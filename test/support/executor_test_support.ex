@@ -122,3 +122,22 @@ defmodule PropertyDamage.Test.ErrorAdapter do
     {:ok, []}
   end
 end
+
+defmodule PropertyDamage.Test.SimpleModel do
+  @moduledoc """
+  Simple model without assertion projections for ref resolution tests.
+  """
+  @behaviour PropertyDamage.Model
+
+  alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
+  alias PropertyDamage.Test.Projections.ModelState
+
+  @impl true
+  def commands, do: [CreateItem, ViewItem]
+
+  @impl true
+  def state_projection, do: ModelState
+
+  @impl true
+  def assertion_projections, do: []
+end

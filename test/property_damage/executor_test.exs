@@ -6,6 +6,7 @@ defmodule PropertyDamage.ExecutorTest do
   alias PropertyDamage.Test.{
     ExecutorModel,
     FailingModel,
+    SimpleModel,
     SimpleAdapter,
     ErrorAdapter,
     SimpleInjectorAdapter
@@ -69,7 +70,7 @@ defmodule PropertyDamage.ExecutorTest do
       result =
         Executor.execute_sequence(
           [create_cmd],
-          PropertyDamage.Test.SimpleModel,
+          SimpleModel,
           SimpleAdapter,
           adapter_ctx
         )
@@ -226,21 +227,4 @@ defmodule PropertyDamage.ExecutorTest do
       assert is_integer(entry.timestamp)
     end
   end
-end
-
-# Simple model without assertion projections for ref resolution test
-defmodule PropertyDamage.Test.SimpleModel do
-  @behaviour PropertyDamage.Model
-
-  alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
-  alias PropertyDamage.Test.Projections.ModelState
-
-  @impl true
-  def commands, do: [CreateItem, ViewItem]
-
-  @impl true
-  def state_projection, do: ModelState
-
-  @impl true
-  def assertion_projections, do: []
 end
