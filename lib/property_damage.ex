@@ -46,6 +46,15 @@ defmodule PropertyDamage do
         end
       end
 
+  ## Running Directly
+
+      PropertyDamage.run(
+        model: MyApp.TestModel,
+        adapter: MyApp.TestAdapter,
+        max_commands: 50,
+        max_runs: 100
+      )
+
   ## Architecture
 
   The framework consists of several layers:
@@ -57,4 +66,375 @@ defmodule PropertyDamage do
 
   See the individual module documentation for detailed information on each component.
   """
+
+  alias PropertyDamage.{Generator, Executor, Shrinker, Validation, EventQueue}
+  alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig
+
+  @typedoc """
+  Result statistics from a successful run.
+  """
+  @type stats :: %{
+          runs: non_neg_integer(),
+          total_commands: non_neg_integer(),
+          seed: integer()
+        }
+
+  @typedoc """
+  Failure report from a failed run.
+  """
+  @type failure_report :: %{
+          seed: integer(),
+          run_number: non_neg_integer(),
+          original_commands: [struct()],
+          shrunk_commands: [struct()],
+          failed_at_index: non_neg_integer(),
+          failure_reason: term(),
+          shrink_iterations: non_neg_integer(),
+          shrink_time_ms: non_neg_integer()
+        }
+
+  @doc """
+  Run a property-based test.
+
+  This is the main entry point for PropertyDamage. It generates command sequences,
+  executes them against the SUT, and shrinks failures to minimal reproductions.
+
+  ## Required Options
+
+  - `:model` - Model module implementing PropertyDamage.Model
+  - `:adapter` - Adapter module implementing PropertyDamage.Adapter
+
+  ## Optional Options
+
+  - `:max_commands` - Maximum commands per sequence (default: 50)
+  - `:max_runs` - Number of test sequences to run (default: 100)
+  - `:seed` - Random seed for reproducibility (default: random)
+  - `:injector_adapters` - List of InjectorAdapter modules (default: [])
+  - `:adapter_config` - Config passed to adapter.setup/1 (default: %{})
+  - `:shrink` - Whether to shrink failing sequences (default: true)
+  - `:shrinker_config` - ShrinkerConfig struct for tuning shrinking
+  - `:on_failure` - Callback function receiving failure_report (default: nil)
+  - `:verbose` - Print progress and configuration (default: false)
+  - `:validate` - Run configuration validation first (default: true)
+
+  ## Returns
+
+  - `{:ok, stats}` - All runs passed
+  - `{:error, failure_report}` - A run failed
+
+  ## Examples
+
+      # Basic usage
+      PropertyDamage.run(model: MyModel, adapter: MyAdapter)
+
+      # With options
+      PropertyDamage.run(
+        model: MyModel,
+        adapter: MyAdapter,
+        max_commands: 100,
+        max_runs: 1000,
+        seed: 12345
+      )
+
+      # With failure callback
+      PropertyDamage.run(
+        model: MyModel,
+        adapter: MyAdapter,
+        on_failure: fn failure_report ->
+          IO.puts("Failed at command \#{failure_report.failed_at_index}")
+        end
+      )
+  """
+  @spec run(keyword()) :: {:ok, stats()} | {:error, failure_report()}
+  def run(opts) do
+    model = Keyword.fetch!(opts, :model)
+    adapter = Keyword.fetch!(opts, :adapter)
+
+    max_commands = Keyword.get(opts, :max_commands, 50)
+    max_runs = Keyword.get(opts, :max_runs, 100)
+    seed = Keyword.get(opts, :seed, :rand.uniform(1_000_000_000))
+    injector_adapters = Keyword.get(opts, :injector_adapters, [])
+    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    shrink = Keyword.get(opts, :shrink, true)
+    shrinker_config = Keyword.get(opts, :shrinker_config, ShrinkerConfig.new())
+    on_failure = Keyword.get(opts, :on_failure)
+    verbose = Keyword.get(opts, :verbose, false)
+    validate = Keyword.get(opts, :validate, true)
+
+    # Validate configuration
+    if validate do
+      {:ok, warnings} = Validation.validate!(model, adapter, injector_adapters: injector_adapters)
+
+      if verbose do
+        Validation.print_summary(model, adapter, warnings)
+      end
+    end
+
+    # Setup once (if model implements it)
+    setup_once_result =
+      if function_exported?(model, :setup_once, 1) do
+        model.setup_once(%{adapter_config: adapter_config})
+      else
+        :ok
+      end
+
+    case setup_once_result do
+      :ok ->
+        try do
+          do_run(
+            model,
+            adapter,
+            max_commands,
+            max_runs,
+            seed,
+            injector_adapters,
+            adapter_config,
+            shrink,
+            shrinker_config,
+            on_failure,
+            verbose
+          )
+        after
+          # Teardown once
+          if function_exported?(model, :teardown_once, 1) do
+            model.teardown_once(%{})
+          end
+        end
+
+      {:error, reason} ->
+        {:error, %{setup_once_failed: reason}}
+    end
+  end
+
+  defp do_run(
+         model,
+         adapter,
+         max_commands,
+         max_runs,
+         seed,
+         injector_adapters,
+         adapter_config,
+         shrink,
+         shrinker_config,
+         on_failure,
+         verbose
+       ) do
+    # Seed the RNG
+    :rand.seed(:exsss, {seed, seed, seed})
+
+    # Generate sequences and run
+    generator = Generator.generate_sequence(model, max_commands: max_commands)
+
+    run_loop(
+      generator,
+      model,
+      adapter,
+      max_runs,
+      seed,
+      injector_adapters,
+      adapter_config,
+      shrink,
+      shrinker_config,
+      on_failure,
+      verbose,
+      0,
+      0
+    )
+  end
+
+  defp run_loop(
+         _generator,
+         _model,
+         _adapter,
+         max_runs,
+         seed,
+         _injector_adapters,
+         _adapter_config,
+         _shrink,
+         _shrinker_config,
+         _on_failure,
+         _verbose,
+         run_number,
+         total_commands
+       )
+       when run_number >= max_runs do
+    {:ok, %{runs: max_runs, total_commands: total_commands, seed: seed}}
+  end
+
+  defp run_loop(
+         generator,
+         model,
+         adapter,
+         max_runs,
+         seed,
+         injector_adapters,
+         adapter_config,
+         shrink,
+         shrinker_config,
+         on_failure,
+         verbose,
+         run_number,
+         total_commands
+       ) do
+    # Generate a command sequence
+    commands = generate_one(generator)
+
+    if verbose do
+      IO.puts("Run #{run_number + 1}/#{max_runs}: #{length(commands)} commands")
+    end
+
+    # Setup each (if model implements it)
+    setup_each_result =
+      if function_exported?(model, :setup_each, 1) do
+        model.setup_each(%{adapter_config: adapter_config, run_number: run_number})
+      else
+        :ok
+      end
+
+    case setup_each_result do
+      :ok ->
+        # Start event queue for injectors
+        {:ok, event_queue} = EventQueue.start_link()
+
+        # Setup injector adapters
+        setup_injectors(injector_adapters, event_queue)
+
+        try do
+          # Execute the sequence
+          {:ok, result} =
+            Executor.run(commands, model, adapter,
+              adapter_config: adapter_config,
+              event_queue: event_queue
+            )
+
+          if result.success do
+            # Success - continue to next run
+            run_loop(
+              generator,
+              model,
+              adapter,
+              max_runs,
+              seed,
+              injector_adapters,
+              adapter_config,
+              shrink,
+              shrinker_config,
+              on_failure,
+              verbose,
+              run_number + 1,
+              total_commands + length(commands)
+            )
+          else
+            # Failure - shrink and report
+            handle_failure(
+              commands,
+              result,
+              model,
+              adapter,
+              adapter_config,
+              event_queue,
+              shrink,
+              shrinker_config,
+              on_failure,
+              seed,
+              run_number
+            )
+          end
+        after
+          # Teardown injectors
+          teardown_injectors(injector_adapters)
+          EventQueue.stop(event_queue)
+
+          # Teardown each
+          if function_exported?(model, :teardown_each, 1) do
+            model.teardown_each(%{})
+          end
+        end
+
+      {:error, reason} ->
+        {:error, %{setup_each_failed: reason, run_number: run_number}}
+    end
+  end
+
+  defp generate_one(generator) do
+    # Use StreamData's internal generation to get a single value
+    case Enumerable.reduce(generator, {:cont, nil}, fn val, _ -> {:halt, val} end) do
+      {:halted, value} -> value
+      {:done, _} -> []
+    end
+  end
+
+  defp setup_injectors(injector_adapters, event_queue) do
+    for adapter <- injector_adapters do
+      if function_exported?(adapter, :setup, 1) do
+        adapter.setup(%{event_queue: event_queue})
+      end
+    end
+  end
+
+  defp teardown_injectors(injector_adapters) do
+    for adapter <- injector_adapters do
+      if function_exported?(adapter, :teardown, 1) do
+        adapter.teardown(%{})
+      end
+    end
+  end
+
+  defp handle_failure(
+         commands,
+         result,
+         model,
+         adapter,
+         adapter_config,
+         event_queue,
+         shrink,
+         shrinker_config,
+         on_failure,
+         seed,
+         run_number
+       ) do
+    {shrunk_commands, shrink_iterations, shrink_time_ms} =
+      if shrink do
+        shrink_result =
+          Shrinker.shrink(commands,
+            failed_at_index: result.failed_at_index,
+            model: model,
+            adapter: adapter,
+            adapter_config: adapter_config,
+            config: shrinker_config,
+            event_queue: event_queue
+          )
+
+        {shrink_result.commands, shrink_result.iterations, shrink_result.time_ms}
+      else
+        {commands, 0, 0}
+      end
+
+    failure_report = %{
+      seed: seed,
+      run_number: run_number,
+      original_commands: commands,
+      shrunk_commands: shrunk_commands,
+      failed_at_index: result.failed_at_index,
+      failure_reason: result.failure_reason,
+      shrink_iterations: shrink_iterations,
+      shrink_time_ms: shrink_time_ms
+    }
+
+    if on_failure do
+      on_failure.(failure_report)
+    end
+
+    {:error, failure_report}
+  end
+
+  @doc false
+  defmacro __using__(_opts) do
+    quote do
+      import PropertyDamage, only: []
+
+      Module.register_attribute(__MODULE__, :property_damage_model, persist: true)
+      Module.register_attribute(__MODULE__, :property_damage_adapter, persist: true)
+    end
+  end
 end
