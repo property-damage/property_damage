@@ -9,6 +9,8 @@ defmodule PropertyDamage.ModelTest do
 
   describe "Model behaviour can be implemented" do
     test "full model with all callbacks" do
+      Code.ensure_loaded!(FullModel)
+
       assert function_exported?(FullModel, :commands, 0)
       assert function_exported?(FullModel, :state_projection, 0)
       assert function_exported?(FullModel, :assertion_projections, 0)
@@ -21,6 +23,8 @@ defmodule PropertyDamage.ModelTest do
     end
 
     test "minimal model with only required callbacks" do
+      Code.ensure_loaded!(MinimalModel)
+
       assert function_exported?(MinimalModel, :commands, 0)
       assert function_exported?(MinimalModel, :state_projection, 0)
       assert function_exported?(MinimalModel, :assertion_projections, 0)

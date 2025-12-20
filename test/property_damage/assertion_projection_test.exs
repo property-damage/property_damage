@@ -178,6 +178,7 @@ defmodule PropertyDamage.AssertionProjectionTest do
     test "module without @check on check/3 fails compilation" do
       # We can't easily test compile-time errors, but we verify the
       # __on_definition__ hook is set up to enforce this
+      Code.ensure_loaded!(PropertyDamage.AssertionProjection)
       assert function_exported?(PropertyDamage.AssertionProjection, :__on_definition__, 6)
     end
   end

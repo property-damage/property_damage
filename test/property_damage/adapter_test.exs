@@ -8,6 +8,8 @@ defmodule PropertyDamage.AdapterTest do
 
   describe "Adapter behaviour" do
     test "compiles with required callbacks" do
+      Code.ensure_loaded!(TestAdapter)
+
       assert function_exported?(TestAdapter, :setup, 1)
       assert function_exported?(TestAdapter, :teardown, 1)
       assert function_exported?(TestAdapter, :execute, 2)
