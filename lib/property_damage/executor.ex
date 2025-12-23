@@ -249,17 +249,29 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Resolve all refs in a command struct
+  # Resolve all refs in a command struct, skipping the creates_ref field
   defp resolve_command_refs(command, refs) do
     try do
-      resolved = deep_resolve_refs(command, refs)
+      # Get the field to skip (the one this command creates)
+      skip_field = get_creates_ref_field(command)
+      resolved = deep_resolve_refs(command, refs, skip_field)
       {:ok, resolved}
     rescue
       e -> {:error, Exception.message(e)}
     end
   end
 
-  defp deep_resolve_refs(%Ref{} = ref, refs) do
+  defp get_creates_ref_field(command) do
+    command_module = command.__struct__
+
+    if function_exported?(command_module, :creates_ref, 0) do
+      command_module.creates_ref()
+    else
+      nil
+    end
+  end
+
+  defp deep_resolve_refs(%Ref{} = ref, refs, _skip_field) do
     case Map.get(refs, ref.ref) do
       nil ->
         raise "Unresolved ref: #{inspect(ref)}"
@@ -269,31 +281,39 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  defp deep_resolve_refs(%{__struct__: _} = struct, refs) do
+  defp deep_resolve_refs(%{__struct__: _} = struct, refs, skip_field) do
     struct
     |> Map.from_struct()
-    |> deep_resolve_refs(refs)
+    |> Enum.map(fn {k, v} ->
+      if k == skip_field do
+        # Don't resolve the creates_ref field - keep the Ref as-is
+        {k, v}
+      else
+        {k, deep_resolve_refs(v, refs, nil)}
+      end
+    end)
+    |> Map.new()
     |> then(&struct(struct.__struct__, &1))
   end
 
-  defp deep_resolve_refs(map, refs) when is_map(map) do
+  defp deep_resolve_refs(map, refs, skip_field) when is_map(map) do
     for {k, v} <- map, into: %{} do
-      {deep_resolve_refs(k, refs), deep_resolve_refs(v, refs)}
+      {deep_resolve_refs(k, refs, skip_field), deep_resolve_refs(v, refs, skip_field)}
     end
   end
 
-  defp deep_resolve_refs(list, refs) when is_list(list) do
-    Enum.map(list, &deep_resolve_refs(&1, refs))
+  defp deep_resolve_refs(list, refs, skip_field) when is_list(list) do
+    Enum.map(list, &deep_resolve_refs(&1, refs, skip_field))
   end
 
-  defp deep_resolve_refs(tuple, refs) when is_tuple(tuple) do
+  defp deep_resolve_refs(tuple, refs, skip_field) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list()
-    |> deep_resolve_refs(refs)
+    |> deep_resolve_refs(refs, skip_field)
     |> List.to_tuple()
   end
 
-  defp deep_resolve_refs(other, _refs), do: other
+  defp deep_resolve_refs(other, _refs, _skip_field), do: other
 
   # Bind a new ref if the command creates one
   defp maybe_bind_ref(command, events, refs) do

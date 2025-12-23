@@ -153,7 +153,7 @@ defmodule PropertyDamage.Generator do
 
           StreamData.bind(generator, fn command ->
             # Simulate state update
-            events = simulate_command(cmd_module, command)
+            events = simulate_command(cmd_module, state, command)
             new_state = update_state(state, command, events, projection)
             new_acc = [command | acc]
 
@@ -203,9 +203,9 @@ defmodule PropertyDamage.Generator do
     cmd_module.new!(state, %{})
   end
 
-  defp simulate_command(cmd_module, command) do
+  defp simulate_command(cmd_module, state, command) do
     if function_exported?(cmd_module, :simulate, 2) do
-      cmd_module.simulate(%{}, command)
+      cmd_module.simulate(state, command)
     else
       []
     end

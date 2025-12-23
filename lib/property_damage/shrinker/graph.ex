@@ -275,6 +275,9 @@ defmodule PropertyDamage.Shrinker.Graph do
 
   defp collect_refs(%Ref{ref: ref_id}, acc), do: [ref_id | acc]
 
+  # Skip other structs (like DateTime) - they don't contain refs
+  defp collect_refs(%{__struct__: _}, acc), do: acc
+
   defp collect_refs(map, acc) when is_map(map) do
     Enum.reduce(map, acc, fn {_k, v}, a -> collect_refs(v, a) end)
   end
