@@ -167,12 +167,12 @@ defimpl Inspect, for: PropertyDamage.Ref do
   - Unresolved: `<Ref:label:short_ref>`
   - Resolved: `<Ref:label:short_ref → value>`
 
-  The short_ref is the last element of the reference list representation,
-  providing a readable identifier without the full verbose reference format.
+  The short_ref is the last number from the reference (e.g., 220539 from
+  `#Ref<0.xxx.xxx.220539>`), providing a readable unique identifier.
   """
   def inspect(%{ref: ref, label: label, resolved: resolved}, _opts) do
     label_part = if label, do: "#{label}:", else: ""
-    ref_short = ref |> :erlang.ref_to_list() |> List.last()
+    ref_short = extract_ref_id(ref)
 
     case resolved do
       Unresolved ->
@@ -181,5 +181,17 @@ defimpl Inspect, for: PropertyDamage.Ref do
       value ->
         "<Ref:#{label_part}#{ref_short} -> #{Kernel.inspect(value)}>"
     end
+  end
+
+  # Extract the unique ID from a reference.
+  # ref_to_list returns a charlist like '#Ref<0.xxx.xxx.12345>'
+  # We extract the last number (12345) as the short identifier.
+  defp extract_ref_id(ref) do
+    ref
+    |> :erlang.ref_to_list()
+    |> List.to_string()
+    |> String.split(".")
+    |> List.last()
+    |> String.trim_trailing(">")
   end
 end
