@@ -7,7 +7,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Event Sources
 
-  Events can come from three sources:
+  Events can come from four sources:
 
   1. **Command events** (`:command` source) - Events produced by executing
      commands against the SUT. These have a `command_index` indicating
@@ -21,6 +21,10 @@ defmodule PropertyDamage.EventLog.Entry do
   3. **Nemesis events** (`:nemesis` source) - Events produced by fault
      injection commands. These have a `command_index` like command events,
      plus the `nemesis_module` that produced them.
+
+  4. **Telemetry events** (`:telemetry` source) - Events derived from
+     OpenTelemetry spans received from the SUT. These include the
+     `telemetry_receiver` module and optional `trace_id`/`span_id`.
 
   ## Example Event Log
 
@@ -46,20 +50,26 @@ defmodule PropertyDamage.EventLog.Entry do
   An event log entry.
 
   - `timestamp` - Monotonic time in milliseconds when event was recorded
-  - `command_index` - Index of command that produced this event (nil for injected events)
+  - `command_index` - Index of command that produced this event (nil for injected/telemetry events)
   - `event` - The actual event struct
-  - `source` - Either `:command`, `:injector`, or `:nemesis`
+  - `source` - Either `:command`, `:injector`, `:nemesis`, or `:telemetry`
   - `injector_adapter` - Module that received the event (only for `:injector` source)
   - `nemesis_module` - Module that produced the event (only for `:nemesis` source)
+  - `telemetry_receiver` - Module that received the span (only for `:telemetry` source)
+  - `trace_id` - Distributed trace ID (only for `:telemetry` source)
+  - `span_id` - Span ID within the trace (only for `:telemetry` source)
   - `branch_id` - Branch identifier for parallel execution (nil for linear sequences)
   """
   @type t :: %__MODULE__{
           timestamp: integer(),
           command_index: non_neg_integer() | nil,
           event: struct(),
-          source: :command | :injector | :nemesis,
+          source: :command | :injector | :nemesis | :telemetry,
           injector_adapter: module() | nil,
           nemesis_module: module() | nil,
+          telemetry_receiver: module() | nil,
+          trace_id: String.t() | nil,
+          span_id: String.t() | nil,
           branch_id: non_neg_integer() | nil
         }
 
@@ -70,6 +80,9 @@ defmodule PropertyDamage.EventLog.Entry do
     :source,
     :injector_adapter,
     :nemesis_module,
+    :telemetry_receiver,
+    :trace_id,
+    :span_id,
     :branch_id
   ]
 
@@ -208,4 +221,56 @@ defmodule PropertyDamage.EventLog.Entry do
   @spec nemesis?(t()) :: boolean()
   def nemesis?(%__MODULE__{source: :nemesis}), do: true
   def nemesis?(%__MODULE__{}), do: false
+
+  @doc """
+  Create a new entry for a telemetry event.
+
+  ## Parameters
+
+  - `event` - The event struct (derived from a telemetry span)
+  - `telemetry_receiver` - Module that received and converted the span
+
+  ## Options
+
+  - `:timestamp` - Override timestamp (default: current monotonic time)
+  - `:trace_id` - Distributed trace ID
+  - `:span_id` - Span ID within the trace
+  - `:branch_id` - Branch identifier for parallel execution
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_telemetry(%SlowQuery{}, MyReceiver, trace_id: "abc123")
+      iex> entry.source
+      :telemetry
+      iex> entry.trace_id
+      "abc123"
+  """
+  @spec from_telemetry(struct(), module(), keyword()) :: t()
+  def from_telemetry(event, telemetry_receiver, opts \\ []) do
+    %__MODULE__{
+      timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
+      command_index: nil,
+      event: event,
+      source: :telemetry,
+      injector_adapter: nil,
+      nemesis_module: nil,
+      telemetry_receiver: telemetry_receiver,
+      trace_id: Keyword.get(opts, :trace_id),
+      span_id: Keyword.get(opts, :span_id),
+      branch_id: Keyword.get(opts, :branch_id)
+    }
+  end
+
+  @doc """
+  Check if an entry is from telemetry.
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_telemetry(%SomeEvent{}, MyReceiver)
+      iex> PropertyDamage.EventLog.Entry.telemetry?(entry)
+      true
+  """
+  @spec telemetry?(t()) :: boolean()
+  def telemetry?(%__MODULE__{source: :telemetry}), do: true
+  def telemetry?(%__MODULE__{}), do: false
 end
