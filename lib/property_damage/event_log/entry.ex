@@ -7,7 +7,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Event Sources
 
-  Events can come from two sources:
+  Events can come from three sources:
 
   1. **Command events** (`:command` source) - Events produced by executing
      commands against the SUT. These have a `command_index` indicating
@@ -17,6 +17,10 @@ defmodule PropertyDamage.EventLog.Entry do
      SUT via injector adapters (webhooks, callbacks, etc.). These have
      `command_index: nil` since they're not triggered by a specific command,
      and include the `injector_adapter` module that received them.
+
+  3. **Nemesis events** (`:nemesis` source) - Events produced by fault
+     injection commands. These have a `command_index` like command events,
+     plus the `nemesis_module` that produced them.
 
   ## Example Event Log
 
@@ -44,20 +48,30 @@ defmodule PropertyDamage.EventLog.Entry do
   - `timestamp` - Monotonic time in milliseconds when event was recorded
   - `command_index` - Index of command that produced this event (nil for injected events)
   - `event` - The actual event struct
-  - `source` - Either `:command` or `:injector`
+  - `source` - Either `:command`, `:injector`, or `:nemesis`
   - `injector_adapter` - Module that received the event (only for `:injector` source)
+  - `nemesis_module` - Module that produced the event (only for `:nemesis` source)
   - `branch_id` - Branch identifier for parallel execution (nil for linear sequences)
   """
   @type t :: %__MODULE__{
           timestamp: integer(),
           command_index: non_neg_integer() | nil,
           event: struct(),
-          source: :command | :injector,
+          source: :command | :injector | :nemesis,
           injector_adapter: module() | nil,
+          nemesis_module: module() | nil,
           branch_id: non_neg_integer() | nil
         }
 
-  defstruct [:timestamp, :command_index, :event, :source, :injector_adapter, :branch_id]
+  defstruct [
+    :timestamp,
+    :command_index,
+    :event,
+    :source,
+    :injector_adapter,
+    :nemesis_module,
+    :branch_id
+  ]
 
   @doc """
   Create a new entry for a command event.
@@ -146,4 +160,52 @@ defmodule PropertyDamage.EventLog.Entry do
   @spec injector?(t()) :: boolean()
   def injector?(%__MODULE__{source: :injector}), do: true
   def injector?(%__MODULE__{}), do: false
+
+  @doc """
+  Create a new entry for a nemesis event.
+
+  ## Parameters
+
+  - `event` - The event struct
+  - `command_index` - Index of the nemesis command that produced this event
+  - `nemesis_module` - Module that produced the event
+
+  ## Options
+
+  - `:timestamp` - Override timestamp (default: current monotonic time)
+  - `:branch_id` - Branch identifier for parallel execution
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_nemesis(%PartitionEvent{}, 3, MyNemesis)
+      iex> entry.source
+      :nemesis
+      iex> entry.nemesis_module
+      MyNemesis
+  """
+  @spec from_nemesis(struct(), non_neg_integer(), module(), keyword()) :: t()
+  def from_nemesis(event, command_index, nemesis_module, opts \\ []) do
+    %__MODULE__{
+      timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
+      command_index: command_index,
+      event: event,
+      source: :nemesis,
+      injector_adapter: nil,
+      nemesis_module: nemesis_module,
+      branch_id: Keyword.get(opts, :branch_id)
+    }
+  end
+
+  @doc """
+  Check if an entry is from a nemesis.
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_nemesis(%SomeEvent{}, 0, MyNemesis)
+      iex> PropertyDamage.EventLog.Entry.nemesis?(entry)
+      true
+  """
+  @spec nemesis?(t()) :: boolean()
+  def nemesis?(%__MODULE__{source: :nemesis}), do: true
+  def nemesis?(%__MODULE__{}), do: false
 end

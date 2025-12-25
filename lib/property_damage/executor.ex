@@ -75,7 +75,7 @@ defmodule PropertyDamage.Executor do
   - `:linearization` - Selected linearization (for branching sequences)
   """
 
-  alias PropertyDamage.{Ref, EventQueue, Sequence, Settle}
+  alias PropertyDamage.{Ref, EventQueue, Sequence, Settle, Nemesis}
   alias PropertyDamage.EventLog.Entry
 
   @typedoc """
@@ -488,6 +488,113 @@ defmodule PropertyDamage.Executor do
 
   # Execute a single command
   defp execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
+    # Check if this is a nemesis command
+    if Nemesis.nemesis_command?(command) do
+      execute_nemesis_command(command, index, state, model, adapter_context, event_queue)
+    else
+      execute_regular_command(command, index, state, model, adapter, adapter_context, event_queue)
+    end
+  end
+
+  # Execute a nemesis (fault injection) command
+  defp execute_nemesis_command(command, index, state, model, adapter_context, event_queue) do
+    nemesis_module = command.__struct__
+
+    # Build context for nemesis
+    nemesis_context = %{
+      adapter_context: adapter_context,
+      event_queue: event_queue,
+      active_faults: Map.get(state, :active_faults, %{})
+    }
+
+    case nemesis_module.inject(command, nemesis_context) do
+      {:ok, events} ->
+        # Update projections with nemesis command
+        projections = update_projections(state.projections, command)
+
+        # Process nemesis events with source: :nemesis
+        {projections, event_log} =
+          process_nemesis_events(
+            events,
+            nemesis_module,
+            index,
+            state.event_log,
+            projections,
+            state.branch_id
+          )
+
+        # Drain and process injector events
+        {projections, event_log} =
+          process_injector_events(event_queue, event_log, projections, state.branch_id)
+
+        # Track active fault if auto-restoring
+        active_faults = Map.get(state, :active_faults, %{})
+
+        active_faults =
+          if Nemesis.auto_restores?(command) do
+            Map.put(active_faults, {nemesis_module, index}, %{
+              command: command,
+              started_at: System.monotonic_time(:millisecond),
+              duration_ms: Nemesis.get_duration_ms(command)
+            })
+          else
+            active_faults
+          end
+
+        # Run checks
+        check_ctx = %{
+          command: command,
+          events: events,
+          command_index: index,
+          step_count: state.step_count + 1,
+          projections: projections,
+          branch_id: state.branch_id,
+          active_faults: active_faults
+        }
+
+        case run_checks(model, projections, check_ctx, state.check_counters) do
+          {:ok, check_counters} ->
+            new_state = %{
+              event_log: event_log,
+              projections: projections,
+              refs: state.refs,
+              step_count: state.step_count + 1,
+              check_counters: check_counters,
+              branch_id: state.branch_id,
+              active_faults: active_faults
+            }
+
+            {:ok, new_state}
+
+          {:error, check_name, reason, check_counters} ->
+            failed_state = %{
+              event_log: event_log,
+              projections: projections,
+              refs: state.refs,
+              step_count: state.step_count + 1,
+              check_counters: check_counters,
+              branch_id: state.branch_id,
+              active_faults: active_faults
+            }
+
+            {:error, {:check_failed, check_name, reason}, failed_state}
+        end
+
+      {:error, reason} ->
+        {:error, {:nemesis_error, reason}, state}
+    end
+  end
+
+  # Execute a regular (non-nemesis) command
+  defp execute_regular_command(
+         command,
+         index,
+         state,
+         model,
+         adapter,
+         adapter_context,
+         event_queue
+       ) do
     # 1. Resolve refs in command
     case resolve_command_refs(command, state.refs) do
       {:ok, resolved_command} ->
@@ -749,8 +856,26 @@ defmodule PropertyDamage.Executor do
         event: event,
         source: source,
         injector_adapter: nil,
+        nemesis_module: nil,
         branch_id: branch_id
       }
+
+      new_projs = update_projections(projs, event)
+      {new_projs, [entry | log]}
+    end)
+  end
+
+  # Process events from nemesis (fault injection) commands
+  defp process_nemesis_events(
+         events,
+         nemesis_module,
+         command_index,
+         event_log,
+         projections,
+         branch_id
+       ) do
+    Enum.reduce(events, {projections, event_log}, fn event, {projs, log} ->
+      entry = Entry.from_nemesis(event, command_index, nemesis_module, branch_id: branch_id)
 
       new_projs = update_projections(projs, event)
       {new_projs, [entry | log]}
@@ -771,6 +896,7 @@ defmodule PropertyDamage.Executor do
         event: queue_entry.event,
         source: :injector,
         injector_adapter: queue_entry.adapter_module,
+        nemesis_module: nil,
         branch_id: branch_id
       }
 
