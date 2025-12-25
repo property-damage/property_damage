@@ -116,6 +116,19 @@ defmodule PropertyDamage do
   - `:on_failure` - Callback function receiving failure_report (default: nil)
   - `:verbose` - Print progress and configuration (default: false)
   - `:validate` - Run configuration validation first (default: true)
+  - `:branching` - Keyword list for parallel branching (see below)
+
+  ## Branching Options
+
+  Pass `branching: [...]` to generate branching (parallel) sequences:
+
+  - `:branch_probability` - Probability of creating a branch point (default: 0.2)
+  - `:max_branches` - Maximum number of parallel branches (default: 3)
+  - `:max_branch_length` - Maximum commands per branch (default: 5)
+  - `:min_prefix_length` - Minimum commands before branching (default: 3)
+
+  Branching sequences enable detection of race conditions by executing
+  commands in parallel branches and checking linearizability.
 
   ## Returns
 
@@ -160,6 +173,7 @@ defmodule PropertyDamage do
     on_failure = Keyword.get(opts, :on_failure)
     verbose = Keyword.get(opts, :verbose, false)
     validate = Keyword.get(opts, :validate, true)
+    branching = Keyword.get(opts, :branching)
 
     # Validate configuration
     if validate do
@@ -192,7 +206,8 @@ defmodule PropertyDamage do
             shrink,
             shrinker_config,
             on_failure,
-            verbose
+            verbose,
+            branching
           )
         after
           # Teardown once
@@ -217,13 +232,16 @@ defmodule PropertyDamage do
          shrink,
          shrinker_config,
          on_failure,
-         verbose
+         verbose,
+         branching
        ) do
     # Seed the RNG
     :rand.seed(:exsss, {seed, seed, seed})
 
     # Generate sequences and run
-    generator = Generator.generate_sequence(model, max_commands: max_commands)
+    generator_opts = [max_commands: max_commands]
+    generator_opts = if branching, do: Keyword.put(generator_opts, :branching, branching), else: generator_opts
+    generator = Generator.generate_sequence(model, generator_opts)
 
     run_loop(
       generator,
