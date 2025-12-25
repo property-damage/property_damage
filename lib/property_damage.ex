@@ -67,7 +67,7 @@ defmodule PropertyDamage do
   See the individual module documentation for detailed information on each component.
   """
 
-  alias PropertyDamage.{Generator, Executor, Shrinker, Validation, EventQueue}
+  alias PropertyDamage.{Generator, Executor, Shrinker, Validation, EventQueue, Sequence}
   alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig
 
   @typedoc """
@@ -85,8 +85,8 @@ defmodule PropertyDamage do
   @type failure_report :: %{
           seed: integer(),
           run_number: non_neg_integer(),
-          original_commands: [struct()],
-          shrunk_commands: [struct()],
+          original_sequence: Sequence.t(),
+          shrunk_sequence: Sequence.t(),
           failed_at_index: non_neg_integer(),
           failure_reason: term(),
           shrink_iterations: non_neg_integer(),
@@ -277,10 +277,16 @@ defmodule PropertyDamage do
          total_commands
        ) do
     # Generate a command sequence
-    commands = generate_one(generator)
+    sequence = generate_one(generator)
+    command_count = Sequence.command_count(sequence)
 
     if verbose do
-      IO.puts("Run #{run_number + 1}/#{max_runs}: #{length(commands)} commands")
+      branch_info =
+        if Sequence.branching?(sequence),
+          do: " (#{Sequence.branch_count(sequence)} branches)",
+          else: ""
+
+      IO.puts("Run #{run_number + 1}/#{max_runs}: #{command_count} commands#{branch_info}")
     end
 
     # Setup each (if model implements it)
@@ -302,7 +308,7 @@ defmodule PropertyDamage do
         try do
           # Execute the sequence
           {:ok, result} =
-            Executor.run(commands, model, adapter,
+            Executor.run(sequence, model, adapter,
               adapter_config: adapter_config,
               event_queue: event_queue
             )
@@ -322,12 +328,12 @@ defmodule PropertyDamage do
               on_failure,
               verbose,
               run_number + 1,
-              total_commands + length(commands)
+              total_commands + command_count
             )
           else
             # Failure - shrink and report
             handle_failure(
-              commands,
+              sequence,
               result,
               model,
               adapter,
@@ -381,7 +387,7 @@ defmodule PropertyDamage do
   end
 
   defp handle_failure(
-         commands,
+         sequence,
          result,
          model,
          adapter,
@@ -393,10 +399,10 @@ defmodule PropertyDamage do
          seed,
          run_number
        ) do
-    {shrunk_commands, shrink_iterations, shrink_time_ms} =
+    {shrunk_sequence, shrink_iterations, shrink_time_ms} =
       if shrink do
         shrink_result =
-          Shrinker.shrink(commands,
+          Shrinker.shrink(sequence,
             failed_at_index: result.failed_at_index,
             model: model,
             adapter: adapter,
@@ -405,16 +411,16 @@ defmodule PropertyDamage do
             event_queue: event_queue
           )
 
-        {shrink_result.commands, shrink_result.iterations, shrink_result.time_ms}
+        {shrink_result.sequence, shrink_result.iterations, shrink_result.time_ms}
       else
-        {commands, 0, 0}
+        {sequence, 0, 0}
       end
 
     failure_report = %{
       seed: seed,
       run_number: run_number,
-      original_commands: commands,
-      shrunk_commands: shrunk_commands,
+      original_sequence: sequence,
+      shrunk_sequence: shrunk_sequence,
       failed_at_index: result.failed_at_index,
       failure_reason: result.failure_reason,
       shrink_iterations: shrink_iterations,

@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ShrinkerTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Shrinker
+  alias PropertyDamage.{Shrinker, Sequence}
   alias PropertyDamage.Shrinker.Config
 
   alias PropertyDamage.Test.Commands.CreateItem
@@ -28,7 +28,8 @@ defmodule PropertyDamage.ShrinkerTest do
         )
 
       # Should only have commands up to and including the failure
-      assert length(result.commands) <= 2
+      shrunk_commands = Sequence.to_list(result.sequence)
+      assert length(shrunk_commands) <= 2
     end
 
     test "removes unnecessary commands" do
@@ -51,8 +52,9 @@ defmodule PropertyDamage.ShrinkerTest do
         )
 
       # Should shrink to just the failing command
-      assert length(result.commands) == 1
-      assert hd(result.commands).quantity == 101
+      shrunk_commands = Sequence.to_list(result.sequence)
+      assert length(shrunk_commands) == 1
+      assert hd(shrunk_commands).quantity == 101
     end
 
     test "preserves failure reproduction" do
@@ -73,7 +75,8 @@ defmodule PropertyDamage.ShrinkerTest do
       # The shrunk sequence should still fail
       # Since removing either command would make it pass (50 or 60 alone < 100)
       # Both commands should remain
-      assert length(result.commands) == 2
+      shrunk_commands = Sequence.to_list(result.sequence)
+      assert length(shrunk_commands) == 2
     end
 
     test "returns iterations count" do
@@ -103,6 +106,19 @@ defmodule PropertyDamage.ShrinkerTest do
       assert is_integer(result.time_ms)
       assert result.time_ms >= 0
     end
+
+    test "returns a Sequence struct" do
+      commands = [%CreateItem{name: "Failing", quantity: 101}]
+
+      result =
+        Shrinker.shrink(commands,
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter
+        )
+
+      assert %Sequence{} = result.sequence
+    end
   end
 
   describe "argument shrinking" do
@@ -119,7 +135,8 @@ defmodule PropertyDamage.ShrinkerTest do
         )
 
       # Should shrink quantity from 400 -> 200 (still > 100, so fails)
-      shrunk_qty = hd(result.commands).quantity
+      shrunk_commands = Sequence.to_list(result.sequence)
+      shrunk_qty = hd(shrunk_commands).quantity
       assert shrunk_qty > 100
       assert shrunk_qty <= 400
     end
@@ -136,7 +153,8 @@ defmodule PropertyDamage.ShrinkerTest do
           config: Config.new(shrink_arguments: true)
         )
 
-      shrunk_name = hd(result.commands).name
+      shrunk_commands = Sequence.to_list(result.sequence)
+      shrunk_name = hd(shrunk_commands).name
       # Name should shrink since it doesn't affect the failure
       assert String.length(shrunk_name) < String.length("VeryLongNameHere")
     end
@@ -153,7 +171,8 @@ defmodule PropertyDamage.ShrinkerTest do
         )
 
       # Verify command type is preserved
-      assert hd(result.commands).__struct__ == CreateItem
+      shrunk_commands = Sequence.to_list(result.sequence)
+      assert hd(shrunk_commands).__struct__ == CreateItem
     end
 
     test "can be disabled via config" do
@@ -168,8 +187,9 @@ defmodule PropertyDamage.ShrinkerTest do
         )
 
       # With shrinking disabled, values should remain unchanged
-      assert hd(result.commands).quantity == 200
-      assert hd(result.commands).name == "LongName"
+      shrunk_commands = Sequence.to_list(result.sequence)
+      assert hd(shrunk_commands).quantity == 200
+      assert hd(shrunk_commands).name == "LongName"
     end
   end
 

@@ -46,16 +46,18 @@ defmodule PropertyDamage.EventLog.Entry do
   - `event` - The actual event struct
   - `source` - Either `:command` or `:injector`
   - `injector_adapter` - Module that received the event (only for `:injector` source)
+  - `branch_id` - Branch identifier for parallel execution (nil for linear sequences)
   """
   @type t :: %__MODULE__{
           timestamp: integer(),
           command_index: non_neg_integer() | nil,
           event: struct(),
           source: :command | :injector,
-          injector_adapter: module() | nil
+          injector_adapter: module() | nil,
+          branch_id: non_neg_integer() | nil
         }
 
-  defstruct [:timestamp, :command_index, :event, :source, :injector_adapter]
+  defstruct [:timestamp, :command_index, :event, :source, :injector_adapter, :branch_id]
 
   @doc """
   Create a new entry for a command event.
