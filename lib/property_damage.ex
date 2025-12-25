@@ -445,8 +445,13 @@ defmodule PropertyDamage do
          seed,
          run_number
        ) do
+    # Skip shrinking for stutter-related failures since:
+    # 1. The failure is about SUT idempotency, not the command sequence
+    # 2. Shrinking without stutter won't reproduce the failure
+    should_shrink = shrink and not stutter_failure?(result.failure_reason)
+
     {shrunk_sequence, shrink_iterations, shrink_time_ms} =
-      if shrink do
+      if should_shrink do
         shrink_result =
           Shrinker.shrink(sequence,
             failed_at_index: result.failed_at_index,
@@ -479,6 +484,11 @@ defmodule PropertyDamage do
 
     {:error, failure_report}
   end
+
+  # Check if a failure reason is stutter-related (idempotency violation or execution failure)
+  defp stutter_failure?({:idempotency_violation, _}), do: true
+  defp stutter_failure?({:stutter_execution_failed, _}), do: true
+  defp stutter_failure?(_), do: false
 
   @doc false
   defmacro __using__(_opts) do

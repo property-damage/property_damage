@@ -266,6 +266,59 @@ defmodule PropertyDamage.Command do
               backoff: :linear | :exponential
             }
 
+  # ===========================================================================
+  # Idempotency Testing Callbacks
+  # ===========================================================================
+
+  @doc """
+  (Optional) Whether this command should be included in stutter/idempotency testing.
+
+  Commands that are intentionally non-idempotent (like `IncrementCounter`) should
+  return `false` to be excluded from stutter testing.
+
+  Default: `true` (command is assumed idempotent and will be stuttered)
+
+  ## Example
+
+      # Non-idempotent command - exclude from stutter testing
+      def idempotent?, do: false
+  """
+  @callback idempotent?() :: boolean()
+
+  @doc """
+  (Optional) Returns the idempotency key for this command instance.
+
+  The idempotency key is passed to the adapter in the stutter context,
+  allowing it to include the key in HTTP headers or other request metadata.
+
+  If not implemented, no idempotency key is provided to the adapter.
+
+  ## Example
+
+      defstruct [:amount, :idempotency_key]
+
+      def idempotency_key(%__MODULE__{idempotency_key: key}), do: key
+  """
+  @callback idempotency_key(command :: struct()) :: String.t() | nil
+
+  @doc """
+  (Optional) Event modules that are acceptable as retry responses.
+
+  When stutter testing, a retry might return different events than the
+  original execution while still being correct (e.g., `OrderCreated` vs
+  `OrderAlreadyExists`). This callback declares which alternative event
+  types are acceptable.
+
+  If not implemented, only events matching the original execution are accepted.
+
+  ## Example
+
+      def acceptable_retry_events do
+        [OrderCreated, OrderAlreadyExists]
+      end
+  """
+  @callback acceptable_retry_events() :: [module()]
+
   @optional_callbacks [
     generator: 1,
     simulate: 2,
@@ -274,6 +327,9 @@ defmodule PropertyDamage.Command do
     downstream_observables: 0,
     read_only?: 0,
     role: 0,
-    settle_config: 0
+    settle_config: 0,
+    idempotent?: 0,
+    idempotency_key: 1,
+    acceptable_retry_events: 0
   ]
 end

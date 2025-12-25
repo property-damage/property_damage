@@ -84,6 +84,36 @@ defmodule PropertyDamage.Adapter do
         @impl true
         def teardown(_context), do: :ok
       end
+
+  ## Stutter/Idempotency Testing
+
+  When stutter testing is enabled, the framework may execute commands multiple
+  times to verify idempotent behavior. During retry executions, the adapter
+  context includes a `:stutter` key with information the adapter can use:
+
+      %{
+        stutter: %{
+          attempt: 2,           # Current attempt (2, 3, etc. for retries)
+          is_retry: true,       # Always true for retry executions
+          idempotency_key: "abc123"  # From Command.idempotency_key/1, or nil
+        }
+      }
+
+  Adapters can use this to include idempotency keys in HTTP headers:
+
+      def execute(%CreateOrder{} = cmd, context) do
+        headers = build_headers(context)
+        # headers will include "Idempotency-Key" if stutter context present
+        HTTPClient.post(context.client, "/orders", body, headers)
+      end
+
+      defp build_headers(%{stutter: %{idempotency_key: key}}) when is_binary(key) do
+        [{"Idempotency-Key", key}]
+      end
+      defp build_headers(_context), do: []
+
+  The first execution (attempt 1) does NOT include stutter context, only retries do.
+  This allows the adapter to behave normally for the initial execution.
   """
 
   @doc """
