@@ -7,7 +7,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Event Sources
 
-  Events can come from four sources:
+  Events can come from five sources:
 
   1. **Command events** (`:command` source) - Events produced by executing
      commands against the SUT. These have a `command_index` indicating
@@ -25,6 +25,10 @@ defmodule PropertyDamage.EventLog.Entry do
   4. **Telemetry events** (`:telemetry` source) - Events derived from
      OpenTelemetry spans received from the SUT. These include the
      `telemetry_receiver` module and optional `trace_id`/`span_id`.
+
+  5. **Stutter events** (`:stutter` source) - Events from retry executions
+     during idempotency testing. These are captured but NOT applied to
+     projections. They include `stutter_attempt` and `stutter_comparison`.
 
   ## Example Event Log
 
@@ -52,25 +56,29 @@ defmodule PropertyDamage.EventLog.Entry do
   - `timestamp` - Monotonic time in milliseconds when event was recorded
   - `command_index` - Index of command that produced this event (nil for injected/telemetry events)
   - `event` - The actual event struct
-  - `source` - Either `:command`, `:injector`, `:nemesis`, or `:telemetry`
+  - `source` - Either `:command`, `:injector`, `:nemesis`, `:telemetry`, or `:stutter`
   - `injector_adapter` - Module that received the event (only for `:injector` source)
   - `nemesis_module` - Module that produced the event (only for `:nemesis` source)
   - `telemetry_receiver` - Module that received the span (only for `:telemetry` source)
   - `trace_id` - Distributed trace ID (only for `:telemetry` source)
   - `span_id` - Span ID within the trace (only for `:telemetry` source)
   - `branch_id` - Branch identifier for parallel execution (nil for linear sequences)
+  - `stutter_attempt` - Attempt number for stutter retries (only for `:stutter` source)
+  - `stutter_comparison` - Comparison result with original events (only for `:stutter` source)
   """
   @type t :: %__MODULE__{
           timestamp: integer(),
           command_index: non_neg_integer() | nil,
           event: struct(),
-          source: :command | :injector | :nemesis | :telemetry,
+          source: :command | :injector | :nemesis | :telemetry | :stutter,
           injector_adapter: module() | nil,
           nemesis_module: module() | nil,
           telemetry_receiver: module() | nil,
           trace_id: String.t() | nil,
           span_id: String.t() | nil,
-          branch_id: non_neg_integer() | nil
+          branch_id: non_neg_integer() | nil,
+          stutter_attempt: pos_integer() | nil,
+          stutter_comparison: :match | {:mismatch, map()} | nil
         }
 
   defstruct [
@@ -83,7 +91,9 @@ defmodule PropertyDamage.EventLog.Entry do
     :telemetry_receiver,
     :trace_id,
     :span_id,
-    :branch_id
+    :branch_id,
+    :stutter_attempt,
+    :stutter_comparison
   ]
 
   @doc """
@@ -273,4 +283,61 @@ defmodule PropertyDamage.EventLog.Entry do
   @spec telemetry?(t()) :: boolean()
   def telemetry?(%__MODULE__{source: :telemetry}), do: true
   def telemetry?(%__MODULE__{}), do: false
+
+  @doc """
+  Create a new entry for a stutter (retry) event.
+
+  Stutter events are captured during idempotency testing but NOT applied
+  to projections. They record the result of retry executions for comparison.
+
+  ## Parameters
+
+  - `event` - The event struct from retry execution
+  - `command_index` - Index of the command being retried
+  - `attempt` - Attempt number (2, 3, etc. - first execution is attempt 1)
+  - `comparison` - Result of comparing with original events
+
+  ## Options
+
+  - `:timestamp` - Override timestamp (default: current monotonic time)
+  - `:branch_id` - Branch identifier for parallel execution
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_stutter(%OrderCreated{}, 5, 2, :match)
+      iex> entry.source
+      :stutter
+      iex> entry.stutter_attempt
+      2
+  """
+  @spec from_stutter(struct(), non_neg_integer(), pos_integer(), term(), keyword()) :: t()
+  def from_stutter(event, command_index, attempt, comparison, opts \\ []) do
+    %__MODULE__{
+      timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
+      command_index: command_index,
+      event: event,
+      source: :stutter,
+      injector_adapter: nil,
+      nemesis_module: nil,
+      telemetry_receiver: nil,
+      trace_id: nil,
+      span_id: nil,
+      branch_id: Keyword.get(opts, :branch_id),
+      stutter_attempt: attempt,
+      stutter_comparison: comparison
+    }
+  end
+
+  @doc """
+  Check if an entry is from stutter (retry) testing.
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_stutter(%SomeEvent{}, 0, 2, :match)
+      iex> PropertyDamage.EventLog.Entry.stutter?(entry)
+      true
+  """
+  @spec stutter?(t()) :: boolean()
+  def stutter?(%__MODULE__{source: :stutter}), do: true
+  def stutter?(%__MODULE__{}), do: false
 end

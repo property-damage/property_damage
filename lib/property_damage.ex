@@ -67,7 +67,7 @@ defmodule PropertyDamage do
   See the individual module documentation for detailed information on each component.
   """
 
-  alias PropertyDamage.{Generator, Executor, Shrinker, Validation, EventQueue, Sequence}
+  alias PropertyDamage.{Generator, Executor, Shrinker, Validation, EventQueue, Sequence, Stutter}
   alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig
 
   @typedoc """
@@ -117,6 +117,7 @@ defmodule PropertyDamage do
   - `:verbose` - Print progress and configuration (default: false)
   - `:validate` - Run configuration validation first (default: true)
   - `:branching` - Keyword list for parallel branching (see below)
+  - `:stutter` - Map for idempotency testing (see below)
 
   ## Branching Options
 
@@ -129,6 +130,22 @@ defmodule PropertyDamage do
 
   Branching sequences enable detection of race conditions by executing
   commands in parallel branches and checking linearizability.
+
+  ## Stutter Options (Idempotency Testing)
+
+  Pass `stutter: %{...}` to enable idempotency testing:
+
+  - `:probability` - Probability of stuttering each command (default: 0.1)
+  - `:max_repeats` - Maximum retry attempts per stuttered command (default: 2)
+  - `:delay_ms` - Delay between retries, `{min, max}` tuple or integer (default: {0, 100})
+  - `:commands` - `:all` or list of command modules to stutter (default: :all)
+  - `:comparison` - Event comparison mode (default: :strict)
+    - `:strict` - Events must be exactly equal
+    - `{:structural, fields}` - Ignore specified fields when comparing
+    - `{:custom, fun}` - Custom comparison function `fn(events1, events2) -> :match | {:mismatch, map()}`
+
+  Stutter testing verifies that retrying commands produces consistent results
+  (idempotency). Retry events are captured but not applied to projections.
 
   ## Returns
 
@@ -174,6 +191,7 @@ defmodule PropertyDamage do
     verbose = Keyword.get(opts, :verbose, false)
     validate = Keyword.get(opts, :validate, true)
     branching = Keyword.get(opts, :branching)
+    stutter_config = Stutter.parse_config(Keyword.get(opts, :stutter))
 
     # Validate configuration
     if validate do
@@ -207,7 +225,8 @@ defmodule PropertyDamage do
             shrinker_config,
             on_failure,
             verbose,
-            branching
+            branching,
+            stutter_config
           )
         after
           # Teardown once
@@ -233,7 +252,8 @@ defmodule PropertyDamage do
          shrinker_config,
          on_failure,
          verbose,
-         branching
+         branching,
+         stutter_config
        ) do
     # Seed the RNG
     :rand.seed(:exsss, {seed, seed, seed})
@@ -258,6 +278,7 @@ defmodule PropertyDamage do
       shrinker_config,
       on_failure,
       verbose,
+      stutter_config,
       0,
       0
     )
@@ -275,6 +296,7 @@ defmodule PropertyDamage do
          _shrinker_config,
          _on_failure,
          _verbose,
+         _stutter_config,
          run_number,
          total_commands
        )
@@ -294,6 +316,7 @@ defmodule PropertyDamage do
          shrinker_config,
          on_failure,
          verbose,
+         stutter_config,
          run_number,
          total_commands
        ) do
@@ -331,7 +354,8 @@ defmodule PropertyDamage do
           {:ok, result} =
             Executor.run(sequence, model, adapter,
               adapter_config: adapter_config,
-              event_queue: event_queue
+              event_queue: event_queue,
+              stutter_config: stutter_config
             )
 
           if result.success do
@@ -348,6 +372,7 @@ defmodule PropertyDamage do
               shrinker_config,
               on_failure,
               verbose,
+              stutter_config,
               run_number + 1,
               total_commands + command_count
             )
