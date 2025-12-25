@@ -210,12 +210,70 @@ defmodule PropertyDamage.Command do
   """
   @callback read_only?() :: boolean()
 
+  @doc """
+  (Optional) Returns the role of this command for async/eventual consistency support.
+
+  ## Roles
+
+  - `:action` - Mutates SUT state. Postconditions are weak (check response codes).
+    This is the default if not implemented.
+
+  - `:probe` - Queries SUT state without mutation. Contains settle/retry logic
+    for eventually consistent systems. Should also implement `read_only?/0` returning `true`.
+
+  - `:bridge` - Blocks until an async operation completes. Used for operations
+    that return "processing" status and require polling. Bridge commands are
+    protected during shrinking if their ref is used by other commands.
+
+  ## Examples
+
+      # Action (default) - creates/modifies state
+      def role, do: :action
+
+      # Probe - queries and settles
+      def role, do: :probe
+
+      # Bridge - waits for async completion
+      def role, do: :bridge
+  """
+  @callback role() :: :action | :probe | :bridge
+
+  @doc """
+  (Optional) Returns settle configuration for probes and bridges.
+
+  When a command's `role/0` is `:probe` or `:bridge`, this configuration
+  controls the retry behavior when waiting for eventual consistency.
+
+  ## Fields
+
+  - `:timeout_ms` - Maximum time to wait (default: 2000)
+  - `:interval_ms` - Time between retries (default: 100)
+  - `:backoff` - Backoff strategy, `:linear` or `:exponential` (default: `:linear`)
+
+  ## Example
+
+      def settle_config do
+        %{
+          timeout_ms: 5_000,
+          interval_ms: 200,
+          backoff: :exponential
+        }
+      end
+  """
+  @callback settle_config() :: %{
+              timeout_ms: pos_integer(),
+              interval_ms: pos_integer(),
+              backoff: :linear | :exponential
+            }
+
   @optional_callbacks [
     generator: 1,
     simulate: 2,
     label: 2,
     creates_ref: 0,
     downstream_observables: 0,
-    read_only?: 0
+    read_only?: 0,
+    role: 0,
+    settle_config: 0
   ]
 end

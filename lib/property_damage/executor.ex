@@ -75,7 +75,7 @@ defmodule PropertyDamage.Executor do
   - `:linearization` - Selected linearization (for branching sequences)
   """
 
-  alias PropertyDamage.{Ref, EventQueue, Sequence}
+  alias PropertyDamage.{Ref, EventQueue, Sequence, Settle}
   alias PropertyDamage.EventLog.Entry
 
   @typedoc """
@@ -491,8 +491,8 @@ defmodule PropertyDamage.Executor do
     # 1. Resolve refs in command
     case resolve_command_refs(command, state.refs) do
       {:ok, resolved_command} ->
-        # 2. Execute via adapter
-        case adapter.execute(resolved_command, adapter_context) do
+        # 2. Execute via adapter (with settle logic for probes/bridges)
+        case execute_with_settle(resolved_command, adapter, adapter_context) do
           {:ok, events} ->
             # 3. Bind new ref if command creates one
             refs = maybe_bind_ref(command, events, state.refs)
@@ -551,12 +551,84 @@ defmodule PropertyDamage.Executor do
                 {:error, {:check_failed, check_name, reason}, failed_state}
             end
 
+          {:settled, events} ->
+            # Probe/bridge settled successfully - treat same as {:ok, events}
+            refs = maybe_bind_ref(command, events, state.refs)
+            projections = update_projections(state.projections, resolved_command)
+
+            {projections, event_log} =
+              process_events(
+                events,
+                :command,
+                index,
+                state.event_log,
+                projections,
+                state.branch_id
+              )
+
+            {projections, event_log} =
+              process_injector_events(event_queue, event_log, projections, state.branch_id)
+
+            check_ctx = %{
+              command: resolved_command,
+              events: events,
+              command_index: index,
+              step_count: state.step_count + 1,
+              projections: projections,
+              branch_id: state.branch_id
+            }
+
+            case run_checks(model, projections, check_ctx, state.check_counters) do
+              {:ok, check_counters} ->
+                new_state = %{
+                  event_log: event_log,
+                  projections: projections,
+                  refs: refs,
+                  step_count: state.step_count + 1,
+                  check_counters: check_counters,
+                  branch_id: state.branch_id
+                }
+
+                {:ok, new_state}
+
+              {:error, check_name, reason, check_counters} ->
+                failed_state = %{
+                  event_log: event_log,
+                  projections: projections,
+                  refs: refs,
+                  step_count: state.step_count + 1,
+                  check_counters: check_counters,
+                  branch_id: state.branch_id
+                }
+
+                {:error, {:check_failed, check_name, reason}, failed_state}
+            end
+
+          {:timeout, last_reason} ->
+            {:error, {:settle_timeout, last_reason}, state}
+
           {:error, reason} ->
             {:error, {:adapter_error, reason}, state}
         end
 
       {:error, reason} ->
         {:error, {:ref_resolution_error, reason}, state}
+    end
+  end
+
+  # Execute command with settle logic for probes/bridges
+  defp execute_with_settle(command, adapter, adapter_context) do
+    if Settle.requires_settling?(command) do
+      config = Settle.get_config(command)
+
+      Settle.settle(
+        fn -> adapter.execute(command, adapter_context) end,
+        timeout_ms: config.timeout_ms,
+        interval_ms: config.interval_ms,
+        backoff: config.backoff
+      )
+    else
+      adapter.execute(command, adapter_context)
     end
   end
 

@@ -64,7 +64,7 @@ defmodule PropertyDamage.Shrinker do
   ```
   """
 
-  alias PropertyDamage.{Validator, Executor, Ref, Sequence}
+  alias PropertyDamage.{Validator, Executor, Ref, Sequence, Settle}
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """
@@ -469,15 +469,23 @@ defmodule PropertyDamage.Shrinker do
     if exceeded_limits?(state) or index >= length(state.commands) do
       state
     else
-      candidate = List.delete_at(state.commands, index)
+      command = Enum.at(state.commands, index)
+      remaining = Enum.drop(state.commands, index + 1)
 
-      state = increment_iterations(state)
-
-      if valid_candidate?(candidate, state) and still_fails?(candidate, state) do
-        new_state = %{state | commands: candidate}
-        do_linear_shrink(new_state, index)
-      else
+      # Skip if this is a protected bridge command
+      if protected_bridge?(command, remaining) do
         do_linear_shrink(state, index + 1)
+      else
+        candidate = List.delete_at(state.commands, index)
+
+        state = increment_iterations(state)
+
+        if valid_candidate?(candidate, state) and still_fails?(candidate, state) do
+          new_state = %{state | commands: candidate}
+          do_linear_shrink(new_state, index)
+        else
+          do_linear_shrink(state, index + 1)
+        end
       end
     end
   end
@@ -588,4 +596,70 @@ defmodule PropertyDamage.Shrinker do
   defp increment_iterations_branch(state) do
     %{state | iterations: state.iterations + 1}
   end
+
+  # Check if command is a bridge with refs used by downstream commands
+  defp protected_bridge?(command, downstream_commands) do
+    # Only protect bridge commands
+    if is_struct(command) and Settle.get_role(command) == :bridge do
+      # Check if this command creates a ref
+      command_module = command.__struct__
+
+      if function_exported?(command_module, :creates_ref, 0) do
+        case command_module.creates_ref() do
+          nil ->
+            false
+
+          ref_field ->
+            # Get the ref this command creates
+            case Map.get(command, ref_field) do
+              %Ref{} = ref ->
+                # Check if any downstream command uses this ref
+                ref_used_downstream?(ref, downstream_commands)
+
+              _ ->
+                false
+            end
+        end
+      else
+        false
+      end
+    else
+      false
+    end
+  end
+
+  # Check if a ref is used by any command in the list
+  defp ref_used_downstream?(ref, commands) do
+    Enum.any?(commands, fn cmd ->
+      contains_ref?(cmd, ref)
+    end)
+  end
+
+  # Recursively check if a value contains the given ref
+  defp contains_ref?(%Ref{ref: r}, %Ref{ref: target_ref}), do: r == target_ref
+
+  defp contains_ref?(%{__struct__: _} = struct, target_ref) do
+    struct
+    |> Map.from_struct()
+    |> Map.values()
+    |> Enum.any?(fn v -> contains_ref?(v, target_ref) end)
+  end
+
+  defp contains_ref?(map, target_ref) when is_map(map) do
+    map
+    |> Map.values()
+    |> Enum.any?(fn v -> contains_ref?(v, target_ref) end)
+  end
+
+  defp contains_ref?(list, target_ref) when is_list(list) do
+    Enum.any?(list, fn v -> contains_ref?(v, target_ref) end)
+  end
+
+  defp contains_ref?(tuple, target_ref) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.any?(fn v -> contains_ref?(v, target_ref) end)
+  end
+
+  defp contains_ref?(_, _), do: false
 end
