@@ -18,6 +18,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Seed Library**: Track and share interesting seeds across your team
 - **Coverage Metrics**: Know how thoroughly your model is being exercised
 - **Flakiness Detection**: Identify non-deterministic behavior in your SUT
+- **Load Testing**: Generate realistic load using SPBT traffic patterns
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 
 ## Installation
@@ -736,6 +737,108 @@ end
 | Livelock | System busy but no progress |
 | Starvation | Some operations always timeout |
 
+## Load Testing
+
+Generate realistic load against your system using SPBT-generated traffic. Unlike synthetic benchmarks, each simulated user session follows valid state transitions with command weights that model real usage patterns.
+
+### Basic Usage
+
+```elixir
+{:ok, report} = PropertyDamage.LoadTest.run(
+  model: MyModel,
+  adapter: HTTPAdapter,
+  adapter_config: %{base_url: "http://localhost:4000"},
+  concurrent_users: 50,
+  duration: {2, :minutes}
+)
+
+# Print formatted report
+IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
+```
+
+### Advanced Configuration
+
+```elixir
+{:ok, report} = PropertyDamage.LoadTest.run(
+  model: MyModel,
+  adapter: HTTPAdapter,
+  adapter_config: %{base_url: "http://localhost:4000"},
+
+  # Load configuration
+  concurrent_users: 100,
+  duration: {5, :minutes},
+
+  # Ramp strategies: :immediate, {:linear, duration}, {:step, N, interval}, {:exponential, duration}
+  ramp_up: {:linear, {30, :seconds}},
+  ramp_down: {:linear, {10, :seconds}},
+
+  # Session behavior
+  commands_per_session: {10, 50},  # {min, max} commands per sequence
+  think_time: {100, 500},          # {min, max} ms between commands
+
+  # Live metrics callback (called every interval)
+  metrics_interval: {1, :seconds},
+  on_metrics: fn m ->
+    IO.puts("RPS: #{m.requests_per_second}, p95: #{m.latency_p95}ms, errors: #{m.error_rate}%")
+  end,
+
+  # Called when test completes
+  on_complete: fn report ->
+    PropertyDamage.LoadTest.save(report, "load_test.md", :markdown)
+  end
+)
+```
+
+### Ramp Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| `:immediate` | All users start at once |
+| `{:linear, {30, :seconds}}` | Gradually add users over 30 seconds |
+| `{:step, 4, {15, :seconds}}` | Add users in 4 steps, 15 seconds apart |
+| `{:exponential, {1, :minutes}}` | Exponential growth over 1 minute |
+
+### Metrics Collected
+
+- **Throughput**: Total requests, requests/second
+- **Latency**: p50, p95, p99, min, max, mean (in milliseconds)
+- **Errors**: Total count, error rate, breakdown by type
+- **Per-Command**: Individual metrics for each command type
+- **History**: Time series for trend analysis
+
+### Report Formats
+
+```elixir
+# Terminal output with ASCII charts
+IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
+
+# Markdown for documentation
+PropertyDamage.LoadTest.save(report, "report.md", :markdown)
+
+# JSON for programmatic analysis
+json = PropertyDamage.LoadTest.format(report, :json)
+```
+
+### Async Control
+
+```elixir
+# Start without blocking
+{:ok, runner} = PropertyDamage.LoadTest.start(opts)
+
+# Monitor progress
+status = PropertyDamage.LoadTest.status(runner)
+# => %{phase: :steady, active_sessions: 50, progress_percent: 45.0, ...}
+
+# Get live metrics
+metrics = PropertyDamage.LoadTest.get_metrics(runner)
+
+# Stop early if needed
+{:ok, report} = PropertyDamage.LoadTest.stop(runner)
+
+# Or wait for completion
+{:ok, report} = PropertyDamage.LoadTest.await(runner)
+```
+
 ## Architecture
 
 ```
@@ -763,6 +866,14 @@ PropertyDamage
 │   ├── Replay       - Step-by-step execution
 │   ├── Coverage     - Metrics tracking
 │   └── Flakiness    - Determinism checking
+│
+├── Load Testing
+│   ├── LoadTest     - Main API
+│   ├── Runner       - Orchestrates concurrent sessions
+│   ├── Session      - Single user session
+│   ├── Metrics      - Lock-free metrics collection
+│   ├── RampStrategy - Load ramping strategies
+│   └── Report       - Report generation
 │
 └── Utilities
     ├── Persistence  - Save/load failures
