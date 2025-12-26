@@ -668,6 +668,236 @@ defmodule PropertyDamage do
   @spec generate_test(FailureReport.t(), keyword()) :: String.t()
   defdelegate generate_test(report, opts \\ []), to: PropertyDamage.Analysis
 
+  # ============================================================================
+  # Persistence API
+  # ============================================================================
+
+  @doc """
+  Save a failure report to disk for later analysis or regression testing.
+
+  ## Options
+
+  - `:filename` - Custom filename (default: auto-generated from metadata)
+  - `:overwrite` - Whether to overwrite existing files (default: false)
+
+  ## Examples
+
+      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+
+      # Save with auto-generated name
+      {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
+
+      # Save with custom name
+      {:ok, path} = PropertyDamage.save_failure(failure, "failures/", filename: "currency-bug.pd")
+  """
+  @spec save_failure(FailureReport.t(), Path.t(), keyword()) ::
+          {:ok, Path.t()} | {:error, term()}
+  defdelegate save_failure(report, directory, opts \\ []),
+    to: PropertyDamage.Persistence,
+    as: :save
+
+  @doc """
+  Load a previously saved failure report.
+
+  ## Examples
+
+      {:ok, failure} = PropertyDamage.load_failure("failures/currency-bug.pd")
+      PropertyDamage.replay(failure)
+  """
+  @spec load_failure(Path.t()) :: {:ok, FailureReport.t()} | {:error, term()}
+  defdelegate load_failure(path), to: PropertyDamage.Persistence, as: :load
+
+  @doc """
+  List all saved failures in a directory.
+
+  ## Options
+
+  - `:sort` - Sort order: `:newest`, `:oldest`, `:seed` (default: `:newest`)
+  - `:filter` - Filter function `(metadata -> boolean)`
+
+  ## Examples
+
+      failures = PropertyDamage.list_failures("failures/")
+
+      # Only check failures
+      failures = PropertyDamage.list_failures("failures/",
+        filter: &(&1.failure_type == :check_failed))
+  """
+  @spec list_failures(Path.t(), keyword()) :: [map()]
+  defdelegate list_failures(directory, opts \\ []), to: PropertyDamage.Persistence, as: :list
+
+  @doc """
+  Delete a saved failure file.
+  """
+  @spec delete_failure(Path.t()) :: :ok | {:error, term()}
+  defdelegate delete_failure(path), to: PropertyDamage.Persistence, as: :delete
+
+  # ============================================================================
+  # Replay API
+  # ============================================================================
+
+  @doc """
+  Replay a failure sequence step-by-step for debugging.
+
+  Executes each command in the shrunk sequence and returns detailed
+  information about each step including events and projection states.
+
+  ## Options
+
+  - `:adapter_config` - Override adapter configuration
+  - `:stop_on_failure` - Stop at first failure (default: true)
+
+  ## Example
+
+      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:ok, steps} = PropertyDamage.replay(failure)
+
+      Enum.each(steps, fn step ->
+        IO.puts("[\#{step.index}] \#{step.command_name}")
+        IO.inspect(step.projections)
+      end)
+
+  For interactive stepping, use `PropertyDamage.Replay` directly:
+
+      {:ok, session} = PropertyDamage.Replay.start(failure)
+      {:ok, session, step} = PropertyDamage.Replay.step(session)
+  """
+  @spec replay(FailureReport.t(), keyword()) ::
+          {:ok, [PropertyDamage.Replay.step()]} | {:error, term()}
+  defdelegate replay(failure, opts \\ []), to: PropertyDamage.Replay, as: :run
+
+  # ============================================================================
+  # Seed Library API
+  # ============================================================================
+
+  @doc """
+  Load a seed library from disk.
+
+  Returns an empty library if the file doesn't exist.
+
+  ## Example
+
+      {:ok, library} = PropertyDamage.load_seed_library("seeds.json")
+  """
+  @spec load_seed_library(Path.t()) :: {:ok, PropertyDamage.SeedLibrary.t()} | {:error, term()}
+  defdelegate load_seed_library(path \\ "property_damage_seeds.json"),
+    to: PropertyDamage.SeedLibrary,
+    as: :load
+
+  @doc """
+  Save a seed library to disk.
+
+  ## Example
+
+      :ok = PropertyDamage.save_seed_library(library, "seeds.json")
+  """
+  @spec save_seed_library(PropertyDamage.SeedLibrary.t(), Path.t()) :: :ok | {:error, term()}
+  defdelegate save_seed_library(library, path \\ "property_damage_seeds.json"),
+    to: PropertyDamage.SeedLibrary,
+    as: :save
+
+  @doc """
+  Add a failure to the seed library.
+
+  ## Options
+
+  - `:tags` - Categorization tags (e.g., `[:currency, :race_condition]`)
+  - `:description` - Human-readable description
+
+  ## Example
+
+      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:ok, library} = PropertyDamage.add_to_seed_library(library, failure,
+        tags: [:currency_mismatch],
+        description: "Capture with different currency than authorization"
+      )
+  """
+  @spec add_to_seed_library(PropertyDamage.SeedLibrary.t(), FailureReport.t(), keyword()) ::
+          {:ok, PropertyDamage.SeedLibrary.t()} | {:error, term()}
+  defdelegate add_to_seed_library(library, failure, opts \\ []),
+    to: PropertyDamage.SeedLibrary,
+    as: :add
+
+  # ============================================================================
+  # Coverage API
+  # ============================================================================
+
+  @doc """
+  Get coverage statistics from a test result.
+
+  ## Example
+
+      result = PropertyDamage.run(model: M, adapter: A)
+      coverage = PropertyDamage.coverage(result, M)
+      IO.puts(PropertyDamage.Coverage.format(coverage))
+  """
+  @spec coverage({:ok, map()} | {:error, FailureReport.t()}, module()) ::
+          PropertyDamage.Coverage.t()
+  defdelegate coverage(result, model), to: PropertyDamage.Coverage, as: :from_result
+
+  # ============================================================================
+  # Flakiness Detection API
+  # ============================================================================
+
+  @doc """
+  Check if a seed produces deterministic results.
+
+  Runs the same seed multiple times to detect non-deterministic behavior
+  in the system under test.
+
+  ## Options
+
+  - `:runs` - Number of times to run (default: 5)
+  - `:adapter_config` - Adapter configuration
+  - `:max_commands` - Maximum commands per run (default: 50)
+  - `:verbose` - Print progress (default: false)
+
+  ## Returns
+
+  - `{:ok, :deterministic}` - Same result every time
+  - `{:ok, :flaky, stats}` - Different results, with statistics
+  - `{:error, reason}` - Check failed
+
+  ## Example
+
+      case PropertyDamage.check_determinism(M, A, 512902757, runs: 10) do
+        {:ok, :deterministic} ->
+          IO.puts("Seed is deterministic")
+
+        {:ok, :flaky, stats} ->
+          IO.puts("FLAKY: passed \#{stats.passes}/\#{stats.runs} times")
+      end
+  """
+  @spec check_determinism(module(), module(), integer(), keyword()) ::
+          PropertyDamage.Flakiness.result()
+  defdelegate check_determinism(model, adapter, seed, opts \\ []),
+    to: PropertyDamage.Flakiness,
+    as: :check
+
+  @doc """
+  Discover flaky seeds by testing random seeds.
+
+  ## Options
+
+  - `:num_seeds` - Number of random seeds to test (default: 10)
+  - `:runs_per_seed` - Runs per seed (default: 3)
+  - `:verbose` - Print progress (default: false)
+
+  ## Returns
+
+  List of `{seed, flaky_stats}` for seeds that are flaky.
+
+  ## Example
+
+      flaky_seeds = PropertyDamage.discover_flaky_seeds(M, A, num_seeds: 20)
+      IO.puts("Found \#{length(flaky_seeds)} flaky seeds")
+  """
+  @spec discover_flaky_seeds(module(), module(), keyword()) ::
+          [{integer(), PropertyDamage.Flakiness.flaky_stats()}]
+  defdelegate discover_flaky_seeds(model, adapter, opts \\ []),
+    to: PropertyDamage.Flakiness,
+    as: :discover_flaky
+
   @doc false
   defmacro __using__(_opts) do
     quote do
