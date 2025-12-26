@@ -75,7 +75,17 @@ defmodule PropertyDamage.Executor do
   - `:linearization` - Selected linearization (for branching sequences)
   """
 
-  alias PropertyDamage.{Ref, EventQueue, Sequence, Settle, Nemesis, Stutter, MockServiceRegistry}
+  alias PropertyDamage.{
+    Ref,
+    EventQueue,
+    Sequence,
+    Settle,
+    Nemesis,
+    Stutter,
+    MockServiceRegistry,
+    Linearization
+  }
+
   alias PropertyDamage.EventLog.Entry
 
   @typedoc """
@@ -502,21 +512,20 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  defp find_linearization(branch_commands, _branch_event_logs, _projections, _model) do
-    # For now, use a simple interleaving (round-robin)
-    # The full linearization checker (M3) will replace this
-    linearization = interleave_branches(branch_commands)
-    {:ok, linearization}
-  end
+  defp find_linearization(branch_commands, branch_event_logs, projections, model) do
+    # Convert branch_event_logs from list of {branch_id, events} to map
+    branch_events_map = Map.new(branch_event_logs)
 
-  defp interleave_branches(branches) do
-    # Simple round-robin interleaving
-    # This will be replaced by proper linearization checking in M3
-    branches
-    |> Enum.map(&Enum.with_index/1)
-    |> List.flatten()
-    |> Enum.sort_by(fn {_cmd, idx} -> idx end)
-    |> Enum.map(fn {cmd, _idx} -> cmd end)
+    # Use the Linearization module for proper linearization checking
+    case Linearization.check(branch_commands, branch_events_map, projections, model) do
+      {:ok, linearization} ->
+        {:ok, linearization}
+
+      :no_linearization ->
+        # Fallback to round-robin if no valid linearization is found
+        # This allows tests to proceed while detecting non-linearizability
+        :no_linearization
+    end
   end
 
   defp merge_branch_states(prefix_state, branch_results, branch_event_logs) do
