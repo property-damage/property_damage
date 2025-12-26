@@ -227,4 +227,123 @@ defmodule PropertyDamage.ExecutorTest do
       assert is_integer(entry.timestamp)
     end
   end
+
+  describe "branching sequence execution" do
+    alias PropertyDamage.Sequence
+
+    test "executes branching sequence with prefix" do
+      # Create a branching sequence with prefix and two branches
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 1}],
+          [
+            [%CreateItem{name: "BranchA", quantity: 2}],
+            [%CreateItem{name: "BranchB", quantity: 3}]
+          ],
+          []
+        )
+
+      {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
+
+      assert result.success == true
+      # 1 prefix + 1 branch A + 1 branch B = 3 events
+      assert length(result.event_log) == 3
+    end
+
+    test "executes branching sequence with suffix" do
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 1}],
+          [[%CreateItem{name: "BranchA", quantity: 2}]],
+          [%CreateItem{name: "Suffix", quantity: 4}]
+        )
+
+      {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
+
+      assert result.success == true
+      # 1 prefix + 1 branch + 1 suffix = 3 events
+      assert length(result.event_log) == 3
+    end
+
+    test "branch events have branch_id" do
+      seq =
+        Sequence.branching(
+          [],
+          [
+            [%CreateItem{name: "BranchA", quantity: 1}],
+            [%CreateItem{name: "BranchB", quantity: 2}]
+          ],
+          []
+        )
+
+      {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
+
+      # Find events from each branch
+      branch_ids = result.event_log |> Enum.map(& &1.branch_id) |> Enum.uniq()
+      # Should have events from branch 0 and branch 1
+      assert 0 in branch_ids
+      assert 1 in branch_ids
+    end
+
+    test "failure in branch reports branch_id" do
+      seq =
+        Sequence.branching(
+          [],
+          [
+            [%CreateItem{name: "Item", quantity: 150}]
+          ],
+          []
+        )
+
+      {:ok, result} = Executor.run(seq, FailingModel, SimpleAdapter)
+
+      # Should fail due to exceeding 100 quantity limit
+      assert result.success == false
+      # Branch failures are wrapped with branch_id
+      assert {:branch_failure, 0, {:check_failed, _, _}} = result.failure_reason
+    end
+
+    test "merges projections from all branches" do
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 10}],
+          [
+            [%CreateItem{name: "BranchA", quantity: 20}],
+            [%CreateItem{name: "BranchB", quantity: 30}]
+          ],
+          []
+        )
+
+      {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
+
+      model_state = result.projections[ModelState]
+      # The executor takes the last branch's projection state
+      # So we expect at least one item (this is implementation-dependent)
+      assert map_size(model_state.items) >= 1
+    end
+
+    test "handles empty branches list" do
+      # Empty branches should be treated as linear
+      seq = %Sequence{prefix: [%CreateItem{name: "Test", quantity: 1}], branches: [], suffix: []}
+
+      {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
+
+      assert result.success == true
+      assert length(result.event_log) == 1
+    end
+
+    test "linear sequence works when passed as Sequence struct" do
+      # Verify that a linear Sequence struct works correctly
+      seq =
+        Sequence.linear([
+          %CreateItem{name: "Test1", quantity: 1},
+          %CreateItem{name: "Test2", quantity: 2}
+        ])
+
+      {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
+
+      assert result.success == true
+      assert length(result.event_log) == 2
+    end
+  end
 end

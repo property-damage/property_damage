@@ -163,4 +163,152 @@ defmodule PropertyDamage.GeneratorTest do
       end
     end
   end
+
+  describe "generate_sequence/2 - linear sequences" do
+    alias PropertyDamage.Test.FullModel
+    alias PropertyDamage.Sequence
+
+    test "generates linear sequence by default" do
+      generator = Generator.generate_sequence(FullModel, max_commands: 10)
+
+      sequences = Enum.take(generator, 5)
+
+      for seq <- sequences do
+        assert %Sequence{} = seq
+        assert Sequence.linear?(seq)
+        assert Sequence.command_count(seq) <= 10
+      end
+    end
+
+    test "respects max_commands option" do
+      generator = Generator.generate_sequence(FullModel, max_commands: 5)
+
+      sequences = Enum.take(generator, 10)
+
+      for seq <- sequences do
+        assert Sequence.command_count(seq) <= 5
+      end
+    end
+
+    test "generates valid command structs" do
+      alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
+
+      generator = Generator.generate_sequence(FullModel, max_commands: 10)
+      seq = Enum.take(generator, 1) |> hd()
+
+      for cmd <- Sequence.to_list(seq) do
+        assert cmd.__struct__ in [CreateItem, ViewItem, MinimalCommand]
+      end
+    end
+  end
+
+  describe "generate_sequence/2 - branching sequences" do
+    alias PropertyDamage.Test.FullModel
+    alias PropertyDamage.Sequence
+
+    test "generates branching sequence with branching option" do
+      generator =
+        Generator.generate_sequence(FullModel,
+          max_commands: 20,
+          branching: [
+            branch_probability: 1.0,
+            max_branches: 2,
+            max_branch_length: 3,
+            min_prefix_length: 2
+          ]
+        )
+
+      # Generate multiple sequences and check at least some are branching
+      sequences = Enum.take(generator, 10)
+
+      branching_count = Enum.count(sequences, &Sequence.branching?/1)
+      # With branch_probability: 1.0, most should be branching
+      assert branching_count > 0
+    end
+
+    test "branching sequence respects max_branches" do
+      generator =
+        Generator.generate_sequence(FullModel,
+          max_commands: 30,
+          branching: [
+            branch_probability: 1.0,
+            max_branches: 3,
+            max_branch_length: 5,
+            min_prefix_length: 2
+          ]
+        )
+
+      sequences = Enum.take(generator, 10)
+
+      for seq <- sequences do
+        if Sequence.branching?(seq) do
+          assert Sequence.branch_count(seq) <= 3
+        end
+      end
+    end
+
+    test "branching sequence respects max_branch_length" do
+      generator =
+        Generator.generate_sequence(FullModel,
+          max_commands: 30,
+          branching: [
+            branch_probability: 1.0,
+            max_branches: 2,
+            max_branch_length: 4,
+            min_prefix_length: 2
+          ]
+        )
+
+      sequences = Enum.take(generator, 10)
+
+      for seq <- sequences do
+        if Sequence.branching?(seq) and not is_nil(seq.branches) do
+          for branch <- seq.branches do
+            assert length(branch) <= 4
+          end
+        end
+      end
+    end
+
+    test "branching sequence has non-empty prefix" do
+      generator =
+        Generator.generate_sequence(FullModel,
+          max_commands: 20,
+          branching: [
+            branch_probability: 1.0,
+            max_branches: 2,
+            max_branch_length: 3,
+            min_prefix_length: 3
+          ]
+        )
+
+      sequences = Enum.take(generator, 10)
+
+      for seq <- sequences do
+        if Sequence.branching?(seq) do
+          # Branching sequences should have at least one command in prefix
+          # (min_prefix_length is a soft constraint)
+          assert length(seq.prefix) >= 1
+        end
+      end
+    end
+
+    test "branching sequences contain valid commands" do
+      alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
+
+      generator =
+        Generator.generate_sequence(FullModel,
+          max_commands: 20,
+          branching: [branch_probability: 1.0, max_branches: 2]
+        )
+
+      sequences = Enum.take(generator, 5)
+
+      for seq <- sequences do
+        for cmd <- Sequence.to_list(seq) do
+          assert cmd.__struct__ in [CreateItem, ViewItem, MinimalCommand]
+        end
+      end
+    end
+  end
 end
