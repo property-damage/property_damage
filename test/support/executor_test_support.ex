@@ -141,3 +141,72 @@ defmodule PropertyDamage.Test.SimpleModel do
   @impl true
   def assertion_projections, do: []
 end
+
+# ============================================================================
+# Multi-Check Test Support (for failure equivalence testing)
+# ============================================================================
+
+defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
+  @moduledoc """
+  Assertion projection with two different checks at different thresholds.
+
+  Used to test that the shrinker preserves failure type:
+  - `high_limit` fails when quantity > 200
+  - `low_limit` fails when quantity > 100
+
+  If a sequence fails `high_limit`, shrinking shouldn't accept a
+  sequence that only fails `low_limit`.
+  """
+  use PropertyDamage.AssertionProjection
+
+  alias PropertyDamage.Test.Events.ItemCreated
+
+  @impl true
+  def init, do: %{total_quantity: 0}
+
+  @impl true
+  def apply(state, %ItemCreated{quantity: qty}) do
+    update_in(state, [:total_quantity], &(&1 + qty))
+  end
+
+  def apply(state, _), do: state
+
+  check(:always)
+  @impl true
+  def check(:low_limit, state, _ctx) do
+    if state.total_quantity <= 100 do
+      :ok
+    else
+      {:error, "Quantity #{state.total_quantity} exceeds low limit of 100"}
+    end
+  end
+
+  check(:always)
+
+  def check(:high_limit, state, _ctx) do
+    if state.total_quantity <= 200 do
+      :ok
+    else
+      {:error, "Quantity #{state.total_quantity} exceeds high limit of 200"}
+    end
+  end
+end
+
+defmodule PropertyDamage.Test.MultiCheckModel do
+  @moduledoc """
+  Model with multiple assertion checks for testing failure equivalence.
+  """
+  @behaviour PropertyDamage.Model
+
+  alias PropertyDamage.Test.Commands.CreateItem
+  alias PropertyDamage.Test.Projections.{ModelState, MultiCheckAssertion}
+
+  @impl true
+  def commands, do: [CreateItem]
+
+  @impl true
+  def state_projection, do: ModelState
+
+  @impl true
+  def assertion_projections, do: [MultiCheckAssertion]
+end
