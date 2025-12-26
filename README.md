@@ -340,6 +340,79 @@ end
 untested = Coverage.untested_commands(tracker)
 ```
 
+### Format Options
+
+Coverage supports multiple output formats:
+
+```elixir
+# Summary - basic stats
+IO.puts(Coverage.format(tracker, :summary))
+
+# Matrix - shows command transition coverage
+IO.puts(Coverage.format(tracker, :matrix))
+
+# Full - includes everything
+IO.puts(Coverage.format(tracker, :full))
+
+# State classes (when classifier is set)
+IO.puts(Coverage.format(tracker, :state_classes))
+```
+
+### Transition Coverage
+
+Track which command pairs (transitions) have been tested:
+
+```elixir
+# Get a transition matrix showing which A→B pairs were tested
+matrix = Coverage.transition_matrix(tracker)
+# => %{CreateAccount => %{CreateAccount => 5, CreditAccount => 12, DebitAccount => 8}, ...}
+
+# Find untested transitions
+untested = Coverage.untested_transitions(tracker)
+# => [{CreateAccount, DeleteAccount}, {DebitAccount, CloseAccount}, ...]
+
+# Get most frequent transitions
+top = Coverage.top_transitions(tracker, 5)
+# => [{{CreateAccount, CreditAccount}, 42}, {{CreditAccount, DebitAccount}, 38}, ...]
+```
+
+### State Class Coverage
+
+For more meaningful coverage, define a state classifier to group concrete states into abstract classes:
+
+```elixir
+# Define a classifier function
+classifier = fn state ->
+  cond do
+    state.accounts == %{} -> :no_accounts
+    Enum.all?(state.accounts, fn {_, a} -> a.balance == 0 end) -> :all_zero_balance
+    Enum.any?(state.accounts, fn {_, a} -> a.balance < 0 end) -> :has_negative
+    true -> :has_positive
+  end
+end
+
+# Create tracker with classifier
+tracker = Coverage.new(MyModel, state_classifier: classifier)
+tracker = Coverage.record(tracker, result1)
+tracker = Coverage.record(tracker, result2)
+
+# View state class distribution
+counts = Coverage.state_class_counts(tracker)
+# => %{no_accounts: 5, all_zero_balance: 12, has_positive: 83}
+
+# View state class transitions (what state classes lead to what)
+transitions = Coverage.state_class_transitions(tracker)
+# => %{{:no_accounts, :all_zero_balance} => 5, {:all_zero_balance, :has_positive} => 10, ...}
+
+# Get state class matrix for visualization
+state_matrix = Coverage.state_class_matrix(tracker)
+
+# Format with state class matrix
+IO.puts(Coverage.format(tracker, :state_classes))
+```
+
+State class coverage helps answer: "Have we tested all interesting state configurations?"
+
 ## Flakiness Detection
 
 Detect non-deterministic behavior in your system:

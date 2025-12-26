@@ -52,8 +52,15 @@ defmodule PropertyDamage.Coverage do
     :check_hits,
     :total_commands,
     :total_runs,
-    :failures_found
+    :failures_found,
+    # State class tracking
+    :state_classifier,
+    :state_class_counts,
+    :state_class_transitions,
+    :last_state_class
   ]
+
+  @type state_classifier :: (map() -> atom() | String.t()) | nil
 
   @type t :: %__MODULE__{
           model: module(),
@@ -64,14 +71,38 @@ defmodule PropertyDamage.Coverage do
           check_hits: %{module() => non_neg_integer()},
           total_commands: non_neg_integer(),
           total_runs: non_neg_integer(),
-          failures_found: non_neg_integer()
+          failures_found: non_neg_integer(),
+          # State class tracking
+          state_classifier: state_classifier(),
+          state_class_counts: %{atom() => non_neg_integer()},
+          state_class_transitions: %{{atom(), atom()} => non_neg_integer()},
+          last_state_class: atom() | nil
         }
 
   @doc """
   Create a new coverage tracker for a model.
+
+  ## Options
+
+  - `:state_classifier` - Function to classify states into abstract classes.
+    The function receives the projection state map and returns an atom or string
+    identifying the state class.
+
+  ## Example
+
+      # Track coverage with state classes
+      classifier = fn state ->
+        cond do
+          state.balance == 0 -> :zero_balance
+          state.balance > 0 -> :positive_balance
+          state.balance < 0 -> :negative_balance
+        end
+      end
+
+      tracker = Coverage.new(MyModel, state_classifier: classifier)
   """
-  @spec new(module()) :: t()
-  def new(model) do
+  @spec new(module(), keyword()) :: t()
+  def new(model, opts \\ []) do
     command_modules =
       model.commands()
       |> Enum.map(fn {_weight, cmd} -> cmd end)
@@ -86,7 +117,11 @@ defmodule PropertyDamage.Coverage do
       check_hits: %{},
       total_commands: 0,
       total_runs: 0,
-      failures_found: 0
+      failures_found: 0,
+      state_classifier: Keyword.get(opts, :state_classifier),
+      state_class_counts: %{},
+      state_class_transitions: %{},
+      last_state_class: nil
     }
   end
 
@@ -136,7 +171,16 @@ defmodule PropertyDamage.Coverage do
       check_hits: merge_counts(tracker1.check_hits, tracker2.check_hits),
       total_commands: tracker1.total_commands + tracker2.total_commands,
       total_runs: tracker1.total_runs + tracker2.total_runs,
-      failures_found: tracker1.failures_found + tracker2.failures_found
+      failures_found: tracker1.failures_found + tracker2.failures_found,
+      state_classifier: tracker1.state_classifier || tracker2.state_classifier,
+      state_class_counts:
+        merge_counts(tracker1.state_class_counts || %{}, tracker2.state_class_counts || %{}),
+      state_class_transitions:
+        merge_counts(
+          tracker1.state_class_transitions || %{},
+          tracker2.state_class_transitions || %{}
+        ),
+      last_state_class: nil
     }
   end
 
@@ -221,6 +265,118 @@ defmodule PropertyDamage.Coverage do
     |> Enum.take(n)
   end
 
+  # ============================================================================
+  # State Class Functions
+  # ============================================================================
+
+  @doc """
+  Get state class counts (requires state_classifier to be set).
+
+  Returns a map of `%{state_class => count}`.
+  """
+  @spec state_class_counts(t()) :: %{atom() => non_neg_integer()}
+  def state_class_counts(%__MODULE__{state_class_counts: counts}) do
+    counts || %{}
+  end
+
+  @doc """
+  Get state class transition counts (requires state_classifier to be set).
+
+  Returns a map of `%{{from_class, to_class} => count}`.
+  """
+  @spec state_class_transitions(t()) :: %{{atom(), atom()} => non_neg_integer()}
+  def state_class_transitions(%__MODULE__{state_class_transitions: transitions}) do
+    transitions || %{}
+  end
+
+  @doc """
+  Get the state class transition matrix.
+
+  Returns `%{from_class => %{to_class => count}}`.
+  """
+  @spec state_class_matrix(t()) :: %{atom() => %{atom() => non_neg_integer()}}
+  def state_class_matrix(%__MODULE__{state_class_counts: counts, state_class_transitions: trans}) do
+    counts = counts || %{}
+    trans = trans || %{}
+
+    classes = Map.keys(counts) |> Enum.sort()
+
+    # Initialize matrix with zeros
+    initial =
+      for from <- classes, into: %{} do
+        row = for to <- classes, into: %{}, do: {to, 0}
+        {from, row}
+      end
+
+    # Fill in actual counts
+    Enum.reduce(trans, initial, fn {{from, to}, count}, matrix ->
+      if Map.has_key?(matrix, from) and Map.has_key?(matrix[from], to) do
+        put_in(matrix, [from, to], count)
+      else
+        matrix
+      end
+    end)
+  end
+
+  @doc """
+  Format state class coverage as ASCII art.
+
+  Shows which state class transitions have been tested.
+  """
+  @spec format_state_class_matrix(t()) :: String.t()
+  def format_state_class_matrix(%__MODULE__{state_class_counts: counts} = tracker) do
+    counts = counts || %{}
+
+    if map_size(counts) == 0 do
+      "  (no state classifier set or no states observed)"
+    else
+      matrix = state_class_matrix(tracker)
+      classes = Map.keys(counts) |> Enum.sort()
+      names = Enum.map(classes, &to_string/1)
+
+      max_name_len = names |> Enum.map(&String.length/1) |> Enum.max(fn -> 6 end)
+      col_width = max(max_name_len, 6)
+
+      header_padding = String.duplicate(" ", col_width + 2)
+
+      header =
+        header_padding <>
+          "→ " <>
+          (names |> Enum.map(&String.pad_trailing(&1, col_width)) |> Enum.join("  "))
+
+      separator = String.duplicate("─", String.length(header))
+
+      rows =
+        Enum.map(classes, fn from ->
+          from_name = to_string(from) |> String.pad_trailing(col_width)
+
+          cells =
+            Enum.map(classes, fn to ->
+              count = get_in(matrix, [from, to]) || 0
+              format_cell(count, from == to, col_width)
+            end)
+
+          "#{from_name}  #{Enum.join(cells, "  ")}"
+        end)
+
+      # Also show counts per state class
+      class_counts =
+        classes
+        |> Enum.map(fn c -> "  #{c}: #{Map.get(counts, c, 0)}x" end)
+        |> Enum.join("\n")
+
+      """
+      State Class Transition Matrix
+      #{separator}
+      #{header}
+      #{Enum.join(rows, "\n")}
+
+      State class counts:
+      #{class_counts}
+      """
+    end
+  end
+
   @doc """
   Get detailed statistics.
   """
@@ -233,6 +389,8 @@ defmodule PropertyDamage.Coverage do
       total_commands: tracker.total_commands,
       total_runs: tracker.total_runs,
       failures_found: tracker.failures_found,
+      state_classes_observed: map_size(tracker.state_class_counts || %{}),
+      state_class_transitions_tested: map_size(tracker.state_class_transitions || %{}),
       commands_tested: map_size(tracker.command_counts),
       commands_total: MapSet.size(tracker.command_modules),
       transitions_tested: map_size(tracker.transition_counts),
@@ -242,9 +400,25 @@ defmodule PropertyDamage.Coverage do
 
   @doc """
   Format coverage report for display.
+
+  ## Format Options
+
+  - `:summary` - Brief summary (default)
+  - `:matrix` - Transition matrix showing command pairs
+  - `:full` - Complete report with matrix and untested transitions
+  - `:state_classes` - State class transition matrix (requires state_classifier)
+
+  ## Examples
+
+      Coverage.format(tracker)                # summary
+      Coverage.format(tracker, :matrix)       # transition matrix only
+      Coverage.format(tracker, :full)         # everything
+      Coverage.format(tracker, :state_classes) # state class matrix only
   """
-  @spec format(t()) :: String.t()
-  def format(tracker) do
+  @spec format(t(), atom()) :: String.t()
+  def format(tracker, format \\ :summary)
+
+  def format(tracker, :summary) do
     stats = stats(tracker)
 
     untested_str =
@@ -280,6 +454,200 @@ defmodule PropertyDamage.Coverage do
     Untested commands:
     #{untested_str}
     """
+  end
+
+  def format(tracker, :matrix) do
+    format_transition_matrix(tracker)
+  end
+
+  def format(tracker, :full) do
+    summary = format(tracker, :summary)
+    matrix = format_transition_matrix(tracker)
+
+    untested = untested_transitions(tracker)
+
+    untested_str =
+      if untested == [] do
+        "  (all transitions tested)"
+      else
+        untested
+        |> Enum.take(10)
+        |> Enum.map(fn {from, to} -> "  #{short_name(from)} → #{short_name(to)}" end)
+        |> Enum.join("\n")
+      end
+
+    suffix =
+      if length(untested) > 10 do
+        "\n  ... and #{length(untested) - 10} more"
+      else
+        ""
+      end
+
+    # Include state class matrix if classifier was set
+    state_class_section =
+      if tracker.state_classifier && map_size(tracker.state_class_counts || %{}) > 0 do
+        "\n#{format_state_class_matrix(tracker)}"
+      else
+        ""
+      end
+
+    """
+    #{summary}
+    Transition Matrix:
+    #{matrix}
+
+    Untested Transitions:
+    #{untested_str}#{suffix}
+    #{state_class_section}
+    """
+  end
+
+  def format(tracker, :state_classes) do
+    format_state_class_matrix(tracker)
+  end
+
+  @doc """
+  Get transitions (command pairs) that haven't been tested yet.
+
+  Returns list of `{from_command, to_command}` tuples.
+  """
+  @spec untested_transitions(t()) :: [{module(), module()}]
+  def untested_transitions(%__MODULE__{command_modules: all, transition_counts: counts}) do
+    tested = MapSet.new(Map.keys(counts))
+
+    for from <- all,
+        to <- all,
+        pair = {from, to},
+        not MapSet.member?(tested, pair) do
+      pair
+    end
+    |> Enum.sort_by(fn {from, to} -> {short_name(from), short_name(to)} end)
+  end
+
+  @doc """
+  Get most frequently tested transitions.
+  """
+  @spec top_transitions(t(), non_neg_integer()) :: [{{module(), module()}, non_neg_integer()}]
+  def top_transitions(%__MODULE__{transition_counts: counts}, n \\ 10) do
+    counts
+    |> Enum.sort_by(fn {_, count} -> count end, :desc)
+    |> Enum.take(n)
+  end
+
+  @doc """
+  Get the transition matrix as a map.
+
+  Returns `%{from_command => %{to_command => count}}`.
+  """
+  @spec transition_matrix(t()) :: %{module() => %{module() => non_neg_integer()}}
+  def transition_matrix(%__MODULE__{command_modules: all, transition_counts: counts}) do
+    # Initialize matrix with zeros
+    commands = MapSet.to_list(all) |> Enum.sort_by(&short_name/1)
+
+    initial =
+      for from <- commands, into: %{} do
+        row = for to <- commands, into: %{}, do: {to, 0}
+        {from, row}
+      end
+
+    # Fill in actual counts
+    Enum.reduce(counts, initial, fn {{from, to}, count}, matrix ->
+      if Map.has_key?(matrix, from) and Map.has_key?(matrix[from], to) do
+        put_in(matrix, [from, to], count)
+      else
+        matrix
+      end
+    end)
+  end
+
+  @doc """
+  Format the transition matrix as ASCII art.
+
+  Shows which command pairs have been tested:
+  - `████` = well-tested (>10 occurrences)
+  - `▓▓▓▓` = tested (>5 occurrences)
+  - `░░░░` = lightly tested (1-5 occurrences)
+  - `    ` = untested
+
+  ## Example
+
+      Transition Matrix
+      ───────────────────────────────────────
+                    → Create  Credit  Debit
+      Create           ·      ████    ████
+      Credit         ████       ·     ▓▓▓▓
+      Debit          ░░░░    ████       ·
+  """
+  @spec format_transition_matrix(t()) :: String.t()
+  def format_transition_matrix(%__MODULE__{command_modules: all} = tracker) do
+    commands = MapSet.to_list(all) |> Enum.sort_by(&short_name/1)
+
+    if commands == [] do
+      "  (no commands to display)"
+    else
+      matrix = transition_matrix(tracker)
+      names = Enum.map(commands, &short_name/1)
+
+      # Calculate column width (minimum 6 for the bars)
+      max_name_len = names |> Enum.map(&String.length/1) |> Enum.max(fn -> 6 end)
+      col_width = max(max_name_len, 6)
+
+      # Header row
+      header_padding = String.duplicate(" ", col_width + 2)
+
+      header =
+        header_padding <>
+          "→ " <>
+          (names |> Enum.map(&String.pad_trailing(&1, col_width)) |> Enum.join("  "))
+
+      separator = String.duplicate("─", String.length(header))
+
+      # Data rows
+      rows =
+        Enum.map(commands, fn from ->
+          from_name = short_name(from) |> String.pad_trailing(col_width)
+
+          cells =
+            Enum.map(commands, fn to ->
+              count = get_in(matrix, [from, to]) || 0
+              format_cell(count, from == to, col_width)
+            end)
+
+          "#{from_name}  #{Enum.join(cells, "  ")}"
+        end)
+
+      """
+      Transition Matrix
+      #{separator}
+      #{header}
+      #{Enum.join(rows, "\n")}
+      """
+    end
+  end
+
+  defp format_cell(_count, true, width) do
+    # Diagonal (same command twice) - show dot
+    String.pad_trailing("·", width)
+  end
+
+  defp format_cell(0, false, width) do
+    # Untested
+    String.pad_trailing("", width)
+  end
+
+  defp format_cell(count, false, width) when count >= 10 do
+    # Well tested
+    String.pad_trailing("████", width)
+  end
+
+  defp format_cell(count, false, width) when count >= 5 do
+    # Tested
+    String.pad_trailing("▓▓▓▓", width)
+  end
+
+  defp format_cell(_count, false, width) do
+    # Lightly tested
+    String.pad_trailing("░░░░", width)
   end
 
   @doc """
@@ -335,6 +703,21 @@ defmodule PropertyDamage.Coverage do
     # Count check hits from event log
     check_hits = count_check_hits(event_log, tracker.check_hits)
 
+    # Track state class transitions if classifier is provided
+    {state_class_counts, state_class_transitions, last_class} =
+      if tracker.state_classifier do
+        track_state_classes(
+          tracker.state_classifier,
+          projections,
+          tracker.state_class_counts || %{},
+          tracker.state_class_transitions || %{},
+          tracker.last_state_class
+        )
+      else
+        {tracker.state_class_counts || %{}, tracker.state_class_transitions || %{},
+         tracker.last_state_class}
+      end
+
     %{
       tracker
       | command_counts: command_counts,
@@ -343,8 +726,41 @@ defmodule PropertyDamage.Coverage do
         check_hits: check_hits,
         total_commands: tracker.total_commands + length(commands),
         total_runs: tracker.total_runs + 1,
-        failures_found: tracker.failures_found + if(is_failure, do: 1, else: 0)
+        failures_found: tracker.failures_found + if(is_failure, do: 1, else: 0),
+        state_class_counts: state_class_counts,
+        state_class_transitions: state_class_transitions,
+        last_state_class: last_class
     }
+  end
+
+  defp track_state_classes(classifier, projections, counts, transitions, last_class) do
+    # Get the combined state from all projections
+    state =
+      projections
+      |> Enum.reduce(%{}, fn {_proj, proj_state}, acc ->
+        Map.merge(acc, proj_state)
+      end)
+
+    # Classify the current state
+    current_class =
+      try do
+        classifier.(state)
+      rescue
+        _ -> :unknown
+      end
+
+    # Update counts
+    new_counts = Map.update(counts, current_class, 1, &(&1 + 1))
+
+    # Update transitions if we have a previous class
+    new_transitions =
+      if last_class do
+        Map.update(transitions, {last_class, current_class}, 1, &(&1 + 1))
+      else
+        transitions
+      end
+
+    {new_counts, new_transitions, current_class}
   end
 
   defp count_check_hits(event_log, check_hits) when is_list(event_log) do
