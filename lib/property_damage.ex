@@ -55,6 +55,65 @@ defmodule PropertyDamage do
         max_runs: 100
       )
 
+  ## Debugging Failures
+
+  When a test fails, PropertyDamage provides rich tools for understanding what went wrong:
+
+      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+
+      # Understand why each command in the shrunk sequence is needed
+      explanation = PropertyDamage.explain(failure)
+
+      # Find the specific field/value that caused the failure
+      {:ok, trigger} = PropertyDamage.isolate_trigger(failure)
+
+      # Generate a reproducible test case
+      test_code = PropertyDamage.generate_test(failure, format: :exunit)
+
+      # Try harder to shrink if needed
+      {:ok, smaller} = PropertyDamage.shrink_further(failure, strategy: :exhaustive)
+
+      # Replay step-by-step
+      {:ok, steps} = PropertyDamage.replay(failure)
+
+  ## Failure Persistence
+
+  Save failures for later analysis or regression testing:
+
+      {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
+      {:ok, loaded} = PropertyDamage.load_failure(path)
+      failures = PropertyDamage.list_failures("failures/")
+
+  See `PropertyDamage.Persistence` for details.
+
+  ## Seed Library
+
+  Track interesting seeds for regression testing:
+
+      {:ok, library} = PropertyDamage.load_seed_library("seeds.json")
+      {:ok, library} = PropertyDamage.add_to_seed_library(library, failure, tags: [:bug])
+      PropertyDamage.save_seed_library(library, "seeds.json")
+
+  See `PropertyDamage.SeedLibrary` for details.
+
+  ## Coverage Metrics
+
+  Track how thoroughly your model is being exercised:
+
+      coverage = PropertyDamage.coverage(result, MyModel)
+      IO.puts(PropertyDamage.Coverage.format(coverage))
+
+  See `PropertyDamage.Coverage` for details.
+
+  ## Flakiness Detection
+
+  Detect non-deterministic behavior in your SUT:
+
+      PropertyDamage.check_determinism(Model, Adapter, seed, runs: 10)
+      flaky = PropertyDamage.discover_flaky_seeds(Model, Adapter, num_seeds: 20)
+
+  See `PropertyDamage.Flakiness` for details.
+
   ## Architecture
 
   The framework consists of several layers:
@@ -62,7 +121,8 @@ defmodule PropertyDamage do
   - **Tier 0 (Core Types)**: Ref, Command, Projection, Model behaviours
   - **Tier 1 (Execution)**: Adapter, EventQueue, InjectorAdapter, Executor
   - **Tier 2 (Shrinking)**: Validator, Shrinker, dependency graph
-  - **Tier 3 (Integration)**: Main API, ExUnit integration, validation
+  - **Tier 3 (Analysis)**: Analysis, Replay, Coverage, Flakiness
+  - **Utilities**: Persistence, SeedLibrary, mix tasks
 
   See the individual module documentation for detailed information on each component.
   """
