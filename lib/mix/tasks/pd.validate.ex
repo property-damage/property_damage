@@ -173,38 +173,39 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     # Check command callbacks
-    for {_weight, cmd} <- commands, Code.ensure_loaded?(cmd) do
-      unless function_exported?(cmd, :precondition, 1) do
-        errors = ["Command #{inspect(cmd)} missing precondition/1" | errors]
+    errors =
+      for {_weight, cmd} <- commands, Code.ensure_loaded?(cmd), reduce: errors do
+        acc ->
+          acc = if function_exported?(cmd, :precondition, 1), do: acc, else: ["Command #{inspect(cmd)} missing precondition/1" | acc]
+          if function_exported?(cmd, :new!, 2), do: acc, else: ["Command #{inspect(cmd)} missing new!/2" | acc]
       end
-
-      unless function_exported?(cmd, :new!, 2) do
-        errors = ["Command #{inspect(cmd)} missing new!/2" | errors]
-      end
-    end
 
     # Check projections
     state_proj = model.state_projection()
 
-    unless Code.ensure_loaded?(state_proj) do
-      errors = ["State projection #{inspect(state_proj)} does not exist" | errors]
-    end
+    errors =
+      if Code.ensure_loaded?(state_proj) do
+        errors
+      else
+        ["State projection #{inspect(state_proj)} does not exist" | errors]
+      end
 
     assertion_projs = model.assertion_projections()
 
-    for proj <- assertion_projs, not Code.ensure_loaded?(proj) do
-      errors = ["Assertion projection #{inspect(proj)} does not exist" | errors]
-    end
+    errors =
+      for proj <- assertion_projs, not Code.ensure_loaded?(proj), reduce: errors do
+        acc -> ["Assertion projection #{inspect(proj)} does not exist" | acc]
+      end
 
     # Collect warnings
-    for {_weight, cmd} <- commands,
-        Code.ensure_loaded?(cmd),
-        not function_exported?(cmd, :downstream_observables, 0) do
-      warnings = [
-        "Command #{cmd |> Module.split() |> List.last()} missing downstream_observables/0"
-        | warnings
-      ]
-    end
+    warnings =
+      for {_weight, cmd} <- commands,
+          Code.ensure_loaded?(cmd),
+          not function_exported?(cmd, :downstream_observables, 0),
+          reduce: warnings do
+        acc ->
+          ["Command #{cmd |> Module.split() |> List.last()} missing downstream_observables/0" | acc]
+      end
 
     if verbose do
       print_model_summary(model, commands)
