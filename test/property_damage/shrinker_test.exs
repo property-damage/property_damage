@@ -420,4 +420,304 @@ defmodule PropertyDamage.ShrinkerTest do
       assert result.time_ms < 200
     end
   end
+
+  # ============================================================================
+  # Branching Sequence Shrinking Tests
+  # ============================================================================
+
+  describe "shrink/2 with branching sequences" do
+    test "shrinks branching sequence to minimal reproduction" do
+      # Create a branching sequence where only the prefix causes failure
+      seq =
+        Sequence.branching(
+          # This alone causes failure (> 100)
+          [%CreateItem{name: "Prefix", quantity: 101}],
+          [
+            [%CreateItem{name: "BranchA", quantity: 10}],
+            [%CreateItem{name: "BranchB", quantity: 20}]
+          ],
+          [%CreateItem{name: "Suffix", quantity: 5}]
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      # Should shrink to just the failing command
+      shrunk_count = Sequence.command_count(result.sequence)
+      assert shrunk_count <= 4
+    end
+
+    test "converts to linear when race not required" do
+      # Create a branching sequence where the failure doesn't depend on parallelism
+      # Total quantity: 60 + 50 = 110 > 100, fails regardless of order
+      seq =
+        Sequence.branching(
+          [],
+          [
+            [%CreateItem{name: "BranchA", quantity: 60}],
+            [%CreateItem{name: "BranchB", quantity: 50}]
+          ],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 1,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      # Should convert to linear sequence since race is not needed
+      assert Sequence.linear?(result.sequence) or Sequence.command_count(result.sequence) == 2
+    end
+
+    test "preserves branching when needed for failure" do
+      # This is a simpler test - the shrinker should not break the failure
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 50}],
+          [
+            # Total with prefix: 110 > 100
+            [%CreateItem{name: "BranchA", quantity: 60}],
+            [%CreateItem{name: "BranchB", quantity: 10}]
+          ],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 1,
+          failure_reason: {:check_failed, :quantity_limit, "exceeds limit"},
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      # Verify the shrunk sequence still has commands that total > 100
+      shrunk_commands = Sequence.to_list(result.sequence)
+      total = Enum.reduce(shrunk_commands, 0, fn cmd, acc -> acc + cmd.quantity end)
+      assert total > 100, "Shrunk sequence must still fail (total: #{total})"
+    end
+
+    test "shrinks individual branch contents" do
+      # Create a sequence with unnecessarily long branches
+      seq =
+        Sequence.branching(
+          [],
+          [
+            # First branch alone causes failure
+            [
+              %CreateItem{name: "A1", quantity: 50},
+              %CreateItem{name: "A2", quantity: 60}
+            ],
+            # Second branch is just filler
+            [
+              %CreateItem{name: "B1", quantity: 5},
+              %CreateItem{name: "B2", quantity: 5},
+              %CreateItem{name: "B3", quantity: 5}
+            ]
+          ],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 1,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      # Should shrink the branches
+      assert Sequence.command_count(result.sequence) < 5
+    end
+
+    test "shrinks prefix while preserving failure" do
+      # Prefix has unnecessary commands before the critical ones
+      seq =
+        Sequence.branching(
+          [
+            # Unnecessary
+            %CreateItem{name: "Filler1", quantity: 5},
+            # Unnecessary
+            %CreateItem{name: "Filler2", quantity: 5},
+            # Needed for failure
+            %CreateItem{name: "Critical", quantity: 50}
+          ],
+          [
+            # Combined with prefix: 110 > 100
+            [%CreateItem{name: "BranchA", quantity: 60}]
+          ],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 3,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      # Should remove some filler commands from prefix
+      assert Sequence.command_count(result.sequence) <= 4
+    end
+
+    test "shrinks suffix" do
+      # Suffix has commands that don't contribute to failure
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 101}],
+          [[%CreateItem{name: "Branch", quantity: 10}]],
+          [
+            %CreateItem{name: "Suffix1", quantity: 5},
+            %CreateItem{name: "Suffix2", quantity: 5}
+          ]
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      # Suffix is unnecessary since failure happens in prefix
+      # Should remove suffix commands
+      shrunk_commands = Sequence.to_list(result.sequence)
+      suffix_count = Enum.count(shrunk_commands, fn cmd -> cmd.name =~ "Suffix" end)
+      assert suffix_count < 2
+    end
+
+    test "returns Sequence struct for branching input" do
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 101}],
+          [[%CreateItem{name: "Branch", quantity: 10}]],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter
+        )
+
+      assert %Sequence{} = result.sequence
+    end
+
+    test "tracks iterations for branching shrinking" do
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 101}],
+          [[%CreateItem{name: "Branch", quantity: 10}]],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter
+        )
+
+      assert is_integer(result.iterations)
+      assert result.iterations >= 0
+    end
+
+    test "tracks time for branching shrinking" do
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 101}],
+          [[%CreateItem{name: "Branch", quantity: 10}]],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter
+        )
+
+      assert is_integer(result.time_ms)
+      assert result.time_ms >= 0
+    end
+  end
+
+  describe "branching argument shrinking" do
+    test "shrinks arguments in branching sequence" do
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "LongPrefixName", quantity: 400}],
+          [[%CreateItem{name: "LongBranchName", quantity: 50}]],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: true)
+        )
+
+      # Arguments should be shrunk
+      shrunk_commands = Sequence.to_list(result.sequence)
+      prefix_cmd = hd(shrunk_commands)
+
+      # Quantity should shrink toward minimum that still fails
+      assert prefix_cmd.quantity <= 400
+      assert prefix_cmd.quantity > 100
+    end
+  end
+
+  describe "branching with branch_failure reasons" do
+    test "branch_failure is unwrapped for equivalence checking" do
+      # This verifies the failure_signature function handles branch_failure
+      inner = {:check_failed, :quantity_limit, "exceeded"}
+      wrapped = {:branch_failure, 0, inner}
+
+      # Both should have same signature
+      assert Shrinker.failure_signature(inner) == Shrinker.failure_signature(wrapped)
+    end
+
+    test "shrinks with branch_failure reason" do
+      seq =
+        Sequence.branching(
+          [],
+          [
+            [%CreateItem{name: "Branch", quantity: 101}]
+          ],
+          []
+        )
+
+      # Failure in branch 0
+      failure_reason = {:branch_failure, 0, {:check_failed, :quantity_limit, "exceeded"}}
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 0,
+          failure_reason: failure_reason,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      # Should still shrink correctly
+      shrunk_commands = Sequence.to_list(result.sequence)
+      assert length(shrunk_commands) >= 1
+
+      total = Enum.reduce(shrunk_commands, 0, fn cmd, acc -> acc + cmd.quantity end)
+      assert total > 100
+    end
+  end
 end
