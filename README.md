@@ -22,6 +22,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Visual Diagrams**: Sequence diagrams in Mermaid, PlantUML, WebSequence formats
 - **Diff Debugging**: Compare passing vs failing runs to find divergence
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
+- **Mutation Testing**: Verify your tests catch bugs by injecting faults
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 
 ## Installation
@@ -1141,6 +1142,114 @@ RESP3=$(curl -s -X POST "$BASE_URL/api/accounts/$REF_account_0/debit" \
 echo "$RESP3"
 ```
 
+## Mutation Testing
+
+Verify that your property tests are actually effective at catching bugs. Mutation testing injects faults into adapter responses and checks if your tests detect them.
+
+### Basic Usage
+
+```elixir
+{:ok, report} = PropertyDamage.Mutation.run(
+  model: MyModel,
+  adapter: MyAdapter,
+  adapter_config: %{base_url: "http://localhost:4000"},
+  target_score: 0.80
+)
+
+# Check results
+IO.puts(PropertyDamage.Mutation.format(report))
+
+# Get detailed analysis
+if not PropertyDamage.Mutation.passes?(report) do
+  analysis = PropertyDamage.Mutation.analyze(report)
+  IO.puts(PropertyDamage.Mutation.Analysis.format(analysis))
+end
+```
+
+### Understanding Results
+
+- **Killed mutant**: Your tests detected the simulated bug (good)
+- **Survived mutant**: Your tests missed the bug (bad - weak tests)
+- **Mutation score**: `killed / total` - aim for 80%+
+
+### Mutation Operators
+
+| Operator | Description |
+|----------|-------------|
+| `:value` | Mutates numeric/string values (zero, negate, off-by-one) |
+| `:omission` | Removes fields from events |
+| `:status` | Changes success/error outcomes |
+| `:event` | Modifies event contents and structure |
+| `:boundary` | Pushes values to edge cases (0, -1, max, nil) |
+
+### Options
+
+```elixir
+PropertyDamage.Mutation.run(
+  model: MyModel,
+  adapter: MyAdapter,
+  adapter_config: %{base_url: "http://localhost:4000"},
+
+  # Which operators to use (default: all)
+  operators: [:value, :omission, :status],
+
+  # Mutations per command type (default: 5)
+  mutations_per_command: 10,
+
+  # PropertyDamage runs per mutation (default: 10)
+  max_runs: 20,
+
+  # Target score to pass (default: 0.80)
+  target_score: 0.80,
+
+  # Timeout per mutation test (default: 30000)
+  timeout_ms: 60_000,
+
+  # Print progress
+  verbose: true
+)
+```
+
+### Example Report
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║                       MUTATION TESTING REPORT                        ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Mutation Score: 85% (17/20 killed)  ✓ PASS (target: 80%)
+
+┌─ By Command ────────────────────────────────────────────────────────┐
+│ CreateAccount    ████████████████████ 100% (5/5)                    │
+│ CreditAccount    ██████████████░░░░░░  86% (6/7)                    │
+│ DebitAccount     ████████████░░░░░░░░  75% (6/8)                    │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─ Survived Mutations (Weaknesses) ───────────────────────────────────┐
+│ 1. CreditAccount: amount 100→99 (off-by-one not detected)           │
+│ 2. DebitAccount: omitted 'timestamp' field not detected             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Analysis & Suggestions
+
+```elixir
+analysis = PropertyDamage.Mutation.analyze(report)
+
+# Weak commands (low kill rates)
+for {cmd, score} <- analysis.weak_commands do
+  IO.puts("#{cmd}: #{Float.round(score * 100, 1)}%")
+end
+
+# Fields that aren't being validated
+IO.inspect(analysis.unchecked_fields)
+
+# Actionable suggestions
+for suggestion <- analysis.suggestions do
+  IO.puts("• #{suggestion}")
+end
+```
+
 ## Architecture
 
 ```
@@ -1191,6 +1300,15 @@ PropertyDamage
 │   ├── Script.Python - Python + requests scripts
 │   ├── LiveBook     - LiveBook notebook generation
 │   └── Common       - Shared utilities
+│
+├── Mutation
+│   ├── Mutation     - Main API (run, analyze, format)
+│   ├── Runner       - Orchestrates mutation runs
+│   ├── MutatingAdapter - Wraps adapters to inject faults
+│   ├── Report       - Aggregates results
+│   ├── Analysis     - Weakness detection
+│   ├── Formatter    - Output formatting
+│   └── Operators    - Value, Omission, Status, Event, Boundary
 │
 └── Utilities
     ├── Persistence  - Save/load failures
