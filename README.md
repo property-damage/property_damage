@@ -19,6 +19,8 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Coverage Metrics**: Know how thoroughly your model is being exercised
 - **Flakiness Detection**: Identify non-deterministic behavior in your SUT
 - **Load Testing**: Generate realistic load using SPBT traffic patterns
+- **Visual Diagrams**: Sequence diagrams in Mermaid, PlantUML, WebSequence formats
+- **Diff Debugging**: Compare passing vs failing runs to find divergence
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 
 ## Installation
@@ -839,6 +841,120 @@ metrics = PropertyDamage.LoadTest.get_metrics(runner)
 {:ok, report} = PropertyDamage.LoadTest.await(runner)
 ```
 
+## Visual Sequence Diagrams
+
+Generate sequence diagrams from failure reports to visualize command flows and pinpoint failures.
+
+### Supported Formats
+
+| Format | Description | Use Case |
+|--------|-------------|----------|
+| `:mermaid` | Mermaid syntax | GitHub, GitLab, Notion |
+| `:plantuml` | PlantUML syntax | Enterprise docs, IDE plugins |
+| `:websequence` | sequencediagram.org | Quick sharing |
+
+### Basic Usage
+
+```elixir
+# From a failure report
+{:error, report} = PropertyDamage.run(model: MyModel, adapter: MyAdapter)
+diagram = PropertyDamage.Diagram.from_failure_report(report, :mermaid)
+IO.puts(diagram)
+
+# From sequence and event log
+diagram = PropertyDamage.Diagram.generate(sequence, event_log, :plantuml,
+  title: "Account Creation Flow",
+  highlight_failure: true
+)
+
+# Save to file
+PropertyDamage.Diagram.save(diagram, "failure_diagram", :mermaid)
+# Creates: failure_diagram.md
+```
+
+### Example Output (Mermaid)
+
+```mermaid
+sequenceDiagram
+    title Failure: NonNegativeBalance (seed: 12345)
+    participant Test
+    participant SUT
+
+    Test->>SUT: CreateAccount(name: "Alice")
+    SUT-->>Test: AccountCreated(id: "acc_123", balance: 0)
+
+    Test->>SUT: Deposit(amount: 100)
+    SUT-->>Test: DepositSucceeded(new_balance: 100)
+
+    Note over Test,SUT: ❌ FAILURE at command 2
+    Test-xSUT: Withdraw(amount: 200)
+    Note right of SUT: Balance went negative
+```
+
+### Options
+
+- `:title` - Custom diagram title
+- `:show_state` - Include state participant
+- `:max_value_length` - Truncate long values (default: 50)
+- `:highlight_failure` - Visual failure markers (default: true)
+
+## Diff-Based Debugging
+
+Compare passing and failing test runs to identify exactly what changed.
+
+### Comparing Traces
+
+```elixir
+# Compare two failure reports
+passing = PropertyDamage.run(model: M, adapter: A, seed: 123) |> elem(1)
+failing = PropertyDamage.run(model: M, adapter: A, seed: 456) |> elem(1)
+
+diff = PropertyDamage.Diff.compare_reports(passing, failing)
+IO.puts(PropertyDamage.Diff.format(diff))
+```
+
+### Output Formats
+
+```elixir
+# Terminal (default) - ASCII boxes
+PropertyDamage.Diff.format(diff, format: :terminal)
+
+# Markdown - tables for documentation
+PropertyDamage.Diff.format(diff, format: :markdown)
+
+# JSON - for programmatic analysis
+PropertyDamage.Diff.format(diff, format: :json)
+```
+
+### Example Terminal Output
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║                         EXECUTION DIFF                               ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Summary: Divergence at command 2: Withdraw. Events differ.
+
+┌─ Event Differences ─────────────────────────────────────────────────┐
+│ Cmd 2 ≠: LEFT: [WithdrawSucceeded]                                  │
+│         RIGHT: [WithdrawFailed]                                     │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ State Differences ─────────────────────────────────────────────────┐
+│ After command 2:                                                    │
+│   balance: -50 → 100                                                │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### What It Detects
+
+| Difference | Description |
+|------------|-------------|
+| Command divergence | Different commands in sequence |
+| Event differences | Different events produced |
+| State changes | Field values that differ |
+| Missing commands | Commands present in one trace but not other |
+
 ## Architecture
 
 ```
@@ -874,6 +990,10 @@ PropertyDamage
 │   ├── Metrics      - Lock-free metrics collection
 │   ├── RampStrategy - Load ramping strategies
 │   └── Report       - Report generation
+│
+├── Debugging
+│   ├── Diagram      - Visual sequence diagrams
+│   └── Diff         - Trace comparison and diffing
 │
 └── Utilities
     ├── Persistence  - Save/load failures
