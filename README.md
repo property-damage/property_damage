@@ -511,6 +511,231 @@ branches = [[CreateItem.new()],  # Creates :item_ref
             [ViewItem.new(item_ref: :item_ref)]]  # ERROR: :item_ref not visible
 ```
 
+## Eventual Consistency (Async Support)
+
+For systems with eventual consistency, PropertyDamage provides probe and bridge
+command roles with automatic settle/retry logic.
+
+### Command Roles
+
+Commands can declare their role via the `role/0` callback:
+
+```elixir
+defmodule MyTest.Commands.GetOrderStatus do
+  @behaviour PropertyDamage.Command
+
+  defstruct [:order_id]
+
+  # This is a probe - it queries state and may need to retry
+  def role, do: :probe
+
+  # Configure settle behavior
+  def settle_config do
+    %{
+      timeout_ms: 5_000,    # Max time to wait
+      interval_ms: 200,     # Time between retries
+      backoff: :exponential # :linear or :exponential
+    }
+  end
+
+  def read_only?, do: true
+end
+```
+
+### Role Types
+
+| Role | Purpose | Settle Behavior |
+|------|---------|-----------------|
+| `:action` | Mutates state (default) | Execute once |
+| `:probe` | Queries state | Retry until success or timeout |
+| `:bridge` | Waits for async completion | Retry until complete |
+| `:mock_config` | Configures mock services | Not sent to SUT |
+
+### Adapter Integration
+
+Adapters return settle-compatible results for probes:
+
+```elixir
+def execute(%GetOrderStatus{order_id: id}, ctx) do
+  case MyAPI.get_order(id) do
+    {:ok, %{status: "pending"}} ->
+      {:retry, :still_pending}  # Keep trying
+
+    {:ok, order} ->
+      {:ok, order}  # Success - stop retrying
+
+    {:error, :not_found} ->
+      {:retry, :not_found}  # Keep trying
+
+    {:error, reason} ->
+      {:error, reason}  # Hard failure - stop immediately
+  end
+end
+```
+
+## Fault Injection (Nemesis)
+
+Test system resilience by injecting faults like network partitions, latency,
+and node crashes.
+
+### Defining a Nemesis Command
+
+```elixir
+defmodule MyTest.Nemesis.PartitionNetwork do
+  @behaviour PropertyDamage.Nemesis
+
+  defstruct [:partition_type, :duration_ms]
+
+  @impl true
+  def precondition(_state), do: true
+
+  @impl true
+  def inject(%__MODULE__{partition_type: type}, ctx) do
+    :ok = Toxiproxy.partition(ctx.proxy, type)
+    {:ok, [%NetworkPartitioned{type: type}]}
+  end
+
+  @impl true
+  def restore(%__MODULE__{partition_type: type}, ctx) do
+    Toxiproxy.restore(ctx.proxy, type)
+    {:ok, [%NetworkRestored{type: type}]}
+  end
+
+  # Auto-restore after duration
+  def auto_restore?, do: true
+  def duration_ms(%__MODULE__{duration_ms: d}), do: d
+end
+```
+
+### Using Nemesis in Models
+
+Add nemesis commands with lower weights:
+
+```elixir
+def commands do
+  [
+    {5, CreateOrder},
+    {3, ProcessPayment},
+    {1, PartitionNetwork},   # Fault injection
+    {1, InjectLatency}
+  ]
+end
+```
+
+### Adjusting Invariants During Faults
+
+```elixir
+def check(:latency_sla, state, ctx) do
+  if Map.get(state.active_faults, :network_partition) do
+    :ok  # Skip SLA check during partition
+  else
+    if state.last_latency_ms < 100, do: :ok, else: {:error, "SLA violated"}
+  end
+end
+```
+
+## Production Forensics
+
+Replay production event logs through your model to analyze incidents.
+
+### Basic Usage
+
+```elixir
+# Fetch events from your observability system
+{:ok, events} = ProductionLogs.fetch(trace_id: "abc123")
+
+# Replay through model projections
+result = PropertyDamage.Forensics.analyze(
+  events: events,
+  model: OrderModel
+)
+
+case result do
+  {:ok, %{final_state: state, events_processed: n}} ->
+    IO.puts("Processed #{n} events - no violations")
+
+  {:error, failure} ->
+    IO.puts("Violation at event ##{failure.failure_step}")
+    IO.puts(PropertyDamage.Forensics.format_report(failure))
+end
+```
+
+### Event Mapping
+
+Translate production event formats to your model's event structs:
+
+```elixir
+defmodule MyEventMapping do
+  @behaviour PropertyDamage.Forensics.EventMapping
+
+  @impl true
+  def map(%{"type" => "order.created", "payload" => p}) do
+    {:ok, %OrderCreated{
+      order_id: p["order_id"],
+      amount: p["total"]
+    }}
+  end
+
+  def map(%{"type" => "internal.metric"}), do: :skip
+  def map(_), do: {:skip, :unknown_event}
+end
+
+# Use with analyze
+Forensics.analyze(
+  events: production_events,
+  model: OrderModel,
+  event_mapping: MyEventMapping
+)
+```
+
+### Generate Regression Tests
+
+Create test cases from production failures:
+
+```elixir
+{:error, failure} = Forensics.analyze(events: events, model: MyModel)
+test_code = Forensics.generate_regression_test(failure, MyModel)
+File.write!("test/regressions/incident_2025_01_15_test.exs", test_code)
+```
+
+## Liveness Checking
+
+Detect deadlocks, livelocks, and starvation with the Liveness projection.
+
+### Configuration
+
+```elixir
+defmodule MyModel do
+  def assertion_projections do
+    [
+      {PropertyDamage.Projection.Liveness, [
+        max_pending_duration_ms: 10_000,
+        check_interval: 10,
+        required_completions: %{
+          CreateTransfer => [TransferCompleted, TransferFailed],
+          CreateOrder => [OrderConfirmed, OrderRejected]
+        }
+      ]}
+    ]
+  end
+end
+```
+
+### How It Works
+
+1. **Track starts**: When `CreateTransfer` executes, mark operation as pending
+2. **Track completions**: When `TransferCompleted` or `TransferFailed` arrives, mark complete
+3. **Check timeouts**: Periodically check for operations pending too long
+4. **Report stuck**: If any operation exceeds `max_pending_duration_ms`, fail
+
+### What It Detects
+
+| Issue | Symptom |
+|-------|---------|
+| Deadlock | Operations never complete |
+| Livelock | System busy but no progress |
+| Starvation | Some operations always timeout |
+
 ## Architecture
 
 ```
