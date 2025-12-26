@@ -577,7 +577,23 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp linear_shrink(state) do
-    do_linear_shrink(state, 0)
+    # Run linear shrinking in a fixpoint loop until no more shrinking happens
+    # This handles cases where removing one command enables removal of others
+    do_linear_shrink_fixpoint(state)
+  end
+
+  # Keep running linear shrinking until no commands are removed in a full pass
+  defp do_linear_shrink_fixpoint(state) do
+    original_count = length(state.commands)
+    state = do_linear_shrink(state, 0)
+    new_count = length(state.commands)
+
+    if new_count < original_count and not exceeded_limits?(state) do
+      # Made progress, try again from the beginning
+      do_linear_shrink_fixpoint(state)
+    else
+      state
+    end
   end
 
   defp do_linear_shrink(state, index) do
