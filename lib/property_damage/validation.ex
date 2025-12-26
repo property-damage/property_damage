@@ -19,6 +19,8 @@ defmodule PropertyDamage.Validation do
   - Adapter module must exist and export required callbacks
   - All command modules referenced by model must exist
   - All projection modules must exist
+  - Command weights must be positive integers
+  - Commands must have at least one entry
   - Injectable events must be covered by InjectorAdapter @emits
 
   ### Warnings (logged but don't fail)
@@ -37,6 +39,8 @@ defmodule PropertyDamage.Validation do
   Validation.print_summary(model, adapter, result)
   ```
   """
+
+  alias PropertyDamage.Error
 
   @doc """
   Validate test configuration.
@@ -93,8 +97,152 @@ defmodule PropertyDamage.Validation do
     warnings = []
     warnings = warnings ++ warn_missing_downstream_observables(model)
     warnings = warnings ++ warn_orphan_events(model)
+    warnings = warnings ++ warn_no_assertion_projections(model)
+    warnings = warnings ++ warn_unbalanced_weights(model)
+    warnings = warnings ++ warn_single_command(model)
 
     {:ok, warnings}
+  end
+
+  @doc """
+  Validates run options before execution.
+
+  Returns `:ok` if valid, raises `ArgumentError` with helpful message if not.
+
+  ## Validated Options
+
+  - `:model` - Required, must be a module
+  - `:adapter` - Required, must be a module
+  - `:max_commands` - Must be positive integer if provided
+  - `:max_runs` - Must be positive integer if provided
+  - `:seed` - Must be positive integer if provided
+  """
+  @spec validate_run_opts!(keyword()) :: :ok
+  def validate_run_opts!(opts) do
+    # Required options
+    unless Keyword.has_key?(opts, :model) do
+      raise ArgumentError, Error.format_config_error(:missing_model, nil)
+    end
+
+    unless Keyword.has_key?(opts, :adapter) do
+      raise ArgumentError, Error.format_config_error(:missing_adapter, nil)
+    end
+
+    # Type validations
+    model = Keyword.get(opts, :model)
+
+    unless is_atom(model) and model != nil do
+      raise ArgumentError, Error.format_config_error(:invalid_model, model)
+    end
+
+    adapter = Keyword.get(opts, :adapter)
+
+    unless is_atom(adapter) and adapter != nil do
+      raise ArgumentError, Error.format_config_error(:invalid_adapter, adapter)
+    end
+
+    # Optional integer validations
+    if Keyword.has_key?(opts, :max_commands) do
+      max_commands = Keyword.get(opts, :max_commands)
+
+      unless is_integer(max_commands) and max_commands > 0 do
+        raise ArgumentError, Error.format_config_error(:invalid_max_commands, max_commands)
+      end
+    end
+
+    if Keyword.has_key?(opts, :max_runs) do
+      max_runs = Keyword.get(opts, :max_runs)
+
+      unless is_integer(max_runs) and max_runs > 0 do
+        raise ArgumentError, Error.format_config_error(:invalid_max_runs, max_runs)
+      end
+    end
+
+    if Keyword.has_key?(opts, :seed) do
+      seed = Keyword.get(opts, :seed)
+
+      unless is_integer(seed) and seed > 0 do
+        raise ArgumentError, Error.format_config_error(:invalid_seed, seed)
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
+  Validates command list from a model.
+
+  Checks that:
+  - Command list is not empty
+  - All weights are positive integers
+  - All command modules exist and implement required callbacks
+  """
+  @spec validate_command_list!(module()) :: :ok
+  def validate_command_list!(model) do
+    commands = model.commands()
+
+    # Check for empty
+    if commands == [] do
+      raise ArgumentError, Error.format_config_error(:empty_commands, model)
+    end
+
+    # Validate raw commands before normalization
+    for cmd_spec <- commands do
+      validate_command_spec!(cmd_spec)
+    end
+
+    # Normalize and validate modules
+    normalized = PropertyDamage.Model.normalize_commands(commands)
+
+    for {_weight, cmd} <- normalized do
+      # Validate command module exists
+      unless Code.ensure_loaded?(cmd) do
+        raise ArgumentError,
+              Error.format_config_error(:command_not_found, cmd)
+      end
+
+      # Validate required callbacks
+      validate_command_callbacks!(cmd)
+    end
+
+    :ok
+  end
+
+  defp validate_command_spec!({weight, _cmd}) when is_integer(weight) and weight > 0 do
+    :ok
+  end
+
+  defp validate_command_spec!({weight, cmd}) do
+    raise ArgumentError, Error.format_config_error(:invalid_command_weight, {weight, cmd})
+  end
+
+  defp validate_command_spec!(cmd) when is_atom(cmd) do
+    :ok
+  end
+
+  defp validate_command_spec!(invalid) do
+    raise ArgumentError, Error.format_config_error(:invalid_command_spec, invalid)
+  end
+
+  @doc """
+  Validates that a command module implements required callbacks.
+  """
+  @spec validate_command_callbacks!(module()) :: :ok
+  def validate_command_callbacks!(cmd) do
+    required = [
+      {:new, 2},
+      {:precondition, 1},
+      {:events, 2}
+    ]
+
+    for {callback, arity} <- required do
+      unless function_exported?(cmd, callback, arity) do
+        raise ArgumentError,
+              Error.format_config_error(:command_missing_callback, {cmd, callback, arity})
+      end
+    end
+
+    :ok
   end
 
   @doc """
@@ -157,6 +305,76 @@ defmodule PropertyDamage.Validation do
     end
 
     :ok
+  end
+
+  @doc """
+  Returns run-time warnings for the given configuration options.
+
+  These warnings don't fail validation but indicate potentially suboptimal
+  configurations that may reduce test effectiveness.
+
+  ## Parameters
+
+  - `opts` - Run options keyword list
+
+  ## Returns
+
+  List of warning strings (may be empty)
+  """
+  @spec runtime_warnings(keyword()) :: [String.t()]
+  def runtime_warnings(opts) do
+    warnings = []
+
+    max_runs = Keyword.get(opts, :max_runs, 100)
+    max_commands = Keyword.get(opts, :max_commands, 50)
+
+    warnings =
+      if max_runs < 10 do
+        [
+          "max_runs: #{max_runs} is very low - " <>
+            "property testing is most effective with many runs (recommended: 100+). " <>
+            "Low run counts may miss edge cases."
+          | warnings
+        ]
+      else
+        warnings
+      end
+
+    warnings =
+      if max_commands < 5 do
+        [
+          "max_commands: #{max_commands} is very low - " <>
+            "short sequences may miss bugs that require multiple operations. " <>
+            "Recommended: 20+ commands per sequence."
+          | warnings
+        ]
+      else
+        warnings
+      end
+
+    warnings =
+      if Keyword.get(opts, :shrink, true) == false do
+        [
+          "shrink: false - failing sequences won't be minimized. " <>
+            "Shrinking helps find the minimal reproduction and is recommended."
+          | warnings
+        ]
+      else
+        warnings
+      end
+
+    warnings =
+      if Keyword.get(opts, :validate, true) == false do
+        [
+          "validate: false - configuration validation disabled. " <>
+            "Consider enabling validation to catch configuration errors early."
+          | warnings
+        ]
+      else
+        warnings
+      end
+
+    warnings
   end
 
   # Validation helpers
@@ -313,6 +531,64 @@ defmodule PropertyDamage.Validation do
           "Event #{inspect(event)} produced but not handled by any assertion projection check"
           | acc
         ]
+    end
+  end
+
+  defp warn_no_assertion_projections(model) do
+    assertion_projs = model.assertion_projections()
+
+    if Enum.empty?(assertion_projs) do
+      [
+        "Model has no assertion projections - " <>
+          "no invariants or properties will be checked during test execution. " <>
+          "Consider adding assertion projections with checks to verify system behavior."
+      ]
+    else
+      []
+    end
+  end
+
+  defp warn_unbalanced_weights(model) do
+    commands = model.commands()
+    normalized = PropertyDamage.Model.normalize_commands(commands)
+
+    if length(normalized) >= 2 do
+      weights = Enum.map(normalized, fn {weight, _cmd} -> weight end)
+      total_weight = Enum.sum(weights)
+      max_weight = Enum.max(weights)
+
+      # Warn if a single command has > 80% of total weight
+      if max_weight / total_weight > 0.8 do
+        {_weight, dominant_cmd} =
+          Enum.find(normalized, fn {w, _} -> w == max_weight end)
+
+        [
+          "Command #{inspect(dominant_cmd)} has #{Float.round(max_weight / total_weight * 100, 1)}% " <>
+            "of total weight - this command will dominate test sequences. " <>
+            "Consider more balanced weights for better coverage."
+        ]
+      else
+        []
+      end
+    else
+      []
+    end
+  end
+
+  defp warn_single_command(model) do
+    commands = model.commands()
+    normalized = PropertyDamage.Model.normalize_commands(commands)
+
+    if length(normalized) == 1 do
+      [{_weight, cmd}] = normalized
+
+      [
+        "Model has only one command (#{inspect(cmd)}) - " <>
+          "property testing is most effective with multiple commands that interact. " <>
+          "Consider adding more commands to test different scenarios."
+      ]
+    else
+      []
     end
   end
 end

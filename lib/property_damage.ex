@@ -135,7 +135,8 @@ defmodule PropertyDamage do
     EventQueue,
     Sequence,
     Stutter,
-    FailureReport
+    FailureReport,
+    Progress
   }
 
   alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig
@@ -274,6 +275,9 @@ defmodule PropertyDamage do
   """
   @spec run(keyword()) :: {:ok, stats()} | {:error, failure_report()}
   def run(opts) do
+    # Early validation of options with helpful error messages
+    Validation.validate_run_opts!(opts)
+
     model = Keyword.fetch!(opts, :model)
     adapter = Keyword.fetch!(opts, :adapter)
 
@@ -297,6 +301,24 @@ defmodule PropertyDamage do
       if verbose do
         Validation.print_summary(model, adapter, warnings)
       end
+    end
+
+    # Print runtime warnings when verbose
+    if verbose do
+      runtime_warnings = Validation.runtime_warnings(opts)
+
+      unless Enum.empty?(runtime_warnings) do
+        IO.puts("Runtime Warnings:")
+
+        for warning <- runtime_warnings do
+          IO.puts("  ⚠ #{warning}")
+        end
+
+        IO.puts("")
+      end
+
+      # Print test run header
+      Progress.print_header(model, adapter, opts)
     end
 
     # Setup once (if model implements it)
@@ -392,13 +414,19 @@ defmodule PropertyDamage do
          _shrink,
          _shrinker_config,
          _on_failure,
-         _verbose,
+         verbose,
          _stutter_config,
          run_number,
          total_commands
        )
        when run_number >= max_runs do
-    {:ok, %{runs: max_runs, total_commands: total_commands, seed: seed}}
+    stats = %{runs: max_runs, total_commands: total_commands, seed: seed}
+
+    if verbose do
+      Progress.print_success(stats)
+    end
+
+    {:ok, stats}
   end
 
   defp run_loop(
@@ -422,12 +450,7 @@ defmodule PropertyDamage do
     command_count = Sequence.command_count(sequence)
 
     if verbose do
-      branch_info =
-        if Sequence.branching?(sequence),
-          do: " (#{Sequence.branch_count(sequence)} branches)",
-          else: ""
-
-      IO.puts("Run #{run_number + 1}/#{max_runs}: #{command_count} commands#{branch_info}")
+      Progress.print_run(run_number, max_runs, sequence)
     end
 
     # Setup each (if model implements it)
@@ -485,6 +508,7 @@ defmodule PropertyDamage do
               shrink,
               shrinker_config,
               on_failure,
+              verbose,
               seed,
               run_number
             )
@@ -539,6 +563,7 @@ defmodule PropertyDamage do
          shrink,
          shrinker_config,
          on_failure,
+         verbose,
          seed,
          run_number
        ) do
@@ -592,6 +617,11 @@ defmodule PropertyDamage do
         adapter: adapter,
         linearization: fresh_result.linearization
       )
+
+    # Print failure summary when verbose
+    if verbose do
+      Progress.print_failure(failure_report)
+    end
 
     if on_failure do
       on_failure.(failure_report)

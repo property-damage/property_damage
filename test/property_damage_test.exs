@@ -18,13 +18,13 @@ defmodule PropertyDamageTest do
 
   describe "run/1 validation" do
     test "requires model option" do
-      assert_raise KeyError, ~r/:model/, fn ->
+      assert_raise ArgumentError, ~r/Missing Model/, fn ->
         PropertyDamage.run(adapter: SimpleAdapter)
       end
     end
 
     test "requires adapter option" do
-      assert_raise KeyError, ~r/:adapter/, fn ->
+      assert_raise ArgumentError, ~r/Missing Adapter/, fn ->
         PropertyDamage.run(model: ExecutorModel)
       end
     end
