@@ -242,6 +242,24 @@ IO.inspect(Replay.current_state(session))
 Replay.stop(session)
 ```
 
+### Visual Debugging Tools
+
+For complex failures, PropertyDamage provides visual tools to understand execution flow:
+
+```elixir
+# Generate a sequence diagram from a failure
+diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
+IO.puts(diagram)  # Paste into GitHub markdown, Notion, etc.
+
+# Compare a passing run against a failing run to find the divergence
+passing_trace = PropertyDamage.Diff.create_trace(passing_commands, passing_events, [], :pass)
+failing_trace = PropertyDamage.Diff.create_trace(failing_commands, failing_events, [], {:fail, :test})
+diff = PropertyDamage.Diff.compare_traces(passing_trace, failing_trace)
+IO.puts(PropertyDamage.Diff.format(diff, format: :terminal))
+```
+
+See [Visual Sequence Diagrams](#visual-sequence-diagrams) and [Diff-Based Debugging](#diff-based-debugging) for detailed documentation.
+
 ## Failure Persistence
 
 Save failures for later analysis or to build a regression suite:
