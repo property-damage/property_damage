@@ -518,6 +518,156 @@ defmodule PropertyDamage do
   defp stutter_failure?({:stutter_execution_failed, _}), do: true
   defp stutter_failure?(_), do: false
 
+  @doc """
+  Attempt further shrinking on an existing failure report.
+
+  Use this when the initial shrinking didn't produce a minimal enough sequence.
+  You can specify more aggressive time/iteration limits or different strategies.
+
+  ## Options
+
+  - `:max_iterations` - Maximum shrink attempts (default: 5000)
+  - `:max_time_ms` - Maximum time for shrinking in ms (default: 60000)
+  - `:strategy` - Shrinking strategy (default: :thorough)
+    - `:quick` - Fast shrinking, may miss some reductions
+    - `:thorough` - Balanced approach (default)
+    - `:exhaustive` - Try all possible reductions (slow)
+  - `:shrink_arguments` - Whether to shrink argument values (default: true)
+  - `:adapter_config` - Adapter configuration (uses report's adapter if not specified)
+
+  ## Returns
+
+  - `{:ok, new_failure_report}` - Shrinking succeeded, possibly smaller sequence
+  - `{:error, reason}` - Shrinking failed (e.g., missing model/adapter)
+
+  ## Example
+
+      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+
+      # Try harder to shrink
+      {:ok, smaller} = PropertyDamage.shrink_further(failure,
+        max_time_ms: 120_000,
+        strategy: :exhaustive
+      )
+
+      IO.puts("Reduced from \#{length(original)} to \#{length(smaller)} commands")
+  """
+  @spec shrink_further(FailureReport.t(), keyword()) ::
+          {:ok, FailureReport.t()} | {:error, term()}
+  def shrink_further(%FailureReport{} = report, opts \\ []) do
+    model = report.model
+    adapter = report.adapter
+
+    if is_nil(model) or is_nil(adapter) do
+      {:error, :missing_model_or_adapter}
+    else
+      adapter_config = Keyword.get(opts, :adapter_config, %{})
+
+      # Build shrinker config from options
+      strategy = Keyword.get(opts, :strategy, :thorough)
+
+      shrinker_config =
+        ShrinkerConfig.new(
+          max_iterations: strategy_iterations(strategy, opts),
+          max_time_ms: strategy_time(strategy, opts),
+          shrink_arguments: Keyword.get(opts, :shrink_arguments, true),
+          granularity_threshold: strategy_threshold(strategy)
+        )
+
+      # Start event queue for shrinking
+      {:ok, event_queue} = EventQueue.start_link()
+
+      try do
+        start_time = System.monotonic_time(:millisecond)
+
+        # Perform shrinking on the already-shrunk sequence
+        shrink_result =
+          Shrinker.shrink(report.shrunk_sequence,
+            failed_at_index: report.failed_at_index,
+            failure_reason: report.failure_reason,
+            model: model,
+            adapter: adapter,
+            adapter_config: adapter_config,
+            config: shrinker_config,
+            event_queue: event_queue
+          )
+
+        # Re-execute to get fresh state
+        {:ok, fresh_result} =
+          Executor.run(shrink_result.sequence, model, adapter,
+            adapter_config: adapter_config,
+            event_queue: event_queue
+          )
+
+        end_time = System.monotonic_time(:millisecond)
+
+        # Create updated failure report
+        new_report =
+          FailureReport.new(
+            seed: report.seed,
+            run_number: report.run_number,
+            original_sequence: report.original_sequence,
+            shrunk_sequence: shrink_result.sequence,
+            failed_at_index: fresh_result.failed_at_index,
+            failure_reason: fresh_result.failure_reason,
+            shrink_iterations: report.shrink_iterations + shrink_result.iterations,
+            shrink_time_ms: report.shrink_time_ms + (end_time - start_time),
+            event_log: fresh_result.event_log,
+            projections: fresh_result.projections,
+            projections_before: fresh_result.projections_before,
+            refs: fresh_result.refs,
+            model: model,
+            adapter: adapter,
+            linearization: fresh_result.linearization
+          )
+
+        {:ok, new_report}
+      after
+        EventQueue.stop(event_queue)
+      end
+    end
+  end
+
+  # Strategy configuration helpers
+  defp strategy_iterations(:quick, opts), do: Keyword.get(opts, :max_iterations, 500)
+  defp strategy_iterations(:thorough, opts), do: Keyword.get(opts, :max_iterations, 2000)
+  defp strategy_iterations(:exhaustive, opts), do: Keyword.get(opts, :max_iterations, 10000)
+
+  defp strategy_time(:quick, opts), do: Keyword.get(opts, :max_time_ms, 10_000)
+  defp strategy_time(:thorough, opts), do: Keyword.get(opts, :max_time_ms, 60_000)
+  defp strategy_time(:exhaustive, opts), do: Keyword.get(opts, :max_time_ms, 300_000)
+
+  defp strategy_threshold(:quick), do: 4
+  defp strategy_threshold(:thorough), do: 8
+  defp strategy_threshold(:exhaustive), do: 16
+
+  @doc """
+  Explain why each command in a failure's shrunk sequence is needed.
+
+  Delegates to `PropertyDamage.Analysis.explain/1`.
+  See that module for detailed documentation.
+  """
+  @spec explain(FailureReport.t()) :: map()
+  defdelegate explain(report), to: PropertyDamage.Analysis
+
+  @doc """
+  Find the minimal change that eliminates the failure.
+
+  Delegates to `PropertyDamage.Analysis.isolate_trigger/1`.
+  See that module for detailed documentation.
+  """
+  @spec isolate_trigger(FailureReport.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  defdelegate isolate_trigger(report, opts \\ []), to: PropertyDamage.Analysis
+
+  @doc """
+  Generate a reproducible test case from a failure.
+
+  Delegates to `PropertyDamage.Analysis.generate_test/2`.
+  See that module for detailed documentation.
+  """
+  @spec generate_test(FailureReport.t(), keyword()) :: String.t()
+  defdelegate generate_test(report, opts \\ []), to: PropertyDamage.Analysis
+
   @doc false
   defmacro __using__(_opts) do
     quote do

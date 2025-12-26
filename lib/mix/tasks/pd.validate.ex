@@ -176,8 +176,14 @@ defmodule Mix.Tasks.Pd.Validate do
     errors =
       for {_weight, cmd} <- commands, Code.ensure_loaded?(cmd), reduce: errors do
         acc ->
-          acc = if function_exported?(cmd, :precondition, 1), do: acc, else: ["Command #{inspect(cmd)} missing precondition/1" | acc]
-          if function_exported?(cmd, :new!, 2), do: acc, else: ["Command #{inspect(cmd)} missing new!/2" | acc]
+          acc =
+            if function_exported?(cmd, :precondition, 1),
+              do: acc,
+              else: ["Command #{inspect(cmd)} missing precondition/1" | acc]
+
+          if function_exported?(cmd, :new!, 2),
+            do: acc,
+            else: ["Command #{inspect(cmd)} missing new!/2" | acc]
       end
 
     # Check projections
@@ -204,7 +210,10 @@ defmodule Mix.Tasks.Pd.Validate do
           not function_exported?(cmd, :downstream_observables, 0),
           reduce: warnings do
         acc ->
-          ["Command #{cmd |> Module.split() |> List.last()} missing downstream_observables/0" | acc]
+          [
+            "Command #{cmd |> Module.split() |> List.last()} missing downstream_observables/0"
+            | acc
+          ]
       end
 
     if verbose do
