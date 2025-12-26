@@ -685,46 +685,75 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp still_fails?(commands, state) do
-    # Regenerate idempotency keys to ensure fresh SUT state
-    commands = regenerate_idempotency_keys(commands)
+    # Call setup_each to reset SUT state before each shrink attempt
+    setup_each_result = call_setup_each(state.model, state.adapter_config)
 
-    case Executor.run(commands, state.model, state.adapter,
-           adapter_config: state.adapter_config,
-           event_queue: state.event_queue
-         ) do
-      {:ok, result} ->
-        if result.success do
-          false
-        else
-          # Check failure equivalence if we have an original signature
-          check_failure_equivalence(result.failure_reason, state.original_signature)
+    case setup_each_result do
+      :ok ->
+        # Regenerate idempotency keys to ensure fresh SUT state
+        commands = regenerate_idempotency_keys(commands)
+
+        case Executor.run(commands, state.model, state.adapter,
+               adapter_config: state.adapter_config,
+               event_queue: state.event_queue
+             ) do
+          {:ok, result} ->
+            if result.success do
+              false
+            else
+              # Check failure equivalence if we have an original signature
+              check_failure_equivalence(result.failure_reason, state.original_signature)
+            end
+
+          {:error, _} ->
+            # Execution errors are only equivalent if original was also an error
+            state.original_signature == nil or state.original_signature.type == :adapter_error
         end
 
-      {:error, _} ->
-        # Execution errors are only equivalent if original was also an error
-        state.original_signature == nil or state.original_signature.type == :adapter_error
+      {:error, _reason} ->
+        # If setup_each fails, treat as if shrink candidate passed (don't remove)
+        false
     end
   end
 
   defp still_fails_branch?(sequence, state) do
-    # Regenerate idempotency keys to ensure fresh SUT state
-    sequence = regenerate_sequence_idempotency_keys(sequence)
+    # Call setup_each to reset SUT state before each shrink attempt
+    setup_each_result = call_setup_each(state.model, state.adapter_config)
 
-    case Executor.run(sequence, state.model, state.adapter,
-           adapter_config: state.adapter_config,
-           event_queue: state.event_queue
-         ) do
-      {:ok, result} ->
-        if result.success do
-          false
-        else
-          # Check failure equivalence if we have an original signature
-          check_failure_equivalence(result.failure_reason, state.original_signature)
+    case setup_each_result do
+      :ok ->
+        # Regenerate idempotency keys to ensure fresh SUT state
+        sequence = regenerate_sequence_idempotency_keys(sequence)
+
+        case Executor.run(sequence, state.model, state.adapter,
+               adapter_config: state.adapter_config,
+               event_queue: state.event_queue
+             ) do
+          {:ok, result} ->
+            if result.success do
+              false
+            else
+              # Check failure equivalence if we have an original signature
+              check_failure_equivalence(result.failure_reason, state.original_signature)
+            end
+
+          {:error, _} ->
+            # Execution errors are only equivalent if original was also an error
+            state.original_signature == nil or state.original_signature.type == :adapter_error
         end
 
-      {:error, _} ->
-        # Execution errors are only equivalent if original was also an error
-        state.original_signature == nil or state.original_signature.type == :adapter_error
+      {:error, _reason} ->
+        # If setup_each fails, treat as if shrink candidate passed (don't remove)
+        false
+    end
+  end
+
+  # Call setup_each if the model implements it
+  defp call_setup_each(model, adapter_config) do
+    if function_exported?(model, :setup_each, 1) do
+      model.setup_each(%{adapter_config: adapter_config})
+    else
+      :ok
     end
   end
 
