@@ -274,6 +274,7 @@ defmodule PropertyDamage.Executor do
     initial_state = %{
       event_log: [],
       projections: init_projections(model),
+      projections_before: nil,
       refs: %{},
       step_count: 0,
       check_counters: %{},
@@ -286,10 +287,13 @@ defmodule PropertyDamage.Executor do
       commands
       |> Enum.with_index()
       |> Enum.reduce_while(initial_state, fn {command, index}, state ->
+        # Capture projections before this command executes
+        state_with_before = %{state | projections_before: state.projections}
+
         case execute_command(
                command,
                index,
-               state,
+               state_with_before,
                model,
                adapter,
                adapter_context,
@@ -321,6 +325,7 @@ defmodule PropertyDamage.Executor do
     initial_state = %{
       event_log: [],
       projections: init_projections(model),
+      projections_before: nil,
       refs: %{},
       step_count: 0,
       check_counters: %{},
@@ -334,7 +339,18 @@ defmodule PropertyDamage.Executor do
       prefix
       |> Enum.with_index()
       |> Enum.reduce_while(initial_state, fn {command, index}, state ->
-        case execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
+        # Capture projections before this command executes
+        state_with_before = %{state | projections_before: state.projections}
+
+        case execute_command(
+               command,
+               index,
+               state_with_before,
+               model,
+               adapter,
+               adapter_context,
+               event_queue
+             ) do
           {:ok, new_state} -> {:cont, new_state}
           {:error, reason, failed_state} -> {:halt, {:failed, index, reason, failed_state}}
         end
@@ -367,10 +383,13 @@ defmodule PropertyDamage.Executor do
               suffix
               |> Enum.with_index(suffix_start_index)
               |> Enum.reduce_while(merged_state, fn {command, index}, state ->
+                # Capture projections before this command executes
+                state_with_before = %{state | projections_before: state.projections}
+
                 case execute_command(
                        command,
                        index,
-                       state,
+                       state_with_before,
                        model,
                        adapter,
                        adapter_context,
@@ -428,10 +447,13 @@ defmodule PropertyDamage.Executor do
           branch_commands
           |> Enum.with_index(start_index)
           |> Enum.reduce_while(branch_state, fn {command, index}, state ->
+            # Capture projections before this command executes
+            state_with_before = %{state | projections_before: state.projections}
+
             case execute_command(
                    command,
                    index,
-                   state,
+                   state_with_before,
                    model,
                    adapter,
                    adapter_context,
@@ -532,10 +554,13 @@ defmodule PropertyDamage.Executor do
     %{
       event_log: merged_event_log,
       projections: merged_projections,
+      projections_before: prefix_state.projections_before,
       refs: merged_refs,
       step_count: total_steps,
       check_counters: merged_counters,
-      branch_id: nil
+      branch_id: nil,
+      stutter_config: Map.get(prefix_state, :stutter_config),
+      mock_registry: Map.get(prefix_state, :mock_registry)
     }
   end
 
@@ -554,6 +579,7 @@ defmodule PropertyDamage.Executor do
       success: false,
       event_log: Enum.reverse(state.event_log),
       projections: state.projections,
+      projections_before: state.projections_before,
       refs: state.refs,
       failed_at_index: index,
       failure_reason: reason,
@@ -655,6 +681,7 @@ defmodule PropertyDamage.Executor do
         new_state = %{
           event_log: state.event_log,
           projections: projections,
+          projections_before: state.projections_before,
           refs: state.refs,
           step_count: state.step_count + 1,
           check_counters: check_counters,
@@ -669,6 +696,7 @@ defmodule PropertyDamage.Executor do
         failed_state = %{
           event_log: state.event_log,
           projections: projections,
+          projections_before: state.projections_before,
           refs: state.refs,
           step_count: state.step_count + 1,
           check_counters: check_counters,
@@ -742,6 +770,7 @@ defmodule PropertyDamage.Executor do
             new_state = %{
               event_log: event_log,
               projections: projections,
+              projections_before: state.projections_before,
               refs: state.refs,
               step_count: state.step_count + 1,
               check_counters: check_counters,
@@ -755,6 +784,7 @@ defmodule PropertyDamage.Executor do
             failed_state = %{
               event_log: event_log,
               projections: projections,
+              projections_before: state.projections_before,
               refs: state.refs,
               step_count: state.step_count + 1,
               check_counters: check_counters,
@@ -849,6 +879,7 @@ defmodule PropertyDamage.Executor do
                     new_state = %{
                       event_log: final_event_log,
                       projections: projections,
+                      projections_before: state.projections_before,
                       refs: refs,
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
@@ -863,6 +894,7 @@ defmodule PropertyDamage.Executor do
                     failed_state = %{
                       event_log: event_log,
                       projections: projections,
+                      projections_before: state.projections_before,
                       refs: refs,
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
@@ -877,6 +909,7 @@ defmodule PropertyDamage.Executor do
                     failed_state = %{
                       event_log: event_log,
                       projections: projections,
+                      projections_before: state.projections_before,
                       refs: refs,
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
@@ -892,6 +925,7 @@ defmodule PropertyDamage.Executor do
                 failed_state = %{
                   event_log: event_log,
                   projections: projections,
+                  projections_before: state.projections_before,
                   refs: refs,
                   step_count: state.step_count + 1,
                   check_counters: check_counters,
@@ -956,6 +990,7 @@ defmodule PropertyDamage.Executor do
                     new_state = %{
                       event_log: final_event_log,
                       projections: projections,
+                      projections_before: state.projections_before,
                       refs: refs,
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
@@ -970,6 +1005,7 @@ defmodule PropertyDamage.Executor do
                     failed_state = %{
                       event_log: event_log,
                       projections: projections,
+                      projections_before: state.projections_before,
                       refs: refs,
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
@@ -984,6 +1020,7 @@ defmodule PropertyDamage.Executor do
                     failed_state = %{
                       event_log: event_log,
                       projections: projections,
+                      projections_before: state.projections_before,
                       refs: refs,
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
@@ -999,6 +1036,7 @@ defmodule PropertyDamage.Executor do
                 failed_state = %{
                   event_log: event_log,
                   projections: projections,
+                  projections_before: state.projections_before,
                   refs: refs,
                   step_count: state.step_count + 1,
                   check_counters: check_counters,

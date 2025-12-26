@@ -478,23 +478,32 @@ defmodule PropertyDamage do
         {sequence, 0, 0}
       end
 
-    # Create rich failure report
+    # Re-execute shrunk sequence to get fresh event log and state
+    # (the original result has state from before shrinking)
+    {:ok, fresh_result} =
+      Executor.run(shrunk_sequence, model, adapter,
+        adapter_config: adapter_config,
+        event_queue: event_queue
+      )
+
+    # Create rich failure report with fresh state from shrunk sequence
     failure_report =
       FailureReport.new(
         seed: seed,
         run_number: run_number,
         original_sequence: sequence,
         shrunk_sequence: shrunk_sequence,
-        failed_at_index: result.failed_at_index,
-        failure_reason: result.failure_reason,
+        failed_at_index: fresh_result.failed_at_index,
+        failure_reason: fresh_result.failure_reason,
         shrink_iterations: shrink_iterations,
         shrink_time_ms: shrink_time_ms,
-        event_log: result.event_log,
-        projections: result.projections,
-        refs: result.refs,
+        event_log: fresh_result.event_log,
+        projections: fresh_result.projections,
+        projections_before: fresh_result.projections_before,
+        refs: fresh_result.refs,
         model: model,
         adapter: adapter,
-        linearization: result.linearization
+        linearization: fresh_result.linearization
       )
 
     if on_failure do
