@@ -77,7 +77,7 @@ defmodule PropertyDamage.Validator do
     # Check precondition
     if command_module.precondition(state) do
       # Simulate command to get events
-      events = simulate_command(command)
+      events = simulate_command(command, state)
 
       # Update state with command and events
       new_state =
@@ -91,13 +91,11 @@ defmodule PropertyDamage.Validator do
     end
   end
 
-  defp simulate_command(command) do
+  defp simulate_command(command, state) do
     command_module = command.__struct__
 
     if function_exported?(command_module, :simulate, 2) do
-      # simulate/2 takes state as first arg but we don't have resolved refs
-      # So we pass nil and let simulate handle it
-      command_module.simulate(%{}, command)
+      command_module.simulate(state, command)
     else
       []
     end
