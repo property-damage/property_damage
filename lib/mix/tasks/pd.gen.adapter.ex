@@ -52,9 +52,15 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
 
     content =
       case type do
-        "http" -> generate_http_adapter(module_name)
-        "grpc" -> generate_grpc_adapter(module_name)
-        "direct" -> generate_direct_adapter(module_name)
+        "http" ->
+          generate_http_adapter(module_name)
+
+        "grpc" ->
+          generate_grpc_adapter(module_name)
+
+        "direct" ->
+          generate_direct_adapter(module_name)
+
         _ ->
           Mix.shell().error("Unknown adapter type: #{type}")
           Mix.shell().error("Use 'http', 'grpc', or 'direct'")

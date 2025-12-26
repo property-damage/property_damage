@@ -63,7 +63,7 @@ defmodule PropertyDamage.Settle do
 
   Returns the command's role if implemented, otherwise returns :action (default).
   """
-  @spec get_role(module() | struct() | map()) :: :action | :probe | :bridge
+  @spec get_role(module() | struct() | map()) :: :action | :probe | :bridge | :mock_config
   def get_role(command) when is_struct(command) do
     get_role(command.__struct__)
   end

@@ -7,7 +7,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Event Sources
 
-  Events can come from five sources:
+  Events can come from six sources:
 
   1. **Command events** (`:command` source) - Events produced by executing
      commands against the SUT. These have a `command_index` indicating
@@ -29,6 +29,10 @@ defmodule PropertyDamage.EventLog.Entry do
   5. **Stutter events** (`:stutter` source) - Events from retry executions
      during idempotency testing. These are captured but NOT applied to
      projections. They include `stutter_attempt` and `stutter_comparison`.
+
+  6. **Mock events** (`:mock` source) - Events injected by mock service
+     adapters when the SUT calls them. These have a `command_index` indicating
+     which command triggered the mock call.
 
   ## Example Event Log
 
@@ -56,7 +60,7 @@ defmodule PropertyDamage.EventLog.Entry do
   - `timestamp` - Monotonic time in milliseconds when event was recorded
   - `command_index` - Index of command that produced this event (nil for injected/telemetry events)
   - `event` - The actual event struct
-  - `source` - Either `:command`, `:injector`, `:nemesis`, `:telemetry`, or `:stutter`
+  - `source` - Either `:command`, `:injector`, `:nemesis`, `:telemetry`, `:stutter`, or `:mock`
   - `injector_adapter` - Module that received the event (only for `:injector` source)
   - `nemesis_module` - Module that produced the event (only for `:nemesis` source)
   - `telemetry_receiver` - Module that received the span (only for `:telemetry` source)
@@ -70,7 +74,7 @@ defmodule PropertyDamage.EventLog.Entry do
           timestamp: integer(),
           command_index: non_neg_integer() | nil,
           event: struct(),
-          source: :command | :injector | :nemesis | :telemetry | :stutter,
+          source: :command | :injector | :nemesis | :telemetry | :stutter | :mock,
           injector_adapter: module() | nil,
           nemesis_module: module() | nil,
           telemetry_receiver: module() | nil,
@@ -340,4 +344,59 @@ defmodule PropertyDamage.EventLog.Entry do
   @spec stutter?(t()) :: boolean()
   def stutter?(%__MODULE__{source: :stutter}), do: true
   def stutter?(%__MODULE__{}), do: false
+
+  @doc """
+  Create a new entry for a mock-injected event.
+
+  Mock events are injected by mock service adapters when the SUT calls them.
+  They are applied to projections like command events.
+
+  ## Parameters
+
+  - `event` - The event struct injected by the mock
+  - `command_index` - Index of the command that triggered the mock call
+
+  ## Options
+
+  - `:timestamp` - Override timestamp (default: current monotonic time)
+  - `:branch_id` - Branch identifier for parallel execution
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_mock(%PaymentProcessed{}, 3)
+      iex> entry.source
+      :mock
+      iex> entry.command_index
+      3
+  """
+  @spec from_mock(struct(), non_neg_integer(), keyword()) :: t()
+  def from_mock(event, command_index, opts \\ []) do
+    %__MODULE__{
+      timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
+      command_index: command_index,
+      event: event,
+      source: :mock,
+      injector_adapter: nil,
+      nemesis_module: nil,
+      telemetry_receiver: nil,
+      trace_id: nil,
+      span_id: nil,
+      branch_id: Keyword.get(opts, :branch_id),
+      stutter_attempt: nil,
+      stutter_comparison: nil
+    }
+  end
+
+  @doc """
+  Check if an entry is from a mock service adapter.
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_mock(%SomeEvent{}, 0)
+      iex> PropertyDamage.EventLog.Entry.mock?(entry)
+      true
+  """
+  @spec mock?(t()) :: boolean()
+  def mock?(%__MODULE__{source: :mock}), do: true
+  def mock?(%__MODULE__{}), do: false
 end

@@ -49,8 +49,12 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
 
     content =
       case type do
-        "state" -> generate_state_projection(module_name)
-        "assertion" -> generate_assertion_projection(module_name)
+        "state" ->
+          generate_state_projection(module_name)
+
+        "assertion" ->
+          generate_assertion_projection(module_name)
+
         _ ->
           Mix.shell().error("Unknown projection type: #{type}")
           Mix.shell().error("Use 'state' or 'assertion'")

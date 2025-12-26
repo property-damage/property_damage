@@ -148,7 +148,9 @@ defmodule Mix.Tasks.Pd.Validate do
     required_callbacks = [:commands, :state_projection, :assertion_projections]
 
     errors =
-      for callback <- required_callbacks, not function_exported?(model, callback, 0), reduce: errors do
+      for callback <- required_callbacks,
+          not function_exported?(model, callback, 0),
+          reduce: errors do
         acc -> ["Model missing required callback #{callback}/0" | acc]
       end
 

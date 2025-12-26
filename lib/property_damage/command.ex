@@ -225,6 +225,10 @@ defmodule PropertyDamage.Command do
     that return "processing" status and require polling. Bridge commands are
     protected during shrinking if their ref is used by other commands.
 
+  - `:mock_config` - Configures mock service behavior. Not sent to the SUT adapter.
+    Instead, mock adapters receive this command via `on_command/2` to update
+    their behavior. Useful for testing different third-party service responses.
+
   ## Examples
 
       # Action (default) - creates/modifies state
@@ -235,8 +239,11 @@ defmodule PropertyDamage.Command do
 
       # Bridge - waits for async completion
       def role, do: :bridge
+
+      # Mock config - configures mock services
+      def role, do: :mock_config
   """
-  @callback role() :: :action | :probe | :bridge
+  @callback role() :: :action | :probe | :bridge | :mock_config
 
   @doc """
   (Optional) Returns settle configuration for probes and bridges.

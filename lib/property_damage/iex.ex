@@ -279,7 +279,9 @@ defmodule PropertyDamage.IEx do
 
     # Generate sequence
     generator_opts = [max_commands: max_commands]
-    generator_opts = if branching, do: Keyword.put(generator_opts, :branching, branching), else: generator_opts
+
+    generator_opts =
+      if branching, do: Keyword.put(generator_opts, :branching, branching), else: generator_opts
 
     generator = Generator.generate_sequence(model, generator_opts)
 

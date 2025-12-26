@@ -75,7 +75,7 @@ defmodule PropertyDamage.Executor do
   - `:linearization` - Selected linearization (for branching sequences)
   """
 
-  alias PropertyDamage.{Ref, EventQueue, Sequence, Settle, Nemesis, Stutter}
+  alias PropertyDamage.{Ref, EventQueue, Sequence, Settle, Nemesis, Stutter, MockServiceRegistry}
   alias PropertyDamage.EventLog.Entry
 
   @typedoc """
@@ -110,6 +110,7 @@ defmodule PropertyDamage.Executor do
   - `:event_queue` - EventQueue pid for injector events (optional)
   - `:injector_adapters` - List of injector adapter modules (optional)
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
+  - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
 
   ## Returns
 
@@ -124,11 +125,20 @@ defmodule PropertyDamage.Executor do
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     event_queue = Keyword.get(opts, :event_queue)
     stutter_config = Keyword.get(opts, :stutter_config)
+    mock_registry = Keyword.get(opts, :mock_registry)
 
     with {:ok, adapter_context} <- adapter.setup(adapter_config) do
       try do
         result =
-          execute_sequence(sequence, model, adapter, adapter_context, event_queue, stutter_config)
+          execute_sequence(
+            sequence,
+            model,
+            adapter,
+            adapter_context,
+            event_queue,
+            stutter_config,
+            mock_registry
+          )
 
         {:ok, result}
       after
@@ -156,6 +166,7 @@ defmodule PropertyDamage.Executor do
   - `adapter_context` - Pre-established adapter context
   - `event_queue` - EventQueue pid (optional)
   - `stutter_config` - Stutter.Config for idempotency testing (optional)
+  - `mock_registry` - MockServiceRegistry pid (optional)
 
   ## Returns
 
@@ -167,7 +178,8 @@ defmodule PropertyDamage.Executor do
           module(),
           map(),
           pid() | nil,
-          Stutter.Config.t() | nil
+          Stutter.Config.t() | nil,
+          pid() | nil
         ) ::
           result()
   def execute_sequence(
@@ -176,7 +188,8 @@ defmodule PropertyDamage.Executor do
         adapter,
         adapter_context,
         event_queue \\ nil,
-        stutter_config \\ nil
+        stutter_config \\ nil,
+        mock_registry \\ nil
       )
 
   def execute_sequence(
@@ -185,11 +198,21 @@ defmodule PropertyDamage.Executor do
         adapter,
         adapter_context,
         event_queue,
-        stutter_config
+        stutter_config,
+        mock_registry
       ) do
     # Linear sequence: just execute prefix ++ suffix
     commands = Sequence.to_list(sequence)
-    execute_linear(commands, model, adapter, adapter_context, event_queue, stutter_config)
+
+    execute_linear(
+      commands,
+      model,
+      adapter,
+      adapter_context,
+      event_queue,
+      stutter_config,
+      mock_registry
+    )
   end
 
   def execute_sequence(
@@ -198,23 +221,56 @@ defmodule PropertyDamage.Executor do
         adapter,
         adapter_context,
         event_queue,
-        stutter_config
+        stutter_config,
+        mock_registry
       ) do
     # Branching sequence: execute prefix, branches, suffix
-    execute_branching(sequence, model, adapter, adapter_context, event_queue, stutter_config)
+    execute_branching(
+      sequence,
+      model,
+      adapter,
+      adapter_context,
+      event_queue,
+      stutter_config,
+      mock_registry
+    )
   end
 
   # Backwards compatibility: accept list of commands
-  def execute_sequence(commands, model, adapter, adapter_context, event_queue, stutter_config)
+  def execute_sequence(
+        commands,
+        model,
+        adapter,
+        adapter_context,
+        event_queue,
+        stutter_config,
+        mock_registry
+      )
       when is_list(commands) do
-    execute_linear(commands, model, adapter, adapter_context, event_queue, stutter_config)
+    execute_linear(
+      commands,
+      model,
+      adapter,
+      adapter_context,
+      event_queue,
+      stutter_config,
+      mock_registry
+    )
   end
 
   # ============================================================================
   # Linear Execution
   # ============================================================================
 
-  defp execute_linear(commands, model, adapter, adapter_context, event_queue, stutter_config) do
+  defp execute_linear(
+         commands,
+         model,
+         adapter,
+         adapter_context,
+         event_queue,
+         stutter_config,
+         mock_registry
+       ) do
     initial_state = %{
       event_log: [],
       projections: init_projections(model),
@@ -222,7 +278,8 @@ defmodule PropertyDamage.Executor do
       step_count: 0,
       check_counters: %{},
       branch_id: nil,
-      stutter_config: stutter_config
+      stutter_config: stutter_config,
+      mock_registry: mock_registry
     }
 
     result =
@@ -250,7 +307,15 @@ defmodule PropertyDamage.Executor do
   # Branching Execution
   # ============================================================================
 
-  defp execute_branching(sequence, model, adapter, adapter_context, event_queue, stutter_config) do
+  defp execute_branching(
+         sequence,
+         model,
+         adapter,
+         adapter_context,
+         event_queue,
+         stutter_config,
+         mock_registry
+       ) do
     %Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence
 
     initial_state = %{
@@ -260,7 +325,8 @@ defmodule PropertyDamage.Executor do
       step_count: 0,
       check_counters: %{},
       branch_id: nil,
-      stutter_config: stutter_config
+      stutter_config: stutter_config,
+      mock_registry: mock_registry
     }
 
     # Phase 1: Execute prefix
@@ -525,11 +591,93 @@ defmodule PropertyDamage.Executor do
 
   # Execute a single command
   defp execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    # Check if this is a nemesis command
-    if Nemesis.nemesis_command?(command) do
-      execute_nemesis_command(command, index, state, model, adapter_context, event_queue)
+    mock_registry = Map.get(state, :mock_registry)
+
+    cond do
+      # Check if this is a mock_config command
+      mock_config_command?(command) ->
+        execute_mock_config_command(command, index, state, model, mock_registry)
+
+      # Check if this is a nemesis command
+      Nemesis.nemesis_command?(command) ->
+        execute_nemesis_command(command, index, state, model, adapter_context, event_queue)
+
+      # Regular command
+      true ->
+        execute_regular_command(
+          command,
+          index,
+          state,
+          model,
+          adapter,
+          adapter_context,
+          event_queue,
+          mock_registry
+        )
+    end
+  end
+
+  # Check if command has role :mock_config
+  defp mock_config_command?(command) when is_struct(command) do
+    module = command.__struct__
+
+    if function_exported?(module, :role, 0) do
+      module.role() == :mock_config
     else
-      execute_regular_command(command, index, state, model, adapter, adapter_context, event_queue)
+      false
+    end
+  end
+
+  defp mock_config_command?(_), do: false
+
+  # Execute a mock_config command (notifies mocks, doesn't execute against SUT)
+  defp execute_mock_config_command(command, index, state, model, mock_registry) do
+    # Notify mock registry of the command
+    if mock_registry do
+      MockServiceRegistry.notify_command(mock_registry, command)
+    end
+
+    # Update projections with command (mock configs can affect model state)
+    projections = update_projections(state.projections, command)
+
+    # Run checks
+    check_ctx = %{
+      command: command,
+      events: [],
+      command_index: index,
+      step_count: state.step_count + 1,
+      projections: projections,
+      branch_id: state.branch_id
+    }
+
+    case run_checks(model, projections, check_ctx, state.check_counters) do
+      {:ok, check_counters} ->
+        new_state = %{
+          event_log: state.event_log,
+          projections: projections,
+          refs: state.refs,
+          step_count: state.step_count + 1,
+          check_counters: check_counters,
+          branch_id: state.branch_id,
+          stutter_config: state.stutter_config,
+          mock_registry: mock_registry
+        }
+
+        {:ok, new_state}
+
+      {:error, check_name, reason, check_counters} ->
+        failed_state = %{
+          event_log: state.event_log,
+          projections: projections,
+          refs: state.refs,
+          step_count: state.step_count + 1,
+          check_counters: check_counters,
+          branch_id: state.branch_id,
+          stutter_config: state.stutter_config,
+          mock_registry: mock_registry
+        }
+
+        {:error, {:check_failed, check_name, reason}, failed_state}
     end
   end
 
@@ -630,8 +778,14 @@ defmodule PropertyDamage.Executor do
          model,
          adapter,
          adapter_context,
-         event_queue
+         event_queue,
+         mock_registry
        ) do
+    # 0. Notify mock registry of command (before execution)
+    if mock_registry do
+      MockServiceRegistry.notify_command(mock_registry, command)
+    end
+
     # 1. Resolve refs in command
     case resolve_command_refs(command, state.refs) do
       {:ok, resolved_command} ->
@@ -658,6 +812,15 @@ defmodule PropertyDamage.Executor do
             # 6. Drain and process injector events
             {projections, event_log} =
               process_injector_events(event_queue, event_log, projections, state.branch_id)
+
+            # 6.5. Flush and process mock-injected events
+            {projections, event_log} =
+              process_mock_events(mock_registry, index, event_log, projections, state.branch_id)
+
+            # 6.6. Update mock projections
+            if mock_registry do
+              MockServiceRegistry.update_projections(mock_registry, projections)
+            end
 
             # 7. Run checks
             check_ctx = %{
@@ -690,7 +853,8 @@ defmodule PropertyDamage.Executor do
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
                       branch_id: state.branch_id,
-                      stutter_config: state.stutter_config
+                      stutter_config: state.stutter_config,
+                      mock_registry: mock_registry
                     }
 
                     {:ok, new_state}
@@ -703,7 +867,8 @@ defmodule PropertyDamage.Executor do
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
                       branch_id: state.branch_id,
-                      stutter_config: state.stutter_config
+                      stutter_config: state.stutter_config,
+                      mock_registry: mock_registry
                     }
 
                     {:error, {:idempotency_violation, violation}, failed_state}
@@ -716,7 +881,8 @@ defmodule PropertyDamage.Executor do
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
                       branch_id: state.branch_id,
-                      stutter_config: state.stutter_config
+                      stutter_config: state.stutter_config,
+                      mock_registry: mock_registry
                     }
 
                     {:error, {:stutter_execution_failed, details}, failed_state}
@@ -730,7 +896,8 @@ defmodule PropertyDamage.Executor do
                   step_count: state.step_count + 1,
                   check_counters: check_counters,
                   branch_id: state.branch_id,
-                  stutter_config: state.stutter_config
+                  stutter_config: state.stutter_config,
+                  mock_registry: mock_registry
                 }
 
                 {:error, {:check_failed, check_name, reason}, failed_state}
@@ -753,6 +920,15 @@ defmodule PropertyDamage.Executor do
 
             {projections, event_log} =
               process_injector_events(event_queue, event_log, projections, state.branch_id)
+
+            # Flush and process mock-injected events
+            {projections, event_log} =
+              process_mock_events(mock_registry, index, event_log, projections, state.branch_id)
+
+            # Update mock projections
+            if mock_registry do
+              MockServiceRegistry.update_projections(mock_registry, projections)
+            end
 
             check_ctx = %{
               command: resolved_command,
@@ -784,7 +960,8 @@ defmodule PropertyDamage.Executor do
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
                       branch_id: state.branch_id,
-                      stutter_config: state.stutter_config
+                      stutter_config: state.stutter_config,
+                      mock_registry: mock_registry
                     }
 
                     {:ok, new_state}
@@ -797,7 +974,8 @@ defmodule PropertyDamage.Executor do
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
                       branch_id: state.branch_id,
-                      stutter_config: state.stutter_config
+                      stutter_config: state.stutter_config,
+                      mock_registry: mock_registry
                     }
 
                     {:error, {:idempotency_violation, violation}, failed_state}
@@ -810,7 +988,8 @@ defmodule PropertyDamage.Executor do
                       step_count: state.step_count + 1,
                       check_counters: check_counters,
                       branch_id: state.branch_id,
-                      stutter_config: state.stutter_config
+                      stutter_config: state.stutter_config,
+                      mock_registry: mock_registry
                     }
 
                     {:error, {:stutter_execution_failed, details}, failed_state}
@@ -824,7 +1003,8 @@ defmodule PropertyDamage.Executor do
                   step_count: state.step_count + 1,
                   check_counters: check_counters,
                   branch_id: state.branch_id,
-                  stutter_config: state.stutter_config
+                  stutter_config: state.stutter_config,
+                  mock_registry: mock_registry
                 }
 
                 {:error, {:check_failed, check_name, reason}, failed_state}
@@ -1020,6 +1200,32 @@ defmodule PropertyDamage.Executor do
       }
 
       new_projs = update_projections(projs, queue_entry.event)
+      {new_projs, [entry | log]}
+    end)
+  end
+
+  # Flush and process events from mock service adapters
+  defp process_mock_events(nil, _command_index, event_log, projections, _branch_id),
+    do: {projections, event_log}
+
+  defp process_mock_events(mock_registry, command_index, event_log, projections, branch_id) do
+    events = MockServiceRegistry.flush_events(mock_registry)
+
+    Enum.reduce(events, {projections, event_log}, fn event, {projs, log} ->
+      entry = %Entry{
+        timestamp: System.monotonic_time(:millisecond),
+        command_index: command_index,
+        event: event,
+        source: :mock,
+        injector_adapter: nil,
+        nemesis_module: nil,
+        branch_id: branch_id
+      }
+
+      # Notify mock registry of the event so mocks can react
+      MockServiceRegistry.notify_event(mock_registry, event)
+
+      new_projs = update_projections(projs, event)
       {new_projs, [entry | log]}
     end)
   end
