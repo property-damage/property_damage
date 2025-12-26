@@ -67,7 +67,17 @@ defmodule PropertyDamage do
   See the individual module documentation for detailed information on each component.
   """
 
-  alias PropertyDamage.{Generator, Executor, Shrinker, Validation, EventQueue, Sequence, Stutter}
+  alias PropertyDamage.{
+    Generator,
+    Executor,
+    Shrinker,
+    Validation,
+    EventQueue,
+    Sequence,
+    Stutter,
+    FailureReport
+  }
+
   alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig
 
   @typedoc """
@@ -467,16 +477,24 @@ defmodule PropertyDamage do
         {sequence, 0, 0}
       end
 
-    failure_report = %{
-      seed: seed,
-      run_number: run_number,
-      original_sequence: sequence,
-      shrunk_sequence: shrunk_sequence,
-      failed_at_index: result.failed_at_index,
-      failure_reason: result.failure_reason,
-      shrink_iterations: shrink_iterations,
-      shrink_time_ms: shrink_time_ms
-    }
+    # Create rich failure report
+    failure_report =
+      FailureReport.new(
+        seed: seed,
+        run_number: run_number,
+        original_sequence: sequence,
+        shrunk_sequence: shrunk_sequence,
+        failed_at_index: result.failed_at_index,
+        failure_reason: result.failure_reason,
+        shrink_iterations: shrink_iterations,
+        shrink_time_ms: shrink_time_ms,
+        event_log: result.event_log,
+        projections: result.projections,
+        refs: result.refs,
+        model: model,
+        adapter: adapter,
+        linearization: result.linearization
+      )
 
     if on_failure do
       on_failure.(failure_report)

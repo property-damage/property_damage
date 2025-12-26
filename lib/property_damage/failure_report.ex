@@ -1,0 +1,356 @@
+defmodule PropertyDamage.FailureReport do
+  @moduledoc """
+  Rich failure report with comprehensive diagnostic information.
+
+  A FailureReport captures everything needed to understand, debug, and
+  reproduce a test failure:
+
+  - **Location**: Which run, command index, and seed
+  - **Sequences**: Original and shrunk command sequences
+  - **State**: Projection states before and at failure
+  - **Events**: Complete event trail leading to failure
+  - **Reason**: Structured failure reason with context
+
+  ## Creating Reports
+
+  Reports are created automatically by PropertyDamage when a test fails.
+  You can also create them manually for testing:
+
+      report = FailureReport.new(
+        seed: 12345,
+        run_number: 3,
+        original_sequence: sequence,
+        shrunk_sequence: shrunk,
+        failed_at_index: 5,
+        failure_reason: {:check_failed, :NonNegativeBalance, "..."}
+      )
+
+  ## Formatting Reports
+
+  Use `FailureReport.Formatter` to render reports in different formats:
+
+      # Terminal output (default)
+      FailureReport.Formatter.format(report, :terminal)
+
+      # Markdown for documentation
+      FailureReport.Formatter.format(report, :markdown)
+
+      # JSON for CI integration
+      FailureReport.Formatter.format(report, :json)
+
+  ## Failure Reasons
+
+  The `failure_reason` field contains structured data about what failed:
+
+  - `{:check_failed, check_name, message}` - Invariant violation
+  - `{:idempotency_violation, %Stutter.Violation{}}` - Idempotency failure
+  - `{:adapter_error, reason}` - Adapter execution failed
+  - `{:linearization_failed, message}` - No valid linearization (parallel)
+  - `{:branch_failure, branch_id, reason}` - Branch execution failed
+  - `{:ref_resolution_error, reason}` - Symbolic ref couldn't be resolved
+  """
+
+  alias PropertyDamage.{Sequence, EventLog.Entry}
+
+  @type failure_type ::
+          :check_failed
+          | :idempotency_violation
+          | :adapter_error
+          | :linearization_failed
+          | :branch_failure
+          | :ref_resolution_error
+          | :unknown
+
+  @type t :: %__MODULE__{
+          # Location
+          seed: integer(),
+          run_number: non_neg_integer(),
+          failed_at_index: non_neg_integer(),
+          failure_type: failure_type(),
+
+          # Sequences
+          original_sequence: Sequence.t(),
+          shrunk_sequence: Sequence.t(),
+
+          # Failure details
+          failure_reason: term(),
+          check_name: atom() | nil,
+          failure_message: String.t() | nil,
+
+          # State snapshots
+          state_before_failure: %{atom() => any()} | nil,
+          state_at_failure: %{atom() => any()} | nil,
+          refs_at_failure: map() | nil,
+
+          # Event trail
+          event_log: [Entry.t()],
+          command_at_failure: struct() | nil,
+          events_at_failure: [struct()],
+
+          # Idempotency-specific (for stutter failures)
+          idempotency_violation: map() | nil,
+
+          # Parallel execution-specific
+          branch_id: non_neg_integer() | nil,
+          linearization: [struct()] | nil,
+          branch_events: %{non_neg_integer() => [Entry.t()]} | nil,
+
+          # Shrinking stats
+          shrink_iterations: non_neg_integer(),
+          shrink_time_ms: non_neg_integer(),
+
+          # Metadata
+          model: module() | nil,
+          adapter: module() | nil,
+          timestamp: DateTime.t()
+        }
+
+  defstruct seed: nil,
+            run_number: nil,
+            failed_at_index: nil,
+            failure_type: nil,
+            original_sequence: nil,
+            shrunk_sequence: nil,
+            failure_reason: nil,
+            check_name: nil,
+            failure_message: nil,
+            state_before_failure: nil,
+            state_at_failure: nil,
+            refs_at_failure: nil,
+            event_log: [],
+            command_at_failure: nil,
+            events_at_failure: [],
+            idempotency_violation: nil,
+            branch_id: nil,
+            linearization: nil,
+            branch_events: nil,
+            shrink_iterations: 0,
+            shrink_time_ms: 0,
+            model: nil,
+            adapter: nil,
+            timestamp: nil
+
+  @doc """
+  Create a new failure report from execution results.
+
+  ## Options
+
+  Required:
+  - `:seed` - Random seed for reproduction
+  - `:run_number` - Which test run failed
+  - `:original_sequence` - The sequence before shrinking
+  - `:failed_at_index` - Command index where failure occurred
+  - `:failure_reason` - Structured failure reason
+
+  Optional:
+  - `:shrunk_sequence` - Minimized sequence (defaults to original)
+  - `:event_log` - Complete event log
+  - `:projections` - Projection states at failure
+  - `:refs` - Ref resolution map at failure
+  - `:shrink_iterations` - Number of shrink attempts
+  - `:shrink_time_ms` - Time spent shrinking
+  - `:model` - Model module
+  - `:adapter` - Adapter module
+  - `:linearization` - Selected linearization (parallel)
+  """
+  @spec new(keyword()) :: t()
+  def new(opts) do
+    seed = Keyword.fetch!(opts, :seed)
+    run_number = Keyword.fetch!(opts, :run_number)
+    original_sequence = Keyword.fetch!(opts, :original_sequence)
+    failed_at_index = Keyword.fetch!(opts, :failed_at_index)
+    failure_reason = Keyword.fetch!(opts, :failure_reason)
+
+    shrunk_sequence = Keyword.get(opts, :shrunk_sequence, original_sequence)
+    event_log = Keyword.get(opts, :event_log, [])
+    projections = Keyword.get(opts, :projections, %{})
+    refs = Keyword.get(opts, :refs, %{})
+
+    # Parse failure reason
+    {failure_type, check_name, failure_message, idempotency_violation, branch_id} =
+      parse_failure_reason(failure_reason)
+
+    # Extract command and events at failure point
+    {command_at_failure, events_at_failure} =
+      extract_failure_context(shrunk_sequence, event_log, failed_at_index)
+
+    # Extract branch events if parallel
+    branch_events = extract_branch_events(event_log)
+
+    %__MODULE__{
+      seed: seed,
+      run_number: run_number,
+      failed_at_index: failed_at_index,
+      failure_type: failure_type,
+      original_sequence: original_sequence,
+      shrunk_sequence: shrunk_sequence,
+      failure_reason: failure_reason,
+      check_name: check_name,
+      failure_message: failure_message,
+      state_at_failure: projections,
+      refs_at_failure: refs,
+      event_log: event_log,
+      command_at_failure: command_at_failure,
+      events_at_failure: events_at_failure,
+      idempotency_violation: idempotency_violation,
+      branch_id: branch_id,
+      linearization: Keyword.get(opts, :linearization),
+      branch_events: branch_events,
+      shrink_iterations: Keyword.get(opts, :shrink_iterations, 0),
+      shrink_time_ms: Keyword.get(opts, :shrink_time_ms, 0),
+      model: Keyword.get(opts, :model),
+      adapter: Keyword.get(opts, :adapter),
+      timestamp: DateTime.utc_now()
+    }
+  end
+
+  @doc """
+  Convert from the legacy failure_report map format.
+
+  This allows gradual migration from the old format.
+  """
+  @spec from_legacy(map(), keyword()) :: t()
+  def from_legacy(legacy_report, opts \\ []) do
+    new(
+      seed: legacy_report.seed,
+      run_number: legacy_report.run_number,
+      original_sequence: legacy_report.original_sequence,
+      shrunk_sequence: legacy_report.shrunk_sequence,
+      failed_at_index: legacy_report.failed_at_index,
+      failure_reason: legacy_report.failure_reason,
+      shrink_iterations: legacy_report.shrink_iterations,
+      shrink_time_ms: legacy_report.shrink_time_ms,
+      event_log: Keyword.get(opts, :event_log, []),
+      projections: Keyword.get(opts, :projections, %{}),
+      refs: Keyword.get(opts, :refs, %{}),
+      model: Keyword.get(opts, :model),
+      adapter: Keyword.get(opts, :adapter)
+    )
+  end
+
+  @doc """
+  Convert to the legacy failure_report map format.
+
+  For backwards compatibility with existing code.
+  """
+  @spec to_legacy(t()) :: map()
+  def to_legacy(%__MODULE__{} = report) do
+    %{
+      seed: report.seed,
+      run_number: report.run_number,
+      original_sequence: report.original_sequence,
+      shrunk_sequence: report.shrunk_sequence,
+      failed_at_index: report.failed_at_index,
+      failure_reason: report.failure_reason,
+      shrink_iterations: report.shrink_iterations,
+      shrink_time_ms: report.shrink_time_ms
+    }
+  end
+
+  @doc """
+  Get a summary string for the failure type.
+  """
+  @spec failure_type_summary(t()) :: String.t()
+  def failure_type_summary(%__MODULE__{failure_type: type, check_name: check_name}) do
+    case type do
+      :check_failed -> "Invariant Violation: #{check_name}"
+      :idempotency_violation -> "Idempotency Violation"
+      :adapter_error -> "Adapter Error"
+      :linearization_failed -> "Linearization Failed"
+      :branch_failure -> "Branch Execution Failed"
+      :ref_resolution_error -> "Ref Resolution Error"
+      :unknown -> "Unknown Failure"
+    end
+  end
+
+  @doc """
+  Check if this is a parallel execution failure.
+  """
+  @spec parallel_failure?(t()) :: boolean()
+  def parallel_failure?(%__MODULE__{failure_type: type}) do
+    type in [:linearization_failed, :branch_failure]
+  end
+
+  @doc """
+  Check if this is an idempotency failure.
+  """
+  @spec idempotency_failure?(t()) :: boolean()
+  def idempotency_failure?(%__MODULE__{failure_type: :idempotency_violation}), do: true
+  def idempotency_failure?(_), do: false
+
+  @doc """
+  Get the reproduction command as a string.
+  """
+  @spec reproduction_command(t()) :: String.t()
+  def reproduction_command(%__MODULE__{seed: seed, model: model, adapter: adapter}) do
+    model_str = if model, do: "model: #{inspect(model)}, ", else: ""
+    adapter_str = if adapter, do: "adapter: #{inspect(adapter)}, ", else: ""
+
+    "PropertyDamage.run(#{model_str}#{adapter_str}seed: #{seed}, max_runs: 1)"
+  end
+
+  # ============================================================================
+  # Private Helpers
+  # ============================================================================
+
+  defp parse_failure_reason({:check_failed, check_name, message}) do
+    {:check_failed, check_name, to_string(message), nil, nil}
+  end
+
+  defp parse_failure_reason({:idempotency_violation, violation}) do
+    message = format_idempotency_message(violation)
+    {:idempotency_violation, nil, message, violation, nil}
+  end
+
+  defp parse_failure_reason({:adapter_error, reason}) do
+    {:adapter_error, nil, inspect(reason), nil, nil}
+  end
+
+  defp parse_failure_reason({:linearization_failed, message}) do
+    {:linearization_failed, nil, to_string(message), nil, nil}
+  end
+
+  defp parse_failure_reason({:branch_failure, branch_id, reason}) do
+    {inner_type, check_name, message, _, _} = parse_failure_reason(reason)
+    {inner_type, check_name, message, nil, branch_id}
+  end
+
+  defp parse_failure_reason({:ref_resolution_error, reason}) do
+    {:ref_resolution_error, nil, inspect(reason), nil, nil}
+  end
+
+  defp parse_failure_reason(other) do
+    {:unknown, nil, inspect(other), nil, nil}
+  end
+
+  defp format_idempotency_message(%{command: command, comparison_result: result}) do
+    cmd_name = command.__struct__ |> Module.split() |> List.last()
+    "Command #{cmd_name} produced different events on retry: #{inspect(result)}"
+  end
+
+  defp format_idempotency_message(violation) do
+    inspect(violation)
+  end
+
+  defp extract_failure_context(sequence, event_log, failed_at_index) do
+    commands = Sequence.to_list(sequence)
+    command = Enum.at(commands, failed_at_index)
+
+    events =
+      event_log
+      |> Enum.filter(fn entry -> entry.command_index == failed_at_index end)
+      |> Enum.map(& &1.event)
+
+    {command, events}
+  end
+
+  defp extract_branch_events(event_log) do
+    event_log
+    |> Enum.filter(fn entry -> entry.branch_id != nil end)
+    |> Enum.group_by(& &1.branch_id)
+    |> case do
+      empty when map_size(empty) == 0 -> nil
+      grouped -> grouped
+    end
+  end
+end
