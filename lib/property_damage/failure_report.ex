@@ -146,6 +146,7 @@ defmodule PropertyDamage.FailureReport do
   - `:shrunk_sequence` - Minimized sequence (defaults to original)
   - `:event_log` - Complete event log
   - `:projections` - Projection states at failure
+  - `:projections_before` - Projection states before failing command
   - `:refs` - Ref resolution map at failure
   - `:shrink_iterations` - Number of shrink attempts
   - `:shrink_time_ms` - Time spent shrinking
@@ -164,6 +165,7 @@ defmodule PropertyDamage.FailureReport do
     shrunk_sequence = Keyword.get(opts, :shrunk_sequence, original_sequence)
     event_log = Keyword.get(opts, :event_log, [])
     projections = Keyword.get(opts, :projections, %{})
+    projections_before = Keyword.get(opts, :projections_before)
     refs = Keyword.get(opts, :refs, %{})
 
     # Parse failure reason
@@ -187,6 +189,7 @@ defmodule PropertyDamage.FailureReport do
       failure_reason: failure_reason,
       check_name: check_name,
       failure_message: failure_message,
+      state_before_failure: projections_before,
       state_at_failure: projections,
       refs_at_failure: refs,
       event_log: event_log,

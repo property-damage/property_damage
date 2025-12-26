@@ -67,17 +67,20 @@ defmodule PropertyDamage.FailureReport.Formatter do
     color = Keyword.get(opts, :color, true)
     show_event_log = Keyword.get(opts, :show_event_log, true)
     show_state = Keyword.get(opts, :show_state, true)
+    show_original = Keyword.get(opts, :show_original, true)
     max_events = Keyword.get(opts, :max_events, 50)
 
+    # Shrunk info first (primary focus), original second (for reference)
     sections = [
       terminal_header(report, color),
       terminal_location(report, color),
-      terminal_failure_reason(report, color),
-      terminal_shrinking_stats(report, color),
-      terminal_command_sequence(report, opts),
-      if(show_state, do: terminal_state(report, color), else: nil),
+      terminal_failure_explanation(report, color),
+      terminal_shrunk_sequence(report, opts),
+      if(show_state, do: terminal_state_transition(report, color), else: nil),
       if(show_event_log, do: terminal_event_log(report, max_events, color), else: nil),
-      terminal_reproduction(report, color)
+      terminal_reproduction(report, color),
+      terminal_shrinking_stats(report, color),
+      if(show_original, do: terminal_original_sequence(report, opts), else: nil)
     ]
 
     sections
@@ -116,45 +119,78 @@ defmodule PropertyDamage.FailureReport.Formatter do
     """
   end
 
-  defp terminal_failure_reason(report, color) do
-    reason_text =
+  defp terminal_failure_explanation(report, color) do
+    # Build the "Why It Failed" explanation
+    {reason_text, why_text} =
       case report.failure_type do
         :check_failed ->
-          """
+          reason = """
           #{label("Check", color)}         #{cyan(color)}#{report.check_name}#{reset()}
           #{label("Message", color)}
           #{indent_text(report.failure_message, "    ")}
           """
 
+          why = build_check_explanation(report, color)
+          {reason, why}
+
         :idempotency_violation ->
-          format_idempotency_terminal(report, color)
+          {format_idempotency_terminal(report, color), nil}
 
         :linearization_failed ->
-          """
+          reason = """
           #{label("Type", color)}          Linearization Failed
           #{label("Details", color)}
           #{indent_text(report.failure_message, "    ")}
           """
 
-        :branch_failure ->
+          why = """
+          #{yellow(color)}Why it failed:#{reset()} No sequential ordering of the parallel commands
+          could explain the observed results. The system behavior is non-linearizable.
           """
+
+          {reason, why}
+
+        :branch_failure ->
+          reason = """
           #{label("Type", color)}          Branch Execution Failed
           #{label("Branch ID", color)}     #{report.branch_id}
           #{label("Details", color)}
           #{indent_text(report.failure_message, "    ")}
           """
 
+          {reason, nil}
+
         _ ->
-          """
+          reason = """
           #{label("Reason", color)}
           #{indent_text(inspect(report.failure_reason, pretty: true), "    ")}
           """
+
+          {reason, nil}
       end
 
+    why_section = if why_text, do: "\n#{why_text}", else: ""
+
     """
-    #{section_header("Failure Details", color)}
-    #{reason_text}
+    #{section_header("What Failed", color)}
+    #{reason_text}#{why_section}
     """
+  end
+
+  defp build_check_explanation(report, color) do
+    # Get the failing command
+    failed_cmd = report.command_at_failure
+
+    if failed_cmd do
+      cmd_name = module_name(failed_cmd.__struct__)
+
+      """
+      #{yellow(color)}Why it failed:#{reset()} Command #{cyan(color)}#{cmd_name}#{reset()} at index #{report.failed_at_index}
+      violated the #{cyan(color)}#{report.check_name}#{reset()} invariant.
+      """
+    else
+      nil
+    end
   end
 
   defp format_idempotency_terminal(report, color) do
@@ -218,23 +254,27 @@ defmodule PropertyDamage.FailureReport.Formatter do
     """
   end
 
-  defp terminal_command_sequence(report, opts) do
+  defp terminal_shrunk_sequence(report, opts) do
     color = Keyword.get(opts, :color, true)
-    max_commands = Keyword.get(opts, :max_commands, 20)
+    max_commands = Keyword.get(opts, :max_commands, 30)
     commands = Sequence.to_list(report.shrunk_sequence)
+    refs = report.refs_at_failure || %{}
+
+    # Calculate failed_at for shrunk sequence (may differ from original)
+    shrunk_len = length(commands)
+    failed_at = min(report.failed_at_index, shrunk_len - 1)
 
     commands_text =
       commands
       |> Enum.take(max_commands)
       |> Enum.with_index()
       |> Enum.map(fn {cmd, idx} ->
-        marker =
-          if idx == report.failed_at_index,
-            do: "#{red(color)}►#{reset()}",
-            else: " "
+        is_failure = idx == failed_at
+        marker = if is_failure, do: "#{red(color)}►#{reset()}", else: " "
+        idx_color = if is_failure, do: red(color), else: dim(color)
+        failure_label = if is_failure, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
 
-        idx_color = if idx == report.failed_at_index, do: red(color), else: dim(color)
-        "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command_terminal(cmd, color)}"
+        "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command_with_refs(cmd, refs, color)}#{failure_label}"
       end)
       |> Enum.join("\n")
 
@@ -246,36 +286,158 @@ defmodule PropertyDamage.FailureReport.Formatter do
       end
 
     """
-    #{section_header("Minimal Reproduction Sequence", color)}
+    #{section_header("Minimal Reproduction (#{length(commands)} commands)", color)}
     #{commands_text}#{truncated}
     """
   end
 
-  defp format_command_terminal(cmd, color) do
+  defp terminal_original_sequence(report, opts) do
+    color = Keyword.get(opts, :color, true)
+    max_commands = Keyword.get(opts, :max_commands, 30)
+    commands = Sequence.to_list(report.original_sequence)
+    refs = report.refs_at_failure || %{}
+
+    # Only show if different from shrunk
+    shrunk_count = Sequence.command_count(report.shrunk_sequence)
+
+    if length(commands) == shrunk_count do
+      nil
+    else
+      commands_text =
+        commands
+        |> Enum.take(max_commands)
+        |> Enum.with_index()
+        |> Enum.map(fn {cmd, idx} ->
+          is_failure = idx == report.failed_at_index
+          marker = if is_failure, do: "#{red(color)}►#{reset()}", else: " "
+          idx_color = if is_failure, do: red(color), else: dim(color)
+          failure_label = if is_failure, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
+
+          "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command_with_refs(cmd, refs, color)}#{failure_label}"
+        end)
+        |> Enum.join("\n")
+
+      truncated =
+        if length(commands) > max_commands do
+          "\n#{dim(color)}  ... and #{length(commands) - max_commands} more commands#{reset()}"
+        else
+          ""
+        end
+
+      """
+      #{section_header("Original Sequence (#{length(commands)} commands)", color)}
+      #{dim(color)}For reference - the full sequence before shrinking#{reset()}
+
+      #{commands_text}#{truncated}
+      """
+    end
+  end
+
+  defp format_command_with_refs(cmd, refs, color) do
     name = module_name(cmd.__struct__)
-    fields = cmd |> Map.from_struct() |> format_fields_inline()
+    fields = cmd |> Map.from_struct() |> format_fields_with_refs(refs)
     "#{cyan(color)}#{name}#{reset()} #{dim(color)}#{fields}#{reset()}"
   end
 
-  defp terminal_state(report, color) do
-    if report.state_at_failure && map_size(report.state_at_failure) > 0 do
-      state_text =
-        report.state_at_failure
-        |> Enum.map(fn {projection, state} ->
-          proj_name = module_name(projection)
-          state_summary = summarize_state(state)
-          "  #{cyan(color)}#{proj_name}#{reset()}\n#{indent_text(state_summary, "    ")}"
-        end)
-        |> Enum.join("\n\n")
+  defp format_fields_with_refs(fields, refs) do
+    fields
+    |> Enum.map(fn {k, v} -> "#{k}: #{inspect_with_ref(v, refs)}" end)
+    |> Enum.join(", ")
+    |> then(&"{#{&1}}")
+  end
 
-      """
-      #{section_header("Projection States at Failure", color)}
-      #{state_text}
-      """
-    else
-      nil
+  defp inspect_with_ref(%PropertyDamage.Ref{ref: erlang_ref, label: label}, refs) do
+    # It's a Ref struct - show label and resolved value
+    case Map.get(refs, erlang_ref) do
+      nil -> "<#{label}>"
+      resolved -> "<#{label}> → #{inspect_short(resolved)}"
     end
   end
+
+  defp inspect_with_ref(ref, refs) when is_reference(ref) do
+    case Map.get(refs, ref) do
+      nil -> inspect_short(ref)
+      resolved -> "#{inspect_short(ref)} → #{inspect_short(resolved)}"
+    end
+  end
+
+  defp inspect_with_ref(value, _refs), do: inspect_short(value)
+
+  defp terminal_state_transition(report, color) do
+    has_after = report.state_at_failure != nil and map_size(report.state_at_failure) > 0
+    has_before = report.state_before_failure != nil and map_size(report.state_before_failure) > 0
+
+    cond do
+      has_before and has_after ->
+        # Show transition view
+        transition_text =
+          report.state_at_failure
+          |> Enum.map(fn {projection, after_state} ->
+            proj_name = module_name(projection)
+            before_state = Map.get(report.state_before_failure, projection, %{})
+
+            before_summary = summarize_state(before_state)
+            after_summary = summarize_state(after_state)
+
+            changes = diff_states(before_state, after_state)
+
+            change_text =
+              if changes != "",
+                do: "\n    #{yellow(color)}Changes:#{reset()}\n#{indent_text(changes, "      ")}",
+                else: ""
+
+            """
+              #{cyan(color)}#{proj_name}#{reset()}
+                #{dim(color)}Before:#{reset()}
+            #{indent_text(before_summary, "      ")}
+                #{dim(color)}After:#{reset()}
+            #{indent_text(after_summary, "      ")}#{change_text}
+            """
+          end)
+          |> Enum.join("\n")
+
+        """
+        #{section_header("State Transition", color)}
+        #{transition_text}
+        """
+
+      has_after ->
+        # Only show after state
+        state_text =
+          report.state_at_failure
+          |> Enum.map(fn {projection, state} ->
+            proj_name = module_name(projection)
+            state_summary = summarize_state(state)
+            "  #{cyan(color)}#{proj_name}#{reset()}\n#{indent_text(state_summary, "    ")}"
+          end)
+          |> Enum.join("\n\n")
+
+        """
+        #{section_header("Projection States at Failure", color)}
+        #{state_text}
+        """
+
+      true ->
+        nil
+    end
+  end
+
+  defp diff_states(before, after_state) when is_map(before) and is_map(after_state) do
+    all_keys = MapSet.union(MapSet.new(Map.keys(before)), MapSet.new(Map.keys(after_state)))
+
+    all_keys
+    |> Enum.filter(fn key ->
+      Map.get(before, key) != Map.get(after_state, key)
+    end)
+    |> Enum.map(fn key ->
+      before_val = Map.get(before, key)
+      after_val = Map.get(after_state, key)
+      "#{key}: #{summarize_value(before_val)} → #{summarize_value(after_val)}"
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp diff_states(_, _), do: ""
 
   defp terminal_event_log(report, max_events, color) do
     if length(report.event_log) > 0 do
@@ -715,13 +877,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp event_summary(event) do
     module_name(event.__struct__)
-  end
-
-  defp format_fields_inline(fields) do
-    fields
-    |> Enum.map(fn {k, v} -> "#{k}: #{inspect_short(v)}" end)
-    |> Enum.join(", ")
-    |> then(&"{#{&1}}")
   end
 
   defp inspect_short(value) when is_binary(value) and byte_size(value) > 20 do
