@@ -685,6 +685,9 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp still_fails?(commands, state) do
+    # Regenerate idempotency keys to ensure fresh SUT state
+    commands = regenerate_idempotency_keys(commands)
+
     case Executor.run(commands, state.model, state.adapter,
            adapter_config: state.adapter_config,
            event_queue: state.event_queue
@@ -704,6 +707,9 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp still_fails_branch?(sequence, state) do
+    # Regenerate idempotency keys to ensure fresh SUT state
+    sequence = regenerate_sequence_idempotency_keys(sequence)
+
     case Executor.run(sequence, state.model, state.adapter,
            adapter_config: state.adapter_config,
            event_queue: state.event_queue
@@ -847,4 +853,33 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp contains_ref?(_, _), do: false
+
+  # ============================================================================
+  # Idempotency Key Regeneration
+  # ============================================================================
+
+  # Regenerate idempotency keys for a list of commands to ensure fresh SUT state
+  defp regenerate_idempotency_keys(commands) do
+    Enum.map(commands, &regenerate_command_idempotency_key/1)
+  end
+
+  # Regenerate idempotency keys for a sequence (handles branching)
+  defp regenerate_sequence_idempotency_keys(%Sequence{} = sequence) do
+    Sequence.map(sequence, &regenerate_command_idempotency_key/1)
+  end
+
+  # Regenerate the idempotency key for a single command
+  defp regenerate_command_idempotency_key(command) do
+    if Map.has_key?(command, :idempotency_key) do
+      new_key = generate_idempotency_key()
+      %{command | idempotency_key: new_key}
+    else
+      command
+    end
+  end
+
+  # Generate a new random idempotency key
+  defp generate_idempotency_key do
+    :crypto.strong_rand_bytes(16) |> Base.encode16()
+  end
 end
