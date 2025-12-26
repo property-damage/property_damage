@@ -465,6 +465,7 @@ defmodule PropertyDamage do
         shrink_result =
           Shrinker.shrink(sequence,
             failed_at_index: result.failed_at_index,
+            failure_reason: result.failure_reason,
             model: model,
             adapter: adapter,
             adapter_config: adapter_config,

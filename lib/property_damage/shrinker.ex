@@ -6,6 +6,28 @@ defmodule PropertyDamage.Shrinker do
   sequence that still reproduces the failure. This makes debugging easier
   by removing irrelevant commands and simplifying arguments.
 
+  ## Failure Equivalence
+
+  The shrinker preserves failure equivalence - a shrunk sequence is only
+  accepted if it produces the **same type of failure** as the original.
+  This ensures the minimal reproduction demonstrates the same bug, not
+  a different one.
+
+  Failure equivalence is determined by:
+  - Same failure type (`:check_failed`, `:idempotency_violation`, etc.)
+  - Same check name (for invariant violations)
+  - Failure at the same or earlier command index
+
+  ## Determinism
+
+  Shrinking is fully deterministic given:
+  - The same seed (which determines the command sequence)
+  - The same initial failure
+  - Deterministic SUT behavior
+
+  This ensures reproducibility: the same seed always produces the same
+  shrunk sequence, making CI failures reliably reproducible locally.
+
   ## Sequence Types
 
   The Shrinker handles both linear and branching sequences:
@@ -57,6 +79,7 @@ defmodule PropertyDamage.Shrinker do
   shrunk = Shrinker.shrink(
     sequence,
     failed_at_index: 5,
+    failure_reason: {:check_failed, :balance_invariant, "..."},
     model: MyModel,
     adapter: MyAdapter,
     config: config
@@ -68,6 +91,17 @@ defmodule PropertyDamage.Shrinker do
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """
+  Failure signature for equivalence checking.
+
+  Contains the essential properties that must match for a shrunk
+  sequence to be considered as reproducing the "same" failure.
+  """
+  @type failure_signature :: %{
+          type: atom(),
+          check_name: atom() | nil
+        }
+
+  @typedoc """
   Result of shrinking.
   """
   @type shrink_result :: %{
@@ -77,6 +111,64 @@ defmodule PropertyDamage.Shrinker do
         }
 
   @doc """
+  Extract a failure signature from a failure reason.
+
+  The signature captures the essential properties for equivalence checking.
+  """
+  @spec failure_signature(term()) :: failure_signature()
+  def failure_signature({:check_failed, check_name, _message}) do
+    %{type: :check_failed, check_name: check_name}
+  end
+
+  def failure_signature({:idempotency_violation, _details}) do
+    %{type: :idempotency_violation, check_name: nil}
+  end
+
+  def failure_signature({:linearization_failed, _message}) do
+    %{type: :linearization_failed, check_name: nil}
+  end
+
+  def failure_signature({:branch_failure, _branch_id, inner_reason}) do
+    # Unwrap branch failures to get the actual failure type
+    failure_signature(inner_reason)
+  end
+
+  def failure_signature({:adapter_error, _reason}) do
+    %{type: :adapter_error, check_name: nil}
+  end
+
+  def failure_signature({:ref_resolution_error, _reason}) do
+    %{type: :ref_resolution_error, check_name: nil}
+  end
+
+  def failure_signature({:stutter_execution_failed, _reason}) do
+    %{type: :stutter_execution_failed, check_name: nil}
+  end
+
+  def failure_signature(other) when is_tuple(other) do
+    # Extract first element as type for unknown tuple formats
+    %{type: elem(other, 0), check_name: nil}
+  end
+
+  def failure_signature(_other) do
+    %{type: :unknown, check_name: nil}
+  end
+
+  @doc """
+  Check if two failure reasons are equivalent.
+
+  Two failures are equivalent if they have the same type and
+  (for check failures) the same check name.
+  """
+  @spec equivalent_failures?(term(), term()) :: boolean()
+  def equivalent_failures?(reason1, reason2) do
+    sig1 = failure_signature(reason1)
+    sig2 = failure_signature(reason2)
+
+    sig1.type == sig2.type and sig1.check_name == sig2.check_name
+  end
+
+  @doc """
   Shrink a failing command sequence.
 
   ## Parameters
@@ -84,6 +176,7 @@ defmodule PropertyDamage.Shrinker do
   - `sequence` - The original failing sequence (or list for backwards compatibility)
   - `opts` - Shrinking options:
     - `:failed_at_index` - Index where the failure occurred (required)
+    - `:failure_reason` - Original failure reason for equivalence checking (optional but recommended)
     - `:model` - Model module (required)
     - `:adapter` - Adapter module (required)
     - `:adapter_config` - Config for adapter setup (default: %{})
@@ -123,12 +216,21 @@ defmodule PropertyDamage.Shrinker do
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     config = Keyword.get(opts, :config, Config.new())
     event_queue = Keyword.get(opts, :event_queue)
+    original_failure = Keyword.get(opts, :failure_reason)
 
     start_time = System.monotonic_time(:millisecond)
 
     # Get command list and truncate at failure point
     commands = Sequence.to_list(sequence)
     commands = Enum.take(commands, failed_at_index + 1)
+
+    # Compute the failure signature we need to preserve
+    original_signature =
+      if original_failure do
+        failure_signature(original_failure)
+      else
+        nil
+      end
 
     shrink_state = %{
       commands: commands,
@@ -138,7 +240,8 @@ defmodule PropertyDamage.Shrinker do
       config: config,
       event_queue: event_queue,
       iterations: 0,
-      start_time: start_time
+      start_time: start_time,
+      original_signature: original_signature
     }
 
     # Phase 1: Sequence shrinking
@@ -172,8 +275,17 @@ defmodule PropertyDamage.Shrinker do
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     config = Keyword.get(opts, :config, Config.new())
     event_queue = Keyword.get(opts, :event_queue)
+    original_failure = Keyword.get(opts, :failure_reason)
 
     start_time = System.monotonic_time(:millisecond)
+
+    # Compute the failure signature we need to preserve
+    original_signature =
+      if original_failure do
+        failure_signature(original_failure)
+      else
+        nil
+      end
 
     shrink_state = %{
       sequence: sequence,
@@ -184,7 +296,8 @@ defmodule PropertyDamage.Shrinker do
       event_queue: event_queue,
       iterations: 0,
       start_time: start_time,
-      failed_at_index: failed_at_index
+      failed_at_index: failed_at_index,
+      original_signature: original_signature
     }
 
     # Strategy 1: Try converting to linear (maybe race isn't needed)
@@ -226,6 +339,7 @@ defmodule PropertyDamage.Shrinker do
 
       if still_fails_branch?(linear_seq, state) do
         # Race not required - convert to linear and continue with linear shrinking
+        # Reconstruct failure_reason from original_signature for passing to shrink_linear
         linear_result =
           shrink_linear(linear_seq,
             failed_at_index: state.failed_at_index,
@@ -233,7 +347,8 @@ defmodule PropertyDamage.Shrinker do
             adapter: state.adapter,
             adapter_config: state.adapter_config,
             config: state.config,
-            event_queue: state.event_queue
+            event_queue: state.event_queue,
+            failure_reason: reconstruct_failure_reason(state.original_signature)
           )
 
         %{
@@ -558,8 +673,17 @@ defmodule PropertyDamage.Shrinker do
            adapter_config: state.adapter_config,
            event_queue: state.event_queue
          ) do
-      {:ok, result} -> not result.success
-      {:error, _} -> true
+      {:ok, result} ->
+        if result.success do
+          false
+        else
+          # Check failure equivalence if we have an original signature
+          check_failure_equivalence(result.failure_reason, state.original_signature)
+        end
+
+      {:error, _} ->
+        # Execution errors are only equivalent if original was also an error
+        state.original_signature == nil or state.original_signature.type == :adapter_error
     end
   end
 
@@ -568,9 +692,54 @@ defmodule PropertyDamage.Shrinker do
            adapter_config: state.adapter_config,
            event_queue: state.event_queue
          ) do
-      {:ok, result} -> not result.success
-      {:error, _} -> true
+      {:ok, result} ->
+        if result.success do
+          false
+        else
+          # Check failure equivalence if we have an original signature
+          check_failure_equivalence(result.failure_reason, state.original_signature)
+        end
+
+      {:error, _} ->
+        # Execution errors are only equivalent if original was also an error
+        state.original_signature == nil or state.original_signature.type == :adapter_error
     end
+  end
+
+  # Check if a failure matches the original signature
+  defp check_failure_equivalence(_failure_reason, nil) do
+    # No original signature - accept any failure (backwards compatibility)
+    true
+  end
+
+  defp check_failure_equivalence(failure_reason, original_signature) do
+    new_signature = failure_signature(failure_reason)
+
+    # Must have same type
+    if new_signature.type != original_signature.type do
+      false
+    else
+      # For check failures, must have same check name
+      case original_signature.type do
+        :check_failed ->
+          new_signature.check_name == original_signature.check_name
+
+        _ ->
+          true
+      end
+    end
+  end
+
+  # Reconstruct a minimal failure_reason from a signature for passing through
+  # This is used when we need to pass failure_reason to nested shrink calls
+  defp reconstruct_failure_reason(nil), do: nil
+
+  defp reconstruct_failure_reason(%{type: :check_failed, check_name: check_name}) do
+    {:check_failed, check_name, ""}
+  end
+
+  defp reconstruct_failure_reason(%{type: type}) do
+    {type, nil}
   end
 
   defp exceeded_limits?(state) do
