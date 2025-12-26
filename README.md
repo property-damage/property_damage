@@ -9,6 +9,8 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Stateful Testing**: Generate sequences of commands, not just individual inputs
 - **Automatic Shrinking**: Failed sequences are minimized to the smallest reproduction
 - **Symbolic References**: Commands can reference results from earlier commands
+- **Parallel Execution**: Branching sequences for race condition detection
+- **Linearization Checking**: Verify parallel results are sequentially explainable
 - **Idempotency Testing**: Built-in stutter testing for retry safety
 - **Rich Failure Reports**: Comprehensive diagnostics when tests fail
 - **Failure Persistence**: Save failures for later analysis and regression testing
@@ -419,6 +421,96 @@ defmodule MyModel do
 end
 ```
 
+## Parallel Execution
+
+PropertyDamage supports branching sequences for detecting race conditions and
+concurrent bugs. Commands can execute in parallel branches, and the framework
+verifies that results are linearizable.
+
+### Enabling Branching Sequences
+
+```elixir
+PropertyDamage.run(
+  model: MyApp.TestModel,
+  adapter: MyApp.TestAdapter,
+  max_commands: 50,
+  max_runs: 100,
+  branching: [
+    branch_probability: 0.3,   # Probability of creating branch points
+    max_branches: 3,           # Max parallel branches
+    max_branch_length: 5,      # Max commands per branch
+    min_prefix_length: 3       # Min commands before branching
+  ]
+)
+```
+
+### How It Works
+
+A branching sequence has three parts:
+
+1. **Prefix**: Commands executed sequentially before branching
+2. **Branches**: Parallel command lists executed concurrently
+3. **Suffix**: Commands executed after branches merge
+
+```
+Prefix:  [cmd1, cmd2]
+                |
+       +--------+--------+
+       |                 |
+Branch A: [cmd3a, cmd4a] | Branch B: [cmd3b]
+       |                 |
+       +--------+--------+
+                |
+Suffix: [cmd5]
+```
+
+### Linearization Checking
+
+After parallel execution, PropertyDamage verifies that the observed results
+can be explained by some sequential ordering of the commands. If no valid
+ordering exists, a `:linearization_failed` error is raised.
+
+```elixir
+alias PropertyDamage.Linearization
+
+# Check complexity before verification
+case Linearization.feasibility(branches) do
+  :ok -> IO.puts("Manageable linearization space")
+  {:warning, count} -> IO.puts("#{count} possible orderings")
+end
+
+# Count possible linearizations
+count = Linearization.linearization_count([[cmd1, cmd2], [cmd3]])
+# => 3 (possible orderings: [1,2,3], [1,3,2], [3,1,2])
+```
+
+### Shrinking Branching Sequences
+
+The shrinker handles branching sequences with special strategies:
+
+1. **Convert to linear**: If race not required for failure
+2. **Remove branches**: Eliminate unnecessary parallel branches
+3. **Shrink branches**: Remove commands within individual branches
+4. **Shrink prefix/suffix**: Remove non-essential sequential commands
+
+### Ref Constraints in Parallel Execution
+
+Symbolic references follow strict rules in branching sequences:
+
+- Refs from prefix can be used in any branch
+- Refs from one branch **cannot** be used in another branch
+- Refs from branches can be used in suffix
+
+```elixir
+# Valid: prefix ref used in branch
+prefix = [CreateUser.new()]  # Creates :user_ref
+branches = [[GetUser.new(user_ref: :user_ref)], [UpdateUser.new(user_ref: :user_ref)]]
+
+# Invalid: cross-branch ref usage
+branches = [[CreateItem.new()],  # Creates :item_ref
+            [ViewItem.new(item_ref: :item_ref)]]  # ERROR: :item_ref not visible
+```
+
 ## Architecture
 
 ```
@@ -427,15 +519,17 @@ PropertyDamage
 │   ├── Ref          - Symbolic references
 │   ├── Command      - Operation behaviour
 │   ├── Projection   - State reducer behaviour
+│   ├── Sequence     - Linear and branching command sequences
 │   └── Model        - Test model behaviour
 │
 ├── Execution (Tier 1)
 │   ├── Adapter      - SUT bridge behaviour
-│   ├── Executor     - Command execution
+│   ├── Executor     - Command execution (linear and parallel)
+│   ├── Linearization - Parallel execution verification
 │   └── EventQueue   - Event coordination
 │
 ├── Shrinking (Tier 2)
-│   ├── Shrinker     - Sequence minimization
+│   ├── Shrinker     - Sequence minimization (supports branching)
 │   ├── Validator    - Sequence validation
 │   └── Graph        - Dependency analysis
 │
