@@ -23,6 +23,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Diff Debugging**: Compare passing vs failing runs to find divergence
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **Mutation Testing**: Verify your tests catch bugs by injecting faults
+- **Invariant Suggestions**: Get AI-powered suggestions for missing checks
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 
 ## Installation
@@ -1250,6 +1251,110 @@ for suggestion <- analysis.suggestions do
 end
 ```
 
+## Property & Invariant Suggestions
+
+Automatically analyze your model and get suggestions for missing checks and invariants.
+
+### Basic Usage
+
+```elixir
+# Analyze a model
+suggestions = PropertyDamage.Suggestions.analyze(MyModel)
+
+# Print formatted suggestions
+IO.puts(PropertyDamage.Suggestions.format(suggestions))
+
+# Get high-priority suggestions only
+high_priority = PropertyDamage.Suggestions.high_priority(suggestions)
+
+# Filter by field or event
+balance_suggestions = PropertyDamage.Suggestions.for_field(suggestions, :balance)
+```
+
+### What It Detects
+
+The suggestion system examines your events and existing checks to identify gaps:
+
+| Pattern Type | Fields Detected | Suggested Checks |
+|--------------|-----------------|------------------|
+| Numeric | `balance`, `amount`, `total`, `count`, `price` | Non-negative, reasonable bounds |
+| Currency | `currency`, `currency_code` | Currency consistency across operations |
+| Reference | `*_ref`, `*_id` | Reference exists, reference valid |
+| Status | `status`, `state`, `phase` | Valid status values, valid transitions |
+| Timestamp | `*_at`, `created_at`, `updated_at` | Timestamp ordering, not future |
+
+### Example Output
+
+```
+╔════════════════════════════════════════════════════════════════════════╗
+║             PROPERTY & INVARIANT SUGGESTIONS                           ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+Model: MyApp.TestModel
+Events analyzed: 12
+Existing checks: 3
+Field coverage: 40%
+
+Suggestions: 8 total
+  ▸ 2 high priority (should address)
+  ▸ 4 medium priority (consider adding)
+  ▸ 2 low priority (nice to have)
+
+┌─ Suggestions ──────────────────────────────────────────────────────────┐
+│ ▶ HIGH PRIORITY ───────────────────────────────────────────────────────│
+│   1. Add non-negative check for balance (balance)                      │
+│   2. Add currency consistency check (currency)                         │
+│                                                                        │
+│ ▶ MEDIUM PRIORITY ─────────────────────────────────────────────────────│
+│   3. Add reference existence check for account_ref (account_ref)       │
+│   4. Add status transition validation for status (status)              │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Output Formats
+
+```elixir
+# Terminal - ASCII boxes (default)
+PropertyDamage.Suggestions.format(suggestions, :terminal)
+
+# Markdown - tables with example code
+PropertyDamage.Suggestions.format(suggestions, :markdown)
+
+# JSON - for programmatic analysis
+PropertyDamage.Suggestions.format(suggestions, :json)
+```
+
+### Options
+
+```elixir
+PropertyDamage.Suggestions.analyze(MyModel,
+  # Include low-priority suggestions (default: true)
+  include_low_priority: true,
+
+  # Maximum suggestions to return (default: 20)
+  max_suggestions: 10,
+
+  # Focus on specific areas (default: :all)
+  # Options: :all, :numeric, :references, :consistency
+  focus: :numeric
+)
+```
+
+### Integration with Mutation Testing
+
+Use suggestions to improve your mutation testing score:
+
+```elixir
+# Run mutation testing
+{:ok, mutation_report} = PropertyDamage.Mutation.run(model: MyModel, adapter: MyAdapter)
+
+# If score is low, get suggestions for improvement
+if mutation_report.mutation_score < 0.8 do
+  suggestions = PropertyDamage.Suggestions.analyze(MyModel)
+  IO.puts(PropertyDamage.Suggestions.format(suggestions, :markdown))
+end
+```
+
 ## Architecture
 
 ```
@@ -1309,6 +1414,12 @@ PropertyDamage
 │   ├── Analysis     - Weakness detection
 │   ├── Formatter    - Output formatting
 │   └── Operators    - Value, Omission, Status, Event, Boundary
+│
+├── Suggestions
+│   ├── Suggestions  - Main API (analyze, format, high_priority)
+│   ├── Analyzer     - Model analysis and suggestion generation
+│   ├── Patterns     - Pattern detection for fields and events
+│   └── Formatter    - Output formatting (terminal, markdown, json)
 │
 └── Utilities
     ├── Persistence  - Save/load failures
