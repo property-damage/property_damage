@@ -24,6 +24,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **Mutation Testing**: Verify your tests catch bugs by injecting faults
 - **Invariant Suggestions**: Get AI-powered suggestions for missing checks
+- **Failure Intelligence**: Pattern detection, similarity analysis, and fix verification
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 
 ## Installation
@@ -1355,6 +1356,188 @@ if mutation_report.mutation_score < 0.8 do
 end
 ```
 
+## Failure Intelligence
+
+Analyze, cluster, and verify fixes for failures using fingerprinting and similarity detection.
+
+### Pattern Detection
+
+When you have multiple failures, identify patterns to find root causes:
+
+```elixir
+# Analyze a set of failures
+failures = [failure1, failure2, failure3, ...]
+analysis = PropertyDamage.FailureIntelligence.analyze(failures)
+
+IO.puts(analysis.pattern_summary)
+# => "Analyzed 15 failures:
+#     - 3 distinct patterns (12 failures)
+#     - 3 unique failures (no pattern match)
+#
+#     Top patterns:
+#       - Check failure in :balance_valid during DebitAccount (5 occurrences)
+#       - Invariant violation during CreditAccount (4 occurrences)"
+
+# Get individual clusters
+for cluster <- analysis.clusters do
+  IO.puts("Pattern: #{cluster.pattern.description}")
+  IO.puts("Occurrences: #{cluster.size}")
+end
+```
+
+### Similarity Detection
+
+Compare failures to identify duplicates and related issues:
+
+```elixir
+# Check if two failures are similar
+if PropertyDamage.FailureIntelligence.similar?(failure1, failure2) do
+  IO.puts("These failures likely have the same root cause")
+end
+
+# Get similarity score (0.0 to 1.0)
+score = PropertyDamage.FailureIntelligence.similarity_score(failure1, failure2)
+# => 0.85
+
+# Detailed comparison
+comparison = PropertyDamage.FailureIntelligence.compare(failure1, failure2)
+# => %{
+#   score: 0.85,
+#   breakdown: %{failure_type: 1.0, check_name: 1.0, command_type: 0.8, ...},
+#   is_similar: true
+# }
+
+# Find similar failures from a list
+similar = PropertyDamage.FailureIntelligence.find_similar(new_failure, known_failures,
+  threshold: 0.80,
+  limit: 5
+)
+```
+
+### Fingerprinting
+
+Fingerprints capture the essential characteristics of a failure:
+
+```elixir
+# Get a fingerprint for quick comparison
+fingerprint = PropertyDamage.FailureIntelligence.fingerprint(failure)
+# => %Fingerprint{
+#   failure_type: :check_failed,
+#   check_name: :balance_non_negative,
+#   command_type: DebitAccount,
+#   event_types: [AccountDebited],
+#   sequence_shape: [CreateAccount, CreditAccount, DebitAccount],
+#   error_category: :check_violation,
+#   ...
+# }
+
+# Get a short hash for display
+hash = PropertyDamage.FailureIntelligence.fingerprint_hash(failure)
+# => "a1b2c3d4"
+
+# Group failures by fingerprint
+groups = PropertyDamage.FailureIntelligence.group_by_fingerprint(failures)
+for {hash, group} <- groups do
+  IO.puts("Hash #{hash}: #{length(group)} failures")
+end
+
+# Find potential duplicates (> 90% similar)
+duplicates = PropertyDamage.FailureIntelligence.find_duplicates(failures)
+for {f1, f2, score} <- duplicates do
+  IO.puts("Seeds #{f1.seed} and #{f2.seed} are #{score * 100}% similar")
+end
+```
+
+### Fix Verification
+
+When you believe a bug is fixed, verify the fix is robust:
+
+```elixir
+result = PropertyDamage.FailureIntelligence.verify_fix(failure, MyModel,
+  adapter: MyAdapter,
+  adapter_config: %{base_url: "http://localhost:4000"},
+  max_variations: 20  # Test 20 seed variations
+)
+
+case result.status do
+  :verified ->
+    IO.puts("Fix verified with #{result.confidence * 100}% confidence")
+
+  :still_failing ->
+    IO.puts("Original failure still reproduces!")
+
+  :partially_fixed ->
+    IO.puts("Fix incomplete. #{result.variations_failed} variations still fail")
+
+  :flaky ->
+    IO.puts("Intermittent failures detected. May be timing-related.")
+end
+
+# Format for display
+IO.puts(PropertyDamage.FailureIntelligence.format_verification(result))
+```
+
+### Verification Result
+
+```elixir
+%{
+  status: :verified | :still_failing | :partially_fixed | :flaky,
+  original_seed: 12345,
+  original_passes: true,
+  variations_run: 20,
+  variations_passed: 18,
+  variations_failed: 2,
+  failed_variations: [12346, 12400],
+  confidence: 0.95,
+  summary: "Fix verified! Original seed and all 18 variations pass."
+}
+```
+
+### Quick Checks
+
+```elixir
+# Quick check if a seed still fails
+if PropertyDamage.FailureIntelligence.still_fails?(12345, MyModel, MyAdapter) do
+  IO.puts("Bug not fixed yet!")
+end
+
+# Verify multiple fixes at once
+results = PropertyDamage.FailureIntelligence.verify_fixes(failures, MyModel,
+  adapter: MyAdapter
+)
+for {failure, result} <- results do
+  IO.puts("Seed #{failure.seed}: #{result.status}")
+end
+```
+
+### Example Workflow
+
+```elixir
+# 1. Collect failures from test runs
+failures = collect_failures_from_ci()
+
+# 2. Analyze to find patterns
+analysis = PropertyDamage.FailureIntelligence.analyze(failures)
+IO.puts("Found #{length(analysis.clusters)} distinct failure patterns")
+
+# 3. Work on the most common pattern first
+if pattern = analysis.most_common_pattern do
+  IO.puts("Most common: #{pattern.description}")
+end
+
+# 4. After fixing, verify the fix
+{:ok, fixed_failure} = PropertyDamage.load_failure("failures/issue_123.pd")
+result = PropertyDamage.FailureIntelligence.verify_fix(fixed_failure, MyModel,
+  adapter: MyAdapter,
+  max_variations: 50
+)
+
+if result.status == :verified do
+  IO.puts("Fix confirmed! Safe to merge.")
+  PropertyDamage.delete_failure("failures/issue_123.pd")
+end
+```
+
 ## Architecture
 
 ```
@@ -1420,6 +1603,13 @@ PropertyDamage
 │   ├── Analyzer     - Model analysis and suggestion generation
 │   ├── Patterns     - Pattern detection for fields and events
 │   └── Formatter    - Output formatting (terminal, markdown, json)
+│
+├── FailureIntelligence
+│   ├── FailureIntelligence - Main API (analyze, similar?, verify_fix)
+│   ├── Fingerprint         - Extract comparable features from failures
+│   ├── Similarity          - Compare fingerprints and compute scores
+│   ├── Patterns            - Cluster failures and detect patterns
+│   └── Verification        - Verify fixes with seed variations
 │
 └── Utilities
     ├── Persistence  - Save/load failures
