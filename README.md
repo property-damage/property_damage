@@ -21,6 +21,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Load Testing**: Generate realistic load using SPBT traffic patterns
 - **Visual Diagrams**: Sequence diagrams in Mermaid, PlantUML, WebSequence formats
 - **Diff Debugging**: Compare passing vs failing runs to find divergence
+- **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 
 ## Installation
@@ -973,6 +974,173 @@ Summary: Divergence at command 2: Withdraw. Events differ.
 | State changes | Field values that differ |
 | Missing commands | Commands present in one trace but not other |
 
+## Failure Export Hub
+
+Convert failure reports into portable artifacts for sharing, regression testing, and interactive exploration.
+
+### Export Formats
+
+| Format | Output | Use Case |
+|--------|--------|----------|
+| ExUnit | `.exs` test file | CI regression protection |
+| Elixir Script | `.exs` standalone | Elixir developers |
+| Bash/curl Script | `.sh` with curl | Any developer with a shell |
+| Python Script | `.py` with requests | Python teams |
+| LiveBook | `.livemd` notebook | Interactive debugging |
+
+### Basic Usage
+
+```elixir
+{:error, failure} = PropertyDamage.run(model: MyModel, adapter: MyAdapter)
+
+# Generate ExUnit regression test
+test_code = PropertyDamage.Export.to_exunit(failure)
+File.write!("test/regressions/seed_#{failure.seed}_test.exs", test_code)
+
+# Generate standalone scripts
+elixir_script = PropertyDamage.Export.to_script(failure, :elixir,
+  base_url: "http://localhost:4000",
+  adapter: MyHTTPAdapter
+)
+
+curl_script = PropertyDamage.Export.to_script(failure, :curl,
+  base_url: "http://localhost:4000",
+  adapter: MyHTTPAdapter
+)
+
+python_script = PropertyDamage.Export.to_script(failure, :python,
+  base_url: "http://localhost:4000",
+  adapter: MyHTTPAdapter
+)
+
+# Generate LiveBook notebook
+notebook = PropertyDamage.Export.to_livebook(failure,
+  base_url: "http://localhost:4000",
+  adapter: MyHTTPAdapter
+)
+```
+
+### File Operations
+
+```elixir
+# Save single format
+{:ok, path} = PropertyDamage.Export.save(failure, "exports/", :exunit)
+# => {:ok, "exports/reproduce_512902757.exs"}
+
+{:ok, path} = PropertyDamage.Export.save(failure, "exports/", {:script, :curl},
+  base_url: "http://localhost:4000",
+  adapter: MyHTTPAdapter
+)
+# => {:ok, "exports/reproduce_512902757.sh"}
+
+# Save all formats at once
+{:ok, paths} = PropertyDamage.Export.save_all(failure, "exports/",
+  base_url: "http://localhost:4000",
+  adapter: MyHTTPAdapter,
+  script_languages: [:elixir, :curl, :python]
+)
+# => {:ok, %{
+#   exunit: "exports/reproduce_512902757.exs",
+#   livebook: "exports/reproduce_512902757.livemd",
+#   script_elixir: "exports/reproduce_512902757.exs",
+#   script_curl: "exports/reproduce_512902757.sh",
+#   script_python: "exports/reproduce_512902757.py"
+# }}
+```
+
+### HTTPSpec for Script Generation
+
+For scripts to make HTTP calls, your adapter needs to implement `http_spec/2`:
+
+```elixir
+defmodule MyHTTPAdapter do
+  @behaviour PropertyDamage.Adapter
+
+  alias PropertyDamage.Export.HTTPSpec
+
+  # Standard adapter callbacks...
+  def execute(cmd, ctx), do: # ...
+
+  # Optional: HTTP mapping for export
+  def http_spec(%CreateAccount{currency: curr}, _ctx) do
+    %HTTPSpec{
+      method: :post,
+      path: "/api/accounts",
+      body: %{currency: curr}
+    }
+  end
+
+  def http_spec(%CreditAccount{account_ref: ref, amount: amt}, _ctx) do
+    %HTTPSpec{
+      method: :post,
+      path: "/api/accounts/:account_id/credit",
+      path_params: %{account_id: ref},
+      body: %{amount: amt}
+    }
+  end
+
+  def http_spec(%DebitAccount{account_ref: ref, amount: amt}, _ctx) do
+    %HTTPSpec{
+      method: :post,
+      path: "/api/accounts/:account_id/debit",
+      path_params: %{account_id: ref},
+      body: %{amount: amt}
+    }
+  end
+end
+```
+
+### LiveBook Features
+
+Generated LiveBook notebooks include:
+
+- **Setup section**: Installs dependencies (Req, Jason)
+- **State tracking**: Tracks refs and model state alongside execution
+- **Step-by-step commands**: Each command in its own cell with HTTP call
+- **Failure marker**: Highlights the command that caused the failure
+- **Exploration section**: Space to experiment with variations
+
+```elixir
+# Exclude exploration section if not needed
+notebook = PropertyDamage.Export.to_livebook(failure,
+  base_url: "http://localhost:4000",
+  adapter: MyHTTPAdapter,
+  include_exploration: false
+)
+```
+
+### Example Generated Script (curl)
+
+```bash
+#!/bin/bash
+# Failure Reproduction Script
+# Generated: 2025-12-26T14:30:00Z
+# Failure: NonNegativeBalance check failed
+# Seed: 512902757
+
+set -e
+BASE_URL="${BASE_URL:-http://localhost:4000}"
+
+echo "=== Step 1: CreateAccount ==="
+RESP1=$(curl -s -X POST "$BASE_URL/api/accounts" \
+  -H "Content-Type: application/json" \
+  -d '{"currency": "USD"}')
+echo "$RESP1"
+REF_account_0=$(echo "$RESP1" | jq -r '.data.id // .id // empty')
+
+echo "=== Step 2: CreditAccount ==="
+RESP2=$(curl -s -X POST "$BASE_URL/api/accounts/$REF_account_0/credit" \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 100}')
+echo "$RESP2"
+
+echo "=== Step 3: DebitAccount (FAILURE POINT) ==="
+RESP3=$(curl -s -X POST "$BASE_URL/api/accounts/$REF_account_0/debit" \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 200}')
+echo "$RESP3"
+```
+
 ## Architecture
 
 ```
@@ -1012,6 +1180,17 @@ PropertyDamage
 ├── Debugging
 │   ├── Diagram      - Visual sequence diagrams
 │   └── Diff         - Trace comparison and diffing
+│
+├── Export
+│   ├── Export       - Main API (to_exunit, to_script, to_livebook)
+│   ├── HTTPSpec     - HTTP call description struct
+│   ├── ExUnit       - ExUnit test generation
+│   ├── Script       - Script dispatcher
+│   ├── Script.Elixir - Elixir + Req scripts
+│   ├── Script.Curl  - Bash + curl scripts
+│   ├── Script.Python - Python + requests scripts
+│   ├── LiveBook     - LiveBook notebook generation
+│   └── Common       - Shared utilities
 │
 └── Utilities
     ├── Persistence  - Save/load failures
