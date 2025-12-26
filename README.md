@@ -1611,6 +1611,106 @@ if result.status == :verified do
 end
 ```
 
+## Automatic Regression Management
+
+Automatically save failures to seed libraries and generate regression tests when bugs are found.
+
+### Basic Usage
+
+Use the `:regression` option in `PropertyDamage.run/1`:
+
+```elixir
+PropertyDamage.run(
+  model: MyModel,
+  adapter: MyAdapter,
+  regression: [
+    save_failures: "failures/",           # Save failure files
+    seed_library: "seeds.json",           # Add to seed library
+    generate_tests: "test/regressions/",  # Generate ExUnit tests
+    tags: [:auto_detected],               # Tags for seed library
+    dedup: true                           # Skip similar failures
+  ]
+)
+```
+
+When a failure is found, PropertyDamage will automatically:
+1. Save the failure file to the specified directory
+2. Add the seed to your seed library
+3. Generate an ExUnit regression test
+
+### Deduplication
+
+Avoid noise from multiple runs finding the same bug:
+
+```elixir
+PropertyDamage.run(
+  model: MyModel,
+  adapter: MyAdapter,
+  regression: [
+    save_failures: "failures/",
+    dedup: true,                 # Enable deduplication
+    dedup_threshold: 0.90        # 90% similarity threshold
+  ]
+)
+```
+
+### Using Handlers Directly
+
+For more control, use handlers with `:on_failure`:
+
+```elixir
+alias PropertyDamage.Regression
+
+# Single handler
+PropertyDamage.run(
+  model: MyModel,
+  adapter: MyAdapter,
+  on_failure: Regression.save_failure("failures/")
+)
+
+# Compose multiple handlers
+PropertyDamage.run(
+  model: MyModel,
+  adapter: MyAdapter,
+  on_failure: Regression.compose([
+    Regression.save_failure("failures/"),
+    Regression.add_to_library("seeds.json", tags: [:critical]),
+    fn report -> Logger.warning("Failure found: #{report.seed}") end
+  ])
+)
+```
+
+### Batch Processing
+
+Process multiple failures at once with deduplication:
+
+```elixir
+failures = [failure1, failure2, failure3]
+
+results = PropertyDamage.Regression.process_batch(failures,
+  seed_library: "seeds.json",
+  dedup: true,
+  dedup_threshold: 0.90
+)
+
+summary = PropertyDamage.Regression.batch_summary(results)
+IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `:save_failures` | Directory to save failure files |
+| `:seed_library` | Path to seed library JSON file |
+| `:generate_tests` | Directory for ExUnit test files |
+| `:tags` | Tags for seed library entries (default: `[:auto_detected]`) |
+| `:description` | Description for seed library entries |
+| `:dedup` | Enable deduplication (default: false) |
+| `:dedup_threshold` | Similarity threshold (default: 0.90) |
+| `:dedup_source` | Where to check: `:failures`, `:library`, or `:both` |
+| `:verbose` | Print actions taken (default: false) |
+
 ## Architecture
 
 ```
@@ -1683,6 +1783,9 @@ PropertyDamage
 │   ├── Similarity          - Compare fingerprints and compute scores
 │   ├── Patterns            - Cluster failures and detect patterns
 │   └── Verification        - Verify fixes with seed variations
+│
+├── Regression
+│   └── Regression          - Automatic regression test management
 │
 └── Utilities
     ├── Persistence  - Save/load failures

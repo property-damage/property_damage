@@ -184,6 +184,7 @@ defmodule PropertyDamage do
   - `:shrink` - Whether to shrink failing sequences (default: true)
   - `:shrinker_config` - ShrinkerConfig struct for tuning shrinking
   - `:on_failure` - Callback function receiving failure_report (default: nil)
+  - `:regression` - Keyword list for automatic regression test management (see below)
   - `:verbose` - Print progress and configuration (default: false)
   - `:validate` - Run configuration validation first (default: true)
   - `:branching` - Keyword list for parallel branching (see below)
@@ -217,6 +218,20 @@ defmodule PropertyDamage do
   Stutter testing verifies that retrying commands produces consistent results
   (idempotency). Retry events are captured but not applied to projections.
 
+  ## Regression Options
+
+  Pass `regression: [...]` to automatically save failures for regression testing:
+
+  - `:save_failures` - Directory to save failure files
+  - `:seed_library` - Path to seed library JSON file
+  - `:generate_tests` - Directory to generate ExUnit test files
+  - `:tags` - Tags to add to seed library entries (default: `[:auto_detected]`)
+  - `:dedup` - Skip if similar failure exists (default: false)
+  - `:dedup_threshold` - Similarity threshold for dedup (default: 0.90)
+  - `:verbose` - Print regression actions (default: false)
+
+  This option integrates with `:on_failure` - both can be used together.
+
   ## Returns
 
   - `{:ok, stats}` - All runs passed
@@ -244,6 +259,18 @@ defmodule PropertyDamage do
           IO.puts("Failed at command \#{failure_report.failed_at_index}")
         end
       )
+
+      # With automatic regression management
+      PropertyDamage.run(
+        model: MyModel,
+        adapter: MyAdapter,
+        regression: [
+          save_failures: "failures/",
+          seed_library: "seeds.json",
+          generate_tests: "test/regressions/",
+          dedup: true
+        ]
+      )
   """
   @spec run(keyword()) :: {:ok, stats()} | {:error, failure_report()}
   def run(opts) do
@@ -257,7 +284,7 @@ defmodule PropertyDamage do
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     shrink = Keyword.get(opts, :shrink, true)
     shrinker_config = Keyword.get(opts, :shrinker_config, ShrinkerConfig.new())
-    on_failure = Keyword.get(opts, :on_failure)
+    on_failure = build_on_failure_callback(opts)
     verbose = Keyword.get(opts, :verbose, false)
     validate = Keyword.get(opts, :validate, true)
     branching = Keyword.get(opts, :branching)
@@ -577,6 +604,35 @@ defmodule PropertyDamage do
   defp stutter_failure?({:idempotency_violation, _}), do: true
   defp stutter_failure?({:stutter_execution_failed, _}), do: true
   defp stutter_failure?(_), do: false
+
+  # Build the on_failure callback from :on_failure and :regression options
+  defp build_on_failure_callback(opts) do
+    on_failure = Keyword.get(opts, :on_failure)
+    regression = Keyword.get(opts, :regression)
+
+    cond do
+      # Both options specified - compose them
+      on_failure != nil and regression != nil ->
+        regression_handler = PropertyDamage.Regression.handler(regression)
+
+        fn failure_report ->
+          on_failure.(failure_report)
+          regression_handler.(failure_report)
+        end
+
+      # Only on_failure specified
+      on_failure != nil ->
+        on_failure
+
+      # Only regression specified
+      regression != nil ->
+        PropertyDamage.Regression.handler(regression)
+
+      # Neither specified
+      true ->
+        nil
+    end
+  end
 
   @doc """
   Attempt further shrinking on an existing failure report.
