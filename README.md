@@ -26,6 +26,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Invariant Suggestions**: Get AI-powered suggestions for missing checks
 - **Failure Intelligence**: Pattern detection, similarity analysis, and fix verification
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
+- **Telemetry Dashboard**: Real-time monitoring of test runs with LiveView integration
 
 ## Installation
 
@@ -1711,6 +1712,137 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 | `:dedup_source` | Where to check: `:failures`, `:library`, or `:both` |
 | `:verbose` | Print actions taken (default: false) |
 
+## Telemetry Dashboard
+
+PropertyDamage emits telemetry events during test execution that can be used for real-time monitoring via a LiveView dashboard.
+
+### Setup
+
+1. **Add the Collector to your application supervisor:**
+
+```elixir
+# In your application.ex
+def start(_type, _args) do
+  children = [
+    # ... your other children
+    PropertyDamage.Telemetry.Collector
+  ]
+
+  opts = [strategy: :one_for_one, name: MyApp.Supervisor]
+  Supervisor.start_link(children, opts)
+end
+```
+
+2. **Create a LiveView for the dashboard:**
+
+```elixir
+defmodule MyAppWeb.PropertyDamageDashboardLive do
+  use MyAppWeb, :live_view
+
+  alias PropertyDamage.Telemetry.{Collector, Dashboard}
+
+  def mount(_params, _session, socket) do
+    if connected?(socket) do
+      Collector.subscribe()
+    end
+
+    state = Collector.get_state()
+
+    {:ok,
+     assign(socket,
+       page_title: "PropertyDamage Dashboard",
+       state: state,
+       view_mode: :overview
+     )}
+  end
+
+  def handle_info({:telemetry_update, _event_type, _data, state}, socket) do
+    {:noreply, assign(socket, :state, state)}
+  end
+
+  def handle_event("reset", _params, socket) do
+    Collector.reset()
+    {:noreply, socket}
+  end
+
+  def handle_event("set_view_mode", %{"mode" => mode}, socket) do
+    {:noreply, assign(socket, :view_mode, String.to_existing_atom(mode))}
+  end
+
+  def render(assigns) do
+    Dashboard.render(assigns)
+  end
+end
+```
+
+3. **Add a route:**
+
+```elixir
+# In your router.ex
+live "/property-damage", PropertyDamageDashboardLive
+```
+
+### Dashboard Views
+
+| View | Description |
+|------|-------------|
+| **Overview** | Cards showing runs/commands/checks/shrinking stats, current run progress, pass rate |
+| **Commands** | Table with command counts, average timing, total timing |
+| **Checks** | Table with check pass/fail counts and rates |
+| **Events** | Timeline of recent telemetry events |
+
+### Telemetry Events
+
+PropertyDamage emits these telemetry events:
+
+| Event | Description |
+|-------|-------------|
+| `[:property_damage, :run, :start]` | Test run started |
+| `[:property_damage, :run, :stop]` | Test run completed |
+| `[:property_damage, :run, :exception]` | Test run crashed |
+| `[:property_damage, :sequence, :start]` | Sequence execution started |
+| `[:property_damage, :sequence, :stop]` | Sequence execution completed |
+| `[:property_damage, :command, :start]` | Command execution started |
+| `[:property_damage, :command, :stop]` | Command execution completed |
+| `[:property_damage, :check, :start]` | Check evaluation started |
+| `[:property_damage, :check, :stop]` | Check evaluation completed |
+| `[:property_damage, :shrink, :start]` | Shrinking started |
+| `[:property_damage, :shrink, :iteration]` | Shrink iteration completed |
+| `[:property_damage, :shrink, :stop]` | Shrinking completed |
+
+### Custom Telemetry Handlers
+
+You can attach custom handlers to these events:
+
+```elixir
+:telemetry.attach(
+  "my-metrics-handler",
+  [:property_damage, :command, :stop],
+  fn _event, measurements, metadata, _config ->
+    # Record command execution time to your metrics system
+    MyMetrics.histogram(
+      "property_damage.command.duration",
+      measurements.duration,
+      tags: [command: metadata.command]
+    )
+  end,
+  nil
+)
+```
+
+### Collector API
+
+```elixir
+# Get current aggregated state
+state = PropertyDamage.Telemetry.Collector.get_state()
+
+# Subscribe to updates (for LiveView)
+PropertyDamage.Telemetry.Collector.subscribe()
+
+# Reset all counters
+PropertyDamage.Telemetry.Collector.reset()
+```
+
 ## Architecture
 
 ```
@@ -1786,6 +1918,11 @@ PropertyDamage
 │
 ├── Regression
 │   └── Regression          - Automatic regression test management
+│
+├── Telemetry
+│   ├── Telemetry    - Event emission API
+│   ├── Collector    - Aggregates events for dashboard
+│   └── Dashboard    - HTML rendering for LiveView
 │
 └── Utilities
     ├── Persistence  - Save/load failures
