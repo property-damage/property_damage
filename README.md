@@ -796,6 +796,33 @@ end
 | `ProcessKill` | Kill processes by name, pattern, or randomly |
 | `SlowIO` | Add artificial delay to I/O operations |
 
+#### Security Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `CertificateExpiry` | Simulate TLS certificate failures (expired, wrong host, self-signed, revoked)
+
+```elixir
+alias PropertyDamage.Nemesis.CertificateExpiry
+
+# Simulate expired certificate
+%CertificateExpiry{failure_type: :expired}
+
+# Simulate hostname mismatch
+%CertificateExpiry{failure_type: :wrong_host, target: :api}
+
+# In your adapter:
+def connect(host, port, opts) do
+  if CertificateExpiry.should_fail?() do
+    CertificateExpiry.get_ssl_error()  # Returns {:error, {:tls_alert, ...}}
+  else
+    :ssl.connect(host, port, opts)
+  end
+end
+```
+
+#### Process Operations (continued)
+
 ```elixir
 alias PropertyDamage.Nemesis.{ProcessKill, SlowIO}
 

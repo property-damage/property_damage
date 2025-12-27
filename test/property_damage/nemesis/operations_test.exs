@@ -10,7 +10,8 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
     ClockSkew,
     ProcessKill,
     ResourceExhaustion,
-    SlowIO
+    SlowIO,
+    CertificateExpiry
   }
 
   describe "NetworkLatency" do
@@ -478,6 +479,99 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
     end
   end
 
+  describe "CertificateExpiry" do
+    test "implements Nemesis behaviour" do
+      assert PropertyDamage.Nemesis.nemesis_module?(CertificateExpiry)
+    end
+
+    test "should_fail? returns false when no failure active" do
+      refute CertificateExpiry.should_fail?()
+      refute CertificateExpiry.should_fail?(:api)
+    end
+
+    test "inject enables certificate failure" do
+      command = %CertificateExpiry{failure_type: :expired, target: :all}
+      {:ok, events} = CertificateExpiry.inject(command, %{})
+
+      assert length(events) == 1
+      [event] = events
+      assert event.__struct__ == CertificateFailureInjected
+      assert event.failure_type == :expired
+
+      assert CertificateExpiry.active?()
+      assert CertificateExpiry.should_fail?()
+
+      # Clean up
+      CertificateExpiry.restore(command, %{})
+    end
+
+    test "inject with specific target only affects that target" do
+      command = %CertificateExpiry{failure_type: :expired, target: :api}
+      {:ok, _} = CertificateExpiry.inject(command, %{})
+
+      assert CertificateExpiry.should_fail?(:api)
+      refute CertificateExpiry.should_fail?(:database)
+
+      CertificateExpiry.restore(command, %{})
+    end
+
+    test "get_failure returns failure info" do
+      command = %CertificateExpiry{failure_type: :wrong_host}
+      {:ok, _} = CertificateExpiry.inject(command, %{})
+
+      failure = CertificateExpiry.get_failure()
+      assert failure.failure_type == :wrong_host
+      assert failure.error != nil
+
+      CertificateExpiry.restore(command, %{})
+    end
+
+    test "get_ssl_error returns realistic SSL error tuple" do
+      command = %CertificateExpiry{failure_type: :expired}
+      {:ok, _} = CertificateExpiry.inject(command, %{})
+
+      {:error, {alert_type, _message}} = CertificateExpiry.get_ssl_error()
+      assert alert_type == :tls_alert
+
+      CertificateExpiry.restore(command, %{})
+    end
+
+    test "failure_description returns human-readable description" do
+      command = %CertificateExpiry{failure_type: :self_signed}
+      {:ok, _} = CertificateExpiry.inject(command, %{})
+
+      desc = CertificateExpiry.failure_description()
+      assert desc =~ "Self-signed"
+
+      CertificateExpiry.restore(command, %{})
+    end
+
+    test "restore disables certificate failure" do
+      command = %CertificateExpiry{failure_type: :expired}
+      {:ok, _} = CertificateExpiry.inject(command, %{})
+
+      assert CertificateExpiry.active?()
+
+      {:ok, events} = CertificateExpiry.restore(command, %{})
+
+      refute CertificateExpiry.active?()
+      assert length(events) == 1
+      [event] = events
+      assert event.__struct__ == CertificateFailureRestored
+    end
+
+    test "new! generates valid commands with different failure types" do
+      generator = CertificateExpiry.new!(%{})
+      commands = Enum.take(StreamData.resize(generator, 10), 20)
+
+      failure_types = Enum.map(commands, & &1.failure_type) |> Enum.uniq()
+      assert length(failure_types) > 1
+
+      valid_types = [:expired, :not_yet_valid, :wrong_host, :self_signed, :revoked]
+      assert Enum.all?(failure_types, &(&1 in valid_types))
+    end
+  end
+
   describe "Integration with Nemesis module" do
     test "nemesis_module? correctly identifies all operations" do
       modules = [
@@ -489,7 +583,8 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
         ClockSkew,
         ProcessKill,
         ResourceExhaustion,
-        SlowIO
+        SlowIO,
+        CertificateExpiry
       ]
 
       for module <- modules do
@@ -508,7 +603,8 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
         %ClockSkew{},
         %ProcessKill{},
         %ResourceExhaustion{},
-        %SlowIO{}
+        %SlowIO{},
+        %CertificateExpiry{}
       ]
 
       for cmd <- commands do
