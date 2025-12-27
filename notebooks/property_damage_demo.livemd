@@ -1,8 +1,8 @@
-# PropertyDamage Livebook Demo
+# PropertyDamage Interactive Demo
 
 ```elixir
 Mix.install([
-  {:property_damage, path: "."},
+  {:property_damage, path: ".."},
   {:kino, "~> 0.12"},
   {:vega_lite, "~> 0.1"},
   {:kino_vega_lite, "~> 0.1"}
@@ -12,110 +12,332 @@ Mix.install([
 ## Introduction
 
 This notebook demonstrates PropertyDamage's Livebook integration for interactive
-exploration of stateful property-based testing results.
+exploration of stateful property-based testing. You'll learn how to:
 
-## Setup
+- Define models, commands, and projections
+- Run tests with live visualization
+- Analyze coverage and failures
+- Use chaos engineering with nemesis operations
 
-First, let's define a simple model and adapter for demonstration:
+## Part 1: Define a Simple Model
+
+Let's create a bank account model to demonstrate PropertyDamage concepts.
+
+### Events
+
+Events represent outcomes of operations:
 
 ```elixir
-defmodule Demo.Counter do
-  @moduledoc "A simple counter model for demonstration"
-
-  defstruct value: 0
-
-  def initial_state, do: %__MODULE__{}
-
-  def commands do
-    [Demo.Increment, Demo.Decrement, Demo.Reset]
-  end
-end
-
-defmodule Demo.Increment do
-  use PropertyDamage.Command
-
-  def generate(_state), do: StreamData.constant(%{})
-
-  def precondition(_state, _args), do: true
-
-  def run(_state, _args, _context), do: :increment
-
-  def next_state(state, _args, _result) do
-    %{state | value: state.value + 1}
-  end
-end
-
-defmodule Demo.Decrement do
-  use PropertyDamage.Command
-
-  def generate(_state), do: StreamData.constant(%{})
-
-  def precondition(state, _args), do: state.value > 0
-
-  def run(_state, _args, _context), do: :decrement
-
-  def next_state(state, _args, _result) do
-    %{state | value: state.value - 1}
-  end
-end
-
-defmodule Demo.Reset do
-  use PropertyDamage.Command
-
-  def generate(_state), do: StreamData.constant(%{})
-
-  def precondition(_state, _args), do: true
-
-  def run(_state, _args, _context), do: :reset
-
-  def next_state(_state, _args, _result) do
-    %Demo.Counter{}
-  end
-end
-
-defmodule Demo.Adapter do
-  @behaviour PropertyDamage.Adapter
-
-  def init(_opts), do: {:ok, %{value: 0}}
-
-  def execute(:increment, context) do
-    new_value = context.value + 1
-    {:ok, [%{type: :incremented, value: new_value}], %{context | value: new_value}}
+defmodule Demo.Events do
+  defmodule AccountCreated do
+    defstruct [:account_id, :currency, :balance]
   end
 
-  def execute(:decrement, context) do
-    new_value = context.value - 1
-    {:ok, [%{type: :decremented, value: new_value}], %{context | value: new_value}}
+  defmodule Credited do
+    defstruct [:account_id, :amount, :new_balance]
   end
 
-  def execute(:reset, context) do
-    {:ok, [%{type: :reset, value: 0}], %{context | value: 0}}
+  defmodule Debited do
+    defstruct [:account_id, :amount, :new_balance]
   end
 
-  def cleanup(_context), do: :ok
+  defmodule DebitFailed do
+    defstruct [:account_id, :amount, :reason]
+  end
 end
 ```
 
-## Running Tests with Visualization
+### Commands
 
-Use `run_with_visualization/1` to run tests with live progress updates:
+Commands represent operations that can be executed:
+
+```elixir
+defmodule Demo.Commands.CreateAccount do
+  @behaviour PropertyDamage.Command
+
+  alias Demo.Events.AccountCreated
+
+  defstruct [:currency, :initial_balance]
+
+  @impl true
+  def new!(_state, _overrides \\ %{}) do
+    import StreamData
+
+    bind(member_of(["USD", "EUR", "GBP"]), fn currency ->
+      bind(integer(0..10000), fn balance ->
+        constant(%__MODULE__{
+          currency: currency,
+          initial_balance: balance
+        })
+      end)
+    end)
+  end
+
+  @impl true
+  def precondition(_state), do: true
+
+  @impl true
+  def ref(_cmd, events) do
+    case events do
+      [%AccountCreated{account_id: id} | _] -> id
+      _ -> nil
+    end
+  end
+end
+
+defmodule Demo.Commands.Credit do
+  @behaviour PropertyDamage.Command
+
+  defstruct [:account_ref, :amount]
+
+  @impl true
+  def new!(state, _overrides \\ %{}) do
+    import StreamData
+
+    accounts = Map.keys(state[:accounts] || %{})
+
+    if Enum.empty?(accounts) do
+      nil
+    else
+      bind(member_of(accounts), fn account_ref ->
+        bind(integer(1..5000), fn amount ->
+          constant(%__MODULE__{
+            account_ref: account_ref,
+            amount: amount
+          })
+        end)
+      end)
+    end
+  end
+
+  @impl true
+  def precondition(state) do
+    map_size(state[:accounts] || %{}) > 0
+  end
+
+  @impl true
+  def ref(_cmd, _events), do: nil
+end
+
+defmodule Demo.Commands.Debit do
+  @behaviour PropertyDamage.Command
+
+  defstruct [:account_ref, :amount]
+
+  @impl true
+  def new!(state, _overrides \\ %{}) do
+    import StreamData
+
+    accounts = Map.keys(state[:accounts] || %{})
+
+    if Enum.empty?(accounts) do
+      nil
+    else
+      bind(member_of(accounts), fn account_ref ->
+        bind(integer(1..5000), fn amount ->
+          constant(%__MODULE__{
+            account_ref: account_ref,
+            amount: amount
+          })
+        end)
+      end)
+    end
+  end
+
+  @impl true
+  def precondition(state) do
+    map_size(state[:accounts] || %{}) > 0
+  end
+
+  @impl true
+  def ref(_cmd, _events), do: nil
+end
+```
+
+### Projections
+
+Projections maintain state and check invariants:
+
+```elixir
+defmodule Demo.Projections.ModelState do
+  @behaviour PropertyDamage.Projection
+
+  alias Demo.Events.{AccountCreated, Credited, Debited, DebitFailed}
+
+  @impl true
+  def init, do: %{accounts: %{}}
+
+  @impl true
+  def apply(state, %AccountCreated{account_id: id, currency: currency, balance: balance}) do
+    put_in(state, [:accounts, id], %{currency: currency, balance: balance})
+  end
+
+  def apply(state, %Credited{account_id: id, new_balance: balance}) do
+    put_in(state, [:accounts, id, :balance], balance)
+  end
+
+  def apply(state, %Debited{account_id: id, new_balance: balance}) do
+    put_in(state, [:accounts, id, :balance], balance)
+  end
+
+  def apply(state, %DebitFailed{}), do: state
+  def apply(state, _), do: state
+end
+
+defmodule Demo.Projections.AccountInvariants do
+  @behaviour PropertyDamage.Projection
+
+  alias Demo.Events.{AccountCreated, Credited, Debited}
+
+  @impl true
+  def init, do: %{balances: %{}}
+
+  @impl true
+  def apply(state, %AccountCreated{account_id: id, balance: balance}) do
+    put_in(state, [:balances, id], balance)
+  end
+
+  def apply(state, %Credited{account_id: id, amount: amount}) do
+    update_in(state, [:balances, id], &(&1 + amount))
+  end
+
+  def apply(state, %Debited{account_id: id, amount: amount}) do
+    update_in(state, [:balances, id], &(&1 - amount))
+  end
+
+  def apply(state, _), do: state
+
+  # Invariant checks
+  def __checks__ do
+    [
+      %{name: :balance_never_negative, trigger: :always, sample: 1}
+    ]
+  end
+
+  def check(:balance_never_negative, state, _ctx) do
+    negative =
+      state.balances
+      |> Enum.filter(fn {_id, balance} -> balance < 0 end)
+
+    if Enum.empty?(negative) do
+      :ok
+    else
+      {:error, "Negative balances found: #{inspect(negative)}"}
+    end
+  end
+end
+```
+
+### Model
+
+The model ties everything together:
+
+```elixir
+defmodule Demo.Model do
+  @behaviour PropertyDamage.Model
+
+  alias Demo.Commands.{CreateAccount, Credit, Debit}
+  alias Demo.Projections.{ModelState, AccountInvariants}
+
+  @impl true
+  def commands do
+    [
+      {5, CreateAccount},
+      {3, Credit},
+      {3, Debit}
+    ]
+  end
+
+  @impl true
+  def state_projection, do: ModelState
+
+  @impl true
+  def assertion_projections, do: [AccountInvariants]
+
+  @impl true
+  def injectable_events, do: []
+end
+```
+
+### Adapter
+
+The adapter executes commands against the system under test:
+
+```elixir
+defmodule Demo.Adapter do
+  @behaviour PropertyDamage.Adapter
+
+  alias Demo.Events.{AccountCreated, Credited, Debited, DebitFailed}
+  alias Demo.Commands.{CreateAccount, Credit, Debit}
+
+  # In-memory "database"
+  @impl true
+  def setup(_config) do
+    {:ok, %{accounts: %{}, next_id: 1}}
+  end
+
+  @impl true
+  def teardown(_ctx), do: :ok
+
+  @impl true
+  def execute(%CreateAccount{currency: currency, initial_balance: balance}, ctx) do
+    id = "acc_#{ctx.next_id}"
+
+    new_ctx = %{
+      ctx
+      | accounts: Map.put(ctx.accounts, id, %{currency: currency, balance: balance}),
+        next_id: ctx.next_id + 1
+    }
+
+    events = [%AccountCreated{account_id: id, currency: currency, balance: balance}]
+    {:ok, events, new_ctx}
+  end
+
+  def execute(%Credit{account_ref: id, amount: amount}, ctx) do
+    account = ctx.accounts[id]
+    new_balance = account.balance + amount
+
+    new_ctx = put_in(ctx, [:accounts, id, :balance], new_balance)
+    events = [%Credited{account_id: id, amount: amount, new_balance: new_balance}]
+
+    {:ok, events, new_ctx}
+  end
+
+  def execute(%Debit{account_ref: id, amount: amount}, ctx) do
+    account = ctx.accounts[id]
+
+    # BUG: Allow negative balance (intentional for demo)
+    new_balance = account.balance - amount
+
+    new_ctx = put_in(ctx, [:accounts, id, :balance], new_balance)
+    events = [%Debited{account_id: id, amount: amount, new_balance: new_balance}]
+
+    {:ok, events, new_ctx}
+  end
+end
+```
+
+## Part 2: Run Tests with Visualization
+
+Now let's run the tests with live visualization:
 
 ```elixir
 alias PropertyDamage.Livebook
 
+# Run with live progress updates
 result = Livebook.run_with_visualization(
-  model: Demo.Counter,
+  model: Demo.Model,
   adapter: Demo.Adapter,
-  max_runs: 50,
-  max_commands: 20
+  max_runs: 20,
+  max_commands: 15
 )
 ```
 
-## Visualizing Results
+## Part 3: Visualize Results
 
 ### Main Dashboard
 
-The `visualize/1` function creates a tabbed dashboard:
+The `visualize/1` function creates a tabbed dashboard with all visualizations:
 
 ```elixir
 Livebook.visualize(result)
@@ -137,15 +359,7 @@ See execution counts and timing for each command type:
 Livebook.command_stats(result)
 ```
 
-### State Timeline
-
-Visualize how state progressed through the test:
-
-```elixir
-Livebook.state_timeline(result)
-```
-
-## Charts and Graphs
+## Part 4: Charts and Graphs
 
 ### Command Execution Chart
 
@@ -167,115 +381,148 @@ Charts.timing_histogram(result)
 Charts.success_pie_chart(result)
 ```
 
-### Execution Timeline
-
-```elixir
-Charts.execution_timeline(result)
-```
-
 ### Command Transitions
 
-See which commands follow which:
+See which commands follow which (useful for coverage analysis):
 
 ```elixir
 Charts.command_transition_heatmap(result)
 ```
 
-## Interactive Exploration
+## Part 5: Interactive Command Stepper
 
-### Command Stepper
-
-Step through command execution one at a time:
+Step through command execution one at a time to understand failures:
 
 ```elixir
 Livebook.command_stepper(result)
 ```
 
-### Live Monitor
+## Part 6: Coverage Analysis
 
-Monitor test runs in real-time:
-
-```elixir
-Livebook.live_monitor()
-```
-
-Now run some tests to see the monitor update:
-
-```elixir
-# Run in a separate process so the monitor updates
-Task.start(fn ->
-  PropertyDamage.run(
-    model: Demo.Counter,
-    adapter: Demo.Adapter,
-    max_runs: 20,
-    max_commands: 10
-  )
-end)
-```
-
-## Failure Analysis
-
-When tests fail, use these tools to analyze:
-
-```elixir
-# Simulate a failing test by creating a result with failure
-failing_result = %{
-  success: false,
-  history: result.history,
-  failure_message: "State mismatch: expected value 5, got 4",
-  failed_command: Demo.Increment,
-  shrunk_sequence: Enum.take(result.history, 3),
-  shrink_info: %{original_length: 10, iterations: 5}
-}
-
-Livebook.failure_details(failing_result)
-```
-
-### Failure Explorer
-
-Interactive exploration of failures:
-
-```elixir
-Livebook.explore_failure(failing_result)
-```
-
-### State Diff
-
-Compare expected vs actual state:
-
-```elixir
-Livebook.state_diff(failing_result)
-```
-
-## Coverage Analysis
-
-Integrate with PropertyDamage's coverage module:
+Analyze how thoroughly your model was exercised:
 
 ```elixir
 coverage = PropertyDamage.Coverage.from_result(result)
 PropertyDamage.Coverage.format_summary(coverage)
 ```
 
-## Export Options
+## Part 7: Chaos Engineering with Nemesis
 
-Export results to various formats:
+PropertyDamage includes nemesis operations for fault injection.
+Here's how to use them:
 
 ```elixir
-# JSON export
-json = PropertyDamage.Export.to_json(result)
-IO.puts(json)
+# Example: Simulating network latency
+alias PropertyDamage.Nemesis.NetworkLatency
+
+latency_cmd = %NetworkLatency{
+  latency_ms: 100,
+  jitter_ms: 20,
+  duration_ms: 5000
+}
+
+# Inject the fault
+{:ok, events} = NetworkLatency.inject(latency_cmd, %{})
+IO.inspect(events, label: "Latency injected")
+
+# Check if latency should be applied
+NetworkLatency.should_delay?()
+
+# Restore normal operation
+{:ok, _} = NetworkLatency.restore(latency_cmd, %{})
 ```
 
+### Certificate Expiry Simulation
+
 ```elixir
-# Markdown export
+alias PropertyDamage.Nemesis.CertificateExpiry
+
+cert_cmd = %CertificateExpiry{
+  failure_type: :expired,
+  target: :api,
+  duration_ms: 10000
+}
+
+# Inject certificate failure
+{:ok, events} = CertificateExpiry.inject(cert_cmd, %{})
+IO.inspect(events, label: "Certificate failure injected")
+
+# Check if requests should fail
+CertificateExpiry.should_fail?(:api)
+
+# Get the SSL error that would be returned
+CertificateExpiry.get_ssl_error()
+
+# Restore
+{:ok, _} = CertificateExpiry.restore(cert_cmd, %{})
+```
+
+## Part 8: Export Results
+
+### Export to ExUnit Test
+
+Generate a regression test from a failing sequence:
+
+```elixir
+# If we had a failure, we could export it:
+# PropertyDamage.Export.to_exunit(result, "test/regression_test.exs")
+
+# For now, let's see the markdown export:
 md = PropertyDamage.Export.to_markdown(result)
 Kino.Markdown.new(md)
 ```
 
-## Tips
+### Export to Script
 
-1. **Use `run_with_visualization/1`** for live progress during long test runs
-2. **Combine with telemetry** for production monitoring
-3. **Export failures** to share with teammates
-4. **Use the command stepper** to debug specific failures
-5. **Check command transitions** to ensure good test coverage
+```elixir
+# Generate a curl script (if using HTTP adapter):
+# script = PropertyDamage.Export.to_script(result, :curl)
+# IO.puts(script)
+```
+
+## Part 9: Live Monitor
+
+Monitor test runs in real-time:
+
+```elixir
+monitor = Livebook.live_monitor()
+```
+
+Run some tests to see the monitor update:
+
+```elixir
+Task.start(fn ->
+  PropertyDamage.run(
+    model: Demo.Model,
+    adapter: Demo.Adapter,
+    max_runs: 10,
+    max_commands: 8
+  )
+end)
+```
+
+## Tips for Effective Testing
+
+1. **Start Simple**: Begin with basic commands and add complexity gradually
+
+2. **Use Weights**: Weight commands to ensure necessary preconditions are met
+   (e.g., create accounts before debiting them)
+
+3. **Check Coverage**: Use `Coverage.from_result/1` to ensure all commands
+   and transitions are being exercised
+
+4. **Debug with Stepper**: When tests fail, use the command stepper to
+   understand exactly what happened
+
+5. **Shrinking is Your Friend**: PropertyDamage automatically shrinks
+   failing sequences to minimal reproductions
+
+6. **Add Nemesis Gradually**: Start with basic tests, then add chaos
+   engineering to test resilience
+
+## Next Steps
+
+- Explore the `example_tests/` directory for more complex examples
+- Try the ToyBank example with 12 intentional bugs to find
+- Use TravelBooking example for chaos engineering patterns
+- Read the README for complete API documentation
