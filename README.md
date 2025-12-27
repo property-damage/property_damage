@@ -2087,6 +2087,43 @@ The stepper shows:
 
 A demo notebook is included at `notebooks/property_damage_demo.livemd` showing all features.
 
+## Example Projects
+
+Complete working examples are available in the `example_tests/` directory:
+
+### Counter (Hello World)
+
+The simplest PropertyDamage example - a counter with an intentional bug.
+Start here if you're new to stateful property-based testing.
+
+```
+example_tests/counter/
+```
+
+### ToyBank (Payment Authorization)
+
+A banking API with 12 intentional bugs. Demonstrates:
+- Multiple entity types (accounts, authorizations, captures)
+- Complex state machines and cross-entity invariants
+- Parallel testing for race conditions
+- Bug detection and regression testing
+
+```
+example_tests/toy_bank/
+```
+
+### TravelBooking (Chaos Engineering)
+
+A travel booking service demonstrating chaos engineering:
+- Multi-provider coordination (flights, hotels)
+- Fault injection with nemesis operations
+- Certificate failure simulation
+- Partial failure rollback testing
+
+```
+example_tests/travel_booking/
+```
+
 ## Architecture
 
 ```
