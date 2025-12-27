@@ -28,6 +28,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 - **Telemetry Dashboard**: Real-time monitoring of test runs with LiveView integration
 - **Livebook Integration**: Interactive exploration with rich visualizations and charts
+- **Chaos Engineering**: Built-in nemesis operations for network, resource, time, and process faults
 
 ## Installation
 
@@ -720,6 +721,115 @@ def commands do
     {1, InjectLatency}
   ]
 end
+```
+
+### Built-in Nemesis Operations
+
+PropertyDamage includes ready-to-use nemesis operations for common fault injection scenarios:
+
+#### Network Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `NetworkLatency` | Add latency (50-500ms) with optional jitter |
+| `NetworkPartition` | Block traffic (full, upstream, downstream, asymmetric) |
+| `PacketLoss` | Drop percentage of packets (5-50%) |
+
+```elixir
+# Add network latency
+alias PropertyDamage.Nemesis.NetworkLatency
+
+def commands do
+  [
+    {5, CreateOrder},
+    {1, NetworkLatency}  # Uses defaults: 100ms latency, 5s duration
+  ]
+end
+
+# Or customize
+%NetworkLatency{latency_ms: 200, jitter_ms: 50, duration_ms: 10_000}
+```
+
+#### Resource Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `MemoryPressure` | Allocate memory to create pressure (bulk or fragmented) |
+| `CPUStress` | Spawn busy-loop processes to stress schedulers |
+| `ResourceExhaustion` | Exhaust file descriptors, ports, ETS tables, or processes |
+
+```elixir
+alias PropertyDamage.Nemesis.{MemoryPressure, CPUStress}
+
+# Create memory pressure (100MB)
+%MemoryPressure{megabytes: 100, allocation_pattern: :bulk}
+
+# Create CPU stress (intensity 1-10)
+%CPUStress{intensity: 5, schedulers: :all, duration_ms: 5000}
+```
+
+#### Time Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `ClockSkew` | Shift virtual time forward/backward with optional drift |
+
+```elixir
+alias PropertyDamage.Nemesis.ClockSkew
+
+# Jump 1 minute into the future
+%ClockSkew{skew_ms: 60_000, mode: :instant}
+
+# Gradual drift (10% fast)
+%ClockSkew{skew_ms: 0, drift_rate: 1.1, mode: :gradual}
+
+# In your adapter, use the virtual clock:
+def get_current_time do
+  ClockSkew.now()  # Returns skewed time when active
+end
+```
+
+#### Process Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `ProcessKill` | Kill processes by name, pattern, or randomly |
+| `SlowIO` | Add artificial delay to I/O operations |
+
+```elixir
+alias PropertyDamage.Nemesis.{ProcessKill, SlowIO}
+
+# Kill a specific named process
+%ProcessKill{target: {:name, :my_worker}, signal: :kill}
+
+# Kill random processes from supervised children
+%ProcessKill{target: {:supervised_by, MyApp.WorkerSupervisor}}
+
+# Slow down I/O operations
+%SlowIO{delay_ms: 100, target: :all}  # :reads, :writes, or :all
+
+# In your adapter:
+def read_data(path) do
+  if SlowIO.should_delay?(:reads), do: SlowIO.apply_delay()
+  File.read(path)
+end
+```
+
+#### Integration with Toxiproxy
+
+Network operations integrate with [Toxiproxy](https://github.com/Shopify/toxiproxy) when available:
+
+```elixir
+# Configure in adapter context
+context = %{
+  toxiproxy: %{
+    proxy_name: "my_service",
+    api_url: "http://localhost:8474"
+  }
+}
+
+# Nemesis operations will automatically use Toxiproxy
+# Falls back to simulated mode if not configured
 ```
 
 ### Adjusting Invariants During Faults
