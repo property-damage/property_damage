@@ -49,6 +49,7 @@ defmodule PropertyDamage.MixProject do
         "guides/writing_invariants.md",
         "guides/debugging_failures.md",
         "guides/chaos_engineering.md",
+        "guides/integration_testing.md",
         "CHANGELOG.md"
       ],
       groups_for_extras: [
@@ -62,7 +63,7 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Projection,
           PropertyDamage.Nemesis
         ],
-        "Execution": [
+        Execution: [
           PropertyDamage.Executor,
           PropertyDamage.Linearization,
           PropertyDamage.EventQueue,
@@ -99,14 +100,15 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Export,
           PropertyDamage.Forensics
         ],
-        "Integration": [
+        Integration: [
+          PropertyDamage.Integration,
           PropertyDamage.Livebook,
           PropertyDamage.Livebook.Charts,
           PropertyDamage.Telemetry,
           PropertyDamage.Telemetry.Collector,
           PropertyDamage.Telemetry.Dashboard
         ],
-        "Persistence": [
+        Persistence: [
           PropertyDamage.Persistence,
           PropertyDamage.SeedLibrary,
           PropertyDamage.Regression
