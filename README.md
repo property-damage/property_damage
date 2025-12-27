@@ -27,6 +27,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Failure Intelligence**: Pattern detection, similarity analysis, and fix verification
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 - **Telemetry Dashboard**: Real-time monitoring of test runs with LiveView integration
+- **Livebook Integration**: Interactive exploration with rich visualizations and charts
 
 ## Installation
 
@@ -1842,6 +1843,112 @@ PropertyDamage.Telemetry.Collector.subscribe()
 # Reset all counters
 PropertyDamage.Telemetry.Collector.reset()
 ```
+
+## Livebook Integration
+
+PropertyDamage includes rich Livebook integration for interactive exploration of test results.
+
+### Setup
+
+In your Livebook notebook:
+
+```elixir
+Mix.install([
+  {:property_damage, "~> 0.1"},
+  {:kino, "~> 0.12"},
+  {:vega_lite, "~> 0.1"},
+  {:kino_vega_lite, "~> 0.1"}
+])
+```
+
+### Quick Start
+
+```elixir
+alias PropertyDamage.Livebook
+
+# Run tests and visualize results
+result = PropertyDamage.run(
+  model: MyModel,
+  adapter: MyAdapter,
+  max_runs: 100
+)
+
+# Create main dashboard with tabs
+Livebook.visualize(result)
+```
+
+### Available Widgets
+
+| Widget | Description |
+|--------|-------------|
+| `visualize/1` | Main tabbed dashboard with overview, commands, state, failures |
+| `results_table/1` | Sortable DataTable of command execution history |
+| `command_stats/1` | Per-command execution counts and timing statistics |
+| `state_timeline/1` | Visual progression of state changes |
+| `failure_details/1` | Detailed failure analysis with shrunk sequence |
+| `live_monitor/0` | Real-time telemetry streaming widget |
+| `command_stepper/1` | Step through command execution interactively |
+| `state_diff/1` | Compare model vs actual state |
+| `explore_failure/1` | Interactive failure explorer with tabs |
+
+### Charts and Visualizations
+
+With VegaLite installed, you get rich interactive charts:
+
+```elixir
+alias PropertyDamage.Livebook.Charts
+
+# Bar chart of command execution counts
+Charts.command_bar_chart(result)
+
+# Histogram of command timing distribution
+Charts.timing_histogram(result)
+
+# Pie chart of success/failure rate
+Charts.success_pie_chart(result)
+
+# Timeline showing execution progression
+Charts.execution_timeline(result)
+
+# Heatmap of command transitions
+Charts.command_transition_heatmap(result)
+
+# Check results by type
+Charts.check_results_chart(result)
+```
+
+### Live Visualization
+
+Run tests with live progress updates:
+
+```elixir
+# Displays real-time progress as tests run
+result = Livebook.run_with_visualization(
+  model: MyModel,
+  adapter: MyAdapter,
+  max_runs: 100,
+  max_commands: 20
+)
+```
+
+### Interactive Command Stepper
+
+Debug failures by stepping through commands:
+
+```elixir
+# Navigate through execution step-by-step
+Livebook.command_stepper(result)
+```
+
+The stepper shows:
+- Command name and arguments
+- Result status (success/failure)
+- Events generated
+- State before and after
+
+### Sample Notebook
+
+A demo notebook is included at `notebooks/property_damage_demo.livemd` showing all features.
 
 ## Architecture
 

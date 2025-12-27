@@ -1,0 +1,281 @@
+# PropertyDamage Livebook Demo
+
+```elixir
+Mix.install([
+  {:property_damage, path: "."},
+  {:kino, "~> 0.12"},
+  {:vega_lite, "~> 0.1"},
+  {:kino_vega_lite, "~> 0.1"}
+])
+```
+
+## Introduction
+
+This notebook demonstrates PropertyDamage's Livebook integration for interactive
+exploration of stateful property-based testing results.
+
+## Setup
+
+First, let's define a simple model and adapter for demonstration:
+
+```elixir
+defmodule Demo.Counter do
+  @moduledoc "A simple counter model for demonstration"
+
+  defstruct value: 0
+
+  def initial_state, do: %__MODULE__{}
+
+  def commands do
+    [Demo.Increment, Demo.Decrement, Demo.Reset]
+  end
+end
+
+defmodule Demo.Increment do
+  use PropertyDamage.Command
+
+  def generate(_state), do: StreamData.constant(%{})
+
+  def precondition(_state, _args), do: true
+
+  def run(_state, _args, _context), do: :increment
+
+  def next_state(state, _args, _result) do
+    %{state | value: state.value + 1}
+  end
+end
+
+defmodule Demo.Decrement do
+  use PropertyDamage.Command
+
+  def generate(_state), do: StreamData.constant(%{})
+
+  def precondition(state, _args), do: state.value > 0
+
+  def run(_state, _args, _context), do: :decrement
+
+  def next_state(state, _args, _result) do
+    %{state | value: state.value - 1}
+  end
+end
+
+defmodule Demo.Reset do
+  use PropertyDamage.Command
+
+  def generate(_state), do: StreamData.constant(%{})
+
+  def precondition(_state, _args), do: true
+
+  def run(_state, _args, _context), do: :reset
+
+  def next_state(_state, _args, _result) do
+    %Demo.Counter{}
+  end
+end
+
+defmodule Demo.Adapter do
+  @behaviour PropertyDamage.Adapter
+
+  def init(_opts), do: {:ok, %{value: 0}}
+
+  def execute(:increment, context) do
+    new_value = context.value + 1
+    {:ok, [%{type: :incremented, value: new_value}], %{context | value: new_value}}
+  end
+
+  def execute(:decrement, context) do
+    new_value = context.value - 1
+    {:ok, [%{type: :decremented, value: new_value}], %{context | value: new_value}}
+  end
+
+  def execute(:reset, context) do
+    {:ok, [%{type: :reset, value: 0}], %{context | value: 0}}
+  end
+
+  def cleanup(_context), do: :ok
+end
+```
+
+## Running Tests with Visualization
+
+Use `run_with_visualization/1` to run tests with live progress updates:
+
+```elixir
+alias PropertyDamage.Livebook
+
+result = Livebook.run_with_visualization(
+  model: Demo.Counter,
+  adapter: Demo.Adapter,
+  max_runs: 50,
+  max_commands: 20
+)
+```
+
+## Visualizing Results
+
+### Main Dashboard
+
+The `visualize/1` function creates a tabbed dashboard:
+
+```elixir
+Livebook.visualize(result)
+```
+
+### Results Table
+
+View command execution history in a sortable, filterable table:
+
+```elixir
+Livebook.results_table(result)
+```
+
+### Command Statistics
+
+See execution counts and timing for each command type:
+
+```elixir
+Livebook.command_stats(result)
+```
+
+### State Timeline
+
+Visualize how state progressed through the test:
+
+```elixir
+Livebook.state_timeline(result)
+```
+
+## Charts and Graphs
+
+### Command Execution Chart
+
+```elixir
+alias PropertyDamage.Livebook.Charts
+
+Charts.command_bar_chart(result)
+```
+
+### Timing Distribution
+
+```elixir
+Charts.timing_histogram(result)
+```
+
+### Success Rate
+
+```elixir
+Charts.success_pie_chart(result)
+```
+
+### Execution Timeline
+
+```elixir
+Charts.execution_timeline(result)
+```
+
+### Command Transitions
+
+See which commands follow which:
+
+```elixir
+Charts.command_transition_heatmap(result)
+```
+
+## Interactive Exploration
+
+### Command Stepper
+
+Step through command execution one at a time:
+
+```elixir
+Livebook.command_stepper(result)
+```
+
+### Live Monitor
+
+Monitor test runs in real-time:
+
+```elixir
+Livebook.live_monitor()
+```
+
+Now run some tests to see the monitor update:
+
+```elixir
+# Run in a separate process so the monitor updates
+Task.start(fn ->
+  PropertyDamage.run(
+    model: Demo.Counter,
+    adapter: Demo.Adapter,
+    max_runs: 20,
+    max_commands: 10
+  )
+end)
+```
+
+## Failure Analysis
+
+When tests fail, use these tools to analyze:
+
+```elixir
+# Simulate a failing test by creating a result with failure
+failing_result = %{
+  success: false,
+  history: result.history,
+  failure_message: "State mismatch: expected value 5, got 4",
+  failed_command: Demo.Increment,
+  shrunk_sequence: Enum.take(result.history, 3),
+  shrink_info: %{original_length: 10, iterations: 5}
+}
+
+Livebook.failure_details(failing_result)
+```
+
+### Failure Explorer
+
+Interactive exploration of failures:
+
+```elixir
+Livebook.explore_failure(failing_result)
+```
+
+### State Diff
+
+Compare expected vs actual state:
+
+```elixir
+Livebook.state_diff(failing_result)
+```
+
+## Coverage Analysis
+
+Integrate with PropertyDamage's coverage module:
+
+```elixir
+coverage = PropertyDamage.Coverage.from_result(result)
+PropertyDamage.Coverage.format_summary(coverage)
+```
+
+## Export Options
+
+Export results to various formats:
+
+```elixir
+# JSON export
+json = PropertyDamage.Export.to_json(result)
+IO.puts(json)
+```
+
+```elixir
+# Markdown export
+md = PropertyDamage.Export.to_markdown(result)
+Kino.Markdown.new(md)
+```
+
+## Tips
+
+1. **Use `run_with_visualization/1`** for live progress during long test runs
+2. **Combine with telemetry** for production monitoring
+3. **Export failures** to share with teammates
+4. **Use the command stepper** to debug specific failures
+5. **Check command transitions** to ensure good test coverage
