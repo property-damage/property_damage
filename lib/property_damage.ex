@@ -136,7 +136,8 @@ defmodule PropertyDamage do
     Sequence,
     Stutter,
     FailureReport,
-    Progress
+    Progress,
+    Telemetry
   }
 
   alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig
@@ -331,22 +332,57 @@ defmodule PropertyDamage do
 
     case setup_once_result do
       :ok ->
+        # Emit telemetry for run start
+        telemetry_metadata = %{
+          model: model,
+          adapter: adapter,
+          max_runs: max_runs,
+          max_commands: max_commands,
+          seed: seed
+        }
+
+        start_time = System.system_time()
+        Telemetry.run_start(telemetry_metadata)
+
         try do
-          do_run(
-            model,
-            adapter,
-            max_commands,
-            max_runs,
-            seed,
-            injector_adapters,
-            adapter_config,
-            shrink,
-            shrinker_config,
-            on_failure,
-            verbose,
-            branching,
-            stutter_config
+          result =
+            do_run(
+              model,
+              adapter,
+              max_commands,
+              max_runs,
+              seed,
+              injector_adapters,
+              adapter_config,
+              shrink,
+              shrinker_config,
+              on_failure,
+              verbose,
+              branching,
+              stutter_config
+            )
+
+          # Emit telemetry for run stop
+          {result_type, result_data} =
+            case result do
+              {:ok, stats} -> {:ok, stats}
+              {:error, _} -> {:error, %{}}
+            end
+
+          Telemetry.run_stop(
+            start_time,
+            Map.merge(telemetry_metadata, %{
+              result: result_type,
+              runs_completed: if(result_type == :ok, do: result_data[:runs], else: 0),
+              total_commands: if(result_type == :ok, do: result_data[:total_commands], else: 0)
+            })
           )
+
+          result
+        rescue
+          e ->
+            Telemetry.run_exception(start_time, :error, e, __STACKTRACE__, telemetry_metadata)
+            reraise e, __STACKTRACE__
         after
           # Teardown once
           if function_exported?(model, :teardown_once, 1) do
@@ -453,6 +489,15 @@ defmodule PropertyDamage do
       Progress.print_run(run_number, max_runs, sequence)
     end
 
+    # Emit telemetry for sequence start
+    seq_start_time = System.system_time()
+
+    Telemetry.sequence_start(%{
+      run_number: run_number,
+      command_count: command_count,
+      branching: Sequence.branching?(sequence)
+    })
+
     # Setup each (if model implements it)
     setup_each_result =
       if function_exported?(model, :setup_each, 1) do
@@ -477,6 +522,13 @@ defmodule PropertyDamage do
               event_queue: event_queue,
               stutter_config: stutter_config
             )
+
+          # Emit telemetry for sequence stop
+          Telemetry.sequence_stop(seq_start_time, %{
+            run_number: run_number,
+            success: result.success,
+            commands_executed: command_count
+          })
 
           if result.success do
             # Success - continue to next run
