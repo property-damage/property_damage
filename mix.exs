@@ -43,7 +43,77 @@ defmodule PropertyDamage.MixProject do
   defp docs do
     [
       main: "PropertyDamage",
-      extras: ["README.md"]
+      extras: [
+        "README.md",
+        "guides/getting_started.md",
+        "guides/writing_invariants.md",
+        "guides/debugging_failures.md",
+        "guides/chaos_engineering.md",
+        "CHANGELOG.md"
+      ],
+      groups_for_extras: [
+        Guides: ~r/guides\/.*/
+      ],
+      groups_for_modules: [
+        "Core Behaviours": [
+          PropertyDamage.Command,
+          PropertyDamage.Model,
+          PropertyDamage.Adapter,
+          PropertyDamage.Projection,
+          PropertyDamage.Nemesis
+        ],
+        "Execution": [
+          PropertyDamage.Executor,
+          PropertyDamage.Linearization,
+          PropertyDamage.EventQueue,
+          PropertyDamage.Ref
+        ],
+        "Shrinking & Analysis": [
+          PropertyDamage.Shrinker,
+          PropertyDamage.Analysis,
+          PropertyDamage.Replay,
+          PropertyDamage.Coverage,
+          PropertyDamage.Flakiness
+        ],
+        "Fault Injection": [
+          PropertyDamage.Nemesis.NetworkLatency,
+          PropertyDamage.Nemesis.NetworkPartition,
+          PropertyDamage.Nemesis.PacketLoss,
+          PropertyDamage.Nemesis.MemoryPressure,
+          PropertyDamage.Nemesis.CPUStress,
+          PropertyDamage.Nemesis.ClockSkew,
+          PropertyDamage.Nemesis.ProcessKill,
+          PropertyDamage.Nemesis.SlowIO,
+          PropertyDamage.Nemesis.ResourceExhaustion,
+          PropertyDamage.Nemesis.CertificateExpiry
+        ],
+        "Testing Tools": [
+          PropertyDamage.Mutation,
+          PropertyDamage.Suggestions,
+          PropertyDamage.FailureIntelligence,
+          PropertyDamage.LoadTest
+        ],
+        "Debugging & Export": [
+          PropertyDamage.Diagram,
+          PropertyDamage.Diff,
+          PropertyDamage.Export,
+          PropertyDamage.Forensics
+        ],
+        "Integration": [
+          PropertyDamage.Livebook,
+          PropertyDamage.Livebook.Charts,
+          PropertyDamage.Telemetry,
+          PropertyDamage.Telemetry.Collector,
+          PropertyDamage.Telemetry.Dashboard
+        ],
+        "Persistence": [
+          PropertyDamage.Persistence,
+          PropertyDamage.SeedLibrary,
+          PropertyDamage.Regression
+        ]
+      ],
+      source_url: @source_url,
+      source_ref: "v#{@version}"
     ]
   end
 
