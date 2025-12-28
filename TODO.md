@@ -88,59 +88,6 @@ Dedicated tooling for running regression tests in continuous integration pipelin
 
 ---
 
-## Oracle-Based Testing
-
-Native support for comparing SUT against a trusted reference implementation (oracle).
-
-**Concept:**
-- An "oracle" is a trusted reference implementation that defines correct behavior
-- Run the same commands against both SUT and oracle, compare results
-- Failures occur when SUT diverges from oracle behavior
-
-**Use Cases:**
-- Testing new implementation against legacy system
-- Validating optimized version against slow-but-correct reference
-- Comparing across language implementations (e.g., Elixir port vs original Python)
-- Database migration validation (old schema vs new schema)
-- Verifying refactored code matches original behavior
-
-**Features:**
-- **Dual Adapter Execution**: Run commands through both oracle and SUT adapters
-- **Result Comparison Strategies**:
-  - Exact match (byte-for-byte identical)
-  - Semantic equivalence (logically equivalent, different representation)
-  - Subset matching (SUT returns at least what oracle returns)
-  - Custom comparators for domain-specific equivalence
-- **Divergence Reporting**: Clear output showing where and how results differ
-- **Timing Tolerance**: Handle speed differences between oracle and SUT
-- **Selective Comparison**: Compare only specific fields/events
-
-**Implementation:**
-- `PropertyDamage.Oracle` module
-- Oracle adapter configuration in model
-- `oracle_adapter` option for `PropertyDamage.run/1`
-- Comparison functions: `Oracle.compare/3`, `Oracle.equivalent?/3`
-- Divergence report generation
-
-**API Design:**
-```elixir
-PropertyDamage.run(
-  model: MyModel,
-  adapter: MyNewAdapter,           # SUT
-  oracle_adapter: MyLegacyAdapter, # Oracle (reference)
-  oracle_config: %{base_url: "http://legacy:4000"},
-  comparison: :semantic,           # or :exact, :subset, &custom/2
-  on_divergence: :fail             # or :warn, :record
-)
-```
-
-**Ergonomics:**
-- Single command definition works against both oracle and SUT
-- Clear failure output: "Oracle returned X, SUT returned Y"
-- Optional oracle (fall back to model-only validation when not provided)
-
----
-
 ## Polish & Release Prep
 
 Final preparation for v1.0 release to Hex.pm.
@@ -184,4 +131,5 @@ For reference, these features have been implemented:
 - [x] Telemetry & Livebook integration
 - [x] Model validation
 - [x] Integration testing framework
+- [x] Differential testing (oracle testing, performance comparison, baselines)
 - [x] Documentation (guides, CHANGELOG, ExDoc config)
