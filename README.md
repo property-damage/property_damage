@@ -29,6 +29,7 @@ PropertyDamage generates random sequences of operations against your system and 
 - **Telemetry Dashboard**: Real-time monitoring of test runs with LiveView integration
 - **Livebook Integration**: Interactive exploration with rich visualizations and charts
 - **Chaos Engineering**: Built-in nemesis operations for network, resource, time, and process faults
+- **Differential Testing**: Compare implementations against oracles, baselines, or each other
 
 ## Installation
 
@@ -1850,6 +1851,87 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 | `:dedup_source` | Where to check: `:failures`, `:library`, or `:both` |
 | `:verbose` | Print actions taken (default: false) |
 
+## Differential Testing
+
+Compare multiple implementations by running the same command sequences against them.
+Use cases include oracle testing, performance comparison, migration validation, and
+regression testing.
+
+### Basic Usage
+
+```elixir
+# Oracle testing - compare against reference implementation
+PropertyDamage.Differential.run(
+  model: MyModel,
+  targets: [
+    {ReferenceAdapter, role: :reference},
+    {SUTAdapter, name: "new-impl"}
+  ],
+  compare: :correctness,
+  max_runs: 100
+)
+
+# Performance comparison
+PropertyDamage.Differential.run(
+  model: MyModel,
+  targets: [
+    {RedisAdapter, name: "redis-backend"},
+    {PostgresAdapter, name: "postgres-backend"}
+  ],
+  compare: :performance
+)
+
+# Same adapter, different configurations (e.g., staging vs prod)
+PropertyDamage.Differential.run(
+  model: MyModel,
+  targets: [
+    {HTTPAdapter, role: :reference, opts: [base_url: "https://prod.example.com"]},
+    {HTTPAdapter, name: "staging", opts: [base_url: "https://staging.example.com"]}
+  ],
+  compare: :correctness
+)
+```
+
+### Time-Separated Comparison
+
+Save results now, compare later:
+
+```elixir
+# Export baseline before deployment
+PropertyDamage.Differential.run(
+  model: MyModel,
+  targets: [{ProdAdapter, name: "v2.3"}],
+  compare: :performance,
+  export_to: "baselines/v2.3.json",
+  seed: 12345
+)
+
+# Compare against baseline after deployment
+PropertyDamage.Differential.run(
+  model: MyModel,
+  targets: [{ProdAdapter, name: "v2.4"}],
+  compare: :performance,
+  baseline: "baselines/v2.3.json"
+)
+```
+
+### Equivalence Strategies
+
+```elixir
+# Exact matching (default)
+compare: :correctness, equivalence: :exact
+
+# Structural - ignores IDs, timestamps, UUIDs
+compare: :correctness, equivalence: :structural
+
+# Custom comparison function
+compare: :correctness, equivalence: fn ref, target ->
+  ref.status == target.status && ref.amount == target.amount
+end
+```
+
+See [Differential Testing Guide](guides/differential_testing.md) for complete documentation.
+
 ## Telemetry Dashboard
 
 PropertyDamage emits telemetry events during test execution that can be used for real-time monitoring via a LiveView dashboard.
@@ -2199,6 +2281,13 @@ PropertyDamage
 │
 ├── Regression
 │   └── Regression          - Automatic regression test management
+│
+├── Differential
+│   ├── Differential        - Main API (run, compare modes)
+│   ├── Target              - Target parsing and validation
+│   ├── Result              - Result struct and formatting
+│   ├── Equivalence         - Comparison strategies (exact, structural, custom)
+│   └── Baseline            - Export/import for time-separated testing
 │
 ├── Telemetry
 │   ├── Telemetry    - Event emission API
