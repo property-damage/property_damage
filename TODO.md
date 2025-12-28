@@ -23,28 +23,6 @@ Step-through execution and debugging tools for analyzing test failures.
 
 ---
 
-## OpenAPI Scaffolding
-
-Improve `mix pd.scaffold` to generate complete models and adapters from OpenAPI specifications.
-
-**Features:**
-- Parse OpenAPI 3.0/3.1 specs (JSON and YAML)
-- Generate command modules from endpoint definitions
-- Generate event structs from response schemas
-- Generate adapter with HTTP client code
-- Generate basic model with command weights
-- Support for authentication schemes
-- Handle path parameters, query parameters, request bodies
-- Generate generators for request body fields based on schema types
-
-**Implementation:**
-- Enhance `lib/mix/tasks/pd.scaffold.ex`
-- Add OpenAPI parser (leverage existing libraries)
-- Template system for generated code
-- Configuration for customizing output
-
----
-
 ## Performance Optimization
 
 Speed improvements for test execution and shrinking.
@@ -132,4 +110,5 @@ For reference, these features have been implemented:
 - [x] Model validation
 - [x] Integration testing framework
 - [x] Differential testing (oracle testing, performance comparison, baselines)
+- [x] OpenAPI scaffolding (full code generation from specs)
 - [x] Documentation (guides, CHANGELOG, ExDoc config)
