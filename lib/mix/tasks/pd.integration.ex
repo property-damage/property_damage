@@ -203,7 +203,7 @@ defmodule Mix.Tasks.Pd.Integration do
     end
   end
 
-  defp get_required_opt(opts, key, name) do
+  defp get_required_opt(opts, key, _name) do
     case Keyword.get(opts, key) do
       nil ->
         IO.puts("Error: --#{key} is required")
@@ -215,7 +215,7 @@ defmodule Mix.Tasks.Pd.Integration do
     end
   end
 
-  defp get_opt_with_env(opts, key, env_var, name) do
+  defp get_opt_with_env(opts, key, env_var, _name) do
     case Keyword.get(opts, key) || System.get_env(env_var) do
       nil ->
         IO.puts("Error: --#{key} is required (or set #{env_var})")

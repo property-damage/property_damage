@@ -119,7 +119,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   end
 
   @impl true
-  def new!(state, overrides \\ %{}) do
+  def new!(_state, overrides \\ %{}) do
     import StreamData
 
     bind(integer(50..500), fn latency ->
