@@ -35,7 +35,7 @@ defmodule PropertyDamage.LoadTest.Session do
   require Logger
 
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.{Generator, Sequence}
+  alias PropertyDamage.{Generator, Ref, Sequence}
 
   defstruct [
     :model,
@@ -223,7 +223,8 @@ defmodule PropertyDamage.LoadTest.Session do
     case state.adapter.setup(state.adapter_config) do
       {:ok, adapter_context} ->
         try do
-          execute_commands(commands, adapter_context, state, 0, 0)
+          # Initialize refs map for this sequence
+          execute_commands(commands, adapter_context, state, _refs = %{}, 0, 0)
         after
           state.adapter.teardown(adapter_context)
         end
@@ -233,11 +234,11 @@ defmodule PropertyDamage.LoadTest.Session do
     end
   end
 
-  defp execute_commands([], _adapter_context, _state, commands_run, errors) do
+  defp execute_commands([], _adapter_context, _state, _refs, commands_run, errors) do
     {:ok, commands_run, errors}
   end
 
-  defp execute_commands([command | rest], adapter_context, state, commands_run, errors) do
+  defp execute_commands([command | rest], adapter_context, state, refs, commands_run, errors) do
     # Apply think time
     maybe_think(state.think_time_range)
 
@@ -248,13 +249,13 @@ defmodule PropertyDamage.LoadTest.Session do
     command_module = command.__struct__
     start_time = System.monotonic_time(:microsecond)
 
-    {result, error_delta} =
-      case execute_single_command(command, state.adapter, adapter_context) do
-        {:ok, _events} ->
-          {:ok, 0}
+    {result, error_delta, new_refs} =
+      case execute_single_command(command, state.adapter, adapter_context, refs) do
+        {:ok, _events, updated_refs} ->
+          {:ok, 0, updated_refs}
 
         {:error, reason} ->
-          {{:error, categorize_error(reason)}, 1}
+          {{:error, categorize_error(reason)}, 1, refs}
       end
 
     end_time = System.monotonic_time(:microsecond)
@@ -263,44 +264,133 @@ defmodule PropertyDamage.LoadTest.Session do
     # Report metrics
     Metrics.record_request(state.metrics, command_module, latency_ms, result)
 
-    # Continue with remaining commands
-    execute_commands(rest, adapter_context, state, commands_run + 1, errors + error_delta)
+    # Continue with remaining commands, threading updated refs
+    execute_commands(
+      rest,
+      adapter_context,
+      state,
+      new_refs,
+      commands_run + 1,
+      errors + error_delta
+    )
   end
 
-  defp execute_single_command(command, adapter, adapter_context) do
-    # Resolve refs - for load testing we use simple placeholder resolution
-    resolved_command = resolve_refs_for_load_test(command)
+  defp execute_single_command(command, adapter, adapter_context, refs) do
+    # Resolve refs using proper lookup (like executor.ex)
+    case resolve_command_refs(command, refs) do
+      {:ok, resolved_command} ->
+        case adapter.execute(resolved_command, adapter_context) do
+          {:ok, events} ->
+            # Bind any new refs created by this command
+            new_refs = maybe_bind_ref(command, events, refs)
+            {:ok, events, new_refs}
 
-    adapter.execute(resolved_command, adapter_context)
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, {:ref_resolution_failed, reason}}
+    end
   end
 
-  defp resolve_refs_for_load_test(command) do
-    # For load testing, we generate fresh values for refs
-    # This is a simplification - each sequence is independent
-    command
+  # Resolve symbolic refs in command using the refs map (mirrors executor.ex)
+  defp resolve_command_refs(command, refs) do
+    try do
+      # Get the field to skip (the one this command creates)
+      skip_field = get_creates_ref_field(command)
+      resolved = deep_resolve_refs(command, refs, skip_field)
+      {:ok, resolved}
+    rescue
+      e -> {:error, Exception.message(e)}
+    end
+  end
+
+  defp get_creates_ref_field(command) do
+    case command do
+      %{__struct__: command_module} ->
+        if function_exported?(command_module, :creates_ref, 0) do
+          command_module.creates_ref()
+        else
+          nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp deep_resolve_refs(%Ref{} = ref, refs, _skip_field) do
+    case Map.get(refs, ref.ref) do
+      nil ->
+        raise "Unresolved ref: #{inspect(ref)}"
+
+      value ->
+        value
+    end
+  end
+
+  defp deep_resolve_refs(%{__struct__: _} = struct, refs, skip_field) do
+    struct
     |> Map.from_struct()
     |> Enum.map(fn {k, v} ->
-      case v do
-        %PropertyDamage.Ref{} ->
-          # Generate a placeholder value
-          {k, generate_placeholder_value(k)}
-
-        other ->
-          {k, other}
+      if k == skip_field do
+        # Don't resolve the creates_ref field - keep the Ref as-is
+        {k, v}
+      else
+        {k, deep_resolve_refs(v, refs, nil)}
       end
     end)
     |> Map.new()
-    |> then(&struct(command.__struct__, &1))
+    |> then(&struct(struct.__struct__, &1))
   end
 
-  defp generate_placeholder_value(field_name) do
-    # Generate appropriate placeholder based on field name conventions
-    case to_string(field_name) do
-      name when name in ["id", "account_id", "user_id", "booking_id"] ->
-        "load_test_#{:rand.uniform(1_000_000)}"
+  defp deep_resolve_refs(map, refs, skip_field) when is_map(map) do
+    for {k, v} <- map, into: %{} do
+      {deep_resolve_refs(k, refs, skip_field), deep_resolve_refs(v, refs, skip_field)}
+    end
+  end
 
-      _ ->
-        "placeholder_#{:rand.uniform(1_000_000)}"
+  defp deep_resolve_refs(list, refs, skip_field) when is_list(list) do
+    Enum.map(list, &deep_resolve_refs(&1, refs, skip_field))
+  end
+
+  defp deep_resolve_refs(tuple, refs, skip_field) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> deep_resolve_refs(refs, skip_field)
+    |> List.to_tuple()
+  end
+
+  defp deep_resolve_refs(other, _refs, _skip_field), do: other
+
+  # Bind a new ref if the command creates one (mirrors executor.ex)
+  defp maybe_bind_ref(command, events, refs) do
+    command_module = command.__struct__
+
+    if function_exported?(command_module, :creates_ref, 0) do
+      case command_module.creates_ref() do
+        nil ->
+          refs
+
+        ref_field ->
+          # Find the value in the first event
+          case events do
+            [first_event | _] ->
+              value = Map.get(first_event, ref_field)
+
+              # Find the ref in the command
+              case Map.get(command, ref_field) do
+                %Ref{} = ref -> Map.put(refs, ref.ref, value)
+                _ -> refs
+              end
+
+            [] ->
+              refs
+          end
+      end
+    else
+      refs
     end
   end
 
