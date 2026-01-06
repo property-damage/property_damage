@@ -114,6 +114,9 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   use Mix.Task
 
+  # Suppress warnings for optional Req/YamlElixir dependencies (guarded at runtime)
+  @compile {:no_warn_undefined, [Req, YamlElixir]}
+
   @requirements ["app.config"]
 
   @impl Mix.Task
@@ -611,16 +614,25 @@ defmodule Mix.Tasks.Pd.Scaffold do
   def schema_to_type(%{"type" => "string", "format" => "email"}), do: :email
   def schema_to_type(%{"type" => "string", "format" => "uri"}), do: :uri
   def schema_to_type(%{"type" => "string", "enum" => values}), do: {:enum, values}
-  def schema_to_type(%{"type" => "string", "minLength" => min, "maxLength" => max}), do: {:string, min, max}
+
+  def schema_to_type(%{"type" => "string", "minLength" => min, "maxLength" => max}),
+    do: {:string, min, max}
+
   def schema_to_type(%{"type" => "string", "minLength" => min}), do: {:string, min, 100}
   def schema_to_type(%{"type" => "string", "maxLength" => max}), do: {:string, 1, max}
   def schema_to_type(%{"type" => "string", "pattern" => pattern}), do: {:pattern, pattern}
   def schema_to_type(%{"type" => "string"}), do: :string
-  def schema_to_type(%{"type" => "integer", "minimum" => min, "maximum" => max}), do: {:integer, min, max}
+
+  def schema_to_type(%{"type" => "integer", "minimum" => min, "maximum" => max}),
+    do: {:integer, min, max}
+
   def schema_to_type(%{"type" => "integer", "minimum" => min}), do: {:integer, min, 10000}
   def schema_to_type(%{"type" => "integer", "maximum" => max}), do: {:integer, 0, max}
   def schema_to_type(%{"type" => "integer"}), do: :integer
-  def schema_to_type(%{"type" => "number", "minimum" => min, "maximum" => max}), do: {:number, min, max}
+
+  def schema_to_type(%{"type" => "number", "minimum" => min, "maximum" => max}),
+    do: {:number, min, max}
+
   def schema_to_type(%{"type" => "number"}), do: :number
   def schema_to_type(%{"type" => "boolean"}), do: :boolean
   def schema_to_type(%{"type" => "array", "items" => items}), do: {:array, schema_to_type(items)}

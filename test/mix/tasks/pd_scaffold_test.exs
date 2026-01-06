@@ -292,6 +292,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
 
     test "converts numeric types" do
       assert schema_to_type(%{"type" => "integer"}) == :integer
+
       assert schema_to_type(%{"type" => "integer", "minimum" => 0, "maximum" => 100}) ==
                {:integer, 0, 100}
 
@@ -393,7 +394,8 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "def new!(state, _generators)"
       assert code =~ "def precondition(_state)"
       assert code =~ "def events(command, response)"
-      assert code =~ "@read_only false"  # POST should not be read_only
+      # POST should not be read_only
+      assert code =~ "@read_only false"
     end
 
     test "generates GET command as read_only" do
@@ -476,9 +478,12 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "defmodule PetStore.Model do"
       assert code =~ "use PropertyDamage.Model"
       assert code =~ "def commands do"
-      assert code =~ "{5, Commands.ListPets}"  # GET has weight 5
-      assert code =~ "{3, Commands.CreatePet}" # POST has weight 3
-      assert code =~ "{1, Commands.DeletePet}" # DELETE has weight 1
+      # GET has weight 5
+      assert code =~ "{5, Commands.ListPets}"
+      # POST has weight 3
+      assert code =~ "{3, Commands.CreatePet}"
+      # DELETE has weight 1
+      assert code =~ "{1, Commands.DeletePet}"
       assert code =~ "def projections do"
       assert code =~ "def checks do"
     end

@@ -47,6 +47,18 @@ defmodule PropertyDamage.Livebook do
       Livebook.state_diff(result)
   """
 
+  # Suppress warnings for optional Kino dependency (guarded by ensure_kino!/0 at runtime)
+  @compile {:no_warn_undefined,
+            [
+              Kino,
+              Kino.Markdown,
+              Kino.DataTable,
+              Kino.Frame,
+              Kino.Control,
+              Kino.Input,
+              Kino.Layout
+            ]}
+
   @doc """
   Check if Kino is available.
   """

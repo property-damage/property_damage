@@ -26,6 +26,9 @@ defmodule PropertyDamage.Livebook.Charts do
       Charts.success_pie_chart(result)
   """
 
+  # Suppress warnings for optional VegaLite/Kino dependencies (guarded at runtime)
+  @compile {:no_warn_undefined, [VegaLite, Kino, Kino.Markdown]}
+
   @doc """
   Check if VegaLite is available.
   """

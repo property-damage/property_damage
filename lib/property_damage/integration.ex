@@ -61,6 +61,9 @@ defmodule PropertyDamage.Integration do
 
   alias PropertyDamage.FailureIntelligence
 
+  # Suppress warnings for optional Req dependency and :ssl (guarded at runtime)
+  @compile {:no_warn_undefined, [Req, :ssl]}
+
   @default_health_check %{
     timeout_ms: 30_000,
     retries: 30,
