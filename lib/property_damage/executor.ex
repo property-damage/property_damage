@@ -88,6 +88,10 @@ defmodule PropertyDamage.Executor do
 
   alias PropertyDamage.EventLog.Entry
 
+  # Process dictionary key for injection context during adapter execution.
+  # This allows adapters to inject events mid-execution using ctx.inject.(event).
+  @injection_ctx_key :pd_injection_context
+
   @typedoc """
   Result of executing a command sequence.
   """
@@ -828,40 +832,72 @@ defmodule PropertyDamage.Executor do
     # 1. Resolve refs in command
     case resolve_command_refs(command, state.refs) do
       {:ok, resolved_command} ->
-        # 2. Execute via adapter (with settle logic for probes/bridges)
-        case execute_with_settle(resolved_command, adapter, adapter_context) do
+        # 2. Set up injection context for mid-execution event injection
+        injection_ctx = %{
+          projections: state.projections,
+          refs: state.refs,
+          event_log: state.event_log,
+          command_index: index,
+          branch_id: state.branch_id,
+          command: command
+        }
+
+        Process.put(@injection_ctx_key, injection_ctx)
+
+        # Add inject function to adapter context
+        adapter_context_with_inject = Map.put(adapter_context, :inject, &inject_event/1)
+
+        # 3. Execute via adapter (with settle logic for probes/async)
+        result =
+          try do
+            execute_with_settle(resolved_command, adapter, adapter_context_with_inject)
+          after
+            # Always clean up - get final injection state first
+            :ok
+          end
+
+        # Get accumulated state from injection context (includes any injected events)
+        final_injection_ctx = Process.get(@injection_ctx_key)
+        Process.delete(@injection_ctx_key)
+
+        # Use injection context state as base (already has injected events applied)
+        base_projections = final_injection_ctx.projections
+        base_refs = final_injection_ctx.refs
+        base_event_log = final_injection_ctx.event_log
+
+        case result do
           {:ok, events} ->
-            # 3. Bind new ref if command creates one
-            refs = maybe_bind_ref(command, events, state.refs)
+            # 4. Bind new ref if command creates one (from returned events)
+            refs = maybe_bind_ref(command, events, base_refs)
 
-            # 4. Update projections with command
-            projections = update_projections(state.projections, resolved_command)
+            # 5. Update projections with command
+            projections = update_projections(base_projections, resolved_command)
 
-            # 5. Update projections with events and record in log
+            # 6. Update projections with returned events and record in log
             {projections, event_log} =
               process_events(
                 events,
                 :command,
                 index,
-                state.event_log,
+                base_event_log,
                 projections,
                 state.branch_id
               )
 
-            # 6. Drain and process injector events
+            # 7. Drain and process injector events
             {projections, event_log} =
               process_injector_events(event_queue, event_log, projections, state.branch_id)
 
-            # 6.5. Flush and process mock-injected events
+            # 7.5. Flush and process mock-injected events
             {projections, event_log} =
               process_mock_events(mock_registry, index, event_log, projections, state.branch_id)
 
-            # 6.6. Update mock projections
+            # 7.6. Update mock projections
             if mock_registry do
               MockServiceRegistry.update_projections(mock_registry, projections)
             end
 
-            # 7. Run checks
+            # 8. Run checks
             check_ctx = %{
               command: resolved_command,
               events: events,
@@ -873,7 +909,7 @@ defmodule PropertyDamage.Executor do
 
             case run_checks(model, projections, check_ctx, state.check_counters) do
               {:ok, check_counters} ->
-                # 8. Execute stutter retries if configured
+                # 9. Execute stutter retries if configured
                 case maybe_execute_stutter_retries(
                        command,
                        resolved_command,
@@ -947,16 +983,16 @@ defmodule PropertyDamage.Executor do
             end
 
           {:settled, events} ->
-            # Probe/bridge settled successfully - treat same as {:ok, events}
-            refs = maybe_bind_ref(command, events, state.refs)
-            projections = update_projections(state.projections, resolved_command)
+            # Probe/async settled successfully - treat same as {:ok, events}
+            refs = maybe_bind_ref(command, events, base_refs)
+            projections = update_projections(base_projections, resolved_command)
 
             {projections, event_log} =
               process_events(
                 events,
                 :command,
                 index,
-                state.event_log,
+                base_event_log,
                 projections,
                 state.branch_id
               )
@@ -1183,6 +1219,63 @@ defmodule PropertyDamage.Executor do
       end
     else
       refs
+    end
+  end
+
+  # Bind a ref from a single event (used during injection)
+  defp maybe_bind_ref_from_event(command, event, refs) do
+    command_module = command.__struct__
+
+    if function_exported?(command_module, :creates_ref, 0) do
+      case command_module.creates_ref() do
+        nil ->
+          refs
+
+        ref_field ->
+          value = Map.get(event, ref_field)
+
+          if value do
+            # Find the ref in the command
+            case Map.get(command, ref_field) do
+              %Ref{} = ref -> Map.put(refs, ref.ref, value)
+              _ -> refs
+            end
+          else
+            refs
+          end
+      end
+    else
+      refs
+    end
+  end
+
+  # Inject an event mid-execution from an adapter.
+  # Called via ctx.inject.(event) from adapter execute/2.
+  # Updates projections immediately and records in event log.
+  defp inject_event(event) do
+    case Process.get(@injection_ctx_key) do
+      nil ->
+        raise ArgumentError, "inject called outside adapter execution context"
+
+      ctx ->
+        # 1. Update projections immediately
+        projections = update_projections(ctx.projections, event)
+
+        # 2. Bind ref if event has the creates_ref field
+        refs = maybe_bind_ref_from_event(ctx.command, event, ctx.refs)
+
+        # 3. Create entry with source :injected
+        entry = Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
+
+        # 4. Update process dictionary with accumulated state
+        Process.put(@injection_ctx_key, %{
+          ctx
+          | projections: projections,
+            refs: refs,
+            event_log: [entry | ctx.event_log]
+        })
+
+        :ok
     end
   end
 

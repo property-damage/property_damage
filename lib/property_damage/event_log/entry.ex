@@ -7,7 +7,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Event Sources
 
-  Events can come from six sources:
+  Events can come from seven sources:
 
   1. **Command events** (`:command` source) - Events produced by executing
      commands against the SUT. These have a `command_index` indicating
@@ -33,6 +33,12 @@ defmodule PropertyDamage.EventLog.Entry do
   6. **Mock events** (`:mock` source) - Events injected by mock service
      adapters when the SUT calls them. These have a `command_index` indicating
      which command triggered the mock call.
+
+  7. **Injected events** (`:injected` source) - Events emitted mid-execution
+     by adapters with `:async` semantics using `ctx.inject.(event)`. These
+     update projections immediately when injected, unlike command events which
+     batch all events at the end. They have a `command_index` indicating
+     which command's adapter injected them.
 
   ## Example Event Log
 
@@ -60,7 +66,7 @@ defmodule PropertyDamage.EventLog.Entry do
   - `timestamp` - Monotonic time in milliseconds when event was recorded
   - `command_index` - Index of command that produced this event (nil for injected/telemetry events)
   - `event` - The actual event struct
-  - `source` - Either `:command`, `:injector`, `:nemesis`, `:telemetry`, `:stutter`, or `:mock`
+  - `source` - One of `:command`, `:injector`, `:nemesis`, `:telemetry`, `:stutter`, `:mock`, or `:injected`
   - `injector_adapter` - Module that received the event (only for `:injector` source)
   - `nemesis_module` - Module that produced the event (only for `:nemesis` source)
   - `telemetry_receiver` - Module that received the span (only for `:telemetry` source)
@@ -74,7 +80,7 @@ defmodule PropertyDamage.EventLog.Entry do
           timestamp: integer(),
           command_index: non_neg_integer() | nil,
           event: struct(),
-          source: :command | :injector | :nemesis | :telemetry | :stutter | :mock,
+          source: :command | :injector | :nemesis | :telemetry | :stutter | :mock | :injected,
           injector_adapter: module() | nil,
           nemesis_module: module() | nil,
           telemetry_receiver: module() | nil,
@@ -399,4 +405,63 @@ defmodule PropertyDamage.EventLog.Entry do
   @spec mock?(t()) :: boolean()
   def mock?(%__MODULE__{source: :mock}), do: true
   def mock?(%__MODULE__{}), do: false
+
+  @doc """
+  Create a new entry for an injected event.
+
+  Injected events are emitted mid-execution by adapters using `ctx.inject.(event)`.
+  Unlike command events which are batched at the end of execution, injected events
+  update projections immediately when they're emitted. This is useful for adapters
+  with `:async` semantics that need to emit events as they happen (e.g., emit
+  `AuthorizationCreated` immediately when the resource is created, rather than
+  waiting until polling completes).
+
+  ## Parameters
+
+  - `event` - The event struct
+  - `command_index` - Index of the command whose adapter is injecting the event
+
+  ## Options
+
+  - `:timestamp` - Override timestamp (default: current monotonic time)
+  - `:branch_id` - Branch identifier for parallel execution
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_injected(%AuthCreated{}, 3)
+      iex> entry.source
+      :injected
+      iex> entry.command_index
+      3
+  """
+  @spec from_injected(struct(), non_neg_integer(), keyword()) :: t()
+  def from_injected(event, command_index, opts \\ []) do
+    %__MODULE__{
+      timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
+      command_index: command_index,
+      event: event,
+      source: :injected,
+      injector_adapter: nil,
+      nemesis_module: nil,
+      telemetry_receiver: nil,
+      trace_id: nil,
+      span_id: nil,
+      branch_id: Keyword.get(opts, :branch_id),
+      stutter_attempt: nil,
+      stutter_comparison: nil
+    }
+  end
+
+  @doc """
+  Check if an entry was injected mid-execution by an adapter.
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_injected(%SomeEvent{}, 0)
+      iex> PropertyDamage.EventLog.Entry.injected?(entry)
+      true
+  """
+  @spec injected?(t()) :: boolean()
+  def injected?(%__MODULE__{source: :injected}), do: true
+  def injected?(%__MODULE__{}), do: false
 end

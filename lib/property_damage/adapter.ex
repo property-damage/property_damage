@@ -114,6 +114,46 @@ defmodule PropertyDamage.Adapter do
 
   The first execution (attempt 1) does NOT include stutter context, only retries do.
   This allows the adapter to behave normally for the initial execution.
+
+  ## Mid-Execution Event Injection
+
+  For commands with `:async` semantics that poll for completion, you may want to
+  emit events as they happen rather than batching all events at the end. The
+  adapter context includes an `:inject` function for this purpose:
+
+      %{
+        inject: #Function<...>  # Call with event to inject it immediately
+      }
+
+  Use this to emit events at the correct time in the execution timeline:
+
+      def execute(%CreateAuthorization{} = cmd, ctx) do
+        # Step 1: Create the authorization (T=0)
+        {:ok, %{body: %{"id" => id, "status" => "processing"}}} =
+          Req.post(ctx.client, url: "/authorizations", json: payload)
+
+        # Inject immediately - projections update NOW at T=0
+        ctx.inject.(%AuthorizationCreated{authorization_id: id})
+
+        # Step 2: Poll until settled (T=5000)
+        case poll_until_settled(ctx.client, id) do
+          :approved ->
+            # Return settlement event - recorded at T=5000
+            {:ok, [%AuthorizationApproved{authorization_id: id}]}
+
+          :declined ->
+            {:ok, [%AuthorizationDeclined{authorization_id: id}]}
+        end
+      end
+
+  Key behaviors:
+  - Injected events update projections immediately
+  - Injected events are recorded in the event log with source `:injected`
+  - If the command has `creates_ref/0`, refs are bound from the first injected event
+  - Adapters that don't use `inject` continue to work unchanged
+
+  This is particularly useful when your model needs to track intermediate states,
+  or when assertions depend on events appearing at the correct point in time.
   """
 
   @doc """
