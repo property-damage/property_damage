@@ -282,6 +282,7 @@ defmodule PropertyDamage.LoadTest.Runner do
         {next_time_ms, _} = Enum.at(plan, next_index)
         delay = next_time_ms - time_ms
         Process.send_after(self(), :execute_ramp_step, delay)
+        {:noreply, %{state | sessions: new_sessions, ramp_step_index: next_index}}
       else
         # Last step - finish test
         report = finish_test(%{state | sessions: new_sessions})
@@ -289,9 +290,9 @@ defmodule PropertyDamage.LoadTest.Runner do
         if state.awaiting do
           GenServer.reply(state.awaiting, {:ok, report})
         end
-      end
 
-      {:noreply, %{state | sessions: new_sessions, ramp_step_index: next_index}}
+        {:stop, :normal, %{state | sessions: new_sessions, ramp_step_index: next_index, phase: :finished}}
+      end
     end
   end
 
