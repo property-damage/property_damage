@@ -2,7 +2,7 @@ defmodule PropertyDamage.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/example/property_damage"
+  @source_url "https://github.com/property-damage/property_damage"
 
   def project do
     [
