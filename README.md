@@ -1,5 +1,7 @@
 # PropertyDamage
 
+*Controlled chaos from the outside in: break your systems before your users do it in prod.*
+
 A stateful property-based testing (SPBT) framework for Elixir.
 
 PropertyDamage generates random sequences of operations against your system and verifies that invariants hold throughout. When a failure is found, it automatically shrinks the sequence to the minimal reproduction case.
