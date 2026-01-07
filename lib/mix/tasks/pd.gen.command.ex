@@ -9,7 +9,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
   ## Options
 
       --creates-ref NAME    Field name for ref this command creates
-      --role ROLE           Command role (action, probe, bridge, mock_config)
+      --semantics SEM       Command semantics (sync, probe, async, mock_config)
       --fields FIELDS       Comma-separated field names
 
   ## Examples
@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
       mix pd.gen.command MyApp.Commands.CreateUser --creates-ref user
 
       # Probe command with fields
-      mix pd.gen.command MyApp.Commands.GetUser --role probe --fields user_ref
+      mix pd.gen.command MyApp.Commands.GetUser --semantics probe --fields user_ref
 
       # Command with multiple fields
       mix pd.gen.command MyApp.Commands.UpdateUser --fields user_ref,name,email
@@ -35,7 +35,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
   def run(args) do
     {opts, argv, _} =
       OptionParser.parse(args,
-        strict: [creates_ref: :string, role: :string, fields: :string]
+        strict: [creates_ref: :string, semantics: :string, fields: :string]
       )
 
     case argv do
@@ -53,7 +53,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
 
   defp generate_command(module_name, opts) do
     creates_ref = Keyword.get(opts, :creates_ref)
-    role = Keyword.get(opts, :role, "action")
+    semantics = Keyword.get(opts, :semantics, "sync")
     fields = parse_fields(Keyword.get(opts, :fields, ""))
 
     # Parse module name to get path
@@ -64,7 +64,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     File.mkdir_p!(dir)
 
     # Generate content
-    content = generate_content(module_name, fields, creates_ref, role)
+    content = generate_content(module_name, fields, creates_ref, semantics)
 
     # Write file
     File.write!(path, content)
@@ -91,14 +91,14 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     |> then(&"lib/#{&1}.ex")
   end
 
-  defp generate_content(module_name, fields, creates_ref, role) do
+  defp generate_content(module_name, fields, creates_ref, semantics) do
     fields_atoms = Enum.map(fields, &String.to_atom/1)
     defstruct_line = if fields == [], do: "[]", else: inspect(fields_atoms)
 
-    role_function =
-      case role do
-        "action" -> ""
-        other -> "\n  def role, do: :#{other}\n"
+    semantics_function =
+      case semantics do
+        "sync" -> ""
+        other -> "\n  def semantics, do: :#{other}\n"
       end
 
     creates_ref_function =
@@ -130,7 +130,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
       def new!(state, overrides \\\\ %{}) do
         #{generator_body}
       end
-    #{role_function}#{creates_ref_function}end
+    #{semantics_function}#{creates_ref_function}end
     """
   end
 

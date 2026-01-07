@@ -603,8 +603,8 @@ defmodule PropertyDamage.Shrinker do
       command = Enum.at(state.commands, index)
       remaining = Enum.drop(state.commands, index + 1)
 
-      # Skip if this is a protected bridge command
-      if protected_bridge?(command, remaining) do
+      # Skip if this is a protected async command
+      if protected_async?(command, remaining) do
         do_linear_shrink(state, index + 1)
       else
         candidate = List.delete_at(state.commands, index)
@@ -817,10 +817,10 @@ defmodule PropertyDamage.Shrinker do
     %{state | iterations: state.iterations + 1}
   end
 
-  # Check if command is a bridge with refs used by downstream commands
-  defp protected_bridge?(command, downstream_commands) do
-    # Only protect bridge commands
-    if is_struct(command) and Settle.get_role(command) == :bridge do
+  # Check if command is async with refs used by downstream commands
+  defp protected_async?(command, downstream_commands) do
+    # Only protect async commands
+    if is_struct(command) and Settle.get_semantics(command) == :async do
       # Check if this command creates a ref
       command_module = command.__struct__
 

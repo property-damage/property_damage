@@ -81,20 +81,20 @@ defmodule PropertyDamage.IEx do
 
     IO.puts("COMMANDS (#{length(commands)} total)")
     IO.puts(String.duplicate("─", 65))
-    IO.puts("  Weight │ Command                    │ Role     │ Creates Ref")
+    IO.puts("  Weight │ Command                    │ Semantics│ Creates Ref")
     IO.puts(String.duplicate("─", 65))
 
     for {weight, cmd_module} <- commands do
       name = cmd_module |> Module.split() |> List.last()
-      role = get_role(cmd_module)
+      semantics = get_semantics(cmd_module)
       creates_ref = get_creates_ref(cmd_module)
 
       weight_str = String.pad_leading("#{weight}", 5)
       name_str = String.pad_trailing(name, 26)
-      role_str = String.pad_trailing("#{role}", 8)
+      semantics_str = String.pad_trailing("#{semantics}", 8)
       ref_str = if creates_ref, do: ":#{creates_ref}", else: "-"
 
-      IO.puts("  #{weight_str}   │ #{name_str} │ #{role_str} │ #{ref_str}")
+      IO.puts("  #{weight_str}   │ #{name_str} │ #{semantics_str} │ #{ref_str}")
     end
 
     IO.puts("")
@@ -201,7 +201,7 @@ defmodule PropertyDamage.IEx do
     # Check for no probe commands
     has_probes =
       Enum.any?(commands, fn {_, cmd} ->
-        get_role(cmd) == :probe
+        get_semantics(cmd) == :probe
       end)
 
     hints =
@@ -214,11 +214,11 @@ defmodule PropertyDamage.IEx do
     Enum.reverse(hints)
   end
 
-  defp get_role(cmd_module) do
-    if function_exported?(cmd_module, :role, 0) do
-      cmd_module.role()
+  defp get_semantics(cmd_module) do
+    if function_exported?(cmd_module, :semantics, 0) do
+      cmd_module.semantics()
     else
-      :action
+      :sync
     end
   end
 

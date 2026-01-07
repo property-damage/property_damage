@@ -2,13 +2,13 @@ defmodule PropertyDamage.Settle do
   @moduledoc """
   Settle logic for eventually consistent systems.
 
-  The Settle module provides retry logic for probe and bridge commands that need
+  The Settle module provides retry logic for probe and async commands that need
   to wait for eventual consistency. It supports configurable timeout, interval,
   and backoff strategies.
 
   ## Usage
 
-  Commands with `role/0` returning `:probe` or `:bridge` can implement `settle_config/0`
+  Commands with `semantics/0` returning `:probe` or `:async` can implement `settle_config/0`
   to customize retry behavior. The Executor uses this module to repeatedly execute
   the command until it succeeds or times out.
 
@@ -17,7 +17,7 @@ defmodule PropertyDamage.Settle do
       defmodule MyProbe do
         @behaviour PropertyDamage.Command
 
-        def role, do: :probe
+        def semantics, do: :probe
 
         def settle_config do
           %{
@@ -59,32 +59,32 @@ defmodule PropertyDamage.Settle do
   end
 
   @doc """
-  Get the role of a command.
+  Get the semantics of a command.
 
-  Returns the command's role if implemented, otherwise returns :action (default).
+  Returns the command's semantics if implemented, otherwise returns :sync (default).
   """
-  @spec get_role(module() | struct() | map()) :: :action | :probe | :bridge | :mock_config
-  def get_role(command) when is_struct(command) do
-    get_role(command.__struct__)
+  @spec get_semantics(module() | struct() | map()) :: :sync | :probe | :async | :mock_config
+  def get_semantics(command) when is_struct(command) do
+    get_semantics(command.__struct__)
   end
 
-  def get_role(command_module) when is_atom(command_module) do
-    if function_exported?(command_module, :role, 0) do
-      command_module.role()
+  def get_semantics(command_module) when is_atom(command_module) do
+    if function_exported?(command_module, :semantics, 0) do
+      command_module.semantics()
     else
-      :action
+      :sync
     end
   end
 
-  # Plain maps are always actions
-  def get_role(command) when is_map(command), do: :action
+  # Plain maps are always sync
+  def get_semantics(command) when is_map(command), do: :sync
 
   @doc """
-  Check if a command requires settling (is a probe or bridge).
+  Check if a command requires settling (is a probe or async).
   """
   @spec requires_settling?(module() | struct()) :: boolean()
   def requires_settling?(command) do
-    get_role(command) in [:probe, :bridge]
+    get_semantics(command) in [:probe, :async]
   end
 
   @doc """
@@ -171,8 +171,8 @@ defmodule PropertyDamage.Settle do
   @doc """
   Execute a command with settle logic if required.
 
-  If the command is a probe or bridge, wraps execution with settle/retry logic.
-  For regular actions, executes directly.
+  If the command is a probe or async, wraps execution with settle/retry logic.
+  For regular sync commands, executes directly.
 
   ## Parameters
 

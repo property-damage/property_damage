@@ -615,12 +615,12 @@ branches = [[CreateItem.new()],  # Creates :item_ref
 
 ## Eventual Consistency (Async Support)
 
-For systems with eventual consistency, PropertyDamage provides probe and bridge
-command roles with automatic settle/retry logic.
+For systems with eventual consistency, PropertyDamage provides probe and async
+command semantics with automatic settle/retry logic.
 
-### Command Roles
+### Command Semantics
 
-Commands can declare their role via the `role/0` callback:
+Commands can declare their semantics via the `semantics/0` callback:
 
 ```elixir
 defmodule MyTest.Commands.GetOrderStatus do
@@ -629,7 +629,7 @@ defmodule MyTest.Commands.GetOrderStatus do
   defstruct [:order_id]
 
   # This is a probe - it queries state and may need to retry
-  def role, do: :probe
+  def semantics, do: :probe
 
   # Configure settle behavior
   def settle_config do
@@ -644,13 +644,13 @@ defmodule MyTest.Commands.GetOrderStatus do
 end
 ```
 
-### Role Types
+### Semantics Types
 
-| Role | Purpose | Settle Behavior |
-|------|---------|-----------------|
-| `:action` | Mutates state (default) | Execute once |
+| Semantics | Purpose | Settle Behavior |
+|-----------|---------|-----------------|
+| `:sync` | Mutates state (default) | Execute once |
 | `:probe` | Queries state | Retry until success or timeout |
-| `:bridge` | Waits for async completion | Retry until complete |
+| `:async` | Waits for async completion | Retry until complete |
 | `:mock_config` | Configures mock services | Not sent to SUT |
 
 ### Adapter Integration

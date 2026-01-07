@@ -3,15 +3,15 @@ defmodule PropertyDamage.SettleTest do
 
   alias PropertyDamage.Settle
 
-  # Test command modules for role testing
-  defmodule ActionCommand do
+  # Test command modules for semantics testing
+  defmodule SyncCommand do
     defstruct [:id]
-    def role, do: :action
+    def semantics, do: :sync
   end
 
   defmodule ProbeCommand do
     defstruct [:id]
-    def role, do: :probe
+    def semantics, do: :probe
 
     def settle_config do
       %{
@@ -22,9 +22,9 @@ defmodule PropertyDamage.SettleTest do
     end
   end
 
-  defmodule BridgeCommand do
+  defmodule AsyncCommand do
     defstruct [:id]
-    def role, do: :bridge
+    def semantics, do: :async
 
     def settle_config do
       %{
@@ -35,34 +35,34 @@ defmodule PropertyDamage.SettleTest do
     end
   end
 
-  defmodule NoRoleCommand do
+  defmodule NoSemanticsCommand do
     defstruct [:id]
-    # No role/0 callback - should default to :action
+    # No semantics/0 callback - should default to :sync
   end
 
-  describe "get_role/1" do
-    test "returns :action for action commands" do
-      assert Settle.get_role(%ActionCommand{id: 1}) == :action
-      assert Settle.get_role(ActionCommand) == :action
+  describe "get_semantics/1" do
+    test "returns :sync for sync commands" do
+      assert Settle.get_semantics(%SyncCommand{id: 1}) == :sync
+      assert Settle.get_semantics(SyncCommand) == :sync
     end
 
     test "returns :probe for probe commands" do
-      assert Settle.get_role(%ProbeCommand{id: 1}) == :probe
-      assert Settle.get_role(ProbeCommand) == :probe
+      assert Settle.get_semantics(%ProbeCommand{id: 1}) == :probe
+      assert Settle.get_semantics(ProbeCommand) == :probe
     end
 
-    test "returns :bridge for bridge commands" do
-      assert Settle.get_role(%BridgeCommand{id: 1}) == :bridge
-      assert Settle.get_role(BridgeCommand) == :bridge
+    test "returns :async for async commands" do
+      assert Settle.get_semantics(%AsyncCommand{id: 1}) == :async
+      assert Settle.get_semantics(AsyncCommand) == :async
     end
 
-    test "returns :action for commands without role/0" do
-      assert Settle.get_role(%NoRoleCommand{id: 1}) == :action
-      assert Settle.get_role(NoRoleCommand) == :action
+    test "returns :sync for commands without semantics/0" do
+      assert Settle.get_semantics(%NoSemanticsCommand{id: 1}) == :sync
+      assert Settle.get_semantics(NoSemanticsCommand) == :sync
     end
 
-    test "returns :action for plain maps" do
-      assert Settle.get_role(%{foo: :bar}) == :action
+    test "returns :sync for plain maps" do
+      assert Settle.get_semantics(%{foo: :bar}) == :sync
     end
   end
 
@@ -76,7 +76,7 @@ defmodule PropertyDamage.SettleTest do
     end
 
     test "returns defaults when settle_config not implemented" do
-      config = Settle.get_config(%ActionCommand{id: 1})
+      config = Settle.get_config(%SyncCommand{id: 1})
 
       assert config.timeout_ms == 2_000
       assert config.interval_ms == 100
@@ -84,7 +84,7 @@ defmodule PropertyDamage.SettleTest do
     end
 
     test "works with module directly" do
-      config = Settle.get_config(BridgeCommand)
+      config = Settle.get_config(AsyncCommand)
 
       assert config.timeout_ms == 1000
       assert config.backoff == :exponential
@@ -96,16 +96,16 @@ defmodule PropertyDamage.SettleTest do
       assert Settle.requires_settling?(%ProbeCommand{id: 1})
     end
 
-    test "returns true for bridges" do
-      assert Settle.requires_settling?(%BridgeCommand{id: 1})
+    test "returns true for async" do
+      assert Settle.requires_settling?(%AsyncCommand{id: 1})
     end
 
-    test "returns false for actions" do
-      refute Settle.requires_settling?(%ActionCommand{id: 1})
+    test "returns false for sync" do
+      refute Settle.requires_settling?(%SyncCommand{id: 1})
     end
 
-    test "returns false for commands without role" do
-      refute Settle.requires_settling?(%NoRoleCommand{id: 1})
+    test "returns false for commands without semantics" do
+      refute Settle.requires_settling?(%NoSemanticsCommand{id: 1})
     end
   end
 
@@ -250,10 +250,10 @@ defmodule PropertyDamage.SettleTest do
       assert result == {:ok, :settled_result}
     end
 
-    test "executes directly for action commands" do
+    test "executes directly for sync commands" do
       result =
         Settle.execute_with_settle(
-          %ActionCommand{id: 1},
+          %SyncCommand{id: 1},
           fn -> {:ok, :direct_result} end
         )
 

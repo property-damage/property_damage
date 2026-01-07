@@ -211,19 +211,19 @@ defmodule PropertyDamage.Command do
   @callback read_only?() :: boolean()
 
   @doc """
-  (Optional) Returns the role of this command for async/eventual consistency support.
+  (Optional) Returns the execution semantics of this command.
 
-  ## Roles
+  ## Semantics
 
-  - `:action` - Mutates SUT state. Postconditions are weak (check response codes).
-    This is the default if not implemented.
+  - `:sync` - Synchronous operation. Mutates SUT state, completes immediately.
+    Postconditions are weak (check response codes). This is the default if not implemented.
 
   - `:probe` - Queries SUT state without mutation. Contains settle/retry logic
     for eventually consistent systems. Should also implement `read_only?/0` returning `true`.
 
-  - `:bridge` - Blocks until an async operation completes. Used for operations
-    that return "processing" status and require polling. Bridge commands are
-    protected during shrinking if their ref is used by other commands.
+  - `:async` - Asynchronous operation that creates a resource and waits for it to settle.
+    Used for operations that return "processing" status and require polling.
+    Async commands are protected during shrinking if their ref is used by other commands.
 
   - `:mock_config` - Configures mock service behavior. Not sent to the SUT adapter.
     Instead, mock adapters receive this command via `on_command/2` to update
@@ -231,24 +231,24 @@ defmodule PropertyDamage.Command do
 
   ## Examples
 
-      # Action (default) - creates/modifies state
-      def role, do: :action
+      # Sync (default) - creates/modifies state synchronously
+      def semantics, do: :sync
 
       # Probe - queries and settles
-      def role, do: :probe
+      def semantics, do: :probe
 
-      # Bridge - waits for async completion
-      def role, do: :bridge
+      # Async - waits for async completion
+      def semantics, do: :async
 
       # Mock config - configures mock services
-      def role, do: :mock_config
+      def semantics, do: :mock_config
   """
-  @callback role() :: :action | :probe | :bridge | :mock_config
+  @callback semantics() :: :sync | :probe | :async | :mock_config
 
   @doc """
-  (Optional) Returns settle configuration for probes and bridges.
+  (Optional) Returns settle configuration for probes and async commands.
 
-  When a command's `role/0` is `:probe` or `:bridge`, this configuration
+  When a command's `semantics/0` is `:probe` or `:async`, this configuration
   controls the retry behavior when waiting for eventual consistency.
 
   ## Fields
@@ -333,7 +333,7 @@ defmodule PropertyDamage.Command do
     creates_ref: 0,
     downstream_observables: 0,
     read_only?: 0,
-    role: 0,
+    semantics: 0,
     settle_config: 0,
     idempotent?: 0,
     idempotency_key: 1,

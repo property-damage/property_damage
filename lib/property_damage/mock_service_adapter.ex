@@ -139,7 +139,7 @@ defmodule PropertyDamage.MockServiceAdapter do
         def precondition(_state), do: true
 
         @impl true
-        def role, do: :mock_config  # Signals this is mock configuration
+        def semantics, do: :mock_config  # Signals this is mock configuration
 
         @impl true
         def new!(state, overrides \\\\ %{}) do
@@ -151,7 +151,7 @@ defmodule PropertyDamage.MockServiceAdapter do
         end
       end
 
-  Commands with `role: :mock_config` are executed by notifying mock adapters
+  Commands with `semantics: :mock_config` are executed by notifying mock adapters
   rather than calling the SUT.
   """
 
@@ -193,7 +193,7 @@ defmodule PropertyDamage.MockServiceAdapter do
   Called before each command is executed against the SUT. Use this to
   update mock behavior based on commands.
 
-  Commands with `role: :mock_config` are handled entirely by this callback
+  Commands with `semantics: :mock_config` are handled entirely by this callback
   and are not sent to the SUT adapter.
 
   ## Parameters
@@ -279,15 +279,15 @@ defmodule PropertyDamage.MockServiceAdapter do
   @doc """
   Check if a command is a mock configuration command.
 
-  Mock config commands have `role: :mock_config` and are handled by
+  Mock config commands have `semantics: :mock_config` and are handled by
   mock adapters rather than the SUT adapter.
   """
   @spec mock_config_command?(struct()) :: boolean()
   def mock_config_command?(command) when is_struct(command) do
     module = command.__struct__
 
-    if function_exported?(module, :role, 0) do
-      module.role() == :mock_config
+    if function_exported?(module, :semantics, 0) do
+      module.semantics() == :mock_config
     else
       false
     end

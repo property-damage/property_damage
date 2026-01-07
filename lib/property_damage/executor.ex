@@ -652,12 +652,12 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Check if command has role :mock_config
+  # Check if command has semantics :mock_config
   defp mock_config_command?(command) when is_struct(command) do
     module = command.__struct__
 
-    if function_exported?(module, :role, 0) do
-      module.role() == :mock_config
+    if function_exported?(module, :semantics, 0) do
+      module.semantics() == :mock_config
     else
       false
     end

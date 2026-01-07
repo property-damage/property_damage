@@ -4,7 +4,7 @@ This guide covers patterns for testing systems with asynchronous operations and
 eventual consistency, including:
 
 - **Probe commands** - Query until data appears
-- **Bridge commands** - Create resource and poll until settled
+- **Async commands** - Create resource and poll until settled
 - **InjectorAdapters** - Handle webhook/callback events
 
 ## Overview
@@ -26,15 +26,15 @@ Client                          API                         Backend
 
 PropertyDamage provides several mechanisms to handle these patterns.
 
-## Command Roles
+## Command Semantics
 
-Commands declare their behavior via the `role/0` callback:
+Commands declare their behavior via the `semantics/0` callback:
 
-| Role | Purpose | Mutates State? | Settle Behavior |
-|------|---------|----------------|-----------------|
-| `:action` | Standard operations (default) | Yes | Execute once |
+| Semantics | Purpose | Mutates State? | Settle Behavior |
+|-----------|---------|----------------|-----------------|
+| `:sync` | Standard operations (default) | Yes | Execute once |
 | `:probe` | Query and wait for consistency | No | Retry until success |
-| `:bridge` | Create and wait for completion | Yes | Retry until complete |
+| `:async` | Create and wait for completion | Yes | Retry until complete |
 | `:mock_config` | Configure mock services | No | Not sent to SUT |
 
 ## Probe Commands
@@ -70,8 +70,8 @@ defmodule MyTest.Commands.GetOrder do
     map_size(state.orders) > 0
   end
 
-  # Probe role enables settle/retry logic
-  def role, do: :probe
+  # Probe semantics enables settle/retry logic
+  def semantics, do: :probe
 
   # Read-only commands are prioritized for removal during shrinking
   def read_only?, do: true
@@ -117,9 +117,9 @@ The executor wraps probe execution with `Settle.settle/2`, which:
 2. If `{:retry, reason}` is returned, sleeps and retries
 3. Continues until `{:ok, events}`, `{:error, reason}`, or timeout
 
-## Bridge Commands
+## Async Commands
 
-Use bridges for **operations that create resources and must wait for them to settle**.
+Use async commands for **operations that create resources and must wait for them to settle**.
 
 ### When to Use
 
@@ -183,9 +183,9 @@ defmodule MyTest.Commands.CreateAuthorization do
   @impl true
   def precondition(state), do: map_size(state.accounts) > 0
 
-  # Bridge role protects this command during shrinking
+  # Async semantics protects this command during shrinking
   # if downstream commands use its ref
-  def role, do: :bridge
+  def semantics, do: :async
 
   # This command creates a ref used by other commands
   def creates_ref, do: :authorization_id
@@ -342,10 +342,10 @@ defp poll_authorization(authorization_id, cmd, cmd_key, ctx) do
 end
 ```
 
-### Bridge Shrinking Protection
+### Async Shrinking Protection
 
-The `:bridge` role provides **shrinking protection**. When a test fails, the
-shrinker tries to minimize the command sequence. Bridge commands that create
+The `:async` semantics provides **shrinking protection**. When a test fails, the
+shrinker tries to minimize the command sequence. Async commands that create
 refs used by downstream commands are protected from removal:
 
 ```
@@ -589,10 +589,10 @@ end
 | Pattern | Use When | Implementation |
 |---------|----------|----------------|
 | **Probe** | Read-only query waiting for data | Return `{:retry, reason}` from adapter |
-| **Bridge (internal poll)** | Create + wait for completion | Poll inside `execute/2` |
-| **Bridge (process dict)** | Create + wait, prefer Settle module | Track state in process dictionary |
+| **Async (internal poll)** | Create + wait for completion | Poll inside `execute/2` |
+| **Async (process dict)** | Create + wait, prefer Settle module | Track state in process dictionary |
 | **InjectorAdapter** | External system pushes webhooks | Implement `to_event/1` callback |
 | **Polling InjectorAdapter** | Poll but inject events between commands | Background GenServer + EventQueue |
 
 Choose the simplest pattern that fits your use case. For most async create
-operations, **Bridge with internal polling** is recommended.
+operations, **Async with internal polling** is recommended.
