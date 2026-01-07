@@ -400,17 +400,25 @@ defmodule PropertyDamage.LoadTest.Runner do
       |> Enum.sort()
       |> Enum.take(count)
 
-    Enum.reduce(session_ids, state.sessions, fn id, sessions ->
-      pid = Map.get(sessions, id)
+    # Stop sessions in parallel to avoid sequential blocking
+    session_ids
+    |> Enum.map(fn id ->
+      pid = Map.get(state.sessions, id)
 
-      if pid do
-        try do
-          Session.stop(pid)
-        catch
-          :exit, _ -> :ok
+      Task.async(fn ->
+        if pid do
+          try do
+            Session.stop(pid)
+          catch
+            :exit, _ -> :ok
+          end
         end
-      end
+      end)
+    end)
+    |> Task.await_many(6_000)
 
+    # Remove from map
+    Enum.reduce(session_ids, state.sessions, fn id, sessions ->
       Map.delete(sessions, id)
     end)
   end
@@ -425,14 +433,18 @@ defmodule PropertyDamage.LoadTest.Runner do
   end
 
   defp finish_test(state) do
-    # Stop all sessions
-    for {_id, pid} <- state.sessions do
-      try do
-        Session.stop(pid)
-      catch
-        :exit, _ -> :ok
-      end
-    end
+    # Stop all sessions in parallel to avoid sequential blocking
+    state.sessions
+    |> Enum.map(fn {_id, pid} ->
+      Task.async(fn ->
+        try do
+          Session.stop(pid)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+    end)
+    |> Task.await_many(6_000)
 
     # Get final metrics
     snapshot = Metrics.snapshot(state.metrics)
