@@ -37,6 +37,9 @@ defmodule PropertyDamage.LoadTest.Session do
   alias PropertyDamage.LoadTest.Metrics
   alias PropertyDamage.{Generator, Ref, Sequence}
 
+  # Process dictionary key for injection context during adapter execution
+  @injection_ctx_key :property_damage_load_test_injection_ctx
+
   defstruct [
     :model,
     :adapter,
@@ -279,13 +282,36 @@ defmodule PropertyDamage.LoadTest.Session do
     # Resolve refs using proper lookup (like executor.ex)
     case resolve_command_refs(command, refs) do
       {:ok, resolved_command} ->
-        case adapter.execute(resolved_command, adapter_context) do
-          {:ok, events} ->
-            # Bind any new refs created by this command
-            new_refs = maybe_bind_ref(command, events, refs)
-            {:ok, events, new_refs}
+        # Set up injection context in process dictionary
+        Process.put(@injection_ctx_key, %{events: [], command: command, refs: refs})
+
+        # Add inject function to adapter context
+        adapter_context_with_inject = Map.put(adapter_context, :inject, &inject_event/1)
+
+        result =
+          try do
+            adapter.execute(resolved_command, adapter_context_with_inject)
+          after
+            :ok
+          end
+
+        # Get injected events from context
+        injection_ctx = Process.get(@injection_ctx_key)
+        Process.delete(@injection_ctx_key)
+        injected_events = Enum.reverse(injection_ctx.events)
+
+        case result do
+          {:ok, returned_events} ->
+            # Combine injected events (first) with returned events
+            all_events = injected_events ++ returned_events
+
+            # Bind refs from all events
+            new_refs = bind_refs_from_events(command, all_events, refs)
+            {:ok, all_events, new_refs}
 
           {:error, reason} ->
+            # Still process any injected events for ref binding (for future use)
+            _new_refs = bind_refs_from_events(command, injected_events, refs)
             {:error, reason}
         end
 
@@ -364,8 +390,8 @@ defmodule PropertyDamage.LoadTest.Session do
 
   defp deep_resolve_refs(other, _refs, _skip_field), do: other
 
-  # Bind a new ref if the command creates one (mirrors executor.ex)
-  defp maybe_bind_ref(command, events, refs) do
+  # Bind refs from all events (handles injected + returned events)
+  defp bind_refs_from_events(command, events, refs) do
     command_module = command.__struct__
 
     if function_exported?(command_module, :creates_ref, 0) do
@@ -374,24 +400,29 @@ defmodule PropertyDamage.LoadTest.Session do
           refs
 
         ref_field ->
-          # Find the value in the first event
-          case events do
-            [first_event | _] ->
-              value = Map.get(first_event, ref_field)
+          # Find the ref in the command
+          case Map.get(command, ref_field) do
+            %Ref{} = ref ->
+              # Find the value in the first event that has this field set
+              value = find_ref_value_in_events(events, ref_field)
+              if value, do: Map.put(refs, ref.ref, value), else: refs
 
-              # Find the ref in the command
-              case Map.get(command, ref_field) do
-                %Ref{} = ref -> Map.put(refs, ref.ref, value)
-                _ -> refs
-              end
-
-            [] ->
+            _ ->
               refs
           end
       end
     else
       refs
     end
+  end
+
+  defp find_ref_value_in_events(events, ref_field) do
+    Enum.find_value(events, fn event ->
+      case Map.get(event, ref_field) do
+        nil -> nil
+        value -> value
+      end
+    end)
   end
 
   defp maybe_think({0, 0}), do: :ok
@@ -412,4 +443,17 @@ defmodule PropertyDamage.LoadTest.Session do
   defp categorize_error({:timeout, _}), do: :timeout
   defp categorize_error({:connection_refused, _}), do: :connection_error
   defp categorize_error(_), do: :unknown_error
+
+  # Inject function for adapter use - stores events in process dictionary
+  defp inject_event(event) do
+    case Process.get(@injection_ctx_key) do
+      nil ->
+        raise ArgumentError, "inject called outside adapter execution context"
+
+      ctx ->
+        # Accumulate injected event
+        Process.put(@injection_ctx_key, %{ctx | events: [event | ctx.events]})
+        :ok
+    end
+  end
 end
