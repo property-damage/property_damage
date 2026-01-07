@@ -675,6 +675,10 @@ def execute(%GetOrderStatus{order_id: id}, ctx) do
 end
 ```
 
+See [Async and Eventual Consistency Guide](guides/async_and_eventual_consistency.md)
+for complete documentation including bridge commands, InjectorAdapters, and
+handling async operations that require polling.
+
 ## Fault Injection (Nemesis)
 
 Test system resilience by injecting faults like network partitions, latency,
@@ -2205,6 +2209,16 @@ A travel booking service demonstrating chaos engineering:
 ```
 example_tests/travel_booking/
 ```
+
+## Guides
+
+- [Getting Started](guides/getting_started.md) - First steps with PropertyDamage
+- [Writing Invariants](guides/writing_invariants.md) - AssertionProjections and checks
+- [Debugging Failures](guides/debugging_failures.md) - Analyzing and fixing test failures
+- [Async and Eventual Consistency](guides/async_and_eventual_consistency.md) - Probes, bridges, and InjectorAdapters
+- [Chaos Engineering](guides/chaos_engineering.md) - Nemesis fault injection
+- [Integration Testing](guides/integration_testing.md) - Testing against live services
+- [Differential Testing](guides/differential_testing.md) - Comparing implementations
 
 ## Architecture
 
