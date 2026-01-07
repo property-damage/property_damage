@@ -257,7 +257,12 @@ defmodule PropertyDamage.LoadTest.Session do
         {:ok, _events, updated_refs} ->
           {:ok, 0, updated_refs}
 
+        {:error, reason, updated_refs} ->
+          # Preserve refs from injected events even on error
+          {{:error, categorize_error(reason)}, 1, updated_refs}
+
         {:error, reason} ->
+          # No ref updates (e.g., ref resolution failed)
           {{:error, categorize_error(reason)}, 1, refs}
       end
 
@@ -310,9 +315,9 @@ defmodule PropertyDamage.LoadTest.Session do
             {:ok, all_events, new_refs}
 
           {:error, reason} ->
-            # Still process any injected events for ref binding (for future use)
-            _new_refs = bind_refs_from_events(command, injected_events, refs)
-            {:error, reason}
+            # Still bind refs from injected events so subsequent commands can use them
+            new_refs = bind_refs_from_events(command, injected_events, refs)
+            {:error, reason, new_refs}
         end
 
       {:error, reason} ->
