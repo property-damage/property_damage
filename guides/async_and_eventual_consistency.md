@@ -5,6 +5,7 @@ eventual consistency, including:
 
 - **Probe commands** - Query until data appears
 - **Async commands** - Create resource and poll until settled
+- **Mid-execution injection** - Emit events as they happen during polling
 - **InjectorAdapters** - Handle webhook/callback events
 
 ## Overview
@@ -289,6 +290,75 @@ defmodule MyTest.HTTPAdapter do
   end
 end
 ```
+
+### Alternative: Mid-Execution Event Injection
+
+The internal polling pattern above has a limitation: **all events are returned together
+at the end**, compressing the timeline. If your model needs to see intermediate states
+(e.g., verify the authorization exists before it's approved), use `ctx.inject`:
+
+```elixir
+def execute(%CreateAuthorization{} = cmd, ctx) do
+  payload = %{
+    account_id: cmd.account_id,
+    amount: cmd.amount,
+    currency: cmd.currency
+  }
+
+  case Req.post(ctx.client, url: "/authorizations", json: payload) do
+    {:ok, %{status: 201, body: %{"id" => id, "status" => status}}} ->
+      # Inject AuthorizationCreated NOW - projections update immediately
+      ctx.inject.(%AuthorizationCreated{
+        authorization_id: id,
+        account_id: cmd.account_id,
+        amount: cmd.amount,
+        currency: cmd.currency,
+        status: status_to_atom(status)
+      })
+
+      case status do
+        "approved" ->
+          {:ok, [%AuthorizationApproved{authorization_id: id, amount: cmd.amount}]}
+
+        "declined" ->
+          {:ok, [%AuthorizationDeclined{authorization_id: id, reason: "immediate"}]}
+
+        "processing" ->
+          # Poll until settled - AuthorizationCreated already visible to projections
+          poll_until_settled(ctx.client, id, cmd)
+      end
+
+    {:error, reason} ->
+      {:error, reason}
+  end
+end
+
+defp poll_until_settled(client, id, cmd) do
+  # ... polling logic ...
+  case final_status do
+    "approved" ->
+      {:ok, [%AuthorizationApproved{authorization_id: id, amount: cmd.amount}]}
+
+    "declined" ->
+      {:ok, [%AuthorizationDeclined{authorization_id: id, reason: reason}]}
+  end
+end
+```
+
+**Key behaviors of `ctx.inject`:**
+
+- Injected events update projections **immediately** when injected
+- Injected events are recorded with source `:injected` in the event log
+- If the command has `creates_ref/0`, refs are bound from the **first** injected event
+- Events returned from `execute/2` are processed **after** injected events
+- Adapters not using `inject` continue to work unchanged (backward compatible)
+
+**When to use `ctx.inject`:**
+
+- Model assertions depend on intermediate states
+- Projections need to track resources before they settle
+- Event timeline accuracy matters for debugging/visualization
+- You want to emit `Created` event immediately, then `Settled` event after polling
 
 ### Alternative: Process Dictionary for Retry State
 
@@ -590,9 +660,13 @@ end
 |---------|----------|----------------|
 | **Probe** | Read-only query waiting for data | Return `{:retry, reason}` from adapter |
 | **Async (internal poll)** | Create + wait for completion | Poll inside `execute/2` |
+| **Async (ctx.inject)** | Create + wait, need accurate event timing | Call `ctx.inject.(event)` mid-execution |
 | **Async (process dict)** | Create + wait, prefer Settle module | Track state in process dictionary |
 | **InjectorAdapter** | External system pushes webhooks | Implement `to_event/1` callback |
 | **Polling InjectorAdapter** | Poll but inject events between commands | Background GenServer + EventQueue |
 
-Choose the simplest pattern that fits your use case. For most async create
-operations, **Async with internal polling** is recommended.
+Choose the simplest pattern that fits your use case:
+
+- **Most async create operations**: Use **internal polling** (simplest)
+- **Need intermediate state visibility**: Use **ctx.inject** for accurate event timing
+- **External webhooks/callbacks**: Use **InjectorAdapter**
