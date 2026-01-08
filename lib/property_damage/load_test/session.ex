@@ -35,7 +35,7 @@ defmodule PropertyDamage.LoadTest.Session do
   require Logger
 
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.{Generator, Ref, Sequence}
+  alias PropertyDamage.{AssertionProjection, Generator, Ref, Sequence}
 
   # Process dictionary key for injection context during adapter execution
   @injection_ctx_key :property_damage_load_test_injection_ctx
@@ -49,10 +49,12 @@ defmodule PropertyDamage.LoadTest.Session do
     :commands_range,
     :think_time_range,
     :rate_limiter,
+    :run_assertions,
     :running,
     :commands_executed,
     :sequences_completed,
-    :errors
+    :errors,
+    :assertion_failures
   ]
 
   @type t :: %__MODULE__{}
@@ -74,6 +76,7 @@ defmodule PropertyDamage.LoadTest.Session do
   - `:commands_range` - {min, max} commands per sequence (default: {10, 50})
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:rate_limiter` - Optional rate limiter pid
+  - `:run_assertions` - Whether to run model assertions during execution (default: false)
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
@@ -110,6 +113,7 @@ defmodule PropertyDamage.LoadTest.Session do
     commands_range = Keyword.get(opts, :commands_range, {10, 50})
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
     rate_limiter = Keyword.get(opts, :rate_limiter)
+    run_assertions = Keyword.get(opts, :run_assertions, false)
 
     state = %__MODULE__{
       model: model,
@@ -120,10 +124,12 @@ defmodule PropertyDamage.LoadTest.Session do
       commands_range: commands_range,
       think_time_range: think_time_range,
       rate_limiter: rate_limiter,
+      run_assertions: run_assertions,
       running: true,
       commands_executed: 0,
       sequences_completed: 0,
-      errors: 0
+      errors: 0,
+      assertion_failures: 0
     }
 
     # Notify metrics that session started
@@ -148,6 +154,7 @@ defmodule PropertyDamage.LoadTest.Session do
       commands_executed: state.commands_executed,
       sequences_completed: state.sequences_completed,
       errors: state.errors,
+      assertion_failures: state.assertion_failures,
       running: state.running
     }
 
@@ -203,12 +210,13 @@ defmodule PropertyDamage.LoadTest.Session do
 
     # Execute sequence with metrics collection
     case execute_sequence_with_metrics(sequence, state) do
-      {:ok, commands_run, errors} ->
+      {:ok, commands_run, errors, assertion_failure_count} ->
         new_state = %{
           state
           | commands_executed: state.commands_executed + commands_run,
             sequences_completed: state.sequences_completed + 1,
-            errors: state.errors + errors
+            errors: state.errors + errors,
+            assertion_failures: state.assertion_failures + assertion_failure_count
         }
 
         {:ok, new_state}
@@ -226,8 +234,32 @@ defmodule PropertyDamage.LoadTest.Session do
     case state.adapter.setup(state.adapter_config) do
       {:ok, adapter_context} ->
         try do
-          # Initialize refs map for this sequence
-          execute_commands(commands, adapter_context, state, _refs = %{}, 0, 0)
+          # Initialize refs map and projections for this sequence
+          initial_projections =
+            if state.run_assertions do
+              init_projections(state.model)
+            else
+              nil
+            end
+
+          initial_counters =
+            if state.run_assertions do
+              %{step: 0, command: 0, event: 0}
+            else
+              nil
+            end
+
+          execute_commands(
+            commands,
+            adapter_context,
+            state,
+            _refs = %{},
+            initial_projections,
+            initial_counters,
+            0,
+            0,
+            0
+          )
         after
           state.adapter.teardown(adapter_context)
         end
@@ -237,11 +269,31 @@ defmodule PropertyDamage.LoadTest.Session do
     end
   end
 
-  defp execute_commands([], _adapter_context, _state, _refs, commands_run, errors) do
-    {:ok, commands_run, errors}
+  defp execute_commands(
+         [],
+         _adapter_context,
+         _state,
+         _refs,
+         _projections,
+         _counters,
+         commands_run,
+         errors,
+         assertion_failures
+       ) do
+    {:ok, commands_run, errors, assertion_failures}
   end
 
-  defp execute_commands([command | rest], adapter_context, state, refs, commands_run, errors) do
+  defp execute_commands(
+         [command | rest],
+         adapter_context,
+         state,
+         refs,
+         projections,
+         counters,
+         commands_run,
+         errors,
+         assertion_failures
+       ) do
     # Apply think time
     maybe_think(state.think_time_range)
 
@@ -252,18 +304,18 @@ defmodule PropertyDamage.LoadTest.Session do
     command_module = command.__struct__
     start_time = System.monotonic_time(:microsecond)
 
-    {result, error_delta, new_refs} =
+    {result, error_delta, new_refs, events} =
       case execute_single_command(command, state.adapter, adapter_context, refs) do
-        {:ok, _events, updated_refs} ->
-          {:ok, 0, updated_refs}
+        {:ok, returned_events, updated_refs} ->
+          {:ok, 0, updated_refs, returned_events}
 
         {:error, reason, updated_refs} ->
           # Preserve refs from injected events even on error
-          {{:error, categorize_error(reason)}, 1, updated_refs}
+          {{:error, categorize_error(reason)}, 1, updated_refs, []}
 
         {:error, reason} ->
           # No ref updates (e.g., ref resolution failed)
-          {{:error, categorize_error(reason)}, 1, refs}
+          {{:error, categorize_error(reason)}, 1, refs, []}
       end
 
     end_time = System.monotonic_time(:microsecond)
@@ -272,14 +324,32 @@ defmodule PropertyDamage.LoadTest.Session do
     # Report metrics
     Metrics.record_request(state.metrics, command_module, latency_ms, result)
 
-    # Continue with remaining commands, threading updated refs
+    # Run assertions if enabled and command succeeded
+    {new_projections, new_counters, assertion_failure_delta} =
+      if state.run_assertions and result == :ok do
+        run_assertions_for_command(
+          command,
+          events,
+          projections,
+          counters,
+          commands_run,
+          state
+        )
+      else
+        {projections, counters, 0}
+      end
+
+    # Continue with remaining commands, threading updated refs and projections
     execute_commands(
       rest,
       adapter_context,
       state,
       new_refs,
+      new_projections,
+      new_counters,
       commands_run + 1,
-      errors + error_delta
+      errors + error_delta,
+      assertion_failures + assertion_failure_delta
     )
   end
 
@@ -460,5 +530,128 @@ defmodule PropertyDamage.LoadTest.Session do
         Process.put(@injection_ctx_key, %{ctx | events: [event | ctx.events]})
         :ok
     end
+  end
+
+  # ============================================================================
+  # Assertion Support
+  # ============================================================================
+
+  # Get module from struct or fallback for plain maps
+  defp get_module(%{__struct__: module}), do: module
+  defp get_module(map) when is_map(map), do: :plain_map_event
+  defp get_module(_other), do: :unknown_event
+
+  # Initialize all projections for a model
+  defp init_projections(model) do
+    state_projection = model.state_projection()
+    assertion_projections = model.assertion_projections()
+    all_projections = [state_projection | assertion_projections]
+
+    for projection <- all_projections, into: %{} do
+      {projection, projection.init()}
+    end
+  end
+
+  # Update projections and run assertions for a command and its events
+  defp run_assertions_for_command(command, events, projections, counters, command_index, state) do
+    model = state.model
+    command_module = command.__struct__
+
+    # Update projections with command
+    projections = update_projections(projections, command)
+
+    # Update counters for command
+    counters =
+      counters
+      |> Map.update(:step, 1, &(&1 + 1))
+      |> Map.update(:command, 1, &(&1 + 1))
+      |> Map.update(command_module, 1, &(&1 + 1))
+
+    # Run command assertions
+    {counters, failure_count} =
+      run_assertions(model, projections, :command, command_module, counters, command_index, state)
+
+    # Update projections and run assertions for each event
+    {projections, counters, event_failures} =
+      Enum.reduce(events, {projections, counters, 0}, fn event, {projs, ctrs, failures} ->
+        # Handle both struct events and plain map events
+        event_module = get_module(event)
+
+        # Update projections with event
+        projs = update_projections(projs, event)
+
+        # Update counters for event
+        ctrs =
+          ctrs
+          |> Map.update(:step, 1, &(&1 + 1))
+          |> Map.update(:event, 1, &(&1 + 1))
+          |> Map.update(event_module, 1, &(&1 + 1))
+
+        # Run event assertions
+        {ctrs, event_failure_count} =
+          run_assertions(model, projs, :event, event_module, ctrs, command_index, state)
+
+        {projs, ctrs, failures + event_failure_count}
+      end)
+
+    {projections, counters, failure_count + event_failures}
+  end
+
+  # Update all projections with a command or event
+  defp update_projections(projections, command_or_event) do
+    for {projection_module, projection_state} <- projections, into: %{} do
+      {projection_module, projection_module.apply(projection_state, command_or_event)}
+    end
+  end
+
+  # Run assertions and record failures
+  defp run_assertions(model, projections, step_type, module, counters, command_index, state) do
+    assertion_projections = model.assertion_projections()
+
+    failure_count =
+      Enum.reduce(assertion_projections, 0, fn projection, failures ->
+        projection_state = Map.get(projections, projection)
+        assertions = projection.__assertions__()
+
+        Enum.reduce(assertions, failures, fn assertion, acc_failures ->
+          if AssertionProjection.should_run?(assertion.trigger, step_type, module, counters) do
+            result =
+              if function_exported?(projection, :assert, 2) do
+                projection.assert(assertion.name, projection_state)
+              else
+                # Legacy fallback
+                projection.check(assertion.name, projection_state, %{})
+              end
+
+            case result do
+              :ok ->
+                acc_failures
+
+              {:error, reason} ->
+                # Record failure to metrics
+                failure = %{
+                  reason: reason,
+                  command_index: command_index,
+                  step_type: step_type,
+                  module: module,
+                  timestamp: System.monotonic_time(:millisecond)
+                }
+
+                Metrics.record_assertion_failure(
+                  state.metrics,
+                  assertion.name,
+                  module,
+                  failure
+                )
+
+                acc_failures + 1
+            end
+          else
+            acc_failures
+          end
+        end)
+      end)
+
+    {counters, failure_count}
   end
 end

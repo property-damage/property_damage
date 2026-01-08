@@ -50,6 +50,8 @@ defmodule PropertyDamage.LoadTest.Metrics do
     :latencies_table,
     :errors_table,
     :command_metrics_table,
+    :assertion_failures_table,
+    :recent_failures,
     :history,
     :start_time,
     :last_snapshot_time,
@@ -74,7 +76,11 @@ defmodule PropertyDamage.LoadTest.Metrics do
           completed_sessions: non_neg_integer(),
           by_command: %{module() => command_metrics()},
           duration_ms: non_neg_integer(),
-          history: [history_point()]
+          history: [history_point()],
+          assertion_failures: non_neg_integer(),
+          assertion_failure_rate: float(),
+          failures_by_assertion: %{atom() => non_neg_integer()},
+          recent_assertion_failures: [map()]
         }
 
   @type command_metrics :: %{
@@ -98,6 +104,10 @@ defmodule PropertyDamage.LoadTest.Metrics do
   @total_errors 2
   @active_sessions 3
   @completed_sessions 4
+  @assertion_failures 5
+
+  # Max recent failures to keep
+  @max_recent_failures 100
 
   # ============================================================================
   # Public API
@@ -151,6 +161,21 @@ defmodule PropertyDamage.LoadTest.Metrics do
   end
 
   @doc """
+  Record an assertion failure.
+
+  ## Parameters
+
+  - `pid` - Metrics collector pid
+  - `assertion_name` - Atom identifying the assertion that failed
+  - `command_module` - The command that was being executed
+  - `failure` - Map with failure details (reason, command_index, etc.)
+  """
+  @spec record_assertion_failure(pid(), atom(), module(), map()) :: :ok
+  def record_assertion_failure(pid, assertion_name, command_module, failure) do
+    GenServer.cast(pid, {:record_assertion_failure, assertion_name, command_module, failure})
+  end
+
+  @doc """
   Get a snapshot of current metrics.
   """
   @spec snapshot(pid()) :: snapshot()
@@ -177,9 +202,10 @@ defmodule PropertyDamage.LoadTest.Metrics do
     latencies_table = :ets.new(:load_test_latencies, [:set, :public])
     errors_table = :ets.new(:load_test_errors, [:set, :public])
     command_metrics_table = :ets.new(:load_test_command_metrics, [:set, :public])
+    assertion_failures_table = :ets.new(:load_test_assertion_failures, [:set, :public])
 
-    # Initialize counters
-    :ets.insert(counters_table, {:counters, :atomics.new(4, signed: false)})
+    # Initialize counters (5 indices now - added assertion_failures)
+    :ets.insert(counters_table, {:counters, :atomics.new(5, signed: false)})
 
     now = System.monotonic_time(:millisecond)
 
@@ -188,6 +214,8 @@ defmodule PropertyDamage.LoadTest.Metrics do
       latencies_table: latencies_table,
       errors_table: errors_table,
       command_metrics_table: command_metrics_table,
+      assertion_failures_table: assertion_failures_table,
+      recent_failures: [],
       history: [],
       start_time: now,
       last_snapshot_time: now,
@@ -242,6 +270,30 @@ defmodule PropertyDamage.LoadTest.Metrics do
   end
 
   @impl true
+  def handle_cast({:record_assertion_failure, assertion_name, command_module, failure}, state) do
+    counters = get_counters(state.counters_table)
+
+    # Increment assertion failure count
+    :atomics.add(counters, @assertion_failures, 1)
+
+    # Track by assertion name
+    increment_assertion_failure(state.assertion_failures_table, assertion_name)
+
+    # Add to recent failures (bounded)
+    failure_record =
+      Map.merge(failure, %{
+        assertion_name: assertion_name,
+        command_module: command_module,
+        recorded_at: System.monotonic_time(:millisecond)
+      })
+
+    recent = [failure_record | state.recent_failures]
+    recent = Enum.take(recent, @max_recent_failures)
+
+    {:noreply, %{state | recent_failures: recent}}
+  end
+
+  @impl true
   def handle_call(:snapshot, _from, state) do
     snapshot = build_snapshot(state)
     {:reply, snapshot, state}
@@ -253,11 +305,12 @@ defmodule PropertyDamage.LoadTest.Metrics do
     :ets.delete_all_objects(state.latencies_table)
     :ets.delete_all_objects(state.errors_table)
     :ets.delete_all_objects(state.command_metrics_table)
+    :ets.delete_all_objects(state.assertion_failures_table)
 
-    # Reset counters
+    # Reset counters (now 5 indices)
     counters = get_counters(state.counters_table)
 
-    for i <- 1..4 do
+    for i <- 1..5 do
       :atomics.put(counters, i, 0)
     end
 
@@ -266,6 +319,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
     new_state = %{
       state
       | history: [],
+        recent_failures: [],
         start_time: now,
         last_snapshot_time: now,
         last_total_requests: 0
@@ -287,6 +341,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
     :ets.delete(state.latencies_table)
     :ets.delete(state.errors_table)
     :ets.delete(state.command_metrics_table)
+    :ets.delete(state.assertion_failures_table)
     :ok
   end
 
@@ -353,6 +408,16 @@ defmodule PropertyDamage.LoadTest.Metrics do
 
       [{^error_type, count}] ->
         :ets.insert(table, {error_type, count + 1})
+    end
+  end
+
+  defp increment_assertion_failure(table, assertion_name) do
+    case :ets.lookup(table, assertion_name) do
+      [] ->
+        :ets.insert(table, {assertion_name, 1})
+
+      [{^assertion_name, count}] ->
+        :ets.insert(table, {assertion_name, count + 1})
     end
   end
 
@@ -482,6 +547,20 @@ defmodule PropertyDamage.LoadTest.Metrics do
       end)
       |> Map.new()
 
+    # Assertion failure stats
+    assertion_failures = :atomics.get(counters, @assertion_failures)
+
+    assertion_failure_rate =
+      if total_requests > 0 do
+        assertion_failures / total_requests * 100.0
+      else
+        0.0
+      end
+
+    failures_by_assertion =
+      :ets.tab2list(state.assertion_failures_table)
+      |> Map.new()
+
     %{
       total_requests: total_requests,
       requests_per_second: rps,
@@ -498,7 +577,11 @@ defmodule PropertyDamage.LoadTest.Metrics do
       completed_sessions: completed_sessions,
       by_command: by_command,
       duration_ms: duration_ms,
-      history: Enum.reverse(state.history)
+      history: Enum.reverse(state.history),
+      assertion_failures: assertion_failures,
+      assertion_failure_rate: assertion_failure_rate,
+      failures_by_assertion: failures_by_assertion,
+      recent_assertion_failures: Enum.reverse(state.recent_failures)
     }
   end
 

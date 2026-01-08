@@ -115,6 +115,83 @@ defmodule PropertyDamage.LoadTestTest do
 
       Metrics.stop(metrics)
     end
+
+    test "tracks assertion failures" do
+      {:ok, metrics} = Metrics.start_link()
+
+      # Record some assertion failures
+      Metrics.record_assertion_failure(metrics, :balance_positive, CreateAccount, %{
+        reason: "balance -50",
+        command_index: 5,
+        step_type: :command,
+        module: CreateAccount,
+        timestamp: System.monotonic_time(:millisecond)
+      })
+
+      Metrics.record_assertion_failure(metrics, :balance_positive, CreateAccount, %{
+        reason: "balance -100",
+        command_index: 10,
+        step_type: :event,
+        module: AccountCreated,
+        timestamp: System.monotonic_time(:millisecond)
+      })
+
+      Metrics.record_assertion_failure(metrics, :no_orphans, DeleteAccount, %{
+        reason: "orphaned order",
+        command_index: 15,
+        step_type: :command,
+        module: DeleteAccount,
+        timestamp: System.monotonic_time(:millisecond)
+      })
+
+      # Also record some requests
+      for _ <- 1..100 do
+        Metrics.record_request(metrics, TestCommand, 10, :ok)
+      end
+
+      Process.sleep(50)
+      snapshot = Metrics.snapshot(metrics)
+
+      assert snapshot.assertion_failures == 3
+      assert snapshot.assertion_failure_rate == 3.0
+      assert snapshot.failures_by_assertion[:balance_positive] == 2
+      assert snapshot.failures_by_assertion[:no_orphans] == 1
+      assert length(snapshot.recent_assertion_failures) == 3
+
+      # Verify failure details
+      [first | _] = snapshot.recent_assertion_failures
+      assert first.assertion_name in [:balance_positive, :no_orphans]
+      assert Map.has_key?(first, :reason)
+      assert Map.has_key?(first, :command_index)
+
+      Metrics.stop(metrics)
+    end
+
+    test "bounds recent assertion failures" do
+      {:ok, metrics} = Metrics.start_link()
+
+      # Record more failures than the max (100)
+      for i <- 1..150 do
+        Metrics.record_assertion_failure(metrics, :test_assertion, TestCommand, %{
+          reason: "failure #{i}",
+          command_index: i,
+          step_type: :command,
+          module: TestCommand,
+          timestamp: System.monotonic_time(:millisecond)
+        })
+      end
+
+      Process.sleep(50)
+      snapshot = Metrics.snapshot(metrics)
+
+      # Total count should be all failures
+      assert snapshot.assertion_failures == 150
+
+      # But recent failures should be bounded
+      assert length(snapshot.recent_assertion_failures) <= 100
+
+      Metrics.stop(metrics)
+    end
   end
 
   # ============================================================================
@@ -436,6 +513,79 @@ defmodule PropertyDamage.LoadTestTest do
       assert_receive {:sessions, _}, 1000
 
       :ets.delete(session_counts)
+    end
+
+    # Model with assertion projections for testing run_assertions option
+    defmodule FailingAssertionProjection do
+      use PropertyDamage.AssertionProjection
+
+      @impl true
+      def init(), do: %{count: 0}
+
+      @impl true
+      def apply(state, _), do: %{state | count: state.count + 1}
+
+      trigger(every: 1)
+      @impl true
+      def assert(:count_check, state) do
+        # Fail every 3rd assertion to simulate intermittent failures
+        if rem(state.count, 3) == 0 do
+          {:error, "count #{state.count} is divisible by 3"}
+        else
+          :ok
+        end
+      end
+    end
+
+    defmodule MockModelWithAssertions do
+      @behaviour PropertyDamage.Model
+
+      @impl true
+      def commands(), do: [{1, MockCommand}]
+
+      @impl true
+      def state_projection(), do: MockProjection
+
+      @impl true
+      def assertion_projections(), do: [FailingAssertionProjection]
+    end
+
+    @tag :integration
+    test "runs load test with assertions disabled (default)" do
+      {:ok, report} =
+        LoadTest.run(
+          model: MockModelWithAssertions,
+          adapter: MockAdapter,
+          concurrent_users: 2,
+          duration: {500, :milliseconds}
+        )
+
+      # Should have requests but no assertion failures tracked
+      # (because run_assertions defaults to false)
+      assert report.metrics.total_requests > 0
+      assert report.metrics.assertion_failures == 0
+    end
+
+    @tag :integration
+    test "runs load test with assertions enabled and tracks failures" do
+      {:ok, report} =
+        LoadTest.run(
+          model: MockModelWithAssertions,
+          adapter: MockAdapter,
+          concurrent_users: 2,
+          duration: {500, :milliseconds},
+          run_assertions: true
+        )
+
+      # Should have requests and some assertion failures
+      assert report.metrics.total_requests > 0
+
+      # Since we fail every 3rd assertion, we should have failures
+      assert report.metrics.assertion_failures > 0
+      assert report.metrics.assertion_failure_rate > 0
+
+      # Should have tracked failures by assertion name
+      assert Map.has_key?(report.metrics.failures_by_assertion, :count_check)
     end
   end
 end
