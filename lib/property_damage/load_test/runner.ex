@@ -291,7 +291,8 @@ defmodule PropertyDamage.LoadTest.Runner do
           GenServer.reply(state.awaiting, {:ok, report})
         end
 
-        {:stop, :normal, %{state | sessions: new_sessions, ramp_step_index: next_index, phase: :finished}}
+        {:stop, :normal,
+         %{state | sessions: new_sessions, ramp_step_index: next_index, phase: :finished}}
       end
     end
   end

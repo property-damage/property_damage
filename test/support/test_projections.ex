@@ -2,7 +2,7 @@ defmodule PropertyDamage.Test.Projections.ModelState do
   @moduledoc """
   Test projection that tracks model state for command preconditions.
 
-  Demonstrates basic Projection usage without checks.
+  Demonstrates basic Projection usage without assertions.
   """
   @behaviour PropertyDamage.Projection
 
@@ -26,13 +26,13 @@ end
 
 defmodule PropertyDamage.Test.Projections.TestAssertions do
   @moduledoc """
-  Test assertion projection demonstrating all check features.
+  Test assertion projection demonstrating all assertion features.
 
   Includes:
-  - @check :always trigger
-  - @check after: Module trigger
-  - @check after: [Module1, Module2] trigger
-  - @check with sample: N option
+  - trigger every: 1 (every step)
+  - trigger every: Module (after specific module)
+  - trigger every: [Module1, Module2] (after any listed)
+  - trigger every: N (sampling)
   - @requirement attribute
   - requirements/1 macro
   """
@@ -61,27 +61,27 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
 
   def apply(state, _), do: state
 
-  # === Checks ===
+  # === Assertions ===
 
   @requirement "REQ-INV-001"
-  check(:always)
+  trigger(every: 1)
   @impl true
-  def check(:quantity_non_negative, state, _ctx) do
+  def assert(:quantity_non_negative, state) do
     if state.total_quantity >= 0, do: :ok, else: {:error, "Negative quantity"}
   end
 
   @requirement "REQ-CREATE-001"
-  check(after: CreateItem)
+  trigger(every: CreateItem)
 
-  def check(:create_increments_count, state, _ctx) do
+  def assert(:create_increments_count, state) do
     if state.create_count > 0, do: :ok, else: {:error, "Create count should be positive"}
   end
 
   @requirement "REQ-CMD-001"
   @requirement "REQ-CMD-002"
-  check(after: [CreateItem, ViewItem])
+  trigger(every: [CreateItem, ViewItem])
 
-  def check(:command_was_tracked, state, _ctx) do
+  def assert(:command_was_tracked, state) do
     if state.create_count > 0 or state.view_count > 0 do
       :ok
     else
@@ -90,24 +90,24 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   end
 
   @requirement "REQ-PERF-001"
-  check(:always, sample: 5)
+  trigger(every: 5)
 
-  def check(:sampled_check, _state, _ctx) do
+  def assert(:sampled_check, _state) do
     # This only runs every 5th step
     :ok
   end
 
   requirements(["REQ-MULTI-001", "REQ-MULTI-002", "REQ-MULTI-003"])
-  check(:always)
+  trigger(every: 1)
 
-  def check(:multi_requirement_check, _state, _ctx) do
+  def assert(:multi_requirement_check, _state) do
     :ok
   end
 end
 
 defmodule PropertyDamage.Test.Projections.SingleAfterTrigger do
   @moduledoc """
-  Test projection with single module after trigger.
+  Test projection with single module trigger.
   """
   use PropertyDamage.AssertionProjection
 
@@ -119,14 +119,14 @@ defmodule PropertyDamage.Test.Projections.SingleAfterTrigger do
   @impl true
   def apply(state, _), do: state
 
-  check(after: CreateItem)
+  trigger(every: CreateItem)
   @impl true
-  def check(:after_create, _state, _ctx), do: :ok
+  def assert(:after_create, _state), do: :ok
 end
 
 defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
   @moduledoc """
-  Test projection with event-based after trigger.
+  Test projection with event-based trigger.
   """
   use PropertyDamage.AssertionProjection
 
@@ -138,7 +138,28 @@ defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
   @impl true
   def apply(state, _), do: state
 
-  check(after: ItemCreated)
+  trigger(every: ItemCreated)
   @impl true
-  def check(:after_item_created, _state, _ctx), do: :ok
+  def assert(:after_item_created, _state), do: :ok
+end
+
+# Legacy projection using old check/3 syntax for backward compatibility testing
+defmodule PropertyDamage.Test.Projections.LegacyCheckProjection do
+  @moduledoc """
+  Test projection using legacy check/3 syntax for backward compatibility.
+  """
+  use PropertyDamage.AssertionProjection
+
+  @impl true
+  def init, do: %{count: 0}
+
+  @impl true
+  def apply(state, _), do: update_in(state, [:count], &(&1 + 1))
+
+  # Legacy syntax using check/3
+  check(:always)
+  @impl true
+  def check(:legacy_check, state, _ctx) do
+    if state.count >= 0, do: :ok, else: {:error, "negative count"}
+  end
 end

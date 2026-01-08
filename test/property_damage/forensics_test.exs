@@ -45,25 +45,23 @@ defmodule PropertyDamage.ForensicsTest do
     def apply(state, _), do: state
   end
 
-  # Test assertion projection with checks
+  # Test assertion projection with assertions
   defmodule OrderInvariants do
-    @behaviour PropertyDamage.Projection
+    use PropertyDamage.AssertionProjection
 
+    @impl true
     def init, do: %{order_amounts: %{}}
 
+    @impl true
     def apply(state, %OrderCreated{order_id: id, amount: amount}) do
       %{state | order_amounts: Map.put(state.order_amounts, id, amount)}
     end
 
     def apply(state, _), do: state
 
-    def __checks__ do
-      [
-        %{name: :no_negative_amounts, trigger: :always, sample: 1}
-      ]
-    end
-
-    def check(:no_negative_amounts, state, _ctx) do
+    trigger(every: 1)
+    @impl true
+    def assert(:no_negative_amounts, state) do
       negative = Enum.filter(state.order_amounts, fn {_id, amt} -> amt < 0 end)
 
       if Enum.empty?(negative) do
@@ -141,7 +139,7 @@ defmodule PropertyDamage.ForensicsTest do
 
       assert {:error, failure} = result
       assert failure.failure_step == 1
-      assert {:check_failed, :no_negative_amounts, _reason} = failure.failure_reason
+      assert {:assertion_failed, :no_negative_amounts, _reason} = failure.failure_reason
 
       assert failure.event_at_failure == %OrderCreated{
                order_id: "order2",
@@ -240,7 +238,7 @@ defmodule PropertyDamage.ForensicsTest do
   describe "format_report/1" do
     test "formats failure report as readable string" do
       failure = %{
-        failure_reason: {:check_failed, :no_negative_amounts, "Negative amounts found"},
+        failure_reason: {:assertion_failed, :no_negative_amounts, "Negative amounts found"},
         failure_step: 5,
         event_at_failure: %OrderCreated{order_id: "bad", amount: -100, currency: "USD"},
         state_before: %{},
@@ -263,7 +261,7 @@ defmodule PropertyDamage.ForensicsTest do
   describe "generate_regression_test/2" do
     test "generates valid Elixir test code" do
       failure = %{
-        failure_reason: {:check_failed, :some_check, "failed"},
+        failure_reason: {:assertion_failed, :some_check, "failed"},
         failure_step: 2,
         event_at_failure: %OrderCreated{order_id: "test", amount: 100, currency: "USD"},
         state_before: %{},

@@ -57,7 +57,7 @@ defmodule PropertyDamage.Forensics do
   ## Limitations
 
   - Events must be self-describing (contain enough context to reconstruct state)
-  - Projections receive `ctx.command = nil` since there's no command in forensic mode
+  - Assertions using `every: :command` won't trigger (forensics has no commands)
   - Event ordering must match production ordering
   """
 
@@ -194,11 +194,11 @@ defmodule PropertyDamage.Forensics do
       :ok ->
         {:cont, {:ok, new_state, history ++ [event]}}
 
-      {:error, check_name, reason} when stop_early ->
+      {:error, assertion_name, reason} when stop_early ->
         {:halt,
          {:error,
           %{
-            failure_reason: {:check_failed, check_name, reason},
+            failure_reason: {:assertion_failed, assertion_name, reason},
             failure_step: index,
             event_at_failure: event,
             state_before: state.projections,
@@ -206,7 +206,7 @@ defmodule PropertyDamage.Forensics do
             events_leading_to_failure: history ++ [event]
           }}}
 
-      {:error, _check_name, _reason} ->
+      {:error, _assertion_name, _reason} ->
         # Continue past failure if stop_early is false
         {:cont, {:ok, new_state, history ++ [event]}}
     end
@@ -215,7 +215,7 @@ defmodule PropertyDamage.Forensics do
   defp finalize_result({:ok, state, _history}) do
     state_projection_key =
       Enum.find(Map.keys(state.projections), fn mod ->
-        not function_exported?(mod, :__checks__, 0)
+        not function_exported?(mod, :__assertions__, 0)
       end)
 
     {:ok,
@@ -240,51 +240,72 @@ defmodule PropertyDamage.Forensics do
     end)
   end
 
-  defp run_checks(_model, assertion_projections, projections, check_ctx) do
+  defp run_assertions(_model, assertion_projections, projections, assertion_ctx) do
+    alias PropertyDamage.AssertionProjection
+
     Enum.reduce_while(assertion_projections, :ok, fn projection, :ok ->
       projection_state = Map.get(projections, projection)
 
-      # Get checks for this projection
-      checks =
-        if function_exported?(projection, :__checks__, 0) do
-          projection.__checks__()
+      # Get assertions for this projection
+      assertions =
+        if function_exported?(projection, :__assertions__, 0) do
+          projection.__assertions__()
         else
           []
         end
 
-      case run_projection_checks(projection, projection_state, checks, check_ctx) do
+      case run_projection_assertions(projection, projection_state, assertions, assertion_ctx) do
         :ok -> {:cont, :ok}
-        {:error, check_name, reason} -> {:halt, {:error, check_name, reason}}
+        {:error, assertion_name, reason} -> {:halt, {:error, assertion_name, reason}}
       end
     end)
   end
 
-  defp run_projection_checks(_projection, _projection_state, [], _check_ctx), do: :ok
+  defp run_projection_assertions(_projection, _projection_state, [], _ctx), do: :ok
 
-  defp run_projection_checks(projection, projection_state, [check | rest], check_ctx) do
-    # Only run checks that trigger on :always (forensics has no commands)
-    if should_run_check?(check, check_ctx) do
-      case projection.check(check.name, projection_state, check_ctx) do
+  defp run_projection_assertions(projection, projection_state, [assertion | rest], ctx) do
+    alias PropertyDamage.AssertionProjection
+
+    # Check if assertion should run given current context
+    if AssertionProjection.should_run?(assertion.trigger, ctx.step_type, ctx.module, ctx.counters) do
+      # Execute assertion - try assert/2 first (new API), fall back to check/3 (legacy)
+      result =
+        if function_exported?(projection, :assert, 2) do
+          projection.assert(assertion.name, projection_state)
+        else
+          # Legacy: pass minimal context for backward compatibility
+          projection.check(assertion.name, projection_state, %{})
+        end
+
+      case result do
         :ok ->
-          run_projection_checks(projection, projection_state, rest, check_ctx)
+          run_projection_assertions(projection, projection_state, rest, ctx)
 
         {:error, reason} ->
-          {:error, check.name, reason}
+          {:error, assertion.name, reason}
       end
     else
-      run_projection_checks(projection, projection_state, rest, check_ctx)
+      run_projection_assertions(projection, projection_state, rest, ctx)
     end
   end
 
-  defp should_run_check?(%{trigger: :always}, _ctx), do: true
+  # Legacy wrapper for backward compatibility
+  defp run_checks(model, assertion_projections, projections, check_ctx) do
+    # Convert old check_ctx to new assertion_ctx format
+    event_module =
+      case check_ctx.events do
+        [event | _] -> get_module(event)
+        _ -> nil
+      end
 
-  defp should_run_check?(%{trigger: [{:after, modules}]}, ctx) do
-    # In forensic mode, we only have events, no commands
-    event_modules = Enum.map(ctx.events, &get_module/1)
-    Enum.any?(modules, fn mod -> mod in event_modules end)
+    assertion_ctx = %{
+      step_type: :event,
+      module: event_module,
+      counters: %{step: check_ctx.step_count, event: check_ctx.step_count}
+    }
+
+    run_assertions(model, assertion_projections, projections, assertion_ctx)
   end
-
-  defp should_run_check?(_, _ctx), do: false
 
   defp get_module(%{__struct__: mod}), do: mod
   defp get_module(_), do: nil
@@ -332,8 +353,13 @@ defmodule PropertyDamage.Forensics do
     """
   end
 
+  defp format_failure_reason({:assertion_failed, assertion_name, reason}) do
+    "Assertion '#{assertion_name}' failed: #{inspect(reason)}"
+  end
+
+  # Legacy support
   defp format_failure_reason({:check_failed, check_name, reason}) do
-    "Check '#{check_name}' failed: #{inspect(reason)}"
+    "Assertion '#{check_name}' failed: #{inspect(reason)}"
   end
 
   defp format_failure_reason(other), do: inspect(other)
@@ -420,6 +446,7 @@ defmodule PropertyDamage.Forensics do
 
   defp event_to_code(event), do: inspect(event)
 
+  defp format_check_name({:assertion_failed, name, _}), do: "#{name} failure"
   defp format_check_name({:check_failed, name, _}), do: "#{name} failure"
   defp format_check_name(_), do: "unknown failure"
 end

@@ -1,11 +1,10 @@
 defmodule PropertyDamage.AssertionProjection do
   @moduledoc """
-  Extended projection behaviour with check functions for assertions.
+  Extended projection behaviour with assertion functions for invariant checking.
 
-  AssertionProjection extends Projection with the ability to define check
-  functions that verify invariants. Checks have trigger conditions that
-  determine when they run, and can be linked to requirement IDs for
-  traceability.
+  AssertionProjection extends Projection with the ability to define assertions
+  that verify invariants. Assertions have trigger conditions that determine
+  when they run, and can be linked to requirement IDs for traceability.
 
   ## Usage
 
@@ -13,85 +12,93 @@ defmodule PropertyDamage.AssertionProjection do
         use PropertyDamage.AssertionProjection
 
         @impl true
-        def init, do: %{orders: %{}, total: 0}
+        def init, do: %{orders: %{}, total: 0, last_command: nil}
 
         @impl true
-        def apply(state, %OrderCreated{amount: amt}) do
-          update_in(state, [:total], &(&1 + amt))
+        def apply(state, %OrderCreated{amount: amt} = cmd) do
+          %{state | total: state.total + amt, last_command: cmd}
         end
 
         def apply(state, _), do: state
 
-        # Check that runs after every step
-        @check :always
+        # Assertion that runs after every step
         @requirement "REQ-ACCT-001"
-        def check(:total_non_negative, state, _ctx) do
+        trigger every: 1
+        def assert(:total_non_negative, state) do
           if state.total >= 0, do: :ok, else: {:error, "Negative total"}
         end
 
-        # Check that runs after specific command
-        @check after: RefundOrder
+        # Assertion that runs after specific command
         @requirement "REQ-REFUND-001"
-        def check(:refund_valid, state, ctx) do
-          if ctx.command.amount > 0, do: :ok, else: {:error, "Invalid amount"}
+        trigger every: RefundOrder
+        def assert(:refund_valid, state) do
+          if state.last_command.amount > 0, do: :ok, else: {:error, "Invalid amount"}
         end
       end
 
-  ## Check Triggers
+  ## Trigger Syntax
 
-  The `@check` attribute determines when a check runs:
+  Use the `trigger` macro with `every:` to specify when an assertion runs:
 
-  | Value | Runs when... |
-  |-------|--------------|
-  | `:always` | After every step (command + events, or injected event) |
-  | `after: RefundOrder` | After RefundOrder command executes |
-  | `after: [Cmd1, Cmd2]` | After any listed command executes |
-  | `after: OrderCancelled` | When OrderCancelled event is produced |
-  | `after: [Event1, Event2]` | When any listed event is produced |
-  | `after: [Cmd, Event]` | After command OR when event produced |
-  | `:always, sample: 10` | Every 10th step |
-  | `after: RefundOrder, sample: 5` | Every 5th RefundOrder execution |
+  | Syntax | Runs when... |
+  |--------|--------------|
+  | `trigger every: 1` | After every step (command + events, or injected event) |
+  | `trigger every: :command` | After any command executes |
+  | `trigger every: :event` | After any event is produced |
+  | `trigger every: RefundOrder` | After RefundOrder command or event |
+  | `trigger every: [Cmd1, Cmd2]` | After any listed command/event |
+  | `trigger every: 10` | Every 10th step (sampling) |
+  | `trigger every: {5, :command}` | Every 5th command |
+  | `trigger every: {3, RefundOrder}` | Every 3rd RefundOrder |
+  | `trigger every: {2, [Cmd1, Cmd2]}` | Every 2nd of any listed |
 
-  ## Check Context
+  ## Tracking Context in State
 
-  Checks receive a context map with:
+  Since assertions only receive `(name, state)`, track any context you need
+  in your projection state via `apply/2`:
 
   ```elixir
-  %{
-    command: %RefundOrder{...},       # The command (nil for injected events)
-    events: [%RefundFailed{...}],     # Events from this step
-    command_index: 5,                  # Index in sequence
-    step_count: 42,                    # Total steps so far
-    projections: %{...}                # All projection states
-  }
+  def apply(state, %CreateWithdrawal{} = cmd) do
+    %{state | last_withdrawal_request: cmd.amount}
+  end
+
+  def apply(state, %WithdrawalCompleted{} = event) do
+    %{state |
+      balance: state.balance - event.amount,
+      last_withdrawal_actual: event.amount
+    }
+  end
+
+  trigger every: CreateWithdrawal
+  def assert(:withdrawal_amount_matches, state) do
+    if state.last_withdrawal_request == state.last_withdrawal_actual do
+      :ok
+    else
+      {:error, %AmountMismatch{
+        requested: state.last_withdrawal_request,
+        actual: state.last_withdrawal_actual
+      }}
+    end
+  end
   ```
 
   ## Requirements Traceability
 
-  Link checks to external requirement IDs using `@requirement`:
+  Link assertions to external requirement IDs using `@requirement`:
 
   ```elixir
   @requirement "REQ-REFUND-001"
   @requirement "REQ-REFUND-002"
-  @check :always
-  def check(:refund_valid, state, ctx), do: ...
+  trigger every: 1
+  def assert(:refund_valid, state), do: ...
   ```
 
   Or use the `requirements/1` macro for multiple at once:
 
   ```elixir
   requirements ["REQ-001", "REQ-002"]
-  @check :always
-  def check(:balance_check, state, ctx), do: ...
-  ```
-
-  ## Sampling for Performance
-
-  Expensive checks can use `sample: N` to run only every Nth time:
-
-  ```elixir
-  @check :always, sample: 10
-  def check(:expensive_check, state, _ctx), do: ...
+  trigger every: 1
+  def assert(:balance_check, state), do: ...
   ```
   """
 
@@ -106,69 +113,129 @@ defmodule PropertyDamage.AssertionProjection do
   @callback apply(state :: any(), command_or_event :: struct()) :: any()
 
   @doc """
-  Execute a named check.
+  Execute a named assertion.
 
   ## Parameters
 
-  - `name` - Atom identifying the check
+  - `name` - Atom identifying the assertion
   - `state` - Current projection state
-  - `ctx` - Context map with command, events, indices, etc.
 
   ## Returns
 
-  - `:ok` - Check passed
-  - `{:error, reason}` - Check failed with reason
+  - `:ok` - Assertion passed
+  - `{:error, reason}` - Assertion failed with reason
   """
-  @callback check(name :: atom(), state :: any(), ctx :: map()) :: :ok | {:error, term()}
+  @callback assert(name :: atom(), state :: any()) :: :ok | {:error, term()}
 
   defmacro __using__(_opts) do
     quote do
       @behaviour PropertyDamage.AssertionProjection
 
-      # Accumulating attributes for check metadata
-      Module.register_attribute(__MODULE__, :checks, accumulate: true)
-      Module.register_attribute(__MODULE__, :pending_check, accumulate: false)
+      # Accumulating attributes for assertion metadata
+      Module.register_attribute(__MODULE__, :assertions, accumulate: true)
+      Module.register_attribute(__MODULE__, :pending_trigger, accumulate: false)
       Module.register_attribute(__MODULE__, :requirement, accumulate: true)
       Module.register_attribute(__MODULE__, :pending_requirements_list, accumulate: false)
 
-      # Register on_definition callback to capture check/3 function definitions
+      # Register on_definition callback to capture assert/2 function definitions
       @on_definition PropertyDamage.AssertionProjection
 
       @before_compile PropertyDamage.AssertionProjection
 
-      import PropertyDamage.AssertionProjection, only: [requirements: 1, check: 1, check: 2]
+      import PropertyDamage.AssertionProjection,
+        only: [
+          requirements: 1,
+          trigger: 1,
+          # Backward compatibility: check/1 and check/2 as aliases
+          check: 1,
+          check: 2
+        ]
     end
   end
 
   @doc """
-  Register a check trigger for the next check/3 definition.
+  Register a trigger for the next assert/2 definition.
 
-  The trigger determines when the check runs during execution.
+  The trigger determines when the assertion runs during execution.
 
-  ## Triggers
+  ## Trigger Syntax
 
-  - `:always` - Run after every step
-  - `after: Module` - Run after specific command or event
-  - `after: [Mod1, Mod2]` - Run after any of the listed modules
+  All triggers use the `every:` keyword:
 
-  ## Options
-
-  - `:sample` - Run every Nth time (default: 1)
+  | Syntax | Meaning |
+  |--------|---------|
+  | `every: 1` | Every step |
+  | `every: :command` | After any command |
+  | `every: :event` | After any event |
+  | `every: Module` | After specific module |
+  | `every: [Modules]` | After any listed module |
+  | `every: N` | Every Nth step (sampling) |
+  | `every: {N, :command}` | Every Nth command |
+  | `every: {N, :event}` | Every Nth event |
+  | `every: {N, Module}` | Every Nth of specific module |
+  | `every: {N, [Modules]}` | Every Nth of any listed module |
 
   ## Examples
 
-      check :always
-      def check(:my_check, state, ctx), do: ...
+      @trigger every: 1
+      def assert(:my_check, state), do: ...
 
-      check after: CreateOrder
-      def check(:after_create, state, ctx), do: ...
+      @trigger every: CreateOrder
+      def assert(:after_create, state), do: ...
 
-      check :always, sample: 10
-      def check(:expensive_check, state, ctx), do: ...
+      @trigger every: {10, :command}
+      def assert(:sampled_check, state), do: ...
   """
-  defmacro check(trigger, opts \\ []) do
+  defmacro trigger(opts) do
     quote do
-      @pending_check {unquote(trigger), unquote(opts)}
+      @pending_trigger unquote(opts)
+    end
+  end
+
+  @doc """
+  Legacy: Register a check trigger. Use `@trigger every:` instead.
+
+  Provided for backward compatibility during migration.
+  """
+  defmacro check(trigger_or_opts, opts \\ [])
+
+  defmacro check(:always, opts) do
+    sample = Keyword.get(opts, :sample, 1)
+
+    quote do
+      @pending_trigger [every: unquote(sample)]
+    end
+  end
+
+  defmacro check([{:after, triggers} | rest], _opts) do
+    sample = Keyword.get(rest, :sample, 1)
+    triggers = List.wrap(triggers)
+
+    trigger_spec =
+      if sample == 1 do
+        triggers
+      else
+        {sample, triggers}
+      end
+
+    quote do
+      @pending_trigger [every: unquote(Macro.escape(trigger_spec))]
+    end
+  end
+
+  defmacro check({:after, triggers}, opts) do
+    sample = Keyword.get(opts, :sample, 1)
+    triggers = List.wrap(triggers)
+
+    trigger_spec =
+      if sample == 1 do
+        triggers
+      else
+        {sample, triggers}
+      end
+
+    quote do
+      @pending_trigger [every: unquote(Macro.escape(trigger_spec))]
     end
   end
 
@@ -180,8 +247,8 @@ defmodule PropertyDamage.AssertionProjection do
   ## Example
 
       requirements ["REQ-001", "REQ-002", "REQ-003"]
-      @check :always
-      def check(:my_check, state, ctx), do: ...
+      @trigger every: 1
+      def assert(:my_check, state), do: ...
   """
   defmacro requirements(req_list) do
     quote do
@@ -190,60 +257,164 @@ defmodule PropertyDamage.AssertionProjection do
   end
 
   defmacro __before_compile__(env) do
-    checks = Module.get_attribute(env.module, :checks) |> Enum.reverse()
+    assertions = Module.get_attribute(env.module, :assertions) |> Enum.reverse()
 
     quote do
       @doc """
-      Returns metadata for all checks defined in this module.
+      Returns metadata for all assertions defined in this module.
 
-      Each check entry contains:
-      - `:name` - Atom identifying the check
-      - `:trigger` - When the check runs (`:always` or `[after: [...]]`)
+      Each assertion entry contains:
+      - `:name` - Atom identifying the assertion
+      - `:trigger` - Normalized trigger specification
       - `:requirements` - List of requirement IDs
-      - `:sample` - How often to run (1 = every time, N = every Nth)
       """
-      def __checks__, do: unquote(Macro.escape(checks))
+      def __assertions__, do: unquote(Macro.escape(assertions))
+
+      # Backward compatibility
+      @doc false
+      def __checks__, do: __assertions__()
     end
   end
 
   @doc false
   # Called by @on_definition when any function is defined in the module
-  def __on_definition__(env, :def, :check, [name_ast, _state, _ctx], _guards, _body) do
-    name = extract_check_name(name_ast)
+  # Handles both assert/2 (new) and check/3 (legacy)
+  def __on_definition__(env, :def, :assert, [name_ast, _state], _guards, _body) do
+    register_assertion(env, name_ast)
+  end
 
-    case Module.get_attribute(env.module, :pending_check) do
+  def __on_definition__(env, :def, :check, [name_ast, _state, _ctx], _guards, _body) do
+    register_assertion(env, name_ast)
+  end
+
+  def __on_definition__(_env, _kind, _name, _args, _guards, _body), do: :ok
+
+  defp register_assertion(env, name_ast) do
+    name = extract_assertion_name(name_ast)
+
+    case Module.get_attribute(env.module, :pending_trigger) do
       nil ->
         raise CompileError,
           file: env.file,
           line: env.line,
-          description: "check/3 definition for :#{name} missing @check attribute"
+          description: "assert/2 definition for :#{name} missing @trigger attribute"
 
-      {trigger, opts} ->
+      trigger_opts ->
         # Merge requirements from both @requirement (accumulating) and requirements/1 (list)
         single_reqs = Module.get_attribute(env.module, :requirement) || []
         list_reqs = Module.get_attribute(env.module, :pending_requirements_list) || []
         requirements = single_reqs ++ List.wrap(list_reqs)
 
-        check_def = %{
+        assertion_def = %{
           name: name,
-          trigger: normalize_trigger(trigger, opts),
-          requirements: requirements,
-          sample: Keyword.get(opts, :sample, 1)
+          trigger: normalize_trigger(trigger_opts),
+          requirements: requirements
         }
 
-        Module.put_attribute(env.module, :checks, check_def)
-        Module.delete_attribute(env.module, :pending_check)
+        Module.put_attribute(env.module, :assertions, assertion_def)
+        Module.delete_attribute(env.module, :pending_trigger)
         Module.delete_attribute(env.module, :requirement)
         Module.delete_attribute(env.module, :pending_requirements_list)
     end
   end
 
-  def __on_definition__(_env, _kind, _name, _args, _guards, _body), do: :ok
+  defp extract_assertion_name({name, _, _}) when is_atom(name), do: name
+  defp extract_assertion_name(name) when is_atom(name), do: name
 
-  defp extract_check_name({name, _, _}) when is_atom(name), do: name
-  defp extract_check_name(name) when is_atom(name), do: name
+  # Normalize all trigger formats to a consistent internal representation
+  # Internal format: %{type: :every_step | :every_n | :wildcard | :modules, ...}
+  defp normalize_trigger(opts) when is_list(opts) do
+    case Keyword.get(opts, :every) do
+      # every: 1 - every step
+      1 ->
+        %{type: :every_step}
 
-  defp normalize_trigger(:always, _opts), do: :always
-  defp normalize_trigger([{:after, triggers} | _], _opts), do: [{:after, List.wrap(triggers)}]
-  defp normalize_trigger({:after, triggers}, _opts), do: [{:after, List.wrap(triggers)}]
+      # every: N - every Nth step
+      n when is_integer(n) and n > 1 ->
+        %{type: :every_n, n: n, target: :step}
+
+      # every: :command - after any command
+      :command ->
+        %{type: :wildcard, target: :command}
+
+      # every: :event - after any event
+      :event ->
+        %{type: :wildcard, target: :event}
+
+      # every: {N, :command} - every Nth command
+      {n, :command} when is_integer(n) ->
+        %{type: :every_n, n: n, target: :command}
+
+      # every: {N, :event} - every Nth event
+      {n, :event} when is_integer(n) ->
+        %{type: :every_n, n: n, target: :event}
+
+      # every: {N, Module} - every Nth of specific module
+      {n, module} when is_integer(n) and is_atom(module) ->
+        %{type: :every_n, n: n, target: :modules, modules: [module]}
+
+      # every: {N, [Modules]} - every Nth of any listed module
+      {n, modules} when is_integer(n) and is_list(modules) ->
+        %{type: :every_n, n: n, target: :modules, modules: modules}
+
+      # every: Module - after specific module
+      module when is_atom(module) ->
+        %{type: :modules, modules: [module]}
+
+      # every: [Modules] - after any listed module
+      modules when is_list(modules) ->
+        %{type: :modules, modules: modules}
+
+      other ->
+        raise ArgumentError, "Invalid trigger: every: #{inspect(other)}"
+    end
+  end
+
+  @doc """
+  Check if an assertion should run given the current step context.
+
+  ## Parameters
+
+  - `trigger` - Normalized trigger from assertion metadata
+  - `step_type` - `:command` or `:event`
+  - `module` - The command or event module
+  - `counters` - Map with `:step`, `:command`, `:event`, and per-module counts
+
+  ## Returns
+
+  `true` if the assertion should run, `false` otherwise.
+  """
+  @spec should_run?(map(), :command | :event, module(), map()) :: boolean()
+  def should_run?(trigger, step_type, module, counters) do
+    case trigger do
+      # Every step
+      %{type: :every_step} ->
+        true
+
+      # Every Nth step
+      %{type: :every_n, n: n, target: :step} ->
+        rem(counters.step, n) == 0
+
+      # Wildcard: any command or any event
+      %{type: :wildcard, target: target} ->
+        step_type == target
+
+      # Every Nth command/event
+      %{type: :every_n, n: n, target: target} when target in [:command, :event] ->
+        step_type == target and rem(Map.get(counters, target, 0), n) == 0
+
+      # Specific modules
+      %{type: :modules, modules: modules} ->
+        module in modules
+
+      # Every Nth of specific modules
+      %{type: :every_n, n: n, target: :modules, modules: modules} ->
+        if module in modules do
+          count = Map.get(counters, module, 0)
+          rem(count, n) == 0
+        else
+          false
+        end
+    end
+  end
 end

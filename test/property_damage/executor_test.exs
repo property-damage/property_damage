@@ -135,7 +135,7 @@ defmodule PropertyDamage.ExecutorTest do
 
       assert result.success == false
       assert result.failed_at_index == 0
-      assert {:check_failed, :quantity_limit, _reason} = result.failure_reason
+      assert {:assertion_failed, :quantity_limit, _reason} = result.failure_reason
     end
 
     test "successful checks continue execution" do
@@ -156,7 +156,7 @@ defmodule PropertyDamage.ExecutorTest do
       {:ok, result} = Executor.run(commands, FailingModel, SimpleAdapter)
 
       assert result.success == false
-      {:check_failed, :quantity_limit, reason} = result.failure_reason
+      {:assertion_failed, :quantity_limit, reason} = result.failure_reason
       assert reason =~ "exceeds limit"
     end
   end
@@ -300,7 +300,7 @@ defmodule PropertyDamage.ExecutorTest do
       # Should fail due to exceeding 100 quantity limit
       assert result.success == false
       # Branch failures are wrapped with branch_id
-      assert {:branch_failure, 0, {:check_failed, _, _}} = result.failure_reason
+      assert {:branch_failure, 0, {:assertion_failed, _, _}} = result.failure_reason
     end
 
     test "merges projections from all branches" do
