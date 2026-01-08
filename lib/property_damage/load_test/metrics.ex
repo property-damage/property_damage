@@ -5,6 +5,26 @@ defmodule PropertyDamage.LoadTest.Metrics do
   Uses ETS for lock-free, concurrent updates from multiple sessions.
   Provides real-time throughput, latency percentiles, and error tracking.
 
+  ## What Gets Measured
+
+  Metrics are **command-centric**, not HTTP-centric:
+
+  - **Request** = one command execution (e.g., `CreateAuthorization`)
+  - **Latency** = wall-clock time for the entire command execution
+
+  This means:
+  - If `CreateAuthorization` internally does 1 POST + 15 polling GETs,
+    that counts as **1 request**, not 16
+  - The latency includes the full polling duration, not just the initial call
+
+  Example for an async command with 3-second polling:
+  - POST `/authorizations` takes 50ms
+  - 15 polling GETs take 3000ms total
+  - **Reported**: 1 request with ~3050ms latency
+
+  To measure actual HTTP throughput, use external monitoring (server metrics,
+  proxy logs) or add telemetry instrumentation inside your adapter.
+
   ## Architecture
 
   - Uses ETS tables for atomic counters and latency samples
