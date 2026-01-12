@@ -98,8 +98,6 @@ defmodule MyApp.Projections.Users do
   def apply(state, %MyApp.Events.UserCreated{} = event) do
     Map.put(state, event.id, %{name: event.name, email: event.email})
   end
-
-  def observables(state), do: %{users: state, count: map_size(state)}
 end
 ```
 
@@ -534,18 +532,20 @@ PropertyDamage.run(
 
 ```elixir
 defmodule MyModel do
-  use PropertyDamage.Model
+  @behaviour PropertyDamage.Model
 
   # Required
   def commands, do: [{weight, CommandModule}, ...]
-  def projections, do: [ProjectionModule, ...]
-  def checks, do: [CheckModule, ...]
+  def state_projection, do: MyStateProjection
+  def assertion_projections, do: [MyAssertionProjection, ...]
 
   # Optional
-  def setup_all(config), do: :ok
+  def injectable_events, do: []  # For InjectorAdapter
+  def setup_once(config), do: :ok
   def setup_each(config), do: :ok  # Called before each run/shrink attempt
   def teardown_each(config), do: :ok
-  def teardown_all(config), do: :ok
+  def teardown_once(config), do: :ok
+  def terminate?(state, command, events), do: false  # Custom termination
 end
 ```
 

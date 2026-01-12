@@ -476,7 +476,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       code = generate_model(operations, "PetStore")
 
       assert code =~ "defmodule PetStore.Model do"
-      assert code =~ "use PropertyDamage.Model"
+      assert code =~ "@behaviour PropertyDamage.Model"
       assert code =~ "def commands do"
       # GET has weight 5
       assert code =~ "{5, Commands.ListPets}"
@@ -484,8 +484,8 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "{3, Commands.CreatePet}"
       # DELETE has weight 1
       assert code =~ "{1, Commands.DeletePet}"
-      assert code =~ "def projections do"
-      assert code =~ "def checks do"
+      assert code =~ "def state_projection do"
+      assert code =~ "def assertion_projections do"
     end
   end
 

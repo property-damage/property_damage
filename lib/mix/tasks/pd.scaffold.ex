@@ -85,7 +85,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   ```elixir
   defmodule MyAppTest.Model do
-    use PropertyDamage.Model
+    @behaviour PropertyDamage.Model
 
     def commands do
       [
@@ -94,6 +94,9 @@ defmodule Mix.Tasks.Pd.Scaffold do
         # ...
       ]
     end
+
+    def state_projection, do: MyAppTest.Projections.State
+    def assertion_projections, do: [MyAppTest.Assertions.UniqueUsers]
   end
   ```
 
@@ -1136,14 +1139,15 @@ defmodule Mix.Tasks.Pd.Scaffold do
       @moduledoc \"\"\"
       PropertyDamage model for API testing.
 
-      Generated from OpenAPI spec. Customize command weights and add projections.
+      Generated from OpenAPI spec. Customize command weights and add projections/assertions.
       \"\"\"
 
-      use PropertyDamage.Model
+      @behaviour PropertyDamage.Model
 
       alias #{namespace}.Commands
       # alias #{namespace}.Events
       # alias #{namespace}.Projections
+      # alias #{namespace}.Assertions
 
       @impl true
       def commands do
@@ -1153,22 +1157,22 @@ defmodule Mix.Tasks.Pd.Scaffold do
       end
 
       @impl true
-      def projections do
-        # TODO: Add state tracking projections
-        # Example: [Projections.ResourceState]
-        []
+      def state_projection do
+        # TODO: Add state tracking projection
+        # Example: Projections.ResourceState
+        raise "state_projection/0 not implemented - add your state projection module"
       end
 
       @impl true
-      def checks do
-        # TODO: Add invariant checks
-        # Example: [Checks.ResourceExists]
+      def assertion_projections do
+        # TODO: Add assertion projections for invariant checking
+        # Example: [Assertions.ResourceExists, Assertions.ValidState]
         []
       end
 
       # Optional lifecycle callbacks
       # @impl true
-      # def setup_all(config), do: {:ok, config}
+      # def setup_once(config), do: {:ok, config}
       #
       # @impl true
       # def setup_each(config), do: {:ok, config}
@@ -1177,7 +1181,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       # def teardown_each(_config), do: :ok
       #
       # @impl true
-      # def teardown_all(_config), do: :ok
+      # def teardown_once(_config), do: :ok
     end
     """
   end
