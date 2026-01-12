@@ -61,7 +61,7 @@ defmodule PropertyDamage.ForensicsTest do
 
     trigger(every: 1)
     @impl true
-    def assert(:no_negative_amounts, state) do
+    def assert(:no_negative_amounts, state, _cmd_or_event) do
       negative = Enum.filter(state.order_amounts, fn {_id, amt} -> amt < 0 end)
 
       if Enum.empty?(negative) do

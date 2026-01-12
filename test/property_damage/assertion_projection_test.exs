@@ -58,7 +58,7 @@ defmodule PropertyDamage.AssertionProjectionTest do
     test "assert function returns :ok for valid state" do
       state = TestAssertions.init()
 
-      result = TestAssertions.assert(:quantity_non_negative, state)
+      result = TestAssertions.assert(:quantity_non_negative, state, %CreateItem{})
 
       assert result == :ok
     end
@@ -66,7 +66,7 @@ defmodule PropertyDamage.AssertionProjectionTest do
     test "assert function returns error tuple for invalid state" do
       state = %{total_quantity: -5}
 
-      result = TestAssertions.assert(:quantity_non_negative, state)
+      result = TestAssertions.assert(:quantity_non_negative, state, %CreateItem{})
 
       assert {:error, _} = result
     end
@@ -251,7 +251,14 @@ defmodule PropertyDamage.AssertionProjectionTest do
 
       assert {:init, 0} in callbacks
       assert {:apply, 2} in callbacks
-      assert {:assert, 2} in callbacks
+      assert {:assert, 3} in callbacks
+    end
+
+    test "init and apply are optional callbacks" do
+      optional = PropertyDamage.AssertionProjection.behaviour_info(:optional_callbacks)
+
+      assert {:init, 0} in optional
+      assert {:apply, 2} in optional
     end
   end
 end

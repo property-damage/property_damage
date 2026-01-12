@@ -268,10 +268,10 @@ defmodule PropertyDamage.Forensics do
 
     # Check if assertion should run given current context
     if AssertionProjection.should_run?(assertion.trigger, ctx.step_type, ctx.module, ctx.counters) do
-      # Execute assertion - try assert/2 first (new API), fall back to check/3 (legacy)
+      # Execute assertion - try assert/3 first (current), fall back to check/3 (legacy)
       result =
-        if function_exported?(projection, :assert, 2) do
-          projection.assert(assertion.name, projection_state)
+        if function_exported?(projection, :assert, 3) do
+          projection.assert(assertion.name, projection_state, ctx.command_or_event)
         else
           # Legacy: pass minimal context for backward compatibility
           projection.check(assertion.name, projection_state, %{})
@@ -292,16 +292,17 @@ defmodule PropertyDamage.Forensics do
   # Legacy wrapper for backward compatibility
   defp run_checks(model, assertion_projections, projections, check_ctx) do
     # Convert old check_ctx to new assertion_ctx format
-    event_module =
+    {event_module, event} =
       case check_ctx.events do
-        [event | _] -> get_module(event)
-        _ -> nil
+        [event | _] -> {get_module(event), event}
+        _ -> {nil, nil}
       end
 
     assertion_ctx = %{
       step_type: :event,
       module: event_module,
-      counters: %{step: check_ctx.step_count, event: check_ctx.step_count}
+      counters: %{step: check_ctx.step_count, event: check_ctx.step_count},
+      command_or_event: event
     }
 
     run_assertions(model, assertion_projections, projections, assertion_ctx)

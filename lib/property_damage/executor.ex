@@ -1561,10 +1561,10 @@ defmodule PropertyDamage.Executor do
            assertion_ctx.module,
            acc_counters
          ) do
-        # Execute assertion - try assert/2 first (new API), fall back to check/3 (legacy)
+        # Execute assertion - try assert/3 first (current), then check/3 (legacy)
         result =
-          if function_exported?(projection, :assert, 2) do
-            projection.assert(assertion.name, projection_state)
+          if function_exported?(projection, :assert, 3) do
+            projection.assert(assertion.name, projection_state, assertion_ctx.command_or_event)
           else
             # Legacy: pass minimal context for backward compatibility
             projection.check(assertion.name, projection_state, %{})
@@ -1606,7 +1606,8 @@ defmodule PropertyDamage.Executor do
     # Run assertions for command
     assertion_ctx = %{
       step_type: :command,
-      module: command_module
+      module: command_module,
+      command_or_event: check_ctx.command
     }
 
     case run_assertions(
@@ -1666,7 +1667,8 @@ defmodule PropertyDamage.Executor do
 
     assertion_ctx = %{
       step_type: :event,
-      module: event_module
+      module: event_module,
+      command_or_event: event
     }
 
     case run_assertions(

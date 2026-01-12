@@ -527,7 +527,7 @@ defmodule PropertyDamage.LoadTestTest do
 
       trigger(every: 1)
       @impl true
-      def assert(:count_check, state) do
+      def assert(:count_check, state, _cmd_or_event) do
         # Fail every 3rd assertion to simulate intermittent failures
         if rem(state.count, 3) == 0 do
           {:error, "count #{state.count} is divisible by 3"}

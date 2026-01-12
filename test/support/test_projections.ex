@@ -66,14 +66,14 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   @requirement "REQ-INV-001"
   trigger(every: 1)
   @impl true
-  def assert(:quantity_non_negative, state) do
+  def assert(:quantity_non_negative, state, _cmd_or_event) do
     if state.total_quantity >= 0, do: :ok, else: {:error, "Negative quantity"}
   end
 
   @requirement "REQ-CREATE-001"
   trigger(every: CreateItem)
 
-  def assert(:create_increments_count, state) do
+  def assert(:create_increments_count, state, _cmd_or_event) do
     if state.create_count > 0, do: :ok, else: {:error, "Create count should be positive"}
   end
 
@@ -81,7 +81,7 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   @requirement "REQ-CMD-002"
   trigger(every: [CreateItem, ViewItem])
 
-  def assert(:command_was_tracked, state) do
+  def assert(:command_was_tracked, state, _cmd_or_event) do
     if state.create_count > 0 or state.view_count > 0 do
       :ok
     else
@@ -92,7 +92,7 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   @requirement "REQ-PERF-001"
   trigger(every: 5)
 
-  def assert(:sampled_check, _state) do
+  def assert(:sampled_check, _state, _cmd_or_event) do
     # This only runs every 5th step
     :ok
   end
@@ -100,7 +100,7 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   requirements(["REQ-MULTI-001", "REQ-MULTI-002", "REQ-MULTI-003"])
   trigger(every: 1)
 
-  def assert(:multi_requirement_check, _state) do
+  def assert(:multi_requirement_check, _state, _cmd_or_event) do
     :ok
   end
 end
@@ -121,7 +121,7 @@ defmodule PropertyDamage.Test.Projections.SingleAfterTrigger do
 
   trigger(every: CreateItem)
   @impl true
-  def assert(:after_create, _state), do: :ok
+  def assert(:after_create, _state, _cmd_or_event), do: :ok
 end
 
 defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
@@ -140,7 +140,7 @@ defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
 
   trigger(every: ItemCreated)
   @impl true
-  def assert(:after_item_created, _state), do: :ok
+  def assert(:after_item_created, _state, _cmd_or_event), do: :ok
 end
 
 # Legacy projection using old check/3 syntax for backward compatibility testing

@@ -11,28 +11,50 @@ defmodule PropertyDamage.AssertionProjection do
       defmodule MyTest.Projections.OrderBalances do
         use PropertyDamage.AssertionProjection
 
+        # Optional: track state if needed (defaults to %{})
         @impl true
-        def init, do: %{orders: %{}, total: 0, last_command: nil}
+        def init, do: %{orders: %{}, total: 0}
 
+        # Optional: update state on commands/events (defaults to returning state unchanged)
         @impl true
-        def apply(state, %OrderCreated{amount: amt} = cmd) do
-          %{state | total: state.total + amt, last_command: cmd}
+        def apply(state, %OrderCreated{amount: amt}) do
+          %{state | total: state.total + amt}
         end
 
         def apply(state, _), do: state
 
-        # Assertion that runs after every step
+        # Assertion that runs after every step - receives command/event as 3rd arg
         @requirement "REQ-ACCT-001"
         trigger every: 1
-        def assert(:total_non_negative, state) do
+        def assert(:total_non_negative, state, _cmd_or_event) do
           if state.total >= 0, do: :ok, else: {:error, "Negative total"}
         end
 
-        # Assertion that runs after specific command
+        # Assertion that runs after specific command - can inspect the command directly
         @requirement "REQ-REFUND-001"
         trigger every: RefundOrder
-        def assert(:refund_valid, state) do
-          if state.last_command.amount > 0, do: :ok, else: {:error, "Invalid amount"}
+        def assert(:refund_valid, _state, %RefundOrder{amount: amount}) do
+          if amount > 0, do: :ok, else: {:error, "Invalid refund amount"}
+        end
+      end
+
+  ## Simplified Usage (No State Tracking)
+
+  For assertions that only need to inspect commands/events directly,
+  you can skip `init/0` and `apply/2` entirely:
+
+      defmodule MyTest.Projections.CommandValidator do
+        use PropertyDamage.AssertionProjection
+
+        # Just define assertions - init/0 returns %{}, apply/2 is a no-op
+        trigger every: CreateOrder
+        def assert(:order_has_items, _state, %CreateOrder{items: items}) do
+          if length(items) > 0, do: :ok, else: {:error, "Order must have items"}
+        end
+
+        trigger every: :command
+        def assert(:positive_amounts, _state, cmd) do
+          if Map.get(cmd, :amount, 1) > 0, do: :ok, else: {:error, "Amount must be positive"}
         end
       end
 
@@ -52,36 +74,6 @@ defmodule PropertyDamage.AssertionProjection do
   | `trigger every: {3, RefundOrder}` | Every 3rd RefundOrder |
   | `trigger every: {2, [Cmd1, Cmd2]}` | Every 2nd of any listed |
 
-  ## Tracking Context in State
-
-  Since assertions only receive `(name, state)`, track any context you need
-  in your projection state via `apply/2`:
-
-  ```elixir
-  def apply(state, %CreateWithdrawal{} = cmd) do
-    %{state | last_withdrawal_request: cmd.amount}
-  end
-
-  def apply(state, %WithdrawalCompleted{} = event) do
-    %{state |
-      balance: state.balance - event.amount,
-      last_withdrawal_actual: event.amount
-    }
-  end
-
-  trigger every: CreateWithdrawal
-  def assert(:withdrawal_amount_matches, state) do
-    if state.last_withdrawal_request == state.last_withdrawal_actual do
-      :ok
-    else
-      {:error, %AmountMismatch{
-        requested: state.last_withdrawal_request,
-        actual: state.last_withdrawal_actual
-      }}
-    end
-  end
-  ```
-
   ## Requirements Traceability
 
   Link assertions to external requirement IDs using `@requirement`:
@@ -90,7 +82,7 @@ defmodule PropertyDamage.AssertionProjection do
   @requirement "REQ-REFUND-001"
   @requirement "REQ-REFUND-002"
   trigger every: 1
-  def assert(:refund_valid, state), do: ...
+  def assert(:refund_valid, state, cmd_or_event), do: ...
   ```
 
   Or use the `requirements/1` macro for multiple at once:
@@ -98,17 +90,21 @@ defmodule PropertyDamage.AssertionProjection do
   ```elixir
   requirements ["REQ-001", "REQ-002"]
   trigger every: 1
-  def assert(:balance_check, state), do: ...
+  def assert(:balance_check, state, cmd_or_event), do: ...
   ```
   """
 
   @doc """
   Initialize the assertion projection state.
+
+  Optional callback. Default implementation returns an empty map `%{}`.
   """
   @callback init() :: any()
 
   @doc """
   Apply a command or event to the state.
+
+  Optional callback. Default implementation returns the state unchanged.
   """
   @callback apply(state :: any(), command_or_event :: struct()) :: any()
 
@@ -119,13 +115,17 @@ defmodule PropertyDamage.AssertionProjection do
 
   - `name` - Atom identifying the assertion
   - `state` - Current projection state
+  - `command_or_event` - The command or event that triggered this assertion
 
   ## Returns
 
   - `:ok` - Assertion passed
   - `{:error, reason}` - Assertion failed with reason
   """
-  @callback assert(name :: atom(), state :: any()) :: :ok | {:error, term()}
+  @callback assert(name :: atom(), state :: any(), command_or_event :: struct()) ::
+              :ok | {:error, term()}
+
+  @optional_callbacks init: 0, apply: 2
 
   defmacro __using__(_opts) do
     quote do
@@ -154,7 +154,7 @@ defmodule PropertyDamage.AssertionProjection do
   end
 
   @doc """
-  Register a trigger for the next assert/2 definition.
+  Register a trigger for the next assert/3 definition.
 
   The trigger determines when the assertion runs during execution.
 
@@ -177,14 +177,14 @@ defmodule PropertyDamage.AssertionProjection do
 
   ## Examples
 
-      @trigger every: 1
-      def assert(:my_check, state), do: ...
+      trigger every: 1
+      def assert(:my_check, state, _cmd_or_event), do: ...
 
-      @trigger every: CreateOrder
-      def assert(:after_create, state), do: ...
+      trigger every: CreateOrder
+      def assert(:after_create, state, cmd_or_event), do: ...
 
-      @trigger every: {10, :command}
-      def assert(:sampled_check, state), do: ...
+      trigger every: {10, :command}
+      def assert(:sampled_check, state, _cmd_or_event), do: ...
   """
   defmacro trigger(opts) do
     quote do
@@ -247,8 +247,8 @@ defmodule PropertyDamage.AssertionProjection do
   ## Example
 
       requirements ["REQ-001", "REQ-002", "REQ-003"]
-      @trigger every: 1
-      def assert(:my_check, state), do: ...
+      trigger every: 1
+      def assert(:my_check, state, _cmd_or_event), do: ...
   """
   defmacro requirements(req_list) do
     quote do
@@ -259,7 +259,32 @@ defmodule PropertyDamage.AssertionProjection do
   defmacro __before_compile__(env) do
     assertions = Module.get_attribute(env.module, :assertions) |> Enum.reverse()
 
+    # Check if init/0 is defined
+    has_init = Module.defines?(env.module, {:init, 0})
+
+    # Check if apply/2 is defined
+    has_apply = Module.defines?(env.module, {:apply, 2})
+
+    default_init =
+      unless has_init do
+        quote do
+          @doc false
+          def init, do: %{}
+        end
+      end
+
+    default_apply =
+      unless has_apply do
+        quote do
+          @doc false
+          def apply(state, _command_or_event), do: state
+        end
+      end
+
     quote do
+      unquote(default_init)
+      unquote(default_apply)
+
       @doc """
       Returns metadata for all assertions defined in this module.
 
@@ -278,8 +303,8 @@ defmodule PropertyDamage.AssertionProjection do
 
   @doc false
   # Called by @on_definition when any function is defined in the module
-  # Handles both assert/2 (new) and check/3 (legacy)
-  def __on_definition__(env, :def, :assert, [name_ast, _state], _guards, _body) do
+  # Handles assert/3 (current) and check/3 (legacy)
+  def __on_definition__(env, :def, :assert, [name_ast, _state, _cmd_or_event], _guards, _body) do
     register_assertion(env, name_ast)
   end
 
@@ -297,7 +322,7 @@ defmodule PropertyDamage.AssertionProjection do
         raise CompileError,
           file: env.file,
           line: env.line,
-          description: "assert/2 definition for :#{name} missing @trigger attribute"
+          description: "assert/3 definition for :#{name} missing `trigger` attribute"
 
       trigger_opts ->
         # Merge requirements from both @requirement (accumulating) and requirements/1 (list)

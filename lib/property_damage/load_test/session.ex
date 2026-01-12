@@ -569,7 +569,16 @@ defmodule PropertyDamage.LoadTest.Session do
 
     # Run command assertions
     {counters, failure_count} =
-      run_assertions(model, projections, :command, command_module, counters, command_index, state)
+      run_assertions(
+        model,
+        projections,
+        :command,
+        command_module,
+        counters,
+        command_index,
+        command,
+        state
+      )
 
     # Update projections and run assertions for each event
     {projections, counters, event_failures} =
@@ -589,7 +598,16 @@ defmodule PropertyDamage.LoadTest.Session do
 
         # Run event assertions
         {ctrs, event_failure_count} =
-          run_assertions(model, projs, :event, event_module, ctrs, command_index, state)
+          run_assertions(
+            model,
+            projs,
+            :event,
+            event_module,
+            ctrs,
+            command_index,
+            event,
+            state
+          )
 
         {projs, ctrs, failures + event_failure_count}
       end)
@@ -605,7 +623,16 @@ defmodule PropertyDamage.LoadTest.Session do
   end
 
   # Run assertions and record failures
-  defp run_assertions(model, projections, step_type, module, counters, command_index, state) do
+  defp run_assertions(
+         model,
+         projections,
+         step_type,
+         module,
+         counters,
+         command_index,
+         command_or_event,
+         state
+       ) do
     assertion_projections = model.assertion_projections()
 
     failure_count =
@@ -616,8 +643,8 @@ defmodule PropertyDamage.LoadTest.Session do
         Enum.reduce(assertions, failures, fn assertion, acc_failures ->
           if AssertionProjection.should_run?(assertion.trigger, step_type, module, counters) do
             result =
-              if function_exported?(projection, :assert, 2) do
-                projection.assert(assertion.name, projection_state)
+              if function_exported?(projection, :assert, 3) do
+                projection.assert(assertion.name, projection_state, command_or_event)
               else
                 # Legacy fallback
                 projection.check(assertion.name, projection_state, %{})
