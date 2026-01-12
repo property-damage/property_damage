@@ -61,7 +61,7 @@ defmodule PropertyDamage.LoadTest.Runner do
     :phase,
     :ramp_step_index,
     :awaiting,
-    :run_assertions
+    :assertion_mode
   ]
 
   @type t :: %__MODULE__{}
@@ -87,7 +87,7 @@ defmodule PropertyDamage.LoadTest.Runner do
   - `:metrics_interval` - Metrics callback interval (default: {1, :second})
   - `:on_metrics` - Callback function for periodic metrics
   - `:on_complete` - Callback function when test completes
-  - `:run_assertions` - Whether to run model assertions during execution (default: false)
+  - `:assertion_mode` - How to handle assertions: `:disabled` (default), `:record`, or `:log`
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
@@ -146,7 +146,7 @@ defmodule PropertyDamage.LoadTest.Runner do
     metrics_interval = Keyword.get(opts, :metrics_interval, {1, :seconds})
     on_metrics = Keyword.get(opts, :on_metrics)
     on_complete = Keyword.get(opts, :on_complete)
-    run_assertions = Keyword.get(opts, :run_assertions, false)
+    assertion_mode = Keyword.get(opts, :assertion_mode, :disabled)
 
     # Start metrics collector
     {:ok, metrics} = Metrics.start_link()
@@ -177,7 +177,7 @@ defmodule PropertyDamage.LoadTest.Runner do
       phase: :ramp_up,
       ramp_step_index: 0,
       awaiting: nil,
-      run_assertions: run_assertions
+      assertion_mode: assertion_mode
     }
 
     # Schedule first ramp step
@@ -388,7 +388,7 @@ defmodule PropertyDamage.LoadTest.Runner do
           session_id: session_id,
           commands_range: state.commands_range,
           think_time_range: state.think_time_range,
-          run_assertions: state.run_assertions
+          assertion_mode: state.assertion_mode
         )
 
       # Monitor the session

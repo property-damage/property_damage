@@ -1054,7 +1054,10 @@ IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
   # Called when test completes
   on_complete: fn report ->
     PropertyDamage.LoadTest.save(report, "load_test.md", :markdown)
-  end
+  end,
+
+  # Assertion mode: :disabled (default), :record, or :log
+  assertion_mode: :record  # Track assertion failures in metrics
 )
 ```
 
@@ -1072,6 +1075,7 @@ IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
 - **Throughput**: Total requests, requests/second
 - **Latency**: p50, p95, p99, min, max, mean (in milliseconds)
 - **Errors**: Total count, error rate, breakdown by type
+- **Assertions**: Failures count, rate, by assertion name (when enabled via `assertion_mode`)
 - **Per-Command**: Individual metrics for each command type
 - **History**: Time series for trend analysis
 

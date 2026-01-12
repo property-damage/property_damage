@@ -93,13 +93,14 @@ defmodule PropertyDamage.Executor do
   @injection_ctx_key :pd_injection_context
 
   @typedoc """
-  Assertion mode controls how assertion failures are handled.
+  Assertion mode controls whether and how assertion failures are handled.
 
+  - `:disabled` - Skip all assertions (useful for load testing focused on throughput)
   - `:halt` (default) - Stop execution at first failure, return failure
   - `:record` - Record failures and continue, return all failures at end
   - `:log` - Log failures as warnings and continue
   """
-  @type assertion_mode :: :halt | :record | :log
+  @type assertion_mode :: :disabled | :halt | :record | :log
 
   @typedoc """
   Result of executing a command sequence.
@@ -135,7 +136,7 @@ defmodule PropertyDamage.Executor do
   - `:injector_adapters` - List of injector adapter modules (optional)
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
   - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
-  - `:assertion_mode` - How to handle assertion failures (`:halt`, `:record`, `:log`). Default: `:halt`
+  - `:assertion_mode` - How to handle assertions (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
 
   ## Returns
 
@@ -1606,6 +1607,18 @@ defmodule PropertyDamage.Executor do
   # Legacy wrapper for backward compatibility
   # Maps old check_ctx format to new assertion_ctx format
   # Now accepts assertion_mode and assertion_failures from state
+  defp run_checks(
+         _model,
+         _projections,
+         _check_ctx,
+         assertion_counters,
+         :disabled,
+         assertion_failures
+       ) do
+    # When disabled, skip all assertions and just return success
+    {:ok, assertion_counters, assertion_failures}
+  end
+
   defp run_checks(
          model,
          projections,

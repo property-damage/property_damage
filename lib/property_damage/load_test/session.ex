@@ -49,7 +49,7 @@ defmodule PropertyDamage.LoadTest.Session do
     :commands_range,
     :think_time_range,
     :rate_limiter,
-    :run_assertions,
+    :assertion_mode,
     :running,
     :commands_executed,
     :sequences_completed,
@@ -76,7 +76,7 @@ defmodule PropertyDamage.LoadTest.Session do
   - `:commands_range` - {min, max} commands per sequence (default: {10, 50})
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:rate_limiter` - Optional rate limiter pid
-  - `:run_assertions` - Whether to run model assertions during execution (default: false)
+  - `:assertion_mode` - How to handle assertions: `:disabled` (default), `:record`, or `:log`
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
@@ -113,7 +113,7 @@ defmodule PropertyDamage.LoadTest.Session do
     commands_range = Keyword.get(opts, :commands_range, {10, 50})
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
     rate_limiter = Keyword.get(opts, :rate_limiter)
-    run_assertions = Keyword.get(opts, :run_assertions, false)
+    assertion_mode = Keyword.get(opts, :assertion_mode, :disabled)
 
     state = %__MODULE__{
       model: model,
@@ -124,7 +124,7 @@ defmodule PropertyDamage.LoadTest.Session do
       commands_range: commands_range,
       think_time_range: think_time_range,
       rate_limiter: rate_limiter,
-      run_assertions: run_assertions,
+      assertion_mode: assertion_mode,
       running: true,
       commands_executed: 0,
       sequences_completed: 0,
@@ -236,14 +236,14 @@ defmodule PropertyDamage.LoadTest.Session do
         try do
           # Initialize refs map and projections for this sequence
           initial_projections =
-            if state.run_assertions do
+            if state.assertion_mode != :disabled do
               init_projections(state.model)
             else
               nil
             end
 
           initial_counters =
-            if state.run_assertions do
+            if state.assertion_mode != :disabled do
               %{step: 0, command: 0, event: 0}
             else
               nil
@@ -326,7 +326,7 @@ defmodule PropertyDamage.LoadTest.Session do
 
     # Run assertions if enabled and command succeeded
     {new_projections, new_counters, assertion_failure_delta} =
-      if state.run_assertions and result == :ok do
+      if state.assertion_mode != :disabled and result == :ok do
         run_assertions_for_command(
           command,
           events,

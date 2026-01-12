@@ -73,6 +73,7 @@ defmodule PropertyDamage.LoadTest do
   - **Throughput**: Total requests, requests/second
   - **Latency**: p50, p95, p99, min, max, mean
   - **Errors**: Total count, error rate, by type
+  - **Assertions**: Failures count, rate, by assertion name (when enabled)
   - **Per-Command**: Breakdown by command type
   - **History**: Time series for trend analysis
 
@@ -127,6 +128,10 @@ defmodule PropertyDamage.LoadTest do
   - `:metrics_interval` - Callback interval (default: {1, :seconds})
   - `:on_metrics` - Callback receiving metrics snapshot each interval
   - `:on_complete` - Callback receiving final report
+  - `:assertion_mode` - How to handle assertions (default: `:disabled`):
+    - `:disabled` - Skip all assertions (maximum throughput)
+    - `:record` - Run assertions and record failures in metrics
+    - `:log` - Run assertions and log failures as warnings
 
   ## Returns
 

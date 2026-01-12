@@ -515,7 +515,7 @@ defmodule PropertyDamage.LoadTestTest do
       :ets.delete(session_counts)
     end
 
-    # Model with assertion projections for testing run_assertions option
+    # Model with assertion projections for testing assertion_mode option
     defmodule FailingAssertionProjection do
       use PropertyDamage.Projection
 
@@ -558,7 +558,7 @@ defmodule PropertyDamage.LoadTestTest do
         )
 
       # Should have requests but no assertion failures tracked
-      # (because run_assertions defaults to false)
+      # (because assertion_mode defaults to :disabled)
       assert report.metrics.total_requests > 0
       assert report.metrics.assertion_failures == 0
     end
@@ -571,7 +571,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter: MockAdapter,
           concurrent_users: 2,
           duration: {500, :milliseconds},
-          run_assertions: true
+          assertion_mode: :record
         )
 
       # Should have requests and some assertion failures
