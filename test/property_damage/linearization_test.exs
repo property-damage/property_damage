@@ -23,7 +23,7 @@ defmodule PropertyDamage.LinearizationTest do
 
     def commands, do: []
     def state_projection, do: TestProjection
-    def assertion_projections, do: []
+    def extra_projections, do: []
   end
 
   describe "generate_linearizations/1" do

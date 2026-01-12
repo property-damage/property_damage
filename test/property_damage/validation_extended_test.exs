@@ -42,7 +42,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def extra_projections, do: []
   end
 
   defmodule EmptyModel do
@@ -55,7 +55,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def extra_projections, do: []
   end
 
   defmodule InvalidWeightModel do
@@ -70,7 +70,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def extra_projections, do: []
   end
 
   defmodule ValidAdapter do
@@ -296,7 +296,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def extra_projections, do: []
   end
 
   defmodule UnbalancedWeightModel do
@@ -314,13 +314,13 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def extra_projections, do: []
   end
 
   describe "model warnings" do
-    test "warns about empty assertion projections" do
+    test "warns about empty extra projections" do
       {:ok, warnings} = Validation.validate!(ValidModel, ValidAdapter)
-      assert Enum.any?(warnings, &(&1 =~ "no assertion projections"))
+      assert Enum.any?(warnings, &(&1 =~ "no extra projections"))
     end
 
     test "warns about single command" do

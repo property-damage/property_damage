@@ -103,11 +103,11 @@ end
 
 ### 3. Define Assertions (Invariants)
 
-Assertions verify that invariants hold after each command. Use `AssertionProjection` to define assertions with optional state tracking:
+Assertions verify that invariants hold after each command. Use `Projection` to define assertions with optional state tracking:
 
 ```elixir
 defmodule MyApp.Assertions.UniqueEmails do
-  use PropertyDamage.AssertionProjection
+  use PropertyDamage.Projection
 
   # Track users state (optional - defaults to %{})
   def init, do: %{users: %{}}
@@ -119,13 +119,11 @@ defmodule MyApp.Assertions.UniqueEmails do
   def apply(state, _), do: state
 
   # Assert unique emails after every step
-  trigger every: 1
+  @trigger every: 1
   def assert(:unique_emails, state, _cmd_or_event) do
     emails = Map.values(state.users) |> Enum.map(& &1.email)
-    if length(emails) == length(Enum.uniq(emails)) do
-      :ok
-    else
-      {:error, "Duplicate emails found"}
+    unless length(emails) == length(Enum.uniq(emails)) do
+      PropertyDamage.fail!("Duplicate emails found", emails: emails)
     end
   end
 end
@@ -135,12 +133,14 @@ For simpler assertions that don't need state tracking, you can skip `init/0` and
 
 ```elixir
 defmodule MyApp.Assertions.ValidEmails do
-  use PropertyDamage.AssertionProjection
+  use PropertyDamage.Projection
 
   # Just define assertions - defaults are injected
-  trigger every: CreateUser
+  @trigger every: CreateUser
   def assert(:valid_email, _state, %CreateUser{email: email}) do
-    if String.contains?(email, "@"), do: :ok, else: {:error, "Invalid email"}
+    unless String.contains?(email, "@") do
+      PropertyDamage.fail!("Invalid email", email: email)
+    end
   end
 end
 ```
@@ -166,7 +166,7 @@ defmodule MyApp.TestModel do
   def state_projection, do: MyApp.Projections.Users
 
   @impl true
-  def assertion_projections do
+  def extra_projections do
     [MyApp.Assertions.UniqueEmails, MyApp.Assertions.ValidEmails]
   end
 end
@@ -537,7 +537,7 @@ defmodule MyModel do
   # Required
   def commands, do: [{weight, CommandModule}, ...]
   def state_projection, do: MyStateProjection
-  def assertion_projections, do: [MyAssertionProjection, ...]
+  def extra_projections, do: [MyExtraProjection, ...]  # Optional
 
   # Optional
   def injectable_events, do: []  # For InjectorAdapter
@@ -893,12 +893,13 @@ context = %{
 ### Adjusting Invariants During Faults
 
 ```elixir
-trigger every: 1
+@trigger every: 1
 def assert(:latency_sla, state, _cmd_or_event) do
-  if Map.get(state.active_faults, :network_partition) do
-    :ok  # Skip SLA check during partition
-  else
-    if state.last_latency_ms < 100, do: :ok, else: {:error, "SLA violated"}
+  # Skip SLA check during partition
+  unless Map.get(state.active_faults, :network_partition) do
+    unless state.last_latency_ms < 100 do
+      PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
+    end
   end
 end
 ```
@@ -975,7 +976,7 @@ Detect deadlocks, livelocks, and starvation with the Liveness projection.
 
 ```elixir
 defmodule MyModel do
-  def assertion_projections do
+  def extra_projections do
     [
       {PropertyDamage.Projection.Liveness, [
         max_pending_duration_ms: 10_000,
@@ -2240,7 +2241,7 @@ example_tests/travel_booking/
 ## Guides
 
 - [Getting Started](guides/getting_started.md) - First steps with PropertyDamage
-- [Writing Invariants](guides/writing_invariants.md) - AssertionProjections and assertions
+- [Writing Invariants](guides/writing_invariants.md) - Projections and assertions
 - [Debugging Failures](guides/debugging_failures.md) - Analyzing and fixing test failures
 - [Async and Eventual Consistency](guides/async_and_eventual_consistency.md) - Probes, bridges, and InjectorAdapters
 - [Chaos Engineering](guides/chaos_engineering.md) - Nemesis fault injection

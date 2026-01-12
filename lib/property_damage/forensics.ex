@@ -134,10 +134,16 @@ defmodule PropertyDamage.Forensics do
     # Initialize projections
     state_projection = model.state_projection()
 
-    assertion_projections =
-      Keyword.get(opts, :projections, model.assertion_projections())
+    extra_projections =
+      Keyword.get_lazy(opts, :projections, fn ->
+        if function_exported?(model, :extra_projections, 0) do
+          model.extra_projections()
+        else
+          []
+        end
+      end)
 
-    all_projections = [state_projection | assertion_projections]
+    all_projections = [state_projection | extra_projections]
 
     initial_projections =
       for projection <- all_projections, into: %{} do
@@ -161,14 +167,14 @@ defmodule PropertyDamage.Forensics do
         if is_nil(event) do
           {:cont, {:ok, state, history}}
         else
-          process_event(event, index, state, history, model, assertion_projections, stop_early)
+          process_event(event, index, state, history, model, extra_projections, stop_early)
         end
       end)
 
     finalize_result(result)
   end
 
-  defp process_event(event, index, state, history, model, assertion_projections, stop_early) do
+  defp process_event(event, index, state, history, model, extra_projections, stop_early) do
     # Apply event to all projections
     new_projections =
       for {projection, projection_state} <- state.projections, into: %{} do
@@ -180,7 +186,7 @@ defmodule PropertyDamage.Forensics do
       events_processed: index + 1
     }
 
-    # Run checks on assertion projections
+    # Run checks on all projections (state + extra)
     check_ctx = %{
       command: nil,
       events: [event],
@@ -190,7 +196,7 @@ defmodule PropertyDamage.Forensics do
       branch_id: nil
     }
 
-    case run_checks(model, assertion_projections, new_projections, check_ctx) do
+    case run_checks(model, extra_projections, new_projections, check_ctx) do
       :ok ->
         {:cont, {:ok, new_state, history ++ [event]}}
 
@@ -240,13 +246,17 @@ defmodule PropertyDamage.Forensics do
     end)
   end
 
-  defp run_assertions(_model, assertion_projections, projections, assertion_ctx) do
-    alias PropertyDamage.AssertionProjection
+  defp run_assertions(model, extra_projections, projections, assertion_ctx) do
+    alias PropertyDamage.Projection
 
-    Enum.reduce_while(assertion_projections, :ok, fn projection, :ok ->
+    # Run assertions on all projections (state + extra)
+    state_projection = model.state_projection()
+    all_projections = [state_projection | extra_projections]
+
+    Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       projection_state = Map.get(projections, projection)
 
-      # Get assertions for this projection
+      # Get assertions for this projection (only if it has __assertions__/0)
       assertions =
         if function_exported?(projection, :__assertions__, 0) do
           projection.__assertions__()
@@ -264,25 +274,19 @@ defmodule PropertyDamage.Forensics do
   defp run_projection_assertions(_projection, _projection_state, [], _ctx), do: :ok
 
   defp run_projection_assertions(projection, projection_state, [assertion | rest], ctx) do
-    alias PropertyDamage.AssertionProjection
+    alias PropertyDamage.Projection
 
     # Check if assertion should run given current context
-    if AssertionProjection.should_run?(assertion.trigger, ctx.step_type, ctx.module, ctx.counters) do
-      # Execute assertion - try assert/3 first (current), fall back to check/3 (legacy)
-      result =
-        if function_exported?(projection, :assert, 3) do
-          projection.assert(assertion.name, projection_state, ctx.command_or_event)
-        else
-          # Legacy: pass minimal context for backward compatibility
-          projection.check(assertion.name, projection_state, %{})
-        end
-
-      case result do
-        :ok ->
-          run_projection_assertions(projection, projection_state, rest, ctx)
-
-        {:error, reason} ->
-          {:error, assertion.name, reason}
+    if Projection.should_run?(assertion.trigger, ctx.step_type, ctx.module, ctx.counters) do
+      # Execute assertion - assertions raise on failure
+      try do
+        projection.assert(assertion.name, projection_state, ctx.command_or_event)
+        # Success - no exception raised
+        run_projection_assertions(projection, projection_state, rest, ctx)
+      rescue
+        e ->
+          # Assertion failed by raising exception
+          {:error, assertion.name, e}
       end
     else
       run_projection_assertions(projection, projection_state, rest, ctx)
@@ -290,7 +294,7 @@ defmodule PropertyDamage.Forensics do
   end
 
   # Legacy wrapper for backward compatibility
-  defp run_checks(model, assertion_projections, projections, check_ctx) do
+  defp run_checks(model, extra_projections, projections, check_ctx) do
     # Convert old check_ctx to new assertion_ctx format
     {event_module, event} =
       case check_ctx.events do
@@ -305,7 +309,7 @@ defmodule PropertyDamage.Forensics do
       command_or_event: event
     }
 
-    run_assertions(model, assertion_projections, projections, assertion_ctx)
+    run_assertions(model, extra_projections, projections, assertion_ctx)
   end
 
   defp get_module(%{__struct__: mod}), do: mod

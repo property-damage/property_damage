@@ -35,7 +35,7 @@ defmodule PropertyDamage.LoadTest.Session do
   require Logger
 
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.{AssertionProjection, Generator, Ref, Sequence}
+  alias PropertyDamage.{Generator, Projection, Ref, Sequence}
 
   # Process dictionary key for injection context during adapter execution
   @injection_ctx_key :property_damage_load_test_injection_ctx
@@ -544,8 +544,15 @@ defmodule PropertyDamage.LoadTest.Session do
   # Initialize all projections for a model
   defp init_projections(model) do
     state_projection = model.state_projection()
-    assertion_projections = model.assertion_projections()
-    all_projections = [state_projection | assertion_projections]
+
+    extra_projections =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
+
+    all_projections = [state_projection | extra_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
@@ -633,31 +640,41 @@ defmodule PropertyDamage.LoadTest.Session do
          command_or_event,
          state
        ) do
-    assertion_projections = model.assertion_projections()
+    state_projection = model.state_projection()
+
+    extra_projections =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
+
+    all_projections = [state_projection | extra_projections]
 
     failure_count =
-      Enum.reduce(assertion_projections, 0, fn projection, failures ->
+      Enum.reduce(all_projections, 0, fn projection, failures ->
         projection_state = Map.get(projections, projection)
-        assertions = projection.__assertions__()
+
+        # Only projections that use PropertyDamage.Projection have __assertions__/0
+        assertions =
+          if function_exported?(projection, :__assertions__, 0) do
+            projection.__assertions__()
+          else
+            []
+          end
 
         Enum.reduce(assertions, failures, fn assertion, acc_failures ->
-          if AssertionProjection.should_run?(assertion.trigger, step_type, module, counters) do
-            result =
-              if function_exported?(projection, :assert, 3) do
-                projection.assert(assertion.name, projection_state, command_or_event)
-              else
-                # Legacy fallback
-                projection.check(assertion.name, projection_state, %{})
-              end
-
-            case result do
-              :ok ->
-                acc_failures
-
-              {:error, reason} ->
+          if Projection.should_run?(assertion.trigger, step_type, module, counters) do
+            # Execute assertion - assertions raise on failure
+            try do
+              projection.assert(assertion.name, projection_state, command_or_event)
+              # Success - no exception raised
+              acc_failures
+            rescue
+              e ->
                 # Record failure to metrics
                 failure = %{
-                  reason: reason,
+                  reason: e,
                   command_index: command_index,
                   step_type: step_type,
                   module: module,

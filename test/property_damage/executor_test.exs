@@ -156,8 +156,9 @@ defmodule PropertyDamage.ExecutorTest do
       {:ok, result} = Executor.run(commands, FailingModel, SimpleAdapter)
 
       assert result.success == false
-      {:assertion_failed, :quantity_limit, reason} = result.failure_reason
-      assert reason =~ "exceeds limit"
+      {:assertion_failed, :quantity_limit, exception} = result.failure_reason
+      assert %PropertyDamage.AssertionFailed{} = exception
+      assert exception.message =~ "exceeds limit"
     end
   end
 

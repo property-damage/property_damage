@@ -664,9 +664,15 @@ defmodule PropertyDamage.Executor do
   # Initialize all projection states
   defp init_projections(model) do
     state_projection = model.state_projection()
-    assertion_projections = model.assertion_projections()
 
-    all_projections = [state_projection | assertion_projections]
+    extra_projections =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
+
+    all_projections = [state_projection | extra_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
@@ -1386,9 +1392,11 @@ defmodule PropertyDamage.Executor do
   end
 
   # Update all projections with a command or event
+  # apply/2 can raise to signal transition invariant violations
   defp update_projections(projections, item) do
     for {projection, state} <- projections, into: %{} do
-      {projection, projection.apply(state, item)}
+      new_state = projection.apply(state, item)
+      {projection, new_state}
     end
   end
 
@@ -1484,20 +1492,38 @@ defmodule PropertyDamage.Executor do
          projections,
          assertion_ctx,
          assertion_counters,
-         assertion_mode \\ :halt,
-         assertion_failures \\ [],
-         check_ctx \\ %{}
+         assertion_mode,
+         assertion_failures,
+         check_ctx
        ) do
     require Logger
-    assertion_projections = model.assertion_projections()
+
+    # Get all projections that may have assertions (state + extra)
+    state_projection = model.state_projection()
+
+    extra_projections =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
+
+    all_projections = [state_projection | extra_projections]
 
     result =
       Enum.reduce_while(
-        assertion_projections,
+        all_projections,
         {:ok, assertion_counters, assertion_failures},
         fn projection, {:ok, counters, failures} ->
           projection_state = Map.get(projections, projection)
-          assertions = projection.__assertions__()
+
+          # Only projections that use PropertyDamage.Projection have __assertions__/0
+          assertions =
+            if function_exported?(projection, :__assertions__, 0) do
+              projection.__assertions__()
+            else
+              []
+            end
 
           case run_projection_assertions(
                  projection,
@@ -1552,30 +1578,24 @@ defmodule PropertyDamage.Executor do
          assertion_ctx,
          counters
        ) do
-    alias PropertyDamage.AssertionProjection
+    alias PropertyDamage.Projection
 
     Enum.reduce_while(assertions, {:ok, counters}, fn assertion, {:ok, acc_counters} ->
-      if AssertionProjection.should_run?(
+      if Projection.should_run?(
            assertion.trigger,
            assertion_ctx.step_type,
            assertion_ctx.module,
            acc_counters
          ) do
-        # Execute assertion - try assert/3 first (current), then check/3 (legacy)
-        result =
-          if function_exported?(projection, :assert, 3) do
-            projection.assert(assertion.name, projection_state, assertion_ctx.command_or_event)
-          else
-            # Legacy: pass minimal context for backward compatibility
-            projection.check(assertion.name, projection_state, %{})
-          end
-
-        case result do
-          :ok ->
-            {:cont, {:ok, acc_counters}}
-
-          {:error, reason} ->
-            {:halt, {:error, assertion.name, reason, acc_counters}}
+        # Execute assertion - assertions raise on failure
+        try do
+          projection.assert(assertion.name, projection_state, assertion_ctx.command_or_event)
+          # Success: no exception raised
+          {:cont, {:ok, acc_counters}}
+        rescue
+          e ->
+            # Assertion failed by raising exception
+            {:halt, {:error, assertion.name, e, acc_counters}}
         end
       else
         {:cont, {:ok, acc_counters}}
@@ -1591,8 +1611,8 @@ defmodule PropertyDamage.Executor do
          projections,
          check_ctx,
          assertion_counters,
-         assertion_mode \\ :halt,
-         assertion_failures \\ []
+         assertion_mode,
+         assertion_failures
        ) do
     command_module = check_ctx.command.__struct__
 

@@ -79,7 +79,7 @@ defmodule PropertyDamageTest do
       def state_projection, do: ModelState
 
       @impl true
-      def assertion_projections, do: []
+      def extra_projections, do: []
 
       @impl true
       def setup_once(config) do

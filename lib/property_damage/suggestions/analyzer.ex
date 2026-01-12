@@ -15,7 +15,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   def analyze(model, opts \\ []) do
     # Get model components
     commands = get_commands(model)
-    assertion_projections = get_assertion_projections(model)
+    extra_projections = get_extra_projections(model)
 
     # Extract events from commands
     events = extract_events_from_commands(commands)
@@ -24,7 +24,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     patterns = Patterns.detect_patterns_multi(events)
 
     # Get existing checks
-    existing_checks = extract_existing_checks(assertion_projections)
+    existing_checks = extract_existing_checks(extra_projections)
 
     # Find cross-event fields (consistency check candidates)
     cross_event_fields = Patterns.find_cross_event_fields(events)
@@ -63,9 +63,9 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     end
   end
 
-  defp get_assertion_projections(model) do
-    if function_exported?(model, :assertion_projections, 0) do
-      model.assertion_projections()
+  defp get_extra_projections(model) do
+    if function_exported?(model, :extra_projections, 0) do
+      model.extra_projections()
     else
       []
     end
@@ -158,16 +158,25 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   # Check Extraction
   # ============================================================================
 
-  defp extract_existing_checks(assertion_projections) do
-    assertion_projections
+  defp extract_existing_checks(extra_projections) do
+    extra_projections
     |> Enum.flat_map(fn projection ->
-      if function_exported?(projection, :__checks__, 0) do
-        projection.__checks__()
-        |> Enum.map(fn check ->
-          Map.put(check, :projection, projection)
-        end)
-      else
-        []
+      # Check for __assertions__/0 (new) or __checks__/0 (legacy)
+      cond do
+        function_exported?(projection, :__assertions__, 0) ->
+          projection.__assertions__()
+          |> Enum.map(fn check ->
+            Map.put(check, :projection, projection)
+          end)
+
+        function_exported?(projection, :__checks__, 0) ->
+          projection.__checks__()
+          |> Enum.map(fn check ->
+            Map.put(check, :projection, projection)
+          end)
+
+        true ->
+          []
       end
     end)
   end

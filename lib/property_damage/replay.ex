@@ -163,10 +163,17 @@ defmodule PropertyDamage.Replay do
 
         {:ok, event_queue} = EventQueue.start_link()
 
-        # Initialize projections (state projection + assertion projections)
+        # Initialize projections (state projection + extra projections)
         state_projection = model.state_projection()
-        assertion_projections = model.assertion_projections()
-        all_projections = [state_projection | assertion_projections]
+
+        extra_projections =
+          if function_exported?(model, :extra_projections, 0) do
+            model.extra_projections()
+          else
+            []
+          end
+
+        all_projections = [state_projection | extra_projections]
 
         initial_projections =
           all_projections
@@ -488,11 +495,20 @@ defmodule PropertyDamage.Replay do
   end
 
   defp run_checks(model, projections) do
-    assertion_projections = model.assertion_projections()
+    state_projection = model.state_projection()
+
+    extra_projections =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
+
+    all_projections = [state_projection | extra_projections]
 
     # Run assertions for each projection
     # Note: In replay mode, we run all assertions since we can't track step counts
-    Enum.reduce_while(assertion_projections, :ok, fn projection, :ok ->
+    Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       projection_state = Map.get(projections, projection)
 
       assertions =
@@ -515,20 +531,14 @@ defmodule PropertyDamage.Replay do
     # In replay mode, run assertions with every_step trigger always
     # For other triggers (every: N, every: Module), we run them anyway
     # since replay is for debugging and should show all potential issues
-    result =
-      if function_exported?(projection, :assert, 3) do
-        projection.assert(assertion.name, state, nil)
-      else
-        # Legacy: try check/3
-        projection.check(assertion.name, state, %{})
-      end
-
-    case result do
-      :ok ->
-        run_projection_assertions(projection, state, rest)
-
-      {:error, reason} ->
-        {:check_failed, assertion.name, reason}
+    try do
+      projection.assert(assertion.name, state, nil)
+      # Success - no exception raised
+      run_projection_assertions(projection, state, rest)
+    rescue
+      e ->
+        # Assertion failed by raising exception
+        {:check_failed, assertion.name, e}
     end
   end
 end

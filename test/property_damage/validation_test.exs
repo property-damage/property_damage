@@ -84,7 +84,7 @@ defmodule PropertyDamage.ValidationTest do
       assert output =~ inspect(SimpleAdapter)
       assert output =~ "Commands"
       assert output =~ "State Projection"
-      assert output =~ "Assertion Projections"
+      assert output =~ "Extra Projections"
     end
 
     test "includes warnings in output" do

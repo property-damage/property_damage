@@ -42,7 +42,7 @@ defmodule PropertyDamage.RegressionTest do
     def state_projection, do: PropertyDamage.RegressionTest.TestProjection
 
     @impl true
-    def assertion_projections, do: []
+    def extra_projections, do: []
   end
 
   def make_failure(seed, opts \\ []) do

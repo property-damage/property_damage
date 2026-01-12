@@ -161,15 +161,15 @@ defmodule PropertyDamage.Linearization do
     # Get state projection
     state_proj = model.state_projection()
 
-    # Get assertion projections
-    assertion_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    # Get extra projections
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
       else
         []
       end
 
-    all_projs = [state_proj | assertion_projs]
+    all_projs = [state_proj | extra_projs]
 
     # Apply event to each projection that handles it
     Enum.reduce(all_projs, projections, fn proj_module, acc ->

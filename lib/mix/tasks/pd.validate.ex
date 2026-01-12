@@ -144,8 +144,8 @@ defmodule Mix.Tasks.Pd.Validate do
     errors = []
     warnings = []
 
-    # Check model callbacks
-    required_callbacks = [:commands, :state_projection, :assertion_projections]
+    # Check model callbacks (extra_projections is optional)
+    required_callbacks = [:commands, :state_projection]
 
     errors =
       for callback <- required_callbacks,
@@ -196,11 +196,16 @@ defmodule Mix.Tasks.Pd.Validate do
         ["State projection #{inspect(state_proj)} does not exist" | errors]
       end
 
-    assertion_projs = model.assertion_projections()
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
 
     errors =
-      for proj <- assertion_projs, not Code.ensure_loaded?(proj), reduce: errors do
-        acc -> ["Assertion projection #{inspect(proj)} does not exist" | acc]
+      for proj <- extra_projs, not Code.ensure_loaded?(proj), reduce: errors do
+        acc -> ["Extra projection #{inspect(proj)} does not exist" | acc]
       end
 
     # Collect warnings
@@ -248,12 +253,18 @@ defmodule Mix.Tasks.Pd.Validate do
 
   defp print_validation_results(model, adapter, warnings, _verbose) do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
-    assertion_projs = model.assertion_projections()
+
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
 
     IO.puts("Model:      #{inspect(model)}")
     IO.puts("Adapter:    #{inspect(adapter)}")
     IO.puts("Commands:   #{length(commands)}")
-    IO.puts("Assertions: #{length(assertion_projs)}")
+    IO.puts("Extra:      #{length(extra_projs)}")
 
     if length(warnings) > 0 do
       IO.puts("")
@@ -267,7 +278,13 @@ defmodule Mix.Tasks.Pd.Validate do
 
   defp print_model_summary(model, commands) do
     state_proj = model.state_projection()
-    assertion_projs = model.assertion_projections()
+
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
 
     IO.puts("Model: #{inspect(model)}")
     IO.puts("")
@@ -280,9 +297,9 @@ defmodule Mix.Tasks.Pd.Validate do
 
     IO.puts("")
     IO.puts("State Projection: #{inspect(state_proj)}")
-    IO.puts("Assertion Projections: #{length(assertion_projs)}")
+    IO.puts("Extra Projections: #{length(extra_projs)}")
 
-    for proj <- assertion_projs do
+    for proj <- extra_projs do
       name = proj |> Module.split() |> List.last()
       IO.puts("  - #{name}")
     end

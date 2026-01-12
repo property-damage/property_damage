@@ -10,10 +10,10 @@ defmodule PropertyDamage.Model do
 
   - `commands/0` - List of command modules (optionally weighted)
   - `state_projection/0` - Projection module used for command preconditions
-  - `assertion_projections/0` - Projection modules checked for invariant violations
 
   ## Optional Callbacks
 
+  - `extra_projections/0` - Additional projections for state tracking and/or assertions
   - `injectable_events/0` - Events that can arrive from InjectorAdapters
   - `setup_once/1` - Setup that runs once at the start (not during shrinking)
   - `setup_each/1` - Setup that runs before each execution (including shrink attempts)
@@ -35,8 +35,9 @@ defmodule PropertyDamage.Model do
         @impl true
         def state_projection, do: ModelState
 
+        # Optional: additional projections for assertions or extra state tracking
         @impl true
-        def assertion_projections, do: [OrderBalances]
+        def extra_projections, do: [OrderBalances]
 
         # Terminate when order is deleted
         @impl true
@@ -139,13 +140,15 @@ defmodule PropertyDamage.Model do
   @callback state_projection() :: module()
 
   @doc """
-  Returns list of projection modules checked for invariant violations.
+  Returns list of additional projection modules.
 
-  These projections can define checks via `use PropertyDamage.AssertionProjection`.
-  Their state is updated with each command and event, and checks are run
-  according to their trigger conditions.
+  These projections can track extra state and/or define assertions via
+  `use PropertyDamage.Projection`. Their state is updated with each command
+  and event, and any assertions are run according to their trigger conditions.
+
+  Optional - defaults to `[]` if not implemented.
   """
-  @callback assertion_projections() :: [module()]
+  @callback extra_projections() :: [module()]
 
   @doc """
   Returns list of event modules that can be injected from outside.
@@ -239,6 +242,7 @@ defmodule PropertyDamage.Model do
   @callback terminate?(state :: map(), command :: struct(), events :: [struct()]) :: boolean()
 
   @optional_callbacks [
+    extra_projections: 0,
     injectable_events: 0,
     setup_once: 1,
     setup_each: 1,

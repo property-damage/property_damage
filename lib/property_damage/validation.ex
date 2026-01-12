@@ -97,7 +97,7 @@ defmodule PropertyDamage.Validation do
     warnings = []
     warnings = warnings ++ warn_missing_downstream_observables(model)
     warnings = warnings ++ warn_orphan_events(model)
-    warnings = warnings ++ warn_no_assertion_projections(model)
+    warnings = warnings ++ warn_no_extra_projections(model)
     warnings = warnings ++ warn_unbalanced_weights(model)
     warnings = warnings ++ warn_single_command(model)
 
@@ -282,13 +282,26 @@ defmodule PropertyDamage.Validation do
 
     # Projections
     state_proj = model.state_projection()
-    assertion_projs = model.assertion_projections()
-    IO.puts(io, "State Projection: #{inspect(state_proj)}")
-    IO.puts(io, "Assertion Projections (#{length(assertion_projs)}):")
 
-    for proj <- assertion_projs do
-      checks = proj.__checks__()
-      IO.puts(io, "  - #{inspect(proj)} (#{length(checks)} checks)")
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
+
+    IO.puts(io, "State Projection: #{inspect(state_proj)}")
+    IO.puts(io, "Extra Projections (#{length(extra_projs)}):")
+
+    for proj <- extra_projs do
+      assertions =
+        if function_exported?(proj, :__assertions__, 0) do
+          proj.__assertions__()
+        else
+          []
+        end
+
+      IO.puts(io, "  - #{inspect(proj)} (#{length(assertions)} assertions)")
     end
 
     IO.puts(io, "")
@@ -388,7 +401,8 @@ defmodule PropertyDamage.Validation do
   end
 
   defp validate_model_callbacks(model) do
-    required_callbacks = [:commands, :state_projection, :assertion_projections]
+    # extra_projections is optional
+    required_callbacks = [:commands, :state_projection]
 
     for callback <- required_callbacks, not function_exported?(model, callback, 0), reduce: [] do
       acc -> ["Model #{inspect(model)} missing required callback #{callback}/0" | acc]
@@ -436,10 +450,15 @@ defmodule PropertyDamage.Validation do
         ["State projection #{inspect(state_proj)} does not exist" | errors]
       end
 
-    assertion_projs = model.assertion_projections()
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
 
-    for proj <- assertion_projs, not Code.ensure_loaded?(proj), reduce: errors do
-      acc -> ["Assertion projection #{inspect(proj)} does not exist" | acc]
+    for proj <- extra_projs, not Code.ensure_loaded?(proj), reduce: errors do
+      acc -> ["Extra projection #{inspect(proj)} does not exist" | acc]
     end
   end
 
@@ -498,14 +517,20 @@ defmodule PropertyDamage.Validation do
       end
       |> Enum.uniq()
 
-    # Collect all events handled by assertion projections
-    assertion_projs = model.assertion_projections()
+    # Collect all events handled by extra projections
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
 
     handled_events =
-      for proj <- assertion_projs,
-          check <- proj.__checks__(),
-          {:after, modules} <- List.wrap(check.trigger),
-          mod <- modules do
+      for proj <- extra_projs,
+          function_exported?(proj, :__assertions__, 0),
+          assertion <- proj.__assertions__(),
+          %{modules: modules} <- [assertion.trigger],
+          mod <- List.wrap(modules) do
         mod
       end
       |> Enum.uniq()
@@ -534,14 +559,19 @@ defmodule PropertyDamage.Validation do
     end
   end
 
-  defp warn_no_assertion_projections(model) do
-    assertion_projs = model.assertion_projections()
+  defp warn_no_extra_projections(model) do
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
 
-    if Enum.empty?(assertion_projs) do
+    if Enum.empty?(extra_projs) do
       [
-        "Model has no assertion projections - " <>
-          "no invariants or properties will be checked during test execution. " <>
-          "Consider adding assertion projections with checks to verify system behavior."
+        "Model has no extra projections - " <>
+          "invariants should be defined in state_projection or extra_projections. " <>
+          "Consider adding projections with assertions to verify system behavior."
       ]
     else
       []

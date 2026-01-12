@@ -129,7 +129,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
       end
 
       @impl true
-      def assertion_projections do
+      def extra_projections do
         [
           #{assertions_section}
         ]

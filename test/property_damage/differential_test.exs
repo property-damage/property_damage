@@ -153,7 +153,7 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   defmodule TestAssertions do
-    use PropertyDamage.AssertionProjection
+    use PropertyDamage.Projection
 
     @impl true
     def init, do: %{}
@@ -161,10 +161,8 @@ defmodule PropertyDamage.DifferentialTest do
     @impl true
     def apply(state, _), do: state
 
-    # Need at least one check for AssertionProjection
-    check(:always)
-    @impl true
-    def check(:always_pass, _state, _ctx), do: :ok
+    @trigger every: 1
+    def assert(:always_pass, _state, _cmd_or_event), do: :ok
   end
 
   defmodule TestModel do
@@ -177,7 +175,7 @@ defmodule PropertyDamage.DifferentialTest do
     def state_projection, do: TestProjection
 
     @impl true
-    def assertion_projections, do: [TestAssertions]
+    def extra_projections, do: [TestAssertions]
   end
 
   # ============================================================================

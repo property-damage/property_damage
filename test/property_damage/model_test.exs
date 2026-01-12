@@ -13,7 +13,7 @@ defmodule PropertyDamage.ModelTest do
 
       assert function_exported?(FullModel, :commands, 0)
       assert function_exported?(FullModel, :state_projection, 0)
-      assert function_exported?(FullModel, :assertion_projections, 0)
+      assert function_exported?(FullModel, :extra_projections, 0)
       assert function_exported?(FullModel, :injectable_events, 0)
       assert function_exported?(FullModel, :setup_once, 1)
       assert function_exported?(FullModel, :setup_each, 1)
@@ -27,7 +27,7 @@ defmodule PropertyDamage.ModelTest do
 
       assert function_exported?(MinimalModel, :commands, 0)
       assert function_exported?(MinimalModel, :state_projection, 0)
-      assert function_exported?(MinimalModel, :assertion_projections, 0)
+      assert function_exported?(MinimalModel, :extra_projections, 0)
 
       # Optional callbacks not exported
       refute function_exported?(MinimalModel, :injectable_events, 0)
@@ -53,8 +53,8 @@ defmodule PropertyDamage.ModelTest do
       assert projection == ModelState
     end
 
-    test "assertion_projections/0 returns projection list" do
-      projections = FullModel.assertion_projections()
+    test "extra_projections/0 returns projection list" do
+      projections = FullModel.extra_projections()
 
       assert projections == [TestAssertions]
     end
@@ -174,12 +174,14 @@ defmodule PropertyDamage.ModelTest do
 
       assert {:commands, 0} in callbacks
       assert {:state_projection, 0} in callbacks
-      assert {:assertion_projections, 0} in callbacks
+      # extra_projections is now optional
+      assert {:extra_projections, 0} in callbacks
     end
 
     test "optional callbacks are declared" do
       optional = Model.behaviour_info(:optional_callbacks)
 
+      assert {:extra_projections, 0} in optional
       assert {:injectable_events, 0} in optional
       assert {:setup_once, 1} in optional
       assert {:setup_each, 1} in optional

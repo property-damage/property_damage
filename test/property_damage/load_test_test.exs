@@ -383,7 +383,7 @@ defmodule PropertyDamage.LoadTestTest do
       def state_projection(), do: MockProjection
 
       @impl true
-      def assertion_projections(), do: []
+      def extra_projections(), do: []
     end
 
     defmodule MockAdapter do
@@ -517,7 +517,7 @@ defmodule PropertyDamage.LoadTestTest do
 
     # Model with assertion projections for testing run_assertions option
     defmodule FailingAssertionProjection do
-      use PropertyDamage.AssertionProjection
+      use PropertyDamage.Projection
 
       @impl true
       def init(), do: %{count: 0}
@@ -525,14 +525,11 @@ defmodule PropertyDamage.LoadTestTest do
       @impl true
       def apply(state, _), do: %{state | count: state.count + 1}
 
-      trigger(every: 1)
-      @impl true
+      @trigger every: 1
       def assert(:count_check, state, _cmd_or_event) do
         # Fail every 3rd assertion to simulate intermittent failures
         if rem(state.count, 3) == 0 do
-          {:error, "count #{state.count} is divisible by 3"}
-        else
-          :ok
+          PropertyDamage.fail!("count is divisible by 3", count: state.count)
         end
       end
     end
@@ -547,7 +544,7 @@ defmodule PropertyDamage.LoadTestTest do
       def state_projection(), do: MockProjection
 
       @impl true
-      def assertion_projections(), do: [FailingAssertionProjection]
+      def extra_projections(), do: [FailingAssertionProjection]
     end
 
     @tag :integration

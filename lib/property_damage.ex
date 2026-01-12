@@ -1096,6 +1096,51 @@ defmodule PropertyDamage do
     to: PropertyDamage.Flakiness,
     as: :discover_flaky
 
+  # ============================================================================
+  # Assertion Helpers
+  # ============================================================================
+
+  @doc """
+  Convenience function to fail an assertion with a message and optional data.
+
+  Use this in projection assertions when you don't need a custom exception type.
+
+  ## Examples
+
+      # Simple failure
+      PropertyDamage.fail!("balance is negative")
+
+      # With context data
+      PropertyDamage.fail!("balance is negative", balance: -50, account_id: "acc_123")
+
+      # In a projection assertion
+      @trigger every: 1
+      def assert(:balance_positive, state, _cmd) do
+        if state.balance < 0 do
+          PropertyDamage.fail!("negative balance", balance: state.balance)
+        end
+      end
+
+  ## Custom Exceptions
+
+  For richer error context, define your own exception types:
+
+      defmodule MyApp.BalanceViolation do
+        defexception [:balance, :requirement]
+
+        def message(%{balance: b}) do
+          "Balance is negative: \#{b}"
+        end
+      end
+
+      # Then raise directly:
+      raise %MyApp.BalanceViolation{balance: -50, requirement: "REQ-001"}
+  """
+  @spec fail!(String.t(), keyword()) :: no_return()
+  def fail!(message, data \\ []) do
+    raise %PropertyDamage.AssertionFailed{message: message, data: Map.new(data)}
+  end
+
   @doc false
   defmacro __using__(_opts) do
     quote do

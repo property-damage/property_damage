@@ -4,7 +4,7 @@ defmodule PropertyDamage.Test.Projections.ModelState do
 
   Demonstrates basic Projection usage without assertions.
   """
-  @behaviour PropertyDamage.Projection
+  use PropertyDamage.Projection
 
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
@@ -29,14 +29,12 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   Test assertion projection demonstrating all assertion features.
 
   Includes:
-  - trigger every: 1 (every step)
-  - trigger every: Module (after specific module)
-  - trigger every: [Module1, Module2] (after any listed)
-  - trigger every: N (sampling)
-  - @requirement attribute
-  - requirements/1 macro
+  - @trigger every: 1 (every step)
+  - @trigger every: Module (after specific module)
+  - @trigger every: [Module1, Module2] (after any listed)
+  - @trigger every: N (sampling)
   """
-  use PropertyDamage.AssertionProjection
+  use PropertyDamage.Projection
 
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
@@ -63,43 +61,34 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
 
   # === Assertions ===
 
-  @requirement "REQ-INV-001"
-  trigger(every: 1)
-  @impl true
+  @trigger every: 1
   def assert(:quantity_non_negative, state, _cmd_or_event) do
-    if state.total_quantity >= 0, do: :ok, else: {:error, "Negative quantity"}
-  end
-
-  @requirement "REQ-CREATE-001"
-  trigger(every: CreateItem)
-
-  def assert(:create_increments_count, state, _cmd_or_event) do
-    if state.create_count > 0, do: :ok, else: {:error, "Create count should be positive"}
-  end
-
-  @requirement "REQ-CMD-001"
-  @requirement "REQ-CMD-002"
-  trigger(every: [CreateItem, ViewItem])
-
-  def assert(:command_was_tracked, state, _cmd_or_event) do
-    if state.create_count > 0 or state.view_count > 0 do
-      :ok
-    else
-      {:error, "No commands tracked"}
+    unless state.total_quantity >= 0 do
+      PropertyDamage.fail!("Negative quantity", total: state.total_quantity)
     end
   end
 
-  @requirement "REQ-PERF-001"
-  trigger(every: 5)
+  @trigger every: CreateItem
+  def assert(:create_increments_count, state, _cmd_or_event) do
+    unless state.create_count > 0 do
+      PropertyDamage.fail!("Create count should be positive")
+    end
+  end
 
+  @trigger every: [CreateItem, ViewItem]
+  def assert(:command_was_tracked, state, _cmd_or_event) do
+    unless state.create_count > 0 or state.view_count > 0 do
+      PropertyDamage.fail!("No commands tracked")
+    end
+  end
+
+  @trigger every: 5
   def assert(:sampled_check, _state, _cmd_or_event) do
     # This only runs every 5th step
     :ok
   end
 
-  requirements(["REQ-MULTI-001", "REQ-MULTI-002", "REQ-MULTI-003"])
-  trigger(every: 1)
-
+  @trigger every: 1
   def assert(:multi_requirement_check, _state, _cmd_or_event) do
     :ok
   end
@@ -109,7 +98,7 @@ defmodule PropertyDamage.Test.Projections.SingleAfterTrigger do
   @moduledoc """
   Test projection with single module trigger.
   """
-  use PropertyDamage.AssertionProjection
+  use PropertyDamage.Projection
 
   alias PropertyDamage.Test.Commands.CreateItem
 
@@ -119,8 +108,7 @@ defmodule PropertyDamage.Test.Projections.SingleAfterTrigger do
   @impl true
   def apply(state, _), do: state
 
-  trigger(every: CreateItem)
-  @impl true
+  @trigger every: CreateItem
   def assert(:after_create, _state, _cmd_or_event), do: :ok
 end
 
@@ -128,7 +116,7 @@ defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
   @moduledoc """
   Test projection with event-based trigger.
   """
-  use PropertyDamage.AssertionProjection
+  use PropertyDamage.Projection
 
   alias PropertyDamage.Test.Events.ItemCreated
 
@@ -138,28 +126,6 @@ defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
   @impl true
   def apply(state, _), do: state
 
-  trigger(every: ItemCreated)
-  @impl true
+  @trigger every: ItemCreated
   def assert(:after_item_created, _state, _cmd_or_event), do: :ok
-end
-
-# Legacy projection using old check/3 syntax for backward compatibility testing
-defmodule PropertyDamage.Test.Projections.LegacyCheckProjection do
-  @moduledoc """
-  Test projection using legacy check/3 syntax for backward compatibility.
-  """
-  use PropertyDamage.AssertionProjection
-
-  @impl true
-  def init, do: %{count: 0}
-
-  @impl true
-  def apply(state, _), do: update_in(state, [:count], &(&1 + 1))
-
-  # Legacy syntax using check/3
-  check(:always)
-  @impl true
-  def check(:legacy_check, state, _ctx) do
-    if state.count >= 0, do: :ok, else: {:error, "negative count"}
-  end
 end

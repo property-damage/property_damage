@@ -809,8 +809,15 @@ defmodule PropertyDamage.Differential do
 
   defp init_projections(model) do
     state_projection = model.state_projection()
-    assertion_projections = model.assertion_projections()
-    all_projections = [state_projection | assertion_projections]
+
+    extra_projections =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
+
+    all_projections = [state_projection | extra_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}

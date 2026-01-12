@@ -348,18 +348,16 @@ defmodule PropertyDamage.Suggestions.Formatter do
 
   defp generate_non_negative_code(field) do
     """
-    check(:always)
-    def check(:#{field}_non_negative, state, _ctx) do
+    @trigger every: 1
+    def assert(:#{field}_non_negative, state, _cmd_or_event) do
       violations =
         state.entities
         |> Enum.filter(fn {_id, entity} ->
           Map.get(entity, :#{field}, 0) < 0
         end)
 
-      if Enum.empty?(violations) do
-        :ok
-      else
-        {:error, "Negative #{field} detected"}
+      unless Enum.empty?(violations) do
+        PropertyDamage.fail!("Negative #{field} detected", violations: violations)
       end
     end
     """
@@ -367,8 +365,8 @@ defmodule PropertyDamage.Suggestions.Formatter do
 
   defp generate_currency_code do
     """
-    check(:always)
-    def check(:currency_consistency, state, _ctx) do
+    @trigger every: 1
+    def assert(:currency_consistency, state, _cmd_or_event) do
       violations =
         state.operations
         |> Enum.filter(fn op ->
@@ -376,10 +374,8 @@ defmodule PropertyDamage.Suggestions.Formatter do
           entity && entity.currency != op.currency
         end)
 
-      if Enum.empty?(violations) do
-        :ok
-      else
-        {:error, "Currency mismatch detected"}
+      unless Enum.empty?(violations) do
+        PropertyDamage.fail!("Currency mismatch detected", violations: violations)
       end
     end
     """
@@ -389,16 +385,14 @@ defmodule PropertyDamage.Suggestions.Formatter do
     entity = field |> Atom.to_string() |> String.replace(~r/_ref|_id/, "")
 
     """
-    check(:always)
-    def check(:#{field}_exists, state, _ctx) do
+    @trigger every: 1
+    def assert(:#{field}_exists, state, _cmd_or_event) do
       refs_in_use = # collect all #{field} values from state
       known_refs = Map.keys(state.#{entity}s)
       missing = refs_in_use -- known_refs
 
-      if Enum.empty?(missing) do
-        :ok
-      else
-        {:error, "Invalid #{field} references: \#{inspect(missing)}"}
+      unless Enum.empty?(missing) do
+        PropertyDamage.fail!("Invalid #{field} references", missing: missing)
       end
     end
     """
@@ -406,8 +400,8 @@ defmodule PropertyDamage.Suggestions.Formatter do
 
   defp generate_status_code(field) do
     """
-    check(:always)
-    def check(:valid_#{field}, state, _ctx) do
+    @trigger every: 1
+    def assert(:valid_#{field}, state, _cmd_or_event) do
       valid_statuses = [:pending, :active, :completed, :cancelled]
 
       invalid =
@@ -416,10 +410,8 @@ defmodule PropertyDamage.Suggestions.Formatter do
           Map.get(e, :#{field}) not in valid_statuses
         end)
 
-      if Enum.empty?(invalid) do
-        :ok
-      else
-        {:error, "Invalid #{field} values: \#{inspect(invalid)}"}
+      unless Enum.empty?(invalid) do
+        PropertyDamage.fail!("Invalid #{field} values", invalid: invalid)
       end
     end
     """

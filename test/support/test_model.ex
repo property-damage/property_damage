@@ -24,7 +24,7 @@ defmodule PropertyDamage.Test.FullModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def extra_projections, do: [TestAssertions]
 
   @impl true
   def injectable_events, do: [ItemCreated, ItemViewed]
@@ -65,7 +65,7 @@ defmodule PropertyDamage.Test.MinimalModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def extra_projections, do: [TestAssertions]
 end
 
 defmodule PropertyDamage.Test.SimpleWeightModel do
@@ -85,7 +85,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def extra_projections, do: [TestAssertions]
 end
 
 defmodule PropertyDamage.Test.WeightedModel do
@@ -110,5 +110,5 @@ defmodule PropertyDamage.Test.WeightedModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def extra_projections, do: [TestAssertions]
 end

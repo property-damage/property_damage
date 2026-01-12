@@ -34,7 +34,7 @@ defmodule PropertyDamage.SuggestionsTest do
 
   # Test projection with existing checks
   defmodule TestProjection do
-    use PropertyDamage.AssertionProjection
+    use PropertyDamage.Projection
 
     @impl true
     def init, do: %{}
@@ -42,9 +42,9 @@ defmodule PropertyDamage.SuggestionsTest do
     @impl true
     def apply(state, _), do: state
 
-    check(:always)
-    @impl true
-    def check(:balance_non_negative, state, _ctx) do
+    @trigger every: 1
+    def assert(:balance_non_negative, _state, _cmd_or_event) do
+      # No-op assertion that always passes
       :ok
     end
   end
@@ -71,7 +71,7 @@ defmodule PropertyDamage.SuggestionsTest do
     def state_projection, do: EmptyProjection
 
     @impl true
-    def assertion_projections, do: [TestProjection]
+    def extra_projections, do: [TestProjection]
   end
 
   # Model with no projections
@@ -85,7 +85,7 @@ defmodule PropertyDamage.SuggestionsTest do
     def state_projection, do: EmptyProjection
 
     @impl true
-    def assertion_projections, do: []
+    def extra_projections, do: []
   end
 
   # ============================================================================
@@ -553,9 +553,9 @@ defmodule PropertyDamage.SuggestionsTest do
       suggestion = %{type: :non_negative_check, field: :balance}
       code = Formatter.generate_example_code(suggestion)
 
-      assert code =~ "check(:always)"
-      assert code =~ "balance"
-      assert code =~ "non_negative"
+      assert code =~ "@trigger every: 1"
+      assert code =~ "def assert(:balance_non_negative"
+      assert code =~ "PropertyDamage.fail!"
     end
 
     test "generates code for currency_consistency" do

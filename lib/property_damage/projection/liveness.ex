@@ -30,7 +30,7 @@ defmodule PropertyDamage.Projection.Liveness do
   ## Configuration
 
       defmodule MyModel do
-        def assertion_projections do
+        def extra_projections do
           [
             {PropertyDamage.Projection.Liveness, [
               max_pending_duration_ms: 10_000,

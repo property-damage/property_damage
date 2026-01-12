@@ -127,7 +127,7 @@ defmodule PropertyDamage.Errors do
 
                     def commands, do: [CreateEntity, UpdateEntity]
                     def state_projection, do: MyProjection
-                    def assertion_projections, do: [MyInvariant]
+                    def extra_projections, do: [MyInvariant]
                   end
           """
 
@@ -230,10 +230,10 @@ defmodule PropertyDamage.Errors do
           end
           """
 
-        {:model, :assertion_projections, 0} ->
+        {:model, :extra_projections, 0} ->
           """
-          def assertion_projections do
-            # Return list of projection modules for invariant checks
+          def extra_projections do
+            # Return list of extra projection modules (optional)
             [MyInvariant]
           end
           """

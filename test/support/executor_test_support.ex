@@ -8,7 +8,7 @@ defmodule PropertyDamage.Test.Projections.FailingAssertion do
   @moduledoc """
   Assertion projection that fails when total_quantity exceeds threshold.
   """
-  use PropertyDamage.AssertionProjection
+  use PropertyDamage.Projection
 
   alias PropertyDamage.Test.Events.ItemCreated
 
@@ -22,13 +22,10 @@ defmodule PropertyDamage.Test.Projections.FailingAssertion do
 
   def apply(state, _), do: state
 
-  check(:always)
-  @impl true
-  def check(:quantity_limit, state, _ctx) do
-    if state.total_quantity <= 100 do
-      :ok
-    else
-      {:error, "Quantity #{state.total_quantity} exceeds limit of 100"}
+  @trigger every: 1
+  def assert(:quantity_limit, state, _cmd_or_event) do
+    unless state.total_quantity <= 100 do
+      PropertyDamage.fail!("Quantity exceeds limit", quantity: state.total_quantity, limit: 100)
     end
   end
 end
@@ -49,7 +46,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def extra_projections, do: [TestAssertions]
 end
 
 defmodule PropertyDamage.Test.FailingModel do
@@ -68,7 +65,7 @@ defmodule PropertyDamage.Test.FailingModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [FailingAssertion]
+  def extra_projections, do: [FailingAssertion]
 end
 
 defmodule PropertyDamage.Test.SimpleAdapter do
@@ -125,7 +122,7 @@ end
 
 defmodule PropertyDamage.Test.SimpleModel do
   @moduledoc """
-  Simple model without assertion projections for ref resolution tests.
+  Simple model without extra projections for ref resolution tests.
   """
   @behaviour PropertyDamage.Model
 
@@ -138,8 +135,7 @@ defmodule PropertyDamage.Test.SimpleModel do
   @impl true
   def state_projection, do: ModelState
 
-  @impl true
-  def assertion_projections, do: []
+  # No extra_projections - optional callback
 end
 
 # ============================================================================
@@ -157,7 +153,7 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
   If a sequence fails `high_limit`, shrinking shouldn't accept a
   sequence that only fails `low_limit`.
   """
-  use PropertyDamage.AssertionProjection
+  use PropertyDamage.Projection
 
   alias PropertyDamage.Test.Events.ItemCreated
 
@@ -171,23 +167,23 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
 
   def apply(state, _), do: state
 
-  check(:always)
-  @impl true
-  def check(:low_limit, state, _ctx) do
-    if state.total_quantity <= 100 do
-      :ok
-    else
-      {:error, "Quantity #{state.total_quantity} exceeds low limit of 100"}
+  @trigger every: 1
+  def assert(:low_limit, state, _cmd_or_event) do
+    unless state.total_quantity <= 100 do
+      PropertyDamage.fail!("Quantity exceeds low limit",
+        quantity: state.total_quantity,
+        limit: 100
+      )
     end
   end
 
-  check(:always)
-
-  def check(:high_limit, state, _ctx) do
-    if state.total_quantity <= 200 do
-      :ok
-    else
-      {:error, "Quantity #{state.total_quantity} exceeds high limit of 200"}
+  @trigger every: 1
+  def assert(:high_limit, state, _cmd_or_event) do
+    unless state.total_quantity <= 200 do
+      PropertyDamage.fail!("Quantity exceeds high limit",
+        quantity: state.total_quantity,
+        limit: 200
+      )
     end
   end
 end
@@ -208,5 +204,5 @@ defmodule PropertyDamage.Test.MultiCheckModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [MultiCheckAssertion]
+  def extra_projections, do: [MultiCheckAssertion]
 end

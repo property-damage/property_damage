@@ -102,21 +102,27 @@ defmodule PropertyDamage.IEx do
 
   defp print_projections(model) do
     state_proj = model.state_projection()
-    assertion_projs = model.assertion_projections()
+
+    extra_projs =
+      if function_exported?(model, :extra_projections, 0) do
+        model.extra_projections()
+      else
+        []
+      end
 
     IO.puts("PROJECTIONS")
     IO.puts(String.duplicate("─", 65))
     IO.puts("  State:      #{inspect(state_proj)}")
 
-    if length(assertion_projs) > 0 do
-      IO.puts("  Assertions: #{length(assertion_projs)} projection(s)")
+    if length(extra_projs) > 0 do
+      IO.puts("  Extra:      #{length(extra_projs)} projection(s)")
 
-      for proj <- assertion_projs do
+      for proj <- extra_projs do
         name = proj |> Module.split() |> List.last()
         IO.puts("              - #{name}")
       end
     else
-      IO.puts("  Assertions: (none)")
+      IO.puts("  Extra:      (none)")
     end
 
     IO.puts("")

@@ -47,7 +47,7 @@ defmodule PropertyDamage.ForensicsTest do
 
   # Test assertion projection with assertions
   defmodule OrderInvariants do
-    use PropertyDamage.AssertionProjection
+    use PropertyDamage.Projection
 
     @impl true
     def init, do: %{order_amounts: %{}}
@@ -59,15 +59,12 @@ defmodule PropertyDamage.ForensicsTest do
 
     def apply(state, _), do: state
 
-    trigger(every: 1)
-    @impl true
+    @trigger every: 1
     def assert(:no_negative_amounts, state, _cmd_or_event) do
       negative = Enum.filter(state.order_amounts, fn {_id, amt} -> amt < 0 end)
 
-      if Enum.empty?(negative) do
-        :ok
-      else
-        {:error, "Negative amounts found: #{inspect(negative)}"}
+      unless Enum.empty?(negative) do
+        PropertyDamage.fail!("Negative amounts found", negative_amounts: negative)
       end
     end
   end
@@ -78,7 +75,7 @@ defmodule PropertyDamage.ForensicsTest do
 
     def commands, do: []
     def state_projection, do: OrderState
-    def assertion_projections, do: [OrderInvariants]
+    def extra_projections, do: [OrderInvariants]
   end
 
   # Test event mapping
