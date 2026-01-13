@@ -157,17 +157,20 @@ defmodule PropertyDamage.LoadTest.Report do
 
   defp terminal_assertions(metrics) do
     failures = Map.get(metrics, :assertion_failures, 0)
-    failures_by_assertion = Map.get(metrics, :failures_by_assertion, %{})
+    failures_by_exception = Map.get(metrics, :failures_by_exception, %{})
 
-    if failures == 0 and map_size(failures_by_assertion) == 0 do
+    if failures == 0 and map_size(failures_by_exception) == 0 do
       ""
     else
       failure_details =
-        if map_size(failures_by_assertion) > 0 do
-          failures_by_assertion
+        if map_size(failures_by_exception) > 0 do
+          failures_by_exception
           |> Enum.sort_by(fn {_, count} -> -count end)
           |> Enum.take(5)
-          |> Enum.map(fn {name, count} -> "#{name}: #{count}" end)
+          |> Enum.map(fn {module, count} ->
+            name = module |> to_string() |> String.replace("Elixir.", "")
+            "#{name}: #{count}"
+          end)
           |> Enum.join(", ")
         else
           "none"
@@ -179,7 +182,7 @@ defmodule PropertyDamage.LoadTest.Report do
       ┌─ Assertions ─────────────────────────────────────────────────────────┐
       │ Total Failures:  #{String.pad_trailing(to_string(failures), 51)}│
       │ Failure Rate:    #{String.pad_trailing(format_float(failure_rate) <> "%", 51)}│
-      │ By Assertion:    #{String.pad_trailing(failure_details, 51)}│
+      │ By Exception:    #{String.pad_trailing(failure_details, 51)}│
       └──────────────────────────────────────────────────────────────────────┘
       """
     end
@@ -396,18 +399,21 @@ defmodule PropertyDamage.LoadTest.Report do
 
   defp format_assertions_markdown(metrics) do
     failures = Map.get(metrics, :assertion_failures, 0)
-    failures_by_assertion = Map.get(metrics, :failures_by_assertion, %{})
+    failures_by_exception = Map.get(metrics, :failures_by_exception, %{})
 
-    if failures == 0 and map_size(failures_by_assertion) == 0 do
+    if failures == 0 and map_size(failures_by_exception) == 0 do
       ""
     else
       failure_rate = Map.get(metrics, :assertion_failure_rate, 0.0)
 
       breakdown =
-        if map_size(failures_by_assertion) > 0 do
-          failures_by_assertion
+        if map_size(failures_by_exception) > 0 do
+          failures_by_exception
           |> Enum.sort_by(fn {_, count} -> -count end)
-          |> Enum.map(fn {name, count} -> "| \`#{name}\` | #{count} |" end)
+          |> Enum.map(fn {module, count} ->
+            name = module |> to_string() |> String.replace("Elixir.", "")
+            "| `#{name}` | #{count} |"
+          end)
           |> Enum.join("\n")
         else
           "| - | - |"
@@ -419,7 +425,7 @@ defmodule PropertyDamage.LoadTest.Report do
       - **Total Failures:** #{failures}
       - **Failure Rate:** #{format_float(failure_rate)}%
 
-      | Assertion | Failures |
+      | Exception | Failures |
       |-----------|----------|
       #{breakdown}
       """

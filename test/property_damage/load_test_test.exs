@@ -119,8 +119,8 @@ defmodule PropertyDamage.LoadTestTest do
     test "tracks assertion failures" do
       {:ok, metrics} = Metrics.start_link()
 
-      # Record some assertion failures
-      Metrics.record_assertion_failure(metrics, :balance_positive, CreateAccount, %{
+      # Record some assertion failures (by exception module)
+      Metrics.record_assertion_failure(metrics, PropertyDamage.AssertionFailed, CreateAccount, %{
         reason: "balance -50",
         command_index: 5,
         step_type: :command,
@@ -128,7 +128,7 @@ defmodule PropertyDamage.LoadTestTest do
         timestamp: System.monotonic_time(:millisecond)
       })
 
-      Metrics.record_assertion_failure(metrics, :balance_positive, CreateAccount, %{
+      Metrics.record_assertion_failure(metrics, PropertyDamage.AssertionFailed, CreateAccount, %{
         reason: "balance -100",
         command_index: 10,
         step_type: :event,
@@ -136,7 +136,7 @@ defmodule PropertyDamage.LoadTestTest do
         timestamp: System.monotonic_time(:millisecond)
       })
 
-      Metrics.record_assertion_failure(metrics, :no_orphans, DeleteAccount, %{
+      Metrics.record_assertion_failure(metrics, ArgumentError, DeleteAccount, %{
         reason: "orphaned order",
         command_index: 15,
         step_type: :command,
@@ -154,13 +154,13 @@ defmodule PropertyDamage.LoadTestTest do
 
       assert snapshot.assertion_failures == 3
       assert snapshot.assertion_failure_rate == 3.0
-      assert snapshot.failures_by_assertion[:balance_positive] == 2
-      assert snapshot.failures_by_assertion[:no_orphans] == 1
+      assert snapshot.failures_by_exception[PropertyDamage.AssertionFailed] == 2
+      assert snapshot.failures_by_exception[ArgumentError] == 1
       assert length(snapshot.recent_assertion_failures) == 3
 
       # Verify failure details
       [first | _] = snapshot.recent_assertion_failures
-      assert first.assertion_name in [:balance_positive, :no_orphans]
+      assert first.exception_module in [PropertyDamage.AssertionFailed, ArgumentError]
       assert Map.has_key?(first, :reason)
       assert Map.has_key?(first, :command_index)
 
@@ -172,7 +172,7 @@ defmodule PropertyDamage.LoadTestTest do
 
       # Record more failures than the max (100)
       for i <- 1..150 do
-        Metrics.record_assertion_failure(metrics, :test_assertion, TestCommand, %{
+        Metrics.record_assertion_failure(metrics, PropertyDamage.AssertionFailed, TestCommand, %{
           reason: "failure #{i}",
           command_index: i,
           step_type: :command,
@@ -581,8 +581,8 @@ defmodule PropertyDamage.LoadTestTest do
       assert report.metrics.assertion_failures > 0
       assert report.metrics.assertion_failure_rate > 0
 
-      # Should have tracked failures by assertion name
-      assert Map.has_key?(report.metrics.failures_by_assertion, :count_check)
+      # Should have tracked failures by exception module
+      assert Map.has_key?(report.metrics.failures_by_exception, PropertyDamage.AssertionFailed)
     end
   end
 end

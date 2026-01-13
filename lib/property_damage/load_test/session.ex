@@ -683,7 +683,7 @@ defmodule PropertyDamage.LoadTest.Session do
 
                 Metrics.record_assertion_failure(
                   state.metrics,
-                  assertion.name,
+                  e.__struct__,
                   module,
                   failure
                 )

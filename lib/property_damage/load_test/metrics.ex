@@ -79,7 +79,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
           history: [history_point()],
           assertion_failures: non_neg_integer(),
           assertion_failure_rate: float(),
-          failures_by_assertion: %{atom() => non_neg_integer()},
+          failures_by_exception: %{module() => non_neg_integer()},
           recent_assertion_failures: [map()]
         }
 
@@ -166,13 +166,13 @@ defmodule PropertyDamage.LoadTest.Metrics do
   ## Parameters
 
   - `pid` - Metrics collector pid
-  - `assertion_name` - Atom identifying the assertion that failed
+  - `exception_module` - Module of the exception that was raised
   - `command_module` - The command that was being executed
   - `failure` - Map with failure details (reason, command_index, etc.)
   """
-  @spec record_assertion_failure(pid(), atom(), module(), map()) :: :ok
-  def record_assertion_failure(pid, assertion_name, command_module, failure) do
-    GenServer.cast(pid, {:record_assertion_failure, assertion_name, command_module, failure})
+  @spec record_assertion_failure(pid(), module(), module(), map()) :: :ok
+  def record_assertion_failure(pid, exception_module, command_module, failure) do
+    GenServer.cast(pid, {:record_assertion_failure, exception_module, command_module, failure})
   end
 
   @doc """
@@ -270,19 +270,19 @@ defmodule PropertyDamage.LoadTest.Metrics do
   end
 
   @impl true
-  def handle_cast({:record_assertion_failure, assertion_name, command_module, failure}, state) do
+  def handle_cast({:record_assertion_failure, exception_module, command_module, failure}, state) do
     counters = get_counters(state.counters_table)
 
     # Increment assertion failure count
     :atomics.add(counters, @assertion_failures, 1)
 
-    # Track by assertion name
-    increment_assertion_failure(state.assertion_failures_table, assertion_name)
+    # Track by exception module
+    increment_assertion_failure(state.assertion_failures_table, exception_module)
 
     # Add to recent failures (bounded)
     failure_record =
       Map.merge(failure, %{
-        assertion_name: assertion_name,
+        exception_module: exception_module,
         command_module: command_module,
         recorded_at: System.monotonic_time(:millisecond)
       })
@@ -411,13 +411,13 @@ defmodule PropertyDamage.LoadTest.Metrics do
     end
   end
 
-  defp increment_assertion_failure(table, assertion_name) do
-    case :ets.lookup(table, assertion_name) do
+  defp increment_assertion_failure(table, exception_module) do
+    case :ets.lookup(table, exception_module) do
       [] ->
-        :ets.insert(table, {assertion_name, 1})
+        :ets.insert(table, {exception_module, 1})
 
-      [{^assertion_name, count}] ->
-        :ets.insert(table, {assertion_name, count + 1})
+      [{^exception_module, count}] ->
+        :ets.insert(table, {exception_module, count + 1})
     end
   end
 
@@ -557,7 +557,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
         0.0
       end
 
-    failures_by_assertion =
+    failures_by_exception =
       :ets.tab2list(state.assertion_failures_table)
       |> Map.new()
 
@@ -580,7 +580,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
       history: Enum.reverse(state.history),
       assertion_failures: assertion_failures,
       assertion_failure_rate: assertion_failure_rate,
-      failures_by_assertion: failures_by_assertion,
+      failures_by_exception: failures_by_exception,
       recent_assertion_failures: Enum.reverse(state.recent_failures)
     }
   end
