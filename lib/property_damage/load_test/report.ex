@@ -67,6 +67,7 @@ defmodule PropertyDamage.LoadTest.Report do
     Throughput: #{format_float(m.requests_per_second)} RPS
     Latency: p50=#{format_float(m.latency_p50)}ms, p95=#{format_float(m.latency_p95)}ms, p99=#{format_float(m.latency_p99)}ms
     Errors: #{m.total_errors} (#{format_float(m.error_rate)}%)
+    #{format_assertion_summary_line(m)}
     """
   end
 
@@ -84,6 +85,7 @@ defmodule PropertyDamage.LoadTest.Report do
       terminal_throughput(m),
       terminal_latency(m),
       terminal_errors(m),
+      terminal_assertions(m),
       terminal_commands(m),
       terminal_chart(m),
       terminal_footer()
@@ -152,6 +154,36 @@ defmodule PropertyDamage.LoadTest.Report do
     """
   end
 
+
+  defp terminal_assertions(metrics) do
+    failures = Map.get(metrics, :assertion_failures, 0)
+    failures_by_assertion = Map.get(metrics, :failures_by_assertion, %{})
+
+    if failures == 0 and map_size(failures_by_assertion) == 0 do
+      ""
+    else
+      failure_details =
+        if map_size(failures_by_assertion) > 0 do
+          failures_by_assertion
+          |> Enum.sort_by(fn {_, count} -> -count end)
+          |> Enum.take(5)
+          |> Enum.map(fn {name, count} -> "#{name}: #{count}" end)
+          |> Enum.join(", ")
+        else
+          "none"
+        end
+
+      failure_rate = Map.get(metrics, :assertion_failure_rate, 0.0)
+
+      """
+      ┌─ Assertions ─────────────────────────────────────────────────────────┐
+      │ Total Failures:  #{String.pad_trailing(to_string(failures), 51)}│
+      │ Failure Rate:    #{String.pad_trailing(format_float(failure_rate) <> "%", 51)}│
+      │ By Assertion:    #{String.pad_trailing(failure_details, 51)}│
+      └──────────────────────────────────────────────────────────────────────┘
+      """
+    end
+  end
   defp terminal_commands(metrics) do
     if map_size(metrics.by_command) == 0 do
       ""
@@ -295,6 +327,8 @@ defmodule PropertyDamage.LoadTest.Report do
     - **Total Errors:** #{m.total_errors}
     #{format_errors_markdown(m.errors_by_type)}
 
+    #{format_assertions_markdown(m)}
+
     ## Per-Command Breakdown
 
     | Command | Count | p50 (ms) | p95 (ms) | Errors |
@@ -352,4 +386,43 @@ defmodule PropertyDamage.LoadTest.Report do
   defp format_duration(ms) when ms < 1000, do: "#{ms}ms"
   defp format_duration(ms) when ms < 60_000, do: "#{Float.round(ms / 1000, 1)}s"
   defp format_duration(ms), do: "#{Float.round(ms / 60_000, 1)}m"
+
+  defp format_assertion_summary_line(metrics) do
+    case Map.get(metrics, :assertion_failures, 0) do
+      0 -> ""
+      failures -> "Assertions: #{failures} failures (#{format_float(metrics.assertion_failure_rate)}%)"
+    end
+  end
+
+  defp format_assertions_markdown(metrics) do
+    failures = Map.get(metrics, :assertion_failures, 0)
+    failures_by_assertion = Map.get(metrics, :failures_by_assertion, %{})
+
+    if failures == 0 and map_size(failures_by_assertion) == 0 do
+      ""
+    else
+      failure_rate = Map.get(metrics, :assertion_failure_rate, 0.0)
+
+      breakdown =
+        if map_size(failures_by_assertion) > 0 do
+          failures_by_assertion
+          |> Enum.sort_by(fn {_, count} -> -count end)
+          |> Enum.map(fn {name, count} -> "| \`#{name}\` | #{count} |" end)
+          |> Enum.join("\n")
+        else
+          "| - | - |"
+        end
+
+      """
+      ## Assertions
+
+      - **Total Failures:** #{failures}
+      - **Failure Rate:** #{format_float(failure_rate)}%
+
+      | Assertion | Failures |
+      |-----------|----------|
+      #{breakdown}
+      """
+    end
+  end
 end
