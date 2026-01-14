@@ -345,6 +345,411 @@ defmodule PropertyDamage.Options do
   end
 
   # ============================================================================
+  # PropertyDamage.Replay.run/2 and start/2 Schema
+  # ============================================================================
+
+  @replay_schema_definition [
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Override adapter configuration."
+    ],
+    stop_on_failure: [
+      type: :boolean,
+      default: true,
+      doc: "Stop replay at first failure."
+    ],
+    include_projections: [
+      type: :boolean,
+      default: true,
+      doc: "Include projection states in step results."
+    ]
+  ]
+
+  @replay_schema NimbleOptions.new!(@replay_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Replay.run/2` and `start/2`.
+  """
+  @spec validate_replay!(keyword()) :: keyword()
+  def validate_replay!(opts) do
+    NimbleOptions.validate!(opts, @replay_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.Analysis.generate_test/2 Schema
+  # ============================================================================
+
+  @generate_test_schema_definition [
+    format: [
+      type: {:in, [:exunit, :script, :markdown]},
+      default: :exunit,
+      doc: "Output format: `:exunit`, `:script`, or `:markdown`."
+    ],
+    module_name: [
+      type: :string,
+      default: "ReproductionTest",
+      doc: "Module name for ExUnit tests."
+    ],
+    include_setup: [
+      type: :boolean,
+      default: true,
+      doc: "Include model/adapter setup code."
+    ]
+  ]
+
+  @generate_test_schema NimbleOptions.new!(@generate_test_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Analysis.generate_test/2`.
+  """
+  @spec validate_generate_test!(keyword()) :: keyword()
+  def validate_generate_test!(opts) do
+    NimbleOptions.validate!(opts, @generate_test_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.Mutation.run/1 Schema
+  # ============================================================================
+
+  @mutation_schema_definition [
+    model: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Model module implementing `PropertyDamage.Model` behaviour."
+    ],
+    adapter: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
+    ],
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Configuration passed to `adapter.setup/1`."
+    ],
+    operators: [
+      type: {:list, {:in, [:value, :omission, :status, :event, :boundary]}},
+      default: [:value, :omission, :status, :event, :boundary],
+      doc: "List of mutation operators to use."
+    ],
+    mutations_per_command: [
+      type: :pos_integer,
+      default: 5,
+      doc: "Maximum mutations per command type."
+    ],
+    max_runs: [
+      type: :pos_integer,
+      default: 10,
+      doc: "Property test runs per mutation."
+    ],
+    target_score: [
+      type: :float,
+      default: 0.80,
+      doc: "Target mutation score (0.0-1.0)."
+    ],
+    timeout_ms: [
+      type: :pos_integer,
+      default: 30_000,
+      doc: "Timeout per mutation test in milliseconds."
+    ],
+    verbose: [
+      type: :boolean,
+      default: false,
+      doc: "Print progress."
+    ],
+    on_progress: [
+      type: {:fun, 1},
+      doc: "Callback for progress updates."
+    ]
+  ]
+
+  @mutation_schema NimbleOptions.new!(@mutation_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Mutation.run/1`.
+  """
+  @spec validate_mutation!(keyword()) :: keyword()
+  def validate_mutation!(opts) do
+    NimbleOptions.validate!(opts, @mutation_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.Differential.run/1 Schema
+  # ============================================================================
+
+  @differential_schema_definition [
+    model: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Model module implementing `PropertyDamage.Model` behaviour."
+    ],
+    targets: [
+      type: {:custom, __MODULE__, :validate_non_empty_list, []},
+      required: true,
+      doc: "List of target specifications: `{AdapterModule}` or `{AdapterModule, opts}`."
+    ],
+    compare: [
+      type: {:in, [:correctness, :performance, :both]},
+      required: true,
+      doc: "Comparison mode: `:correctness`, `:performance`, or `:both`."
+    ],
+    max_commands: [
+      type: :pos_integer,
+      default: 50,
+      doc: "Maximum commands per sequence."
+    ],
+    max_runs: [
+      type: :pos_integer,
+      default: 100,
+      doc: "Number of test sequences to run."
+    ],
+    seed: [
+      type: :pos_integer,
+      doc: "Random seed for reproducibility."
+    ],
+    execution: [
+      type: {:in, [:interleaved, :sequential]},
+      doc: "Execution mode: `:interleaved` or `:sequential`."
+    ],
+    equivalence: [
+      type: :any,
+      default: :exact,
+      doc: "Equivalence strategy: `:exact`, `:structural`, or custom function."
+    ],
+    baseline: [
+      type: :string,
+      doc: "Path to baseline file for comparison."
+    ],
+    export_to: [
+      type: :string,
+      doc: "Path to export results for future baseline."
+    ],
+    metrics: [
+      type: {:list, {:in, [:latency, :throughput]}},
+      default: [:latency, :throughput],
+      doc: "Performance metrics to collect."
+    ],
+    percentiles: [
+      type: {:list, :pos_integer},
+      default: [50, 95, 99],
+      doc: "Latency percentiles to calculate."
+    ],
+    warmup_runs: [
+      type: :non_neg_integer,
+      default: 0,
+      doc: "Runs to discard before measuring."
+    ],
+    verbose: [
+      type: :boolean,
+      default: false,
+      doc: "Print progress."
+    ],
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Default adapter configuration."
+    ]
+  ]
+
+  @differential_schema NimbleOptions.new!(@differential_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Differential.run/1`.
+  """
+  @spec validate_differential!(keyword()) :: keyword()
+  def validate_differential!(opts) do
+    NimbleOptions.validate!(opts, @differential_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.GuidedRunner.run/1 Schema
+  # ============================================================================
+
+  @guided_runner_schema_definition [
+    model: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Model module (must implement TargetedGeneration)."
+    ],
+    adapter: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
+    ],
+    generations: [
+      type: :pos_integer,
+      default: 10,
+      doc: "Number of evolutionary generations."
+    ],
+    population_size: [
+      type: :pos_integer,
+      default: 20,
+      doc: "Seeds per generation."
+    ],
+    elite_count: [
+      type: :pos_integer,
+      default: 2,
+      doc: "Top seeds to preserve unchanged."
+    ],
+    mutation_rate: [
+      type: :float,
+      default: 0.3,
+      doc: "Probability of seed mutation (0.0-1.0)."
+    ],
+    crossover_rate: [
+      type: :float,
+      default: 0.5,
+      doc: "Probability of seed crossover (0.0-1.0)."
+    ],
+    max_commands: [
+      type: :pos_integer,
+      default: 50,
+      doc: "Commands per sequence."
+    ],
+    max_runs_per_seed: [
+      type: :pos_integer,
+      default: 1,
+      doc: "Test runs per seed."
+    ],
+    initial_seeds: [
+      type: {:list, :pos_integer},
+      doc: "Starting seed list (default: random)."
+    ],
+    verbose: [
+      type: :boolean,
+      default: false,
+      doc: "Print progress."
+    ],
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Configuration passed to `adapter.setup/1`."
+    ]
+  ]
+
+  @guided_runner_schema NimbleOptions.new!(@guided_runner_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.GuidedRunner.run/1`.
+  """
+  @spec validate_guided_runner!(keyword()) :: keyword()
+  def validate_guided_runner!(opts) do
+    NimbleOptions.validate!(opts, @guided_runner_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.Export Schemas
+  # ============================================================================
+
+  @export_exunit_schema_definition [
+    model: [
+      type: :atom,
+      doc: "Model module (defaults to report.model)."
+    ],
+    adapter: [
+      type: :atom,
+      doc: "Adapter module (defaults to report.adapter)."
+    ],
+    module_name: [
+      type: {:or, [:string, :atom]},
+      doc: "Module name for the test (string or atom)."
+    ],
+    test_name: [
+      type: :string,
+      doc: "Custom test name."
+    ],
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Adapter configuration map."
+    ],
+    expect_fixed: [
+      type: :boolean,
+      default: false,
+      doc: "If true, expect the test to pass."
+    ]
+  ]
+
+  @export_exunit_schema NimbleOptions.new!(@export_exunit_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Export.to_exunit/2`.
+  """
+  @spec validate_export_exunit!(keyword()) :: keyword()
+  def validate_export_exunit!(opts) do
+    NimbleOptions.validate!(opts, @export_exunit_schema)
+  end
+
+  @export_script_schema_definition [
+    base_url: [
+      type: :string,
+      required: true,
+      doc: "Base URL for HTTP calls."
+    ],
+    adapter: [
+      type: :atom,
+      doc: "Adapter module for HTTPSpec mapping."
+    ],
+    env_var: [
+      type: :string,
+      default: "BASE_URL",
+      doc: "Environment variable name for base URL."
+    ],
+    verbose: [
+      type: :boolean,
+      default: true,
+      doc: "Include extra comments."
+    ]
+  ]
+
+  @export_script_schema NimbleOptions.new!(@export_script_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Export.to_script/3`.
+  """
+  @spec validate_export_script!(keyword()) :: keyword()
+  def validate_export_script!(opts) do
+    NimbleOptions.validate!(opts, @export_script_schema)
+  end
+
+  @export_livebook_schema_definition [
+    base_url: [
+      type: :string,
+      required: true,
+      doc: "Base URL for HTTP calls."
+    ],
+    adapter: [
+      type: :atom,
+      doc: "Adapter module for HTTPSpec mapping."
+    ],
+    title: [
+      type: :string,
+      doc: "Custom notebook title."
+    ],
+    include_exploration: [
+      type: :boolean,
+      default: true,
+      doc: "Include exploration section."
+    ],
+    include_state_tracking: [
+      type: :boolean,
+      default: true,
+      doc: "Track model state."
+    ]
+  ]
+
+  @export_livebook_schema NimbleOptions.new!(@export_livebook_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Export.to_livebook/2`.
+  """
+  @spec validate_export_livebook!(keyword()) :: keyword()
+  def validate_export_livebook!(opts) do
+    NimbleOptions.validate!(opts, @export_livebook_schema)
+  end
+
+  # ============================================================================
   # Custom Type Validators
   # ============================================================================
 
@@ -422,5 +827,18 @@ defmodule PropertyDamage.Options do
     {:error,
      "expected a range tuple like {min, max} where min >= 0 and max >= min, " <>
        "got: #{inspect(value)}"}
+  end
+
+  @doc false
+  def validate_non_empty_list([]) do
+    {:error, "expected a non-empty list, got: []"}
+  end
+
+  def validate_non_empty_list(value) when is_list(value) do
+    {:ok, value}
+  end
+
+  def validate_non_empty_list(value) do
+    {:error, "expected a non-empty list, got: #{inspect(value)}"}
   end
 end

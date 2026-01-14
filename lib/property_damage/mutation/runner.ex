@@ -10,11 +10,7 @@ defmodule PropertyDamage.Mutation.Runner do
   """
 
   alias PropertyDamage.Mutation.{MutatingAdapter, Operator, Report}
-
-  @default_operators [:value, :omission, :status, :event, :boundary]
-  @default_mutations_per_command 5
-  @default_max_runs 10
-  @default_timeout_ms 30_000
+  alias PropertyDamage.Options
 
   @doc """
   Runs mutation testing against a model.
@@ -34,67 +30,51 @@ defmodule PropertyDamage.Mutation.Runner do
   """
   @spec run(keyword()) :: {:ok, Report.t()} | {:error, term()}
   def run(opts) do
-    with {:ok, config} <- validate_opts(opts) do
-      started_at = DateTime.utc_now()
+    opts = Options.validate_mutation!(opts)
 
-      report =
-        Report.new(
-          target_score: config.target_score,
-          model: config.model,
-          adapter: config.adapter
-        )
+    config = %{
+      model: opts[:model],
+      adapter: opts[:adapter],
+      adapter_config: opts[:adapter_config],
+      operators: opts[:operators],
+      mutations_per_command: opts[:mutations_per_command],
+      max_runs: opts[:max_runs],
+      target_score: opts[:target_score],
+      timeout_ms: opts[:timeout_ms],
+      verbose: opts[:verbose],
+      on_progress: opts[:on_progress]
+    }
 
-      # Get command types from the model
-      commands = get_command_types(config.model)
+    started_at = DateTime.utc_now()
 
-      # Get operator modules
-      operators = Operator.operators_by_name(config.operators)
+    report =
+      Report.new(
+        target_score: config.target_score,
+        model: config.model,
+        adapter: config.adapter
+      )
 
-      # Generate and test mutations
-      report =
-        Enum.reduce(commands, report, fn command, acc_report ->
-          test_command_mutations(command, operators, config, acc_report)
-        end)
+    # Get command types from the model
+    commands = get_command_types(config.model)
 
-      completed_at = DateTime.utc_now()
-      report = Report.finalize(report, started_at, completed_at)
+    # Get operator modules
+    operators = Operator.operators_by_name(config.operators)
 
-      {:ok, report}
-    end
+    # Generate and test mutations
+    report =
+      Enum.reduce(commands, report, fn command, acc_report ->
+        test_command_mutations(command, operators, config, acc_report)
+      end)
+
+    completed_at = DateTime.utc_now()
+    report = Report.finalize(report, started_at, completed_at)
+
+    {:ok, report}
   end
 
   # ============================================================================
   # Private Functions
   # ============================================================================
-
-  defp validate_opts(opts) do
-    model = Keyword.get(opts, :model)
-    adapter = Keyword.get(opts, :adapter)
-
-    cond do
-      is_nil(model) ->
-        {:error, {:missing_option, :model}}
-
-      is_nil(adapter) ->
-        {:error, {:missing_option, :adapter}}
-
-      true ->
-        {:ok,
-         %{
-           model: model,
-           adapter: adapter,
-           adapter_config: Keyword.get(opts, :adapter_config, %{}),
-           operators: Keyword.get(opts, :operators, @default_operators),
-           mutations_per_command:
-             Keyword.get(opts, :mutations_per_command, @default_mutations_per_command),
-           max_runs: Keyword.get(opts, :max_runs, @default_max_runs),
-           target_score: Keyword.get(opts, :target_score, 0.80),
-           timeout_ms: Keyword.get(opts, :timeout_ms, @default_timeout_ms),
-           verbose: Keyword.get(opts, :verbose, false),
-           on_progress: Keyword.get(opts, :on_progress)
-         }}
-    end
-  end
 
   defp get_command_types(model) do
     model.commands()

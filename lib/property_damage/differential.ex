@@ -81,7 +81,7 @@ defmodule PropertyDamage.Differential do
   - Custom function - `fn ref_result, target_result -> boolean`
   """
 
-  alias PropertyDamage.{Generator, Sequence}
+  alias PropertyDamage.{Generator, Sequence, Options}
   alias PropertyDamage.Differential.{Target, Result, Baseline, Equivalence}
 
   @type compare_mode :: :correctness | :performance | :both
@@ -136,8 +136,9 @@ defmodule PropertyDamage.Differential do
   """
   @spec run(keyword()) :: {:ok, Result.t()} | {:error, term()}
   def run(opts) do
-    with :ok <- validate_opts(opts),
-         {:ok, config} <- build_config(opts),
+    opts = Options.validate_differential!(opts)
+
+    with {:ok, config} <- build_config(opts),
          {:ok, targets} <- parse_targets(config.targets),
          {:ok, baseline} <- maybe_load_baseline(config.baseline) do
       # Determine execution mode
@@ -172,45 +173,23 @@ defmodule PropertyDamage.Differential do
   # Configuration
   # ============================================================================
 
-  defp validate_opts(opts) do
-    cond do
-      !Keyword.has_key?(opts, :model) ->
-        {:error, {:missing_option, :model}}
-
-      !Keyword.has_key?(opts, :targets) ->
-        {:error, {:missing_option, :targets}}
-
-      !Keyword.has_key?(opts, :compare) ->
-        {:error, {:missing_option, :compare}}
-
-      opts[:compare] not in [:correctness, :performance, :both] ->
-        {:error, {:invalid_option, :compare, "must be :correctness, :performance, or :both"}}
-
-      opts[:targets] == [] ->
-        {:error, {:invalid_option, :targets, "must have at least one target"}}
-
-      true ->
-        :ok
-    end
-  end
-
   defp build_config(opts) do
     config = %{
-      model: Keyword.fetch!(opts, :model),
-      targets: Keyword.fetch!(opts, :targets),
-      compare: Keyword.fetch!(opts, :compare),
-      max_commands: Keyword.get(opts, :max_commands, 50),
-      max_runs: Keyword.get(opts, :max_runs, 100),
-      seed: Keyword.get(opts, :seed, :rand.uniform(1_000_000_000)),
-      execution: Keyword.get(opts, :execution),
-      equivalence: Keyword.get(opts, :equivalence, :exact),
-      baseline: Keyword.get(opts, :baseline),
-      export_to: Keyword.get(opts, :export_to),
-      metrics: Keyword.get(opts, :metrics, [:latency, :throughput]),
-      percentiles: Keyword.get(opts, :percentiles, [50, 95, 99]),
-      warmup_runs: Keyword.get(opts, :warmup_runs, 0),
-      verbose: Keyword.get(opts, :verbose, false),
-      adapter_config: Keyword.get(opts, :adapter_config, %{})
+      model: opts[:model],
+      targets: opts[:targets],
+      compare: opts[:compare],
+      max_commands: opts[:max_commands],
+      max_runs: opts[:max_runs],
+      seed: opts[:seed] || :rand.uniform(1_000_000_000),
+      execution: opts[:execution],
+      equivalence: opts[:equivalence],
+      baseline: opts[:baseline],
+      export_to: opts[:export_to],
+      metrics: opts[:metrics],
+      percentiles: opts[:percentiles],
+      warmup_runs: opts[:warmup_runs],
+      verbose: opts[:verbose],
+      adapter_config: opts[:adapter_config]
     }
 
     {:ok, config}

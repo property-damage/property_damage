@@ -43,7 +43,7 @@ defmodule PropertyDamage.Replay do
   - `result` - `:ok`, `{:check_failed, ...}`, or error
   """
 
-  alias PropertyDamage.{FailureReport, Sequence, EventQueue, Ref}
+  alias PropertyDamage.{FailureReport, Sequence, EventQueue, Ref, Options}
 
   defstruct [
     :failure,
@@ -121,6 +121,8 @@ defmodule PropertyDamage.Replay do
   """
   @spec run(FailureReport.t(), keyword()) :: {:ok, [step()]} | {:error, term()}
   def run(%FailureReport{} = failure, opts \\ []) do
+    opts = Options.validate_replay!(opts)
+
     case start(failure, opts) do
       {:ok, session} ->
         run_all_steps(session, opts)
@@ -147,6 +149,7 @@ defmodule PropertyDamage.Replay do
   """
   @spec start(FailureReport.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def start(%FailureReport{} = failure, opts \\ []) do
+    opts = Options.validate_replay!(opts)
     model = failure.model
     adapter = failure.adapter
 
@@ -158,7 +161,7 @@ defmodule PropertyDamage.Replay do
         {:error, :missing_adapter}
 
       true ->
-        adapter_config = Keyword.get(opts, :adapter_config, %{})
+        adapter_config = opts[:adapter_config]
         commands = Sequence.to_list(failure.shrunk_sequence)
 
         {:ok, event_queue} = EventQueue.start_link()
@@ -373,7 +376,7 @@ defmodule PropertyDamage.Replay do
   # ============================================================================
 
   defp run_all_steps(session, opts) do
-    stop_on_failure = Keyword.get(opts, :stop_on_failure, true)
+    stop_on_failure = opts[:stop_on_failure]
     do_run_all_steps(session, stop_on_failure)
   end
 

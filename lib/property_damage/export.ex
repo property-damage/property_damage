@@ -63,6 +63,7 @@ defmodule PropertyDamage.Export do
 
   alias PropertyDamage.FailureReport
   alias PropertyDamage.Export.{ExUnit, Script, LiveBook, Common}
+  alias PropertyDamage.Options
 
   @type format ::
           :exunit
@@ -96,6 +97,7 @@ defmodule PropertyDamage.Export do
   """
   @spec to_exunit(FailureReport.t(), keyword()) :: String.t()
   def to_exunit(%FailureReport{} = report, opts \\ []) do
+    opts = Options.validate_export_exunit!(opts)
     ExUnit.generate(report, opts)
   end
 
@@ -126,6 +128,7 @@ defmodule PropertyDamage.Export do
   """
   @spec to_script(FailureReport.t(), Script.language(), keyword()) :: String.t()
   def to_script(%FailureReport{} = report, language, opts \\ []) do
+    opts = Options.validate_export_script!(opts)
     Script.generate(report, language, opts)
   end
 
@@ -157,6 +160,7 @@ defmodule PropertyDamage.Export do
   """
   @spec to_livebook(FailureReport.t(), keyword()) :: String.t()
   def to_livebook(%FailureReport{} = report, opts \\ []) do
+    opts = Options.validate_export_livebook!(opts)
     LiveBook.generate(report, opts)
   end
 
@@ -257,9 +261,11 @@ defmodule PropertyDamage.Export do
   # Helpers
   # ============================================================================
 
-  defp generate(report, :exunit, opts), do: to_exunit(report, opts)
-  defp generate(report, :livebook, opts), do: to_livebook(report, opts)
-  defp generate(report, {:script, lang}, opts), do: to_script(report, lang, opts)
+  # For internal generate calls from save/save_all, we skip validation
+  # since the caller may pass options for multiple formats
+  defp generate(report, :exunit, opts), do: ExUnit.generate(report, opts)
+  defp generate(report, :livebook, opts), do: LiveBook.generate(report, opts)
+  defp generate(report, {:script, lang}, opts), do: Script.generate(report, lang, opts)
 
   defp generate_filename(report, :exunit) do
     Common.generate_filename(report, :exunit)

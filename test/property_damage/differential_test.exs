@@ -297,32 +297,37 @@ defmodule PropertyDamage.DifferentialTest do
 
   describe "run/1 validation" do
     test "requires model option" do
-      assert {:error, {:missing_option, :model}} =
-               Differential.run(targets: [{ReferenceAdapter}], compare: :correctness)
+      assert_raise NimbleOptions.ValidationError, ~r/required :model option not found/, fn ->
+        Differential.run(targets: [{ReferenceAdapter}], compare: :correctness)
+      end
     end
 
     test "requires targets option" do
-      assert {:error, {:missing_option, :targets}} =
-               Differential.run(model: TestModel, compare: :correctness)
+      assert_raise NimbleOptions.ValidationError, ~r/required :targets option not found/, fn ->
+        Differential.run(model: TestModel, compare: :correctness)
+      end
     end
 
     test "requires compare option" do
-      assert {:error, {:missing_option, :compare}} =
-               Differential.run(model: TestModel, targets: [{ReferenceAdapter}])
+      assert_raise NimbleOptions.ValidationError, ~r/required :compare option not found/, fn ->
+        Differential.run(model: TestModel, targets: [{ReferenceAdapter}])
+      end
     end
 
     test "validates compare mode" do
-      assert {:error, {:invalid_option, :compare, _}} =
-               Differential.run(
-                 model: TestModel,
-                 targets: [{ReferenceAdapter}],
-                 compare: :invalid
-               )
+      assert_raise NimbleOptions.ValidationError, ~r/:compare.*expected one of/, fn ->
+        Differential.run(
+          model: TestModel,
+          targets: [{ReferenceAdapter}],
+          compare: :invalid
+        )
+      end
     end
 
     test "rejects empty targets" do
-      assert {:error, {:invalid_option, :targets, _}} =
-               Differential.run(model: TestModel, targets: [], compare: :correctness)
+      assert_raise NimbleOptions.ValidationError, ~r/expected a non-empty list/, fn ->
+        Differential.run(model: TestModel, targets: [], compare: :correctness)
+      end
     end
 
     test "rejects multiple references" do

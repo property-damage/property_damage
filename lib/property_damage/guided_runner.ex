@@ -42,18 +42,7 @@ defmodule PropertyDamage.GuidedRunner do
   - `:initial_seeds` - Starting seeds (default: random)
   """
 
-  alias PropertyDamage.{Executor, Generator, Sequence, TargetedGeneration}
-
-  @default_opts [
-    generations: 10,
-    population_size: 20,
-    elite_count: 2,
-    mutation_rate: 0.3,
-    crossover_rate: 0.5,
-    max_commands: 50,
-    max_runs_per_seed: 1,
-    verbose: false
-  ]
+  alias PropertyDamage.{Executor, Generator, Sequence, TargetedGeneration, Options}
 
   @typedoc """
   Result statistics from a guided run.
@@ -98,10 +87,10 @@ defmodule PropertyDamage.GuidedRunner do
   """
   @spec run(keyword()) :: result()
   def run(opts) do
-    opts = Keyword.merge(@default_opts, opts)
+    opts = Options.validate_guided_runner!(opts)
 
-    model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
+    model = opts[:model]
+    adapter = opts[:adapter]
 
     # Validate model implements TargetedGeneration
     unless TargetedGeneration.implements_behaviour?(model) do
@@ -115,7 +104,10 @@ defmodule PropertyDamage.GuidedRunner do
 
     # Initialize population
     initial_seeds =
-      opts[:initial_seeds] || Enum.map(1..population_size, fn _ -> random_seed() end)
+      case opts[:initial_seeds] do
+        nil -> Enum.map(1..population_size, fn _ -> random_seed() end)
+        seeds -> seeds
+      end
 
     all_targets = Enum.map(model.targets(), & &1.name)
 
