@@ -1,21 +1,24 @@
 defmodule PropertyDamage.LoadTest.Runner do
   @moduledoc """
-  Orchestrates a load test run.
+  Orchestrates a load test run using arrival rate scheduling.
 
   The Runner manages:
-  - Starting/stopping sessions according to the ramp strategy
+  - Worker pool with persistent adapter contexts
+  - Arrival scheduling at the configured rate
+  - Rate ramping up and down
   - Metrics collection and periodic reporting
   - Duration-based termination
-  - Graceful shutdown
 
   ## Architecture
 
   ```
   Runner (GenServer)
-    ├── Metrics (GenServer) - Collects metrics from all sessions
-    ├── Session 1 (GenServer) - Individual user session
-    ├── Session 2 (GenServer)
-    └── Session N (GenServer)
+    ├── Metrics (GenServer) - Collects metrics from all workers
+    ├── WorkerPool (GenServer) - Manages workers with persistent contexts
+    │   ├── Worker 1 - Holds adapter context
+    │   ├── Worker 2
+    │   └── Worker N
+    └── Arrivals (Tasks) - Spawned at configured rate
   ```
 
   ## Usage
@@ -24,7 +27,7 @@ defmodule PropertyDamage.LoadTest.Runner do
         model: MyModel,
         adapter: HTTPAdapter,
         adapter_config: %{base_url: "http://localhost:4000"},
-        concurrent_users: 100,
+        arrival_rate: 100,  # 100 arrivals per second
         duration: {5, :minutes},
         ramp_up: {:linear, {30, :seconds}}
       )
@@ -40,32 +43,39 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   require Logger
 
-  alias PropertyDamage.LoadTest.{Metrics, Session, RampStrategy}
+  alias PropertyDamage.LoadTest.{Metrics, WorkerPool, Worker, RampStrategy}
   alias PropertyDamage.Options
 
   defstruct [
     :model,
     :adapter,
     :adapter_config,
-    :target_users,
+    :arrival_rate,
+    :arrival_jitter,
+    :current_rate,
     :duration_ms,
+    :max_queue_size,
     :ramp_up_plan,
     :ramp_down_plan,
-    :commands_range,
     :think_time_range,
     :metrics_interval_ms,
     :on_metrics,
     :on_complete,
     :metrics,
-    :sessions,
+    :pool,
     :start_time,
     :phase,
     :ramp_step_index,
     :awaiting,
-    :assertion_mode
+    :assertion_mode,
+    :in_flight
   ]
 
   @type t :: %__MODULE__{}
+
+  # Auto-calculate pool size based on rate
+  @pool_size_multiplier 2
+  @max_pool_size 500
 
   # ============================================================================
   # Public API
@@ -79,16 +89,19 @@ defmodule PropertyDamage.LoadTest.Runner do
   - `:model` - Model module (required)
   - `:adapter` - Adapter module (required)
   - `:adapter_config` - Adapter configuration (default: %{})
-  - `:concurrent_users` - Target number of concurrent users (required)
+  - `:arrival_rate` - Target arrival rate (required)
+    - Integer: arrivals per second (e.g., `100`)
+    - Tuple: `{count, {time, unit}}` (e.g., `{2, {15, :milliseconds}}`)
   - `:duration` - Test duration as `{value, unit}` (required)
+  - `:arrival_jitter` - {min, max} ms jitter per arrival (default: {0, 0})
+  - `:max_queue_size` - Max queued arrivals when pool exhausted (default: 100)
   - `:ramp_up` - Ramp-up strategy (default: :immediate)
   - `:ramp_down` - Ramp-down strategy (default: :immediate)
-  - `:commands_per_session` - {min, max} commands per sequence (default: {10, 50})
-  - `:think_time` - {min, max} ms between commands (default: {0, 0})
+  - `:think_time` - {min, max} ms between commands in sequence (default: {0, 0})
   - `:metrics_interval` - Metrics callback interval (default: {1, :second})
   - `:on_metrics` - Callback function for periodic metrics
   - `:on_complete` - Callback function when test completes
-  - `:assertion_mode` - How to handle assertions: `:disabled` (default), `:record`, or `:log`
+  - `:assertion_mode` - How to handle assertions (default: :disabled)
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
@@ -135,17 +148,18 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   @impl true
   def init(opts) do
-    # Validate options with NimbleOptions - applies defaults and provides helpful errors
+    # Validate options with NimbleOptions
     opts = Options.validate_load_test!(opts)
 
     model = opts[:model]
     adapter = opts[:adapter]
     adapter_config = opts[:adapter_config]
-    target_users = opts[:concurrent_users]
+    arrival_rate = opts[:arrival_rate]
+    arrival_jitter = opts[:arrival_jitter]
+    max_queue_size = opts[:max_queue_size]
     duration = opts[:duration]
     ramp_up = opts[:ramp_up]
     ramp_down = opts[:ramp_down]
-    commands_range = opts[:commands_per_session]
     think_time_range = opts[:think_time]
     metrics_interval = opts[:metrics_interval]
     on_metrics = opts[:on_metrics]
@@ -155,47 +169,72 @@ defmodule PropertyDamage.LoadTest.Runner do
     # Start metrics collector
     {:ok, metrics} = Metrics.start_link()
 
-    # Build ramp plans
-    ramp_up_plan = RampStrategy.plan(ramp_up, target_users)
-    ramp_down_plan = RampStrategy.plan_down(ramp_down, target_users)
+    # Calculate pool size based on rate
+    rate_per_sec = RampStrategy.rate_to_per_second(arrival_rate)
+    pool_size = min(round(rate_per_sec * @pool_size_multiplier), @max_pool_size)
+    pool_size = max(pool_size, 10)
 
-    duration_ms = duration_to_ms(duration)
-    metrics_interval_ms = duration_to_ms(metrics_interval)
+    # Start worker pool
+    case WorkerPool.start_link(
+           size: pool_size,
+           max_queue_size: max_queue_size,
+           model: model,
+           adapter: adapter,
+           adapter_config: adapter_config,
+           metrics: metrics,
+           think_time_range: think_time_range,
+           assertion_mode: assertion_mode
+         ) do
+      {:ok, pool} ->
+        # Build ramp plans
+        ramp_up_plan = RampStrategy.plan(ramp_up, arrival_rate)
+        ramp_down_plan = RampStrategy.plan_down(ramp_down, arrival_rate)
 
-    state = %__MODULE__{
-      model: model,
-      adapter: adapter,
-      adapter_config: adapter_config,
-      target_users: target_users,
-      duration_ms: duration_ms,
-      ramp_up_plan: ramp_up_plan,
-      ramp_down_plan: ramp_down_plan,
-      commands_range: commands_range,
-      think_time_range: think_time_range,
-      metrics_interval_ms: metrics_interval_ms,
-      on_metrics: on_metrics,
-      on_complete: on_complete,
-      metrics: metrics,
-      sessions: %{},
-      start_time: System.monotonic_time(:millisecond),
-      phase: :ramp_up,
-      ramp_step_index: 0,
-      awaiting: nil,
-      assertion_mode: assertion_mode
-    }
+        duration_ms = duration_to_ms(duration)
+        metrics_interval_ms = duration_to_ms(metrics_interval)
 
-    # Schedule first ramp step
-    send(self(), :execute_ramp_step)
+        state = %__MODULE__{
+          model: model,
+          adapter: adapter,
+          adapter_config: adapter_config,
+          arrival_rate: arrival_rate,
+          arrival_jitter: arrival_jitter,
+          current_rate: {1, {1, :seconds}},
+          duration_ms: duration_ms,
+          max_queue_size: max_queue_size,
+          ramp_up_plan: ramp_up_plan,
+          ramp_down_plan: ramp_down_plan,
+          think_time_range: think_time_range,
+          metrics_interval_ms: metrics_interval_ms,
+          on_metrics: on_metrics,
+          on_complete: on_complete,
+          metrics: metrics,
+          pool: pool,
+          start_time: System.monotonic_time(:millisecond),
+          phase: :ramp_up,
+          ramp_step_index: 0,
+          awaiting: nil,
+          assertion_mode: assertion_mode,
+          in_flight: MapSet.new()
+        }
 
-    # Schedule metrics reporting
-    if on_metrics do
-      schedule_metrics_report(metrics_interval_ms)
+        # Schedule first ramp step
+        send(self(), :execute_ramp_step)
+
+        # Schedule metrics reporting
+        if on_metrics do
+          schedule_metrics_report(metrics_interval_ms)
+        end
+
+        # Schedule duration check
+        schedule_duration_check(1000)
+
+        {:ok, state}
+
+      {:error, reason} ->
+        Metrics.stop(metrics)
+        {:stop, {:pool_start_failed, reason}}
     end
-
-    # Schedule duration check
-    schedule_duration_check(1000)
-
-    {:ok, state}
   end
 
   @impl true
@@ -218,11 +257,15 @@ defmodule PropertyDamage.LoadTest.Runner do
   @impl true
   def handle_call(:status, _from, state) do
     elapsed_ms = System.monotonic_time(:millisecond) - state.start_time
+    pool_stats = WorkerPool.stats(state.pool)
 
     status = %{
       phase: state.phase,
-      active_sessions: map_size(state.sessions),
-      target_users: state.target_users,
+      current_rate: state.current_rate,
+      target_rate: state.arrival_rate,
+      pool_utilization: pool_stats.utilization,
+      pool_queue_depth: pool_stats.queue_depth,
+      in_flight: MapSet.size(state.in_flight),
       elapsed_ms: elapsed_ms,
       duration_ms: state.duration_ms,
       progress_percent: min(100.0, elapsed_ms / state.duration_ms * 100.0)
@@ -239,16 +282,11 @@ defmodule PropertyDamage.LoadTest.Runner do
       # Ramp-up complete, enter steady state
       {:noreply, %{state | phase: :steady}}
     else
-      {time_ms, target} = Enum.at(plan, state.ramp_step_index)
-      current = map_size(state.sessions)
-      delta = target - current
+      {time_ms, rate} = Enum.at(plan, state.ramp_step_index)
+      new_state = %{state | current_rate: rate}
 
-      new_sessions =
-        if delta > 0 do
-          add_sessions(state, delta)
-        else
-          state.sessions
-        end
+      # Start arrival scheduling with new rate
+      schedule_next_arrival(new_state)
 
       # Schedule next step
       next_index = state.ramp_step_index + 1
@@ -259,7 +297,7 @@ defmodule PropertyDamage.LoadTest.Runner do
         Process.send_after(self(), :execute_ramp_step, delay)
       end
 
-      {:noreply, %{state | sessions: new_sessions, ramp_step_index: next_index}}
+      {:noreply, %{new_state | ramp_step_index: next_index}}
     end
   end
 
@@ -268,20 +306,23 @@ defmodule PropertyDamage.LoadTest.Runner do
     plan = state.ramp_down_plan
 
     if state.ramp_step_index >= length(plan) do
-      # Ramp-down complete
-      _report = finish_test(state)
-      {:stop, :normal, state}
-    else
-      {time_ms, target} = Enum.at(plan, state.ramp_step_index)
-      current = map_size(state.sessions)
-      delta = current - target
+      # Ramp-down complete - wait for in-flight to drain
+      if MapSet.size(state.in_flight) == 0 do
+        report = finish_test(state)
 
-      new_sessions =
-        if delta > 0 do
-          remove_sessions(state, delta)
-        else
-          state.sessions
+        if state.awaiting do
+          GenServer.reply(state.awaiting, {:ok, report})
         end
+
+        {:stop, :normal, %{state | phase: :finished}}
+      else
+        # Wait for in-flight to complete
+        Process.send_after(self(), :check_drain, 100)
+        {:noreply, %{state | phase: :draining}}
+      end
+    else
+      {time_ms, rate} = Enum.at(plan, state.ramp_step_index)
+      new_state = %{state | current_rate: rate}
 
       # Schedule next step
       next_index = state.ramp_step_index + 1
@@ -290,24 +331,72 @@ defmodule PropertyDamage.LoadTest.Runner do
         {next_time_ms, _} = Enum.at(plan, next_index)
         delay = next_time_ms - time_ms
         Process.send_after(self(), :execute_ramp_step, delay)
-        {:noreply, %{state | sessions: new_sessions, ramp_step_index: next_index}}
       else
-        # Last step - finish test
-        report = finish_test(%{state | sessions: new_sessions})
-
-        if state.awaiting do
-          GenServer.reply(state.awaiting, {:ok, report})
-        end
-
-        {:stop, :normal,
-         %{state | sessions: new_sessions, ramp_step_index: next_index, phase: :finished}}
+        # Schedule one more to trigger completion check
+        Process.send_after(self(), :execute_ramp_step, 0)
       end
+
+      {:noreply, %{new_state | ramp_step_index: next_index}}
     end
   end
 
   @impl true
   def handle_info(:execute_ramp_step, state) do
     # In steady phase, no ramping needed
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:schedule_arrival, state) when state.phase in [:ramp_up, :steady] do
+    # Spawn an arrival
+    new_state = spawn_arrival(state)
+
+    # Schedule next arrival
+    schedule_next_arrival(new_state)
+
+    {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info(:schedule_arrival, %{phase: :ramp_down} = state) do
+    # Still spawn arrivals during ramp-down but at reduced rate
+    new_state = spawn_arrival(state)
+    schedule_next_arrival(new_state)
+    {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info(:schedule_arrival, state) do
+    # In draining or finished phase, don't spawn new arrivals
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:arrival_completed, ref, _result}, state) do
+    new_in_flight = MapSet.delete(state.in_flight, ref)
+    Metrics.arrival_completed(state.metrics)
+    {:noreply, %{state | in_flight: new_in_flight}}
+  end
+
+  @impl true
+  def handle_info(:check_drain, %{phase: :draining} = state) do
+    if MapSet.size(state.in_flight) == 0 do
+      report = finish_test(state)
+
+      if state.awaiting do
+        GenServer.reply(state.awaiting, {:ok, report})
+      end
+
+      {:stop, :normal, %{state | phase: :finished}}
+    else
+      # Still waiting for in-flight
+      Process.send_after(self(), :check_drain, 100)
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info(:check_drain, state) do
     {:noreply, state}
   end
 
@@ -330,7 +419,10 @@ defmodule PropertyDamage.LoadTest.Runner do
       state.phase == :finished ->
         {:noreply, state}
 
-      elapsed_ms >= state.duration_ms and state.phase != :ramp_down ->
+      state.phase == :draining ->
+        {:noreply, state}
+
+      elapsed_ms >= state.duration_ms and state.phase not in [:ramp_down, :draining] ->
         # Duration reached, start ramp-down
         Logger.info("Load test duration reached, starting ramp-down")
         new_state = %{state | phase: :ramp_down, ramp_step_index: 0}
@@ -344,31 +436,16 @@ defmodule PropertyDamage.LoadTest.Runner do
   end
 
   @impl true
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    # A session died - remove it from tracking
-    session_id = find_session_id(state.sessions, pid)
-
-    if session_id do
-      new_sessions = Map.delete(state.sessions, session_id)
-      {:noreply, %{state | sessions: new_sessions}}
-    else
-      {:noreply, state}
-    end
-  end
-
-  @impl true
   def terminate(_reason, state) do
-    # Stop all sessions
-    for {_id, pid} <- state.sessions do
-      try do
-        Session.stop(pid)
-      catch
-        :exit, _ -> :ok
-      end
+    # Stop worker pool
+    if state.pool do
+      WorkerPool.stop(state.pool)
     end
 
     # Stop metrics
-    Metrics.stop(state.metrics)
+    if state.metrics do
+      Metrics.stop(state.metrics)
+    end
 
     :ok
   end
@@ -377,94 +454,67 @@ defmodule PropertyDamage.LoadTest.Runner do
   # Internal
   # ============================================================================
 
-  defp add_sessions(state, count) do
-    next_id = (Map.keys(state.sessions) |> Enum.max(fn -> 0 end)) + 1
+  defp spawn_arrival(state) do
+    runner_pid = self()
+    ref = make_ref()
 
-    Enum.reduce(1..count, state.sessions, fn i, sessions ->
-      session_id = next_id + i - 1
+    # Try to checkout a worker
+    case WorkerPool.checkout(state.pool, timeout: 100) do
+      {:ok, worker} ->
+        Metrics.arrival_spawned(state.metrics)
 
-      {:ok, pid} =
-        Session.start_link(
-          model: state.model,
-          adapter: state.adapter,
-          adapter_config: state.adapter_config,
-          metrics: state.metrics,
-          session_id: session_id,
-          commands_range: state.commands_range,
-          think_time_range: state.think_time_range,
-          assertion_mode: state.assertion_mode
-        )
+        # Execute sequence in a task
+        Task.start(fn ->
+          result = Worker.execute_sequence(worker)
+          WorkerPool.checkin(state.pool, worker)
+          send(runner_pid, {:arrival_completed, ref, result})
+        end)
 
-      # Monitor the session
-      Process.monitor(pid)
+        %{state | in_flight: MapSet.put(state.in_flight, ref)}
 
-      Map.put(sessions, session_id, pid)
-    end)
-  end
+      {:error, :pool_exhausted} ->
+        # Pool queue is full - drop this arrival
+        Metrics.arrival_dropped(state.metrics)
+        state
 
-  defp remove_sessions(state, count) do
-    # Remove oldest sessions first
-    session_ids =
-      state.sessions
-      |> Map.keys()
-      |> Enum.sort()
-      |> Enum.take(count)
-
-    # Stop sessions in parallel to avoid sequential blocking
-    session_ids
-    |> Enum.map(fn id ->
-      pid = Map.get(state.sessions, id)
-
-      Task.async(fn ->
-        if pid do
-          try do
-            Session.stop(pid)
-          catch
-            :exit, _ -> :ok
-          end
-        end
-      end)
-    end)
-    |> Task.await_many(6_000)
-
-    # Remove from map
-    Enum.reduce(session_ids, state.sessions, fn id, sessions ->
-      Map.delete(sessions, id)
-    end)
-  end
-
-  defp find_session_id(sessions, pid) do
-    sessions
-    |> Enum.find(fn {_id, session_pid} -> session_pid == pid end)
-    |> case do
-      {id, _} -> id
-      nil -> nil
+      {:error, :timeout} ->
+        # Timed out waiting for worker - drop this arrival
+        Metrics.arrival_dropped(state.metrics)
+        state
     end
   end
 
-  defp finish_test(state) do
-    # Stop all sessions in parallel to avoid sequential blocking
-    state.sessions
-    |> Enum.map(fn {_id, pid} ->
-      Task.async(fn ->
-        try do
-          Session.stop(pid)
-        catch
-          :exit, _ -> :ok
-        end
-      end)
-    end)
-    |> Task.await_many(6_000)
+  defp schedule_next_arrival(state) do
+    interval_ms = RampStrategy.rate_to_interval_ms(state.current_rate)
 
+    # Apply jitter
+    {min_jitter, max_jitter} = state.arrival_jitter
+
+    jitter =
+      if max_jitter > min_jitter do
+        :rand.uniform(max_jitter - min_jitter + 1) + min_jitter - 1
+      else
+        0
+      end
+
+    delay = round(interval_ms) + jitter
+    delay = max(delay, 1)
+
+    Process.send_after(self(), :schedule_arrival, delay)
+  end
+
+  defp finish_test(state) do
     # Get final metrics
     snapshot = Metrics.snapshot(state.metrics)
+    pool_stats = WorkerPool.stats(state.pool)
 
     report = %{
       metrics: snapshot,
+      pool_stats: pool_stats,
       config: %{
         model: state.model,
         adapter: state.adapter,
-        concurrent_users: state.target_users,
+        arrival_rate: state.arrival_rate,
         duration_ms: state.duration_ms
       }
     }
@@ -487,4 +537,5 @@ defmodule PropertyDamage.LoadTest.Runner do
   defp duration_to_ms({value, :milliseconds}), do: value
   defp duration_to_ms({value, :seconds}), do: value * 1000
   defp duration_to_ms({value, :minutes}), do: value * 60 * 1000
+  defp duration_to_ms({value, :hours}), do: value * 60 * 60 * 1000
 end

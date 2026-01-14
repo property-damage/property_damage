@@ -43,7 +43,9 @@ defmodule PropertyDamage.LoadTest.Report do
   end
 
   def format(report, :json) do
-    Jason.encode!(report, pretty: true)
+    report
+    |> make_json_encodable()
+    |> Jason.encode!(pretty: true)
   end
 
   @doc """
@@ -83,6 +85,7 @@ defmodule PropertyDamage.LoadTest.Report do
       terminal_header(),
       terminal_config(c),
       terminal_throughput(m),
+      terminal_pool_stats(report),
       terminal_latency(m),
       terminal_errors(m),
       terminal_assertions(m),
@@ -104,24 +107,31 @@ defmodule PropertyDamage.LoadTest.Report do
   defp terminal_config(config) do
     model_name = config.model |> to_string() |> String.replace("Elixir.", "")
     adapter_name = config.adapter |> to_string() |> String.replace("Elixir.", "")
+    arrival_rate_str = format_arrival_rate(config.arrival_rate)
 
     """
     ┌─ Configuration ──────────────────────────────────────────────────────┐
-    │ Model:       #{String.pad_trailing(model_name, 55)}│
-    │ Adapter:     #{String.pad_trailing(adapter_name, 55)}│
-    │ Users:       #{String.pad_trailing(to_string(config.concurrent_users), 55)}│
-    │ Duration:    #{String.pad_trailing(format_duration(config.duration_ms), 55)}│
+    │ Model:         #{String.pad_trailing(model_name, 53)}│
+    │ Adapter:       #{String.pad_trailing(adapter_name, 53)}│
+    │ Arrival Rate:  #{String.pad_trailing(arrival_rate_str, 53)}│
+    │ Duration:      #{String.pad_trailing(format_duration(config.duration_ms), 53)}│
     └──────────────────────────────────────────────────────────────────────┘
     """
   end
 
   defp terminal_throughput(metrics) do
+    arrivals_spawned = Map.get(metrics, :arrivals_spawned, 0)
+    arrivals_dropped = Map.get(metrics, :arrivals_dropped, 0)
+    arrivals_per_second = Map.get(metrics, :arrivals_per_second, 0.0)
+    drop_rate = Map.get(metrics, :drop_rate, 0.0)
+
     """
     ┌─ Throughput ─────────────────────────────────────────────────────────┐
     │ Total Requests:    #{String.pad_trailing(format_number(metrics.total_requests), 48)}│
     │ Requests/Second:   #{String.pad_trailing(format_float(metrics.requests_per_second), 48)}│
-    │ Active Sessions:   #{String.pad_trailing(to_string(metrics.active_sessions), 48)}│
-    │ Completed:         #{String.pad_trailing(to_string(metrics.completed_sessions), 48)}│
+    │ Arrivals Spawned:  #{String.pad_trailing(format_number(arrivals_spawned), 48)}│
+    │ Arrivals/Second:   #{String.pad_trailing(format_float(arrivals_per_second), 48)}│
+    │ Arrivals Dropped:  #{String.pad_trailing(format_number(arrivals_dropped) <> " (" <> format_float(drop_rate) <> "%)", 48)}│
     └──────────────────────────────────────────────────────────────────────┘
     """
   end
@@ -240,6 +250,23 @@ defmodule PropertyDamage.LoadTest.Report do
     end
   end
 
+  defp terminal_pool_stats(report) do
+    case Map.get(report, :pool_stats) do
+      nil ->
+        ""
+
+      stats ->
+        """
+        ┌─ Worker Pool ────────────────────────────────────────────────────────┐
+        │ Pool Size:       #{String.pad_trailing(to_string(stats.size), 51)}│
+        │ Utilization:     #{String.pad_trailing(format_float(stats.utilization * 100) <> "%", 51)}│
+        │ Total Checkouts: #{String.pad_trailing(format_number(stats.total_checkouts), 51)}│
+        │ Avg Queue Time:  #{String.pad_trailing(format_float(stats.avg_queue_time_ms) <> "ms", 51)}│
+        └──────────────────────────────────────────────────────────────────────┘
+        """
+    end
+  end
+
   defp terminal_footer do
     """
     ════════════════════════════════════════════════════════════════════════
@@ -295,6 +322,11 @@ defmodule PropertyDamage.LoadTest.Report do
 
     model_name = c.model |> to_string() |> String.replace("Elixir.", "")
     adapter_name = c.adapter |> to_string() |> String.replace("Elixir.", "")
+    arrival_rate_str = format_arrival_rate(c.arrival_rate)
+
+    arrivals_spawned = Map.get(m, :arrivals_spawned, 0)
+    arrivals_dropped = Map.get(m, :arrivals_dropped, 0)
+    drop_rate = Map.get(m, :drop_rate, 0.0)
 
     """
     # PropertyDamage Load Test Report
@@ -305,14 +337,18 @@ defmodule PropertyDamage.LoadTest.Report do
     |-----------|-------|
     | Model | `#{model_name}` |
     | Adapter | `#{adapter_name}` |
-    | Concurrent Users | #{c.concurrent_users} |
+    | Arrival Rate | #{arrival_rate_str} |
     | Duration | #{format_duration(c.duration_ms)} |
 
     ## Summary
 
     - **Total Requests:** #{format_number(m.total_requests)}
     - **Throughput:** #{format_float(m.requests_per_second)} requests/second
+    - **Arrivals Spawned:** #{format_number(arrivals_spawned)}
+    - **Arrivals Dropped:** #{format_number(arrivals_dropped)} (#{format_float(drop_rate)}%)
     - **Error Rate:** #{format_float(m.error_rate)}%
+
+    #{format_pool_stats_markdown(report)}
 
     ## Latency Distribution
 
@@ -434,4 +470,61 @@ defmodule PropertyDamage.LoadTest.Report do
       """
     end
   end
+
+  defp format_pool_stats_markdown(report) do
+    case Map.get(report, :pool_stats) do
+      nil ->
+        ""
+
+      stats ->
+        """
+        ## Worker Pool
+
+        | Metric | Value |
+        |--------|-------|
+        | Pool Size | #{stats.size} |
+        | Utilization | #{format_float(stats.utilization * 100)}% |
+        | Total Checkouts | #{format_number(stats.total_checkouts)} |
+        | Avg Queue Time | #{format_float(stats.avg_queue_time_ms)}ms |
+        """
+    end
+  end
+
+  defp format_arrival_rate({count, {time, unit}}) do
+    "#{count} per #{time} #{unit}"
+  end
+
+  defp format_arrival_rate(rate) when is_integer(rate) do
+    "#{rate}/sec"
+  end
+
+  defp format_arrival_rate(rate), do: inspect(rate)
+
+  # ============================================================================
+  # JSON Encoding Helpers
+  # ============================================================================
+
+  defp make_json_encodable(data) when is_map(data) do
+    Map.new(data, fn {k, v} -> {k, make_json_encodable(v)} end)
+  end
+
+  defp make_json_encodable(data) when is_list(data) do
+    Enum.map(data, &make_json_encodable/1)
+  end
+
+  defp make_json_encodable({count, {time, unit}})
+       when is_integer(count) and is_integer(time) and is_atom(unit) do
+    [count, [time, Atom.to_string(unit)]]
+  end
+
+  defp make_json_encodable(tuple) when is_tuple(tuple) do
+    tuple |> Tuple.to_list() |> make_json_encodable()
+  end
+
+  defp make_json_encodable(atom)
+       when is_atom(atom) and not is_boolean(atom) and not is_nil(atom) do
+    Atom.to_string(atom)
+  end
+
+  defp make_json_encodable(data), do: data
 end

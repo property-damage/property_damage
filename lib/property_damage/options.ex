@@ -246,10 +246,14 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
     ],
-    concurrent_users: [
-      type: :pos_integer,
+    arrival_rate: [
+      type: {:custom, __MODULE__, :validate_arrival_rate, []},
       required: true,
-      doc: "Target number of concurrent user sessions."
+      doc: """
+      Target arrival rate. Can be specified as:
+      - Integer: arrivals per second (e.g., `100` = 100/sec)
+      - Tuple: `{count, {time, unit}}` (e.g., `{2, {15, :milliseconds}}` = 2 every 15ms)
+      """
     ],
     duration: [
       type:
@@ -264,31 +268,37 @@ defmodule PropertyDamage.Options do
       default: %{},
       doc: "Configuration passed to `adapter.setup/1`."
     ],
+    arrival_jitter: [
+      type: {:custom, __MODULE__, :validate_range, []},
+      default: {0, 0},
+      doc: "`{min, max}` milliseconds random jitter added to each arrival interval."
+    ],
+    max_queue_size: [
+      type: :pos_integer,
+      default: 100,
+      doc:
+        "Maximum pending arrivals to queue when pool is exhausted. Excess arrivals are dropped."
+    ],
     ramp_up: [
       type: {:custom, __MODULE__, :validate_ramp_strategy, []},
       default: :immediate,
       doc: """
-      Strategy for ramping up load:
-      - `:immediate` - All users start at once
-      - `{:linear, duration}` - Gradual linear ramp
-      - `{:step, count, interval}` - Add users in steps
+      Strategy for ramping up arrival rate:
+      - `:immediate` - Start at full rate
+      - `{:linear, duration}` - Linear ramp from 0 to target rate
+      - `{:step, count, interval}` - Increase rate in steps
       - `{:exponential, duration}` - Exponential growth curve
       """
     ],
     ramp_down: [
       type: {:custom, __MODULE__, :validate_ramp_strategy, []},
       default: :immediate,
-      doc: "Strategy for ramping down load (same options as `:ramp_up`)."
-    ],
-    commands_per_session: [
-      type: {:custom, __MODULE__, :validate_range, []},
-      default: {10, 50},
-      doc: "`{min, max}` commands per sequence."
+      doc: "Strategy for ramping down arrival rate (same options as `:ramp_up`)."
     ],
     think_time: [
       type: {:custom, __MODULE__, :validate_range, []},
       default: {0, 0},
-      doc: "`{min, max}` milliseconds delay between commands."
+      doc: "`{min, max}` milliseconds delay between commands within a sequence."
     ],
     metrics_interval: [
       type:
@@ -841,4 +851,54 @@ defmodule PropertyDamage.Options do
   def validate_non_empty_list(value) do
     {:error, "expected a non-empty list, got: #{inspect(value)}"}
   end
+
+  @doc false
+  # Shorthand: integer = arrivals per second
+  def validate_arrival_rate(rate) when is_integer(rate) and rate > 0 do
+    {:ok, {rate, {1, :seconds}}}
+  end
+
+  # Full form: {count, {time, unit}}
+  def validate_arrival_rate({count, {time, unit}})
+      when is_integer(count) and count > 0 and is_integer(time) and time > 0 do
+    if unit in @valid_duration_units do
+      {:ok, {count, {time, unit}}}
+    else
+      {:error,
+       "invalid time unit in arrival_rate: #{inspect(unit)}. " <>
+         "Valid units: #{inspect(@valid_duration_units)}"}
+    end
+  end
+
+  def validate_arrival_rate(value) do
+    {:error,
+     "expected arrival_rate as integer (arrivals per second, e.g., 100) or " <>
+       "tuple {count, {time, unit}} (e.g., {2, {15, :milliseconds}}), got: #{inspect(value)}"}
+  end
+
+  @doc """
+  Converts a validated arrival rate to interval in milliseconds.
+
+  ## Examples
+
+      iex> arrival_rate_to_interval_ms({100, {1, :seconds}})
+      10.0
+
+      iex> arrival_rate_to_interval_ms({2, {15, :milliseconds}})
+      7.5
+  """
+  @spec arrival_rate_to_interval_ms({pos_integer(), {pos_integer(), atom()}}) :: float()
+  def arrival_rate_to_interval_ms({count, {time, unit}}) do
+    total_ms = duration_to_ms({time, unit})
+    total_ms / count
+  end
+
+  @doc """
+  Converts a duration tuple to milliseconds.
+  """
+  @spec duration_to_ms({pos_integer(), atom()}) :: non_neg_integer()
+  def duration_to_ms({value, :milliseconds}), do: value
+  def duration_to_ms({value, :seconds}), do: value * 1_000
+  def duration_to_ms({value, :minutes}), do: value * 60_000
+  def duration_to_ms({value, :hours}), do: value * 3_600_000
 end

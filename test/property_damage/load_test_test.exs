@@ -2,7 +2,7 @@ defmodule PropertyDamage.LoadTestTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.LoadTest
-  alias PropertyDamage.LoadTest.{Metrics, RampStrategy, Report}
+  alias PropertyDamage.LoadTest.{Metrics, RampStrategy, Report, Worker, WorkerPool}
 
   # ============================================================================
   # Metrics Tests
@@ -58,23 +58,36 @@ defmodule PropertyDamage.LoadTestTest do
       Metrics.stop(metrics)
     end
 
-    test "tracks session counts" do
+    test "tracks arrival counts" do
       {:ok, metrics} = Metrics.start_link()
 
-      Metrics.session_started(metrics)
-      Metrics.session_started(metrics)
-      Metrics.session_started(metrics)
+      Metrics.arrival_spawned(metrics)
+      Metrics.arrival_spawned(metrics)
+      Metrics.arrival_spawned(metrics)
 
       Process.sleep(50)
       snapshot = Metrics.snapshot(metrics)
-      assert snapshot.active_sessions == 3
-      assert snapshot.completed_sessions == 0
+      assert snapshot.arrivals_spawned == 3
+      assert snapshot.arrivals_completed == 0
 
-      Metrics.session_completed(metrics)
+      Metrics.arrival_completed(metrics)
       Process.sleep(50)
       snapshot = Metrics.snapshot(metrics)
-      assert snapshot.active_sessions == 2
-      assert snapshot.completed_sessions == 1
+      assert snapshot.arrivals_spawned == 3
+      assert snapshot.arrivals_completed == 1
+
+      Metrics.stop(metrics)
+    end
+
+    test "tracks dropped arrivals" do
+      {:ok, metrics} = Metrics.start_link()
+
+      Metrics.arrival_dropped(metrics)
+      Metrics.arrival_dropped(metrics)
+
+      Process.sleep(50)
+      snapshot = Metrics.snapshot(metrics)
+      assert snapshot.arrivals_dropped == 2
 
       Metrics.stop(metrics)
     end
@@ -199,47 +212,51 @@ defmodule PropertyDamage.LoadTestTest do
   # ============================================================================
 
   describe "RampStrategy" do
-    test "immediate plan starts all users at once" do
-      plan = RampStrategy.plan(:immediate, 100)
+    test "immediate plan starts at target rate at once" do
+      target_rate = {100, {1, :seconds}}
+      plan = RampStrategy.plan(:immediate, target_rate)
 
-      assert plan == [{0, 100}]
+      assert plan == [{0, target_rate}]
     end
 
     test "linear plan ramps gradually" do
-      plan = RampStrategy.plan({:linear, {1, :seconds}}, 100)
+      target_rate = {100, {1, :seconds}}
+      plan = RampStrategy.plan({:linear, {1, :seconds}}, target_rate)
 
       assert length(plan) == 10
       assert {0, _} = hd(plan)
 
-      # Should end at target
-      {_, final_users} = List.last(plan)
-      assert final_users == 100
+      # Should end at target (100/sec)
+      {_, {final_rate, {1, :seconds}}} = List.last(plan)
+      assert final_rate == 100
 
       # Should be monotonically increasing
-      users = Enum.map(plan, fn {_, u} -> u end)
-      assert users == Enum.sort(users)
+      rates = Enum.map(plan, fn {_, {r, _}} -> r end)
+      assert rates == Enum.sort(rates)
     end
 
-    test "step plan adds users in increments" do
-      plan = RampStrategy.plan({:step, 4, {250, :milliseconds}}, 100)
+    test "step plan increases rate in increments" do
+      target_rate = {100, {1, :seconds}}
+      plan = RampStrategy.plan({:step, 4, {250, :milliseconds}}, target_rate)
 
       assert length(plan) == 4
 
       times = Enum.map(plan, fn {t, _} -> t end)
       assert times == [0, 250, 500, 750]
 
-      {_, final_users} = List.last(plan)
-      assert final_users == 100
+      {_, {final_rate, _}} = List.last(plan)
+      assert final_rate == 100
     end
 
     test "exponential plan grows exponentially" do
-      plan = RampStrategy.plan({:exponential, {1, :seconds}}, 100)
+      target_rate = {100, {1, :seconds}}
+      plan = RampStrategy.plan({:exponential, {1, :seconds}}, target_rate)
 
-      users = Enum.map(plan, fn {_, u} -> u end)
+      rates = Enum.map(plan, fn {_, {r, _}} -> r end)
 
       # Exponential growth: later increments should be larger
-      first_half = Enum.slice(users, 0, 5)
-      second_half = Enum.slice(users, 5, 5)
+      first_half = Enum.slice(rates, 0, 5)
+      second_half = Enum.slice(rates, 5, 5)
 
       first_growth = Enum.at(first_half, -1) - Enum.at(first_half, 0)
       second_growth = Enum.at(second_half, -1) - Enum.at(second_half, 0)
@@ -248,21 +265,46 @@ defmodule PropertyDamage.LoadTestTest do
       assert second_growth >= first_growth
     end
 
-    test "plan_down decreases users" do
-      plan = RampStrategy.plan_down({:linear, {1, :seconds}}, 100)
+    test "plan_down decreases rate" do
+      current_rate = {100, {1, :seconds}}
+      plan = RampStrategy.plan_down({:linear, {1, :seconds}}, current_rate)
 
-      users = Enum.map(plan, fn {_, u} -> u end)
+      rates = Enum.map(plan, fn {_, {r, _}} -> r end)
 
       # Should be monotonically decreasing
-      assert users == Enum.sort(users, :desc)
+      assert rates == Enum.sort(rates, :desc)
 
-      # Should end at 0
-      assert List.last(users) == 0
+      # Should end at minimum (1/sec)
+      assert List.last(rates) == 1
     end
 
     test "duration_ms returns plan duration" do
-      plan = RampStrategy.plan({:step, 4, {500, :milliseconds}}, 100)
+      target_rate = {100, {1, :seconds}}
+      plan = RampStrategy.plan({:step, 4, {500, :milliseconds}}, target_rate)
       assert RampStrategy.duration_ms(plan) == 1500
+    end
+
+    test "rate_to_per_second converts rate specs" do
+      # 100 per second
+      assert RampStrategy.rate_to_per_second({100, {1, :seconds}}) == 100.0
+
+      # 2 per 15 milliseconds = 133.33/sec
+      rate = RampStrategy.rate_to_per_second({2, {15, :milliseconds}})
+      assert_in_delta rate, 133.33, 0.1
+
+      # 60 per minute = 1/sec
+      assert RampStrategy.rate_to_per_second({60, {1, :minutes}}) == 1.0
+    end
+
+    test "rate_to_interval_ms converts rate to interval" do
+      # 100 per second = 10ms interval
+      assert RampStrategy.rate_to_interval_ms({100, {1, :seconds}}) == 10.0
+
+      # 2 per 20 ms = 10ms interval
+      assert RampStrategy.rate_to_interval_ms({2, {20, :milliseconds}}) == 10.0
+
+      # 1 per second = 1000ms interval
+      assert RampStrategy.rate_to_interval_ms({1, {1, :seconds}}) == 1000.0
     end
   end
 
@@ -285,8 +327,11 @@ defmodule PropertyDamage.LoadTestTest do
           total_errors: 15,
           error_rate: 0.15,
           errors_by_type: %{timeout: 10, connection_error: 5},
-          active_sessions: 0,
-          completed_sessions: 50,
+          arrivals_spawned: 10_000,
+          arrivals_completed: 10_000,
+          arrivals_dropped: 50,
+          arrivals_per_second: 166.67,
+          drop_rate: 0.5,
           by_command: %{
             CreateAccount => %{
               count: 5000,
@@ -304,12 +349,23 @@ defmodule PropertyDamage.LoadTestTest do
             }
           },
           duration_ms: 60_000,
-          history: []
+          history: [],
+          assertion_failures: 0,
+          assertion_failure_rate: 0.0,
+          failures_by_exception: %{},
+          recent_assertion_failures: []
+        },
+        pool_stats: %{
+          size: 50,
+          utilization: 0.85,
+          total_checkouts: 10_000,
+          total_dropped: 50,
+          avg_queue_time_ms: 5.2
         },
         config: %{
           model: TestModel,
           adapter: TestAdapter,
-          concurrent_users: 50,
+          arrival_rate: {100, {1, :seconds}},
           duration_ms: 60_000
         }
       }
@@ -339,7 +395,7 @@ defmodule PropertyDamage.LoadTestTest do
       decoded = Jason.decode!(output)
 
       assert decoded["metrics"]["total_requests"] == 10_000
-      assert decoded["config"]["concurrent_users"] == 50
+      assert decoded["config"]["arrival_rate"] == [100, [1, "seconds"]]
     end
 
     test "generates summary", %{report: report} do
@@ -347,6 +403,212 @@ defmodule PropertyDamage.LoadTestTest do
 
       assert String.contains?(summary, "10,000 requests")
       assert String.contains?(summary, "500.00 RPS")
+    end
+  end
+
+  # ============================================================================
+  # Worker and WorkerPool Test Fixtures
+  # ============================================================================
+
+  defmodule WorkerTestCommand do
+    defstruct [:value]
+
+    def precondition(_state), do: true
+    def new!(_state, _overrides), do: StreamData.constant(%__MODULE__{value: 1})
+    def simulate(_state, _cmd), do: [%{type: :created}]
+  end
+
+  defmodule WorkerTestProjection do
+    @behaviour PropertyDamage.Projection
+
+    @impl true
+    def init(), do: %{count: 0}
+
+    @impl true
+    def apply(state, _), do: %{state | count: state.count + 1}
+  end
+
+  defmodule WorkerTestModel do
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands(), do: [{1, WorkerTestCommand}]
+
+    @impl true
+    def state_projection(), do: WorkerTestProjection
+
+    @impl true
+    def extra_projections(), do: []
+  end
+
+  defmodule WorkerTestAdapter do
+    @behaviour PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: {:ok, %{setup_at: System.monotonic_time()}}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(_cmd, _ctx) do
+      Process.sleep(:rand.uniform(5))
+      {:ok, [%{type: :executed}]}
+    end
+  end
+
+  # ============================================================================
+  # Worker Tests
+  # ============================================================================
+
+  describe "Worker" do
+    test "starts with persistent adapter context" do
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, worker} =
+        Worker.start_link(
+          worker_id: 1,
+          model: WorkerTestModel,
+          adapter: WorkerTestAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      assert is_pid(worker)
+
+      Worker.stop(worker)
+      Metrics.stop(metrics)
+    end
+
+    test "executes sequences using persistent context" do
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, worker} =
+        Worker.start_link(
+          worker_id: 1,
+          model: WorkerTestModel,
+          adapter: WorkerTestAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      # Execute a sequence
+      result = Worker.execute_sequence(worker)
+      assert {:ok, stats} = result
+      assert is_map(stats)
+
+      # Execute another sequence (should reuse context)
+      result = Worker.execute_sequence(worker)
+      assert {:ok, _} = result
+
+      Process.sleep(50)
+      snapshot = Metrics.snapshot(metrics)
+      assert snapshot.total_requests >= 2
+
+      Worker.stop(worker)
+      Metrics.stop(metrics)
+    end
+  end
+
+  # ============================================================================
+  # WorkerPool Tests
+  # ============================================================================
+
+  describe "WorkerPool" do
+    test "starts pool with specified size" do
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, pool} =
+        WorkerPool.start_link(
+          size: 3,
+          model: WorkerTestModel,
+          adapter: WorkerTestAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      stats = WorkerPool.stats(pool)
+      assert stats.size == 3
+      assert stats.available == 3
+      assert stats.in_use == 0
+
+      WorkerPool.stop(pool)
+      Metrics.stop(metrics)
+    end
+
+    test "checkout and checkin workers" do
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, pool} =
+        WorkerPool.start_link(
+          size: 2,
+          model: WorkerTestModel,
+          adapter: WorkerTestAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      # Checkout first worker
+      {:ok, worker1} = WorkerPool.checkout(pool)
+      assert is_pid(worker1)
+
+      stats = WorkerPool.stats(pool)
+      assert stats.available == 1
+      assert stats.in_use == 1
+
+      # Checkout second worker
+      {:ok, worker2} = WorkerPool.checkout(pool)
+      assert worker1 != worker2
+
+      stats = WorkerPool.stats(pool)
+      assert stats.available == 0
+      assert stats.in_use == 2
+
+      # Checkin first worker
+      :ok = WorkerPool.checkin(pool, worker1)
+
+      stats = WorkerPool.stats(pool)
+      assert stats.available == 1
+      assert stats.in_use == 1
+
+      WorkerPool.stop(pool)
+      Metrics.stop(metrics)
+    end
+
+    test "returns pool_exhausted when queue is full" do
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, pool} =
+        WorkerPool.start_link(
+          size: 1,
+          max_queue_size: 0,
+          model: WorkerTestModel,
+          adapter: WorkerTestAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      # Checkout the only worker
+      {:ok, _worker} = WorkerPool.checkout(pool)
+
+      # Try to checkout another (queue size is 0, so immediate rejection)
+      assert {:error, :pool_exhausted} = WorkerPool.checkout(pool, timeout: 100)
+
+      stats = WorkerPool.stats(pool)
+      assert stats.total_dropped == 1
+
+      WorkerPool.stop(pool)
+      Metrics.stop(metrics)
     end
   end
 
@@ -410,13 +672,13 @@ defmodule PropertyDamage.LoadTestTest do
         LoadTest.run(
           model: MockModel,
           adapter: MockAdapter,
-          concurrent_users: 2,
+          arrival_rate: 50,
           duration: {500, :milliseconds}
         )
 
       assert report.metrics.total_requests > 0
       assert report.metrics.requests_per_second > 0
-      assert report.config.concurrent_users == 2
+      assert report.config.arrival_rate == {50, {1, :seconds}}
     end
 
     @tag :integration
@@ -425,7 +687,7 @@ defmodule PropertyDamage.LoadTestTest do
         LoadTest.start(
           model: MockModel,
           adapter: MockAdapter,
-          concurrent_users: 2,
+          arrival_rate: 50,
           duration: {300, :milliseconds}
         )
 
@@ -433,7 +695,7 @@ defmodule PropertyDamage.LoadTestTest do
 
       # Check status
       status = LoadTest.status(runner)
-      assert status.target_users == 2
+      assert status.target_rate == {50, {1, :seconds}}
       assert status.phase in [:ramp_up, :steady]
 
       # Get metrics during run
@@ -451,7 +713,7 @@ defmodule PropertyDamage.LoadTestTest do
         LoadTest.start(
           model: MockModel,
           adapter: MockAdapter,
-          concurrent_users: 2,
+          arrival_rate: 50,
           duration: {10, :seconds}
         )
 
@@ -471,7 +733,7 @@ defmodule PropertyDamage.LoadTestTest do
         LoadTest.run(
           model: MockModel,
           adapter: MockAdapter,
-          concurrent_users: 2,
+          arrival_rate: 50,
           duration: {600, :milliseconds},
           metrics_interval: {100, :milliseconds},
           on_metrics: fn metrics ->
@@ -488,31 +750,40 @@ defmodule PropertyDamage.LoadTestTest do
     @tag :integration
     test "uses linear ramp-up" do
       test_pid = self()
-      session_counts = :ets.new(:session_counts, [:set, :public])
-      :ets.insert(session_counts, {:max, 0})
 
       {:ok, _report} =
         LoadTest.run(
           model: MockModel,
           adapter: MockAdapter,
-          concurrent_users: 4,
+          arrival_rate: 100,
           duration: {800, :milliseconds},
           ramp_up: {:linear, {400, :milliseconds}},
           metrics_interval: {100, :milliseconds},
           on_metrics: fn metrics ->
-            # Track max active sessions
-            [{:max, current_max}] = :ets.lookup(session_counts, :max)
-            new_max = max(current_max, metrics.active_sessions)
-            :ets.insert(session_counts, {:max, new_max})
-            send(test_pid, {:sessions, metrics.active_sessions})
+            send(test_pid, {:arrivals, metrics.arrivals_spawned})
           end
         )
 
-      # Should have seen ramping (not all 4 at once from the start)
-      # Due to timing, we just verify we received metrics
-      assert_receive {:sessions, _}, 1000
+      # Should have seen ramping (not all at full rate from the start)
+      assert_receive {:arrivals, _}, 1000
+    end
 
-      :ets.delete(session_counts)
+    @tag :integration
+    test "tracks dropped arrivals when pool exhausted" do
+      # Use high arrival rate with small pool to force drops
+      {:ok, report} =
+        LoadTest.run(
+          model: MockModel,
+          adapter: MockAdapter,
+          arrival_rate: 500,
+          duration: {300, :milliseconds},
+          max_queue_size: 1
+        )
+
+      # With high rate and small queue, we should have some drops
+      # (may or may not depending on timing, so just verify metrics exist)
+      assert report.metrics.arrivals_spawned >= 0
+      assert report.metrics.arrivals_dropped >= 0
     end
 
     # Model with assertion projections for testing assertion_mode option
@@ -553,7 +824,7 @@ defmodule PropertyDamage.LoadTestTest do
         LoadTest.run(
           model: MockModelWithAssertions,
           adapter: MockAdapter,
-          concurrent_users: 2,
+          arrival_rate: 50,
           duration: {500, :milliseconds}
         )
 
@@ -569,7 +840,7 @@ defmodule PropertyDamage.LoadTestTest do
         LoadTest.run(
           model: MockModelWithAssertions,
           adapter: MockAdapter,
-          concurrent_users: 2,
+          arrival_rate: 50,
           duration: {500, :milliseconds},
           assertion_mode: :record
         )

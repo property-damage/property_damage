@@ -1,39 +1,43 @@
 defmodule PropertyDamage.LoadTest.RampStrategy do
   @moduledoc """
-  Controls how load is ramped up and down during a load test.
+  Controls how arrival rate is ramped up and down during a load test.
 
   ## Strategies
 
-  - `:immediate` - Start all users at once
-  - `{:linear, duration}` - Gradually add users over duration
-  - `{:step, count, interval}` - Add users in steps
-  - `{:exponential, duration}` - Exponential growth to target
+  - `:immediate` - Start at full rate immediately
+  - `{:linear, duration}` - Gradually increase rate over duration
+  - `{:step, count, interval}` - Increase rate in steps
+  - `{:exponential, duration}` - Exponential growth to target rate
 
   ## Usage
 
-      # Immediate - all 100 users start at once
-      plan = RampStrategy.plan(:immediate, 100)
+      # Immediate - start at 100 arrivals/sec immediately
+      plan = RampStrategy.plan(:immediate, {100, {1, :seconds}})
 
-      # Linear - ramp to 100 users over 60 seconds
-      plan = RampStrategy.plan({:linear, {60, :seconds}}, 100)
+      # Linear - ramp to 100/sec over 60 seconds
+      plan = RampStrategy.plan({:linear, {60, :seconds}}, {100, {1, :seconds}})
 
-      # Step - add 25 users every 15 seconds
-      plan = RampStrategy.plan({:step, 4, {15, :seconds}}, 100)
+      # Step - increase rate every 15 seconds in 4 steps
+      plan = RampStrategy.plan({:step, 4, {15, :seconds}}, {100, {1, :seconds}})
 
-      # Exponential - exponential growth to 100 over 2 minutes
-      plan = RampStrategy.plan({:exponential, {2, :minutes}}, 100)
+      # Exponential - exponential growth to 100/sec over 2 minutes
+      plan = RampStrategy.plan({:exponential, {2, :minutes}}, {100, {1, :seconds}})
 
   ## Plan Format
 
-  A plan is a list of `{time_ms, target_users}` tuples:
+  A plan is a list of `{time_ms, rate_spec}` tuples:
 
       [
-        {0, 25},
-        {15000, 50},
-        {30000, 75},
-        {45000, 100}
+        {0, {25, {1, :seconds}}},
+        {15000, {50, {1, :seconds}}},
+        {30000, {75, {1, :seconds}}},
+        {45000, {100, {1, :seconds}}}
       ]
+
+  The rate_spec is in the normalized form `{count, {time, unit}}`.
   """
+
+  alias PropertyDamage.Options
 
   @type strategy ::
           :immediate
@@ -41,117 +45,123 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
           | {:step, pos_integer(), duration()}
           | {:exponential, duration()}
 
-  @type duration :: {pos_integer(), :milliseconds | :seconds | :minutes}
-  @type plan :: [{non_neg_integer(), pos_integer()}]
+  @type duration :: {pos_integer(), :milliseconds | :seconds | :minutes | :hours}
+  @type rate_spec :: {pos_integer(), duration()}
+  @type plan :: [{non_neg_integer(), rate_spec()}]
 
   @doc """
-  Generate a ramp plan for the given strategy and target users.
+  Generate a ramp plan for the given strategy and target rate.
 
   ## Parameters
 
   - `strategy` - The ramping strategy to use
-  - `target_users` - Target number of concurrent users
+  - `target_rate` - Target arrival rate as `{count, {time, unit}}`
 
   ## Returns
 
-  A list of `{time_ms, target_users}` tuples indicating when to
-  adjust the number of active sessions.
+  A list of `{time_ms, rate_spec}` tuples indicating when to
+  adjust the arrival rate.
   """
-  @spec plan(strategy(), pos_integer()) :: plan()
-  def plan(:immediate, target_users) do
-    [{0, target_users}]
+  @spec plan(strategy(), rate_spec()) :: plan()
+  def plan(:immediate, target_rate) do
+    [{0, target_rate}]
   end
 
-  def plan({:linear, duration}, target_users) do
+  def plan({:linear, duration}, target_rate) do
     duration_ms = to_ms(duration)
+    target_per_sec = rate_to_per_second(target_rate)
 
     # Create 10 steps for linear ramp
-    steps = min(10, target_users)
+    steps = 10
     step_duration = div(duration_ms, steps)
-    users_per_step = target_users / steps
 
     for i <- 0..(steps - 1) do
       time_ms = i * step_duration
-      users = round((i + 1) * users_per_step)
-      {time_ms, users}
+      factor = (i + 1) / steps
+      rate_per_sec = max(1, round(target_per_sec * factor))
+      {time_ms, {rate_per_sec, {1, :seconds}}}
     end
   end
 
-  def plan({:step, num_steps, interval}, target_users) do
+  def plan({:step, num_steps, interval}, target_rate) do
     interval_ms = to_ms(interval)
-    users_per_step = div(target_users, num_steps)
-    remainder = rem(target_users, num_steps)
+    target_per_sec = rate_to_per_second(target_rate)
 
     for i <- 0..(num_steps - 1) do
       time_ms = i * interval_ms
-      # Distribute remainder across first steps
-      users = (i + 1) * users_per_step + min(i + 1, remainder)
-      {time_ms, min(users, target_users)}
+      factor = (i + 1) / num_steps
+      rate_per_sec = max(1, round(target_per_sec * factor))
+      {time_ms, {rate_per_sec, {1, :seconds}}}
     end
   end
 
-  def plan({:exponential, duration}, target_users) do
+  def plan({:exponential, duration}, target_rate) do
     duration_ms = to_ms(duration)
+    target_per_sec = rate_to_per_second(target_rate)
 
     # Use 10 steps for exponential growth
     steps = 10
     step_duration = div(duration_ms, steps)
 
-    # Exponential growth: users = target * (e^(k*t) - 1) / (e^k - 1)
-    # where k is chosen so we reach target at t=1
+    # Exponential growth: rate = target * (e^(k*t) - 1) / (e^k - 1)
     k = 2.0
 
     for i <- 0..(steps - 1) do
       time_ms = i * step_duration
       t = (i + 1) / steps
-      # Normalized exponential growth
       factor = (:math.exp(k * t) - 1) / (:math.exp(k) - 1)
-      users = round(target_users * factor)
-      {time_ms, max(1, users)}
+      rate_per_sec = max(1, round(target_per_sec * factor))
+      {time_ms, {rate_per_sec, {1, :seconds}}}
     end
   end
 
   @doc """
   Generate a ramp-down plan.
 
-  Similar to plan/2 but decreases from current users to 0.
+  Similar to plan/2 but decreases from current rate to minimum (1/sec).
 
   ## Parameters
 
   - `strategy` - The ramping strategy to use
-  - `current_users` - Current number of active users
+  - `current_rate` - Current arrival rate as `{count, {time, unit}}`
   """
-  @spec plan_down(strategy(), pos_integer()) :: plan()
-  def plan_down(:immediate, _current_users) do
-    [{0, 0}]
+  @spec plan_down(strategy(), rate_spec()) :: plan()
+  def plan_down(:immediate, _current_rate) do
+    # Minimum rate of 1 per second during ramp-down
+    [{0, {1, {1, :seconds}}}]
   end
 
-  def plan_down({:linear, duration}, current_users) do
+  def plan_down({:linear, duration}, current_rate) do
     duration_ms = to_ms(duration)
-    steps = min(10, current_users)
+    current_per_sec = rate_to_per_second(current_rate)
+
+    steps = 10
     step_duration = div(duration_ms, steps)
-    users_per_step = current_users / steps
 
     for i <- 0..(steps - 1) do
       time_ms = i * step_duration
-      users = round(current_users - (i + 1) * users_per_step)
-      {time_ms, max(0, users)}
+      factor = 1 - (i + 1) / steps
+      rate_per_sec = max(1, round(current_per_sec * factor))
+      {time_ms, {rate_per_sec, {1, :seconds}}}
     end
   end
 
-  def plan_down({:step, num_steps, interval}, current_users) do
+  def plan_down({:step, num_steps, interval}, current_rate) do
     interval_ms = to_ms(interval)
-    users_per_step = div(current_users, num_steps)
+    current_per_sec = rate_to_per_second(current_rate)
 
     for i <- 0..(num_steps - 1) do
       time_ms = i * interval_ms
-      users = current_users - (i + 1) * users_per_step
-      {time_ms, max(0, users)}
+      factor = 1 - (i + 1) / num_steps
+      rate_per_sec = max(1, round(current_per_sec * factor))
+      {time_ms, {rate_per_sec, {1, :seconds}}}
     end
   end
 
-  def plan_down({:exponential, duration}, current_users) do
+  def plan_down({:exponential, duration}, current_rate) do
     duration_ms = to_ms(duration)
+    current_per_sec = rate_to_per_second(current_rate)
+
     steps = 10
     step_duration = div(duration_ms, steps)
     k = 2.0
@@ -160,27 +170,24 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
       time_ms = i * step_duration
       t = (i + 1) / steps
       factor = (:math.exp(k * t) - 1) / (:math.exp(k) - 1)
-      users = round(current_users * (1 - factor))
-      {time_ms, max(0, users)}
+      rate_per_sec = max(1, round(current_per_sec * (1 - factor)))
+      {time_ms, {rate_per_sec, {1, :seconds}}}
     end
   end
 
   @doc """
-  Get the users to add/remove at a given time point.
-
-  Returns the delta from the previous step.
+  Get the rate at a given time point from a plan.
   """
-  @spec delta_at(plan(), non_neg_integer()) :: integer()
-  def delta_at(plan, time_ms) do
-    # Find the applicable step
+  @spec rate_at(plan(), non_neg_integer()) :: rate_spec() | nil
+  def rate_at(plan, time_ms) do
     applicable =
       plan
       |> Enum.filter(fn {t, _} -> t <= time_ms end)
       |> List.last()
 
     case applicable do
-      nil -> 0
-      {_, users} -> users
+      nil -> nil
+      {_, rate} -> rate
     end
   end
 
@@ -196,6 +203,23 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
     |> Enum.max()
   end
 
+  @doc """
+  Convert a rate spec to arrivals per second.
+  """
+  @spec rate_to_per_second(rate_spec()) :: float()
+  def rate_to_per_second({count, {time, unit}}) do
+    interval_ms = to_ms({time, unit})
+    count * 1000.0 / interval_ms
+  end
+
+  @doc """
+  Convert a rate spec to interval in milliseconds between arrivals.
+  """
+  @spec rate_to_interval_ms(rate_spec()) :: float()
+  def rate_to_interval_ms(rate_spec) do
+    Options.arrival_rate_to_interval_ms(rate_spec)
+  end
+
   # ============================================================================
   # Internal
   # ============================================================================
@@ -203,4 +227,5 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
   defp to_ms({value, :milliseconds}), do: value
   defp to_ms({value, :seconds}), do: value * 1000
   defp to_ms({value, :minutes}), do: value * 60 * 1000
+  defp to_ms({value, :hours}), do: value * 60 * 60 * 1000
 end

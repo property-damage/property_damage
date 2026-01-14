@@ -80,7 +80,13 @@ defmodule PropertyDamage.LoadTest.Metrics do
           assertion_failures: non_neg_integer(),
           assertion_failure_rate: float(),
           failures_by_exception: %{module() => non_neg_integer()},
-          recent_assertion_failures: [map()]
+          recent_assertion_failures: [map()],
+          # Arrival metrics
+          arrivals_spawned: non_neg_integer(),
+          arrivals_completed: non_neg_integer(),
+          arrivals_dropped: non_neg_integer(),
+          arrivals_per_second: float(),
+          drop_rate: float()
         }
 
   @type command_metrics :: %{
@@ -105,6 +111,12 @@ defmodule PropertyDamage.LoadTest.Metrics do
   @active_sessions 3
   @completed_sessions 4
   @assertion_failures 5
+  @arrivals_spawned 6
+  @arrivals_completed 7
+  @arrivals_dropped 8
+
+  # Total counter indices
+  @counter_count 8
 
   # Max recent failures to keep
   @max_recent_failures 100
@@ -176,6 +188,30 @@ defmodule PropertyDamage.LoadTest.Metrics do
   end
 
   @doc """
+  Record an arrival being spawned.
+  """
+  @spec arrival_spawned(pid()) :: :ok
+  def arrival_spawned(pid) do
+    GenServer.cast(pid, :arrival_spawned)
+  end
+
+  @doc """
+  Record an arrival completing its sequence.
+  """
+  @spec arrival_completed(pid()) :: :ok
+  def arrival_completed(pid) do
+    GenServer.cast(pid, :arrival_completed)
+  end
+
+  @doc """
+  Record an arrival being dropped due to pool exhaustion.
+  """
+  @spec arrival_dropped(pid()) :: :ok
+  def arrival_dropped(pid) do
+    GenServer.cast(pid, :arrival_dropped)
+  end
+
+  @doc """
   Get a snapshot of current metrics.
   """
   @spec snapshot(pid()) :: snapshot()
@@ -204,8 +240,8 @@ defmodule PropertyDamage.LoadTest.Metrics do
     command_metrics_table = :ets.new(:load_test_command_metrics, [:set, :public])
     assertion_failures_table = :ets.new(:load_test_assertion_failures, [:set, :public])
 
-    # Initialize counters (5 indices now - added assertion_failures)
-    :ets.insert(counters_table, {:counters, :atomics.new(5, signed: false)})
+    # Initialize counters
+    :ets.insert(counters_table, {:counters, :atomics.new(@counter_count, signed: false)})
 
     now = System.monotonic_time(:millisecond)
 
@@ -294,6 +330,27 @@ defmodule PropertyDamage.LoadTest.Metrics do
   end
 
   @impl true
+  def handle_cast(:arrival_spawned, state) do
+    counters = get_counters(state.counters_table)
+    :atomics.add(counters, @arrivals_spawned, 1)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast(:arrival_completed, state) do
+    counters = get_counters(state.counters_table)
+    :atomics.add(counters, @arrivals_completed, 1)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast(:arrival_dropped, state) do
+    counters = get_counters(state.counters_table)
+    :atomics.add(counters, @arrivals_dropped, 1)
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_call(:snapshot, _from, state) do
     snapshot = build_snapshot(state)
     {:reply, snapshot, state}
@@ -307,10 +364,10 @@ defmodule PropertyDamage.LoadTest.Metrics do
     :ets.delete_all_objects(state.command_metrics_table)
     :ets.delete_all_objects(state.assertion_failures_table)
 
-    # Reset counters (now 5 indices)
+    # Reset counters
     counters = get_counters(state.counters_table)
 
-    for i <- 1..5 do
+    for i <- 1..@counter_count do
       :atomics.put(counters, i, 0)
     end
 
@@ -561,6 +618,25 @@ defmodule PropertyDamage.LoadTest.Metrics do
       :ets.tab2list(state.assertion_failures_table)
       |> Map.new()
 
+    # Arrival stats
+    arrivals_spawned = :atomics.get(counters, @arrivals_spawned)
+    arrivals_completed = :atomics.get(counters, @arrivals_completed)
+    arrivals_dropped = :atomics.get(counters, @arrivals_dropped)
+
+    arrivals_per_second =
+      if duration_ms > 0 do
+        arrivals_spawned / (duration_ms / 1000.0)
+      else
+        0.0
+      end
+
+    drop_rate =
+      if arrivals_spawned > 0 do
+        arrivals_dropped / arrivals_spawned * 100.0
+      else
+        0.0
+      end
+
     %{
       total_requests: total_requests,
       requests_per_second: rps,
@@ -581,7 +657,13 @@ defmodule PropertyDamage.LoadTest.Metrics do
       assertion_failures: assertion_failures,
       assertion_failure_rate: assertion_failure_rate,
       failures_by_exception: failures_by_exception,
-      recent_assertion_failures: Enum.reverse(state.recent_failures)
+      recent_assertion_failures: Enum.reverse(state.recent_failures),
+      # Arrival metrics
+      arrivals_spawned: arrivals_spawned,
+      arrivals_completed: arrivals_completed,
+      arrivals_dropped: arrivals_dropped,
+      arrivals_per_second: arrivals_per_second,
+      drop_rate: drop_rate
     }
   end
 

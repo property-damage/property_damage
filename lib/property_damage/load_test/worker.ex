@@ -1,33 +1,34 @@
-defmodule PropertyDamage.LoadTest.Session do
+defmodule PropertyDamage.LoadTest.Worker do
   @moduledoc """
-  A single load test session (simulated user).
+  A load test worker with persistent adapter context.
 
-  Each session:
-  1. Generates a command sequence using the model
-  2. Executes commands against the SUT via the adapter
-  3. Reports metrics after each command
-  4. Optionally waits (think time) between commands
-  5. Loops: generates new sequences until stopped
+  Workers maintain a long-lived adapter context (connection pool, HTTP client, etc.)
+  and execute command sequences on behalf of arrivals. This eliminates the
+  setup/teardown bottleneck of the previous session-per-sequence model.
 
   ## Architecture
 
-  Sessions are lightweight GenServers that run independently.
-  They report metrics to a shared Metrics collector and can be
-  started/stopped by the Runner.
+  Workers are managed by `WorkerPool` and are checked out for each arrival.
+  Once an arrival completes its sequence, the worker is returned to the pool
+  for reuse.
 
   ## Usage
 
-      {:ok, session} = Session.start_link(
+      {:ok, worker} = Worker.start_link(
         model: MyModel,
         adapter: HTTPAdapter,
         adapter_config: %{base_url: "http://localhost:4000"},
         metrics: metrics_pid,
-        session_id: 1,
-        commands_range: {10, 50},
-        think_time_range: {100, 500}
+        worker_id: 1,
+        think_time_range: {100, 500},
+        assertion_mode: :disabled
       )
 
-      Session.stop(session)
+      # Execute a sequence (blocking)
+      {:ok, stats} = Worker.execute_sequence(worker)
+
+      # Shutdown worker (calls adapter.teardown)
+      Worker.stop(worker)
   """
 
   use GenServer
@@ -41,42 +42,47 @@ defmodule PropertyDamage.LoadTest.Session do
   @injection_ctx_key :property_damage_load_test_injection_ctx
 
   defstruct [
+    :worker_id,
     :model,
     :adapter,
     :adapter_config,
+    :adapter_context,
     :metrics,
-    :session_id,
-    :commands_range,
     :think_time_range,
-    :rate_limiter,
     :assertion_mode,
-    :running,
+    # Stats
+    :sequences_executed,
     :commands_executed,
-    :sequences_completed,
     :errors,
     :assertion_failures
   ]
 
   @type t :: %__MODULE__{}
 
+  @type sequence_result :: %{
+          commands_run: non_neg_integer(),
+          errors: non_neg_integer(),
+          assertion_failures: non_neg_integer()
+        }
+
   # ============================================================================
   # Public API
   # ============================================================================
 
   @doc """
-  Start a new session.
+  Start a new worker with persistent adapter context.
 
   ## Options
 
+  - `:worker_id` - Unique worker ID (required)
   - `:model` - Model module (required)
   - `:adapter` - Adapter module (required)
   - `:adapter_config` - Adapter configuration (default: %{})
   - `:metrics` - Metrics collector pid (required)
-  - `:session_id` - Unique session ID (required)
-  - `:commands_range` - {min, max} commands per sequence (default: {10, 50})
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
-  - `:rate_limiter` - Optional rate limiter pid
-  - `:assertion_mode` - How to handle assertions: `:disabled` (default), `:record`, or `:log`
+  - `:assertion_mode` - How to handle assertions (default: :disabled)
+
+  Returns `{:ok, pid}` or `{:error, reason}` if adapter setup fails.
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
@@ -84,19 +90,34 @@ defmodule PropertyDamage.LoadTest.Session do
   end
 
   @doc """
-  Stop a session gracefully.
+  Execute a single command sequence.
+
+  Generates a random sequence using the model and executes it using the
+  worker's persistent adapter context. This is a blocking call.
+
+  Returns `{:ok, stats}` with execution statistics.
   """
-  @spec stop(pid()) :: :ok
-  def stop(pid) do
-    GenServer.call(pid, :stop)
+  @spec execute_sequence(pid()) :: {:ok, sequence_result()} | {:error, term()}
+  def execute_sequence(pid) do
+    GenServer.call(pid, :execute_sequence, :infinity)
   end
 
   @doc """
-  Get session statistics.
+  Get worker statistics.
   """
   @spec stats(pid()) :: map()
   def stats(pid) do
     GenServer.call(pid, :stats)
+  end
+
+  @doc """
+  Stop the worker gracefully.
+
+  Calls `adapter.teardown/1` to clean up the adapter context.
+  """
+  @spec stop(pid()) :: :ok
+  def stop(pid) do
+    GenServer.stop(pid, :normal)
   end
 
   # ============================================================================
@@ -105,102 +126,80 @@ defmodule PropertyDamage.LoadTest.Session do
 
   @impl true
   def init(opts) do
+    worker_id = Keyword.fetch!(opts, :worker_id)
     model = Keyword.fetch!(opts, :model)
     adapter = Keyword.fetch!(opts, :adapter)
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     metrics = Keyword.fetch!(opts, :metrics)
-    session_id = Keyword.fetch!(opts, :session_id)
-    commands_range = Keyword.get(opts, :commands_range, {10, 50})
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
-    rate_limiter = Keyword.get(opts, :rate_limiter)
     assertion_mode = Keyword.get(opts, :assertion_mode, :disabled)
 
-    state = %__MODULE__{
-      model: model,
-      adapter: adapter,
-      adapter_config: adapter_config,
-      metrics: metrics,
-      session_id: session_id,
-      commands_range: commands_range,
-      think_time_range: think_time_range,
-      rate_limiter: rate_limiter,
-      assertion_mode: assertion_mode,
-      running: true,
-      commands_executed: 0,
-      sequences_completed: 0,
-      errors: 0,
-      assertion_failures: 0
-    }
+    # Setup adapter ONCE - this context will be reused for all sequences
+    case adapter.setup(adapter_config) do
+      {:ok, adapter_context} ->
+        state = %__MODULE__{
+          worker_id: worker_id,
+          model: model,
+          adapter: adapter,
+          adapter_config: adapter_config,
+          adapter_context: adapter_context,
+          metrics: metrics,
+          think_time_range: think_time_range,
+          assertion_mode: assertion_mode,
+          sequences_executed: 0,
+          commands_executed: 0,
+          errors: 0,
+          assertion_failures: 0
+        }
 
-    # Notify metrics that session started
-    Metrics.session_started(metrics)
+        {:ok, state}
 
-    # Start the execution loop
-    send(self(), :run_sequence)
-
-    {:ok, state}
+      {:error, reason} ->
+        {:stop, {:adapter_setup_failed, reason}}
+    end
   end
 
   @impl true
-  def handle_call(:stop, _from, state) do
-    Metrics.session_completed(state.metrics)
-    {:stop, :normal, :ok, %{state | running: false}}
+  def handle_call(:execute_sequence, _from, state) do
+    case run_one_sequence(state) do
+      {:ok, result, new_state} ->
+        {:reply, {:ok, result}, new_state}
+
+      {:error, reason, new_state} ->
+        {:reply, {:error, reason}, new_state}
+    end
   end
 
   @impl true
   def handle_call(:stats, _from, state) do
     stats = %{
-      session_id: state.session_id,
+      worker_id: state.worker_id,
+      sequences_executed: state.sequences_executed,
       commands_executed: state.commands_executed,
-      sequences_completed: state.sequences_completed,
       errors: state.errors,
-      assertion_failures: state.assertion_failures,
-      running: state.running
+      assertion_failures: state.assertion_failures
     }
 
     {:reply, stats, state}
   end
 
   @impl true
-  def handle_info(:run_sequence, %{running: false} = state) do
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info(:run_sequence, state) do
-    case run_one_sequence(state) do
-      {:ok, new_state} ->
-        # Schedule next sequence immediately
-        send(self(), :run_sequence)
-        {:noreply, new_state}
-
-      {:error, reason, new_state} ->
-        Logger.warning("Session #{state.session_id} sequence error: #{inspect(reason)}")
-        # Continue despite errors
-        send(self(), :run_sequence)
-        {:noreply, new_state}
-    end
-  end
-
-  @impl true
   def terminate(_reason, state) do
-    if state.running do
-      Metrics.session_completed(state.metrics)
+    # Teardown adapter context on worker shutdown
+    if state.adapter_context do
+      state.adapter.teardown(state.adapter_context)
     end
 
     :ok
   end
 
   # ============================================================================
-  # Internal
+  # Sequence Execution
   # ============================================================================
 
   defp run_one_sequence(state) do
-    {min_commands, max_commands} = state.commands_range
-    num_commands = :rand.uniform(max_commands - min_commands + 1) + min_commands - 1
-
-    # Generate sequence
-    generator = Generator.generate_sequence(state.model, max_commands: num_commands)
+    # Generate a full sequence using the model
+    generator = Generator.generate_sequence(state.model)
 
     sequence =
       case Enumerable.reduce(generator, {:cont, nil}, fn val, _ -> {:halt, val} end) do
@@ -208,18 +207,24 @@ defmodule PropertyDamage.LoadTest.Session do
         {:done, _} -> Sequence.linear([])
       end
 
-    # Execute sequence with metrics collection
-    case execute_sequence_with_metrics(sequence, state) do
+    # Execute sequence using persistent adapter context
+    case execute_sequence_commands(sequence, state) do
       {:ok, commands_run, errors, assertion_failure_count} ->
+        result = %{
+          commands_run: commands_run,
+          errors: errors,
+          assertion_failures: assertion_failure_count
+        }
+
         new_state = %{
           state
           | commands_executed: state.commands_executed + commands_run,
-            sequences_completed: state.sequences_completed + 1,
+            sequences_executed: state.sequences_executed + 1,
             errors: state.errors + errors,
             assertion_failures: state.assertion_failures + assertion_failure_count
         }
 
-        {:ok, new_state}
+        {:ok, result, new_state}
 
       {:error, reason} ->
         new_state = %{state | errors: state.errors + 1}
@@ -227,51 +232,38 @@ defmodule PropertyDamage.LoadTest.Session do
     end
   end
 
-  defp execute_sequence_with_metrics(sequence, state) do
+  defp execute_sequence_commands(sequence, state) do
     commands = Sequence.to_list(sequence)
 
-    # Setup adapter once for the sequence
-    case state.adapter.setup(state.adapter_config) do
-      {:ok, adapter_context} ->
-        try do
-          # Initialize refs map and projections for this sequence
-          initial_projections =
-            if state.assertion_mode != :disabled do
-              init_projections(state.model)
-            else
-              nil
-            end
+    # Initialize refs map and projections for this sequence
+    initial_projections =
+      if state.assertion_mode != :disabled do
+        init_projections(state.model)
+      else
+        nil
+      end
 
-          initial_counters =
-            if state.assertion_mode != :disabled do
-              %{step: 0, command: 0, event: 0}
-            else
-              nil
-            end
+    initial_counters =
+      if state.assertion_mode != :disabled do
+        %{step: 0, command: 0, event: 0}
+      else
+        nil
+      end
 
-          execute_commands(
-            commands,
-            adapter_context,
-            state,
-            _refs = %{},
-            initial_projections,
-            initial_counters,
-            0,
-            0,
-            0
-          )
-        after
-          state.adapter.teardown(adapter_context)
-        end
-
-      {:error, reason} ->
-        {:error, {:adapter_setup_failed, reason}}
-    end
+    execute_commands(
+      commands,
+      state,
+      _refs = %{},
+      initial_projections,
+      initial_counters,
+      0,
+      0,
+      0
+    )
   end
 
   defp execute_commands(
          [],
-         _adapter_context,
          _state,
          _refs,
          _projections,
@@ -285,7 +277,6 @@ defmodule PropertyDamage.LoadTest.Session do
 
   defp execute_commands(
          [command | rest],
-         adapter_context,
          state,
          refs,
          projections,
@@ -294,18 +285,15 @@ defmodule PropertyDamage.LoadTest.Session do
          errors,
          assertion_failures
        ) do
-    # Apply think time
+    # Apply think time between commands
     maybe_think(state.think_time_range)
-
-    # Apply rate limiting
-    maybe_rate_limit(state.rate_limiter)
 
     # Execute command and measure latency
     command_module = command.__struct__
     start_time = System.monotonic_time(:microsecond)
 
     {result, error_delta, new_refs, events} =
-      case execute_single_command(command, state.adapter, adapter_context, refs) do
+      case execute_single_command(command, state, refs) do
         {:ok, returned_events, updated_refs} ->
           {:ok, 0, updated_refs, returned_events}
 
@@ -339,10 +327,9 @@ defmodule PropertyDamage.LoadTest.Session do
         {projections, counters, 0}
       end
 
-    # Continue with remaining commands, threading updated refs and projections
+    # Continue with remaining commands
     execute_commands(
       rest,
-      adapter_context,
       state,
       new_refs,
       new_projections,
@@ -353,19 +340,19 @@ defmodule PropertyDamage.LoadTest.Session do
     )
   end
 
-  defp execute_single_command(command, adapter, adapter_context, refs) do
-    # Resolve refs using proper lookup (like executor.ex)
+  defp execute_single_command(command, state, refs) do
+    # Resolve refs using proper lookup
     case resolve_command_refs(command, refs) do
       {:ok, resolved_command} ->
         # Set up injection context in process dictionary
         Process.put(@injection_ctx_key, %{events: [], command: command, refs: refs})
 
         # Add inject function to adapter context
-        adapter_context_with_inject = Map.put(adapter_context, :inject, &inject_event/1)
+        adapter_context_with_inject = Map.put(state.adapter_context, :inject, &inject_event/1)
 
         result =
           try do
-            adapter.execute(resolved_command, adapter_context_with_inject)
+            state.adapter.execute(resolved_command, adapter_context_with_inject)
           after
             :ok
           end
@@ -385,7 +372,7 @@ defmodule PropertyDamage.LoadTest.Session do
             {:ok, all_events, new_refs}
 
           {:error, reason} ->
-            # Still bind refs from injected events so subsequent commands can use them
+            # Still bind refs from injected events
             new_refs = bind_refs_from_events(command, injected_events, refs)
             {:error, reason, new_refs}
         end
@@ -395,10 +382,12 @@ defmodule PropertyDamage.LoadTest.Session do
     end
   end
 
-  # Resolve symbolic refs in command using the refs map (mirrors executor.ex)
+  # ============================================================================
+  # Ref Resolution
+  # ============================================================================
+
   defp resolve_command_refs(command, refs) do
     try do
-      # Get the field to skip (the one this command creates)
       skip_field = get_creates_ref_field(command)
       resolved = deep_resolve_refs(command, refs, skip_field)
       {:ok, resolved}
@@ -436,7 +425,6 @@ defmodule PropertyDamage.LoadTest.Session do
     |> Map.from_struct()
     |> Enum.map(fn {k, v} ->
       if k == skip_field do
-        # Don't resolve the creates_ref field - keep the Ref as-is
         {k, v}
       else
         {k, deep_resolve_refs(v, refs, nil)}
@@ -465,7 +453,6 @@ defmodule PropertyDamage.LoadTest.Session do
 
   defp deep_resolve_refs(other, _refs, _skip_field), do: other
 
-  # Bind refs from all events (handles injected + returned events)
   defp bind_refs_from_events(command, events, refs) do
     command_module = command.__struct__
 
@@ -475,10 +462,8 @@ defmodule PropertyDamage.LoadTest.Session do
           refs
 
         ref_field ->
-          # Find the ref in the command
           case Map.get(command, ref_field) do
             %Ref{} = ref ->
-              # Find the value in the first event that has this field set
               value = find_ref_value_in_events(events, ref_field)
               if value, do: Map.put(refs, ref.ref, value), else: refs
 
@@ -500,6 +485,10 @@ defmodule PropertyDamage.LoadTest.Session do
     end)
   end
 
+  # ============================================================================
+  # Helpers
+  # ============================================================================
+
   defp maybe_think({0, 0}), do: :ok
 
   defp maybe_think({min_ms, max_ms}) do
@@ -507,26 +496,17 @@ defmodule PropertyDamage.LoadTest.Session do
     Process.sleep(think_time)
   end
 
-  defp maybe_rate_limit(nil), do: :ok
-
-  defp maybe_rate_limit(rate_limiter) do
-    # Simple token bucket rate limiting
-    GenServer.call(rate_limiter, :acquire)
-  end
-
   defp categorize_error({:adapter_error, _}), do: :adapter_error
   defp categorize_error({:timeout, _}), do: :timeout
   defp categorize_error({:connection_refused, _}), do: :connection_error
   defp categorize_error(_), do: :unknown_error
 
-  # Inject function for adapter use - stores events in process dictionary
   defp inject_event(event) do
     case Process.get(@injection_ctx_key) do
       nil ->
         raise ArgumentError, "inject called outside adapter execution context"
 
       ctx ->
-        # Accumulate injected event
         Process.put(@injection_ctx_key, %{ctx | events: [event | ctx.events]})
         :ok
     end
@@ -536,12 +516,10 @@ defmodule PropertyDamage.LoadTest.Session do
   # Assertion Support
   # ============================================================================
 
-  # Get module from struct or fallback for plain maps
   defp get_module(%{__struct__: module}), do: module
   defp get_module(map) when is_map(map), do: :plain_map_event
   defp get_module(_other), do: :unknown_event
 
-  # Initialize all projections for a model
   defp init_projections(model) do
     state_projection = model.state_projection()
 
@@ -559,7 +537,6 @@ defmodule PropertyDamage.LoadTest.Session do
     end
   end
 
-  # Update projections and run assertions for a command and its events
   defp run_assertions_for_command(command, events, projections, counters, command_index, state) do
     model = state.model
     command_module = command.__struct__
@@ -590,20 +567,15 @@ defmodule PropertyDamage.LoadTest.Session do
     # Update projections and run assertions for each event
     {projections, counters, event_failures} =
       Enum.reduce(events, {projections, counters, 0}, fn event, {projs, ctrs, failures} ->
-        # Handle both struct events and plain map events
         event_module = get_module(event)
-
-        # Update projections with event
         projs = update_projections(projs, event)
 
-        # Update counters for event
         ctrs =
           ctrs
           |> Map.update(:step, 1, &(&1 + 1))
           |> Map.update(:event, 1, &(&1 + 1))
           |> Map.update(event_module, 1, &(&1 + 1))
 
-        # Run event assertions
         {ctrs, event_failure_count} =
           run_assertions(
             model,
@@ -622,14 +594,12 @@ defmodule PropertyDamage.LoadTest.Session do
     {projections, counters, failure_count + event_failures}
   end
 
-  # Update all projections with a command or event
   defp update_projections(projections, command_or_event) do
     for {projection_module, projection_state} <- projections, into: %{} do
       {projection_module, projection_module.apply(projection_state, command_or_event)}
     end
   end
 
-  # Run assertions and record failures
   defp run_assertions(
          model,
          projections,
@@ -655,7 +625,6 @@ defmodule PropertyDamage.LoadTest.Session do
       Enum.reduce(all_projections, 0, fn projection, failures ->
         projection_state = Map.get(projections, projection)
 
-        # Only projections that use PropertyDamage.Projection have __assertions__/0
         assertions =
           if function_exported?(projection, :__assertions__, 0) do
             projection.__assertions__()
@@ -665,14 +634,11 @@ defmodule PropertyDamage.LoadTest.Session do
 
         Enum.reduce(assertions, failures, fn assertion, acc_failures ->
           if Projection.should_run?(assertion.trigger, step_type, module, counters) do
-            # Execute assertion - assertions raise on failure
             try do
               projection.assert(assertion.name, projection_state, command_or_event)
-              # Success - no exception raised
               acc_failures
             rescue
               e ->
-                # Record failure to metrics
                 failure = %{
                   reason: e,
                   command_index: command_index,
