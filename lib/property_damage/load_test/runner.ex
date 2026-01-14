@@ -41,6 +41,7 @@ defmodule PropertyDamage.LoadTest.Runner do
   require Logger
 
   alias PropertyDamage.LoadTest.{Metrics, Session, RampStrategy}
+  alias PropertyDamage.Options
 
   defstruct [
     :model,
@@ -134,19 +135,22 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   @impl true
   def init(opts) do
-    model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
-    target_users = Keyword.fetch!(opts, :concurrent_users)
-    duration = Keyword.fetch!(opts, :duration)
-    ramp_up = Keyword.get(opts, :ramp_up, :immediate)
-    ramp_down = Keyword.get(opts, :ramp_down, :immediate)
-    commands_range = Keyword.get(opts, :commands_per_session, {10, 50})
-    think_time_range = Keyword.get(opts, :think_time, {0, 0})
-    metrics_interval = Keyword.get(opts, :metrics_interval, {1, :seconds})
-    on_metrics = Keyword.get(opts, :on_metrics)
-    on_complete = Keyword.get(opts, :on_complete)
-    assertion_mode = Keyword.get(opts, :assertion_mode, :disabled)
+    # Validate options with NimbleOptions - applies defaults and provides helpful errors
+    opts = Options.validate_load_test!(opts)
+
+    model = opts[:model]
+    adapter = opts[:adapter]
+    adapter_config = opts[:adapter_config]
+    target_users = opts[:concurrent_users]
+    duration = opts[:duration]
+    ramp_up = opts[:ramp_up]
+    ramp_down = opts[:ramp_down]
+    commands_range = opts[:commands_per_session]
+    think_time_range = opts[:think_time]
+    metrics_interval = opts[:metrics_interval]
+    on_metrics = opts[:on_metrics]
+    on_complete = opts[:on_complete]
+    assertion_mode = opts[:assertion_mode]
 
     # Start metrics collector
     {:ok, metrics} = Metrics.start_link()

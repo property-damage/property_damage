@@ -18,13 +18,13 @@ defmodule PropertyDamageTest do
 
   describe "run/1 validation" do
     test "requires model option" do
-      assert_raise ArgumentError, ~r/Missing Model/, fn ->
+      assert_raise NimbleOptions.ValidationError, ~r/required :model option not found/, fn ->
         PropertyDamage.run(adapter: SimpleAdapter)
       end
     end
 
     test "requires adapter option" do
-      assert_raise ArgumentError, ~r/Missing Adapter/, fn ->
+      assert_raise NimbleOptions.ValidationError, ~r/required :adapter option not found/, fn ->
         PropertyDamage.run(model: ExecutorModel)
       end
     end

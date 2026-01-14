@@ -2,6 +2,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Validation
+  alias PropertyDamage.Options
 
   # ============================================================================
   # Test Fixtures
@@ -80,60 +81,65 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   # ============================================================================
-  # validate_run_opts! Tests
+  # Options.validate_run! Tests (NimbleOptions-based validation)
   # ============================================================================
 
-  describe "Validation.validate_run_opts!/1" do
-    test "passes with valid options" do
+  describe "Options.validate_run!/1" do
+    test "passes with valid options and returns keyword list with defaults" do
       opts = [model: ValidModel, adapter: ValidAdapter]
-      assert :ok = Validation.validate_run_opts!(opts)
+      validated = Options.validate_run!(opts)
+
+      assert validated[:model] == ValidModel
+      assert validated[:adapter] == ValidAdapter
+      assert validated[:max_commands] == 50
+      assert validated[:max_runs] == 100
     end
 
     test "raises on missing model" do
       opts = [adapter: ValidAdapter]
 
-      assert_raise ArgumentError, ~r/Missing Model/, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/required :model option not found/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
     test "raises on missing adapter" do
       opts = [model: ValidModel]
 
-      assert_raise ArgumentError, ~r/Missing Adapter/, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/required :adapter option not found/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
     test "raises on invalid max_commands" do
       opts = [model: ValidModel, adapter: ValidAdapter, max_commands: -5]
 
-      assert_raise ArgumentError, ~r/Invalid max_commands/, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
     test "raises on non-integer max_commands" do
       opts = [model: ValidModel, adapter: ValidAdapter, max_commands: "abc"]
 
-      assert_raise ArgumentError, ~r/Invalid max_commands/, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
     test "raises on invalid max_runs" do
       opts = [model: ValidModel, adapter: ValidAdapter, max_runs: 0]
 
-      assert_raise ArgumentError, ~r/Invalid max_runs/, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
     test "raises on invalid seed" do
       opts = [model: ValidModel, adapter: ValidAdapter, seed: -1]
 
-      assert_raise ArgumentError, ~r/Invalid seed/, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
@@ -146,7 +152,10 @@ defmodule PropertyDamage.ValidationExtendedTest do
         seed: 12345
       ]
 
-      assert :ok = Validation.validate_run_opts!(opts)
+      validated = Options.validate_run!(opts)
+      assert validated[:max_commands] == 100
+      assert validated[:max_runs] == 50
+      assert validated[:seed] == 12345
     end
   end
 
@@ -196,32 +205,32 @@ defmodule PropertyDamage.ValidationExtendedTest do
     test "nil model raises helpful error" do
       opts = [model: nil, adapter: ValidAdapter]
 
-      assert_raise ArgumentError, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/:model/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
     test "nil adapter raises helpful error" do
       opts = [model: ValidModel, adapter: nil]
 
-      assert_raise ArgumentError, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/:adapter/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
     test "zero max_commands raises" do
       opts = [model: ValidModel, adapter: ValidAdapter, max_commands: 0]
 
-      assert_raise ArgumentError, ~r/Invalid max_commands/, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
+        Options.validate_run!(opts)
       end
     end
 
     test "float max_runs raises" do
       opts = [model: ValidModel, adapter: ValidAdapter, max_runs: 10.5]
 
-      assert_raise ArgumentError, ~r/Invalid max_runs/, fn ->
-        Validation.validate_run_opts!(opts)
+      assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
+        Options.validate_run!(opts)
       end
     end
   end

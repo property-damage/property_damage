@@ -35,6 +35,7 @@ defmodule PropertyDamage.MixProject do
     [
       {:stream_data, "~> 1.0"},
       {:telemetry, "~> 1.0"},
+      {:nimble_options, "~> 1.0"},
       {:jason, "~> 1.4", optional: true},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]

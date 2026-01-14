@@ -132,6 +132,7 @@ defmodule PropertyDamage do
     Executor,
     Shrinker,
     Validation,
+    Options,
     EventQueue,
     Sequence,
     Stutter,
@@ -276,24 +277,23 @@ defmodule PropertyDamage do
   """
   @spec run(keyword()) :: {:ok, stats()} | {:error, failure_report()}
   def run(opts) do
-    # Early validation of options with helpful error messages
-    Validation.validate_run_opts!(opts)
+    # Validate options with NimbleOptions - applies defaults and provides helpful errors
+    opts = Options.validate_run!(opts)
 
-    model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
-
-    max_commands = Keyword.get(opts, :max_commands, 50)
-    max_runs = Keyword.get(opts, :max_runs, 100)
-    seed = Keyword.get(opts, :seed, :rand.uniform(1_000_000_000))
-    injector_adapters = Keyword.get(opts, :injector_adapters, [])
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
-    shrink = Keyword.get(opts, :shrink, true)
-    shrinker_config = Keyword.get(opts, :shrinker_config, ShrinkerConfig.new())
+    model = opts[:model]
+    adapter = opts[:adapter]
+    max_commands = opts[:max_commands]
+    max_runs = opts[:max_runs]
+    seed = opts[:seed] || :rand.uniform(1_000_000_000)
+    injector_adapters = opts[:injector_adapters]
+    adapter_config = opts[:adapter_config]
+    shrink = opts[:shrink]
+    shrinker_config = opts[:shrinker_config] || ShrinkerConfig.new()
     on_failure = build_on_failure_callback(opts)
-    verbose = Keyword.get(opts, :verbose, false)
-    validate = Keyword.get(opts, :validate, true)
-    branching = Keyword.get(opts, :branching)
-    stutter_config = Stutter.parse_config(Keyword.get(opts, :stutter))
+    verbose = opts[:verbose]
+    validate = opts[:validate]
+    branching = opts[:branching]
+    stutter_config = Stutter.parse_config(opts[:stutter])
 
     # Validate configuration
     if validate do
