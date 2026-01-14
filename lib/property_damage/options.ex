@@ -279,6 +279,20 @@ defmodule PropertyDamage.Options do
       doc:
         "Maximum pending arrivals to queue when pool is exhausted. Excess arrivals are dropped."
     ],
+    pool_size: [
+      type: :pos_integer,
+      doc: """
+      Number of workers in the pool. Each worker holds a persistent adapter context
+      and executes command sequences.
+
+      By default, pool size is auto-calculated as `min(arrival_rate * 2, 500)` with
+      a minimum of 10. Override this when:
+
+      - Commands are slow (>100ms avg) and you're seeing drops at low arrival rates
+      - You need to limit concurrency to avoid overwhelming the SUT
+      - Testing connection pool behavior under specific worker counts
+      """
+    ],
     ramp_up: [
       type: {:custom, __MODULE__, :validate_ramp_strategy, []},
       default: :immediate,

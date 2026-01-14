@@ -70,6 +70,7 @@ Report.save(report, "load_test_report.md", :markdown)
 | Option | Description | Default |
 |--------|-------------|---------|
 | `adapter_config` | Adapter configuration | `%{}` |
+| `pool_size` | Number of workers (see below) | auto |
 | `ramp_up` | How to ramp up to target rate | `:immediate` |
 | `ramp_down` | How to ramp down at end | `:immediate` |
 | `think_time` | `{min_ms, max_ms}` between commands | `{0, 0}` |
@@ -194,24 +195,43 @@ When arrivals are being dropped or throughput is lower than expected:
 
 ### 1. Increase Pool Size
 
-The pool size auto-calculates as `min(arrival_rate * 2, 500)`. If your
-commands are slow, you may need more workers:
+By default, pool size auto-calculates as `min(arrival_rate * 2, 500)` with
+a minimum of 10 workers. Override this with the `pool_size` option:
 
 ```elixir
-# Pool size is auto-calculated, but you can influence it
-# by understanding the formula:
-# pool_size = min(round(rate_per_sec * 2), 500)
-
-# For 100 arrivals/sec with 200ms average command time:
-# You need at least 100 * 0.2 = 20 workers minimum
-# Auto-calc gives: min(100 * 2, 500) = 200 workers
+Runner.start_link(
+  arrival_rate: 50,
+  duration: {5, :minutes},
+  pool_size: 200,  # Override auto-calculated value
+  # ...
+)
 ```
 
-If you're seeing drops with the auto-calculated size, your commands may be
-taking longer than expected. Profile command latency and consider:
-- Optimizing SUT response times
-- Using connection pooling in your adapter
-- Reducing the arrival rate
+**When to increase pool size:**
+
+- Commands are slow (>100ms average) and you're seeing drops
+- The SUT can handle more concurrent requests than the default allows
+- You need to stress test connection pooling behavior
+
+**When to decrease pool size:**
+
+- You want to limit concurrency to avoid overwhelming the SUT
+- Testing how the system behaves under resource constraints
+- Simulating a fixed number of concurrent users
+
+**Sizing guidance:**
+
+```
+Required workers ≥ arrival_rate × avg_command_latency_seconds
+
+Example: 50 arrivals/sec with 200ms avg latency
+  → 50 × 0.2 = 10 workers minimum
+  → Auto-calc gives: min(50 × 2, 500) = 100 workers (plenty of headroom)
+
+Example: 50 arrivals/sec with 2s avg latency (slow commands)
+  → 50 × 2 = 100 workers minimum
+  → Auto-calc gives: 100 workers (borderline - consider pool_size: 150)
+```
 
 ### 2. Increase max_queue_size
 

@@ -169,10 +169,17 @@ defmodule PropertyDamage.LoadTest.Runner do
     # Start metrics collector
     {:ok, metrics} = Metrics.start_link()
 
-    # Calculate pool size based on rate
-    rate_per_sec = RampStrategy.rate_to_per_second(arrival_rate)
-    pool_size = min(round(rate_per_sec * @pool_size_multiplier), @max_pool_size)
-    pool_size = max(pool_size, 10)
+    # Use configured pool size or auto-calculate based on rate
+    pool_size =
+      case opts[:pool_size] do
+        nil ->
+          rate_per_sec = RampStrategy.rate_to_per_second(arrival_rate)
+          calculated = min(round(rate_per_sec * @pool_size_multiplier), @max_pool_size)
+          max(calculated, 10)
+
+        configured ->
+          configured
+      end
 
     # Start worker pool
     case WorkerPool.start_link(
