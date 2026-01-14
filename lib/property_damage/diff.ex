@@ -424,7 +424,7 @@ defmodule PropertyDamage.Diff do
 
         state_changes =
           state_diffs
-          |> Enum.filter(&(&1.command_index == divergence_index && &1.status != :same))
+          |> Enum.filter(&(&1.command_index == divergence_index and &1.status != :same))
           |> length()
 
         state_summary =
@@ -465,13 +465,13 @@ defmodule PropertyDamage.Diff do
     # Event differences
     event_section =
       diff.event_diffs
-      |> Enum.filter(fn d -> show_same || d.status != :same end)
+      |> Enum.filter(fn d -> show_same or d.status != :same end)
       |> format_event_diffs_terminal(max_len)
 
     # State differences
     state_section =
       diff.state_diffs
-      |> Enum.filter(fn d -> show_same || d.status != :same end)
+      |> Enum.filter(fn d -> show_same or d.status != :same end)
       |> format_state_diffs_terminal(max_len)
 
     header <> summary <> event_section <> state_section
@@ -561,12 +561,12 @@ defmodule PropertyDamage.Diff do
 
     event_section =
       diff.event_diffs
-      |> Enum.filter(fn d -> show_same || d.status != :same end)
+      |> Enum.filter(fn d -> show_same or d.status != :same end)
       |> format_event_diffs_markdown(max_len)
 
     state_section =
       diff.state_diffs
-      |> Enum.filter(fn d -> show_same || d.status != :same end)
+      |> Enum.filter(fn d -> show_same or d.status != :same end)
       |> format_state_diffs_markdown(max_len)
 
     header <> summary <> event_section <> state_section
