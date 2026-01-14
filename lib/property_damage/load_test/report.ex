@@ -65,8 +65,8 @@ defmodule PropertyDamage.LoadTest.Report do
     m = report.metrics
 
     """
-    Load Test Summary: #{format_number(m.total_requests)} requests in #{format_duration(m.duration_ms)}
-    Throughput: #{format_float(m.requests_per_second)} RPS
+    Load Test Summary: #{format_number(m.total_requests)} commands in #{format_duration(m.duration_ms)}
+    Throughput: #{format_float(m.requests_per_second)} cmd/sec
     Latency: p50=#{format_float(m.latency_p50)}ms, p95=#{format_float(m.latency_p95)}ms, p99=#{format_float(m.latency_p99)}ms
     Errors: #{m.total_errors} (#{format_float(m.error_rate)}%)
     #{format_assertion_summary_line(m)}
@@ -127,8 +127,8 @@ defmodule PropertyDamage.LoadTest.Report do
 
     """
     ┌─ Throughput ─────────────────────────────────────────────────────────┐
-    │ Total Requests:    #{String.pad_trailing(format_number(metrics.total_requests), 48)}│
-    │ Requests/Second:   #{String.pad_trailing(format_float(metrics.requests_per_second), 48)}│
+    │ Total Commands:    #{String.pad_trailing(format_number(metrics.total_requests), 48)}│
+    │ Commands/Second:   #{String.pad_trailing(format_float(metrics.requests_per_second), 48)}│
     │ Arrivals Spawned:  #{String.pad_trailing(format_number(arrivals_spawned), 48)}│
     │ Arrivals/Second:   #{String.pad_trailing(format_float(arrivals_per_second), 48)}│
     │ Arrivals Dropped:  #{String.pad_trailing(format_number(arrivals_dropped) <> " (" <> format_float(drop_rate) <> "%)", 48)}│
@@ -342,8 +342,8 @@ defmodule PropertyDamage.LoadTest.Report do
 
     ## Summary
 
-    - **Total Requests:** #{format_number(m.total_requests)}
-    - **Throughput:** #{format_float(m.requests_per_second)} requests/second
+    - **Total Commands:** #{format_number(m.total_requests)}
+    - **Throughput:** #{format_float(m.requests_per_second)} commands/second
     - **Arrivals Spawned:** #{format_number(arrivals_spawned)}
     - **Arrivals Dropped:** #{format_number(arrivals_dropped)} (#{format_float(drop_rate)}%)
     - **Error Rate:** #{format_float(m.error_rate)}%

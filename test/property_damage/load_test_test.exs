@@ -386,7 +386,7 @@ defmodule PropertyDamage.LoadTestTest do
       output = Report.format(report, :markdown)
 
       assert String.contains?(output, "# PropertyDamage Load Test Report")
-      assert String.contains?(output, "**Total Requests:**")
+      assert String.contains?(output, "**Total Commands:**")
       assert String.contains?(output, "10,000")
     end
 
@@ -401,8 +401,8 @@ defmodule PropertyDamage.LoadTestTest do
     test "generates summary", %{report: report} do
       summary = Report.summary(report)
 
-      assert String.contains?(summary, "10,000 requests")
-      assert String.contains?(summary, "500.00 RPS")
+      assert String.contains?(summary, "10,000 commands")
+      assert String.contains?(summary, "500.00 cmd/sec")
     end
   end
 
