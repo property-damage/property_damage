@@ -40,7 +40,10 @@ defmodule PropertyDamage.GeneratorTest do
         |> StreamData.fixed_map()
         |> Enum.take(10)
 
-      assert Enum.all?(generated, fn g -> g.amount >= 100 and g.amount <= 200 end)
+      for g <- generated do
+        assert g.amount >= 100 and g.amount <= 200,
+               "expected amount #{g.amount} to be between 100-200"
+      end
     end
 
     test "preserves base generators when no override provided" do

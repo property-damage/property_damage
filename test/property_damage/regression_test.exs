@@ -322,7 +322,10 @@ defmodule PropertyDamage.RegressionTest do
       results = Regression.process_batch(failures, save_failures: tmp_dir)
 
       assert length(results) == 3
-      assert Enum.all?(results, &(!&1.skipped))
+
+      for result <- results do
+        refute result.skipped, "expected result not to be skipped: #{inspect(result)}"
+      end
     end
 
     @tag :tmp_dir

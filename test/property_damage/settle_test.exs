@@ -184,7 +184,10 @@ defmodule PropertyDamage.SettleTest do
           |> Enum.map(fn [a, b] -> b - a end)
 
         # All intervals should be close to 20ms
-        assert Enum.all?(intervals, fn i -> i >= 15 and i <= 40 end)
+        for interval <- intervals do
+          assert interval >= 15 and interval <= 40,
+                 "expected interval #{interval}ms to be between 15-40ms"
+        end
       end
     end
 

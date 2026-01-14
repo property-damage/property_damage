@@ -392,7 +392,11 @@ defmodule PropertyDamage.SuggestionsTest do
       high = Suggestions.high_priority(analysis)
 
       assert length(high) == 2
-      assert Enum.all?(high, &(&1.priority == :high))
+
+      for suggestion <- high do
+        assert suggestion.priority == :high,
+               "expected high priority, got: #{inspect(suggestion)}"
+      end
     end
   end
 
@@ -410,7 +414,11 @@ defmodule PropertyDamage.SuggestionsTest do
       balance_suggestions = Suggestions.for_field(analysis, :balance)
 
       assert length(balance_suggestions) == 2
-      assert Enum.all?(balance_suggestions, &(&1.field == :balance))
+
+      for suggestion <- balance_suggestions do
+        assert suggestion.field == :balance,
+               "expected field :balance, got: #{inspect(suggestion)}"
+      end
     end
   end
 
@@ -427,7 +435,11 @@ defmodule PropertyDamage.SuggestionsTest do
       account_suggestions = Suggestions.for_event(analysis, TestEvents.AccountCreated)
 
       assert length(account_suggestions) == 2
-      assert Enum.all?(account_suggestions, &(&1.event == TestEvents.AccountCreated))
+
+      for suggestion <- account_suggestions do
+        assert suggestion.event == TestEvents.AccountCreated,
+               "expected event TestEvents.AccountCreated, got: #{inspect(suggestion)}"
+      end
     end
   end
 

@@ -49,7 +49,10 @@ defmodule PropertyDamage.LinearizationTest do
       assert length(result) == 3
 
       # Each linearization should have 3 commands
-      assert Enum.all?(result, &(length(&1) == 3))
+      for linearization <- result do
+        assert length(linearization) == 3,
+               "expected 3 commands, got #{length(linearization)}"
+      end
 
       # a1 should come before a2 in all orderings
       for lin <- result do

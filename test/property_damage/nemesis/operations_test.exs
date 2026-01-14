@@ -109,7 +109,11 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       partition_types = Enum.map(commands, & &1.partition_type) |> Enum.uniq()
       assert length(partition_types) > 1
-      assert Enum.all?(partition_types, &(&1 in [:full, :upstream, :downstream, :asymmetric]))
+
+      for type <- partition_types do
+        assert type in [:full, :upstream, :downstream, :asymmetric],
+               "unexpected partition type: #{inspect(type)}"
+      end
     end
   end
 
@@ -215,7 +219,10 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
       {:ok, _} = CPUStress.inject(command, %{})
 
       pids = Process.get(:nemesis_cpu_pids)
-      assert Enum.all?(pids, &Process.alive?/1)
+
+      for pid <- pids do
+        assert Process.alive?(pid), "expected process #{inspect(pid)} to be alive"
+      end
 
       {:ok, events} = CPUStress.restore(command, %{})
 
@@ -568,7 +575,10 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
       assert length(failure_types) > 1
 
       valid_types = [:expired, :not_yet_valid, :wrong_host, :self_signed, :revoked]
-      assert Enum.all?(failure_types, &(&1 in valid_types))
+
+      for type <- failure_types do
+        assert type in valid_types, "unexpected failure type: #{inspect(type)}"
+      end
     end
   end
 

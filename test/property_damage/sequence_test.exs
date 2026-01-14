@@ -255,10 +255,15 @@ defmodule PropertyDamage.SequenceTest do
       assert length(linearizations) == 3
 
       # All should be linear
-      assert Enum.all?(linearizations, &Sequence.linear?/1)
+      for lin <- linearizations do
+        assert Sequence.linear?(lin), "expected linear sequence: #{inspect(lin)}"
+      end
 
       # Each should have 3 commands
-      assert Enum.all?(linearizations, &(Sequence.command_count(&1) == 3))
+      for lin <- linearizations do
+        assert Sequence.command_count(lin) == 3,
+               "expected 3 commands, got #{Sequence.command_count(lin)}"
+      end
     end
 
     test "preserves order within branches" do
