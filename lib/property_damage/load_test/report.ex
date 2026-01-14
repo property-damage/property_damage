@@ -156,7 +156,7 @@ defmodule PropertyDamage.LoadTest.Report do
       end
 
     """
-    ┌─ Errors ─────────────────────────────────────────────────────────────┐
+    ┌─ Execution Errors ───────────────────────────────────────────────────┐
     │ Total:       #{String.pad_trailing(to_string(metrics.total_errors), 55)}│
     │ Error Rate:  #{String.pad_trailing(format_float(metrics.error_rate) <> "%", 55)}│
     │ By Type:     #{String.pad_trailing(error_details, 55)}│
@@ -188,7 +188,7 @@ defmodule PropertyDamage.LoadTest.Report do
       failure_rate = Map.get(metrics, :assertion_failure_rate, 0.0)
 
       """
-      ┌─ Assertions ─────────────────────────────────────────────────────────┐
+      ┌─ Assertion Failures ─────────────────────────────────────────────────┐
       │ Total Failures:  #{String.pad_trailing(to_string(failures), 51)}│
       │ Failure Rate:    #{String.pad_trailing(format_float(failure_rate) <> "%", 51)}│
       │ By Exception:    #{String.pad_trailing(failure_details, 51)}│
@@ -361,7 +361,7 @@ defmodule PropertyDamage.LoadTest.Report do
     | Maximum | #{format_float(m.latency_max)} |
     | Mean | #{format_float(m.latency_mean)} |
 
-    ## Errors
+    ## Execution Errors
 
     - **Total Errors:** #{m.total_errors}
     #{format_errors_markdown(m.errors_by_type)}
@@ -459,7 +459,7 @@ defmodule PropertyDamage.LoadTest.Report do
         end
 
       """
-      ## Assertions
+      ## Assertion Failures
 
       - **Total Failures:** #{failures}
       - **Failure Rate:** #{format_float(failure_rate)}%
