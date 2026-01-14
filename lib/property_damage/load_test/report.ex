@@ -256,10 +256,14 @@ defmodule PropertyDamage.LoadTest.Report do
         ""
 
       stats ->
+        peak_util = Map.get(stats, :peak_utilization, stats.utilization)
+        avg_util = Map.get(stats, :avg_utilization, stats.utilization)
+
         """
         ┌─ Worker Pool ────────────────────────────────────────────────────────┐
         │ Pool Size:       #{String.pad_trailing(to_string(stats.size), 51)}│
-        │ Utilization:     #{String.pad_trailing(format_float(stats.utilization * 100) <> "%", 51)}│
+        │ Peak Utilization: #{String.pad_trailing(format_float(peak_util * 100) <> "%", 50)}│
+        │ Avg Utilization: #{String.pad_trailing(format_float(avg_util * 100) <> "%", 51)}│
         │ Total Checkouts: #{String.pad_trailing(format_number(stats.total_checkouts), 51)}│
         │ Avg Queue Time:  #{String.pad_trailing(format_float(stats.avg_queue_time_ms) <> "ms", 51)}│
         └──────────────────────────────────────────────────────────────────────┘
@@ -477,13 +481,17 @@ defmodule PropertyDamage.LoadTest.Report do
         ""
 
       stats ->
+        peak_util = Map.get(stats, :peak_utilization, stats.utilization)
+        avg_util = Map.get(stats, :avg_utilization, stats.utilization)
+
         """
         ## Worker Pool
 
         | Metric | Value |
         |--------|-------|
         | Pool Size | #{stats.size} |
-        | Utilization | #{format_float(stats.utilization * 100)}% |
+        | Peak Utilization | #{format_float(peak_util * 100)}% |
+        | Avg Utilization | #{format_float(avg_util * 100)}% |
         | Total Checkouts | #{format_number(stats.total_checkouts)} |
         | Avg Queue Time | #{format_float(stats.avg_queue_time_ms)}ms |
         """

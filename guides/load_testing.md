@@ -162,19 +162,21 @@ If `Total Commands >> Arrivals Spawned`, sequences run multiple commands.
 ```
 ┌─ Worker Pool ────────────────────────────────────────────────────────┐
 │ Pool Size:       100                                                 │
-│ Utilization:     0.00%                                               │
+│ Peak Utilization: 85.00%                                             │
+│ Avg Utilization: 62.34%                                              │
 │ Total Checkouts: 3,048                                               │
 │ Avg Queue Time:  12.34ms                                             │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Pool Size**: Number of workers available
-- **Utilization**: Percentage of workers in use (snapshot at report time)
+- **Peak Utilization**: Maximum utilization seen during the test
+- **Avg Utilization**: Average utilization across all checkout attempts
 - **Total Checkouts**: How many times workers were borrowed
 - **Avg Queue Time**: How long arrivals waited for a worker
 
-Note: Utilization shows 0% at test end because all workers are returned.
-Check the throughput chart for runtime utilization patterns.
+High peak utilization (>90%) with drops suggests the pool is undersized.
+High average utilization (>70%) indicates sustained load on the pool.
 
 ### Latency Section
 
@@ -319,7 +321,8 @@ status = Runner.status(runner)
 |---------|--------------|----------|
 | High drop rate (>10%) | Pool saturation | Increase pool size or lower arrival rate |
 | Commands ≈ Arrivals | Early termination | Check `terminate?/3` returns `false` initially |
-| 0% utilization | Snapshot timing | Normal - check history for runtime patterns |
+| Peak util 100%, avg util low | Bursty traffic | Increase pool size or add ramp-up |
+| Peak and avg util both high | Sustained overload | Increase pool size significantly |
 | High avg queue time | Pool undersized | Increase pool size |
 | Low arrivals/sec vs target | Ramp-up or drops | Check ramp config and drop rate |
 | Latency spikes | SUT bottleneck | Profile SUT, check for resource contention |

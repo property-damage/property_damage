@@ -64,7 +64,11 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     :total_checkouts,
     :total_checkins,
     :total_dropped,
-    :total_queue_time_ms
+    :total_queue_time_ms,
+    # Utilization tracking
+    :peak_in_use,
+    :utilization_samples,
+    :utilization_sum
   ]
 
   @type t :: %__MODULE__{}
@@ -165,7 +169,10 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
       total_checkouts: 0,
       total_checkins: 0,
       total_dropped: 0,
-      total_queue_time_ms: 0
+      total_queue_time_ms: 0,
+      peak_in_use: 0,
+      utilization_samples: 0,
+      utilization_sum: 0.0
     }
 
     # Start workers
@@ -186,11 +193,18 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     case :queue.out(state.available) do
       {{:value, worker}, rest} ->
         # Worker available immediately
+        new_in_use = MapSet.put(state.in_use, worker)
+        in_use_count = MapSet.size(new_in_use)
+        utilization = in_use_count / max(state.size, 1)
+
         new_state = %{
           state
           | available: rest,
-            in_use: MapSet.put(state.in_use, worker),
-            total_checkouts: state.total_checkouts + 1
+            in_use: new_in_use,
+            total_checkouts: state.total_checkouts + 1,
+            peak_in_use: max(state.peak_in_use, in_use_count),
+            utilization_samples: state.utilization_samples + 1,
+            utilization_sum: state.utilization_sum + utilization
         }
 
         {:reply, {:ok, worker}, new_state}
@@ -207,10 +221,26 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
           # Schedule timeout check
           Process.send_after(self(), {:checkout_timeout, from}, timeout)
 
-          {:noreply, %{state | waiting: new_waiting}}
+          # Pool is at 100% utilization when queueing
+          new_state = %{
+            state
+            | waiting: new_waiting,
+              peak_in_use: max(state.peak_in_use, state.size),
+              utilization_samples: state.utilization_samples + 1,
+              utilization_sum: state.utilization_sum + 1.0
+          }
+
+          {:noreply, new_state}
         else
-          # Queue full - drop the arrival
-          new_state = %{state | total_dropped: state.total_dropped + 1}
+          # Queue full - drop the arrival (also 100% utilization)
+          new_state = %{
+            state
+            | total_dropped: state.total_dropped + 1,
+              peak_in_use: max(state.peak_in_use, state.size),
+              utilization_samples: state.utilization_samples + 1,
+              utilization_sum: state.utilization_sum + 1.0
+          }
+
           {:reply, {:error, :pool_exhausted}, new_state}
         end
     end
@@ -222,6 +252,15 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     in_use_count = MapSet.size(state.in_use)
     queue_depth = :queue.len(state.waiting)
 
+    avg_utilization =
+      if state.utilization_samples > 0 do
+        state.utilization_sum / state.utilization_samples
+      else
+        0.0
+      end
+
+    peak_utilization = state.peak_in_use / max(state.size, 1)
+
     stats = %{
       size: state.size,
       available: available_count,
@@ -229,6 +268,8 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
       queue_depth: queue_depth,
       max_queue_size: state.max_queue_size,
       utilization: in_use_count / max(state.size, 1),
+      peak_utilization: peak_utilization,
+      avg_utilization: avg_utilization,
       total_checkouts: state.total_checkouts,
       total_checkins: state.total_checkins,
       total_dropped: state.total_dropped,
