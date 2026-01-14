@@ -154,7 +154,6 @@ defmodule PropertyDamage.LoadTest.Report do
     """
   end
 
-
   defp terminal_assertions(metrics) do
     failures = Map.get(metrics, :assertion_failures, 0)
     failures_by_exception = Map.get(metrics, :failures_by_exception, %{})
@@ -187,6 +186,7 @@ defmodule PropertyDamage.LoadTest.Report do
       """
     end
   end
+
   defp terminal_commands(metrics) do
     if map_size(metrics.by_command) == 0 do
       ""
@@ -392,8 +392,11 @@ defmodule PropertyDamage.LoadTest.Report do
 
   defp format_assertion_summary_line(metrics) do
     case Map.get(metrics, :assertion_failures, 0) do
-      0 -> ""
-      failures -> "Assertions: #{failures} failures (#{format_float(metrics.assertion_failure_rate)}%)"
+      0 ->
+        ""
+
+      failures ->
+        "Assertions: #{failures} failures (#{format_float(metrics.assertion_failure_rate)}%)"
     end
   end
 

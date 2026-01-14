@@ -289,7 +289,7 @@ defmodule PropertyDamage.Mutation.Formatter do
 
   defp format_mutation_short(mutation) do
     case mutation do
-      %{target: target, original: original, mutated: mutated} when not is_nil(target) ->
+      %{target: target, original: original, mutated: mutated} when is_atom(target) ->
         "#{target}: #{inspect(original)} → #{inspect(mutated)}"
 
       %{type: type, description: desc} when is_binary(desc) ->

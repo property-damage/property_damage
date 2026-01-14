@@ -526,7 +526,7 @@ defmodule PropertyDamage.Livebook do
   end
 
   defp format_state_change(%{model_state_before: before, model_state_after: after_state})
-       when not is_nil(before) and not is_nil(after_state) do
+       when is_map(before) and is_map(after_state) do
     """
     <details>
     <summary>State Change</summary>
@@ -568,7 +568,7 @@ defmodule PropertyDamage.Livebook do
     Kino.Markdown.new(md)
   end
 
-  defp format_failed_command(%{failed_command: cmd}) when not is_nil(cmd) do
+  defp format_failed_command(%{failed_command: cmd}) when is_map(cmd) do
     """
     ```elixir
     #{inspect(cmd, pretty: true)}
@@ -600,7 +600,7 @@ defmodule PropertyDamage.Livebook do
   defp format_failure_sequence(_), do: "*Not available*"
 
   defp shrinking_info_section(%{shrunk_sequence: seq, shrink_info: info})
-       when not is_nil(seq) and not is_nil(info) do
+       when is_list(seq) and is_map(info) do
     """
     ### Shrinking
 
@@ -648,7 +648,7 @@ defmodule PropertyDamage.Livebook do
     Kino.Markdown.new(md)
   end
 
-  defp format_diff_details(%{diff: diff}) when not is_nil(diff) do
+  defp format_diff_details(%{diff: diff}) when is_binary(diff) do
     """
     ### Differences
 
@@ -701,7 +701,7 @@ defmodule PropertyDamage.Livebook do
 
   defp format_step_events(_), do: ""
 
-  defp format_step_state(%{model_state_after: state}) when not is_nil(state) do
+  defp format_step_state(%{model_state_after: state}) when is_map(state) do
     """
     **State After:**
     ```elixir
