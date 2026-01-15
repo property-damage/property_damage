@@ -52,14 +52,14 @@ defmodule MyApp.ChaosModel do
   def commands do
     [
       # Regular operations (higher weights)
-      {5, CreateOrder},
-      {3, ProcessOrder},
-      {2, CancelOrder},
+      {CreateOrder, weight: 5},
+      {ProcessOrder, weight: 3},
+      {CancelOrder, weight: 2},
 
       # Nemesis operations (lower weights = occasional faults)
-      {1, NetworkLatency},
-      {1, NetworkPartition},
-      {1, CertificateExpiry}
+      {NetworkLatency, weight: 1},
+      {NetworkPartition, weight: 1},
+      {CertificateExpiry, weight: 1}
     ]
   end
 
@@ -73,7 +73,7 @@ Create a projection that tracks active faults:
 
 ```elixir
 defmodule MyApp.Projections.NemesisInvariants do
-  @behaviour PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   @impl true
   def init do
@@ -95,14 +95,9 @@ defmodule MyApp.Projections.NemesisInvariants do
 
   def apply(state, _), do: state
 
-  def __checks__ do
-    [
-      # Verify all faults were cleaned up
-      %{name: :no_orphaned_faults, trigger: :end_of_sequence, sample: 1}
-    ]
-  end
-
-  def check(:no_orphaned_faults, state, _ctx) do
+  # Verify all faults were cleaned up
+  @trigger at: :end_of_sequence
+  def assert_no_orphaned_faults(state, _cmd_or_event) do
     if map_size(state.active_faults) == 0 do
       :ok
     else
@@ -346,7 +341,8 @@ end
 Some invariants don't apply during faults. Adjust checks accordingly:
 
 ```elixir
-def check(:response_time_sla, state, _ctx) do
+@trigger every: 1
+def assert_response_time_sla(state, _cmd_or_event) do
   # Don't check SLA during network partition
   if has_active_fault?(state, :network_partition) do
     :ok
@@ -359,7 +355,8 @@ def check(:response_time_sla, state, _ctx) do
   end
 end
 
-def check(:all_requests_succeed, state, _ctx) do
+@trigger every: 1
+def assert_all_requests_succeed(state, _cmd_or_event) do
   # Allow failures during certificate issues
   if has_active_fault?(state, :certificate_expiry) do
     :ok
@@ -423,16 +420,16 @@ defmodule TravelBooking.ChaosModel do
   def commands do
     [
       # Regular operations (70-80% of commands)
-      {5, CreateBooking},
-      {4, AddFlight},
-      {4, AddHotel},
-      {2, ConfirmBooking},
+      {CreateBooking, weight: 5},
+      {AddFlight, weight: 4},
+      {AddHotel, weight: 4},
+      {ConfirmBooking, weight: 2},
 
       # Nemesis operations (20-30% of commands)
-      {1, InjectLatency},
-      {1, InjectProviderError},
-      {1, InjectCertificateFailure},
-      {1, InjectPartialFailure}
+      {InjectLatency, weight: 1},
+      {InjectProviderError, weight: 1},
+      {InjectCertificateFailure, weight: 1},
+      {InjectPartialFailure, weight: 1}
     ]
   end
 
@@ -440,7 +437,7 @@ defmodule TravelBooking.ChaosModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections do
+  def extra_projections do
     [
       BookingInvariants,
       NemesisInvariants

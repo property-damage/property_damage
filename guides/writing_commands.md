@@ -74,6 +74,7 @@ The Model wires this command with state:
 ```elixir
 defmodule MyTest.OrderModel do
   @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
   def commands do
     [
@@ -84,7 +85,10 @@ defmodule MyTest.OrderModel do
     ]
   end
 
-  # simulate/2 defines expected events
+  # Return self as the simulator module
+  def simulator, do: __MODULE__
+
+  # simulate/2 defines expected events (Simulator behaviour)
   def simulate(%ViewOrder{order_ref: ref}, state) do
     if Map.has_key?(state.orders, ref) do
       [%OrderViewed{order_ref: ref}]
@@ -127,24 +131,38 @@ end
 
 ### Simulate Callback
 
-Models implement `simulate/2` to define expected events:
+Models that need symbolic execution implement the `PropertyDamage.Model.Simulator` behaviour
+and return themselves (or a delegate module) via `simulator/0`:
 
 ```elixir
-@impl true
-def simulate(%CreateOrder{amount: amount}, _state) do
-  [%OrderCreated{amount: amount, order_ref: nil}]
-end
+defmodule MyTest.OrderModel do
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
-def simulate(%CancelOrder{order_ref: ref}, state) do
-  if Map.has_key?(state.orders, ref) do
-    [%OrderCancelled{order_ref: ref}]
-  else
-    [%OrderNotFound{order_ref: ref}]
+  def commands, do: [CreateOrder, CancelOrder]
+  def state_projection, do: MyTest.OrderProjection
+  def extra_projections, do: []
+
+  # Return self as the simulator module
+  def simulator, do: __MODULE__
+
+  # Simulator behaviour callback
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%CreateOrder{amount: amount}, _state) do
+    [%OrderCreated{amount: amount, order_ref: nil}]
   end
-end
 
-# Catch-all for commands with no events
-def simulate(_command, _state), do: []
+  def simulate(%CancelOrder{order_ref: ref}, state) do
+    if Map.has_key?(state.orders, ref) do
+      [%OrderCancelled{order_ref: ref}]
+    else
+      [%OrderNotFound{order_ref: ref}]
+    end
+  end
+
+  # Catch-all for commands with no events
+  def simulate(_command, _state), do: []
+end
 ```
 
 ## Managing Model Verbosity
@@ -157,6 +175,9 @@ Factor wiring functions into a helper module:
 
 ```elixir
 defmodule MyTest.OrderModel do
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
+
   alias MyTest.CommandWiring
   alias MyTest.Simulation
 
@@ -168,6 +189,13 @@ defmodule MyTest.OrderModel do
     ]
   end
 
+  def state_projection, do: MyTest.OrderProjection
+  def extra_projections, do: []
+
+  # Return self as the simulator (delegates to Simulation module)
+  def simulator, do: __MODULE__
+
+  # Delegate simulate/2 to helper module
   defdelegate simulate(command, state), to: Simulation
 end
 
@@ -195,6 +223,9 @@ defmodule MyTest.CommandWiring do
 end
 
 defmodule MyTest.Simulation do
+  @behaviour PropertyDamage.Model.Simulator
+
+  @impl true
   def simulate(%CreateOrder{amount: amount}, _state) do
     [%OrderCreated{amount: amount, order_ref: nil}]
   end
@@ -355,5 +386,5 @@ def semantics, do: :probe  # For read operations that may need retry/settle
 | Metadata | Command (optional callbacks) |
 | When to enable | Model (`when:` option) |
 | State-dependent params | Model (`with:` option) |
-| Expected events | Model (`simulate/2`) |
+| Expected events | Simulator (`simulate/2` via `simulator/0`) |
 | State shape | Model's projection |

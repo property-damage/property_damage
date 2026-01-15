@@ -2,23 +2,23 @@ defmodule PropertyDamage.Adapter.Injector do
   @moduledoc """
   Behaviour for adapters that receive and inject external events.
 
-  InjectorAdapters handle asynchronous event sources like webhooks, callbacks,
+  Adapter.Injector modules handle asynchronous event sources like webhooks, callbacks,
   message queues, or any external system that pushes events into the test.
   They transform incoming payloads into domain events and push them to the
   shared EventQueue for processing.
 
   ## Direction of Event Flow
 
-  Unlike Adapter (which executes commands → produces events), InjectorAdapter
+  Unlike Adapter (which executes commands → produces events), Adapter.Injector
   receives external events → transforms → pushes to EventQueue:
 
   ```
-  External System → InjectorAdapter.to_event/1 → EventQueue → Executor
+  External System → Adapter.Injector.to_event/1 → EventQueue → Executor
   ```
 
   ## Lifecycle
 
-  InjectorAdapters follow a similar lifecycle to Adapters:
+  Adapter.Injector modules follow a similar lifecycle to Adapters:
 
   1. `setup/1` - Start listening (webhooks, subscriptions, etc.)
   2. External events arrive → `to_event/1` → `EventQueue.push/3`

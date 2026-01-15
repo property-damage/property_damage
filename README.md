@@ -88,7 +88,7 @@ Projections maintain state by processing events:
 
 ```elixir
 defmodule MyApp.Projections.Users do
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   def init, do: %{}
 
@@ -103,11 +103,11 @@ end
 
 ### 3. Define Assertions (Invariants)
 
-Assertions verify that invariants hold after each command. Use `Projection` to define assertions with optional state tracking:
+Assertions verify that invariants hold after each command. Use `Model.Projection` to define assertions with optional state tracking:
 
 ```elixir
 defmodule MyApp.Assertions.UniqueEmails do
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   # Track users state (optional - defaults to %{})
   def init, do: %{users: %{}}
@@ -120,7 +120,7 @@ defmodule MyApp.Assertions.UniqueEmails do
 
   # Assert unique emails after every step
   @trigger every: 1
-  def assert(:unique_emails, state, _cmd_or_event) do
+  def assert_unique_emails(state, _cmd_or_event) do
     emails = Map.values(state.users) |> Enum.map(& &1.email)
     unless length(emails) == length(Enum.uniq(emails)) do
       PropertyDamage.fail!("Duplicate emails found", emails: emails)
@@ -133,11 +133,11 @@ For simpler assertions that don't need state tracking, you can skip `init/0` and
 
 ```elixir
 defmodule MyApp.Assertions.ValidEmails do
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   # Just define assertions - defaults are injected
   @trigger every: CreateUser
-  def assert(:valid_email, _state, %CreateUser{email: email}) do
+  def assert_valid_email(_state, %CreateUser{email: email}) do
     unless String.contains?(email, "@") do
       PropertyDamage.fail!("Invalid email", email: email)
     end
@@ -156,9 +156,9 @@ defmodule MyApp.TestModel do
   @impl true
   def commands do
     [
-      {10, MyApp.Commands.CreateUser},
-      {5, MyApp.Commands.UpdateUser},
-      {3, MyApp.Commands.DeleteUser}
+      {MyApp.Commands.CreateUser, weight: 10},
+      {MyApp.Commands.UpdateUser, weight: 5},
+      {MyApp.Commands.DeleteUser, weight: 3}
     ]
   end
 
@@ -535,12 +535,13 @@ defmodule MyModel do
   @behaviour PropertyDamage.Model
 
   # Required
-  def commands, do: [{weight, CommandModule}, ...]
+  def commands, do: [{CommandModule, weight: N}, ...]
   def state_projection, do: MyStateProjection
   def extra_projections, do: [MyExtraProjection, ...]  # Optional
 
   # Optional
-  def injectable_events, do: []  # For InjectorAdapter
+  def injectable_events, do: []  # For Adapter.Injector
+  def simulator, do: MySimulatorModule  # Returns module implementing Simulator behaviour
   def setup_once(config), do: :ok
   def setup_each(config), do: :ok  # Called before each run/shrink attempt
   def teardown_each(config), do: :ok
@@ -702,7 +703,7 @@ end
 ```
 
 See [Async and Eventual Consistency Guide](guides/async_and_eventual_consistency.md)
-for complete documentation including bridge commands, InjectorAdapters, and
+for complete documentation including bridge commands, `Adapter.Injector`, and
 handling async operations that require polling.
 
 ## Fault Injection (Nemesis)
@@ -746,10 +747,10 @@ Add nemesis commands with lower weights:
 ```elixir
 def commands do
   [
-    {5, CreateOrder},
-    {3, ProcessPayment},
-    {1, PartitionNetwork},   # Fault injection
-    {1, InjectLatency}
+    {CreateOrder, weight: 5},
+    {ProcessPayment, weight: 3},
+    {PartitionNetwork, weight: 1},   # Fault injection
+    {InjectLatency, weight: 1}
   ]
 end
 ```
@@ -772,8 +773,8 @@ alias PropertyDamage.Nemesis.NetworkLatency
 
 def commands do
   [
-    {5, CreateOrder},
-    {1, NetworkLatency}  # Uses defaults: 100ms latency, 5s duration
+    {CreateOrder, weight: 5},
+    {NetworkLatency, weight: 1}  # Uses defaults: 100ms latency, 5s duration
   ]
 end
 
@@ -894,7 +895,7 @@ context = %{
 
 ```elixir
 @trigger every: 1
-def assert(:latency_sla, state, _cmd_or_event) do
+def assert_latency_sla(state, _cmd_or_event) do
   # Skip SLA check during partition
   unless Map.get(state.active_faults, :network_partition) do
     unless state.last_latency_ms < 100 do
@@ -978,7 +979,7 @@ Detect deadlocks, livelocks, and starvation with the Liveness projection.
 defmodule MyModel do
   def extra_projections do
     [
-      {PropertyDamage.Projection.Liveness, [
+      {PropertyDamage.Model.Projection.Liveness, [
         max_pending_duration_ms: 10_000,
         check_interval: 10,
         required_completions: %{
@@ -2247,7 +2248,7 @@ example_tests/travel_booking/
 - [Getting Started](guides/getting_started.md) - First steps with PropertyDamage
 - [Writing Invariants](guides/writing_invariants.md) - Projections and assertions
 - [Debugging Failures](guides/debugging_failures.md) - Analyzing and fixing test failures
-- [Async and Eventual Consistency](guides/async_and_eventual_consistency.md) - Probes, bridges, and InjectorAdapters
+- [Async and Eventual Consistency](guides/async_and_eventual_consistency.md) - Probes, bridges, and Adapter.Injector
 - [Chaos Engineering](guides/chaos_engineering.md) - Nemesis fault injection
 - [Integration Testing](guides/integration_testing.md) - Testing against live services
 - [Differential Testing](guides/differential_testing.md) - Comparing implementations
@@ -2259,12 +2260,14 @@ PropertyDamage
 ├── Core Types (Tier 0)
 │   ├── Ref          - Symbolic references
 │   ├── Command      - Operation behaviour
-│   ├── Projection   - State reducer behaviour
-│   ├── Sequence     - Linear and branching command sequences
-│   └── Model        - Test model behaviour
+│   ├── Model        - Test model behaviour
+│   │   ├── Projection   - State reducer behaviour
+│   │   └── Simulator    - Symbolic execution behaviour
+│   └── Sequence     - Linear and branching command sequences
 │
 ├── Execution (Tier 1)
 │   ├── Adapter      - SUT bridge behaviour
+│   │   └── Injector - External event injection behaviour
 │   ├── Executor     - Command execution (linear and parallel)
 │   ├── Linearization - Parallel execution verification
 │   └── EventQueue   - Event coordination

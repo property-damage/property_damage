@@ -20,7 +20,8 @@ Good invariants are:
 Track that quantities add up correctly:
 
 ```elixir
-def check(:balance_matches_ledger, state, _ctx) do
+@trigger every: 1
+def assert_balance_matches_ledger(state, _cmd_or_event) do
   # Account balance should equal sum of all transactions
   expected_balances =
     state.transactions
@@ -54,7 +55,8 @@ end
 Verify uniqueness constraints:
 
 ```elixir
-def check(:emails_unique, state, _ctx) do
+@trigger every: 1
+def assert_emails_unique(state, _cmd_or_event) do
   emails = Enum.map(state.users, fn {_id, user} -> user.email end)
   unique_emails = Enum.uniq(emails)
 
@@ -81,7 +83,8 @@ Verify valid state transitions:
   :completed => []
 }
 
-def check(:valid_status_transitions, state, _ctx) do
+@trigger every: 1
+def assert_valid_status_transitions(state, _cmd_or_event) do
   invalid =
     state.transition_history
     |> Enum.filter(fn {from, to} ->
@@ -102,7 +105,8 @@ end
 Verify foreign key relationships:
 
 ```elixir
-def check(:orders_reference_valid_users, state, _ctx) do
+@trigger every: 1
+def assert_orders_reference_valid_users(state, _cmd_or_event) do
   user_ids = MapSet.new(Map.keys(state.users))
 
   orphan_orders =
@@ -124,7 +128,8 @@ end
 Verify values stay within acceptable ranges:
 
 ```elixir
-def check(:balances_non_negative, state, _ctx) do
+@trigger every: 1
+def assert_balances_non_negative(state, _cmd_or_event) do
   negative =
     state.accounts
     |> Enum.filter(fn {_id, account} -> account.balance < 0 end)
@@ -136,7 +141,8 @@ def check(:balances_non_negative, state, _ctx) do
   end
 end
 
-def check(:inventory_non_negative, state, _ctx) do
+@trigger every: 1
+def assert_inventory_non_negative(state, _cmd_or_event) do
   negative =
     state.inventory
     |> Enum.filter(fn {_sku, qty} -> qty < 0 end)
@@ -154,7 +160,8 @@ end
 Verify time-based constraints:
 
 ```elixir
-def check(:expiry_after_creation, state, _ctx) do
+@trigger every: 1
+def assert_expiry_after_creation(state, _cmd_or_event) do
   invalid =
     state.authorizations
     |> Enum.filter(fn {_id, auth} ->
@@ -171,20 +178,25 @@ end
 
 ## Invariant Triggers
 
-Control when invariants are checked:
+Control when invariants are checked using the `@trigger` attribute:
 
 ```elixir
-def __checks__ do
-  [
-    # Check after every event
-    %{name: :balance_non_negative, trigger: :always, sample: 1},
+# Check after every event (every: 1)
+@trigger every: 1
+def assert_balance_non_negative(state, _cmd_or_event) do
+  # ...
+end
 
-    # Check only at end of sequence (expensive checks)
-    %{name: :full_consistency_check, trigger: :end_of_sequence, sample: 1},
+# Check only at end of sequence (expensive checks)
+@trigger at: :end_of_sequence
+def assert_full_consistency_check(state, _cmd_or_event) do
+  # ...
+end
 
-    # Sample: check 10% of the time (for very expensive checks)
-    %{name: :deep_validation, trigger: :always, sample: 0.1}
-  ]
+# Check after specific event types
+@trigger every: OrderCreated
+def assert_order_valid(state, _cmd_or_event) do
+  # ...
 end
 ```
 
@@ -194,7 +206,7 @@ Assertion projections can track their own state:
 
 ```elixir
 defmodule MyApp.Projections.AuditInvariants do
-  @behaviour PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   @impl true
   def init do
@@ -215,11 +227,8 @@ defmodule MyApp.Projections.AuditInvariants do
 
   def apply(state, _), do: state
 
-  def __checks__ do
-    [%{name: :no_suspicious_patterns, trigger: :end_of_sequence, sample: 1}]
-  end
-
-  def check(:no_suspicious_patterns, state, _ctx) do
+  @trigger at: :end_of_sequence
+  def assert_no_suspicious_patterns(state, _cmd_or_event) do
     if Enum.empty?(state.suspicious_patterns) do
       :ok
     else
@@ -234,7 +243,8 @@ end
 When using nemesis (chaos engineering), some invariants may not apply:
 
 ```elixir
-def check(:latency_within_sla, state, _ctx) do
+@trigger every: 1
+def assert_latency_within_sla(state, _cmd_or_event) do
   # Skip SLA check during active network partition
   if Map.get(state.active_faults, :network_partition) do
     :ok
@@ -256,7 +266,8 @@ end
 
 ```elixir
 # Don't do this - relies on implementation details
-def check(:cache_hit_ratio, state, _ctx) do
+@trigger every: 1
+def assert_cache_hit_ratio(state, _cmd_or_event) do
   if state.cache.hits / state.cache.total > 0.8, do: :ok, else: {:error, "Low cache hits"}
 end
 ```
@@ -265,7 +276,8 @@ end
 
 ```elixir
 # Check what users can observe
-def check(:orders_match_line_items, state, _ctx) do
+@trigger every: 1
+def assert_orders_match_line_items(state, _cmd_or_event) do
   # Sum of line items should equal order total
   ...
 end
@@ -277,7 +289,8 @@ end
 
 ```elixir
 # Don't do this - can fail due to timing
-def check(:recent_activity, state, _ctx) do
+@trigger every: 1
+def assert_recent_activity(state, _cmd_or_event) do
   if DateTime.diff(DateTime.utc_now(), state.last_activity, :second) < 60 do
     :ok
   else
@@ -290,7 +303,8 @@ end
 
 ```elixir
 # Use event timestamps, not wall clock
-def check(:activity_ordering, state, _ctx) do
+@trigger every: 1
+def assert_activity_ordering(state, _cmd_or_event) do
   sorted = Enum.sort_by(state.activities, & &1.timestamp)
   if state.activities == sorted, do: :ok, else: {:error, "Out of order"}
 end
@@ -302,7 +316,8 @@ end
 
 ```elixir
 # Too specific - will break with any change
-def check(:exact_balance, state, _ctx) do
+@trigger every: 1
+def assert_exact_balance(state, _cmd_or_event) do
   if state.accounts["acc_1"].balance == 1000, do: :ok, else: {:error, "Wrong"}
 end
 ```
@@ -311,7 +326,8 @@ end
 
 ```elixir
 # Check the relationship, not specific values
-def check(:credits_minus_debits, state, _ctx) do
+@trigger every: 1
+def assert_credits_minus_debits(state, _cmd_or_event) do
   expected = state.total_credits - state.total_debits
   actual = Enum.reduce(state.accounts, 0, fn {_, acc}, sum -> sum + acc.balance end)
   if expected == actual, do: :ok, else: {:error, "Mismatch"}

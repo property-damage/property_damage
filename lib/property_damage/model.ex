@@ -14,7 +14,7 @@ defmodule PropertyDamage.Model do
   ## Optional Callbacks
 
   - `extra_projections/0` - Additional projections for state tracking and/or assertions
-  - `injectable_events/0` - Events that can arrive from InjectorAdapters
+  - `injectable_events/0` - Events that can arrive from Adapter.Injector modules
   - `setup_once/1` - Setup that runs once at the start (not during shrinking)
   - `setup_each/1` - Setup that runs before each execution (including shrink attempts)
   - `teardown_each/1` - Cleanup after each execution
@@ -54,8 +54,8 @@ defmodule PropertyDamage.Model do
           # Simple: just module (weight 1, always enabled, no overrides)
           CreateOrder,
 
-          # Weighted: {module, weight}
-          {ViewOrder, 2},
+          # Weighted: {module, weight: n}
+          {ViewOrder, weight: 2},
 
           # Full options: {module, keyword_list}
           {CancelOrder,
@@ -199,7 +199,7 @@ defmodule PropertyDamage.Model do
       def commands do
         [
           CreateOrder,                           # Always enabled, weight 1
-          {ViewOrder, 2},                        # Always enabled, weight 2
+          {ViewOrder, weight: 2},                # Always enabled, weight 2
           {CancelOrder,
             weight: 1,
             when: fn s -> map_size(s.orders) > 0 end,
@@ -251,9 +251,9 @@ defmodule PropertyDamage.Model do
   @doc """
   Returns list of event modules that can be injected from outside.
 
-  These events arrive via InjectorAdapters (webhooks, callbacks, etc.),
+  These events arrive via Adapter.Injector modules (webhooks, callbacks, etc.),
   not from command execution. Used for validation to ensure all injectable
-  events are covered by InjectorAdapter `@emits` declarations.
+  events are covered by Adapter.Injector `@emits` declarations.
 
   Optional - defaults to `[]` if not implemented.
   """

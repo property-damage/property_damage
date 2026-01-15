@@ -66,43 +66,33 @@ Commands represent operations. Each command must implement the
 ```elixir
 defmodule MyApp.Commands.CreateUser do
   @behaviour PropertyDamage.Command
-
-  alias MyApp.Events.UserCreated
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:email, :name]
 
   @impl true
-  def new!(_state, _overrides \\ %{}) do
-    import StreamData
-
-    bind(string(:alphanumeric, min_length: 5), fn name ->
-      bind(string(:alphanumeric, min_length: 5), fn email_prefix ->
-        constant(%__MODULE__{
-          name: name,
-          email: "#{email_prefix}@example.com"
-        })
-      end)
-    end)
+  def generator(overrides \\ %{}) do
+    %{
+      name: StreamData.string(:alphanumeric, min_length: 5),
+      email: StreamData.map(
+        StreamData.string(:alphanumeric, min_length: 5),
+        &"#{&1}@example.com"
+      )
+    }
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
 
-  @impl true
-  def precondition(_state), do: true
-
-  @impl true
-  def ref(_cmd, events) do
-    case events do
-      [%UserCreated{user_id: id} | _] -> id
-      _ -> nil
-    end
-  end
+  # Optional: this command creates a user ref
+  def creates_ref, do: :user_id
 end
 ```
 
 ### Key Command Callbacks
 
-- **`new!/2`** - Generate command instances (returns `StreamData`)
-- **`precondition/1`** - When can this command run? (returns boolean)
-- **`ref/2`** - Extract entity ID from events (for symbolic refs)
+- **`generator/1`** - Generate command field values (returns `StreamData` of maps)
+- **`creates_ref/0`** (optional) - Field name for entity ref this command creates
+- **`read_only?/0`** (optional) - Whether command only reads state
 
 ## Step 3: Define Projections
 
@@ -110,7 +100,7 @@ Projections are state reducers. They process events and maintain state:
 
 ```elixir
 defmodule MyApp.Projections.ModelState do
-  @behaviour PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   alias MyApp.Events.{UserCreated, UserUpdated, UserDeleted}
 
@@ -137,11 +127,11 @@ end
 ## Step 4: Define Invariants
 
 Invariants are checks that should always hold. Define them in assertion
-projections:
+projections using `@trigger` and `assert_*` functions:
 
 ```elixir
 defmodule MyApp.Projections.UserInvariants do
-  @behaviour PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   alias MyApp.Events.UserCreated
 
@@ -155,15 +145,10 @@ defmodule MyApp.Projections.UserInvariants do
 
   def apply(state, _), do: state
 
-  # Define which invariants to check
-  def __checks__ do
-    [
-      %{name: :emails_unique, trigger: :always, sample: 1}
-    ]
-  end
-
-  # Implement the invariant check
-  def check(:emails_unique, state, _ctx) do
+  # Assertions use @trigger to specify when to run
+  # and assert_* naming convention
+  @trigger every: 1
+  def assert_emails_unique(state, _cmd_or_event) do
     # In a real system, duplicate emails would be caught at creation time
     # This is just an example of the pattern
     :ok
@@ -185,9 +170,9 @@ defmodule MyApp.TestModel do
   @impl true
   def commands do
     [
-      {5, CreateUser},   # Higher weight = more likely
-      {2, UpdateUser},
-      {1, DeleteUser}
+      {CreateUser, weight: 5},   # Higher weight = more likely
+      {UpdateUser, weight: 2},
+      {DeleteUser, weight: 1}
     ]
   end
 
@@ -195,7 +180,7 @@ defmodule MyApp.TestModel do
   def state_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [UserInvariants]
+  def extra_projections, do: [UserInvariants]
 
   @impl true
   def injectable_events, do: []

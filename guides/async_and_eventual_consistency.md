@@ -6,7 +6,7 @@ eventual consistency, including:
 - **Probe commands** - Query until data appears
 - **Async commands** - Create resource and poll until settled
 - **Mid-execution injection** - Emit events as they happen during polling
-- **InjectorAdapters** - Handle webhook/callback events
+- **Adapter.Injector** - Handle webhook/callback events
 
 ## Overview
 
@@ -52,23 +52,17 @@ Use probes for **read-only queries** that may need to wait for eventual consiste
 
 ```elixir
 defmodule MyTest.Commands.GetOrder do
-  use PropertyDamage.Command
+  @behaviour PropertyDamage.Command
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:order_id]
 
   @impl true
-  def new!(state, _generators) do
-    import StreamData
-
-    state.orders
-    |> Map.keys()
-    |> member_of()
-    |> map(&%__MODULE__{order_id: &1})
-  end
-
-  @impl true
-  def precondition(state) do
-    map_size(state.orders) > 0
+  def generator(overrides \\ %{}) do
+    # Default to nil - Model provides actual order_id via with:
+    %{order_id: nil}
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
 
   # Probe semantics enables settle/retry logic
@@ -85,6 +79,18 @@ defmodule MyTest.Commands.GetOrder do
       backoff: :exponential  # :linear or :exponential
     }
   end
+end
+```
+
+The Model wires this probe with state-dependent order selection:
+
+```elixir
+def commands do
+  [
+    {GetOrder,
+      when: fn state -> map_size(state.orders) > 0 end,
+      with: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
+  ]
 end
 ```
 
@@ -159,30 +165,22 @@ Handle the entire create-and-poll flow inside `execute/2`:
 
 ```elixir
 defmodule MyTest.Commands.CreateAuthorization do
-  use PropertyDamage.Command
+  @behaviour PropertyDamage.Command
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
 
-  defstruct [:authorization_id, :account_id, :amount, :currency]
+  defstruct [:account_id, :amount, :currency]
 
   @impl true
-  def new!(state, _generators) do
-    import StreamData
-
-    bind(member_of(Map.keys(state.accounts)), fn account_id ->
-      fixed_map(%{
-        authorization_id: constant(%PropertyDamage.Ref{
-          ref: make_ref(),
-          field: :authorization_id
-        }),
-        account_id: constant(account_id),
-        amount: integer(100..10000),
-        currency: member_of(["USD", "EUR", "GBP"])
-      })
-      |> map(&struct(__MODULE__, &1))
-    end)
+  def generator(overrides \\ %{}) do
+    # account_id provided via Model's with: option
+    %{
+      account_id: nil,
+      amount: StreamData.integer(100..10000),
+      currency: StreamData.member_of(["USD", "EUR", "GBP"])
+    }
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
-
-  @impl true
-  def precondition(state), do: map_size(state.accounts) > 0
 
   # Async semantics protects this command during shrinking
   # if downstream commands use its ref
@@ -190,6 +188,18 @@ defmodule MyTest.Commands.CreateAuthorization do
 
   # This command creates a ref used by other commands
   def creates_ref, do: :authorization_id
+end
+```
+
+The Model wires this command with account selection:
+
+```elixir
+def commands do
+  [
+    {CreateAuthorization,
+      when: fn state -> map_size(state.accounts) > 0 end,
+      with: fn state -> %{account_id: StreamData.member_of(Map.keys(state.accounts))} end}
+  ]
 end
 ```
 
@@ -429,9 +439,9 @@ During shrinking:
 - CreateAuthorization is kept because CaptureAuthorization needs its ref
 ```
 
-## InjectorAdapters (Webhook Events)
+## Adapter.Injector (Webhook Events)
 
-Use InjectorAdapters when external systems **push** events to your test
+Use Adapter.Injector when external systems **push** events to your test
 (webhooks, callbacks, message queues) rather than you polling for them.
 
 ### When to Use
@@ -444,7 +454,7 @@ Use InjectorAdapters when external systems **push** events to your test
 
 ```elixir
 defmodule MyTest.PaymentWebhookAdapter do
-  use PropertyDamage.InjectorAdapter
+  use PropertyDamage.Adapter.Injector
 
   alias MyTest.Events.{PaymentApproved, PaymentDeclined}
 
@@ -513,7 +523,7 @@ defmodule MyTest.WebhookHandler do
 end
 ```
 
-### Using InjectorAdapters
+### Using Adapter.Injector
 
 Register injector adapters when running tests:
 
@@ -546,15 +556,15 @@ defmodule MyTest.Model do
 end
 ```
 
-## Polling InjectorAdapter (Advanced)
+## Polling Adapter.Injector (Advanced)
 
 For systems where you must **actively poll** for status changes but want events
 processed through the injection system (e.g., between commands rather than
-blocking a single command), you can create a polling InjectorAdapter:
+blocking a single command), you can create a polling Adapter.Injector:
 
 ```elixir
 defmodule MyTest.AuthorizationPollerAdapter do
-  use PropertyDamage.InjectorAdapter
+  use PropertyDamage.Adapter.Injector
 
   @emits [AuthorizationApproved, AuthorizationDeclined]
 
@@ -662,11 +672,11 @@ end
 | **Async (internal poll)** | Create + wait for completion | Poll inside `execute/2` |
 | **Async (ctx.inject)** | Create + wait, need accurate event timing | Call `ctx.inject.(event)` mid-execution |
 | **Async (process dict)** | Create + wait, prefer Settle module | Track state in process dictionary |
-| **InjectorAdapter** | External system pushes webhooks | Implement `to_event/1` callback |
-| **Polling InjectorAdapter** | Poll but inject events between commands | Background GenServer + EventQueue |
+| **Adapter.Injector** | External system pushes webhooks | Implement `to_event/1` callback |
+| **Polling Adapter.Injector** | Poll but inject events between commands | Background GenServer + EventQueue |
 
 Choose the simplest pattern that fits your use case:
 
 - **Most async create operations**: Use **internal polling** (simplest)
 - **Need intermediate state visibility**: Use **ctx.inject** for accurate event timing
-- **External webhooks/callbacks**: Use **InjectorAdapter**
+- **External webhooks/callbacks**: Use **Adapter.Injector**
