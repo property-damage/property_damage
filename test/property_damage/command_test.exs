@@ -8,16 +8,11 @@ defmodule PropertyDamage.CommandTest do
 
   describe "CreateItem command" do
     test "compiles correctly with behaviour" do
-      # Verify behaviour is implemented
-      assert function_exported?(CreateItem, :precondition, 1)
-      assert function_exported?(CreateItem, :new!, 2)
+      # Verify generator is implemented
       assert function_exported?(CreateItem, :generator, 1)
-    end
-
-    test "precondition always returns true" do
-      assert CreateItem.precondition(%{})
-      assert CreateItem.precondition(%{items: %{}})
-      assert CreateItem.precondition(%{anything: "here"})
+      # Verify metadata callbacks
+      assert function_exported?(CreateItem, :creates_ref, 0)
+      assert function_exported?(CreateItem, :downstream_observables, 0)
     end
 
     test "creates_ref returns :item_ref" do
@@ -45,45 +40,13 @@ defmodule PropertyDamage.CommandTest do
         assert is_integer(map.quantity)
       end
     end
-
-    test "new!/2 produces valid command structs" do
-      state = %{}
-
-      check all(cmd <- CreateItem.new!(state, %{})) do
-        assert %CreateItem{} = cmd
-        assert is_binary(cmd.name)
-        assert is_integer(cmd.quantity)
-        assert cmd.quantity > 0
-      end
-    end
-
-    test "simulate/2 returns expected events" do
-      state = %{}
-      cmd = %CreateItem{name: "Widget", quantity: 5}
-
-      events = CreateItem.simulate(state, cmd)
-
-      assert [%ItemCreated{name: "Widget", quantity: 5, item_ref: nil}] = events
-    end
   end
 
   describe "ViewItem command" do
     test "compiles correctly with behaviour" do
-      assert function_exported?(ViewItem, :precondition, 1)
-      assert function_exported?(ViewItem, :new!, 2)
       assert function_exported?(ViewItem, :generator, 1)
-    end
-
-    test "precondition returns false when no items exist" do
-      refute ViewItem.precondition(%{})
-      refute ViewItem.precondition(%{items: %{}})
-    end
-
-    test "precondition returns true when items exist" do
-      ref = Ref.symbolic(label: "item")
-      state = %{items: %{ref => %{name: "Widget"}}}
-
-      assert ViewItem.precondition(state)
+      assert function_exported?(ViewItem, :read_only?, 0)
+      assert function_exported?(ViewItem, :downstream_observables, 0)
     end
 
     test "read_only? returns true" do
@@ -94,14 +57,19 @@ defmodule PropertyDamage.CommandTest do
       assert ViewItem.downstream_observables() == [ItemViewed]
     end
 
-    test "new!/2 generates command with item_ref from state" do
-      ref1 = Ref.symbolic(label: "item1")
-      ref2 = Ref.symbolic(label: "item2")
-      state = %{items: %{ref1 => %{name: "Widget"}, ref2 => %{name: "Gadget"}}}
+    test "generator/1 produces valid maps with nil item_ref" do
+      check all(map <- ViewItem.generator(%{})) do
+        assert is_map(map)
+        assert Map.has_key?(map, :item_ref)
+        assert map.item_ref == nil
+      end
+    end
 
-      check all(cmd <- ViewItem.new!(state, %{})) do
-        assert %ViewItem{} = cmd
-        assert cmd.item_ref in [ref1, ref2]
+    test "generator/1 respects overrides" do
+      ref = Ref.symbolic(label: "item")
+
+      check all(map <- ViewItem.generator(%{item_ref: ref})) do
+        assert map.item_ref == ref
       end
     end
 
@@ -115,63 +83,61 @@ defmodule PropertyDamage.CommandTest do
       assert is_binary(label)
       assert label =~ "viewing item"
     end
-
-    test "simulate/2 returns expected events" do
-      ref = Ref.symbolic(label: "item")
-      state = %{items: %{ref => %{name: "Widget"}}}
-      cmd = %ViewItem{item_ref: ref}
-
-      events = ViewItem.simulate(state, cmd)
-
-      assert [%ItemViewed{item_ref: ^ref}] = events
-    end
   end
 
   describe "MinimalCommand" do
-    test "compiles with only required callbacks" do
-      assert function_exported?(MinimalCommand, :precondition, 1)
-      assert function_exported?(MinimalCommand, :new!, 2)
+    test "compiles with only required callback (generator)" do
+      assert function_exported?(MinimalCommand, :generator, 1)
     end
 
     test "optional callbacks are not exported" do
-      refute function_exported?(MinimalCommand, :generator, 1)
-      refute function_exported?(MinimalCommand, :simulate, 2)
       refute function_exported?(MinimalCommand, :label, 2)
       refute function_exported?(MinimalCommand, :creates_ref, 0)
       refute function_exported?(MinimalCommand, :downstream_observables, 0)
       refute function_exported?(MinimalCommand, :read_only?, 0)
     end
 
-    test "precondition works" do
-      assert MinimalCommand.precondition(%{})
-    end
-
-    test "new!/2 generates command struct" do
-      check all(cmd <- MinimalCommand.new!(%{}, %{})) do
-        assert %MinimalCommand{} = cmd
+    test "generator/1 produces empty map" do
+      check all(map <- MinimalCommand.generator(%{})) do
+        assert map == %{}
       end
     end
   end
 
   describe "behaviour enforcement" do
-    test "command without precondition fails compilation" do
-      # We can't easily test compile-time behavior, but we can verify
-      # that the behaviour specifies precondition as required
+    test "generator is required callback" do
       callbacks = PropertyDamage.Command.behaviour_info(:callbacks)
 
-      assert {:precondition, 1} in callbacks
-      assert {:new!, 2} in callbacks
+      assert {:generator, 1} in callbacks
     end
 
     test "optional callbacks are declared" do
       optional = PropertyDamage.Command.behaviour_info(:optional_callbacks)
 
-      assert {:generator, 1} in optional
-      assert {:simulate, 2} in optional
       assert {:label, 2} in optional
       assert {:creates_ref, 0} in optional
       assert {:downstream_observables, 0} in optional
       assert {:read_only?, 0} in optional
+    end
+
+    test "precondition is no longer a callback (moved to Model)" do
+      callbacks = PropertyDamage.Command.behaviour_info(:callbacks)
+
+      refute {:precondition, 1} in callbacks
+    end
+
+    test "new! is no longer a callback (replaced by generator)" do
+      callbacks = PropertyDamage.Command.behaviour_info(:callbacks)
+
+      refute {:new!, 2} in callbacks
+    end
+
+    test "simulate is no longer a callback (moved to Model)" do
+      callbacks = PropertyDamage.Command.behaviour_info(:callbacks)
+      optional = PropertyDamage.Command.behaviour_info(:optional_callbacks)
+
+      refute {:simulate, 2} in callbacks
+      refute {:simulate, 2} in optional
     end
   end
 end

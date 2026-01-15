@@ -10,8 +10,8 @@ defmodule PropertyDamage.Validator do
 
   For each command in the sequence:
 
-  1. Check `command.precondition(state)` - returns false if invalid
-  2. Apply `command.simulate(state, command)` to get simulated events
+  1. Check Model's `when:` option for the command - returns false if invalid
+  2. Apply Model's `simulate/2` to get simulated events
   3. Update state projection with command and events
 
   ## Usage
@@ -27,23 +27,25 @@ defmodule PropertyDamage.Validator do
 
   ## Notes
 
-  - Simulation uses `simulate/2` if defined, otherwise produces no events
+  - Simulation uses Model's `simulate/2` if defined, otherwise produces no events
   - State projection is updated but assertion projections are not
   - This is fast because no actual execution or check evaluation happens
   """
+
+  alias PropertyDamage.Model
 
   @doc """
   Check if a command sequence is valid according to model preconditions.
 
   Simulates the sequence by:
   1. Initializing state from model's state projection
-  2. For each command, checking precondition against current state
-  3. Updating state via simulate/2 (if defined)
+  2. For each command, checking Model's `when:` option against current state
+  3. Updating state via Model's `simulate/2` (if defined)
 
   ## Parameters
 
   - `commands` - List of command structs to validate
-  - `model` - Model module defining state projection
+  - `model` - Model module defining state projection and command wiring
 
   ## Returns
 
@@ -66,18 +68,41 @@ defmodule PropertyDamage.Validator do
     state_projection = model.state_projection()
     initial_state = state_projection.init()
 
-    validate_commands(commands, initial_state, state_projection)
+    # Normalize the model's commands to get when:/with: options
+    normalized_commands =
+      model.commands()
+      |> Model.normalize_commands()
+      |> build_command_lookup()
+
+    validate_commands(commands, initial_state, state_projection, model, normalized_commands)
   end
 
-  defp validate_commands([], _state, _projection), do: true
+  # Build a lookup map from command module to its options
+  defp build_command_lookup(normalized_commands) do
+    Map.new(normalized_commands, fn {_weight, module, opts} ->
+      {module, opts}
+    end)
+  end
 
-  defp validate_commands([command | rest], state, projection) do
+  defp validate_commands([], _state, _projection, _model, _lookup), do: true
+
+  defp validate_commands([command | rest], state, projection, model, lookup) do
     command_module = command.__struct__
 
-    # Check precondition
-    if command_module.precondition(state) do
-      # Simulate command to get events
-      events = simulate_command(command, state)
+    # Get the when: predicate from the command's options
+    opts = Map.get(lookup, command_module, [])
+    when_pred = Keyword.get(opts, :when)
+
+    # Check precondition (when: option)
+    precondition_passes =
+      case when_pred do
+        nil -> true
+        pred when is_function(pred, 1) -> pred.(state)
+      end
+
+    if precondition_passes do
+      # Simulate command to get events using Model's simulate/2
+      events = simulate_command(model, command, state)
 
       # Update state with command and events
       new_state =
@@ -85,17 +110,15 @@ defmodule PropertyDamage.Validator do
         |> projection.apply(command)
         |> apply_events(events, projection)
 
-      validate_commands(rest, new_state, projection)
+      validate_commands(rest, new_state, projection, model, lookup)
     else
       false
     end
   end
 
-  defp simulate_command(command, state) do
-    command_module = command.__struct__
-
-    if function_exported?(command_module, :simulate, 2) do
-      command_module.simulate(state, command)
+  defp simulate_command(model, command, state) do
+    if function_exported?(model, :simulate, 2) do
+      model.simulate(command, state)
     else
       []
     end

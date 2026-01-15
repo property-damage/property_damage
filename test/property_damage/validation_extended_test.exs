@@ -11,8 +11,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   defmodule ValidCommand do
     defstruct [:id]
 
-    def new(_state, _generators), do: %__MODULE__{id: 1}
-    def precondition(_state), do: true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{id: 1})
     def events(_cmd, _response), do: []
   end
 
@@ -36,7 +35,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
 
     @impl true
     def commands do
-      [{10, PropertyDamage.ValidationExtendedTest.ValidCommand}]
+      [{ValidCommand, weight: 10}]
     end
 
     @impl true
@@ -44,6 +43,9 @@ defmodule PropertyDamage.ValidationExtendedTest do
 
     @impl true
     def extra_projections, do: []
+
+    @impl true
+    def simulate(_cmd, _state), do: []
   end
 
   defmodule EmptyModel do

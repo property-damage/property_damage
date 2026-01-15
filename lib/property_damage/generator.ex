@@ -186,11 +186,11 @@ defmodule PropertyDamage.Generator do
         StreamData.constant(Enum.reverse(acc))
 
       _ ->
-        StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module} ->
-          generator = get_command_generator(cmd_module, state)
+        StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
+          generator = get_command_generator(cmd_module, opts, state)
 
           StreamData.bind(generator, fn command ->
-            events = simulate_command(cmd_module, state, command)
+            events = simulate_command(model, state, command)
             new_state = update_state(state, command, events, projection)
             new_acc = [command | acc]
 
@@ -281,11 +281,11 @@ defmodule PropertyDamage.Generator do
           StreamData.constant({Enum.reverse(acc), state, remaining})
 
         _ ->
-          StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module} ->
-            generator = get_command_generator(cmd_module, state)
+          StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
+            generator = get_command_generator(cmd_module, opts, state)
 
             StreamData.bind(generator, fn command ->
-              events = simulate_command(cmd_module, state, command)
+              events = simulate_command(model, state, command)
               new_state = update_state(state, command, events, projection)
               new_acc = [command | acc]
 
@@ -341,7 +341,7 @@ defmodule PropertyDamage.Generator do
     # Combine all branches
     StreamData.bind(combine_branches(branch_generators), fn branches ->
       # Compute merged state after all branches
-      merged_state = merge_branch_states(state_at_branch, branches, projection)
+      merged_state = merge_branch_states(state_at_branch, branches, projection, model)
 
       # Remaining commands for suffix
       branch_command_count = Enum.sum(Enum.map(branches, &length/1))
@@ -388,11 +388,11 @@ defmodule PropertyDamage.Generator do
           if roll < 0.3 and length(acc) > 0 do
             StreamData.constant(Enum.reverse(acc))
           else
-            StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module} ->
-              generator = get_command_generator(cmd_module, state)
+            StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
+              generator = get_command_generator(cmd_module, opts, state)
 
               StreamData.bind(generator, fn command ->
-                events = simulate_command(cmd_module, state, command)
+                events = simulate_command(model, state, command)
                 new_state = update_state(state, command, events, projection)
                 new_acc = [command | acc]
 
@@ -425,18 +425,15 @@ defmodule PropertyDamage.Generator do
     end)
   end
 
-  defp merge_branch_states(base_state, branches, projection) do
+  defp merge_branch_states(base_state, branches, projection, model) do
     # Apply all branch commands to get merged state
     # Note: This is a simplification - real parallel execution would need
     # linearization checking. For generation, we just need a plausible state.
     all_branch_commands = List.flatten(branches)
 
     Enum.reduce(all_branch_commands, base_state, fn command, state ->
-      # Get command module
-      cmd_module = command.__struct__
-
       # Simulate and apply
-      events = simulate_command(cmd_module, state, command)
+      events = simulate_command(model, state, command)
       update_state(state, command, events, projection)
     end)
   end
@@ -446,35 +443,45 @@ defmodule PropertyDamage.Generator do
   # ============================================================================
 
   defp filter_valid_commands(commands, state) do
-    Enum.filter(commands, fn {_weight, cmd_module} ->
-      cmd_module.precondition(state)
+    Enum.filter(commands, fn {_weight, _cmd_module, opts} ->
+      case Keyword.get(opts, :when) do
+        nil -> true
+        pred when is_function(pred, 1) -> pred.(state)
+      end
     end)
   end
 
   defp weighted_member_of(weighted_commands) do
-    total_weight = Enum.reduce(weighted_commands, 0, fn {w, _}, acc -> acc + w end)
+    total_weight = Enum.reduce(weighted_commands, 0, fn {w, _, _}, acc -> acc + w end)
 
     StreamData.bind(StreamData.integer(1..total_weight), fn n ->
-      {_weight, cmd} = select_by_weight(weighted_commands, n)
-      StreamData.constant({1, cmd})
+      select_by_weight(weighted_commands, n)
+      |> StreamData.constant()
     end)
   end
 
-  defp select_by_weight([{weight, cmd} | rest], n) do
+  defp select_by_weight([{weight, cmd, opts} | rest], n) do
     if n <= weight do
-      {weight, cmd}
+      {weight, cmd, opts}
     else
       select_by_weight(rest, n - weight)
     end
   end
 
-  defp get_command_generator(cmd_module, state) do
-    cmd_module.new!(state, %{})
+  defp get_command_generator(cmd_module, opts, state) do
+    overrides =
+      case Keyword.get(opts, :with) do
+        nil -> %{}
+        fun when is_function(fun, 1) -> fun.(state)
+      end
+
+    cmd_module.generator(overrides)
+    |> StreamData.map(&struct!(cmd_module, &1))
   end
 
-  defp simulate_command(cmd_module, state, command) do
-    if function_exported?(cmd_module, :simulate, 2) do
-      cmd_module.simulate(state, command)
+  defp simulate_command(model, state, command) do
+    if function_exported?(model, :simulate, 2) do
+      model.simulate(command, state)
     else
       []
     end

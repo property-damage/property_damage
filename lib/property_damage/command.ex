@@ -2,22 +2,19 @@ defmodule PropertyDamage.Command do
   @moduledoc """
   Behaviour for commands in stateful property-based testing.
 
-  Commands are operations that can be executed against the System Under Test (SUT).
+  Commands are semantic operations that can be executed against the System Under Test (SUT).
   They are represented as structs containing their arguments, and define how to
-  generate valid command instances based on current state.
+  generate valid field values.
 
-  ## Two-Layer Generator Architecture
+  ## Pure Generator Architecture
 
-  Commands use a two-layer architecture for composable generation:
+  Commands define a pure `generator/1` function that produces field maps. The generator
+  takes an overrides map and returns a StreamData generator of maps. The framework
+  wraps the result in the command struct automatically.
 
-  1. **`generator/1`** (optional) - Pure generator returning StreamData of **maps**.
-     Takes overrides, applies them via `PropertyDamage.Generator.merge_overrides/2`.
-     No state dependency. This is the composable building block - other commands
-     can call it and extend the generation logic.
-
-  2. **`new!/2`** (required) - State-aware generator returning StreamData of **structs**.
-     Derives state-dependent values (e.g., refs from existing entities),
-     passes them as overrides to `generator/1`, wraps result in struct.
+  State-dependent concerns (preconditions, ref selection, expected events) are defined
+  in the **Model**, not the Command. This separation enables command reuse across
+  different Models with different state shapes.
 
   ## Example
 
@@ -28,9 +25,6 @@ defmodule PropertyDamage.Command do
         defstruct [:amount, :currency]
 
         @impl true
-        def precondition(_state), do: true
-
-        @impl true
         def generator(overrides \\\\ %{}) do
           %{
             amount: StreamData.positive_integer(),
@@ -39,24 +33,44 @@ defmodule PropertyDamage.Command do
           |> merge_overrides(overrides)
           |> StreamData.fixed_map()
         end
+      end
 
-        @impl true
-        def new!(_state, overrides \\\\ %{}) do
-          generator(overrides)
-          |> StreamData.map(&struct!(__MODULE__, &1))
+  The Model then wires this command with state-dependent configuration:
+
+      defmodule MyTest.OrderModel do
+        def commands do
+          [
+            CreateOrder,  # Always enabled, weight 1
+            {ViewOrder,
+              when: fn s -> map_size(s.orders) > 0 end,
+              with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+          ]
+        end
+
+        def simulate(%CreateOrder{amount: amount}, _state) do
+          [%OrderCreated{amount: amount, order_ref: nil}]
+        end
+
+        def simulate(%ViewOrder{order_ref: ref}, state) do
+          if Map.has_key?(state.orders, ref) do
+            [%OrderViewed{order_ref: ref}]
+          else
+            [%OrderNotFound{order_ref: ref}]
+          end
         end
       end
 
   ## Design Principles
 
-  - **Reusability**: Commands are designed to be reusable across models.
-    Model-specific configuration (like weights) is declared in the Model,
-    not the Command.
+  - **Reusability**: Commands are pure semantic definitions, decoupled from state shape.
+    Model-specific configuration (weights, preconditions, overrides) is declared in
+    the Model, not the Command.
 
   - **Composability**: The `generator/1` function enables composition.
     A specialized command can call another command's generator and extend it.
 
-  - **Separation of Concerns**: Commands define WHAT operations exist.
+  - **Separation of Concerns**: Commands define WHAT operations exist and their fields.
+    Models define WHEN to use them and HOW to parameterize them.
     Adapters define HOW to execute them against the SUT.
 
   ## Optional Metadata Callbacks
@@ -67,7 +81,6 @@ defmodule PropertyDamage.Command do
   - `creates_ref/0` - Field name for entity ref this command creates
   - `downstream_observables/0` - Event modules this command can produce
   - `read_only?/0` - Whether command only reads state (prioritized for removal during shrinking)
-  - `simulate/2` - Expected events for symbolic execution
   - `label/2` - Human-readable label for debugging
 
   The framework reads these via `function_exported?/3`, using sensible
@@ -75,33 +88,11 @@ defmodule PropertyDamage.Command do
   """
 
   @doc """
-  Precondition: Can this command type be generated in the current state?
+  Pure generator for command fields, returns StreamData of maps.
 
-  Called once per command type during generation. If false, this command
-  is excluded from the candidate pool for this generation step. This is
-  NOT the same as validating a specific command instance - it determines
-  whether the command type makes sense given the current state.
-
-  ## Examples
-
-  - `CancelOrder` requires orders to exist: `map_size(state.orders) > 0`
-  - `CreateOrder` is always valid: `true`
-  - `RefundOrder` requires captured payments: `Enum.any?(state.payments, &(&1.captured))`
-
-  ## Why Precondition Takes Only State
-
-  The precondition receives the projection state, not the command itself,
-  because it determines whether to *attempt* generating this command type.
-  At this point, no specific command instance exists yet.
-  """
-  @callback precondition(state :: map()) :: boolean()
-
-  @doc """
-  (Optional) Pure generator for command fields, returns StreamData of maps.
-
-  This is the composable building block. It takes overrides and returns a
-  generator of maps (not structs). Other commands can call this to reuse
-  and extend the generation logic.
+  This is the core building block. It takes overrides and returns a
+  generator of maps (not structs). The framework wraps the result in
+  the command struct automatically.
 
   Use `PropertyDamage.Generator.merge_overrides/2` to apply overrides with
   auto-lifting of raw values to `StreamData.constant/1`.
@@ -118,40 +109,6 @@ defmodule PropertyDamage.Command do
       end
   """
   @callback generator(overrides :: map()) :: StreamData.t(map())
-
-  @doc """
-  Generate a command struct from current state.
-
-  Returns a StreamData generator that produces command structs.
-  Only called if `precondition/1` returns true.
-
-  This callback is state-aware and responsible for:
-  1. Deriving state-dependent overrides (e.g., picking refs from existing entities)
-  2. Calling `generator/1` with those overrides (if defined)
-  3. Wrapping the result map in the command struct
-
-  ## Example
-
-      def new!(state, overrides \\\\ %{}) do
-        generator(%{
-          order_ref: StreamData.member_of(Map.keys(state.orders))
-        } |> Map.merge(overrides))
-        |> StreamData.map(&struct!(__MODULE__, &1))
-      end
-  """
-  @callback new!(state :: map(), overrides :: map()) :: StreamData.t(struct())
-
-  @doc """
-  (Optional) Returns expected events for symbolic execution.
-
-  Used during command sequence generation to update symbolic state
-  without executing against the SUT. If not implemented, the framework
-  applies only the command to projections (no events).
-
-  This enables precise causality tracking for shrinking without
-  requiring SUT modifications.
-  """
-  @callback simulate(state :: map(), command :: struct()) :: [struct()]
 
   @doc """
   (Optional) Provides human-readable label for debugging output.
@@ -327,8 +284,6 @@ defmodule PropertyDamage.Command do
   @callback acceptable_retry_events() :: [module()]
 
   @optional_callbacks [
-    generator: 1,
-    simulate: 2,
     label: 2,
     creates_ref: 0,
     downstream_observables: 0,

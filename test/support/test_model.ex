@@ -3,7 +3,7 @@ defmodule PropertyDamage.Test.FullModel do
   Complete test model implementing all callbacks.
 
   Demonstrates full Model behaviour implementation including
-  lifecycle hooks and terminate?/3.
+  lifecycle hooks, terminate?/3, and the new Model-level wiring pattern.
   """
   @behaviour PropertyDamage.Model
 
@@ -14,9 +14,15 @@ defmodule PropertyDamage.Test.FullModel do
   @impl true
   def commands do
     [
-      {3, CreateItem},
-      {2, ViewItem},
-      {1, MinimalCommand}
+      {CreateItem, weight: 3},
+      {ViewItem,
+       weight: 2,
+       when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
+       with: fn state ->
+         items = Map.get(state, :items, %{})
+         %{item_ref: StreamData.member_of(Map.keys(items))}
+       end},
+      {MinimalCommand, weight: 1}
     ]
   end
 
@@ -41,6 +47,20 @@ defmodule PropertyDamage.Test.FullModel do
   @impl true
   def teardown_once(_config), do: :ok
 
+  # Simulate expected events for each command type
+  @impl true
+  def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+    [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+  end
+
+  def simulate(%ViewItem{item_ref: item_ref}, _state) do
+    [%ItemViewed{item_ref: item_ref}]
+  end
+
+  def simulate(%MinimalCommand{}, _state) do
+    []
+  end
+
   # Terminate after MinimalCommand
   @impl true
   def terminate?(_state, %MinimalCommand{}, _events), do: true
@@ -52,20 +72,41 @@ defmodule PropertyDamage.Test.MinimalModel do
   Minimal test model with only required callbacks.
 
   Demonstrates that optional callbacks can be omitted.
+  Uses the new command spec format with Model-level wiring.
   """
   @behaviour PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
   @impl true
-  def commands, do: [CreateItem, ViewItem]
+  def commands do
+    [
+      CreateItem,
+      {ViewItem,
+       when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
+       with: fn state ->
+         items = Map.get(state, :items, %{})
+         %{item_ref: StreamData.member_of(Map.keys(items))}
+       end}
+    ]
+  end
 
   @impl true
   def state_projection, do: ModelState
 
   @impl true
   def extra_projections, do: [TestAssertions]
+
+  @impl true
+  def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+    [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+  end
+
+  def simulate(%ViewItem{item_ref: item_ref}, _state) do
+    [%ItemViewed{item_ref: item_ref}]
+  end
 end
 
 defmodule PropertyDamage.Test.SimpleWeightModel do
@@ -76,16 +117,36 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
-  # Simple list - all commands weighted equally
+  # Simple list - commands use default weight of 1
   @impl true
-  def commands, do: [CreateItem, ViewItem]
+  def commands do
+    [
+      CreateItem,
+      {ViewItem,
+       when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
+       with: fn state ->
+         items = Map.get(state, :items, %{})
+         %{item_ref: StreamData.member_of(Map.keys(items))}
+       end}
+    ]
+  end
 
   @impl true
   def state_projection, do: ModelState
 
   @impl true
   def extra_projections, do: [TestAssertions]
+
+  @impl true
+  def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+    [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+  end
+
+  def simulate(%ViewItem{item_ref: item_ref}, _state) do
+    [%ItemViewed{item_ref: item_ref}]
+  end
 end
 
 defmodule PropertyDamage.Test.WeightedModel do
@@ -96,13 +157,20 @@ defmodule PropertyDamage.Test.WeightedModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
   # Weighted list - CreateItem 3x more likely than ViewItem
   @impl true
   def commands do
     [
-      {3, CreateItem},
-      {1, ViewItem}
+      {CreateItem, weight: 3},
+      {ViewItem,
+       weight: 1,
+       when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
+       with: fn state ->
+         items = Map.get(state, :items, %{})
+         %{item_ref: StreamData.member_of(Map.keys(items))}
+       end}
     ]
   end
 
@@ -111,4 +179,13 @@ defmodule PropertyDamage.Test.WeightedModel do
 
   @impl true
   def extra_projections, do: [TestAssertions]
+
+  @impl true
+  def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+    [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+  end
+
+  def simulate(%ViewItem{item_ref: item_ref}, _state) do
+    [%ItemViewed{item_ref: item_ref}]
+  end
 end

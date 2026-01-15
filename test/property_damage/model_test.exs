@@ -20,6 +20,7 @@ defmodule PropertyDamage.ModelTest do
       assert function_exported?(FullModel, :teardown_each, 1)
       assert function_exported?(FullModel, :teardown_once, 1)
       assert function_exported?(FullModel, :terminate?, 3)
+      assert function_exported?(FullModel, :simulate, 2)
     end
 
     test "minimal model with only required callbacks" do
@@ -28,6 +29,7 @@ defmodule PropertyDamage.ModelTest do
       assert function_exported?(MinimalModel, :commands, 0)
       assert function_exported?(MinimalModel, :state_projection, 0)
       assert function_exported?(MinimalModel, :extra_projections, 0)
+      assert function_exported?(MinimalModel, :simulate, 2)
 
       # Optional callbacks not exported
       refute function_exported?(MinimalModel, :injectable_events, 0)
@@ -92,24 +94,78 @@ defmodule PropertyDamage.ModelTest do
     end
   end
 
-  describe "command weights" do
-    test "simple command list" do
+  describe "command specifications" do
+    test "simple command list uses new format with when:/with:" do
       commands = SimpleWeightModel.commands()
 
-      # Should be simple modules, not tuples
-      assert commands == [CreateItem, ViewItem]
+      # First command is simple module
+      assert Enum.at(commands, 0) == CreateItem
+
+      # Second command has when:/with: options
+      {module, opts} = Enum.at(commands, 1)
+      assert module == ViewItem
+      assert is_function(Keyword.get(opts, :when), 1)
+      assert is_function(Keyword.get(opts, :with), 1)
     end
 
-    test "weighted command list" do
+    test "weighted command list uses {Module, weight: n} format" do
       commands = WeightedModel.commands()
 
-      assert commands == [{3, CreateItem}, {1, ViewItem}]
+      # First command has weight
+      {module1, opts1} = Enum.at(commands, 0)
+      assert module1 == CreateItem
+      assert Keyword.get(opts1, :weight) == 3
+
+      # Second command has weight and wiring
+      {module2, opts2} = Enum.at(commands, 1)
+      assert module2 == ViewItem
+      assert Keyword.get(opts2, :weight) == 1
+      assert is_function(Keyword.get(opts2, :when), 1)
     end
 
-    test "mixed command list" do
+    test "mixed command list uses new format" do
       commands = FullModel.commands()
 
-      assert commands == [{3, CreateItem}, {2, ViewItem}, {1, MinimalCommand}]
+      assert length(commands) == 3
+
+      # Check weights are present
+      {_, opts1} = Enum.at(commands, 0)
+      assert Keyword.get(opts1, :weight) == 3
+
+      {_, opts2} = Enum.at(commands, 1)
+      assert Keyword.get(opts2, :weight) == 2
+
+      {_, opts3} = Enum.at(commands, 2)
+      assert Keyword.get(opts3, :weight) == 1
+    end
+  end
+
+  describe "simulate/2 callback" do
+    test "simulate returns expected events for CreateItem" do
+      state = %{items: %{}}
+      command = %CreateItem{name: "Test", quantity: 5}
+
+      events = FullModel.simulate(command, state)
+
+      assert [%ItemCreated{name: "Test", quantity: 5, item_ref: nil}] = events
+    end
+
+    test "simulate returns expected events for ViewItem" do
+      state = %{items: %{}}
+      command = %ViewItem{item_ref: "ref-123"}
+
+      events = FullModel.simulate(command, state)
+
+      assert [%ItemViewed{item_ref: "ref-123"}] = events
+    end
+
+    test "simulate returns empty list for MinimalCommand" do
+      state = %{}
+      command = %MinimalCommand{}
+
+      events = FullModel.simulate(command, state)
+
+      assert events == []
     end
   end
 
@@ -143,20 +199,20 @@ defmodule PropertyDamage.ModelTest do
   end
 
   describe "normalize_commands/1" do
-    test "passes through weighted tuples" do
+    test "normalizes {weight, module} tuples to 3-tuple with empty opts" do
       commands = [{3, CreateItem}, {1, ViewItem}]
 
       result = Model.normalize_commands(commands)
 
-      assert result == [{3, CreateItem}, {1, ViewItem}]
+      assert result == [{3, CreateItem, []}, {1, ViewItem, []}]
     end
 
-    test "wraps simple modules with weight 1" do
+    test "wraps simple modules with weight 1 and empty opts" do
       commands = [CreateItem, ViewItem]
 
       result = Model.normalize_commands(commands)
 
-      assert result == [{1, CreateItem}, {1, ViewItem}]
+      assert result == [{1, CreateItem, []}, {1, ViewItem, []}]
     end
 
     test "handles mixed list" do
@@ -164,7 +220,26 @@ defmodule PropertyDamage.ModelTest do
 
       result = Model.normalize_commands(commands)
 
-      assert result == [{3, CreateItem}, {1, ViewItem}]
+      assert result == [{3, CreateItem, []}, {1, ViewItem, []}]
+    end
+
+    test "extracts weight from opts in new format" do
+      commands = [{CreateItem, weight: 3, when: fn _ -> true end}]
+
+      result = Model.normalize_commands(commands)
+
+      assert [{3, CreateItem, opts}] = result
+      assert Keyword.get(opts, :weight) == 3
+      assert is_function(Keyword.get(opts, :when), 1)
+    end
+
+    test "defaults weight to 1 when not specified in opts" do
+      commands = [{ViewItem, when: fn _ -> true end}]
+
+      result = Model.normalize_commands(commands)
+
+      assert [{1, ViewItem, opts}] = result
+      assert is_function(Keyword.get(opts, :when), 1)
     end
   end
 
@@ -176,6 +251,8 @@ defmodule PropertyDamage.ModelTest do
       assert {:state_projection, 0} in callbacks
       # extra_projections is now optional
       assert {:extra_projections, 0} in callbacks
+      # simulate is a callback (optional)
+      assert {:simulate, 2} in callbacks
     end
 
     test "optional callbacks are declared" do
@@ -188,6 +265,7 @@ defmodule PropertyDamage.ModelTest do
       assert {:teardown_each, 1} in optional
       assert {:teardown_once, 1} in optional
       assert {:terminate?, 3} in optional
+      assert {:simulate, 2} in optional
     end
   end
 end

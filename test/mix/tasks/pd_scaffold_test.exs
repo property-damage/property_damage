@@ -352,32 +352,33 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
     end
   end
 
-  describe "generator_for_type/3" do
+  describe "streamdata_generator_for_type/3" do
     test "generates UUID generator" do
-      gen = generator_for_type(:uuid, "id", "body")
+      gen = streamdata_generator_for_type(:uuid, "id", "body")
       assert gen =~ "UUID"
+      assert gen =~ "StreamData"
     end
 
     test "generates email generator" do
-      gen = generator_for_type(:email, "email", "body")
+      gen = streamdata_generator_for_type(:email, "email", "body")
       assert gen =~ "@example.com"
-      assert gen =~ "System.unique_integer"
+      assert gen =~ "StreamData"
     end
 
     test "generates enum generator" do
-      gen = generator_for_type({:enum, ["a", "b", "c"]}, "status", "body")
-      assert gen =~ "Enum.random"
+      gen = streamdata_generator_for_type({:enum, ["a", "b", "c"]}, "status", "body")
+      assert gen =~ "StreamData.member_of"
       assert gen =~ ~s(["a", "b", "c"])
     end
 
     test "generates integer range generator" do
-      gen = generator_for_type({:integer, 1, 100}, "count", "body")
-      assert gen =~ "Enum.random(1..100)"
+      gen = streamdata_generator_for_type({:integer, 1, 100}, "count", "body")
+      assert gen =~ "StreamData.integer(1..100)"
     end
 
     test "generates boolean generator" do
-      gen = generator_for_type(:boolean, "active", "body")
-      assert gen =~ "Enum.random([true, false])"
+      gen = streamdata_generator_for_type(:boolean, "active", "body")
+      assert gen =~ "StreamData.boolean()"
     end
   end
 
@@ -389,13 +390,14 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       code = generate_command(create_pet, "PetStore")
 
       assert code =~ "defmodule PetStore.Commands.CreatePet do"
-      assert code =~ "use PropertyDamage.Command"
+      assert code =~ "@behaviour PropertyDamage.Command"
       assert code =~ "defstruct"
-      assert code =~ "def new!(state, _generators)"
-      assert code =~ "def precondition(_state)"
+      assert code =~ "def generator(overrides"
+      assert code =~ "merge_overrides(overrides)"
+      assert code =~ "StreamData.fixed_map()"
       assert code =~ "def events(command, response)"
-      # POST should not be read_only
-      assert code =~ "@read_only false"
+      # POST should create a ref
+      assert code =~ "def creates_ref"
     end
 
     test "generates GET command as read_only" do
@@ -404,7 +406,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
 
       code = generate_command(list_pets, "PetStore")
 
-      assert code =~ "@read_only true"
+      assert code =~ "def read_only?, do: true"
     end
 
     test "includes HTTP metadata functions" do
@@ -509,7 +511,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
   defp to_module_name(name), do: Scaffold.to_module_name(name)
   defp to_field_name(name), do: Scaffold.to_field_name(name)
   defp infer_weight(op), do: Scaffold.infer_weight(op)
-  defp generator_for_type(type, name, source), do: Scaffold.generator_for_type(type, name, source)
+  defp streamdata_generator_for_type(type, name, source), do: Scaffold.streamdata_generator_for_type(type, name, source)
   defp generate_command(op, namespace), do: Scaffold.generate_command(op, namespace)
   defp generate_event(event, namespace), do: Scaffold.generate_event(event, namespace)
   defp generate_adapter(ops, ns, info, auth), do: Scaffold.generate_adapter(ops, ns, info, auth)

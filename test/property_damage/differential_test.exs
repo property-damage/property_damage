@@ -14,11 +14,9 @@ defmodule PropertyDamage.DifferentialTest do
 
   defmodule TestCommand do
     @behaviour PropertyDamage.Command
+    import PropertyDamage.Generator, only: [merge_overrides: 2]
 
     defstruct [:value, :item_ref]
-
-    @impl true
-    def precondition(_state), do: true
 
     @impl true
     def creates_ref, do: :item_ref
@@ -27,14 +25,10 @@ defmodule PropertyDamage.DifferentialTest do
     def downstream_observables, do: [TestEvent]
 
     @impl true
-    def new!(_state, _overrides \\ %{}) do
-      StreamData.fixed_map(%{value: StreamData.integer(1..100)})
-      |> StreamData.map(&struct!(__MODULE__, &1))
-    end
-
-    @impl true
-    def simulate(_state, %__MODULE__{value: value}) do
-      [%TestEvent{value: value, item_ref: nil, id: nil, timestamp: nil}]
+    def generator(overrides \\ %{}) do
+      %{value: StreamData.integer(1..100)}
+      |> merge_overrides(overrides)
+      |> StreamData.fixed_map()
     end
   end
 
@@ -176,6 +170,11 @@ defmodule PropertyDamage.DifferentialTest do
 
     @impl true
     def extra_projections, do: [TestAssertions]
+
+    @impl true
+    def simulate(%TestCommand{value: value}, _state) do
+      [%TestEvent{value: value, item_ref: nil, id: nil, timestamp: nil}]
+    end
   end
 
   # ============================================================================

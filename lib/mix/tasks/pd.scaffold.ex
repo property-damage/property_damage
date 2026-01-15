@@ -108,11 +108,12 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   ## After Generation
 
-  1. Review and customize generators in command `new!/2` callbacks
+  1. Review and customize generators in command `generator/1` callbacks
   2. Define events/2 to map responses to your event structs
-  3. Add preconditions based on your domain logic
-  4. Configure authentication in the adapter
-  5. Add invariants/projections to the model
+  3. Add preconditions (when:) and overrides (with:) in the Model's commands()
+  4. Implement simulate/2 in the Model for expected events
+  5. Configure authentication in the adapter
+  6. Add invariants/projections to the model
   """
 
   use Mix.Task
@@ -495,10 +496,11 @@ defmodule Mix.Tasks.Pd.Scaffold do
     Mix.shell().info("\n✓ Generated #{length(operations)} commands in #{output}")
 
     Mix.shell().info("\nNext steps:")
-    Mix.shell().info("  1. Review and customize generators in command new!/2 callbacks")
+    Mix.shell().info("  1. Review and customize generators in command generator/1 callbacks")
     Mix.shell().info("  2. Define events/2 to map responses to event structs")
-    Mix.shell().info("  3. Add preconditions and invariants")
-    Mix.shell().info("  4. Configure authentication in adapter")
+    Mix.shell().info("  3. Add when:/with: options in Model's commands() for preconditions")
+    Mix.shell().info("  4. Implement simulate/2 in Model for expected events")
+    Mix.shell().info("  5. Configure authentication in adapter")
   end
 
   # ============================================================================
@@ -521,23 +523,26 @@ defmodule Mix.Tasks.Pd.Scaffold do
       #{String.trim(op.description)}
 
       Generated from OpenAPI operationId: #{op.operation_id}
+
+      Note: Preconditions and state-dependent overrides should be defined in the Model's
+      commands/0 using `when:` and `with:` options. Simulate logic belongs in the Model's
+      `simulate/2` callback.
       \"\"\"
 
-      use PropertyDamage.Command
+      @behaviour PropertyDamage.Command
+      import PropertyDamage.Generator, only: [merge_overrides: 2]
 
       defstruct #{inspect(field_atoms)}
 
     #{generate_field_docs(fields)}
       @impl true
-      def new!(state, _generators) do
-        %__MODULE__{
-    #{generate_field_assignments(fields, "state")}    }
+      def generator(overrides \\\\ %{}) do
+        %{
+    #{generate_field_generators(fields)}    }
+        |> merge_overrides(overrides)
+        |> StreamData.fixed_map()
       end
 
-      @impl true
-      def precondition(_state), do: true
-
-      @impl true
       def events(command, response) do
         # TODO: Map response to events
         # Example: [%#{namespace}.Events.#{infer_event_name(op)}{}]
@@ -545,13 +550,9 @@ defmodule Mix.Tasks.Pd.Scaffold do
         []
       end
 
-      @impl true
-      def ref(_command, response) do
-        # Return ref if this creates a resource (POST typically)
-        #{if op.method == "POST", do: "response[\"id\"]", else: "nil"}
-      end
+      #{if op.method == "POST", do: "def creates_ref, do: :id  # TODO: adjust if different field", else: ""}
 
-      #{if op.method in ["POST", "PUT", "PATCH"], do: "@read_only false", else: "@read_only true"}
+      #{if op.method in ["GET", "HEAD", "OPTIONS"], do: "def read_only?, do: true", else: ""}
 
       # HTTP Info (for adapter)
       def __http_method__, do: :#{String.downcase(op.method)}
@@ -673,10 +674,10 @@ defmodule Mix.Tasks.Pd.Scaffold do
   defp format_type_doc({:array, inner}), do: "array of #{format_type_doc(inner)}"
   defp format_type_doc({:pattern, p}), do: "string matching #{p}"
 
-  defp generate_field_assignments(fields, _state_var) do
+  defp generate_field_generators(fields) do
     fields
     |> Enum.map(fn f ->
-      generator = generator_for_type(f.type, f.name, f.source)
+      generator = streamdata_generator_for_type(f.type, f.name, f.source)
       "      #{f.name}: #{generator}"
     end)
     |> Enum.join(",\n")
@@ -684,73 +685,73 @@ defmodule Mix.Tasks.Pd.Scaffold do
   end
 
   @doc false
-  def generator_for_type(:uuid, _name, _source) do
-    "Ecto.UUID.generate() # or use UUID library"
+  def streamdata_generator_for_type(:uuid, _name, _source) do
+    "StreamData.constant(Ecto.UUID.generate())"
   end
 
-  def generator_for_type(:email, name, _source) do
-    "\"test_" <> name <> "_\#{System.unique_integer([:positive])}@example.com\""
+  def streamdata_generator_for_type(:email, name, _source) do
+    ~s[StreamData.map(StreamData.positive_integer(), &"test_#{name}_\#{&1}@example.com")]
   end
 
-  def generator_for_type(:datetime, _name, _source) do
-    "DateTime.utc_now() |> DateTime.to_iso8601()"
+  def streamdata_generator_for_type(:datetime, _name, _source) do
+    "StreamData.constant(DateTime.utc_now() |> DateTime.to_iso8601())"
   end
 
-  def generator_for_type(:date, _name, _source) do
-    "Date.utc_today() |> Date.to_iso8601()"
+  def streamdata_generator_for_type(:date, _name, _source) do
+    "StreamData.constant(Date.utc_today() |> Date.to_iso8601())"
   end
 
-  def generator_for_type(:uri, name, _source) do
-    "\"https://example.com/" <> name <> "/\#{System.unique_integer([:positive])}\""
+  def streamdata_generator_for_type(:uri, name, _source) do
+    ~s[StreamData.map(StreamData.positive_integer(), &"https://example.com/#{name}/\#{&1}")]
   end
 
-  def generator_for_type(:string, _name, _source) do
-    ~s[for(_ <- 1..Enum.random(5..20), into: "", do: <<Enum.random(?a..?z)>>)]
+  def streamdata_generator_for_type(:string, _name, _source) do
+    "StreamData.string(:alphanumeric, min_length: 5, max_length: 20)"
   end
 
-  def generator_for_type({:string, min, max}, _name, _source) do
-    ~s[for(_ <- 1..Enum.random(#{min}..#{max}), into: "", do: <<Enum.random(?a..?z)>>)]
+  def streamdata_generator_for_type({:string, min, max}, _name, _source) do
+    "StreamData.string(:alphanumeric, min_length: #{min}, max_length: #{max})"
   end
 
-  def generator_for_type({:pattern, _pattern}, _name, _source) do
-    "# TODO: Generate string matching pattern\n      nil"
+  def streamdata_generator_for_type({:pattern, _pattern}, _name, _source) do
+    "# TODO: Generate string matching pattern\n      StreamData.constant(nil)"
   end
 
-  def generator_for_type(:integer, _name, _source) do
-    "Enum.random(1..1000)"
+  def streamdata_generator_for_type(:integer, _name, _source) do
+    "StreamData.integer(1..1000)"
   end
 
-  def generator_for_type({:integer, min, max}, _name, _source) do
-    "Enum.random(#{min}..#{max})"
+  def streamdata_generator_for_type({:integer, min, max}, _name, _source) do
+    "StreamData.integer(#{min}..#{max})"
   end
 
-  def generator_for_type(:number, _name, _source) do
-    ":rand.uniform() * 1000"
+  def streamdata_generator_for_type(:number, _name, _source) do
+    "StreamData.float(min: 0.0, max: 1000.0)"
   end
 
-  def generator_for_type({:number, min, max}, _name, _source) do
-    "#{min} + :rand.uniform() * #{max - min}"
+  def streamdata_generator_for_type({:number, min, max}, _name, _source) do
+    "StreamData.float(min: #{min}, max: #{max})"
   end
 
-  def generator_for_type(:boolean, _name, _source) do
-    "Enum.random([true, false])"
+  def streamdata_generator_for_type(:boolean, _name, _source) do
+    "StreamData.boolean()"
   end
 
-  def generator_for_type({:enum, values}, _name, _source) do
-    "Enum.random(#{inspect(values)})"
+  def streamdata_generator_for_type({:enum, values}, _name, _source) do
+    "StreamData.member_of(#{inspect(values)})"
   end
 
-  def generator_for_type({:array, inner_type}, name, source) do
-    inner_gen = generator_for_type(inner_type, name, source)
-    "for _ <- 1..Enum.random(1..3), do: #{inner_gen}"
+  def streamdata_generator_for_type({:array, inner_type}, name, source) do
+    inner_gen = streamdata_generator_for_type(inner_type, name, source)
+    "StreamData.list_of(#{inner_gen}, min_length: 1, max_length: 3)"
   end
 
-  def generator_for_type(:map, _name, _source) do
-    "%{}"
+  def streamdata_generator_for_type(:map, _name, _source) do
+    "StreamData.constant(%{})"
   end
 
-  def generator_for_type(:any, name, source) do
-    "# TODO: Implement generator for #{name} (#{source})\n      nil"
+  def streamdata_generator_for_type(:any, name, source) do
+    "# TODO: Implement generator for #{name} (#{source})\n      StreamData.constant(nil)"
   end
 
   defp infer_event_name(op) do

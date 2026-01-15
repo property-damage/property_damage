@@ -11,13 +11,10 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     defstruct [:ref, :name, :depends_on]
 
     @impl true
-    def precondition(_), do: true
-
-    @impl true
     def creates_ref, do: :ref
 
     @impl true
-    def new!(_, _), do: StreamData.constant(%__MODULE__{})
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
   # Test command that consumes a ref
@@ -27,10 +24,7 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     defstruct [:target_ref, :extra_ref]
 
     @impl true
-    def precondition(_), do: true
-
-    @impl true
-    def new!(_, _), do: StreamData.constant(%__MODULE__{})
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
   # Test command with no refs
@@ -40,10 +34,7 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     defstruct [:data]
 
     @impl true
-    def precondition(_), do: true
-
-    @impl true
-    def new!(_, _), do: StreamData.constant(%__MODULE__{})
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
   describe "build/1" do

@@ -143,12 +143,18 @@ defmodule PropertyDamage.Validation do
     :ok
   end
 
+  # {weight, module} format (legacy)
   defp validate_command_spec!({weight, _cmd}) when is_integer(weight) and weight > 0 do
     :ok
   end
 
-  defp validate_command_spec!({weight, cmd}) do
+  defp validate_command_spec!({weight, cmd}) when is_integer(weight) do
     raise ArgumentError, Error.format_config_error(:invalid_command_weight, {weight, cmd})
+  end
+
+  # {module, opts} format (new)
+  defp validate_command_spec!({cmd, opts}) when is_atom(cmd) and is_list(opts) do
+    :ok
   end
 
   defp validate_command_spec!(cmd) when is_atom(cmd) do
@@ -164,10 +170,9 @@ defmodule PropertyDamage.Validation do
   """
   @spec validate_command_callbacks!(module()) :: :ok
   def validate_command_callbacks!(cmd) do
+    # generator/1 is the only required callback in the new pattern
     required = [
-      {:new, 2},
-      {:precondition, 1},
-      {:events, 2}
+      {:generator, 1}
     ]
 
     for {callback, arity} <- required do
@@ -518,14 +523,14 @@ defmodule PropertyDamage.Validation do
     normalized = PropertyDamage.Model.normalize_commands(commands)
 
     if length(normalized) >= 2 do
-      weights = Enum.map(normalized, fn {weight, _cmd} -> weight end)
+      weights = Enum.map(normalized, fn {weight, _cmd, _opts} -> weight end)
       total_weight = Enum.sum(weights)
       max_weight = Enum.max(weights)
 
       # Warn if a single command has > 80% of total weight
       if max_weight / total_weight > 0.8 do
-        {_weight, dominant_cmd} =
-          Enum.find(normalized, fn {w, _} -> w == max_weight end)
+        {_weight, dominant_cmd, _opts} =
+          Enum.find(normalized, fn {w, _, _} -> w == max_weight end)
 
         [
           "Command #{inspect(dominant_cmd)} has #{Float.round(max_weight / total_weight * 100, 1)}% " <>
@@ -545,7 +550,7 @@ defmodule PropertyDamage.Validation do
     normalized = PropertyDamage.Model.normalize_commands(commands)
 
     if length(normalized) == 1 do
-      [{_weight, cmd}] = normalized
+      [{_weight, cmd, _opts}] = normalized
 
       [
         "Model has only one command (#{inspect(cmd)}) - " <>

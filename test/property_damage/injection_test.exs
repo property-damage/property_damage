@@ -21,7 +21,7 @@ defmodule PropertyDamage.InjectionTest do
   defmodule CreateResource do
     defstruct [:resource_id, :name]
 
-    def precondition(_state), do: true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{name: "resource"})
     def creates_ref, do: :resource_id
   end
 
@@ -29,7 +29,7 @@ defmodule PropertyDamage.InjectionTest do
   defmodule SimpleCommand do
     defstruct [:data]
 
-    def precondition(_state), do: true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{data: "test"})
   end
 
   # Test projection that tracks resources
@@ -59,6 +59,7 @@ defmodule PropertyDamage.InjectionTest do
     def state_projection, do: ResourceProjection
     def extra_projections, do: []
     def commands, do: [CreateResource, SimpleCommand]
+    def simulate(_cmd, _state), do: []
   end
 
   # Adapter that uses injection

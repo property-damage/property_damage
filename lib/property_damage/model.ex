@@ -45,23 +45,53 @@ defmodule PropertyDamage.Model do
         def terminate?(_state, _command, _events), do: false
       end
 
-  ## Command Weights
+  ## Command Specification
 
-  Commands can be weighted to control selection frequency:
+  Commands are specified with options controlling weight, preconditions, and parameterization:
 
       def commands do
         [
-          {3, CreateOrder},   # 3x relative weight
-          {2, ViewOrder},     # 2x relative weight
-          {1, CancelOrder}    # 1x relative weight
+          # Simple: just module (weight 1, always enabled, no overrides)
+          CreateOrder,
+
+          # Weighted: {module, weight}
+          {ViewOrder, 2},
+
+          # Full options: {module, keyword_list}
+          {CancelOrder,
+            weight: 1,
+            when: fn state -> map_size(state.orders) > 0 end,
+            with: fn state -> %{order_ref: StreamData.member_of(Map.keys(state.orders))} end}
         ]
       end
 
-  Simple list format `[CreateOrder, ViewOrder]` treats all commands equally.
+  ### Options
+
+  - `:weight` - Relative selection frequency (default: 1)
+  - `:when` - Precondition function `(state -> boolean)` (default: always true)
+  - `:with` - Override function `(state -> map)` for command generation (default: %{})
 
   Weights express *relative* frequency among valid commands. If CreateOrder
-  has weight 3 and CancelOrder has weight 1, and both pass their preconditions,
+  has weight 3 and CancelOrder has weight 1, and both pass their `when:` predicates,
   CreateOrder will be selected ~75% of the time.
+
+  ## Simulate Callback
+
+  Models define expected events for each command via `simulate/2`:
+
+      def simulate(%CreateOrder{name: name}, _state) do
+        [%OrderCreated{name: name, order_ref: nil}]
+      end
+
+      def simulate(%ViewOrder{order_ref: ref}, state) do
+        if Map.has_key?(state.orders, ref) do
+          [%OrderViewed{order_ref: ref}]
+        else
+          [%OrderNotFound{order_ref: ref}]
+        end
+      end
+
+  This enables symbolic execution during sequence generation.
 
   ## Lifecycle Diagram
 
@@ -116,28 +146,89 @@ defmodule PropertyDamage.Model do
   """
 
   @typedoc """
-  Command specification - either a module or `{weight, module}` tuple.
+  Command specification options.
+
+  - `:weight` - Relative selection frequency (default: 1)
+  - `:when` - Precondition function `(state -> boolean)` (default: always true)
+  - `:with` - Override function `(state -> map)` for command generation (default: %{})
   """
-  @type command_spec :: module() | {pos_integer(), module()}
+  @type command_opts :: [
+          weight: pos_integer(),
+          when: (map() -> boolean()),
+          with: (map() -> map())
+        ]
+
+  @typedoc """
+  Command specification - module, `{module, weight}`, or `{module, opts}`.
+  """
+  @type command_spec :: module() | {module(), pos_integer()} | {module(), command_opts()}
 
   @doc """
-  Returns list of command modules that can be generated.
+  Returns list of command specifications.
 
-  Can return either:
-  - Simple list: `[CreateOrder, ViewOrder, CancelOrder]` - all weighted equally
-  - Weighted list: `[{3, CreateOrder}, {2, ViewOrder}, {1, CancelOrder}]`
+  Each command can be specified as:
+  - `Module` - Simple module, weight 1, always enabled
+  - `{Module, weight}` - Module with custom weight
+  - `{Module, opts}` - Module with full options (weight, when, with)
 
-  The framework normalizes simple lists to weighted format internally.
+  ## Examples
+
+      def commands do
+        [
+          CreateOrder,                           # Always enabled, weight 1
+          {ViewOrder, 2},                        # Always enabled, weight 2
+          {CancelOrder,
+            weight: 1,
+            when: fn s -> map_size(s.orders) > 0 end,
+            with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+        ]
+      end
   """
   @callback commands() :: [command_spec()]
 
   @doc """
-  Returns the projection module used for command preconditions.
+  Returns the projection module used for state tracking.
 
-  This projection's state is passed to `Command.precondition/1` and
-  `Command.new!/2` during command generation.
+  This projection's state is passed to:
+  - `when:` predicates in command specs
+  - `with:` override functions in command specs
+  - `simulate/2` for determining expected events
   """
   @callback state_projection() :: module()
+
+  @doc """
+  Returns expected events for a command given current state.
+
+  This enables symbolic execution during sequence generation, allowing
+  the framework to track state evolution and generate coherent sequences.
+
+  ## Arguments
+
+  - `command` - The command struct being simulated
+  - `state` - The current projection state
+
+  ## Returns
+
+  List of event structs that the command is expected to produce.
+
+  ## Example
+
+      def simulate(%CreateOrder{name: name}, _state) do
+        [%OrderCreated{name: name, order_ref: nil}]
+      end
+
+      def simulate(%ViewOrder{order_ref: ref}, state) do
+        if Map.has_key?(state.orders, ref) do
+          [%OrderViewed{order_ref: ref}]
+        else
+          [%OrderNotFound{order_ref: ref}]
+        end
+      end
+
+      # Catch-all for commands without events
+      def simulate(_command, _state), do: []
+  """
+  @callback simulate(command :: struct(), state :: map()) :: [struct()]
 
   @doc """
   Returns list of additional projection modules.
@@ -248,27 +339,61 @@ defmodule PropertyDamage.Model do
     setup_each: 1,
     teardown_each: 1,
     teardown_once: 1,
-    terminate?: 3
+    terminate?: 3,
+    simulate: 2
   ]
 
-  @doc """
-  Normalize command list to weighted format.
+  @typedoc """
+  Normalized command specification with weight, module, and options.
+  """
+  @type normalized_command :: {pos_integer(), module(), command_opts()}
 
-  Converts simple module list to `{1, module}` tuples.
+  @doc """
+  Normalize command list to `{weight, module, opts}` format.
+
+  Handles all input formats:
+  - `Module` → `{1, Module, []}`
+  - `{Module, weight}` → `{weight, Module, []}`
+  - `{Module, opts}` → `{weight, Module, opts}` (weight from opts or default 1)
 
   ## Examples
 
-      iex> PropertyDamage.Model.normalize_commands([CreateOrder, ViewOrder])
-      [{1, CreateOrder}, {1, ViewOrder}]
+      iex> PropertyDamage.Model.normalize_commands([CreateOrder])
+      [{1, CreateOrder, []}]
 
-      iex> PropertyDamage.Model.normalize_commands([{3, CreateOrder}, {1, ViewOrder}])
-      [{3, CreateOrder}, {1, ViewOrder}]
+      iex> PropertyDamage.Model.normalize_commands([{ViewOrder, 2}])
+      [{2, ViewOrder, []}]
+
+      iex> PropertyDamage.Model.normalize_commands([{CancelOrder, weight: 3, when: &some_fn/1}])
+      [{3, CancelOrder, [weight: 3, when: &some_fn/1]}]
   """
-  @spec normalize_commands([command_spec()]) :: [{pos_integer(), module()}]
+  @spec normalize_commands([command_spec()]) :: [normalized_command()]
   def normalize_commands(commands) do
-    Enum.map(commands, fn
-      {weight, module} when is_integer(weight) and weight > 0 -> {weight, module}
-      module when is_atom(module) -> {1, module}
-    end)
+    Enum.map(commands, &normalize_command_spec/1)
+  end
+
+  @doc """
+  Normalize a single command specification.
+  """
+  @spec normalize_command_spec(command_spec()) :: normalized_command()
+  def normalize_command_spec(spec) do
+    case spec do
+      # Simple module
+      module when is_atom(module) ->
+        {1, module, []}
+
+      # {module, weight} format (legacy)
+      {module, weight} when is_atom(module) and is_integer(weight) and weight > 0 ->
+        {weight, module, []}
+
+      # {weight, module} format (legacy)
+      {weight, module} when is_integer(weight) and weight > 0 and is_atom(module) ->
+        {weight, module, []}
+
+      # {module, opts} format (new)
+      {module, opts} when is_atom(module) and is_list(opts) ->
+        weight = Keyword.get(opts, :weight, 1)
+        {weight, module, opts}
+    end
   end
 end

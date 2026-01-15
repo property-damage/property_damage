@@ -38,15 +38,35 @@ defmodule PropertyDamage.Test.ExecutorModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
   @impl true
-  def commands, do: [CreateItem, ViewItem]
+  def commands do
+    [
+      CreateItem,
+      {ViewItem,
+       when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
+       with: fn state ->
+         items = Map.get(state, :items, %{})
+         %{item_ref: StreamData.member_of(Map.keys(items))}
+       end}
+    ]
+  end
 
   @impl true
   def state_projection, do: ModelState
 
   @impl true
   def extra_projections, do: [TestAssertions]
+
+  @impl true
+  def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+    [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+  end
+
+  def simulate(%ViewItem{item_ref: item_ref}, _state) do
+    [%ItemViewed{item_ref: item_ref}]
+  end
 end
 
 defmodule PropertyDamage.Test.FailingModel do
@@ -57,6 +77,7 @@ defmodule PropertyDamage.Test.FailingModel do
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Projections.{ModelState, FailingAssertion}
+  alias PropertyDamage.Test.Events.ItemCreated
 
   @impl true
   def commands, do: [CreateItem]
@@ -66,6 +87,11 @@ defmodule PropertyDamage.Test.FailingModel do
 
   @impl true
   def extra_projections, do: [FailingAssertion]
+
+  @impl true
+  def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+    [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+  end
 end
 
 defmodule PropertyDamage.Test.SimpleAdapter do

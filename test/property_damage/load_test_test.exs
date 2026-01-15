@@ -413,9 +413,7 @@ defmodule PropertyDamage.LoadTestTest do
   defmodule WorkerTestCommand do
     defstruct [:value]
 
-    def precondition(_state), do: true
-    def new!(_state, _overrides), do: StreamData.constant(%__MODULE__{value: 1})
-    def simulate(_state, _cmd), do: [%{type: :created}]
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{value: 1})
   end
 
   defmodule WorkerTestProjection do
@@ -432,10 +430,13 @@ defmodule PropertyDamage.LoadTestTest do
     @behaviour PropertyDamage.Model
 
     @impl true
-    def commands(), do: [{1, WorkerTestCommand}]
+    def commands(), do: [WorkerTestCommand]
 
     @impl true
     def state_projection(), do: WorkerTestProjection
+
+    @impl true
+    def simulate(_cmd, _state), do: [%{type: :created}]
 
     @impl true
     def extra_projections(), do: []
@@ -620,9 +621,7 @@ defmodule PropertyDamage.LoadTestTest do
     defmodule MockCommand do
       defstruct [:value]
 
-      def precondition(_state), do: true
-      def new!(_state, _overrides), do: StreamData.constant(%__MODULE__{value: 1})
-      def simulate(_state, _cmd), do: [%{type: :created}]
+      def generator(_overrides \\ %{}), do: StreamData.constant(%{value: 1})
     end
 
     defmodule MockProjection do
@@ -639,13 +638,16 @@ defmodule PropertyDamage.LoadTestTest do
       @behaviour PropertyDamage.Model
 
       @impl true
-      def commands(), do: [{1, MockCommand}]
+      def commands(), do: [MockCommand]
 
       @impl true
       def state_projection(), do: MockProjection
 
       @impl true
       def extra_projections(), do: []
+
+      @impl true
+      def simulate(_cmd, _state), do: [%{type: :created}]
     end
 
     defmodule MockAdapter do
