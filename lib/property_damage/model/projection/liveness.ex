@@ -1,4 +1,4 @@
-defmodule PropertyDamage.Projection.Liveness do
+defmodule PropertyDamage.Model.Projection.Liveness do
   @moduledoc """
   Projection that tracks pending operations and asserts progress (liveness).
 
@@ -32,7 +32,7 @@ defmodule PropertyDamage.Projection.Liveness do
       defmodule MyModel do
         def extra_projections do
           [
-            {PropertyDamage.Projection.Liveness, [
+            {PropertyDamage.Model.Projection.Liveness, [
               max_pending_duration_ms: 10_000,
               required_completions: %{
                 CreateTransfer => [TransferCompleted, TransferFailed],
@@ -56,7 +56,7 @@ defmodule PropertyDamage.Projection.Liveness do
   - Can't detect "infinite but slow progress" (livelock with occasional success)
   """
 
-  @behaviour PropertyDamage.Projection
+  @behaviour PropertyDamage.Model.Projection
 
   defstruct [
     :pending_operations,
@@ -84,7 +84,7 @@ defmodule PropertyDamage.Projection.Liveness do
   @default_max_duration_ms 10_000
   @default_check_interval 10
 
-  @impl PropertyDamage.Projection
+  @impl PropertyDamage.Model.Projection
   def init(opts \\ []) do
     %__MODULE__{
       pending_operations: %{},
@@ -96,7 +96,7 @@ defmodule PropertyDamage.Projection.Liveness do
     }
   end
 
-  @impl PropertyDamage.Projection
+  @impl PropertyDamage.Model.Projection
   def apply(state, item) do
     case item do
       %{__struct__: module} = cmd when is_map_key(state.required_completions, module) ->

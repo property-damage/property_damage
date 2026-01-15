@@ -8,7 +8,7 @@ defmodule PropertyDamage.Test.Projections.FailingAssertion do
   @moduledoc """
   Assertion projection that fails when total_quantity exceeds threshold.
   """
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   alias PropertyDamage.Test.Events.ItemCreated
 
@@ -35,6 +35,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
   Simple model for executor tests.
   """
   @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
@@ -60,6 +61,9 @@ defmodule PropertyDamage.Test.ExecutorModel do
   def extra_projections, do: [TestAssertions]
 
   @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
   def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
     [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
   end
@@ -74,6 +78,7 @@ defmodule PropertyDamage.Test.FailingModel do
   Model with failing assertion projection for testing check failures.
   """
   @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Projections.{ModelState, FailingAssertion}
@@ -89,6 +94,9 @@ defmodule PropertyDamage.Test.FailingModel do
   def extra_projections, do: [FailingAssertion]
 
   @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
   def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
     [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
   end
@@ -179,7 +187,7 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
   If a sequence fails `high_limit`, shrinking shouldn't accept a
   sequence that only fails `low_limit`.
   """
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   alias PropertyDamage.Test.Events.ItemCreated
 

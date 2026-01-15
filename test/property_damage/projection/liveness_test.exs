@@ -1,7 +1,7 @@
-defmodule PropertyDamage.Projection.LivenessTest do
+defmodule PropertyDamage.Model.Projection.LivenessTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Projection.Liveness
+  alias PropertyDamage.Model.Projection.Liveness
 
   # Test command and event modules
   defmodule CreateTransfer do

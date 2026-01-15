@@ -129,7 +129,7 @@ defmodule PropertyDamage.DifferentialTest do
   # ============================================================================
 
   defmodule TestProjection do
-    @behaviour PropertyDamage.Projection
+    @behaviour PropertyDamage.Model.Projection
 
     @impl true
     def init, do: %{items: %{}, counter: 0}
@@ -147,7 +147,7 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   defmodule TestAssertions do
-    use PropertyDamage.Projection
+    use PropertyDamage.Model.Projection
 
     @impl true
     def init, do: %{}
@@ -161,17 +161,21 @@ defmodule PropertyDamage.DifferentialTest do
 
   defmodule TestModel do
     @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
 
-    @impl true
+    @impl PropertyDamage.Model
     def commands, do: [TestCommand]
 
-    @impl true
+    @impl PropertyDamage.Model
     def state_projection, do: TestProjection
 
-    @impl true
+    @impl PropertyDamage.Model
     def extra_projections, do: [TestAssertions]
 
-    @impl true
+    @impl PropertyDamage.Model
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
     def simulate(%TestCommand{value: value}, _state) do
       [%TestEvent{value: value, item_ref: nil, id: nil, timestamp: nil}]
     end

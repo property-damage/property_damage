@@ -1,4 +1,4 @@
-defmodule PropertyDamage.ProjectionTest do
+defmodule PropertyDamage.Model.ProjectionTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Test.Projections.ModelState
@@ -57,7 +57,7 @@ defmodule PropertyDamage.ProjectionTest do
 
   describe "behaviour callbacks" do
     test "Projection defines required callbacks" do
-      callbacks = PropertyDamage.Projection.behaviour_info(:callbacks)
+      callbacks = PropertyDamage.Model.Projection.behaviour_info(:callbacks)
 
       assert {:init, 0} in callbacks
       assert {:apply, 2} in callbacks

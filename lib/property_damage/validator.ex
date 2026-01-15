@@ -11,7 +11,7 @@ defmodule PropertyDamage.Validator do
   For each command in the sequence:
 
   1. Check Model's `when:` option for the command - returns false if invalid
-  2. Apply Model's `simulate/2` to get simulated events
+  2. Apply Model's `simulator().simulate/2` to get simulated events
   3. Update state projection with command and events
 
   ## Usage
@@ -27,7 +27,7 @@ defmodule PropertyDamage.Validator do
 
   ## Notes
 
-  - Simulation uses Model's `simulate/2` if defined, otherwise produces no events
+  - Simulation uses Model's `simulator().simulate/2` if defined, otherwise produces no events
   - State projection is updated but assertion projections are not
   - This is fast because no actual execution or check evaluation happens
   """
@@ -40,7 +40,7 @@ defmodule PropertyDamage.Validator do
   Simulates the sequence by:
   1. Initializing state from model's state projection
   2. For each command, checking Model's `when:` option against current state
-  3. Updating state via Model's `simulate/2` (if defined)
+  3. Updating state via Model's `simulator().simulate/2` (if defined)
 
   ## Parameters
 
@@ -117,8 +117,8 @@ defmodule PropertyDamage.Validator do
   end
 
   defp simulate_command(model, command, state) do
-    if function_exported?(model, :simulate, 2) do
-      model.simulate(command, state)
+    if function_exported?(model, :simulator, 0) do
+      model.simulator().simulate(command, state)
     else
       []
     end

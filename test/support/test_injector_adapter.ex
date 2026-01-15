@@ -4,7 +4,7 @@ defmodule PropertyDamage.Test.SimpleInjectorAdapter do
 
   Transforms simple payloads to test events.
   """
-  use PropertyDamage.InjectorAdapter
+  use PropertyDamage.Adapter.Injector
 
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
@@ -39,7 +39,7 @@ defmodule PropertyDamage.Test.RespondingInjectorAdapter do
   @moduledoc """
   Test injector adapter demonstrating respond/2 callback.
   """
-  use PropertyDamage.InjectorAdapter
+  use PropertyDamage.Adapter.Injector
 
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
@@ -70,7 +70,7 @@ defmodule PropertyDamage.Test.FailingInjectorAdapter do
   @moduledoc """
   Test injector adapter that can fail setup.
   """
-  use PropertyDamage.InjectorAdapter
+  use PropertyDamage.Adapter.Injector
 
   @emits []
 
@@ -91,7 +91,7 @@ defmodule PropertyDamage.Test.NoEmitsInjectorAdapter do
 
   Used to test default behavior when @emits is not specified.
   """
-  use PropertyDamage.InjectorAdapter
+  use PropertyDamage.Adapter.Injector
 
   # No @emits attribute
 

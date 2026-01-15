@@ -90,7 +90,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       TODO: Add description of what state this projection tracks.
       \"\"\"
 
-      @behaviour PropertyDamage.Projection
+      @behaviour PropertyDamage.Model.Projection
 
       # TODO: Add event aliases
       # alias MyApp.Events.{Created, Updated, Deleted}

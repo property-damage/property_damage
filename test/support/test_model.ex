@@ -6,6 +6,7 @@ defmodule PropertyDamage.Test.FullModel do
   lifecycle hooks, terminate?/3, and the new Model-level wiring pattern.
   """
   @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
@@ -47,8 +48,11 @@ defmodule PropertyDamage.Test.FullModel do
   @impl true
   def teardown_once(_config), do: :ok
 
-  # Simulate expected events for each command type
   @impl true
+  def simulator, do: __MODULE__
+
+  # Simulate expected events for each command type
+  @impl PropertyDamage.Model.Simulator
   def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
     [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
   end
@@ -75,6 +79,7 @@ defmodule PropertyDamage.Test.MinimalModel do
   Uses the new command spec format with Model-level wiring.
   """
   @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
@@ -100,6 +105,9 @@ defmodule PropertyDamage.Test.MinimalModel do
   def extra_projections, do: [TestAssertions]
 
   @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
   def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
     [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
   end
@@ -114,6 +122,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
   Test model using simple (unweighted) command list.
   """
   @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
@@ -140,6 +149,9 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
   def extra_projections, do: [TestAssertions]
 
   @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
   def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
     [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
   end
@@ -154,6 +166,7 @@ defmodule PropertyDamage.Test.WeightedModel do
   Test model using explicit command weights.
   """
   @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
@@ -181,6 +194,9 @@ defmodule PropertyDamage.Test.WeightedModel do
   def extra_projections, do: [TestAssertions]
 
   @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
   def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
     [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
   end

@@ -247,7 +247,7 @@ defmodule PropertyDamage.Forensics do
   end
 
   defp run_assertions(model, extra_projections, projections, assertion_ctx) do
-    alias PropertyDamage.Projection
+    alias PropertyDamage.Model.Projection
 
     # Run assertions on all projections (state + extra)
     state_projection = model.state_projection()
@@ -274,7 +274,7 @@ defmodule PropertyDamage.Forensics do
   defp run_projection_assertions(_projection, _projection_state, [], _ctx), do: :ok
 
   defp run_projection_assertions(projection, projection_state, [assertion | rest], ctx) do
-    alias PropertyDamage.Projection
+    alias PropertyDamage.Model.Projection
 
     # Check if assertion should run given current context
     if Projection.should_run?(assertion.trigger, ctx.step_type, ctx.module, ctx.counters) do

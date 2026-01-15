@@ -1,7 +1,7 @@
-defmodule PropertyDamage.InjectorAdapterTest do
+defmodule PropertyDamage.Adapter.InjectorTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.InjectorAdapter
+  alias PropertyDamage.Adapter.Injector
   alias PropertyDamage.EventQueue
 
   alias PropertyDamage.Test.{
@@ -13,7 +13,7 @@ defmodule PropertyDamage.InjectorAdapterTest do
 
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
-  describe "InjectorAdapter behaviour" do
+  describe "Adapter.Injector behaviour" do
     test "compiles with required callbacks" do
       Code.ensure_loaded!(SimpleInjectorAdapter)
 
@@ -169,7 +169,7 @@ defmodule PropertyDamage.InjectorAdapterTest do
 
   describe "behaviour info" do
     test "required callbacks are specified" do
-      callbacks = InjectorAdapter.behaviour_info(:callbacks)
+      callbacks = Injector.behaviour_info(:callbacks)
 
       assert {:setup, 1} in callbacks
       assert {:teardown, 1} in callbacks
@@ -177,7 +177,7 @@ defmodule PropertyDamage.InjectorAdapterTest do
     end
 
     test "optional callbacks are declared" do
-      optional = InjectorAdapter.behaviour_info(:optional_callbacks)
+      optional = Injector.behaviour_info(:optional_callbacks)
 
       assert {:respond, 2} in optional
     end

@@ -169,7 +169,7 @@ defmodule PropertyDamage.Errors do
 
                 Example projection:
                   defmodule #{mod_name} do
-                    @behaviour PropertyDamage.Projection
+                    @behaviour PropertyDamage.Model.Projection
 
                     def init, do: %{}
                     def apply(state, event), do: state

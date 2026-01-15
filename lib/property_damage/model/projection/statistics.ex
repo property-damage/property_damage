@@ -1,4 +1,4 @@
-defmodule PropertyDamage.Projection.Statistics do
+defmodule PropertyDamage.Model.Projection.Statistics do
   @moduledoc """
   Projection that computes statistical properties over event streams.
 
@@ -23,7 +23,7 @@ defmodule PropertyDamage.Projection.Statistics do
       defmodule MyModel do
         def extra_projections do
           [
-            {PropertyDamage.Projection.Statistics, [
+            {PropertyDamage.Model.Projection.Statistics, [
               window_size: 100,
               assertions: [
                 {:p99_latency_ms, :less_than, 500},
@@ -61,7 +61,7 @@ defmodule PropertyDamage.Projection.Statistics do
   - Thresholds are environment-dependent (CI vs production hardware)
   """
 
-  @behaviour PropertyDamage.Projection
+  @behaviour PropertyDamage.Model.Projection
 
   defstruct [
     :latency_samples,
@@ -99,7 +99,7 @@ defmodule PropertyDamage.Projection.Statistics do
 
   @default_window_size 100
 
-  @impl PropertyDamage.Projection
+  @impl PropertyDamage.Model.Projection
   def init(opts \\ []) do
     %__MODULE__{
       latency_samples: :queue.new(),
@@ -112,7 +112,7 @@ defmodule PropertyDamage.Projection.Statistics do
     }
   end
 
-  @impl PropertyDamage.Projection
+  @impl PropertyDamage.Model.Projection
   def apply(state, item) do
     case item do
       %{__struct__: _} = event ->

@@ -64,8 +64,10 @@ defmodule PropertyDamage.MixProject do
         "Core Behaviours": [
           PropertyDamage.Command,
           PropertyDamage.Model,
+          PropertyDamage.Model.Projection,
+          PropertyDamage.Model.Simulator,
           PropertyDamage.Adapter,
-          PropertyDamage.Projection,
+          PropertyDamage.Adapter.Injector,
           PropertyDamage.Nemesis
         ],
         Execution: [

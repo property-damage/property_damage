@@ -4,7 +4,7 @@ defmodule PropertyDamage.Test.Projections.ModelState do
 
   Demonstrates basic Projection usage without assertions.
   """
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
@@ -34,7 +34,7 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   - @trigger every: [Module1, Module2] (after any listed)
   - @trigger every: N (sampling)
   """
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
@@ -98,7 +98,7 @@ defmodule PropertyDamage.Test.Projections.SingleAfterTrigger do
   @moduledoc """
   Test projection with single module trigger.
   """
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   alias PropertyDamage.Test.Commands.CreateItem
 
@@ -116,7 +116,7 @@ defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
   @moduledoc """
   Test projection with event-based trigger.
   """
-  use PropertyDamage.Projection
+  use PropertyDamage.Model.Projection
 
   alias PropertyDamage.Test.Events.ItemCreated
 

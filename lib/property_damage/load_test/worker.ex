@@ -36,7 +36,8 @@ defmodule PropertyDamage.LoadTest.Worker do
   require Logger
 
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.{Generator, Projection, Ref, Sequence}
+  alias PropertyDamage.{Generator, Ref, Sequence}
+  alias PropertyDamage.Model.Projection
 
   # Process dictionary key for injection context during adapter execution
   @injection_ctx_key :property_damage_load_test_injection_ctx

@@ -75,20 +75,43 @@ defmodule PropertyDamage.Model do
   has weight 3 and CancelOrder has weight 1, and both pass their `when:` predicates,
   CreateOrder will be selected ~75% of the time.
 
-  ## Simulate Callback
+  ## Simulator
 
-  Models define expected events for each command via `simulate/2`:
+  Models can define a Simulator module that predicts expected events for each command.
+  See `PropertyDamage.Model.Simulator` for the behaviour definition.
 
-      def simulate(%CreateOrder{name: name}, _state) do
-        [%OrderCreated{name: name, order_ref: nil}]
+      defmodule MySimulator do
+        @behaviour PropertyDamage.Model.Simulator
+
+        @impl true
+        def simulate(%CreateOrder{name: name}, _state) do
+          [%OrderCreated{name: name, order_ref: nil}]
+        end
+
+        def simulate(%ViewOrder{order_ref: ref}, state) do
+          if Map.has_key?(state.orders, ref) do
+            [%OrderViewed{order_ref: ref}]
+          else
+            [%OrderNotFound{order_ref: ref}]
+          end
+        end
       end
 
-      def simulate(%ViewOrder{order_ref: ref}, state) do
-        if Map.has_key?(state.orders, ref) do
-          [%OrderViewed{order_ref: ref}]
-        else
-          [%OrderNotFound{order_ref: ref}]
-        end
+  Then reference it in the model:
+
+      def simulator, do: MySimulator
+
+  For inline implementation, have the model implement both behaviours:
+
+      defmodule MyModel do
+        @behaviour PropertyDamage.Model
+        @behaviour PropertyDamage.Model.Simulator
+
+        def simulator, do: __MODULE__
+
+        @impl PropertyDamage.Model.Simulator
+        def simulate(%CreateOrder{name: name}, _state), do: [%OrderCreated{name: name}]
+        def simulate(_command, _state), do: []
       end
 
   This enables symbolic execution during sequence generation.
@@ -197,44 +220,28 @@ defmodule PropertyDamage.Model do
   @callback state_projection() :: module()
 
   @doc """
-  Returns expected events for a command given current state.
+  Returns the module implementing the Simulator behaviour.
 
-  This enables symbolic execution during sequence generation, allowing
-  the framework to track state evolution and generate coherent sequences.
-
-  ## Arguments
-
-  - `command` - The command struct being simulated
-  - `state` - The current projection state
-
-  ## Returns
-
-  List of event structs that the command is expected to produce.
+  The simulator predicts expected events for each command during sequence
+  generation, enabling symbolic execution.
 
   ## Example
 
-      def simulate(%CreateOrder{name: name}, _state) do
-        [%OrderCreated{name: name, order_ref: nil}]
-      end
+      # Reference an external simulator
+      def simulator, do: MyApp.OrderSimulator
 
-      def simulate(%ViewOrder{order_ref: ref}, state) do
-        if Map.has_key?(state.orders, ref) do
-          [%OrderViewed{order_ref: ref}]
-        else
-          [%OrderNotFound{order_ref: ref}]
-        end
-      end
+      # Or inline (module implements both Model and Simulator behaviours)
+      def simulator, do: __MODULE__
 
-      # Catch-all for commands without events
-      def simulate(_command, _state), do: []
+  See `PropertyDamage.Model.Simulator` for implementing the behaviour.
   """
-  @callback simulate(command :: struct(), state :: map()) :: [struct()]
+  @callback simulator() :: module()
 
   @doc """
   Returns list of additional projection modules.
 
   These projections can track extra state and/or define assertions via
-  `use PropertyDamage.Projection`. Their state is updated with each command
+  `use PropertyDamage.Model.Projection`. Their state is updated with each command
   and event, and any assertions are run according to their trigger conditions.
 
   Optional - defaults to `[]` if not implemented.
@@ -340,7 +347,7 @@ defmodule PropertyDamage.Model do
     teardown_each: 1,
     teardown_once: 1,
     terminate?: 3,
-    simulate: 2
+    simulator: 0
   ]
 
   @typedoc """

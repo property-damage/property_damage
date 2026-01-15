@@ -21,7 +21,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule ValidProjection do
-    @behaviour PropertyDamage.Projection
+    @behaviour PropertyDamage.Model.Projection
 
     @impl true
     def init, do: %{}
@@ -32,19 +32,23 @@ defmodule PropertyDamage.ValidationExtendedTest do
 
   defmodule ValidModel do
     @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
 
-    @impl true
+    @impl PropertyDamage.Model
     def commands do
       [{ValidCommand, weight: 10}]
     end
 
-    @impl true
+    @impl PropertyDamage.Model
     def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
-    @impl true
+    @impl PropertyDamage.Model
     def extra_projections, do: []
 
-    @impl true
+    @impl PropertyDamage.Model
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
     def simulate(_cmd, _state), do: []
   end
 

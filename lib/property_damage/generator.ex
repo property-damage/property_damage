@@ -480,8 +480,8 @@ defmodule PropertyDamage.Generator do
   end
 
   defp simulate_command(model, state, command) do
-    if function_exported?(model, :simulate, 2) do
-      model.simulate(command, state)
+    if function_exported?(model, :simulator, 0) do
+      model.simulator().simulate(command, state)
     else
       []
     end

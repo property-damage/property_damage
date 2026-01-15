@@ -1,4 +1,4 @@
-defmodule PropertyDamage.InjectorAdapter do
+defmodule PropertyDamage.Adapter.Injector do
   @moduledoc """
   Behaviour for adapters that receive and inject external events.
 
@@ -39,7 +39,7 @@ defmodule PropertyDamage.InjectorAdapter do
   ## Example
 
       defmodule MyTest.PaymentWebhookAdapter do
-        use PropertyDamage.InjectorAdapter
+        use PropertyDamage.Adapter.Injector
 
         @emits [PaymentConfirmed, PaymentDeclined]
 
@@ -141,9 +141,9 @@ defmodule PropertyDamage.InjectorAdapter do
 
   defmacro __using__(_opts) do
     quote do
-      @behaviour PropertyDamage.InjectorAdapter
+      @behaviour PropertyDamage.Adapter.Injector
       Module.register_attribute(__MODULE__, :emits, accumulate: false)
-      @before_compile PropertyDamage.InjectorAdapter
+      @before_compile PropertyDamage.Adapter.Injector
     end
   end
 

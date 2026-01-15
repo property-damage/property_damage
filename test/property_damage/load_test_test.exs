@@ -417,7 +417,7 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   defmodule WorkerTestProjection do
-    @behaviour PropertyDamage.Projection
+    @behaviour PropertyDamage.Model.Projection
 
     @impl true
     def init(), do: %{count: 0}
@@ -428,17 +428,21 @@ defmodule PropertyDamage.LoadTestTest do
 
   defmodule WorkerTestModel do
     @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
 
-    @impl true
+    @impl PropertyDamage.Model
     def commands(), do: [WorkerTestCommand]
 
-    @impl true
+    @impl PropertyDamage.Model
     def state_projection(), do: WorkerTestProjection
 
-    @impl true
+    @impl PropertyDamage.Model
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
     def simulate(_cmd, _state), do: [%{type: :created}]
 
-    @impl true
+    @impl PropertyDamage.Model
     def extra_projections(), do: []
   end
 
@@ -625,7 +629,7 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     defmodule MockProjection do
-      @behaviour PropertyDamage.Projection
+      @behaviour PropertyDamage.Model.Projection
 
       @impl true
       def init(), do: %{count: 0}
@@ -636,17 +640,21 @@ defmodule PropertyDamage.LoadTestTest do
 
     defmodule MockModel do
       @behaviour PropertyDamage.Model
+      @behaviour PropertyDamage.Model.Simulator
 
-      @impl true
+      @impl PropertyDamage.Model
       def commands(), do: [MockCommand]
 
-      @impl true
+      @impl PropertyDamage.Model
       def state_projection(), do: MockProjection
 
-      @impl true
+      @impl PropertyDamage.Model
       def extra_projections(), do: []
 
-      @impl true
+      @impl PropertyDamage.Model
+      def simulator, do: __MODULE__
+
+      @impl PropertyDamage.Model.Simulator
       def simulate(_cmd, _state), do: [%{type: :created}]
     end
 
@@ -790,7 +798,7 @@ defmodule PropertyDamage.LoadTestTest do
 
     # Model with assertion projections for testing assertion_mode option
     defmodule FailingAssertionProjection do
-      use PropertyDamage.Projection
+      use PropertyDamage.Model.Projection
 
       @impl true
       def init(), do: %{count: 0}

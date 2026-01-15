@@ -251,8 +251,8 @@ defmodule PropertyDamage.ModelTest do
       assert {:state_projection, 0} in callbacks
       # extra_projections is now optional
       assert {:extra_projections, 0} in callbacks
-      # simulate is a callback (optional)
-      assert {:simulate, 2} in callbacks
+      # simulator is a callback (optional) - returns module implementing Simulator behaviour
+      assert {:simulator, 0} in callbacks
     end
 
     test "optional callbacks are declared" do
@@ -265,7 +265,7 @@ defmodule PropertyDamage.ModelTest do
       assert {:teardown_each, 1} in optional
       assert {:teardown_once, 1} in optional
       assert {:terminate?, 3} in optional
-      assert {:simulate, 2} in optional
+      assert {:simulator, 0} in optional
     end
   end
 end

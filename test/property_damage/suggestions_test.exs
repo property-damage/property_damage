@@ -34,7 +34,7 @@ defmodule PropertyDamage.SuggestionsTest do
 
   # Test projection with existing checks
   defmodule TestProjection do
-    use PropertyDamage.Projection
+    use PropertyDamage.Model.Projection
 
     @impl true
     def init, do: %{}
@@ -51,7 +51,7 @@ defmodule PropertyDamage.SuggestionsTest do
 
   # Test projection without checks
   defmodule EmptyProjection do
-    @behaviour PropertyDamage.Projection
+    @behaviour PropertyDamage.Model.Projection
 
     @impl true
     def init, do: %{}

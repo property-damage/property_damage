@@ -1,4 +1,4 @@
-defmodule PropertyDamage.Projection do
+defmodule PropertyDamage.Model.Projection do
   @moduledoc """
   Behaviour for projections that track state and optionally define assertions.
 
@@ -11,7 +11,7 @@ defmodule PropertyDamage.Projection do
   ## Basic Usage
 
       defmodule MyProjection do
-        use PropertyDamage.Projection
+        use PropertyDamage.Model.Projection
 
         # Track state
         def init, do: %{orders: %{}, total: 0}
@@ -92,7 +92,7 @@ defmodule PropertyDamage.Projection do
   For assertions that only inspect commands/events, skip `init/0` and `apply/2`:
 
       defmodule CommandValidator do
-        use PropertyDamage.Projection
+        use PropertyDamage.Model.Projection
 
         @trigger every: CreateOrder
         def assert_order_has_items(_state, %CreateOrder{items: items}) do
@@ -153,16 +153,16 @@ defmodule PropertyDamage.Projection do
 
   defmacro __using__(_opts) do
     quote do
-      @behaviour PropertyDamage.Projection
+      @behaviour PropertyDamage.Model.Projection
 
       # Accumulating attribute for assertion metadata
       Module.register_attribute(__MODULE__, :assertions, accumulate: true)
       Module.register_attribute(__MODULE__, :trigger, accumulate: false)
 
-      # Register on_definition callback to capture assert/3 definitions
-      @on_definition PropertyDamage.Projection
+      # Register on_definition callback to capture assert_* definitions
+      @on_definition PropertyDamage.Model.Projection
 
-      @before_compile PropertyDamage.Projection
+      @before_compile PropertyDamage.Model.Projection
     end
   end
 

@@ -18,7 +18,7 @@ defmodule PropertyDamage.ForensicsTest do
 
   # Test projection (state)
   defmodule OrderState do
-    @behaviour PropertyDamage.Projection
+    @behaviour PropertyDamage.Model.Projection
 
     def init, do: %{orders: %{}, total_revenue: 0}
 
@@ -47,7 +47,7 @@ defmodule PropertyDamage.ForensicsTest do
 
   # Test assertion projection with assertions
   defmodule OrderInvariants do
-    use PropertyDamage.Projection
+    use PropertyDamage.Model.Projection
 
     @impl true
     def init, do: %{order_amounts: %{}}

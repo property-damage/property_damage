@@ -21,7 +21,7 @@ defmodule PropertyDamage.CoverageTest do
   end
 
   defmodule TestProjection do
-    @behaviour PropertyDamage.Projection
+    @behaviour PropertyDamage.Model.Projection
 
     @impl true
     def init, do: %{items: %{}, total: 0}

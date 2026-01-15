@@ -1518,7 +1518,7 @@ defmodule PropertyDamage.Executor do
         fn projection, {:ok, counters, failures} ->
           projection_state = Map.get(projections, projection)
 
-          # Only projections that use PropertyDamage.Projection have __assertions__/0
+          # Only projections that use PropertyDamage.Model.Projection have __assertions__/0
           assertions =
             if function_exported?(projection, :__assertions__, 0) do
               projection.__assertions__()
@@ -1579,7 +1579,7 @@ defmodule PropertyDamage.Executor do
          assertion_ctx,
          counters
        ) do
-    alias PropertyDamage.Projection
+    alias PropertyDamage.Model.Projection
 
     Enum.reduce_while(assertions, {:ok, counters}, fn assertion, {:ok, acc_counters} ->
       if Projection.should_run?(
