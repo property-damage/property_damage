@@ -166,6 +166,11 @@ defmodule PropertyDamage do
           shrink_time_ms: non_neg_integer()
         }
 
+  @typedoc """
+  Result from `run/1` - either success stats or a failure report.
+  """
+  @type result :: {:ok, stats()} | {:error, failure_report()}
+
   @doc """
   Run a property-based test.
 

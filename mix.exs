@@ -47,10 +47,14 @@ defmodule PropertyDamage.MixProject do
       extras: [
         "README.md",
         "guides/getting_started.md",
+        "guides/writing_commands.md",
         "guides/writing_invariants.md",
         "guides/debugging_failures.md",
+        "guides/async_and_eventual_consistency.md",
         "guides/chaos_engineering.md",
+        "guides/differential_testing.md",
         "guides/integration_testing.md",
+        "guides/load_testing.md",
         "CHANGELOG.md"
       ],
       groups_for_extras: [
