@@ -349,7 +349,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
   defp generate_non_negative_code(field) do
     """
     @trigger every: 1
-    def assert(:#{field}_non_negative, state, _cmd_or_event) do
+    def assert_#{field}_non_negative(state, _cmd_or_event) do
       violations =
         state.entities
         |> Enum.filter(fn {_id, entity} ->
@@ -366,7 +366,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
   defp generate_currency_code do
     """
     @trigger every: 1
-    def assert(:currency_consistency, state, _cmd_or_event) do
+    def assert_currency_consistency(state, _cmd_or_event) do
       violations =
         state.operations
         |> Enum.filter(fn op ->
@@ -386,7 +386,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
 
     """
     @trigger every: 1
-    def assert(:#{field}_exists, state, _cmd_or_event) do
+    def assert_#{field}_exists(state, _cmd_or_event) do
       refs_in_use = # collect all #{field} values from state
       known_refs = Map.keys(state.#{entity}s)
       missing = refs_in_use -- known_refs
@@ -401,7 +401,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
   defp generate_status_code(field) do
     """
     @trigger every: 1
-    def assert(:valid_#{field}, state, _cmd_or_event) do
+    def assert_valid_#{field}(state, _cmd_or_event) do
       valid_statuses = [:pending, :active, :completed, :cancelled]
 
       invalid =

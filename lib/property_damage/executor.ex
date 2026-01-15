@@ -1590,7 +1590,8 @@ defmodule PropertyDamage.Executor do
          ) do
         # Execute assertion - assertions raise on failure
         try do
-          projection.assert(assertion.name, projection_state, assertion_ctx.command_or_event)
+          assertion_fn = :"assert_#{assertion.name}"
+          apply(projection, assertion_fn, [projection_state, assertion_ctx.command_or_event])
           # Success: no exception raised
           {:cont, {:ok, acc_counters}}
         rescue

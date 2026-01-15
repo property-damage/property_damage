@@ -511,7 +511,10 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
   defp to_module_name(name), do: Scaffold.to_module_name(name)
   defp to_field_name(name), do: Scaffold.to_field_name(name)
   defp infer_weight(op), do: Scaffold.infer_weight(op)
-  defp streamdata_generator_for_type(type, name, source), do: Scaffold.streamdata_generator_for_type(type, name, source)
+
+  defp streamdata_generator_for_type(type, name, source),
+    do: Scaffold.streamdata_generator_for_type(type, name, source)
+
   defp generate_command(op, namespace), do: Scaffold.generate_command(op, namespace)
   defp generate_event(event, namespace), do: Scaffold.generate_event(event, namespace)
   defp generate_adapter(ops, ns, info, auth), do: Scaffold.generate_adapter(ops, ns, info, auth)

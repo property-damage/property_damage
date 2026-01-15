@@ -280,7 +280,8 @@ defmodule PropertyDamage.Forensics do
     if Projection.should_run?(assertion.trigger, ctx.step_type, ctx.module, ctx.counters) do
       # Execute assertion - assertions raise on failure
       try do
-        projection.assert(assertion.name, projection_state, ctx.command_or_event)
+        assertion_fn = :"assert_#{assertion.name}"
+        apply(projection, assertion_fn, [projection_state, ctx.command_or_event])
         # Success - no exception raised
         run_projection_assertions(projection, projection_state, rest, ctx)
       rescue

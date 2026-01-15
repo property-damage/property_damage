@@ -23,7 +23,7 @@ defmodule PropertyDamage.Test.Projections.FailingAssertion do
   def apply(state, _), do: state
 
   @trigger every: 1
-  def assert(:quantity_limit, state, _cmd_or_event) do
+  def assert_quantity_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 100 do
       PropertyDamage.fail!("Quantity exceeds limit", quantity: state.total_quantity, limit: 100)
     end
@@ -194,7 +194,7 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
   def apply(state, _), do: state
 
   @trigger every: 1
-  def assert(:low_limit, state, _cmd_or_event) do
+  def assert_low_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 100 do
       PropertyDamage.fail!("Quantity exceeds low limit",
         quantity: state.total_quantity,
@@ -204,7 +204,7 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
   end
 
   @trigger every: 1
-  def assert(:high_limit, state, _cmd_or_event) do
+  def assert_high_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 200 do
       PropertyDamage.fail!("Quantity exceeds high limit",
         quantity: state.total_quantity,

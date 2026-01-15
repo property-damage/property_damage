@@ -1115,7 +1115,7 @@ defmodule PropertyDamage do
 
       # In a projection assertion
       @trigger every: 1
-      def assert(:balance_positive, state, _cmd) do
+      def assert_balance_positive(state, _cmd) do
         if state.balance < 0 do
           PropertyDamage.fail!("negative balance", balance: state.balance)
         end

@@ -156,7 +156,7 @@ defmodule PropertyDamage.DifferentialTest do
     def apply(state, _), do: state
 
     @trigger every: 1
-    def assert(:always_pass, _state, _cmd_or_event), do: :ok
+    def assert_always_pass(_state, _cmd_or_event), do: :ok
   end
 
   defmodule TestModel do

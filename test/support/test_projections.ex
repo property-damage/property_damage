@@ -62,34 +62,34 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   # === Assertions ===
 
   @trigger every: 1
-  def assert(:quantity_non_negative, state, _cmd_or_event) do
+  def assert_quantity_non_negative(state, _cmd_or_event) do
     unless state.total_quantity >= 0 do
       PropertyDamage.fail!("Negative quantity", total: state.total_quantity)
     end
   end
 
   @trigger every: CreateItem
-  def assert(:create_increments_count, state, _cmd_or_event) do
+  def assert_create_increments_count(state, _cmd_or_event) do
     unless state.create_count > 0 do
       PropertyDamage.fail!("Create count should be positive")
     end
   end
 
   @trigger every: [CreateItem, ViewItem]
-  def assert(:command_was_tracked, state, _cmd_or_event) do
+  def assert_command_was_tracked(state, _cmd_or_event) do
     unless state.create_count > 0 or state.view_count > 0 do
       PropertyDamage.fail!("No commands tracked")
     end
   end
 
   @trigger every: 5
-  def assert(:sampled_check, _state, _cmd_or_event) do
+  def assert_sampled_check(_state, _cmd_or_event) do
     # This only runs every 5th step
     :ok
   end
 
   @trigger every: 1
-  def assert(:multi_requirement_check, _state, _cmd_or_event) do
+  def assert_multi_requirement_check(_state, _cmd_or_event) do
     :ok
   end
 end
@@ -109,7 +109,7 @@ defmodule PropertyDamage.Test.Projections.SingleAfterTrigger do
   def apply(state, _), do: state
 
   @trigger every: CreateItem
-  def assert(:after_create, _state, _cmd_or_event), do: :ok
+  def assert_after_create(_state, _cmd_or_event), do: :ok
 end
 
 defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
@@ -127,5 +127,5 @@ defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
   def apply(state, _), do: state
 
   @trigger every: ItemCreated
-  def assert(:after_item_created, _state, _cmd_or_event), do: :ok
+  def assert_after_item_created(_state, _cmd_or_event), do: :ok
 end
