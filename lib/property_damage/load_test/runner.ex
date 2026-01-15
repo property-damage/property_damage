@@ -292,8 +292,11 @@ defmodule PropertyDamage.LoadTest.Runner do
       {time_ms, rate} = Enum.at(plan, state.ramp_step_index)
       new_state = %{state | current_rate: rate}
 
-      # Start arrival scheduling with new rate
-      schedule_next_arrival(new_state)
+      # Only start arrival chain on FIRST step - subsequent steps just update the rate
+      # The chain self-perpetuates via schedule_next_arrival in :schedule_arrival handler
+      if state.ramp_step_index == 0 do
+        schedule_next_arrival(new_state)
+      end
 
       # Schedule next step
       next_index = state.ramp_step_index + 1

@@ -855,5 +855,91 @@ defmodule PropertyDamage.LoadTestTest do
       # Should have tracked failures by exception module
       assert Map.has_key?(report.metrics.failures_by_exception, PropertyDamage.AssertionFailed)
     end
+
+    @tag :integration
+    test "linear ramp produces single arrival chain (no rate multiplication)" do
+      # This test verifies the fix for the bug where each ramp step created
+      # a new parallel arrival chain, causing rate multiplication.
+      #
+      # With linear ramp over 500ms to target rate 100/sec:
+      # - 10 steps, each increasing rate by 10%
+      # - Total duration: 500ms ramp + 500ms steady = 1000ms
+      # - Expected arrivals (integral of ramp curve + steady):
+      #   Ramp: avg rate ~55/sec for 500ms = ~27 arrivals
+      #   Steady: 100/sec for 500ms = ~50 arrivals
+      #   Total: ~77 arrivals
+      #
+      # With the bug (10 parallel chains): would be ~770 arrivals
+      # Without the bug (single chain): ~77 arrivals
+
+      {:ok, report} =
+        LoadTest.run(
+          model: MockModel,
+          adapter: MockAdapter,
+          arrival_rate: 100,
+          duration: {1000, :milliseconds},
+          ramp_up: {:linear, {500, :milliseconds}},
+          ramp_down: :immediate
+        )
+
+      arrivals = report.metrics.arrivals_spawned
+
+      # Sanity check: we should have a reasonable number of arrivals
+      # Not 0 (broken), not 10x expected (bug), but roughly in the expected range
+      #
+      # Allow generous tolerance for timing variations, but catch the 10x bug
+      # Expected ~77, allow 40-200 range to account for timing jitter
+      assert arrivals > 30,
+             "Expected at least 30 arrivals, got #{arrivals} - arrival chain may not be starting"
+
+      assert arrivals < 250,
+             "Expected fewer than 250 arrivals, got #{arrivals} - possible parallel arrival chain bug"
+
+      # Additional sanity check: arrival rate should be reasonable
+      test_duration_sec = report.metrics.duration_ms / 1000
+      actual_rate = arrivals / test_duration_sec
+      target_rate = 100
+
+      # With linear ramp, effective average rate is ~75% of target (0-100 over 50%, 100 for 50%)
+      # So we expect roughly 75/sec average, allow 40-150 range
+      assert actual_rate > 30,
+             "Arrival rate too low: #{actual_rate}/sec"
+
+      assert actual_rate < 150,
+             "Arrival rate too high: #{actual_rate}/sec - possible parallel chain bug"
+    end
+
+    @tag :integration
+    test "immediate ramp produces correct arrival rate" do
+      # With immediate ramp, rate should be at target from the start
+      {:ok, report} =
+        LoadTest.run(
+          model: MockModel,
+          adapter: MockAdapter,
+          arrival_rate: 100,
+          duration: {500, :milliseconds},
+          ramp_up: :immediate,
+          ramp_down: :immediate
+        )
+
+      arrivals = report.metrics.arrivals_spawned
+      test_duration_sec = report.metrics.duration_ms / 1000
+
+      # Expected: ~100/sec * 0.5sec = ~50 arrivals
+      # Allow generous range for timing: 25-100
+      assert arrivals > 20,
+             "Expected at least 20 arrivals at 100/sec for 500ms, got #{arrivals}"
+
+      assert arrivals < 100,
+             "Expected fewer than 100 arrivals at 100/sec for 500ms, got #{arrivals}"
+
+      # Verify rate is roughly correct
+      actual_rate = arrivals / test_duration_sec
+
+      assert_in_delta actual_rate,
+                      100,
+                      50,
+                      "Arrival rate #{actual_rate}/sec not close to target 100/sec"
+    end
   end
 end
