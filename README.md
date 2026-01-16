@@ -6,6 +6,8 @@ A stateful property-based testing (SPBT) framework for Elixir.
 
 PropertyDamage generates random sequences of operations against your system and verifies that invariants hold throughout. When a failure is found, it automatically shrinks the sequence to the minimal reproduction case.
 
+We want to thank [Bluecode](https://bluecode.com/en) for their support in developing and validating this framework.
+
 ## Features
 
 - **Stateful Testing**: Generate sequences of commands, not just individual inputs
