@@ -83,8 +83,11 @@ defmodule PropertyDamage.Executor do
     Nemesis,
     Stutter,
     MockServiceRegistry,
-    Linearization
+    Linearization,
+    StatePoller
   }
+
+  alias PropertyDamage.Model.Projection
 
   alias PropertyDamage.EventLog.Entry
 
@@ -320,7 +323,9 @@ defmodule PropertyDamage.Executor do
       assertion_mode: assertion_mode,
       branch_id: nil,
       stutter_config: stutter_config,
-      mock_registry: mock_registry
+      mock_registry: mock_registry,
+      active_pollers: [],
+      model: model
     }
 
     result =
@@ -374,7 +379,9 @@ defmodule PropertyDamage.Executor do
       assertion_mode: assertion_mode,
       branch_id: nil,
       stutter_config: stutter_config,
-      mock_registry: mock_registry
+      mock_registry: mock_registry,
+      active_pollers: [],
+      model: model
     }
 
     # Phase 1: Execute prefix
@@ -625,6 +632,10 @@ defmodule PropertyDamage.Executor do
   defp finalize_result(result, linearization \\ nil)
 
   defp finalize_result({:failed, index, reason, state}, linearization) do
+    # Stop any active pollers when we fail early
+    pollers = Map.get(state, :active_pollers, [])
+    Enum.each(pollers, &StatePoller.stop/1)
+
     assertion_failures = Map.get(state, :assertion_failures, [])
 
     %{
@@ -641,21 +652,38 @@ defmodule PropertyDamage.Executor do
   end
 
   defp finalize_result(state, linearization) do
-    assertion_failures = Map.get(state, :assertion_failures, [])
+    # Finalize all active pollers - wait for them to complete
+    {state, assertion_failures, halt_failure} = finalize_pollers(state)
 
-    # In :record mode, success is false if there were any failures recorded
-    success = Enum.empty?(assertion_failures)
+    # Check if any poller timed out in :halt mode
+    case halt_failure do
+      {:timeout, _id, info} ->
+        %{
+          success: false,
+          event_log: Enum.reverse(state.event_log),
+          projections: state.projections,
+          refs: state.refs,
+          failed_at_index: nil,
+          failure_reason: {:poll_timeout, info},
+          linearization: linearization,
+          assertion_failures: assertion_failures
+        }
 
-    %{
-      success: success,
-      event_log: Enum.reverse(state.event_log),
-      projections: state.projections,
-      refs: state.refs,
-      failed_at_index: nil,
-      failure_reason: nil,
-      linearization: linearization,
-      assertion_failures: assertion_failures
-    }
+      _ ->
+        # In :record mode, success is false if there were any failures recorded
+        success = Enum.empty?(assertion_failures)
+
+        %{
+          success: success,
+          event_log: Enum.reverse(state.event_log),
+          projections: state.projections,
+          refs: state.refs,
+          failed_at_index: nil,
+          failure_reason: nil,
+          linearization: linearization,
+          assertion_failures: assertion_failures
+        }
+    end
   end
 
   # ============================================================================
@@ -1022,8 +1050,14 @@ defmodule PropertyDamage.Executor do
                       assertion_mode: assertion_mode,
                       branch_id: state.branch_id,
                       stutter_config: state.stutter_config,
-                      mock_registry: mock_registry
+                      mock_registry: mock_registry,
+                      active_pollers: Map.get(state, :active_pollers, []),
+                      model: Map.get(state, :model)
                     }
+
+                    # Spawn pollers for any @poll_state assertions triggered by these events
+                    new_state = maybe_spawn_pollers(new_state, events, model)
+                    new_state = update_poller_state_getters(new_state)
 
                     {:ok, new_state}
 
@@ -1039,7 +1073,9 @@ defmodule PropertyDamage.Executor do
                       assertion_mode: assertion_mode,
                       branch_id: state.branch_id,
                       stutter_config: state.stutter_config,
-                      mock_registry: mock_registry
+                      mock_registry: mock_registry,
+                      active_pollers: Map.get(state, :active_pollers, []),
+                      model: Map.get(state, :model)
                     }
 
                     {:error, {:idempotency_violation, violation}, failed_state}
@@ -1056,7 +1092,9 @@ defmodule PropertyDamage.Executor do
                       assertion_mode: assertion_mode,
                       branch_id: state.branch_id,
                       stutter_config: state.stutter_config,
-                      mock_registry: mock_registry
+                      mock_registry: mock_registry,
+                      active_pollers: Map.get(state, :active_pollers, []),
+                      model: Map.get(state, :model)
                     }
 
                     {:error, {:stutter_execution_failed, details}, failed_state}
@@ -1074,7 +1112,9 @@ defmodule PropertyDamage.Executor do
                   assertion_mode: assertion_mode,
                   branch_id: state.branch_id,
                   stutter_config: state.stutter_config,
-                  mock_registry: mock_registry
+                  mock_registry: mock_registry,
+                  active_pollers: Map.get(state, :active_pollers, []),
+                  model: Map.get(state, :model)
                 }
 
                 {:error, {:assertion_failed, assertion_name, reason}, failed_state}
@@ -1148,8 +1188,14 @@ defmodule PropertyDamage.Executor do
                       assertion_mode: assertion_mode,
                       branch_id: state.branch_id,
                       stutter_config: state.stutter_config,
-                      mock_registry: mock_registry
+                      mock_registry: mock_registry,
+                      active_pollers: Map.get(state, :active_pollers, []),
+                      model: Map.get(state, :model)
                     }
+
+                    # Spawn pollers for any @poll_state assertions triggered by these events
+                    new_state = maybe_spawn_pollers(new_state, events, model)
+                    new_state = update_poller_state_getters(new_state)
 
                     {:ok, new_state}
 
@@ -1165,7 +1211,9 @@ defmodule PropertyDamage.Executor do
                       assertion_mode: assertion_mode,
                       branch_id: state.branch_id,
                       stutter_config: state.stutter_config,
-                      mock_registry: mock_registry
+                      mock_registry: mock_registry,
+                      active_pollers: Map.get(state, :active_pollers, []),
+                      model: Map.get(state, :model)
                     }
 
                     {:error, {:idempotency_violation, violation}, failed_state}
@@ -1182,7 +1230,9 @@ defmodule PropertyDamage.Executor do
                       assertion_mode: assertion_mode,
                       branch_id: state.branch_id,
                       stutter_config: state.stutter_config,
-                      mock_registry: mock_registry
+                      mock_registry: mock_registry,
+                      active_pollers: Map.get(state, :active_pollers, []),
+                      model: Map.get(state, :model)
                     }
 
                     {:error, {:stutter_execution_failed, details}, failed_state}
@@ -1200,7 +1250,9 @@ defmodule PropertyDamage.Executor do
                   assertion_mode: assertion_mode,
                   branch_id: state.branch_id,
                   stutter_config: state.stutter_config,
-                  mock_registry: mock_registry
+                  mock_registry: mock_registry,
+                  active_pollers: Map.get(state, :active_pollers, []),
+                  model: Map.get(state, :model)
                 }
 
                 {:error, {:assertion_failed, assertion_name, reason}, failed_state}
@@ -1895,5 +1947,182 @@ defmodule PropertyDamage.Executor do
 
         {:ok, updated_event_log}
     end
+  end
+
+  # ============================================================================
+  # State Poller Support
+  # ============================================================================
+
+  @doc false
+  # Spawn pollers for any @poll_state assertions triggered by the given events
+  defp maybe_spawn_pollers(state, events, model) do
+    assertion_mode = Map.get(state, :assertion_mode, :halt)
+
+    # Skip if assertions are disabled
+    if assertion_mode == :disabled do
+      state
+    else
+      # Get all projections
+      state_projection = model.state_projection()
+
+      extra_projections =
+        if function_exported?(model, :extra_projections, 0) do
+          model.extra_projections()
+        else
+          []
+        end
+
+      all_projections = [state_projection | extra_projections]
+
+      # For each event, check if any @poll_state assertions should be spawned
+      new_pollers =
+        for event <- events,
+            event_module = event.__struct__,
+            projection <- all_projections,
+            function_exported?(projection, :__assertions__, 0),
+            assertion <- projection.__assertions__(),
+            assertion.type == :polling,
+            Projection.event_matches_poll_trigger?(assertion.poll_state, event_module) do
+          # Get current projection state
+          projection_state = Map.get(state.projections, projection)
+
+          # Call the assertion function to get the predicate
+          predicate = apply(projection, assertion.name, [projection_state, event])
+
+          # Build state getter for the poller
+          get_state_fn = fn proj ->
+            # This will be updated by the executor as state changes
+            Map.get(state.projections, proj)
+          end
+
+          # Spawn the poller
+          StatePoller.start(
+            predicate: predicate,
+            predicate_source: assertion.predicate_source,
+            projection: projection,
+            interval_ms: assertion.poll_state.interval_ms,
+            timeout_ms: assertion.poll_state.timeout_ms,
+            triggered_by: %{event: event, assertion_name: assertion.name},
+            get_state_fn: get_state_fn
+          )
+        end
+
+      if Enum.empty?(new_pollers) do
+        state
+      else
+        existing_pollers = Map.get(state, :active_pollers, [])
+        %{state | active_pollers: existing_pollers ++ new_pollers}
+      end
+    end
+  end
+
+  @doc false
+  # Update state getter for all active pollers with new projection state
+  defp update_poller_state_getters(state) do
+    pollers = Map.get(state, :active_pollers, [])
+    projections = state.projections
+
+    for poller <- pollers do
+      get_state_fn = fn proj -> Map.get(projections, proj) end
+      StatePoller.update_state_getter(poller, get_state_fn)
+    end
+
+    state
+  end
+
+  @doc false
+  # Finalize all active pollers - wait for them to complete or timeout
+  # Returns {state, assertion_failures, halt_failure}
+  defp finalize_pollers(state) do
+    pollers = Map.get(state, :active_pollers, [])
+    assertion_mode = Map.get(state, :assertion_mode, :halt)
+    assertion_failures = Map.get(state, :assertion_failures, [])
+
+    if Enum.empty?(pollers) do
+      {state, assertion_failures, nil}
+    else
+      # Wait for all pollers to complete
+      results = StatePoller.await_all(pollers)
+
+      # Process results
+      {failed_pollers, _succeeded} =
+        Enum.split_with(results, fn {_id, result} ->
+          case result do
+            {:timeout, _, _} -> true
+            {:error, _} -> true
+            _ -> false
+          end
+        end)
+
+      # Handle failures based on assertion_mode
+      new_failures =
+        case assertion_mode do
+          :halt ->
+            # In halt mode, we don't record - we'll return error
+            []
+
+          :record ->
+            # Record all poll timeouts
+            Enum.map(failed_pollers, fn {_id, result} ->
+              timeout_to_failure(result)
+            end)
+
+          :log ->
+            # Log and continue
+            require Logger
+
+            for {_id, result} <- failed_pollers do
+              case result do
+                {:timeout, _, info} ->
+                  Logger.warning(
+                    "Poll timeout in #{info.triggered_by.assertion_name}: " <>
+                      "#{info.predicate_source}"
+                  )
+
+                {:error, reason} ->
+                  Logger.warning("Poll error: #{inspect(reason)}")
+              end
+            end
+
+            []
+        end
+
+      # Check if we should halt
+      halt_failure =
+        if assertion_mode == :halt and not Enum.empty?(failed_pollers) do
+          [{_id, first_failure} | _] = failed_pollers
+          first_failure
+        else
+          nil
+        end
+
+      updated_state = %{state | active_pollers: []}
+      {updated_state, assertion_failures ++ new_failures, halt_failure}
+    end
+  end
+
+  defp timeout_to_failure({:timeout, _id, info}) do
+    %{
+      assertion_name: info.triggered_by.assertion_name,
+      reason: {:poll_timeout, info},
+      command: nil,
+      command_index: nil,
+      step_type: :event,
+      module: info.triggered_by.event.__struct__,
+      timestamp: System.monotonic_time(:millisecond),
+      poll_timeout_info: info
+    }
+  end
+
+  defp timeout_to_failure({:error, reason}) do
+    %{
+      assertion_name: :unknown,
+      reason: {:poll_error, reason},
+      command: nil,
+      command_index: nil,
+      step_type: :event,
+      module: nil,
+      timestamp: System.monotonic_time(:millisecond)
+    }
   end
 end

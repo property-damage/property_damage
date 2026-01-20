@@ -59,6 +59,7 @@ defmodule PropertyDamage.FailureReport do
           | :linearization_failed
           | :branch_failure
           | :ref_resolution_error
+          | :poll_timeout
           | :unknown
 
   @type t :: %__MODULE__{
@@ -89,6 +90,9 @@ defmodule PropertyDamage.FailureReport do
 
           # Idempotency-specific (for stutter failures)
           idempotency_violation: map() | nil,
+
+          # Poll timeout-specific (for @poll_state failures)
+          poll_timeout_info: map() | nil,
 
           # Parallel execution-specific
           branch_id: non_neg_integer() | nil,
@@ -121,6 +125,7 @@ defmodule PropertyDamage.FailureReport do
             command_at_failure: nil,
             events_at_failure: [],
             idempotency_violation: nil,
+            poll_timeout_info: nil,
             branch_id: nil,
             linearization: nil,
             branch_events: nil,
@@ -169,7 +174,8 @@ defmodule PropertyDamage.FailureReport do
     refs = Keyword.get(opts, :refs, %{})
 
     # Parse failure reason
-    {failure_type, check_name, failure_message, idempotency_violation, branch_id} =
+    {failure_type, check_name, failure_message, idempotency_violation, poll_timeout_info,
+     branch_id} =
       parse_failure_reason(failure_reason)
 
     # Extract command and events at failure point
@@ -196,6 +202,7 @@ defmodule PropertyDamage.FailureReport do
       command_at_failure: command_at_failure,
       events_at_failure: events_at_failure,
       idempotency_violation: idempotency_violation,
+      poll_timeout_info: poll_timeout_info,
       branch_id: branch_id,
       linearization: Keyword.get(opts, :linearization),
       branch_events: branch_events,
@@ -258,6 +265,7 @@ defmodule PropertyDamage.FailureReport do
     case type do
       :check_failed -> "Invariant Violation: #{check_name}"
       :idempotency_violation -> "Idempotency Violation"
+      :poll_timeout -> "Poll Timeout: #{check_name}"
       :adapter_error -> "Adapter Error"
       :linearization_failed -> "Linearization Failed"
       :branch_failure -> "Branch Execution Failed"
@@ -265,6 +273,13 @@ defmodule PropertyDamage.FailureReport do
       :unknown -> "Unknown Failure"
     end
   end
+
+  @doc """
+  Check if this is a poll timeout failure.
+  """
+  @spec poll_timeout_failure?(t()) :: boolean()
+  def poll_timeout_failure?(%__MODULE__{failure_type: :poll_timeout}), do: true
+  def poll_timeout_failure?(_), do: false
 
   @doc """
   Check if this is a parallel execution failure.
@@ -297,33 +312,59 @@ defmodule PropertyDamage.FailureReport do
   # ============================================================================
 
   defp parse_failure_reason({:check_failed, check_name, message}) do
-    {:check_failed, check_name, to_string(message), nil, nil}
+    {:check_failed, check_name, to_string(message), nil, nil, nil}
+  end
+
+  defp parse_failure_reason({:assertion_failed, check_name, reason}) do
+    message =
+      case reason do
+        %{message: msg} -> msg
+        e when is_exception(e) -> Exception.message(e)
+        other -> inspect(other)
+      end
+
+    {:check_failed, check_name, to_string(message), nil, nil, nil}
   end
 
   defp parse_failure_reason({:idempotency_violation, violation}) do
     message = format_idempotency_message(violation)
-    {:idempotency_violation, nil, message, violation, nil}
+    {:idempotency_violation, nil, message, violation, nil, nil}
+  end
+
+  defp parse_failure_reason({:poll_timeout, info}) do
+    message = format_poll_timeout_message(info)
+    {:poll_timeout, info.triggered_by.assertion_name, message, nil, info, nil}
   end
 
   defp parse_failure_reason({:adapter_error, reason}) do
-    {:adapter_error, nil, inspect(reason), nil, nil}
+    {:adapter_error, nil, inspect(reason), nil, nil, nil}
   end
 
   defp parse_failure_reason({:linearization_failed, message}) do
-    {:linearization_failed, nil, to_string(message), nil, nil}
+    {:linearization_failed, nil, to_string(message), nil, nil, nil}
   end
 
   defp parse_failure_reason({:branch_failure, branch_id, reason}) do
-    {inner_type, check_name, message, _, _} = parse_failure_reason(reason)
-    {inner_type, check_name, message, nil, branch_id}
+    {inner_type, check_name, message, _, _, _} = parse_failure_reason(reason)
+    {inner_type, check_name, message, nil, nil, branch_id}
   end
 
   defp parse_failure_reason({:ref_resolution_error, reason}) do
-    {:ref_resolution_error, nil, inspect(reason), nil, nil}
+    {:ref_resolution_error, nil, inspect(reason), nil, nil, nil}
   end
 
   defp parse_failure_reason(other) do
-    {:unknown, nil, inspect(other), nil, nil}
+    {:unknown, nil, inspect(other), nil, nil, nil}
+  end
+
+  defp format_poll_timeout_message(info) do
+    """
+    Temporal assertion #{info.triggered_by.assertion_name} timed out after #{info.elapsed_ms}ms.
+    Trigger event: #{inspect(info.triggered_by.event)}
+    Predicate: #{info.predicate_source || "unknown"}
+    Final state: #{inspect(info.final_state, limit: 5)}
+    Poll attempts: #{info.poll_count}
+    """
   end
 
   defp format_idempotency_message(%{command: command, comparison_result: result}) do

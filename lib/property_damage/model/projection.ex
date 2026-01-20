@@ -6,7 +6,7 @@ defmodule PropertyDamage.Model.Projection do
   They serve two purposes:
 
   1. **State tracking**: Reduce commands and events into state via `apply/2`
-  2. **Invariant checking**: Define assertions via `assert_*` functions
+  2. **Invariant checking**: Define assertions via `@trigger` and `@poll_state`
 
   ## Basic Usage
 
@@ -24,7 +24,7 @@ defmodule PropertyDamage.Model.Projection do
 
         def apply(state, _), do: state
 
-        # Define assertions with @trigger and assert_* naming
+        # Synchronous assertion - runs immediately when event occurs
         @trigger every: 1
         def assert_total_non_negative(state, _cmd_or_event) do
           if state.total < 0, do: PropertyDamage.fail!("total is negative", total: state.total)
@@ -38,18 +38,15 @@ defmodule PropertyDamage.Model.Projection do
         end
       end
 
-  ## Defining Assertions
+  ## Assertion Types
 
-  Assertions are functions that start with `assert_` and take two arguments:
+  There are two types of assertions:
 
-  1. `state` - The current projection state
-  2. `command_or_event` - The command or event that triggered the assertion
+  ### Synchronous Assertions (`@trigger`)
 
-  Each assertion **must** be preceded by a `@trigger` attribute that specifies
-  when the assertion should run. The assertion name is derived from the function
-  name by removing the `assert_` prefix.
+  Run immediately when the trigger condition is met. Use for invariants that
+  should hold right after a command/event is processed.
 
-      # This creates an assertion named :balance_positive
       @trigger every: 1
       def assert_balance_positive(state, _cmd_or_event) do
         if state.balance < 0 do
@@ -57,8 +54,33 @@ defmodule PropertyDamage.Model.Projection do
         end
       end
 
-  If an assertion fails, raise an exception (or use `PropertyDamage.fail!/2`).
+  ### Temporal Assertions (`@poll_state`)
+
+  Spawn a background poller when a trigger event occurs. The poller periodically
+  checks if a predicate becomes true within a timeout. Use for eventual
+  consistency assertions.
+
+      @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+      def payment_confirmed(_state, %PaymentInitiated{id: id}) do
+        fn s -> s.payments[id] == :confirmed end
+      end
+
+  ## Defining Assertions
+
+  Assertions are functions that take two arguments:
+
+  1. `state` - The current projection state
+  2. `command_or_event` - The command or event that triggered the assertion
+
+  Each assertion **must** be preceded by either a `@trigger` or `@poll_state`
+  attribute. Function names starting with `assert_` are detected as synchronous
+  assertions; `@poll_state` functions can have any name.
+
+  If a synchronous assertion fails, raise an exception (or use `PropertyDamage.fail!/2`).
   If it returns without raising, the assertion passed.
+
+  For `@poll_state` assertions, the function must return a predicate function
+  `(state -> boolean)` that will be polled.
 
   ## Raising in apply/2
 
@@ -72,9 +94,9 @@ defmodule PropertyDamage.Model.Projection do
         %{state | balance: new_balance}
       end
 
-  ## Trigger Syntax
+  ## @trigger Syntax
 
-  Use `@trigger` with `every:` to specify when an assertion runs:
+  Use `@trigger` with `every:` to specify when a synchronous assertion runs:
 
   | Syntax | Runs when... |
   |--------|--------------|
@@ -86,6 +108,25 @@ defmodule PropertyDamage.Model.Projection do
   | `@trigger every: 10` | Every 10th step (sampling) |
   | `@trigger every: {5, :command}` | Every 5th command |
   | `@trigger every: {3, CreateOrder}` | Every 3rd CreateOrder |
+
+  ## @poll_state Syntax
+
+  Use `@poll_state` with the following options:
+
+  | Option | Type | Description |
+  |--------|------|-------------|
+  | `after:` | module or `[modules]` | Event(s) that spawn the poller |
+  | `timeout:` | integer or `{int, unit}` | Max time to poll (integer = seconds) |
+  | `interval:` | integer or `{int, unit}` | Polling frequency (integer = seconds) |
+
+  Time units: `:milliseconds`, `:seconds`, `:minutes`
+
+  Example:
+
+      @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+      def payment_confirmed(_state, %PaymentInitiated{id: id}) do
+        fn s -> s.payments[id] == :confirmed end
+      end
 
   ## Simplified Usage (No State)
 
@@ -158,8 +199,9 @@ defmodule PropertyDamage.Model.Projection do
       # Accumulating attribute for assertion metadata
       Module.register_attribute(__MODULE__, :assertions, accumulate: true)
       Module.register_attribute(__MODULE__, :trigger, accumulate: false)
+      Module.register_attribute(__MODULE__, :poll_state, accumulate: false)
 
-      # Register on_definition callback to capture assert_* definitions
+      # Register on_definition callback to capture assertion definitions
       @on_definition PropertyDamage.Model.Projection
 
       @before_compile PropertyDamage.Model.Projection
@@ -208,30 +250,51 @@ defmodule PropertyDamage.Model.Projection do
 
   @doc false
   # Called by @on_definition when any function is defined in the module
-  # Detects assert_* functions with arity 2
-  def __on_definition__(env, :def, name, [_state, _cmd_or_event], _guards, _body) do
-    case extract_assertion_name_from_function(name) do
-      nil ->
-        # Not an assertion function
+  # Detects assertion functions (either @trigger or @poll_state decorated)
+  def __on_definition__(env, :def, name, [_state, _cmd_or_event] = _args, _guards, body) do
+    trigger_opts = Module.get_attribute(env.module, :trigger)
+    poll_state_opts = Module.get_attribute(env.module, :poll_state)
+
+    cond do
+      # @poll_state decorated function - temporal assertion
+      poll_state_opts != nil ->
+        predicate_source = capture_predicate_source(body)
+
+        assertion_def = %{
+          name: name,
+          type: :polling,
+          poll_state: normalize_poll_state(poll_state_opts),
+          predicate_source: predicate_source
+        }
+
+        Module.put_attribute(env.module, :assertions, assertion_def)
+        Module.delete_attribute(env.module, :poll_state)
+
+      # @trigger decorated function - synchronous assertion
+      trigger_opts != nil ->
+        assertion_name = extract_assertion_name_from_function(name) || name
+
+        assertion_def = %{
+          name: assertion_name,
+          type: :synchronous,
+          trigger: normalize_trigger(trigger_opts),
+          function_name: name
+        }
+
+        Module.put_attribute(env.module, :assertions, assertion_def)
+        Module.delete_attribute(env.module, :trigger)
+
+      # assert_* function without attribute - error
+      extract_assertion_name_from_function(name) != nil ->
+        assertion_name = extract_assertion_name_from_function(name)
+
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description: "assert_#{assertion_name}/2 missing @trigger attribute"
+
+      true ->
         :ok
-
-      assertion_name ->
-        case Module.get_attribute(env.module, :trigger) do
-          nil ->
-            raise CompileError,
-              file: env.file,
-              line: env.line,
-              description: "assert_#{assertion_name}/2 missing @trigger attribute"
-
-          trigger_opts ->
-            assertion_def = %{
-              name: assertion_name,
-              trigger: normalize_trigger(trigger_opts)
-            }
-
-            Module.put_attribute(env.module, :assertions, assertion_def)
-            Module.delete_attribute(env.module, :trigger)
-        end
     end
   end
 
@@ -343,6 +406,88 @@ defmodule PropertyDamage.Model.Projection do
         else
           false
         end
+    end
+  end
+
+  @doc """
+  Check if an event matches a polling trigger.
+
+  Used by the executor to determine if a `@poll_state` assertion should spawn
+  a poller when an event is processed.
+
+  ## Parameters
+
+  - `poll_state` - Normalized poll_state spec from assertion metadata
+  - `event_module` - The module of the event being processed
+
+  ## Returns
+
+  `true` if the poller should be spawned, `false` otherwise.
+  """
+  @spec event_matches_poll_trigger?(map(), module()) :: boolean()
+  def event_matches_poll_trigger?(poll_state, event_module) do
+    event_module in poll_state.after
+  end
+
+  # ============================================================================
+  # @poll_state Helpers
+  # ============================================================================
+
+  # Normalize @poll_state options to a consistent internal representation
+  defp normalize_poll_state(opts) when is_list(opts) do
+    after_events = normalize_module_list(Keyword.fetch!(opts, :after))
+    timeout_ms = normalize_time(Keyword.fetch!(opts, :timeout))
+    interval_ms = normalize_time(Keyword.fetch!(opts, :interval))
+
+    %{
+      after: after_events,
+      timeout_ms: timeout_ms,
+      interval_ms: interval_ms
+    }
+  end
+
+  # Normalize a module or list of modules to always be a list
+  defp normalize_module_list(module) when is_atom(module), do: [module]
+  defp normalize_module_list(modules) when is_list(modules), do: modules
+
+  # Normalize time values to milliseconds
+  # Integer alone defaults to seconds (consistent with adapter timeouts)
+  defp normalize_time(seconds) when is_integer(seconds), do: seconds * 1000
+  defp normalize_time({value, :milliseconds}), do: value
+  defp normalize_time({value, :seconds}), do: value * 1000
+  defp normalize_time({value, :minutes}), do: value * 60 * 1000
+
+  # Capture the predicate source from the function body for debugging
+  # Tries to extract the fn expression from the body
+  defp capture_predicate_source(body) do
+    try do
+      # The body is typically a block with a fn expression
+      case body do
+        # Direct fn expression: fn x -> ... end
+        {:fn, _, _} = fn_expr ->
+          Macro.to_string(fn_expr)
+
+        # Block with single expression
+        [do: {:fn, _, _} = fn_expr] ->
+          Macro.to_string(fn_expr)
+
+        # Block with single expression (alternate form)
+        {:__block__, _, [{:fn, _, _} = fn_expr]} ->
+          Macro.to_string(fn_expr)
+
+        # Block ending with fn expression
+        [do: {:__block__, _, exprs}] when is_list(exprs) ->
+          case List.last(exprs) do
+            {:fn, _, _} = fn_expr -> Macro.to_string(fn_expr)
+            _ -> Macro.to_string(body)
+          end
+
+        # Fallback: stringify the whole body
+        _ ->
+          Macro.to_string(body)
+      end
+    rescue
+      _ -> "unable to capture predicate source"
     end
   end
 end

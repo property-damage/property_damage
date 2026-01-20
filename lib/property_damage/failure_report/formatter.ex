@@ -160,6 +160,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
           {reason, nil}
 
+        :poll_timeout ->
+          {format_poll_timeout_terminal(report, color), nil}
+
         _ ->
           reason = """
           #{label("Reason", color)}
@@ -236,6 +239,42 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp format_comparison_diff(result, _color), do: "  #{inspect(result)}"
+
+  defp format_poll_timeout_terminal(report, color) do
+    info = report.poll_timeout_info
+
+    if info do
+      trigger_event = info.triggered_by.event
+      event_name = module_name(trigger_event.__struct__)
+
+      """
+      #{label("Type", color)}          Poll Timeout
+      #{label("Assertion", color)}     #{cyan(color)}#{info.triggered_by.assertion_name}#{reset()}
+      #{label("Timeout", color)}       #{info.elapsed_ms}ms
+      #{label("Poll Attempts", color)} #{info.poll_count}
+
+      #{yellow(color)}Trigger Event:#{reset()}
+        #{cyan(color)}#{event_name}#{reset()}
+        #{dim(color)}#{inspect(trigger_event, pretty: true, limit: 5)}#{reset()}
+
+      #{yellow(color)}Predicate:#{reset()}
+        #{cyan(color)}#{info.predicate_source || "unknown"}#{reset()}
+
+      #{yellow(color)}Final State:#{reset()}
+        #{dim(color)}#{inspect(info.final_state, pretty: true, limit: 10)}#{reset()}
+
+      #{yellow(color)}Why it failed:#{reset()} The predicate never returned true within the
+      timeout period. The temporal assertion expected the state to eventually
+      satisfy the condition, but it did not.
+      """
+    else
+      """
+      #{label("Type", color)}          Poll Timeout
+      #{label("Details", color)}
+      #{indent_text(report.failure_message, "    ")}
+      """
+    end
+  end
 
   defp terminal_shrinking_stats(report, color) do
     original_count = Sequence.command_count(report.original_sequence)
@@ -554,6 +593,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
         :idempotency_violation ->
           format_idempotency_markdown(report)
 
+        :poll_timeout ->
+          format_poll_timeout_markdown(report)
+
         _ ->
           """
           **Details:**
@@ -568,6 +610,52 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
     #{reason_text}
     """
+  end
+
+  defp format_poll_timeout_markdown(report) do
+    info = report.poll_timeout_info
+
+    if info do
+      trigger_event = info.triggered_by.event
+      event_name = module_name(trigger_event.__struct__)
+
+      """
+      **Type:** Poll Timeout
+
+      **Assertion:** `#{info.triggered_by.assertion_name}`
+
+      | Property | Value |
+      |----------|-------|
+      | Timeout | #{info.elapsed_ms}ms |
+      | Poll Attempts | #{info.poll_count} |
+
+      ### Trigger Event
+
+      `#{event_name}`
+
+      ```elixir
+      #{inspect(trigger_event, pretty: true, limit: 10)}
+      ```
+
+      ### Predicate
+
+      ```elixir
+      #{info.predicate_source || "unknown"}
+      ```
+
+      ### Final State
+
+      ```elixir
+      #{inspect(info.final_state, pretty: true, limit: 10)}
+      ```
+      """
+    else
+      """
+      **Type:** Poll Timeout
+
+      #{report.failure_message}
+      """
+    end
   end
 
   defp format_idempotency_markdown(report) do
