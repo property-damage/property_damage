@@ -84,9 +84,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
           # Arrival metrics
           arrivals_spawned: non_neg_integer(),
           arrivals_completed: non_neg_integer(),
-          arrivals_dropped: non_neg_integer(),
-          arrivals_per_second: float(),
-          drop_rate: float()
+          arrivals_per_second: float()
         }
 
   @type command_metrics :: %{
@@ -113,10 +111,9 @@ defmodule PropertyDamage.LoadTest.Metrics do
   @assertion_failures 5
   @arrivals_spawned 6
   @arrivals_completed 7
-  @arrivals_dropped 8
 
   # Total counter indices
-  @counter_count 8
+  @counter_count 7
 
   # Max recent failures to keep
   @max_recent_failures 100
@@ -201,14 +198,6 @@ defmodule PropertyDamage.LoadTest.Metrics do
   @spec arrival_completed(pid()) :: :ok
   def arrival_completed(pid) do
     GenServer.cast(pid, :arrival_completed)
-  end
-
-  @doc """
-  Record an arrival being dropped due to pool exhaustion.
-  """
-  @spec arrival_dropped(pid()) :: :ok
-  def arrival_dropped(pid) do
-    GenServer.cast(pid, :arrival_dropped)
   end
 
   @doc """
@@ -340,13 +329,6 @@ defmodule PropertyDamage.LoadTest.Metrics do
   def handle_cast(:arrival_completed, state) do
     counters = get_counters(state.counters_table)
     :atomics.add(counters, @arrivals_completed, 1)
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_cast(:arrival_dropped, state) do
-    counters = get_counters(state.counters_table)
-    :atomics.add(counters, @arrivals_dropped, 1)
     {:noreply, state}
   end
 
@@ -621,18 +603,10 @@ defmodule PropertyDamage.LoadTest.Metrics do
     # Arrival stats
     arrivals_spawned = :atomics.get(counters, @arrivals_spawned)
     arrivals_completed = :atomics.get(counters, @arrivals_completed)
-    arrivals_dropped = :atomics.get(counters, @arrivals_dropped)
 
     arrivals_per_second =
       if duration_ms > 0 do
         arrivals_spawned / (duration_ms / 1000.0)
-      else
-        0.0
-      end
-
-    drop_rate =
-      if arrivals_spawned > 0 do
-        arrivals_dropped / arrivals_spawned * 100.0
       else
         0.0
       end
@@ -661,9 +635,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
       # Arrival metrics
       arrivals_spawned: arrivals_spawned,
       arrivals_completed: arrivals_completed,
-      arrivals_dropped: arrivals_dropped,
-      arrivals_per_second: arrivals_per_second,
-      drop_rate: drop_rate
+      arrivals_per_second: arrivals_per_second
     }
   end
 

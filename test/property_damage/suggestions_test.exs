@@ -310,7 +310,7 @@ defmodule PropertyDamage.SuggestionsTest do
       analysis_with_low = Analyzer.analyze(MinimalModel, include_low_priority: true)
       analysis_without_low = Analyzer.analyze(MinimalModel, include_low_priority: false)
 
-      low_count_with = Enum.count(analysis_with_low.suggestions, &(&1.priority == :low))
+      _low_count_with = Enum.count(analysis_with_low.suggestions, &(&1.priority == :low))
       low_count_without = Enum.count(analysis_without_low.suggestions, &(&1.priority == :low))
 
       assert low_count_without == 0

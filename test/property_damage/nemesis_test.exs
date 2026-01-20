@@ -22,8 +22,10 @@ defmodule PropertyDamage.NemesisTest do
       {:ok, [%{type: :restored, partition_type: type}]}
     end
 
+    @impl true
     def auto_restore?, do: true
 
+    @impl true
     def duration_ms(%__MODULE__{duration_ms: d}), do: d
   end
 
@@ -45,6 +47,7 @@ defmodule PropertyDamage.NemesisTest do
       {:ok, [%{type: :latency_removed}]}
     end
 
+    @impl true
     def auto_restore?, do: false
   end
 

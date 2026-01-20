@@ -33,7 +33,7 @@ defmodule PropertyDamage.ExportTest do
   end
 
   defmodule TestHTTPAdapter do
-    @behaviour PropertyDamage.Adapter
+    use PropertyDamage.Adapter, default_timeout: 30
 
     def setup(_config), do: {:ok, %{}}
     def teardown(_context), do: :ok

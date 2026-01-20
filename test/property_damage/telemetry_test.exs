@@ -4,10 +4,16 @@ defmodule PropertyDamage.TelemetryTest do
   alias PropertyDamage.Telemetry
   alias PropertyDamage.Telemetry.{Collector, Dashboard}
 
+  # Module-level handler to avoid telemetry warnings about anonymous functions
+  defmodule TestHandler do
+    def handle_event(event, measurements, metadata, %{pid: pid}) do
+      send(pid, {:telemetry_event, event, measurements, metadata})
+    end
+  end
+
   describe "Telemetry event emission" do
     setup do
       # Attach a test handler to capture events
-      test_pid = self()
       handler_id = "test_handler_#{inspect(self())}"
 
       :telemetry.attach_many(
@@ -20,10 +26,8 @@ defmodule PropertyDamage.TelemetryTest do
           [:property_damage, :command, :start],
           [:property_damage, :command, :stop]
         ],
-        fn event, measurements, metadata, _ ->
-          send(test_pid, {:telemetry_event, event, measurements, metadata})
-        end,
-        nil
+        &TestHandler.handle_event/4,
+        %{pid: self()}
       )
 
       on_exit(fn ->

@@ -14,15 +14,17 @@ defmodule PropertyDamage.LoadTest do
   - **Metrics Collection**: Latency percentiles, throughput, errors
   - **Ramping Strategies**: Linear, step, exponential load curves
   - **Live Reporting**: Periodic metrics callbacks
+  - **Dynamic Worker Pool**: Workers created on demand, no sizing needed
+  - **Command Timeouts**: Prevents hung commands from causing unbounded growth
 
   ## Quick Start
 
-      # Run a 2-minute load test with 50 concurrent users
+      # Run a 2-minute load test at 100 arrivals/second
       {:ok, report} = PropertyDamage.LoadTest.run(
         model: MyApp.TestModel,
         adapter: MyApp.HTTPAdapter,
         adapter_config: %{base_url: "http://localhost:4000"},
-        concurrent_users: 50,
+        arrival_rate: 100,
         duration: {2, :minutes}
       )
 
@@ -37,7 +39,7 @@ defmodule PropertyDamage.LoadTest do
         adapter_config: %{base_url: "http://localhost:4000"},
 
         # Load configuration
-        concurrent_users: 100,
+        arrival_rate: 100,  # 100 arrivals/second
         duration: {5, :minutes},
 
         # Ramp strategy - gradually increase load
@@ -45,7 +47,6 @@ defmodule PropertyDamage.LoadTest do
         ramp_down: {:linear, {10, :seconds}},
 
         # Session behavior
-        commands_per_session: {10, 50},
         think_time: {100, 500},
 
         # Live metrics (called every second)
@@ -59,13 +60,37 @@ defmodule PropertyDamage.LoadTest do
         end
       )
 
+  ## Dynamic Worker Pool
+
+  The worker pool grows automatically to meet arrival rate demand. Workers
+  are created on demand when no idle workers are available, eliminating the
+  need to calculate pool sizes. The pool tracks:
+
+  - **Workers Created**: Total workers created during the test
+  - **Peak Workers**: Maximum concurrent workers at any point
+  - **Utilization**: How efficiently workers are being used
+
+  ## Command Timeouts
+
+  Adapters can specify timeouts for command execution via the `timeout/1`
+  callback. This prevents hung commands from causing unbounded pool growth:
+
+      defmodule MyAdapter do
+        use PropertyDamage.Adapter, default_timeout: 30  # 30 seconds
+
+        # Override for slow polling command
+        def timeout(%CreateAuthorization{}), do: 120
+      end
+
+  Commands that exceed their timeout raise `PropertyDamage.CommandTimeoutError`.
+
   ## Ramp Strategies
 
   Control how load is applied over time:
 
-  - `:immediate` - All users start at once
+  - `:immediate` - Start at full rate immediately
   - `{:linear, duration}` - Gradual linear ramp
-  - `{:step, count, interval}` - Add users in steps
+  - `{:step, count, interval}` - Increase rate in steps
   - `{:exponential, duration}` - Exponential growth curve
 
   ## Metrics Collected
@@ -75,14 +100,16 @@ defmodule PropertyDamage.LoadTest do
   - **Errors**: Total count, error rate, by type
   - **Assertions**: Failures count, rate, by assertion name (when enabled)
   - **Per-Command**: Breakdown by command type
+  - **Worker Pool**: Workers created, peak workers, utilization
   - **History**: Time series for trend analysis
 
   ## Architecture
 
   ```
   PropertyDamage.LoadTest
-  ├── Runner         # Orchestrates concurrent sessions
-  ├── Session        # Single user session (sequence execution)
+  ├── Runner         # Orchestrates arrivals and metrics
+  ├── WorkerPool     # Dynamic pool of workers (auto-scaling)
+  ├── Worker         # Holds adapter context, executes sequences
   ├── Metrics        # Collects latency, throughput, errors
   ├── RampStrategy   # Controls load ramping
   └── Report         # Generates load test reports

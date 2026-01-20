@@ -141,6 +141,13 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
     end
   end
 
+  @impl PropertyDamage.Adapter
+  def timeout(_command) do
+    # Default timeout - inner adapter's timeout is used during actual execution
+    # This is called when the adapter module itself is passed to the framework
+    30
+  end
+
   # ============================================================================
   # Helper Functions
   # ============================================================================

@@ -54,7 +54,6 @@ defmodule PropertyDamage.LoadTest.Runner do
     :arrival_jitter,
     :current_rate,
     :duration_ms,
-    :max_queue_size,
     :ramp_up_plan,
     :ramp_down_plan,
     :think_time_range,
@@ -73,10 +72,6 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   @type t :: %__MODULE__{}
 
-  # Auto-calculate pool size based on rate
-  @pool_size_multiplier 2
-  @max_pool_size 500
-
   # ============================================================================
   # Public API
   # ============================================================================
@@ -94,7 +89,6 @@ defmodule PropertyDamage.LoadTest.Runner do
     - Tuple: `{count, {time, unit}}` (e.g., `{2, {15, :milliseconds}}`)
   - `:duration` - Test duration as `{value, unit}` (required)
   - `:arrival_jitter` - {min, max} ms jitter per arrival (default: {0, 0})
-  - `:max_queue_size` - Max queued arrivals when pool exhausted (default: 100)
   - `:ramp_up` - Ramp-up strategy (default: :immediate)
   - `:ramp_down` - Ramp-down strategy (default: :immediate)
   - `:think_time` - {min, max} ms between commands in sequence (default: {0, 0})
@@ -156,7 +150,6 @@ defmodule PropertyDamage.LoadTest.Runner do
     adapter_config = opts[:adapter_config]
     arrival_rate = opts[:arrival_rate]
     arrival_jitter = opts[:arrival_jitter]
-    max_queue_size = opts[:max_queue_size]
     duration = opts[:duration]
     ramp_up = opts[:ramp_up]
     ramp_down = opts[:ramp_down]
@@ -169,22 +162,8 @@ defmodule PropertyDamage.LoadTest.Runner do
     # Start metrics collector
     {:ok, metrics} = Metrics.start_link()
 
-    # Use configured pool size or auto-calculate based on rate
-    pool_size =
-      case opts[:pool_size] do
-        nil ->
-          rate_per_sec = RampStrategy.rate_to_per_second(arrival_rate)
-          calculated = min(round(rate_per_sec * @pool_size_multiplier), @max_pool_size)
-          max(calculated, 10)
-
-        configured ->
-          configured
-      end
-
-    # Start worker pool
+    # Start dynamic worker pool (no size configuration needed)
     case WorkerPool.start_link(
-           size: pool_size,
-           max_queue_size: max_queue_size,
            model: model,
            adapter: adapter,
            adapter_config: adapter_config,
@@ -208,7 +187,6 @@ defmodule PropertyDamage.LoadTest.Runner do
           arrival_jitter: arrival_jitter,
           current_rate: {1, {1, :seconds}},
           duration_ms: duration_ms,
-          max_queue_size: max_queue_size,
           ramp_up_plan: ramp_up_plan,
           ramp_down_plan: ramp_down_plan,
           think_time_range: think_time_range,
@@ -271,7 +249,8 @@ defmodule PropertyDamage.LoadTest.Runner do
       current_rate: state.current_rate,
       target_rate: state.arrival_rate,
       pool_utilization: pool_stats.utilization,
-      pool_queue_depth: pool_stats.queue_depth,
+      workers_created: pool_stats.total_created,
+      peak_workers: pool_stats.peak_in_use,
       in_flight: MapSet.size(state.in_flight),
       elapsed_ms: elapsed_ms,
       duration_ms: state.duration_ms,
@@ -468,8 +447,8 @@ defmodule PropertyDamage.LoadTest.Runner do
     runner_pid = self()
     ref = make_ref()
 
-    # Try to checkout a worker
-    case WorkerPool.checkout(state.pool, timeout: 100) do
+    # Checkout a worker (dynamic pool - always succeeds or creates new worker)
+    case WorkerPool.checkout(state.pool) do
       {:ok, worker} ->
         Metrics.arrival_spawned(state.metrics)
 
@@ -482,14 +461,9 @@ defmodule PropertyDamage.LoadTest.Runner do
 
         %{state | in_flight: MapSet.put(state.in_flight, ref)}
 
-      {:error, :pool_exhausted} ->
-        # Pool queue is full - drop this arrival
-        Metrics.arrival_dropped(state.metrics)
-        state
-
-      {:error, :timeout} ->
-        # Timed out waiting for worker - drop this arrival
-        Metrics.arrival_dropped(state.metrics)
+      {:error, reason} ->
+        # Worker creation failed (rare - e.g., adapter.setup failed)
+        Logger.warning("Failed to create worker for arrival: #{inspect(reason)}")
         state
     end
   end

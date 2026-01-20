@@ -206,12 +206,81 @@ defmodule PropertyDamage.Adapter do
   @callback register_handler(command :: struct(), context :: map()) ::
               {:ok, handler_ref :: term()} | {:error, term()}
 
+  @typedoc """
+  Timeout value for command execution.
+
+  - Integer values are interpreted as seconds (e.g., `30` = 30 seconds)
+  - Use tuples for other units:
+    - `{500, :milliseconds}` - 500ms
+    - `{2, :seconds}` - 2 seconds
+    - `{5, :minutes}` - 5 minutes
+  """
+  @type timeout_value :: pos_integer() | {pos_integer(), :milliseconds | :seconds | :minutes}
+
+  @doc """
+  Return the timeout for executing a command.
+
+  This callback allows adapters to specify how long a command execution
+  should be allowed to run before timing out. This is particularly useful
+  for load testing where hung commands should not cause unbounded pool growth.
+
+  Integer values are interpreted as seconds. Use tuples for other units:
+  - `30` - 30 seconds
+  - `{500, :milliseconds}` - 500ms
+  - `{2, :minutes}` - 2 minutes
+
+  Override for specific commands that need longer timeouts (e.g., polling operations).
+
+  ## Examples
+
+      # Default for most commands
+      def timeout(_command), do: 30  # 30 seconds
+
+      # Longer timeout for async commands that poll
+      def timeout(%CreateAuthorization{}), do: 120  # 2 minutes
+
+      # Short timeout for in-memory adapters
+      def timeout(_command), do: {100, :milliseconds}
+  """
+  @callback timeout(command :: struct()) :: timeout_value()
+
   @optional_callbacks [register_handler: 2]
 
-  defmacro __using__(_opts) do
+  @doc """
+  Macro to define an adapter with default behaviors.
+
+  ## Options
+
+  - `:default_timeout` - Default timeout for command execution (default: 30 seconds).
+    Can be an integer (seconds) or a tuple like `{500, :milliseconds}`.
+
+  ## Example
+
+      defmodule MyHTTPAdapter do
+        use PropertyDamage.Adapter, default_timeout: 30  # 30 seconds
+
+        # Override for slow polling command
+        def timeout(%CreateAuthorization{}), do: 120
+      end
+
+      defmodule MyInMemoryAdapter do
+        use PropertyDamage.Adapter, default_timeout: {100, :milliseconds}
+
+        # Override for complex calculation
+        def timeout(%ComplexCalculation{}), do: {500, :milliseconds}
+      end
+  """
+  defmacro __using__(opts) do
+    default_timeout = Keyword.get(opts, :default_timeout, 30)
+
     quote do
       @behaviour PropertyDamage.Adapter
       import PropertyDamage.Adapter, only: [delegate_execution: 1]
+
+      @impl true
+      def timeout(_command), do: unquote(default_timeout)
+
+      defoverridable timeout: 1
     end
   end
 
@@ -238,6 +307,7 @@ defmodule PropertyDamage.Adapter do
 
     for command <- commands do
       quote do
+        @impl true
         def execute(%unquote(command){} = cmd, ctx) do
           unquote(target).execute(cmd, ctx)
         end

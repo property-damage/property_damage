@@ -439,16 +439,18 @@ defmodule PropertyDamage.Telemetry.Collector do
     ]
 
     handler_id = "property_damage_collector_#{inspect(self())}"
-    pid = self()
 
     :telemetry.attach_many(
       handler_id,
       events,
-      fn event_name, measurements, metadata, _config ->
-        send(pid, {:telemetry_event, event_name, measurements, metadata})
-      end,
-      nil
+      &__MODULE__.dispatch_telemetry_event/4,
+      %{pid: self()}
     )
+  end
+
+  @doc false
+  def dispatch_telemetry_event(event_name, measurements, metadata, %{pid: pid}) do
+    send(pid, {:telemetry_event, event_name, measurements, metadata})
   end
 
   defp add_recent_event(state, event) do

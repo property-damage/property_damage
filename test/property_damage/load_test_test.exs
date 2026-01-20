@@ -1,6 +1,8 @@
 defmodule PropertyDamage.LoadTestTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias PropertyDamage.LoadTest
   alias PropertyDamage.LoadTest.{Metrics, RampStrategy, Report, Worker, WorkerPool}
 
@@ -75,19 +77,6 @@ defmodule PropertyDamage.LoadTestTest do
       snapshot = Metrics.snapshot(metrics)
       assert snapshot.arrivals_spawned == 3
       assert snapshot.arrivals_completed == 1
-
-      Metrics.stop(metrics)
-    end
-
-    test "tracks dropped arrivals" do
-      {:ok, metrics} = Metrics.start_link()
-
-      Metrics.arrival_dropped(metrics)
-      Metrics.arrival_dropped(metrics)
-
-      Process.sleep(50)
-      snapshot = Metrics.snapshot(metrics)
-      assert snapshot.arrivals_dropped == 2
 
       Metrics.stop(metrics)
     end
@@ -329,9 +318,7 @@ defmodule PropertyDamage.LoadTestTest do
           errors_by_type: %{timeout: 10, connection_error: 5},
           arrivals_spawned: 10_000,
           arrivals_completed: 10_000,
-          arrivals_dropped: 50,
           arrivals_per_second: 166.67,
-          drop_rate: 0.5,
           by_command: %{
             CreateAccount => %{
               count: 5000,
@@ -356,11 +343,12 @@ defmodule PropertyDamage.LoadTestTest do
           recent_assertion_failures: []
         },
         pool_stats: %{
-          size: 50,
+          total_created: 50,
+          peak_in_use: 45,
           utilization: 0.85,
-          total_checkouts: 10_000,
-          total_dropped: 50,
-          avg_queue_time_ms: 5.2
+          peak_utilization: 0.90,
+          avg_utilization: 0.80,
+          total_checkouts: 10_000
         },
         config: %{
           model: TestModel,
@@ -447,7 +435,7 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   defmodule WorkerTestAdapter do
-    @behaviour PropertyDamage.Adapter
+    use PropertyDamage.Adapter, default_timeout: 30
 
     @impl true
     def setup(_config), do: {:ok, %{setup_at: System.monotonic_time()}}
@@ -524,12 +512,11 @@ defmodule PropertyDamage.LoadTestTest do
   # ============================================================================
 
   describe "WorkerPool" do
-    test "starts pool with specified size" do
+    test "starts empty dynamic pool" do
       {:ok, metrics} = Metrics.start_link()
 
       {:ok, pool} =
         WorkerPool.start_link(
-          size: 3,
           model: WorkerTestModel,
           adapter: WorkerTestAdapter,
           adapter_config: %{},
@@ -539,20 +526,19 @@ defmodule PropertyDamage.LoadTestTest do
         )
 
       stats = WorkerPool.stats(pool)
-      assert stats.size == 3
-      assert stats.available == 3
+      assert stats.total_created == 0
+      assert stats.available == 0
       assert stats.in_use == 0
 
       WorkerPool.stop(pool)
       Metrics.stop(metrics)
     end
 
-    test "checkout and checkin workers" do
+    test "checkout creates workers on demand and checkin returns them" do
       {:ok, metrics} = Metrics.start_link()
 
       {:ok, pool} =
         WorkerPool.start_link(
-          size: 2,
           model: WorkerTestModel,
           adapter: WorkerTestAdapter,
           adapter_config: %{},
@@ -561,19 +547,21 @@ defmodule PropertyDamage.LoadTestTest do
           assertion_mode: :disabled
         )
 
-      # Checkout first worker
+      # Checkout first worker - should create one
       {:ok, worker1} = WorkerPool.checkout(pool)
       assert is_pid(worker1)
 
       stats = WorkerPool.stats(pool)
-      assert stats.available == 1
+      assert stats.total_created == 1
+      assert stats.available == 0
       assert stats.in_use == 1
 
-      # Checkout second worker
+      # Checkout second worker - should create another
       {:ok, worker2} = WorkerPool.checkout(pool)
       assert worker1 != worker2
 
       stats = WorkerPool.stats(pool)
+      assert stats.total_created == 2
       assert stats.available == 0
       assert stats.in_use == 2
 
@@ -584,17 +572,24 @@ defmodule PropertyDamage.LoadTestTest do
       assert stats.available == 1
       assert stats.in_use == 1
 
+      # Checkout again - should reuse the checked-in worker
+      {:ok, worker3} = WorkerPool.checkout(pool)
+      assert worker3 == worker1
+
+      stats = WorkerPool.stats(pool)
+      assert stats.total_created == 2
+      assert stats.available == 0
+      assert stats.in_use == 2
+
       WorkerPool.stop(pool)
       Metrics.stop(metrics)
     end
 
-    test "returns pool_exhausted when queue is full" do
+    test "tracks peak workers in use" do
       {:ok, metrics} = Metrics.start_link()
 
       {:ok, pool} =
         WorkerPool.start_link(
-          size: 1,
-          max_queue_size: 0,
           model: WorkerTestModel,
           adapter: WorkerTestAdapter,
           adapter_config: %{},
@@ -603,14 +598,23 @@ defmodule PropertyDamage.LoadTestTest do
           assertion_mode: :disabled
         )
 
-      # Checkout the only worker
-      {:ok, _worker} = WorkerPool.checkout(pool)
-
-      # Try to checkout another (queue size is 0, so immediate rejection)
-      assert {:error, :pool_exhausted} = WorkerPool.checkout(pool, timeout: 100)
+      # Checkout 3 workers
+      {:ok, w1} = WorkerPool.checkout(pool)
+      {:ok, w2} = WorkerPool.checkout(pool)
+      {:ok, w3} = WorkerPool.checkout(pool)
 
       stats = WorkerPool.stats(pool)
-      assert stats.total_dropped == 1
+      assert stats.peak_in_use == 3
+
+      # Return all workers
+      WorkerPool.checkin(pool, w1)
+      WorkerPool.checkin(pool, w2)
+      WorkerPool.checkin(pool, w3)
+
+      # Peak should still be 3
+      stats = WorkerPool.stats(pool)
+      assert stats.peak_in_use == 3
+      assert stats.in_use == 0
 
       WorkerPool.stop(pool)
       Metrics.stop(metrics)
@@ -659,7 +663,7 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     defmodule MockAdapter do
-      @behaviour PropertyDamage.Adapter
+      use PropertyDamage.Adapter, default_timeout: 30
 
       @impl true
       def setup(_config), do: {:ok, %{}}
@@ -677,123 +681,136 @@ defmodule PropertyDamage.LoadTestTest do
 
     @tag :integration
     test "runs a short load test" do
-      # Run a very short load test
-      {:ok, report} =
-        LoadTest.run(
-          model: MockModel,
-          adapter: MockAdapter,
-          arrival_rate: 50,
-          duration: {500, :milliseconds}
-        )
+      capture_log(fn ->
+        # Run a very short load test
+        {:ok, report} =
+          LoadTest.run(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 50,
+            duration: {500, :milliseconds}
+          )
 
-      assert report.metrics.total_requests > 0
-      assert report.metrics.requests_per_second > 0
-      assert report.config.arrival_rate == {50, {1, :seconds}}
+        assert report.metrics.total_requests > 0
+        assert report.metrics.requests_per_second > 0
+        assert report.config.arrival_rate == {50, {1, :seconds}}
+      end)
     end
 
     @tag :integration
     test "supports async start/await" do
-      {:ok, runner} =
-        LoadTest.start(
-          model: MockModel,
-          adapter: MockAdapter,
-          arrival_rate: 50,
-          duration: {300, :milliseconds}
-        )
+      capture_log(fn ->
+        {:ok, runner} =
+          LoadTest.start(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 50,
+            duration: {300, :milliseconds}
+          )
 
-      assert is_pid(runner)
+        assert is_pid(runner)
 
-      # Check status
-      status = LoadTest.status(runner)
-      assert status.target_rate == {50, {1, :seconds}}
-      assert status.phase in [:ramp_up, :steady]
+        # Check status
+        status = LoadTest.status(runner)
+        assert status.target_rate == {50, {1, :seconds}}
+        assert status.phase in [:ramp_up, :steady]
 
-      # Get metrics during run
-      metrics = LoadTest.get_metrics(runner)
-      assert is_map(metrics)
+        # Get metrics during run
+        metrics = LoadTest.get_metrics(runner)
+        assert is_map(metrics)
 
-      # Wait for completion
-      {:ok, report} = LoadTest.await(runner)
-      assert report.metrics.total_requests > 0
+        # Wait for completion
+        {:ok, report} = LoadTest.await(runner)
+        assert report.metrics.total_requests > 0
+      end)
     end
 
     @tag :integration
     test "supports early stop" do
-      {:ok, runner} =
-        LoadTest.start(
-          model: MockModel,
-          adapter: MockAdapter,
-          arrival_rate: 50,
-          duration: {10, :seconds}
-        )
+      capture_log(fn ->
+        {:ok, runner} =
+          LoadTest.start(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 50,
+            duration: {10, :seconds}
+          )
 
-      # Let it run briefly
-      Process.sleep(200)
+        # Let it run briefly
+        Process.sleep(200)
 
-      # Stop early
-      {:ok, report} = LoadTest.stop(runner)
-      assert report.metrics.total_requests > 0
+        # Stop early
+        {:ok, report} = LoadTest.stop(runner)
+        assert report.metrics.total_requests > 0
+      end)
     end
 
     @tag :integration
     test "calls on_metrics callback" do
       test_pid = self()
 
-      {:ok, _report} =
-        LoadTest.run(
-          model: MockModel,
-          adapter: MockAdapter,
-          arrival_rate: 50,
-          duration: {600, :milliseconds},
-          metrics_interval: {100, :milliseconds},
-          on_metrics: fn metrics ->
-            send(test_pid, {:metrics, metrics})
-          end
-        )
+      capture_log(fn ->
+        {:ok, _report} =
+          LoadTest.run(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 50,
+            duration: {600, :milliseconds},
+            metrics_interval: {100, :milliseconds},
+            on_metrics: fn metrics ->
+              send(test_pid, {:metrics, metrics})
+            end
+          )
 
-      # Should have received multiple metrics callbacks
-      assert_receive {:metrics, metrics}, 1000
-      assert is_map(metrics)
-      assert Map.has_key?(metrics, :requests_per_second)
+        # Should have received multiple metrics callbacks
+        assert_receive {:metrics, metrics}, 1000
+        assert is_map(metrics)
+        assert Map.has_key?(metrics, :requests_per_second)
+      end)
     end
 
     @tag :integration
     test "uses linear ramp-up" do
       test_pid = self()
 
-      {:ok, _report} =
-        LoadTest.run(
-          model: MockModel,
-          adapter: MockAdapter,
-          arrival_rate: 100,
-          duration: {800, :milliseconds},
-          ramp_up: {:linear, {400, :milliseconds}},
-          metrics_interval: {100, :milliseconds},
-          on_metrics: fn metrics ->
-            send(test_pid, {:arrivals, metrics.arrivals_spawned})
-          end
-        )
+      capture_log(fn ->
+        {:ok, _report} =
+          LoadTest.run(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 100,
+            duration: {800, :milliseconds},
+            ramp_up: {:linear, {400, :milliseconds}},
+            metrics_interval: {100, :milliseconds},
+            on_metrics: fn metrics ->
+              send(test_pid, {:arrivals, metrics.arrivals_spawned})
+            end
+          )
 
-      # Should have seen ramping (not all at full rate from the start)
-      assert_receive {:arrivals, _}, 1000
+        # Should have seen ramping (not all at full rate from the start)
+        assert_receive {:arrivals, _}, 1000
+      end)
     end
 
     @tag :integration
-    test "tracks dropped arrivals when pool exhausted" do
-      # Use high arrival rate with small pool to force drops
-      {:ok, report} =
-        LoadTest.run(
-          model: MockModel,
-          adapter: MockAdapter,
-          arrival_rate: 500,
-          duration: {300, :milliseconds},
-          max_queue_size: 1
-        )
+    test "dynamic pool grows to handle high arrival rate" do
+      capture_log(fn ->
+        # Use high arrival rate - pool should grow dynamically to handle it
+        {:ok, report} =
+          LoadTest.run(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 200,
+            duration: {300, :milliseconds}
+          )
 
-      # With high rate and small queue, we should have some drops
-      # (may or may not depending on timing, so just verify metrics exist)
-      assert report.metrics.arrivals_spawned >= 0
-      assert report.metrics.arrivals_dropped >= 0
+        # With dynamic pool, all arrivals should be handled (no drops)
+        assert report.metrics.arrivals_spawned > 0
+
+        # Pool stats should show workers were created
+        assert report.pool_stats.total_created > 0
+        assert report.pool_stats.peak_in_use > 0
+      end)
     end
 
     # Model with assertion projections for testing assertion_mode option
@@ -830,126 +847,132 @@ defmodule PropertyDamage.LoadTestTest do
 
     @tag :integration
     test "runs load test with assertions disabled (default)" do
-      {:ok, report} =
-        LoadTest.run(
-          model: MockModelWithAssertions,
-          adapter: MockAdapter,
-          arrival_rate: 50,
-          duration: {500, :milliseconds}
-        )
+      capture_log(fn ->
+        {:ok, report} =
+          LoadTest.run(
+            model: MockModelWithAssertions,
+            adapter: MockAdapter,
+            arrival_rate: 50,
+            duration: {500, :milliseconds}
+          )
 
-      # Should have requests but no assertion failures tracked
-      # (because assertion_mode defaults to :disabled)
-      assert report.metrics.total_requests > 0
-      assert report.metrics.assertion_failures == 0
+        # Should have requests but no assertion failures tracked
+        # (because assertion_mode defaults to :disabled)
+        assert report.metrics.total_requests > 0
+        assert report.metrics.assertion_failures == 0
+      end)
     end
 
     @tag :integration
     test "runs load test with assertions enabled and tracks failures" do
-      {:ok, report} =
-        LoadTest.run(
-          model: MockModelWithAssertions,
-          adapter: MockAdapter,
-          arrival_rate: 50,
-          duration: {500, :milliseconds},
-          assertion_mode: :record
-        )
+      capture_log(fn ->
+        {:ok, report} =
+          LoadTest.run(
+            model: MockModelWithAssertions,
+            adapter: MockAdapter,
+            arrival_rate: 50,
+            duration: {500, :milliseconds},
+            assertion_mode: :record
+          )
 
-      # Should have requests and some assertion failures
-      assert report.metrics.total_requests > 0
+        # Should have requests and some assertion failures
+        assert report.metrics.total_requests > 0
 
-      # Since we fail every 3rd assertion, we should have failures
-      assert report.metrics.assertion_failures > 0
-      assert report.metrics.assertion_failure_rate > 0
+        # Since we fail every 3rd assertion, we should have failures
+        assert report.metrics.assertion_failures > 0
+        assert report.metrics.assertion_failure_rate > 0
 
-      # Should have tracked failures by exception module
-      assert Map.has_key?(report.metrics.failures_by_exception, PropertyDamage.AssertionFailed)
+        # Should have tracked failures by exception module
+        assert Map.has_key?(report.metrics.failures_by_exception, PropertyDamage.AssertionFailed)
+      end)
     end
 
     @tag :integration
     test "linear ramp produces single arrival chain (no rate multiplication)" do
-      # This test verifies the fix for the bug where each ramp step created
-      # a new parallel arrival chain, causing rate multiplication.
-      #
-      # With linear ramp over 500ms to target rate 100/sec:
-      # - 10 steps, each increasing rate by 10%
-      # - Total duration: 500ms ramp + 500ms steady = 1000ms
-      # - Expected arrivals (integral of ramp curve + steady):
-      #   Ramp: avg rate ~55/sec for 500ms = ~27 arrivals
-      #   Steady: 100/sec for 500ms = ~50 arrivals
-      #   Total: ~77 arrivals
-      #
-      # With the bug (10 parallel chains): would be ~770 arrivals
-      # Without the bug (single chain): ~77 arrivals
+      capture_log(fn ->
+        # This test verifies the fix for the bug where each ramp step created
+        # a new parallel arrival chain, causing rate multiplication.
+        #
+        # With linear ramp over 500ms to target rate 100/sec:
+        # - 10 steps, each increasing rate by 10%
+        # - Total duration: 500ms ramp + 500ms steady = 1000ms
+        # - Expected arrivals (integral of ramp curve + steady):
+        #   Ramp: avg rate ~55/sec for 500ms = ~27 arrivals
+        #   Steady: 100/sec for 500ms = ~50 arrivals
+        #   Total: ~77 arrivals
+        #
+        # With the bug (10 parallel chains): would be ~770 arrivals
+        # Without the bug (single chain): ~77 arrivals
 
-      {:ok, report} =
-        LoadTest.run(
-          model: MockModel,
-          adapter: MockAdapter,
-          arrival_rate: 100,
-          duration: {1000, :milliseconds},
-          ramp_up: {:linear, {500, :milliseconds}},
-          ramp_down: :immediate
-        )
+        {:ok, report} =
+          LoadTest.run(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 100,
+            duration: {1000, :milliseconds},
+            ramp_up: {:linear, {500, :milliseconds}},
+            ramp_down: :immediate
+          )
 
-      arrivals = report.metrics.arrivals_spawned
+        arrivals = report.metrics.arrivals_spawned
 
-      # Sanity check: we should have a reasonable number of arrivals
-      # Not 0 (broken), not 10x expected (bug), but roughly in the expected range
-      #
-      # Allow generous tolerance for timing variations, but catch the 10x bug
-      # Expected ~77, allow 40-200 range to account for timing jitter
-      assert arrivals > 30,
-             "Expected at least 30 arrivals, got #{arrivals} - arrival chain may not be starting"
+        # Sanity check: we should have a reasonable number of arrivals
+        # Not 0 (broken), not 10x expected (bug), but roughly in the expected range
+        #
+        # Allow generous tolerance for timing variations, but catch the 10x bug
+        # Expected ~77, allow 40-200 range to account for timing jitter
+        assert arrivals > 30,
+               "Expected at least 30 arrivals, got #{arrivals} - arrival chain may not be starting"
 
-      assert arrivals < 250,
-             "Expected fewer than 250 arrivals, got #{arrivals} - possible parallel arrival chain bug"
+        assert arrivals < 250,
+               "Expected fewer than 250 arrivals, got #{arrivals} - possible parallel arrival chain bug"
 
-      # Additional sanity check: arrival rate should be reasonable
-      test_duration_sec = report.metrics.duration_ms / 1000
-      actual_rate = arrivals / test_duration_sec
-      target_rate = 100
+        # Additional sanity check: arrival rate should be reasonable
+        test_duration_sec = report.metrics.duration_ms / 1000
+        actual_rate = arrivals / test_duration_sec
+        # With linear ramp, effective average rate is ~75% of target (0-100 over 50%, 100 for 50%)
+        # So we expect roughly 75/sec average, allow 40-150 range
+        assert actual_rate > 30,
+               "Arrival rate too low: #{actual_rate}/sec"
 
-      # With linear ramp, effective average rate is ~75% of target (0-100 over 50%, 100 for 50%)
-      # So we expect roughly 75/sec average, allow 40-150 range
-      assert actual_rate > 30,
-             "Arrival rate too low: #{actual_rate}/sec"
-
-      assert actual_rate < 150,
-             "Arrival rate too high: #{actual_rate}/sec - possible parallel chain bug"
+        assert actual_rate < 150,
+               "Arrival rate too high: #{actual_rate}/sec - possible parallel chain bug"
+      end)
     end
 
     @tag :integration
     test "immediate ramp produces correct arrival rate" do
-      # With immediate ramp, rate should be at target from the start
-      {:ok, report} =
-        LoadTest.run(
-          model: MockModel,
-          adapter: MockAdapter,
-          arrival_rate: 100,
-          duration: {500, :milliseconds},
-          ramp_up: :immediate,
-          ramp_down: :immediate
-        )
+      capture_log(fn ->
+        # With immediate ramp, rate should be at target from the start
+        {:ok, report} =
+          LoadTest.run(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 100,
+            duration: {500, :milliseconds},
+            ramp_up: :immediate,
+            ramp_down: :immediate
+          )
 
-      arrivals = report.metrics.arrivals_spawned
-      test_duration_sec = report.metrics.duration_ms / 1000
+        arrivals = report.metrics.arrivals_spawned
+        test_duration_sec = report.metrics.duration_ms / 1000
 
-      # Expected: ~100/sec * 0.5sec = ~50 arrivals
-      # Allow generous range for timing: 25-100
-      assert arrivals > 20,
-             "Expected at least 20 arrivals at 100/sec for 500ms, got #{arrivals}"
+        # Expected: ~100/sec * 0.5sec = ~50 arrivals
+        # Allow generous range for timing: 25-100
+        assert arrivals > 20,
+               "Expected at least 20 arrivals at 100/sec for 500ms, got #{arrivals}"
 
-      assert arrivals < 100,
-             "Expected fewer than 100 arrivals at 100/sec for 500ms, got #{arrivals}"
+        assert arrivals < 100,
+               "Expected fewer than 100 arrivals at 100/sec for 500ms, got #{arrivals}"
 
-      # Verify rate is roughly correct
-      actual_rate = arrivals / test_duration_sec
+        # Verify rate is roughly correct
+        actual_rate = arrivals / test_duration_sec
 
-      assert_in_delta actual_rate,
-                      100,
-                      50,
-                      "Arrival rate #{actual_rate}/sec not close to target 100/sec"
+        assert_in_delta actual_rate,
+                        100,
+                        50,
+                        "Arrival rate #{actual_rate}/sec not close to target 100/sec"
+      end)
     end
   end
 end

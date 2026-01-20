@@ -345,17 +345,35 @@ defmodule PropertyDamage.LoadTest.Worker do
     # Resolve refs using proper lookup
     case resolve_command_refs(command, refs) do
       {:ok, resolved_command} ->
+        # Get timeout from adapter
+        timeout_ms = normalize_timeout(state.adapter.timeout(resolved_command))
+
         # Set up injection context in process dictionary
         Process.put(@injection_ctx_key, %{events: [], command: command, refs: refs})
 
         # Add inject function to adapter context
         adapter_context_with_inject = Map.put(state.adapter_context, :inject, &inject_event/1)
 
+        # Execute with timeout - wrap in Task to enforce timeout
+        task =
+          Task.async(fn ->
+            try do
+              state.adapter.execute(resolved_command, adapter_context_with_inject)
+            after
+              :ok
+            end
+          end)
+
         result =
-          try do
-            state.adapter.execute(resolved_command, adapter_context_with_inject)
-          after
-            :ok
+          case Task.yield(task, timeout_ms) || Task.shutdown(task) do
+            {:ok, adapter_result} ->
+              adapter_result
+
+            nil ->
+              # Timeout - raise exception (consistent with framework heuristics)
+              raise PropertyDamage.CommandTimeoutError,
+                command: resolved_command,
+                timeout_ms: timeout_ms
           end
 
         # Get injected events from context
@@ -382,6 +400,11 @@ defmodule PropertyDamage.LoadTest.Worker do
         {:error, {:ref_resolution_failed, reason}}
     end
   end
+
+  defp normalize_timeout(seconds) when is_integer(seconds), do: seconds * 1000
+  defp normalize_timeout({value, :milliseconds}), do: value
+  defp normalize_timeout({value, :seconds}), do: value * 1000
+  defp normalize_timeout({value, :minutes}), do: value * 60 * 1000
 
   # ============================================================================
   # Ref Resolution

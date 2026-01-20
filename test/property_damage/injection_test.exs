@@ -75,7 +75,7 @@ defmodule PropertyDamage.InjectionTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%CreateResource{resource_id: ref, name: name}, ctx) do
+    def execute(%CreateResource{resource_id: _ref, name: name}, ctx) do
       # Generate a real ID
       real_id = "resource_#{:erlang.unique_integer([:positive])}"
 

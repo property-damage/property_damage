@@ -121,17 +121,16 @@ defmodule PropertyDamage.LoadTest.Report do
 
   defp terminal_throughput(metrics) do
     arrivals_spawned = Map.get(metrics, :arrivals_spawned, 0)
-    arrivals_dropped = Map.get(metrics, :arrivals_dropped, 0)
+    arrivals_completed = Map.get(metrics, :arrivals_completed, 0)
     arrivals_per_second = Map.get(metrics, :arrivals_per_second, 0.0)
-    drop_rate = Map.get(metrics, :drop_rate, 0.0)
 
     """
     ┌─ Throughput ─────────────────────────────────────────────────────────┐
     │ Total Commands:    #{String.pad_trailing(format_number(metrics.total_requests), 48)}│
     │ Commands/Second:   #{String.pad_trailing(format_float(metrics.requests_per_second), 48)}│
     │ Arrivals Spawned:  #{String.pad_trailing(format_number(arrivals_spawned), 48)}│
+    │ Arrivals Completed: #{String.pad_trailing(format_number(arrivals_completed), 47)}│
     │ Arrivals/Second:   #{String.pad_trailing(format_float(arrivals_per_second), 48)}│
-    │ Arrivals Dropped:  #{String.pad_trailing(format_number(arrivals_dropped) <> " (" <> format_float(drop_rate) <> "%)", 48)}│
     └──────────────────────────────────────────────────────────────────────┘
     """
   end
@@ -258,14 +257,16 @@ defmodule PropertyDamage.LoadTest.Report do
       stats ->
         peak_util = Map.get(stats, :peak_utilization, stats.utilization)
         avg_util = Map.get(stats, :avg_utilization, stats.utilization)
+        total_created = Map.get(stats, :total_created, 0)
+        peak_in_use = Map.get(stats, :peak_in_use, 0)
 
         """
         ┌─ Worker Pool ────────────────────────────────────────────────────────┐
-        │ Pool Size:       #{String.pad_trailing(to_string(stats.size), 51)}│
+        │ Workers Created: #{String.pad_trailing(to_string(total_created), 51)}│
+        │ Peak Workers:    #{String.pad_trailing(to_string(peak_in_use), 51)}│
         │ Peak Utilization: #{String.pad_trailing(format_float(peak_util * 100) <> "%", 50)}│
         │ Avg Utilization: #{String.pad_trailing(format_float(avg_util * 100) <> "%", 51)}│
         │ Total Checkouts: #{String.pad_trailing(format_number(stats.total_checkouts), 51)}│
-        │ Avg Queue Time:  #{String.pad_trailing(format_float(stats.avg_queue_time_ms) <> "ms", 51)}│
         └──────────────────────────────────────────────────────────────────────┘
         """
     end
@@ -329,8 +330,7 @@ defmodule PropertyDamage.LoadTest.Report do
     arrival_rate_str = format_arrival_rate(c.arrival_rate)
 
     arrivals_spawned = Map.get(m, :arrivals_spawned, 0)
-    arrivals_dropped = Map.get(m, :arrivals_dropped, 0)
-    drop_rate = Map.get(m, :drop_rate, 0.0)
+    arrivals_completed = Map.get(m, :arrivals_completed, 0)
 
     """
     # PropertyDamage Load Test Report
@@ -349,7 +349,7 @@ defmodule PropertyDamage.LoadTest.Report do
     - **Total Commands:** #{format_number(m.total_requests)}
     - **Throughput:** #{format_float(m.requests_per_second)} commands/second
     - **Arrivals Spawned:** #{format_number(arrivals_spawned)}
-    - **Arrivals Dropped:** #{format_number(arrivals_dropped)} (#{format_float(drop_rate)}%)
+    - **Arrivals Completed:** #{format_number(arrivals_completed)}
     - **Error Rate:** #{format_float(m.error_rate)}%
 
     #{format_pool_stats_markdown(report)}
@@ -483,17 +483,19 @@ defmodule PropertyDamage.LoadTest.Report do
       stats ->
         peak_util = Map.get(stats, :peak_utilization, stats.utilization)
         avg_util = Map.get(stats, :avg_utilization, stats.utilization)
+        total_created = Map.get(stats, :total_created, 0)
+        peak_in_use = Map.get(stats, :peak_in_use, 0)
 
         """
         ## Worker Pool
 
         | Metric | Value |
         |--------|-------|
-        | Pool Size | #{stats.size} |
+        | Workers Created | #{total_created} |
+        | Peak Workers | #{peak_in_use} |
         | Peak Utilization | #{format_float(peak_util * 100)}% |
         | Avg Utilization | #{format_float(avg_util * 100)}% |
         | Total Checkouts | #{format_number(stats.total_checkouts)} |
-        | Avg Queue Time | #{format_float(stats.avg_queue_time_ms)}ms |
         """
     end
   end

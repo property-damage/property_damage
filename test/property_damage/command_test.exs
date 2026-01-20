@@ -8,6 +8,8 @@ defmodule PropertyDamage.CommandTest do
 
   describe "CreateItem command" do
     test "compiles correctly with behaviour" do
+      # Ensure module is loaded before checking exports
+      Code.ensure_loaded!(CreateItem)
       # Verify generator is implemented
       assert function_exported?(CreateItem, :generator, 1)
       # Verify metadata callbacks
@@ -44,6 +46,7 @@ defmodule PropertyDamage.CommandTest do
 
   describe "ViewItem command" do
     test "compiles correctly with behaviour" do
+      Code.ensure_loaded!(ViewItem)
       assert function_exported?(ViewItem, :generator, 1)
       assert function_exported?(ViewItem, :read_only?, 0)
       assert function_exported?(ViewItem, :downstream_observables, 0)
@@ -87,10 +90,12 @@ defmodule PropertyDamage.CommandTest do
 
   describe "MinimalCommand" do
     test "compiles with only required callback (generator)" do
+      Code.ensure_loaded!(MinimalCommand)
       assert function_exported?(MinimalCommand, :generator, 1)
     end
 
     test "optional callbacks are not exported" do
+      Code.ensure_loaded!(MinimalCommand)
       refute function_exported?(MinimalCommand, :label, 2)
       refute function_exported?(MinimalCommand, :creates_ref, 0)
       refute function_exported?(MinimalCommand, :downstream_observables, 0)
