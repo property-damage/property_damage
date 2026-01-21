@@ -92,7 +92,7 @@ defmodule PropertyDamage.Generator do
         branching: [branch_probability: 0.3, max_branches: 2]
       )
   """
-  @spec generate_sequence(module(), keyword()) :: StreamData.t()
+  @spec generate_sequence(module(), keyword()) :: StreamData.t(PropertyDamage.Sequence.t())
   def generate_sequence(model, opts \\ []) do
     max_commands = Keyword.get(opts, :max_commands, @default_max_commands)
     branching_opts = Keyword.get(opts, :branching, nil)
