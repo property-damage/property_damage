@@ -88,10 +88,13 @@ defmodule Mix.Tasks.Pd.Gen.Model do
   defp parse_list(str), do: String.split(str, ",") |> Enum.map(&String.trim/1)
 
   defp module_to_path(module_name) do
-    module_name
-    |> String.replace(".", "/")
-    |> Macro.underscore()
-    |> then(&"lib/#{&1}.ex")
+    path =
+      module_name
+      |> String.split(".")
+      |> Enum.map(&Macro.underscore/1)
+      |> Enum.join("/")
+
+    "lib/#{path}.ex"
   end
 
   defp generate_content(module_name, commands, projection, extra_projections) do

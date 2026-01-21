@@ -85,10 +85,13 @@ defmodule Mix.Tasks.Pd.Gen.Command do
   defp parse_fields(fields), do: String.split(fields, ",") |> Enum.map(&String.trim/1)
 
   defp module_to_path(module_name) do
-    module_name
-    |> String.replace(".", "/")
-    |> Macro.underscore()
-    |> then(&"lib/#{&1}.ex")
+    path =
+      module_name
+      |> String.split(".")
+      |> Enum.map(&Macro.underscore/1)
+      |> Enum.join("/")
+
+    "lib/#{path}.ex"
   end
 
   defp generate_content(module_name, fields, creates_ref, semantics) do

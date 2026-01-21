@@ -78,10 +78,13 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
   end
 
   defp module_to_path(module_name) do
-    module_name
-    |> String.replace(".", "/")
-    |> Macro.underscore()
-    |> then(&"lib/#{&1}.ex")
+    path =
+      module_name
+      |> String.split(".")
+      |> Enum.map(&Macro.underscore/1)
+      |> Enum.join("/")
+
+    "lib/#{path}.ex"
   end
 
   defp generate_http_adapter(module_name) do
