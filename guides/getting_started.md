@@ -40,12 +40,18 @@ PropertyDamage has five key components:
 
 ## Step 1: Define Events
 
-Events represent the outcomes of operations. They're simple structs:
+Events represent the outcomes of operations. They're simple structs.
+
+For fields that are **server-generated** (like IDs returned by your system),
+use `external()` to mark them:
 
 ```elixir
 defmodule MyApp.Events do
+  import PropertyDamage, only: [external: 0]
+
   defmodule UserCreated do
-    defstruct [:user_id, :email, :name]
+    # user_id is server-generated, email and name come from the command
+    defstruct [user_id: external(), :email, :name]
   end
 
   defmodule UserUpdated do
@@ -57,6 +63,10 @@ defmodule MyApp.Events do
   end
 end
 ```
+
+The `external()` marker tells PropertyDamage that this field will be populated
+by your System Under Test during execution. The framework handles tracking
+these values automatically.
 
 ## Step 2: Define Commands
 
@@ -82,16 +92,15 @@ defmodule MyApp.Commands.CreateUser do
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
   end
-
-  # Optional: this command creates a user ref
-  def creates_ref, do: :user_id
 end
 ```
+
+Note: The `user_id` is **not** in the command - it's server-generated and marked
+with `external()` in the `UserCreated` event struct.
 
 ### Key Command Callbacks
 
 - **`generator/1`** - Generate command field values (returns `StreamData` of maps)
-- **`creates_ref/0`** (optional) - Field name for entity ref this command creates
 - **`read_only?/0`** (optional) - Whether command only reads state
 
 ## Step 3: Define Projections

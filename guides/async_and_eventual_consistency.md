@@ -183,11 +183,16 @@ defmodule MyTest.Commands.CreateAuthorization do
   end
 
   # Async semantics protects this command during shrinking
-  # if downstream commands use its ref
+  # if downstream commands use its authorization_id
   def semantics, do: :async
+end
 
-  # This command creates a ref used by other commands
-  def creates_ref, do: :authorization_id
+# The event marks server-generated fields with external()
+defmodule MyTest.Events.AuthorizationCreated do
+  import PropertyDamage, only: [external: 0]
+
+  # authorization_id is server-generated
+  defstruct [authorization_id: external(), :account_id, :amount, :currency, :status]
 end
 ```
 
@@ -359,7 +364,7 @@ end
 
 - Injected events update projections **immediately** when injected
 - Injected events are recorded with source `:injected` in the event log
-- If the command has `creates_ref/0`, refs are bound from the **first** injected event
+- For events with `external()` fields, values are captured from the **first** injected event
 - Events returned from `execute/2` are processed **after** injected events
 - Adapters not using `inject` continue to work unchanged (backward compatible)
 

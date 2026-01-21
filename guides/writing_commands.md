@@ -11,7 +11,7 @@ Commands follow a pure generator pattern - they are decoupled from state shape a
 Commands define:
 - **Struct fields** - The data needed for the operation
 - **`generator/1`** - How to generate valid field values
-- **Metadata** - Optional callbacks like `creates_ref/0`, `read_only?/0`, `downstream_observables/0`
+- **Metadata** - Optional callbacks like `read_only?/0`, `downstream_observables/0`
 
 Commands do NOT define:
 - When the command is valid (preconditions) - defined in Model via `when:`
@@ -37,11 +37,16 @@ defmodule MyTest.Commands.CreateOrder do
     |> StreamData.fixed_map()
   end
 
-  # Optional: this command creates an order ref
-  def creates_ref, do: :order_ref
-
   # Optional: events this command can produce
   def downstream_observables, do: [OrderCreated, OrderRejected]
+end
+
+# The corresponding event marks server-generated fields with external()
+defmodule MyTest.Events.OrderCreated do
+  import PropertyDamage, only: [external: 0]
+
+  # order_id is server-generated, amount and currency come from the command
+  defstruct [order_id: external(), :amount, :currency]
 end
 ```
 
@@ -334,14 +339,6 @@ end
 ```
 
 ## Optional Command Callbacks
-
-### `creates_ref/0`
-
-Return the field name where a newly created ref should be stored:
-
-```elixir
-def creates_ref, do: :order_ref
-```
 
 ### `read_only?/0`
 
