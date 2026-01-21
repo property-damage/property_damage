@@ -106,19 +106,15 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       # State Tracking
       # ============================================================================
 
-      # Handle events with ref (for entity creation)
-      # def apply(state, %Created{} = event, ref) do
-      #   put_in(state, [:entities, ref], event.data)
+      # def apply(state, %Created{id: id} = event) do
+      #   put_in(state.entities[id], event.data)
       # end
 
-      # Handle events without ref
-      # def apply(state, %Updated{} = event) do
-      #   update_in(state, [:entities, event.id], fn e -> %{e | name: event.name} end)
+      # def apply(state, %Updated{id: id, name: name}) do
+      #   update_in(state.entities[id], fn e -> %{e | name: name} end)
       # end
 
-      # Catch-all (required)
       def apply(state, _event), do: state
-      def apply(state, _event, _ref), do: state
 
       # ============================================================================
       # Synchronous Assertions (@trigger)
