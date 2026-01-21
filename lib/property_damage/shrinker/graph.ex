@@ -36,7 +36,7 @@ defmodule PropertyDamage.Shrinker.Graph do
   Node 2 can be removed independently of nodes 1 and 3.
   """
 
-  alias PropertyDamage.Ref
+  alias PropertyDamage.{Ref, Placeholder}
 
   @typedoc """
   Dependency graph structure.
@@ -74,38 +74,56 @@ defmodule PropertyDamage.Shrinker.Graph do
   """
   @spec build([struct()]) :: t()
   def build(commands) do
-    # First pass: identify producers
+    # First pass: identify producers (refs from creates_ref/0)
     {producers, _} =
       commands
       |> Enum.with_index()
       |> Enum.reduce({%{}, %{}}, fn {command, index}, {prods, _consumers} ->
         case find_produced_ref(command) do
           nil -> {prods, %{}}
-          ref_id -> {Map.put(prods, ref_id, index), %{}}
+          ref_id -> {Map.put(prods, {:ref, ref_id}, index), %{}}
         end
       end)
+
+    # Also track placeholder producers (placeholders know their command_index)
+    # Placeholders are found in commands and their command_index is the producer
+    producers = add_placeholder_producers(commands, producers)
 
     # Second pass: identify consumers and build edges
     {nodes, edges, consumers} =
       commands
       |> Enum.with_index()
       |> Enum.reduce({MapSet.new(), %{}, %{}}, fn {command, index}, {nodes, edges, consumers} ->
-        # Get refs consumed, excluding the ref this command produces
+        # Get refs/placeholders consumed, excluding the ref this command produces
         produced_ref_field = get_produced_ref_field(command)
-        refs_consumed = find_consumed_refs(command, produced_ref_field)
+        deps_consumed = find_consumed_refs(command, produced_ref_field)
         nodes = MapSet.put(nodes, index)
-        consumers = Map.put(consumers, index, refs_consumed)
+        consumers = Map.put(consumers, index, deps_consumed)
 
         # Create edges from producer to consumer
         edges =
-          Enum.reduce(refs_consumed, edges, fn ref_id, acc ->
-            case Map.get(producers, ref_id) do
+          Enum.reduce(deps_consumed, edges, fn dep_key, acc ->
+            producer_index =
+              case dep_key do
+                {:ref, _} ->
+                  Map.get(producers, dep_key)
+
+                {:placeholder, id} ->
+                  # For placeholders, look up the producer from the producers map
+                  Map.get(producers, {:placeholder, id})
+              end
+
+            case producer_index do
               nil ->
                 acc
 
-              producer_index ->
-                existing = Map.get(acc, producer_index, MapSet.new())
-                Map.put(acc, producer_index, MapSet.put(existing, index))
+              idx when idx == index ->
+                # Don't create self-edges
+                acc
+
+              idx ->
+                existing = Map.get(acc, idx, MapSet.new())
+                Map.put(acc, idx, MapSet.put(existing, index))
             end
           end)
 
@@ -119,6 +137,48 @@ defmodule PropertyDamage.Shrinker.Graph do
       consumers: consumers
     }
   end
+
+  # Scan all commands to find placeholders and record their producers
+  defp add_placeholder_producers(commands, producers) do
+    commands
+    |> Enum.with_index()
+    |> Enum.reduce(producers, fn {command, _index}, prods ->
+      # Find all placeholders in this command
+      placeholders = collect_placeholders(command)
+
+      # Each placeholder's command_index is its producer
+      Enum.reduce(placeholders, prods, fn %Placeholder{id: id, command_index: cmd_idx}, acc ->
+        Map.put(acc, {:placeholder, id}, cmd_idx)
+      end)
+    end)
+  end
+
+  # Collect all Placeholder structs from a data structure
+  defp collect_placeholders(data), do: do_collect_placeholders(data, [])
+
+  defp do_collect_placeholders(%Placeholder{} = p, acc), do: [p | acc]
+  defp do_collect_placeholders(%Ref{}, acc), do: acc
+
+  defp do_collect_placeholders(%{__struct__: _} = struct, acc) do
+    struct
+    |> Map.from_struct()
+    |> Map.values()
+    |> Enum.reduce(acc, &do_collect_placeholders/2)
+  end
+
+  defp do_collect_placeholders(map, acc) when is_map(map) do
+    Enum.reduce(map, acc, fn {_k, v}, a -> do_collect_placeholders(v, a) end)
+  end
+
+  defp do_collect_placeholders(list, acc) when is_list(list) do
+    Enum.reduce(list, acc, &do_collect_placeholders/2)
+  end
+
+  defp do_collect_placeholders(tuple, acc) when is_tuple(tuple) do
+    tuple |> Tuple.to_list() |> Enum.reduce(acc, &do_collect_placeholders/2)
+  end
+
+  defp do_collect_placeholders(_, acc), do: acc
 
   @doc """
   Get all ancestors of a node (transitive dependencies).
@@ -273,9 +333,12 @@ defmodule PropertyDamage.Shrinker.Graph do
     |> Enum.uniq()
   end
 
-  defp collect_refs(%Ref{ref: ref_id}, acc), do: [ref_id | acc]
+  defp collect_refs(%Ref{ref: ref_id}, acc), do: [{:ref, ref_id} | acc]
 
-  # Skip other structs (like DateTime) - they don't contain refs
+  # Collect placeholder dependencies - use the placeholder's id as the dependency key
+  defp collect_refs(%Placeholder{id: id}, acc), do: [{:placeholder, id} | acc]
+
+  # Skip other structs (like DateTime) - they don't contain refs/placeholders
   defp collect_refs(%{__struct__: _}, acc), do: acc
 
   defp collect_refs(map, acc) when is_map(map) do

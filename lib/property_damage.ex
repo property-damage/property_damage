@@ -1146,6 +1146,99 @@ defmodule PropertyDamage do
     raise %PropertyDamage.AssertionFailed{message: message, data: Map.new(data)}
   end
 
+  # ============================================================================
+  # External Values (Server-Generated IDs)
+  # ============================================================================
+
+  @doc """
+  Mark a field as server-generated (external) in event struct definitions.
+
+  Use `external()` as the default value for fields that will be populated by
+  the System Under Test (SUT) during execution, such as auto-generated IDs,
+  timestamps, or transaction references.
+
+  ## Basic Usage
+
+      defmodule MyApp.Events.OrderCreated do
+        import PropertyDamage, only: [external: 0]
+
+        # id is server-generated, amount comes from the command
+        defstruct [id: external(), :amount, :customer_id]
+      end
+
+  ## Multiple Externals
+
+  Events can have multiple external fields:
+
+      defmodule MyApp.Events.PaymentProcessed do
+        import PropertyDamage, only: [external: 0]
+
+        defstruct [
+          payment_id: external(),
+          transaction_ref: external(),
+          :order_id,
+          :amount
+        ]
+      end
+
+  ## Nested Externals
+
+  Externals are supported in nested maps:
+
+      defstruct [
+        ids: %{transaction: external(), confirmation: external()},
+        :amount
+      ]
+
+  ## Fixed-Length Lists
+
+  Externals are supported in fixed-length lists:
+
+      defstruct [
+        item_ids: [external(), external(), external()],
+        :batch_name
+      ]
+
+  ## How It Works
+
+  1. In your simulator, return events with external fields unset (or any value):
+
+      def simulate(%CreateOrder{amount: amt}, _state) do
+        {:ok, [%OrderCreated{amount: amt}]}  # id: external() is implicit
+      end
+
+  2. The framework automatically:
+     - Detects external markers during simulation
+     - Creates internal placeholders to track dependencies
+     - Resolves placeholders with real values from the SUT
+
+  3. In projections, you receive concrete values:
+
+      def apply(state, %OrderCreated{id: id, amount: amt}) do
+        put_in(state.orders[id], %{amount: amt})  # id is a real value
+      end
+
+  4. In command generators, read resolved values from state:
+
+      def new!(state, _overrides) do
+        order_id = state.orders |> Map.keys() |> Enum.random()
+        StreamData.constant(%__MODULE__{order_id: order_id})
+      end
+
+  ## Limitations
+
+  Variable-length lists where the count isn't known at struct definition
+  time are not supported. If you need a variable number of external IDs,
+  mark the entire list as `external()` and have the SUT return the complete list.
+
+  ## See Also
+
+  - `PropertyDamage.External` - Implementation details and path detection
+  - `PropertyDamage.Placeholder` - Internal placeholder tracking (not user-facing)
+  """
+  @spec external() :: PropertyDamage.External.t()
+  defdelegate external(), to: PropertyDamage.External
+
   @doc false
   defmacro __using__(_opts) do
     quote do

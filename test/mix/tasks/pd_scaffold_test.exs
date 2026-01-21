@@ -436,7 +436,9 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       code = generate_event(event, "PetStore")
 
       assert code =~ "defmodule PetStore.Events.PetCreated do"
-      assert code =~ "defstruct [:id, :name]"
+      # id field uses external() since it's server-generated
+      assert code =~ "defstruct [id: external(), :name]"
+      assert code =~ "import PropertyDamage, only: [external: 0]"
       assert code =~ "Generated from operation: createPet"
     end
   end

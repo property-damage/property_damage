@@ -64,8 +64,9 @@ defmodule PropertyDamage.Shrinker.GraphTest do
 
       graph = Graph.build(commands)
 
-      assert Map.get(graph.producers, ref1.ref) == 0
-      assert Map.get(graph.producers, ref2.ref) == 1
+      # Producers are keyed by {:ref, ref_id} tuples
+      assert Map.get(graph.producers, {:ref, ref1.ref}) == 0
+      assert Map.get(graph.producers, {:ref, ref2.ref}) == 1
     end
 
     test "creates edges for consumers" do
@@ -93,8 +94,8 @@ defmodule PropertyDamage.Shrinker.GraphTest do
 
       graph = Graph.build(commands)
 
-      # Node 1 consumes the ref
-      assert ref.ref in Map.get(graph.consumers, 1, [])
+      # Node 1 consumes the ref (consumers stores {:ref, ref_id} tuples)
+      assert {:ref, ref.ref} in Map.get(graph.consumers, 1, [])
     end
 
     test "handles complex dependency graph" do

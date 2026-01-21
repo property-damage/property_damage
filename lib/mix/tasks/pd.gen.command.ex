@@ -8,17 +8,27 @@ defmodule Mix.Tasks.Pd.Gen.Command do
 
   ## Options
 
-      --creates-ref NAME    Field name for ref this command creates
+      --creates-ref NAME    (DEPRECATED) Field name for ref this command creates.
+                            Use `external()` in event structs instead.
       --semantics SEM       Command semantics (sync, probe, async, mock_config)
       --fields FIELDS       Comma-separated field names
+
+  ## Note on creates_ref Deprecation
+
+  The `--creates-ref` option is deprecated. Instead of declaring refs on commands,
+  use `external()` markers in your event struct definitions:
+
+      defmodule MyApp.Events.UserCreated do
+        import PropertyDamage, only: [external: 0]
+        defstruct [id: external(), :name, :email]  # id is server-generated
+      end
+
+  See `PropertyDamage.external/0` for full documentation.
 
   ## Examples
 
       # Basic command
       mix pd.gen.command MyApp.Commands.CreateUser
-
-      # Command that creates a ref
-      mix pd.gen.command MyApp.Commands.CreateUser --creates-ref user
 
       # Probe command with fields
       mix pd.gen.command MyApp.Commands.GetUser --semantics probe --fields user_ref
@@ -55,6 +65,21 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     creates_ref = Keyword.get(opts, :creates_ref)
     semantics = Keyword.get(opts, :semantics, "sync")
     fields = parse_fields(Keyword.get(opts, :fields, ""))
+
+    # Warn about deprecated --creates-ref option
+    if creates_ref do
+      Mix.shell().info("""
+      WARNING: --creates-ref is deprecated.
+      Use external() in event struct definitions instead:
+
+          defmodule MyApp.Events.YourEvent do
+            import PropertyDamage, only: [external: 0]
+            defstruct [#{creates_ref}: external(), ...]
+          end
+
+      See `PropertyDamage.external/0` for documentation.
+      """)
+    end
 
     # Parse module name to get path
     path = module_to_path(module_name)

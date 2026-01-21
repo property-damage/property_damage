@@ -2,6 +2,51 @@ defmodule PropertyDamage.Ref do
   @moduledoc """
   Symbolic references for entity IDs in stateful property-based testing.
 
+  **DEPRECATED**: This module is superseded by the `external()` marker system.
+  Use `external()` in event struct definitions instead of symbolic refs.
+
+  The new approach offers:
+  - Multiple external fields per event
+  - Nested externals in maps and fixed-length lists
+  - Automatic detection without command-level configuration
+  - Cleaner separation of concerns (externals declared on events, not commands)
+
+  ## Migration Example
+
+  Instead of:
+
+      # Old approach (deprecated)
+      defmodule CreateOrder do
+        defstruct [:order_ref, :amount]
+        def creates_ref, do: :order_ref
+
+        def new!(state, _) do
+          StreamData.constant(%__MODULE__{
+            order_ref: Ref.symbolic(label: "order"),
+            amount: 100
+          })
+        end
+      end
+
+  Use:
+
+      # New approach
+      defmodule OrderCreated do
+        import PropertyDamage, only: [external: 0]
+        defstruct [id: external(), :amount]
+      end
+
+      defmodule CreateOrder do
+        defstruct [:amount]
+        # No more creates_ref/0 needed
+      end
+
+  See `PropertyDamage.external/0` for full documentation.
+
+  ---
+
+  ## Legacy Documentation
+
   Refs are placeholders that represent entity identities before concrete
   values are known. They enable the framework to generate command sequences
   that refer to entities created by earlier commands, without needing to

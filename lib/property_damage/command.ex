@@ -124,7 +124,37 @@ defmodule PropertyDamage.Command do
   @callback label(state :: map(), command :: struct()) :: String.t() | nil
 
   @doc """
-  (Optional) Returns the field name for the Ref this command creates.
+  (Optional, **Deprecated**) Returns the field name for the Ref this command creates.
+
+  **DEPRECATED**: Use `external()` in event struct definitions instead.
+  The `creates_ref/0` callback is superseded by the external() marker system,
+  which provides:
+  - Multiple external fields per event
+  - Nested externals in maps and fixed-length lists
+  - Automatic detection without command-level configuration
+  - Cleaner separation of concerns (externals declared on events, not commands)
+
+  ## Migration
+
+  Instead of:
+
+      # Old approach (deprecated)
+      defmodule CreateOrder do
+        defstruct [:order_ref, :amount]
+        def creates_ref, do: :order_ref
+      end
+
+  Use:
+
+      # New approach
+      defmodule OrderCreated do
+        import PropertyDamage, only: [external: 0]
+        defstruct [id: external(), :amount]  # id is server-generated
+      end
+
+  See `PropertyDamage.external/0` for full documentation.
+
+  ## Legacy Behavior
 
   When a command creates a new entity (e.g., CreateOrder creates an order),
   return the atom field name where the Ref should be stored (e.g., `:order_ref`).
@@ -134,10 +164,6 @@ defmodule PropertyDamage.Command do
   2. Resolve the Ref to a concrete value from the resulting event
 
   Return `nil` (or don't implement) if this command doesn't create a new entity.
-
-  ## Example
-
-      def creates_ref, do: :order_ref
   """
   @callback creates_ref() :: atom() | nil
 

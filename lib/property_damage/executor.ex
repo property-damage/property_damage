@@ -84,7 +84,10 @@ defmodule PropertyDamage.Executor do
     Stutter,
     MockServiceRegistry,
     Linearization,
-    StatePoller
+    StatePoller,
+    External,
+    Placeholder,
+    PlaceholderRegistry
   }
 
   alias PropertyDamage.Model.Projection
@@ -317,6 +320,7 @@ defmodule PropertyDamage.Executor do
       projections: init_projections(model),
       projections_before: nil,
       refs: %{},
+      placeholder_registry: PlaceholderRegistry.new(),
       step_count: 0,
       assertion_counters: %{step: 0, command: 0, event: 0},
       assertion_failures: [],
@@ -373,6 +377,7 @@ defmodule PropertyDamage.Executor do
       projections: init_projections(model),
       projections_before: nil,
       refs: %{},
+      placeholder_registry: PlaceholderRegistry.new(),
       step_count: 0,
       assertion_counters: %{step: 0, command: 0, event: 0},
       assertion_failures: [],
@@ -937,8 +942,11 @@ defmodule PropertyDamage.Executor do
       MockServiceRegistry.notify_command(mock_registry, command)
     end
 
-    # 1. Resolve refs in command
-    case resolve_command_refs(command, state.refs) do
+    # Get placeholder_registry from state (may not exist in older tests)
+    placeholder_registry = Map.get(state, :placeholder_registry, PlaceholderRegistry.new())
+
+    # 1. Resolve refs and placeholders in command
+    case resolve_refs_and_placeholders(command, state.refs, placeholder_registry) do
       {:ok, resolved_command} ->
         # 2. Set up injection context for mid-execution event injection
         injection_ctx = %{
@@ -980,6 +988,9 @@ defmodule PropertyDamage.Executor do
           {:ok, events} ->
             # 4. Bind new ref if command creates one (from returned events)
             refs = maybe_bind_ref(command, events, base_refs)
+
+            # 4b. Resolve external values from events (new placeholder system)
+            updated_registry = resolve_externals_from_events(events, index, placeholder_registry)
 
             # 5. Update projections with command
             projections = update_projections(base_projections, resolved_command)
@@ -1044,6 +1055,7 @@ defmodule PropertyDamage.Executor do
                       projections: projections,
                       projections_before: state.projections_before,
                       refs: refs,
+                      placeholder_registry: updated_registry,
                       step_count: state.step_count + 1,
                       assertion_counters: assertion_counters,
                       assertion_failures: updated_failures,
@@ -1123,6 +1135,10 @@ defmodule PropertyDamage.Executor do
           {:settled, events} ->
             # Probe/async settled successfully - treat same as {:ok, events}
             refs = maybe_bind_ref(command, events, base_refs)
+
+            # Resolve external values from events (new placeholder system)
+            updated_registry = resolve_externals_from_events(events, index, placeholder_registry)
+
             projections = update_projections(base_projections, resolved_command)
 
             {projections, event_log} =
@@ -1182,6 +1198,7 @@ defmodule PropertyDamage.Executor do
                       projections: projections,
                       projections_before: state.projections_before,
                       refs: refs,
+                      placeholder_registry: updated_registry,
                       step_count: state.step_count + 1,
                       assertion_counters: assertion_counters,
                       assertion_failures: updated_failures,
@@ -1295,6 +1312,15 @@ defmodule PropertyDamage.Executor do
       {:ok, resolved}
     rescue
       e -> {:error, Exception.message(e)}
+    end
+  end
+
+  # Combined resolution: resolve both refs (legacy) and placeholders (new system)
+  defp resolve_refs_and_placeholders(command, refs, placeholder_registry) do
+    with {:ok, refs_resolved} <- resolve_command_refs(command, refs),
+         {:ok, fully_resolved} <-
+           resolve_command_placeholders(refs_resolved, placeholder_registry) do
+      {:ok, fully_resolved}
     end
   end
 
@@ -2124,5 +2150,127 @@ defmodule PropertyDamage.Executor do
       module: nil,
       timestamp: System.monotonic_time(:millisecond)
     }
+  end
+
+  # ============================================================================
+  # External/Placeholder Support
+  # ============================================================================
+
+  # Resolve placeholders in a command before execution.
+  # Similar to resolve_command_refs but for the new placeholder system.
+  defp resolve_command_placeholders(command, registry) do
+    try do
+      resolved = deep_resolve_placeholders(command, registry)
+      {:ok, resolved}
+    rescue
+      e in ArgumentError -> {:error, e.message}
+    end
+  end
+
+  defp deep_resolve_placeholders(%Placeholder{} = p, registry) do
+    case PlaceholderRegistry.get(registry, p.id) do
+      nil ->
+        raise ArgumentError, "Unknown placeholder: #{inspect(p)}"
+
+      %{resolved: nil} = placeholder ->
+        raise ArgumentError,
+              "Unresolved placeholder at #{inspect(placeholder.path)} " <>
+                "(command #{placeholder.command_index}, event #{placeholder.event_index})"
+
+      %{resolved: value} ->
+        value
+    end
+  end
+
+  defp deep_resolve_placeholders(%{__struct__: mod} = struct, registry) do
+    struct
+    |> Map.from_struct()
+    |> Enum.map(fn {k, v} -> {k, deep_resolve_placeholders(v, registry)} end)
+    |> Map.new()
+    |> then(&struct(mod, &1))
+  end
+
+  defp deep_resolve_placeholders(map, registry) when is_map(map) do
+    Map.new(map, fn {k, v} ->
+      {deep_resolve_placeholders(k, registry), deep_resolve_placeholders(v, registry)}
+    end)
+  end
+
+  defp deep_resolve_placeholders(list, registry) when is_list(list) do
+    Enum.map(list, &deep_resolve_placeholders(&1, registry))
+  end
+
+  defp deep_resolve_placeholders(tuple, registry) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.map(&deep_resolve_placeholders(&1, registry))
+    |> List.to_tuple()
+  end
+
+  defp deep_resolve_placeholders(other, _registry), do: other
+
+  # Process executed events to resolve externals in the placeholder registry.
+  # For each event, detect external paths and resolve placeholders with real values.
+  defp resolve_externals_from_events(events, command_index, registry) do
+    events
+    |> Enum.with_index()
+    |> Enum.reduce(registry, fn {event, event_index}, reg ->
+      event_module = event.__struct__
+
+      # Get paths that were marked as external() in the struct definition
+      external_paths = External.external_paths(event_module)
+
+      # For each external path, extract the real value and resolve the placeholder
+      Enum.reduce(external_paths, reg, fn path, r ->
+        real_value = External.get_at_path(event, path)
+
+        PlaceholderRegistry.resolve_by_location(
+          r,
+          event_module,
+          path,
+          command_index,
+          event_index,
+          real_value
+        )
+      end)
+    end)
+  end
+
+  # Create placeholders for external fields in simulated events.
+  # Called during simulation to set up placeholder tracking.
+  # Returns {processed_events, updated_registry}
+  defp process_simulated_events(events, command_index, registry) do
+    {processed_events, final_registry} =
+      events
+      |> Enum.with_index()
+      |> Enum.map_reduce(registry, fn {event, event_index}, reg ->
+        event_module = event.__struct__
+
+        # Get paths marked as external() in struct definition
+        external_paths = External.external_paths(event_module)
+
+        # For each external path, create a placeholder and embed it in the event
+        {final_event, final_reg} =
+          Enum.reduce(external_paths, {event, reg}, fn path, {evt, r} ->
+            placeholder = Placeholder.new(event_module, path, command_index, event_index)
+            new_reg = PlaceholderRegistry.register(r, placeholder)
+            new_evt = External.put_at_path(evt, path, placeholder)
+            {new_evt, new_reg}
+          end)
+
+        {final_event, final_reg}
+      end)
+
+    {processed_events, final_registry}
+  end
+
+  # Validate that a command doesn't contain external() markers.
+  # Commands should only use values from state, not external markers.
+  defp validate_no_externals_in_command(command) do
+    if External.contains_external?(command) do
+      {:error, "Command contains external() markers - commands should only use values from state"}
+    else
+      :ok
+    end
   end
 end

@@ -25,7 +25,7 @@ defmodule PropertyDamage.Analysis do
       PropertyDamage.Analysis.generate_test(failure, format: :exunit)
   """
 
-  alias PropertyDamage.{FailureReport, Sequence, Executor, Validator, Ref}
+  alias PropertyDamage.{FailureReport, Sequence, Executor, Validator, Ref, Placeholder}
   alias PropertyDamage.Shrinker.Graph
 
   # ============================================================================
@@ -213,18 +213,36 @@ defmodule PropertyDamage.Analysis do
     end)
   end
 
+  defp uses_ref?(cmd, %Placeholder{id: placeholder_id}) do
+    cmd
+    |> Map.from_struct()
+    |> Map.values()
+    |> Enum.any?(fn
+      %Placeholder{id: id} -> id == placeholder_id
+      _ -> false
+    end)
+  end
+
   defp uses_ref?(_, _), do: false
 
   defp extract_refs(cmd) do
     cmd
     |> Map.from_struct()
-    |> Enum.filter(fn {_k, v} -> match?(%Ref{}, v) end)
-    |> Enum.map(fn {k, %Ref{} = ref} -> {k, ref_label(ref)} end)
+    |> Enum.filter(fn {_k, v} -> match?(%Ref{}, v) or match?(%Placeholder{}, v) end)
+    |> Enum.map(fn
+      {k, %Ref{} = ref} -> {k, ref_label(ref)}
+      {k, %Placeholder{} = p} -> {k, placeholder_label(p)}
+    end)
     |> Map.new()
   end
 
   defp ref_label(%Ref{label: label}) when is_binary(label), do: label
   defp ref_label(%Ref{ref: ref}), do: "##{:erlang.phash2(ref)}"
+
+  defp placeholder_label(%Placeholder{path: path, command_index: cmd_idx}) do
+    path_str = Enum.map_join(path, ".", &to_string/1)
+    "placeholder:#{path_str}@cmd#{cmd_idx}"
+  end
 
   defp format_refs(refs) when map_size(refs) == 0, do: nil
 
@@ -365,8 +383,8 @@ defmodule PropertyDamage.Analysis do
          adapter,
          adapter_config
        ) do
-    # Skip ref fields - can't change those without breaking dependencies
-    if match?(%Ref{}, original) do
+    # Skip ref and placeholder fields - can't change those without breaking dependencies
+    if match?(%Ref{}, original) or match?(%Placeholder{}, original) do
       []
     else
       variations = generate_variations(field, original, commands, failed_at)

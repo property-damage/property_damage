@@ -81,7 +81,7 @@ defmodule PropertyDamage.Differential do
   - Custom function - `fn ref_result, target_result -> boolean`
   """
 
-  alias PropertyDamage.{Generator, Sequence, Options}
+  alias PropertyDamage.{Generator, Sequence, Options, Placeholder}
   alias PropertyDamage.Differential.{Target, Result, Baseline, Equivalence}
 
   @type compare_mode :: :correctness | :performance | :both
@@ -815,6 +815,10 @@ defmodule PropertyDamage.Differential do
       value -> value
     end
   end
+
+  # Handle new Placeholder structs - if resolved, use value; otherwise leave as-is
+  defp do_resolve_refs(%Placeholder{resolved: nil} = p, _refs), do: p
+  defp do_resolve_refs(%Placeholder{resolved: value}, _refs), do: value
 
   defp do_resolve_refs(%{__struct__: _} = struct, refs) do
     struct

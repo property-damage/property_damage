@@ -36,7 +36,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   require Logger
 
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.{Generator, Ref, Sequence}
+  alias PropertyDamage.{Generator, Ref, Placeholder, Sequence}
   alias PropertyDamage.Model.Projection
 
   # Process dictionary key for injection context during adapter execution
@@ -443,6 +443,13 @@ defmodule PropertyDamage.LoadTest.Worker do
         value
     end
   end
+
+  # Handle new Placeholder structs - if resolved, use value; otherwise raise
+  defp deep_resolve_refs(%Placeholder{resolved: nil} = p, _refs, _skip_field) do
+    raise "Unresolved placeholder at #{inspect(p.path)} (command #{p.command_index}, event #{p.event_index})"
+  end
+
+  defp deep_resolve_refs(%Placeholder{resolved: value}, _refs, _skip_field), do: value
 
   defp deep_resolve_refs(%{__struct__: _} = struct, refs, skip_field) do
     struct

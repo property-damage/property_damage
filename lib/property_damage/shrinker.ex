@@ -87,7 +87,7 @@ defmodule PropertyDamage.Shrinker do
   ```
   """
 
-  alias PropertyDamage.{Validator, Executor, Ref, Sequence, Settle}
+  alias PropertyDamage.{Validator, Executor, Ref, Placeholder, Sequence, Settle}
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """
@@ -655,7 +655,9 @@ defmodule PropertyDamage.Shrinker do
     |> then(&struct(command.__struct__, &1))
   end
 
+  # Don't shrink refs or placeholders - they represent dependencies
   defp shrink_value(%Ref{} = ref), do: ref
+  defp shrink_value(%Placeholder{} = p), do: p
   defp shrink_value(n) when is_integer(n) and n > 0, do: div(n, 2)
   defp shrink_value(n) when is_integer(n) and n < 0, do: div(n, 2)
 

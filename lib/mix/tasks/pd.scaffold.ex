@@ -550,7 +550,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
         []
       end
 
-      #{if op.method == "POST", do: "def creates_ref, do: :id  # TODO: adjust if different field", else: ""}
+      #{if op.method == "POST", do: "# DEPRECATED: Use external() in event structs instead of creates_ref\n  # def creates_ref, do: :id\n  # See: event struct below should use `defstruct [id: external(), ...]`", else: ""}
 
       #{if op.method in ["GET", "HEAD", "OPTIONS"], do: "def read_only?, do: true", else: ""}
 
@@ -832,6 +832,27 @@ defmodule Mix.Tasks.Pd.Scaffold do
   def generate_event(event, namespace) do
     field_atoms = Enum.map(event.fields, fn f -> String.to_atom(f.name) end)
 
+    # Check if event has id field that should be external()
+    has_id_field = Enum.any?(event.fields, fn f -> f.name == "id" end)
+
+    defstruct_line =
+      if has_id_field do
+        # Use external() for id field (server-generated)
+        non_id_fields = Enum.reject(field_atoms, &(&1 == :id))
+
+        "[id: external()" <>
+          if(non_id_fields != [], do: ", " <> inspect_fields(non_id_fields), else: "") <> "]"
+      else
+        inspect(field_atoms)
+      end
+
+    import_line =
+      if has_id_field do
+        "import PropertyDamage, only: [external: 0]\n\n  "
+      else
+        ""
+      end
+
     """
     defmodule #{namespace}.Events.#{event.name} do
       @moduledoc \"\"\"
@@ -840,10 +861,14 @@ defmodule Mix.Tasks.Pd.Scaffold do
       Generated from operation: #{event.operation}
       \"\"\"
 
-      defstruct #{inspect(field_atoms)}
+      #{import_line}defstruct #{defstruct_line}
 
     #{generate_event_field_docs(event.fields)}end
     """
+  end
+
+  defp inspect_fields(fields) do
+    Enum.map_join(fields, ", ", fn f -> ":#{f}" end)
   end
 
   defp generate_event_field_docs(fields) do
