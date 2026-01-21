@@ -2,21 +2,34 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
   @moduledoc """
   Generate a PropertyDamage projection module.
 
+  Projections track state and optionally define assertions using `@trigger` or
+  `@poll_state` attributes.
+
   ## Usage
 
       mix pd.gen.projection MyApp.Projections.ModelState
 
-  ## Options
-
-      --type TYPE    Projection type: state or assertion (default: state)
-
   ## Examples
 
-      # State projection
       mix pd.gen.projection MyApp.Projections.ModelState
+      mix pd.gen.projection MyApp.Projections.BalanceInvariant
 
-      # Assertion projection (invariant checker)
-      mix pd.gen.projection MyApp.Projections.BalanceInvariant --type assertion
+  ## Generated Template
+
+  The generated projection includes:
+
+  - `init/0` - Initialize projection state
+  - `apply/2` - Apply commands/events to state (with example)
+  - `@trigger` assertion example (synchronous)
+  - `@poll_state` assertion example (temporal/eventual consistency)
+
+  ## More Information
+
+  See `PropertyDamage.Model.Projection` for full documentation on:
+
+  - State tracking with `apply/2`
+  - Synchronous assertions with `@trigger`
+  - Temporal assertions with `@poll_state`
   """
 
   use Mix.Task
@@ -25,15 +38,14 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
 
   @impl true
   def run(args) do
-    {opts, argv, _} = OptionParser.parse(args, strict: [type: :string])
+    {_opts, argv, _} = OptionParser.parse(args, strict: [])
 
     case argv do
       [module_name] ->
-        type = Keyword.get(opts, :type, "state")
-        generate_projection(module_name, type)
+        generate_projection(module_name)
 
       [] ->
-        Mix.shell().error("Usage: mix pd.gen.projection MODULE_NAME [OPTIONS]")
+        Mix.shell().error("Usage: mix pd.gen.projection MODULE_NAME")
         Mix.shell().error("Run `mix help pd.gen.projection` for more information.")
 
       _ ->
@@ -41,25 +53,13 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
     end
   end
 
-  defp generate_projection(module_name, type) do
+  defp generate_projection(module_name) do
     path = module_to_path(module_name)
     dir = Path.dirname(path)
 
     File.mkdir_p!(dir)
 
-    content =
-      case type do
-        "state" ->
-          generate_state_projection(module_name)
-
-        "assertion" ->
-          generate_assertion_projection(module_name)
-
-        _ ->
-          Mix.shell().error("Unknown projection type: #{type}")
-          Mix.shell().error("Use 'state' or 'assertion'")
-          System.halt(1)
-      end
+    content = generate_projection_content(module_name)
 
     File.write!(path, content)
 
@@ -67,11 +67,8 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
     Mix.shell().info("")
     Mix.shell().info("Next steps:")
     Mix.shell().info("  1. Add event aliases at the top")
-    Mix.shell().info("  2. Implement apply/2 or apply/3 for each event")
-
-    if type == "assertion" do
-      Mix.shell().info("  3. Implement check/1 with your invariant")
-    end
+    Mix.shell().info("  2. Implement apply/2 for each event to track state")
+    Mix.shell().info("  3. Add assertions with @trigger or @poll_state attributes")
   end
 
   defp module_to_path(module_name) do
@@ -81,21 +78,20 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
     |> then(&"lib/#{&1}.ex")
   end
 
-  defp generate_state_projection(module_name) do
+  defp generate_projection_content(module_name) do
     """
     defmodule #{module_name} do
       @moduledoc \"\"\"
-      State projection for tracking model state.
+      Projection for tracking state and defining assertions.
 
-      TODO: Add description of what state this projection tracks.
+      TODO: Add description of what this projection tracks/checks.
       \"\"\"
 
-      @behaviour PropertyDamage.Model.Projection
+      use PropertyDamage.Model.Projection
 
       # TODO: Add event aliases
       # alias MyApp.Events.{Created, Updated, Deleted}
 
-      @impl true
       def init do
         %{
           # TODO: Add initial state fields
@@ -103,7 +99,10 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
         }
       end
 
-      @impl true
+      # ============================================================================
+      # State Tracking
+      # ============================================================================
+
       # Handle events with ref (for entity creation)
       # def apply(state, %Created{} = event, ref) do
       #   put_in(state, [:entities, ref], event.data)
@@ -117,55 +116,38 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       # Catch-all (required)
       def apply(state, _event), do: state
       def apply(state, _event, _ref), do: state
-    end
-    """
-  end
 
-  defp generate_assertion_projection(module_name) do
-    """
-    defmodule #{module_name} do
-      @moduledoc \"\"\"
-      Assertion projection for checking invariants.
+      # ============================================================================
+      # Synchronous Assertions (@trigger)
+      # ============================================================================
 
-      TODO: Add description of what invariant this projection checks.
-      \"\"\"
-
-      @behaviour PropertyDamage.AssertionProjection
-
-      # TODO: Add event aliases
-      # alias MyApp.Events.{Created, Updated, Deleted}
-
-      @impl true
-      def init do
-        %{
-          # TODO: Add state needed for invariant checking
-        }
-      end
-
-      @impl true
-      # Track state needed for checks
-      # def apply(state, %Created{} = event) do
-      #   # Update state to track what we need to check
-      #   state
+      # Example: Check invariant after every step
+      # @trigger every: 1
+      # def assert_total_non_negative(state, _cmd_or_event) do
+      #   if state.total < 0 do
+      #     PropertyDamage.fail!("total is negative", total: state.total)
+      #   end
       # end
 
-      def apply(state, _event), do: state
+      # Example: Check invariant after specific event
+      # @trigger every: OrderCreated
+      # def assert_order_tracked(state, %OrderCreated{id: id}) do
+      #   unless Map.has_key?(state.orders, id) do
+      #     PropertyDamage.fail!("order not tracked", order_id: id)
+      #   end
+      # end
 
-      @impl true
-      def check(state) do
-        # TODO: Implement your invariant check
-        # Return :ok if invariant holds
-        # Return {:violated, "message"} if invariant is violated
+      # ============================================================================
+      # Temporal Assertions (@poll_state)
+      # ============================================================================
 
-        # Example:
-        # if some_condition_violated?(state) do
-        #   {:violated, "Description of what went wrong"}
-        # else
-        #   :ok
-        # end
-
-        :ok
-      end
+      # Example: Check eventual consistency after an event
+      # The function returns a predicate that is polled until true or timeout
+      #
+      # @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+      # def payment_confirmed(_state, %PaymentInitiated{id: id}) do
+      #   fn s -> s.payments[id] == :confirmed end
+      # end
     end
     """
   end

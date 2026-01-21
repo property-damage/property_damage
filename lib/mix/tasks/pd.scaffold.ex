@@ -96,7 +96,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     end
 
     def state_projection, do: MyAppTest.Projections.State
-    def extra_projections, do: [MyAppTest.Assertions.UniqueUsers]
+    def extra_projections, do: [MyAppTest.Projections.UniqueUsers]
   end
   ```
 
@@ -1148,7 +1148,6 @@ defmodule Mix.Tasks.Pd.Scaffold do
       alias #{namespace}.Commands
       # alias #{namespace}.Events
       # alias #{namespace}.Projections
-      # alias #{namespace}.Assertions
 
       @impl true
       def commands do
@@ -1166,8 +1165,8 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
       @impl true
       def extra_projections do
-        # TODO: Add extra projections for invariant checking
-        # Example: [Assertions.ResourceExists, Assertions.ValidState]
+        # TODO: Add extra projections (with @trigger/@poll_state assertions)
+        # Example: [Projections.ResourceExists, Projections.ValidState]
         []
       end
 
