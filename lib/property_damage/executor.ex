@@ -2236,41 +2236,4 @@ defmodule PropertyDamage.Executor do
     end)
   end
 
-  # Create placeholders for external fields in simulated events.
-  # Called during simulation to set up placeholder tracking.
-  # Returns {processed_events, updated_registry}
-  defp process_simulated_events(events, command_index, registry) do
-    {processed_events, final_registry} =
-      events
-      |> Enum.with_index()
-      |> Enum.map_reduce(registry, fn {event, event_index}, reg ->
-        event_module = event.__struct__
-
-        # Get paths marked as external() in struct definition
-        external_paths = External.external_paths(event_module)
-
-        # For each external path, create a placeholder and embed it in the event
-        {final_event, final_reg} =
-          Enum.reduce(external_paths, {event, reg}, fn path, {evt, r} ->
-            placeholder = Placeholder.new(event_module, path, command_index, event_index)
-            new_reg = PlaceholderRegistry.register(r, placeholder)
-            new_evt = External.put_at_path(evt, path, placeholder)
-            {new_evt, new_reg}
-          end)
-
-        {final_event, final_reg}
-      end)
-
-    {processed_events, final_registry}
-  end
-
-  # Validate that a command doesn't contain external() markers.
-  # Commands should only use values from state, not external markers.
-  defp validate_no_externals_in_command(command) do
-    if External.contains_external?(command) do
-      {:error, "Command contains external() markers - commands should only use values from state"}
-    else
-      :ok
-    end
-  end
 end
