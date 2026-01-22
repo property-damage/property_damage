@@ -1234,7 +1234,6 @@ defmodule PropertyDamage do
   ## See Also
 
   - `PropertyDamage.External` - Implementation details and path detection
-  - `PropertyDamage.Placeholder` - Internal placeholder tracking (not user-facing)
   """
   @spec external() :: PropertyDamage.External.t()
   defdelegate external(), to: PropertyDamage.External
