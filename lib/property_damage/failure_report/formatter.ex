@@ -1079,6 +1079,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
     |> String.slice(0, 30)
   end
 
+  defp summarize_state(state) when is_struct(state) do
+    # For structs, convert to map first (excluding __struct__ key)
+    state
+    |> Map.from_struct()
+    |> summarize_state()
+  end
+
   defp summarize_state(state) when is_map(state) do
     state
     |> Enum.map(fn {k, v} ->

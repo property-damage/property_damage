@@ -1,4 +1,6 @@
 defmodule PropertyDamage.ExUnit do
+  alias PropertyDamage.FailureReport
+
   @moduledoc """
   ExUnit integration for PropertyDamage property tests.
 
@@ -174,19 +176,35 @@ defmodule PropertyDamage.ExUnit do
   Produces human-readable output with all relevant information for
   debugging and reproducing the failure.
   """
-  @spec format_failure(map()) :: String.t()
-  def format_failure(report) do
+  @spec format_failure(FailureReport.t()) :: String.t()
+  def format_failure(%FailureReport{} = report) do
+    # Use the proper formatter for rich output
+    FailureReport.Formatter.format(report, :terminal, color: true)
+  end
+
+  # Legacy support for old map-based reports
+  def format_failure(report) when is_map(report) do
+    # Check if this is the old format
+    if Map.has_key?(report, :original_commands) do
+      format_legacy_failure(report)
+    else
+      # Try to convert to string representation
+      inspect(report, pretty: true, limit: 50)
+    end
+  end
+
+  defp format_legacy_failure(report) do
     """
     Property test failed!
 
     Seed: #{report.seed}
     Run: #{report.run_number + 1}
 
-    Original sequence (#{length(report.original_commands)} commands):
-    #{format_commands(report.original_commands)}
+    Original sequence (#{length(report.original_commands || [])} commands):
+    #{format_commands(report.original_commands || [])}
 
-    Shrunk sequence (#{length(report.shrunk_commands)} commands):
-    #{format_commands(report.shrunk_commands)}
+    Shrunk sequence (#{length(report.shrunk_commands || [])} commands):
+    #{format_commands(report.shrunk_commands || [])}
 
     Failed at command ##{report.failed_at_index}:
     #{format_failure_reason(report.failure_reason)}
