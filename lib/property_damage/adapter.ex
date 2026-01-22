@@ -149,11 +149,29 @@ defmodule PropertyDamage.Adapter do
   Key behaviors:
   - Injected events update projections immediately
   - Injected events are recorded in the event log with source `:injected`
-  - If the command has `creates_ref/0`, refs are bound from the first injected event
+  - For events with `external()` fields, values are captured from the first injected event
   - Adapters that don't use `inject` continue to work unchanged
 
   This is particularly useful when your model needs to track intermediate states,
   or when assertions depend on events appearing at the correct point in time.
+
+  ## Execute Context
+
+  The context map passed to `execute/2` contains:
+
+  | Key | Type | Description |
+  |-----|------|-------------|
+  | *(from setup)* | any | Whatever your `setup/1` returned (e.g., `:client`, `:conn`) |
+  | `:inject` | function | Call with event to inject it immediately into projections |
+  | `:stutter` | map | Present only during retry executions (stutter/idempotency testing) |
+
+  The `:stutter` map (when present) contains:
+
+  | Key | Type | Description |
+  |-----|------|-------------|
+  | `:attempt` | integer | Current attempt number (2, 3, etc. for retries) |
+  | `:is_retry` | boolean | Always `true` for retry executions |
+  | `:idempotency_key` | string or nil | From `Command.idempotency_key/1` if implemented |
   """
 
   @doc """
