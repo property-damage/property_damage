@@ -174,18 +174,80 @@ defmodule PropertyDamage.Adapter do
   | `:idempotency_key` | string or nil | From `Command.idempotency_key/1` if implemented |
   """
 
+  @typedoc """
+  Context returned by `setup/1`.
+
+  This is a map containing whatever your adapter needs for execution:
+  HTTP clients, database connections, configuration, etc.
+
+  ## Example
+
+      # In setup/1:
+      {:ok, %{client: http_client, base_url: "http://localhost:4000"}}
+
+      # In execute/2, pattern match on these keys:
+      def execute(%CreateOrder{} = cmd, %{client: client, base_url: url}) do
+        # ...
+      end
+  """
+  @type user_context :: map()
+
+  @typedoc """
+  Stutter context for idempotency testing.
+
+  Present in `context()` only during retry executions when stutter testing is enabled.
+  """
+  @type stutter_context :: %{
+          attempt: pos_integer(),
+          is_retry: boolean(),
+          idempotency_key: String.t() | nil
+        }
+
+  @typedoc """
+  Full context passed to `execute/2`, `teardown/1`, and `register_handler/2`.
+
+  This map contains:
+  - All keys from your `user_context()` returned by `setup/1`
+  - `:inject` - Function to inject events mid-execution (always present)
+  - `:stutter` - Stutter context (only present during retry executions)
+
+  ## Example
+
+      def execute(%CreateOrder{} = cmd, context) do
+        # Access your setup context
+        client = context.client
+
+        # Inject events mid-execution (for async commands)
+        context.inject.(%OrderCreated{id: id})
+
+        # Check for stutter/retry context
+        case context do
+          %{stutter: %{idempotency_key: key}} when is_binary(key) ->
+            # Include idempotency header
+          _ ->
+            # Normal execution
+        end
+      end
+  """
+  @type context :: %{
+          :inject => (struct() -> :ok),
+          optional(:stutter) => stutter_context(),
+          optional(atom()) => any()
+        }
+
   @doc """
   Called once per run to establish context.
 
   Use for creating HTTP clients, connecting to databases, starting processes.
-  The returned context is passed to `execute/2` and `teardown/1`.
+  The returned `user_context()` is merged with framework-provided keys
+  (`:inject`, `:stutter`) to form the full `context()` passed to `execute/2`.
 
   ## Returns
 
-  - `{:ok, context}` - Setup succeeded, context passed to subsequent calls
+  - `{:ok, user_context}` - Setup succeeded, context passed to subsequent calls
   - `{:error, reason}` - Setup failed, run aborted
   """
-  @callback setup(config :: map()) :: {:ok, context :: map()} | {:error, term()}
+  @callback setup(config :: map()) :: {:ok, user_context()} | {:error, term()}
 
   @doc """
   Called once per run after all commands have executed (or on failure).
@@ -194,24 +256,29 @@ defmodule PropertyDamage.Adapter do
   This is best-effort - the framework logs warnings if teardown raises
   but does not fail the test.
 
+  Note: The context passed here is the full `context()`, not just `user_context()`.
+
   ## Returns
 
   Always returns `:ok`. Handle errors internally.
   """
-  @callback teardown(context :: map()) :: :ok
+  @callback teardown(context()) :: :ok
 
   @doc """
   Execute a command against the SUT and return resulting events.
 
   This is called once per command in the sequence. The command struct
-  has already had its Refs resolved to concrete values.
+  has already had its Refs/Placeholders resolved to concrete values.
+
+  The `context()` contains your `user_context()` from `setup/1` plus
+  framework-provided keys like `:inject` and optionally `:stutter`.
 
   ## Returns
 
   - `{:ok, events}` - Command succeeded, events to record
   - `{:error, reason}` - Command failed, execution stops
   """
-  @callback execute(command :: struct(), context :: map()) ::
+  @callback execute(command :: struct(), context()) ::
               {:ok, [event :: struct()]} | {:error, term()}
 
   @doc """
@@ -221,7 +288,7 @@ defmodule PropertyDamage.Adapter do
   execution. This callback allows registering handlers that will receive
   events from injector adapters.
   """
-  @callback register_handler(command :: struct(), context :: map()) ::
+  @callback register_handler(command :: struct(), context()) ::
               {:ok, handler_ref :: term()} | {:error, term()}
 
   @typedoc """
