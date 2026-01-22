@@ -73,8 +73,8 @@ defmodule PropertyDamage.Model.Projection do
   2. `command_or_event` - The command or event that triggered the assertion
 
   Each assertion **must** be preceded by either a `@trigger` or `@poll_state`
-  attribute. Function names starting with `assert_` are detected as synchronous
-  assertions; `@poll_state` functions can have any name.
+  attribute. Both `@trigger` and `@poll_state` functions can have any name.
+  The `assert_` prefix is optional and conventional but not required.
 
   If a synchronous assertion fails, raise an exception (or use `PropertyDamage.fail!/2`).
   If it returns without raising, the assertion passed.
@@ -170,8 +170,8 @@ defmodule PropertyDamage.Model.Projection do
   @doc """
   Execute an assertion.
 
-  Assertions are defined as functions starting with `assert_` followed by the assertion name.
-  Called when the assertion's trigger condition is met.
+  Assertions are functions decorated with `@trigger` or `@poll_state`.
+  Called when the assertion's trigger condition is met. The `assert_` prefix is conventional but not required.
   Should raise an exception if the assertion fails.
   If the function returns without raising, the assertion passed.
 
@@ -188,7 +188,7 @@ defmodule PropertyDamage.Model.Projection do
   - `command_or_event` - The command or event that triggered this assertion
   """
 
-  # Note: No callback defined - assertions are detected via function name prefix
+  # Note: No callback defined - assertions are detected via @trigger/@poll_state attributes
 
   @optional_callbacks init: 0, apply: 2
 

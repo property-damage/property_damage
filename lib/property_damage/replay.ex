@@ -535,7 +535,7 @@ defmodule PropertyDamage.Replay do
     # For other triggers (every: N, every: Module), we run them anyway
     # since replay is for debugging and should show all potential issues
     try do
-      assertion_fn = :"assert_#{assertion.name}"
+      assertion_fn = assertion.function_name
       apply(projection, assertion_fn, [state, nil])
       # Success - no exception raised
       run_projection_assertions(projection, state, rest)

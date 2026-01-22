@@ -1668,7 +1668,7 @@ defmodule PropertyDamage.Executor do
          ) do
         # Execute assertion - assertions raise on failure
         try do
-          assertion_fn = :"assert_#{assertion.name}"
+          assertion_fn = assertion.function_name
           apply(projection, assertion_fn, [projection_state, assertion_ctx.command_or_event])
           # Success: no exception raised
           {:cont, {:ok, acc_counters}}

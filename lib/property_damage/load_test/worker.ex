@@ -666,7 +666,7 @@ defmodule PropertyDamage.LoadTest.Worker do
         Enum.reduce(assertions, failures, fn assertion, acc_failures ->
           if Projection.should_run?(assertion.trigger, step_type, module, counters) do
             try do
-              assertion_fn = :"assert_#{assertion.name}"
+              assertion_fn = assertion.function_name
               apply(projection, assertion_fn, [projection_state, command_or_event])
               acc_failures
             rescue
