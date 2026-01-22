@@ -672,7 +672,8 @@ defmodule PropertyDamage do
         refs: fresh_result.refs,
         model: model,
         adapter: adapter,
-        linearization: fresh_result.linearization
+        linearization: fresh_result.linearization,
+        stacktrace: Map.get(fresh_result, :stacktrace)
       )
 
     # Print failure summary when verbose
@@ -821,7 +822,8 @@ defmodule PropertyDamage do
             refs: fresh_result.refs,
             model: model,
             adapter: adapter,
-            linearization: fresh_result.linearization
+            linearization: fresh_result.linearization,
+            stacktrace: Map.get(fresh_result, :stacktrace)
           )
 
         {:ok, new_report}

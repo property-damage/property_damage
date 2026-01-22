@@ -91,6 +91,40 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp terminal_header(report, color) do
     type_summary = FailureReport.failure_type_summary(report)
 
+    # Check if this is a test code error
+    case report.error_origin do
+      :test_code_error ->
+        terminal_header_test_code_error(report, color, type_summary)
+
+      _ ->
+        terminal_header_sut_error(report, color, type_summary)
+    end
+  end
+
+  defp terminal_header_test_code_error(report, color, type_summary) do
+    header =
+      if color do
+        """
+        #{yellow(true)}╔══════════════════════════════════════════════════════════════════════╗
+        ║#{reset()}#{bold()}#{yellow(true)}                      TEST CODE ERROR                               #{reset()}#{yellow(true)}║
+        ║#{reset()}#{dim(true)}              (Not a bug in your SUT - fix your test!)              #{reset()}#{yellow(true)}║
+        ╚══════════════════════════════════════════════════════════════════════╝#{reset()}
+        """
+      else
+        """
+        ╔══════════════════════════════════════════════════════════════════════╗
+        ║                      TEST CODE ERROR                                 ║
+        ║              (Not a bug in your SUT - fix your test!)                ║
+        ╚══════════════════════════════════════════════════════════════════════╝
+        """
+      end
+
+    header <>
+      "\n#{dim(color)}#{type_summary}#{reset()}\n" <>
+      terminal_test_code_error_hint(report, color)
+  end
+
+  defp terminal_header_sut_error(_report, color, type_summary) do
     header =
       if color do
         """
@@ -107,6 +141,41 @@ defmodule PropertyDamage.FailureReport.Formatter do
       end
 
     header <> "\n#{dim(color)}#{type_summary}#{reset()}\n"
+  end
+
+  defp terminal_test_code_error_hint(report, color) do
+    case report.error_origin_details do
+      %{reason: reason, evidence: evidence, confidence: confidence} ->
+        hint = Map.get(evidence, :hint, nil)
+        stacktrace_hint = Map.get(evidence, :stacktrace_hint, nil)
+
+        hint_text =
+          cond do
+            hint != nil ->
+              "\n#{yellow(color)}Hint:#{reset()} #{hint}"
+
+            stacktrace_hint != nil ->
+              "\n#{yellow(color)}Location:#{reset()} #{stacktrace_hint}"
+
+            true ->
+              ""
+          end
+
+        confidence_text =
+          case confidence do
+            :high -> ""
+            :medium -> " #{dim(color)}(medium confidence)#{reset()}"
+            :low -> " #{dim(color)}(low confidence - could be SUT bug)#{reset()}"
+          end
+
+        """
+
+        #{yellow(color)}What went wrong:#{reset()} #{reason}#{confidence_text}#{hint_text}
+        """
+
+      _ ->
+        ""
+    end
   end
 
   defp terminal_location(report, color) do
@@ -558,11 +627,29 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp markdown_header(report) do
     type_summary = FailureReport.failure_type_summary(report)
 
-    """
-    # Bug Detected: #{type_summary}
+    case report.error_origin do
+      :test_code_error ->
+        hint = get_in(report.error_origin_details, [:evidence, :hint]) || ""
+        hint_section = if hint != "", do: "\n**Hint:** #{hint}\n", else: ""
 
-    **Timestamp:** #{DateTime.to_string(report.timestamp)}
-    """
+        """
+        # ⚠️ Test Code Error
+
+        > This is NOT a bug in your SUT - fix your test code!
+
+        **Issue:** #{type_summary}
+        **Reason:** #{report.error_origin_details.reason}
+        #{hint_section}
+        **Timestamp:** #{DateTime.to_string(report.timestamp)}
+        """
+
+      _ ->
+        """
+        # 🐛 Bug Detected: #{type_summary}
+
+        **Timestamp:** #{DateTime.to_string(report.timestamp)}
+        """
+    end
   end
 
   defp markdown_location(report) do
@@ -837,6 +924,14 @@ defmodule PropertyDamage.FailureReport.Formatter do
         "message" => report.failure_message,
         "summary" => FailureReport.failure_type_summary(report)
       },
+      "error_origin" => %{
+        "origin" => report.error_origin && to_string(report.error_origin),
+        "reason" => get_in(report.error_origin_details, [:reason]),
+        "confidence" =>
+          report.error_origin_details && to_string(report.error_origin_details.confidence),
+        "hint" => get_in(report.error_origin_details, [:evidence, :hint]),
+        "is_test_code_error" => report.error_origin == :test_code_error
+      },
       "shrinking" => %{
         "original_commands" => Sequence.command_count(report.original_sequence),
         "shrunk_commands" => Sequence.command_count(report.shrunk_sequence),
@@ -951,7 +1046,14 @@ defmodule PropertyDamage.FailureReport.Formatter do
     type = FailureReport.failure_type_summary(report)
     cmd_count = Sequence.command_count(report.shrunk_sequence)
 
-    "[FAIL] #{type} | run=#{report.run_number + 1} cmd=#{report.failed_at_index} " <>
+    origin_tag =
+      case report.error_origin do
+        :test_code_error -> "[TEST CODE ERROR]"
+        :sut_error -> "[SUT BUG]"
+        _ -> "[FAIL]"
+      end
+
+    "#{origin_tag} #{type} | run=#{report.run_number + 1} cmd=#{report.failed_at_index} " <>
       "shrunk=#{cmd_count} seed=#{report.seed}"
   end
 

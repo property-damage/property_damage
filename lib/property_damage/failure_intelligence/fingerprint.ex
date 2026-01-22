@@ -20,7 +20,9 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
           sequence_shape: [atom()],
           state_keys: [atom()],
           error_category: atom(),
-          error_pattern: String.t() | nil
+          error_pattern: String.t() | nil,
+          error_origin: atom() | nil,
+          error_origin_reason: String.t() | nil
         }
 
   defstruct [
@@ -34,7 +36,9 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
     :sequence_shape,
     :state_keys,
     :error_category,
-    :error_pattern
+    :error_pattern,
+    :error_origin,
+    :error_origin_reason
   ]
 
   @doc """
@@ -56,7 +60,9 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
       sequence_shape: extract_sequence_shape(report.shrunk_sequence),
       state_keys: extract_state_keys(report.state_at_failure),
       error_category: categorize_error(report),
-      error_pattern: extract_error_pattern(report.failure_message)
+      error_pattern: extract_error_pattern(report.failure_message),
+      error_origin: report.error_origin,
+      error_origin_reason: get_in(report.error_origin_details || %{}, [:reason])
     }
   end
 
@@ -76,7 +82,9 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
       sequence_shape: extract_sequence_shape(Map.get(failure, :sequence)),
       state_keys: extract_state_keys(Map.get(failure, :state)),
       error_category: categorize_raw_error(failure),
-      error_pattern: extract_error_pattern(Map.get(failure, :message))
+      error_pattern: extract_error_pattern(Map.get(failure, :message)),
+      error_origin: Map.get(failure, :error_origin),
+      error_origin_reason: get_in(failure, [:error_origin_details, :reason])
     }
   end
 
@@ -88,6 +96,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   @spec hash(t()) :: binary()
   def hash(%__MODULE__{} = fp) do
     # Create a deterministic representation for hashing
+    # Include error_origin for better clustering of similar failures
     data =
       [
         fp.failure_type,
@@ -95,7 +104,8 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
         fp.command_type,
         fp.event_types,
         fp.sequence_shape,
-        fp.error_category
+        fp.error_category,
+        fp.error_origin
       ]
       |> :erlang.term_to_binary()
 

@@ -50,7 +50,7 @@ defmodule PropertyDamage.FailureReport do
   - `{:ref_resolution_error, reason}` - Symbolic ref couldn't be resolved
   """
 
-  alias PropertyDamage.{Sequence, EventLog.Entry}
+  alias PropertyDamage.{Sequence, EventLog.Entry, ErrorOrigin}
 
   @type failure_type ::
           :check_failed
@@ -106,7 +106,12 @@ defmodule PropertyDamage.FailureReport do
           # Metadata
           model: module() | nil,
           adapter: module() | nil,
-          timestamp: DateTime.t()
+          timestamp: DateTime.t(),
+
+          # Error origin classification
+          error_origin: ErrorOrigin.origin() | nil,
+          error_origin_details: ErrorOrigin.details() | nil,
+          stacktrace: list() | nil
         }
 
   defstruct seed: nil,
@@ -133,7 +138,10 @@ defmodule PropertyDamage.FailureReport do
             shrink_time_ms: 0,
             model: nil,
             adapter: nil,
-            timestamp: nil
+            timestamp: nil,
+            error_origin: nil,
+            error_origin_details: nil,
+            stacktrace: nil
 
   @doc """
   Create a new failure report from execution results.
@@ -172,6 +180,7 @@ defmodule PropertyDamage.FailureReport do
     projections = Keyword.get(opts, :projections, %{})
     projections_before = Keyword.get(opts, :projections_before)
     refs = Keyword.get(opts, :refs, %{})
+    stacktrace = Keyword.get(opts, :stacktrace)
 
     # Parse failure reason
     {failure_type, check_name, failure_message, idempotency_violation, poll_timeout_info,
@@ -184,6 +193,9 @@ defmodule PropertyDamage.FailureReport do
 
     # Extract branch events if parallel
     branch_events = extract_branch_events(event_log)
+
+    # Classify error origin
+    classification = ErrorOrigin.classify(failure_reason, stacktrace)
 
     %__MODULE__{
       seed: seed,
@@ -210,7 +222,10 @@ defmodule PropertyDamage.FailureReport do
       shrink_time_ms: Keyword.get(opts, :shrink_time_ms, 0),
       model: Keyword.get(opts, :model),
       adapter: Keyword.get(opts, :adapter),
-      timestamp: DateTime.utc_now()
+      timestamp: DateTime.utc_now(),
+      error_origin: classification.origin,
+      error_origin_details: classification.details,
+      stacktrace: stacktrace
     }
   end
 
@@ -295,6 +310,46 @@ defmodule PropertyDamage.FailureReport do
   @spec idempotency_failure?(t()) :: boolean()
   def idempotency_failure?(%__MODULE__{failure_type: :idempotency_violation}), do: true
   def idempotency_failure?(_), do: false
+
+  @doc """
+  Check if this failure is likely a test code error.
+
+  Test code errors are bugs in the model, projections, commands, or adapters
+  rather than bugs in the System Under Test.
+  """
+  @spec test_code_error?(t()) :: boolean()
+  def test_code_error?(%__MODULE__{error_origin: :test_code_error}), do: true
+  def test_code_error?(_), do: false
+
+  @doc """
+  Check if this failure is likely a SUT error (bug in System Under Test).
+  """
+  @spec sut_error?(t()) :: boolean()
+  def sut_error?(%__MODULE__{error_origin: :sut_error}), do: true
+  def sut_error?(_), do: false
+
+  @doc """
+  Get a human-readable summary of the error origin.
+  """
+  @spec error_origin_summary(t()) :: String.t()
+  def error_origin_summary(%__MODULE__{error_origin: :sut_error, error_origin_details: details}) do
+    "SUT Bug: #{details.reason}"
+  end
+
+  def error_origin_summary(%__MODULE__{
+        error_origin: :test_code_error,
+        error_origin_details: details
+      }) do
+    "Test Code Error: #{details.reason}"
+  end
+
+  def error_origin_summary(%__MODULE__{error_origin: :unknown, error_origin_details: details}) do
+    "Unknown Origin: #{details.reason}"
+  end
+
+  def error_origin_summary(%__MODULE__{error_origin: nil}) do
+    "Origin not classified"
+  end
 
   @doc """
   Get the reproduction command as a string.

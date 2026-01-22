@@ -643,6 +643,9 @@ defmodule PropertyDamage.Executor do
 
     assertion_failures = Map.get(state, :assertion_failures, [])
 
+    # Extract stacktrace from failure reason if embedded
+    {normalized_reason, stacktrace} = extract_stacktrace(reason)
+
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
@@ -650,7 +653,8 @@ defmodule PropertyDamage.Executor do
       projections_before: state.projections_before,
       refs: state.refs,
       failed_at_index: index,
-      failure_reason: reason,
+      failure_reason: normalized_reason,
+      stacktrace: stacktrace,
       linearization: linearization,
       assertion_failures: assertion_failures
     }
@@ -670,6 +674,7 @@ defmodule PropertyDamage.Executor do
           refs: state.refs,
           failed_at_index: nil,
           failure_reason: {:poll_timeout, info},
+          stacktrace: nil,
           linearization: linearization,
           assertion_failures: assertion_failures
         }
@@ -685,11 +690,40 @@ defmodule PropertyDamage.Executor do
           refs: state.refs,
           failed_at_index: nil,
           failure_reason: nil,
+          stacktrace: nil,
           linearization: linearization,
           assertion_failures: assertion_failures
         }
     end
   end
+
+  # ============================================================================
+  # Stacktrace Extraction
+  # ============================================================================
+
+  # Extract stacktrace from failure reasons that contain embedded stacktraces
+  defp extract_stacktrace({:adapter_error, {exception, stacktrace}})
+       when is_exception(exception) and is_list(stacktrace) do
+    {{:adapter_error, exception}, stacktrace}
+  end
+
+  defp extract_stacktrace({:assertion_failed, name, {exception, stacktrace}})
+       when is_exception(exception) and is_list(stacktrace) do
+    {{:assertion_failed, name, exception}, stacktrace}
+  end
+
+  defp extract_stacktrace({:ref_resolution_error, {message, stacktrace}})
+       when is_binary(message) and is_list(stacktrace) do
+    {{:ref_resolution_error, message}, stacktrace}
+  end
+
+  defp extract_stacktrace({:branch_failure, branch_id, inner_reason}) do
+    {inner_normalized, stacktrace} = extract_stacktrace(inner_reason)
+    {{:branch_failure, branch_id, inner_normalized}, stacktrace}
+  end
+
+  # No embedded stacktrace
+  defp extract_stacktrace(reason), do: {reason, nil}
 
   # ============================================================================
   # Command Execution
@@ -967,6 +1001,11 @@ defmodule PropertyDamage.Executor do
         result =
           try do
             execute_with_settle(resolved_command, adapter, adapter_context_with_inject)
+          rescue
+            e ->
+              # Capture stacktrace for adapter exceptions
+              stacktrace = __STACKTRACE__
+              {:error, {e, stacktrace}}
           after
             # Always clean up - get final injection state first
             :ok
@@ -1311,7 +1350,9 @@ defmodule PropertyDamage.Executor do
       resolved = deep_resolve_refs(command, refs, skip_field)
       {:ok, resolved}
     rescue
-      e -> {:error, Exception.message(e)}
+      e ->
+        stacktrace = __STACKTRACE__
+        {:error, {Exception.message(e), stacktrace}}
     end
   end
 
@@ -1674,8 +1715,9 @@ defmodule PropertyDamage.Executor do
           {:cont, {:ok, acc_counters}}
         rescue
           e ->
-            # Assertion failed by raising exception
-            {:halt, {:error, assertion.name, e, acc_counters}}
+            # Assertion failed by raising exception - capture stacktrace
+            stacktrace = __STACKTRACE__
+            {:halt, {:error, assertion.name, {e, stacktrace}, acc_counters}}
         end
       else
         {:cont, {:ok, acc_counters}}
@@ -2163,7 +2205,9 @@ defmodule PropertyDamage.Executor do
       resolved = deep_resolve_placeholders(command, registry)
       {:ok, resolved}
     rescue
-      e in ArgumentError -> {:error, e.message}
+      e in ArgumentError ->
+        stacktrace = __STACKTRACE__
+        {:error, {e.message, stacktrace}}
     end
   end
 
@@ -2235,5 +2279,4 @@ defmodule PropertyDamage.Executor do
       end)
     end)
   end
-
 end
