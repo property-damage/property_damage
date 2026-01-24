@@ -754,6 +754,58 @@ defmodule PropertyDamage.Options do
   end
 
   # ============================================================================
+  # PropertyDamage.execute/2 Schema
+  # ============================================================================
+
+  @execute_schema_definition [
+    adapter: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Adapter module for executing commands."
+    ],
+    injector_adapters: [
+      type: {:list, :atom},
+      default: [],
+      doc: "List of injector adapter modules."
+    ],
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Configuration passed to `adapter.setup/1`."
+    ],
+    refs: [
+      type: :map,
+      default: %{},
+      doc: "Initial ref resolution map."
+    ]
+  ]
+
+  @execute_schema NimbleOptions.new!(@execute_schema_definition)
+
+  @doc """
+  Returns the compiled NimbleOptions schema for `PropertyDamage.execute/2`.
+  """
+  @spec execute_schema() :: NimbleOptions.t()
+  def execute_schema, do: @execute_schema
+
+  @doc """
+  Returns NimbleOptions-generated documentation for execute options.
+  """
+  @spec execute_docs() :: String.t()
+  def execute_docs, do: NimbleOptions.docs(@execute_schema)
+
+  @doc """
+  Validates options for `PropertyDamage.execute/2`.
+
+  Returns validated options with defaults applied, or raises
+  `NimbleOptions.ValidationError` on invalid input.
+  """
+  @spec validate_execute!(keyword()) :: keyword()
+  def validate_execute!(opts) do
+    NimbleOptions.validate!(opts, @execute_schema)
+  end
+
+  # ============================================================================
   # Custom Type Validators
   # ============================================================================
 

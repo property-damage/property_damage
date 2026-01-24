@@ -55,6 +55,7 @@ defmodule PropertyDamage.MixProject do
         "guides/differential_testing.md",
         "guides/integration_testing.md",
         "guides/load_testing.md",
+        "guides/static_regression_tests.md",
         "CHANGELOG.md"
       ],
       groups_for_extras: [

@@ -1149,6 +1149,122 @@ defmodule PropertyDamage do
   end
 
   # ============================================================================
+  # Model-Free Execution (Static Regression Tests)
+  # ============================================================================
+
+  @doc """
+  Execute a fixed command sequence without a model.
+
+  This function provides a model-free execution path for static regression tests
+  where you want to run a specific command sequence and assert on the raw event
+  log directly, without using model-defined projections or checks.
+
+  ## Use Cases
+
+  - **Regression tests**: Run a specific sequence that reproduced a bug
+  - **Integration tests**: Execute commands with real injector adapters
+  - **Debugging**: Capture full SUT behavior including webhooks/callbacks
+
+  ## Options
+
+  - `:adapter` - Adapter module (required)
+  - `:injector_adapters` - List of injector adapter modules (default: `[]`)
+  - `:adapter_config` - Config passed to `adapter.setup/1` (default: `%{}`)
+  - `:refs` - Initial ref resolution map (default: `%{}`)
+
+  ## Returns
+
+  - `{:ok, event_log}` - List of `EventLog.Entry` structs containing all events
+  - `{:error, {:adapter_error, reason, partial_events}}` - Adapter failed
+
+  ## Example
+
+      # Simple execution
+      commands = [
+        %CreateUser{name: "alice"},
+        %CreateOrder{user_id: 1, amount: 100}
+      ]
+
+      {:ok, events} = PropertyDamage.execute(commands, adapter: MyAdapter)
+
+      # Assert on returned events
+      assert length(events) == 2
+      assert hd(events).event.__struct__ == UserCreated
+
+  ## With Injector Adapters
+
+  When testing end-to-end flows with webhooks or async callbacks:
+
+      {:ok, events} = PropertyDamage.execute(commands,
+        adapter: MyAdapter,
+        injector_adapters: [WebhookAdapter],
+        adapter_config: %{base_url: "http://localhost:4000"}
+      )
+
+      # Assert on injected webhook events
+      assert Enum.any?(events, fn entry ->
+        entry.source == :injector and
+        match?(%WebhookReceived{status: "completed"}, entry.event)
+      end)
+
+  ## Comparison with Direct Adapter Calls
+
+  For simple tests that only need command return values (no injector events),
+  calling the adapter directly is simpler:
+
+      {:ok, adapter_ctx} = MyAdapter.setup(%{})
+      {:ok, events} = MyAdapter.execute(%CreateUser{name: "alice"}, adapter_ctx)
+      assert [%UserCreated{name: "alice"}] = events
+      MyAdapter.teardown(adapter_ctx)
+
+  Use `execute/2` when you need the full infrastructure: injector adapters,
+  event queue, ref resolution across commands, etc.
+  """
+  @spec execute([struct()], keyword()) ::
+          {:ok, [PropertyDamage.EventLog.Entry.t()]} | {:error, term()}
+  def execute(commands, opts) when is_list(commands) do
+    opts = Options.validate_execute!(opts)
+
+    adapter = opts[:adapter]
+    injector_adapters = opts[:injector_adapters]
+    adapter_config = opts[:adapter_config]
+    refs = opts[:refs]
+
+    # Start event queue for injectors
+    {:ok, event_queue} = EventQueue.start_link()
+
+    # Setup injector adapters
+    setup_injectors(injector_adapters, event_queue)
+
+    # Setup main adapter
+    case adapter.setup(adapter_config) do
+      {:ok, adapter_context} ->
+        context = %{
+          adapter_context: adapter_context,
+          refs: refs,
+          event_queue: event_queue
+        }
+
+        sequence = Sequence.linear(commands)
+
+        try do
+          Executor.execute_raw(sequence, adapter, context)
+        after
+          # Cleanup
+          adapter.teardown(adapter_context)
+          teardown_injectors(injector_adapters)
+          EventQueue.stop(event_queue)
+        end
+
+      {:error, reason} ->
+        # Cleanup event queue and injectors on setup failure
+        teardown_injectors(injector_adapters)
+        EventQueue.stop(event_queue)
+        {:error, {:adapter_setup_failed, reason}}
+    end
+  end
+
+  # ============================================================================
   # External Values (Server-Generated IDs)
   # ============================================================================
 

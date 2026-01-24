@@ -2195,6 +2195,155 @@ defmodule PropertyDamage.Executor do
   end
 
   # ============================================================================
+  # Model-Free Execution (for static regression tests)
+  # ============================================================================
+
+  @doc """
+  Execute a command sequence without model projections or assertions.
+
+  This is a simplified execution path for static regression tests where you want
+  to run a fixed command sequence and assert on the raw event log directly,
+  without using model-defined projections or checks.
+
+  ## Parameters
+
+  - `sequence` - Sequence struct or list of commands to execute
+  - `adapter` - Adapter module for SUT interaction
+  - `context` - Execution context map containing:
+    - `:adapter_context` - Pre-established adapter context from adapter.setup/1
+    - `:refs` - Initial ref resolution map (default: %{})
+    - `:event_queue` - EventQueue pid for injector events (optional)
+
+  ## Returns
+
+  - `{:ok, event_log}` - List of EventLog.Entry structs
+  - `{:error, {:adapter_error, reason, partial_events}}` - Adapter failed
+
+  ## Example
+
+      {:ok, adapter_ctx} = MyAdapter.setup(%{})
+      {:ok, event_queue} = EventQueue.start_link()
+
+      context = %{
+        adapter_context: adapter_ctx,
+        refs: %{},
+        event_queue: event_queue
+      }
+
+      {:ok, events} = Executor.execute_raw(commands, MyAdapter, context)
+  """
+  @spec execute_raw(Sequence.t() | list(), module(), map()) ::
+          {:ok, [Entry.t()]} | {:error, term()}
+  def execute_raw(sequence_or_commands, adapter, context)
+
+  def execute_raw(%Sequence{} = sequence, adapter, context) do
+    commands = Sequence.to_list(sequence)
+    execute_raw(commands, adapter, context)
+  end
+
+  def execute_raw(commands, adapter, context) when is_list(commands) do
+    refs = Map.get(context, :refs, %{})
+    event_queue = Map.get(context, :event_queue)
+
+    initial_state = %{
+      events: [],
+      refs: refs
+    }
+
+    result =
+      commands
+      |> Enum.with_index()
+      |> Enum.reduce_while(initial_state, fn {command, index}, state ->
+        case execute_raw_command(
+               command,
+               index,
+               adapter,
+               context.adapter_context,
+               event_queue,
+               state.refs
+             ) do
+          {:ok, new_events, new_refs} ->
+            {:cont, %{events: state.events ++ new_events, refs: new_refs}}
+
+          {:error, reason} ->
+            {:halt, {:error, {:adapter_error, reason, state.events}}}
+        end
+      end)
+
+    case result do
+      {:error, _} = error -> error
+      %{events: events} -> {:ok, events}
+    end
+  end
+
+  # Execute a single command in raw mode (no projections/assertions)
+  defp execute_raw_command(command, index, adapter, adapter_context, event_queue, refs) do
+    # Resolve refs in command (only for structs that might have refs)
+    resolved_result =
+      if is_struct(command) do
+        resolve_command_refs(command, refs)
+      else
+        # Plain maps don't use refs in raw mode
+        {:ok, command}
+      end
+
+    case resolved_result do
+      {:ok, resolved_command} ->
+        # Merge event_queue into adapter_context so adapters can access it
+        execute_context =
+          if event_queue do
+            Map.put(adapter_context, :event_queue, event_queue)
+          else
+            adapter_context
+          end
+
+        # Execute via adapter
+        case adapter.execute(resolved_command, execute_context) do
+          {:ok, events} ->
+            # Bind new ref if command creates one (only for structs)
+            new_refs =
+              if is_struct(command) do
+                maybe_bind_ref(command, events, refs)
+              else
+                refs
+              end
+
+            # Create event log entries
+            entries =
+              Enum.map(events, fn event ->
+                Entry.from_command(event, index)
+              end)
+
+            # Drain and add injector events if event_queue provided
+            injector_entries =
+              if event_queue do
+                event_queue
+                |> EventQueue.drain()
+                |> Enum.map(fn queue_entry ->
+                  %Entry{
+                    timestamp: queue_entry.timestamp,
+                    command_index: nil,
+                    event: queue_entry.event,
+                    source: :injector,
+                    injector_adapter: queue_entry.adapter_module
+                  }
+                end)
+              else
+                []
+              end
+
+            {:ok, entries ++ injector_entries, new_refs}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, {:ref_resolution_error, reason}}
+    end
+  end
+
+  # ============================================================================
   # External/Placeholder Support
   # ============================================================================
 
