@@ -144,8 +144,8 @@ defmodule Mix.Tasks.Pd.Validate do
     errors = []
     warnings = []
 
-    # Check model callbacks (extra_projections is optional)
-    required_callbacks = [:commands, :state_projection]
+    # Check model callbacks (assertion_projections is optional)
+    required_callbacks = [:commands, :command_sequence_projection]
 
     errors =
       for callback <- required_callbacks,
@@ -187,7 +187,7 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     # Check projections
-    state_proj = model.state_projection()
+    state_proj = model.command_sequence_projection()
 
     errors =
       if Code.ensure_loaded?(state_proj) do
@@ -197,8 +197,8 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     extra_projs =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
@@ -255,8 +255,8 @@ defmodule Mix.Tasks.Pd.Validate do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
 
     extra_projs =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
@@ -277,11 +277,11 @@ defmodule Mix.Tasks.Pd.Validate do
   end
 
   defp print_model_summary(model, commands) do
-    state_proj = model.state_projection()
+    state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end

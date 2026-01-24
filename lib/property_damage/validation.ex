@@ -97,7 +97,7 @@ defmodule PropertyDamage.Validation do
     warnings = []
     warnings = warnings ++ warn_missing_downstream_observables(model)
     warnings = warnings ++ warn_orphan_events(model)
-    warnings = warnings ++ warn_no_extra_projections(model)
+    warnings = warnings ++ warn_no_assertion_projections(model)
     warnings = warnings ++ warn_unbalanced_weights(model)
     warnings = warnings ++ warn_single_command(model)
 
@@ -221,11 +221,11 @@ defmodule PropertyDamage.Validation do
     IO.puts(io, "")
 
     # Projections
-    state_proj = model.state_projection()
+    state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
@@ -341,8 +341,8 @@ defmodule PropertyDamage.Validation do
   end
 
   defp validate_model_callbacks(model) do
-    # extra_projections is optional
-    required_callbacks = [:commands, :state_projection]
+    # assertion_projections is optional
+    required_callbacks = [:commands, :command_sequence_projection]
 
     for callback <- required_callbacks, not function_exported?(model, callback, 0), reduce: [] do
       acc -> ["Model #{inspect(model)} missing required callback #{callback}/0" | acc]
@@ -381,7 +381,7 @@ defmodule PropertyDamage.Validation do
   defp validate_projections(model) do
     errors = []
 
-    state_proj = model.state_projection()
+    state_proj = model.command_sequence_projection()
 
     errors =
       if Code.ensure_loaded?(state_proj) do
@@ -391,8 +391,8 @@ defmodule PropertyDamage.Validation do
       end
 
     extra_projs =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
@@ -459,8 +459,8 @@ defmodule PropertyDamage.Validation do
 
     # Collect all events handled by extra projections
     extra_projs =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
@@ -499,10 +499,10 @@ defmodule PropertyDamage.Validation do
     end
   end
 
-  defp warn_no_extra_projections(model) do
+  defp warn_no_assertion_projections(model) do
     extra_projs =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
@@ -510,7 +510,7 @@ defmodule PropertyDamage.Validation do
     if Enum.empty?(extra_projs) do
       [
         "Model has no extra projections - " <>
-          "invariants should be defined in state_projection or extra_projections. " <>
+          "invariants should be defined in command_sequence_projection or assertion_projections. " <>
           "Consider adding projections with assertions to verify system behavior."
       ]
     else

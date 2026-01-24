@@ -76,10 +76,10 @@ defmodule PropertyDamageTest do
       def commands, do: [CreateItem]
 
       @impl true
-      def state_projection, do: ModelState
+      def command_sequence_projection, do: ModelState
 
       @impl true
-      def extra_projections, do: []
+      def assertion_projections, do: []
 
       @impl true
       def setup_once(config) do

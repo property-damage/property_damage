@@ -21,7 +21,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   ## Usage
 
       defmodule MyModel do
-        def extra_projections do
+        def assertion_projections do
           [
             {PropertyDamage.Model.Projection.Statistics, [
               window_size: 100,

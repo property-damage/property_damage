@@ -466,8 +466,8 @@ defmodule PropertyDamage.ErrorOrigin do
       module_str =~ ~r/Projection$/ and function == :init and arity == 0 ->
         "Implement init/0 in your projection module"
 
-      module_str =~ ~r/Model$/ and function == :state_projection and arity == 0 ->
-        "Implement state_projection/0 in your model module"
+      module_str =~ ~r/Model$/ and function == :command_sequence_projection and arity == 0 ->
+        "Implement command_sequence_projection/0 in your model module"
 
       true ->
         "Implement #{function}/#{arity} in #{module_name(module)}"

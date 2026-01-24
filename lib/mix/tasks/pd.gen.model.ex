@@ -33,8 +33,8 @@ defmodule Mix.Tasks.Pd.Gen.Model do
   - Define synchronous assertions via `@trigger`
   - Define temporal assertions via `@poll_state`
 
-  The `state_projection` is the primary projection used for command generation.
-  The `extra_projections` are additional projections for invariants and side tracking.
+  The `command_sequence_projection` is the primary projection used for command generation.
+  The `assertion_projections` are additional projections for invariants and side tracking.
   """
 
   use Mix.Task
@@ -45,7 +45,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
   def run(args) do
     {opts, argv, _} =
       OptionParser.parse(args,
-        strict: [commands: :string, projection: :string, extra_projections: :string]
+        strict: [commands: :string, projection: :string, assertion_projections: :string]
       )
 
     case argv do
@@ -64,14 +64,14 @@ defmodule Mix.Tasks.Pd.Gen.Model do
   defp generate_model(module_name, opts) do
     commands = parse_list(Keyword.get(opts, :commands, ""))
     projection = Keyword.get(opts, :projection)
-    extra_projections = parse_list(Keyword.get(opts, :extra_projections, ""))
+    assertion_projections = parse_list(Keyword.get(opts, :assertion_projections, ""))
 
     path = module_to_path(module_name)
     dir = Path.dirname(path)
 
     File.mkdir_p!(dir)
 
-    content = generate_content(module_name, commands, projection, extra_projections)
+    content = generate_content(module_name, commands, projection, assertion_projections)
 
     File.write!(path, content)
 
@@ -97,14 +97,16 @@ defmodule Mix.Tasks.Pd.Gen.Model do
     "lib/#{path}.ex"
   end
 
-  defp generate_content(module_name, commands, projection, extra_projections) do
+  defp generate_content(module_name, commands, projection, assertion_projections) do
     # Infer namespace from module name
     parts = String.split(module_name, ".")
     namespace = Enum.slice(parts, 0..-2//1) |> Enum.join(".")
 
     commands_section = generate_commands_section(commands, namespace)
     projection_section = generate_projection_section(projection, namespace)
-    extra_projections_section = generate_extra_projections_section(extra_projections, namespace)
+
+    assertion_projections_section =
+      generate_assertion_projections_section(assertion_projections, namespace)
 
     """
     defmodule #{module_name} do
@@ -136,14 +138,14 @@ defmodule Mix.Tasks.Pd.Gen.Model do
       end
 
       @impl true
-      def state_projection do
+      def command_sequence_projection do
         #{projection_section}
       end
 
       @impl true
-      def extra_projections do
+      def assertion_projections do
         [
-          #{extra_projections_section}
+          #{assertion_projections_section}
         ]
       end
 
@@ -223,11 +225,11 @@ defmodule Mix.Tasks.Pd.Gen.Model do
     projection
   end
 
-  defp generate_extra_projections_section([], namespace) do
+  defp generate_assertion_projections_section([], namespace) do
     "# #{namespace}.Projections.SomeExtraProjection"
   end
 
-  defp generate_extra_projections_section(extra_projections, _namespace) do
-    Enum.join(extra_projections, ",\n      ")
+  defp generate_assertion_projections_section(assertion_projections, _namespace) do
+    Enum.join(assertion_projections, ",\n      ")
   end
 end

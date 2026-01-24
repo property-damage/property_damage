@@ -126,8 +126,8 @@ defmodule PropertyDamage.Errors do
                     @behaviour PropertyDamage.Model
 
                     def commands, do: [CreateEntity, UpdateEntity]
-                    def state_projection, do: MyProjection
-                    def extra_projections, do: [MyInvariant]
+                    def command_sequence_projection, do: MyProjection
+                    def assertion_projections, do: [MyInvariant]
                   end
           """
 
@@ -222,17 +222,17 @@ defmodule PropertyDamage.Errors do
           end
           """
 
-        {:model, :state_projection, 0} ->
+        {:model, :command_sequence_projection, 0} ->
           """
-          def state_projection do
+          def command_sequence_projection do
             # Return the projection module for tracking state
             MyProjection
           end
           """
 
-        {:model, :extra_projections, 0} ->
+        {:model, :assertion_projections, 0} ->
           """
-          def extra_projections do
+          def assertion_projections do
             # Return list of extra projection modules (optional)
             [MyInvariant]
           end

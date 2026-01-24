@@ -40,10 +40,10 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     @impl PropertyDamage.Model
-    def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
+    def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl PropertyDamage.Model
-    def extra_projections, do: []
+    def assertion_projections, do: []
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -59,10 +59,10 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def commands, do: []
 
     @impl true
-    def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
+    def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def extra_projections, do: []
+    def assertion_projections, do: []
   end
 
   defmodule InvalidWeightModel do
@@ -74,10 +74,10 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     @impl true
-    def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
+    def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def extra_projections, do: []
+    def assertion_projections, do: []
   end
 
   defmodule ValidAdapter do
@@ -308,10 +308,10 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def commands, do: [PropertyDamage.ValidationExtendedTest.ValidCommand]
 
     @impl true
-    def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
+    def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def extra_projections, do: []
+    def assertion_projections, do: []
   end
 
   defmodule UnbalancedWeightModel do
@@ -326,10 +326,10 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     @impl true
-    def state_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
+    def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def extra_projections, do: []
+    def assertion_projections, do: []
   end
 
   describe "model warnings" do

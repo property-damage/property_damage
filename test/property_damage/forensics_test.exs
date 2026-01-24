@@ -74,8 +74,8 @@ defmodule PropertyDamage.ForensicsTest do
     @behaviour PropertyDamage.Model
 
     def commands, do: []
-    def state_projection, do: OrderState
-    def extra_projections, do: [OrderInvariants]
+    def command_sequence_projection, do: OrderState
+    def assertion_projections, do: [OrderInvariants]
   end
 
   # Test event mapping

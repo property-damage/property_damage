@@ -132,18 +132,18 @@ defmodule PropertyDamage.Forensics do
     stop_early = Keyword.get(opts, :stop_on_first_failure, true)
 
     # Initialize projections
-    state_projection = model.state_projection()
+    command_sequence_projection = model.command_sequence_projection()
 
-    extra_projections =
+    assertion_projections =
       Keyword.get_lazy(opts, :projections, fn ->
-        if function_exported?(model, :extra_projections, 0) do
-          model.extra_projections()
+        if function_exported?(model, :assertion_projections, 0) do
+          model.assertion_projections()
         else
           []
         end
       end)
 
-    all_projections = [state_projection | extra_projections]
+    all_projections = [command_sequence_projection | assertion_projections]
 
     initial_projections =
       for projection <- all_projections, into: %{} do
@@ -167,14 +167,14 @@ defmodule PropertyDamage.Forensics do
         if is_nil(event) do
           {:cont, {:ok, state, history}}
         else
-          process_event(event, index, state, history, model, extra_projections, stop_early)
+          process_event(event, index, state, history, model, assertion_projections, stop_early)
         end
       end)
 
     finalize_result(result)
   end
 
-  defp process_event(event, index, state, history, model, extra_projections, stop_early) do
+  defp process_event(event, index, state, history, model, assertion_projections, stop_early) do
     # Apply event to all projections
     new_projections =
       for {projection, projection_state} <- state.projections, into: %{} do
@@ -196,7 +196,7 @@ defmodule PropertyDamage.Forensics do
       branch_id: nil
     }
 
-    case run_checks(model, extra_projections, new_projections, check_ctx) do
+    case run_checks(model, assertion_projections, new_projections, check_ctx) do
       :ok ->
         {:cont, {:ok, new_state, history ++ [event]}}
 
@@ -219,14 +219,14 @@ defmodule PropertyDamage.Forensics do
   end
 
   defp finalize_result({:ok, state, _history}) do
-    state_projection_key =
+    command_sequence_projection_key =
       Enum.find(Map.keys(state.projections), fn mod ->
         not function_exported?(mod, :__assertions__, 0)
       end)
 
     {:ok,
      %{
-       final_state: Map.get(state.projections, state_projection_key),
+       final_state: Map.get(state.projections, command_sequence_projection_key),
        events_processed: state.events_processed,
        projections: state.projections
      }}
@@ -246,12 +246,12 @@ defmodule PropertyDamage.Forensics do
     end)
   end
 
-  defp run_assertions(model, extra_projections, projections, assertion_ctx) do
+  defp run_assertions(model, assertion_projections, projections, assertion_ctx) do
     alias PropertyDamage.Model.Projection
 
     # Run assertions on all projections (state + extra)
-    state_projection = model.state_projection()
-    all_projections = [state_projection | extra_projections]
+    command_sequence_projection = model.command_sequence_projection()
+    all_projections = [command_sequence_projection | assertion_projections]
 
     Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       projection_state = Map.get(projections, projection)
@@ -295,7 +295,7 @@ defmodule PropertyDamage.Forensics do
   end
 
   # Legacy wrapper for backward compatibility
-  defp run_checks(model, extra_projections, projections, check_ctx) do
+  defp run_checks(model, assertion_projections, projections, check_ctx) do
     # Convert old check_ctx to new assertion_ctx format
     {event_module, event} =
       case check_ctx.events do
@@ -310,7 +310,7 @@ defmodule PropertyDamage.Forensics do
       command_or_event: event
     }
 
-    run_assertions(model, extra_projections, projections, assertion_ctx)
+    run_assertions(model, assertion_projections, projections, assertion_ctx)
   end
 
   defp get_module(%{__struct__: mod}), do: mod

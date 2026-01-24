@@ -552,16 +552,16 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp get_module(_other), do: :unknown_event
 
   defp init_projections(model) do
-    state_projection = model.state_projection()
+    command_sequence_projection = model.command_sequence_projection()
 
-    extra_projections =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
 
-    all_projections = [state_projection | extra_projections]
+    all_projections = [command_sequence_projection | assertion_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
@@ -641,16 +641,16 @@ defmodule PropertyDamage.LoadTest.Worker do
          command_or_event,
          state
        ) do
-    state_projection = model.state_projection()
+    command_sequence_projection = model.command_sequence_projection()
 
-    extra_projections =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
 
-    all_projections = [state_projection | extra_projections]
+    all_projections = [command_sequence_projection | assertion_projections]
 
     failure_count =
       Enum.reduce(all_projections, 0, fn projection, failures ->

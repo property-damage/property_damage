@@ -159,12 +159,12 @@ defmodule PropertyDamage.Linearization do
   # Apply a single event to all projections
   defp apply_event_to_projections(event, projections, model) do
     # Get state projection
-    state_proj = model.state_projection()
+    state_proj = model.command_sequence_projection()
 
     # Get extra projections
     extra_projs =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end

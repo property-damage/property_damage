@@ -249,7 +249,7 @@ defmodule Demo.Model do
   end
 
   @impl true
-  def state_projection, do: ModelState
+  def command_sequence_projection, do: ModelState
 
   @impl true
   def assertion_projections, do: [AccountInvariants]

@@ -422,7 +422,7 @@ defmodule PropertyDamage.LoadTestTest do
     def commands(), do: [WorkerTestCommand]
 
     @impl PropertyDamage.Model
-    def state_projection(), do: WorkerTestProjection
+    def command_sequence_projection(), do: WorkerTestProjection
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -431,7 +431,7 @@ defmodule PropertyDamage.LoadTestTest do
     def simulate(_cmd, _state), do: [%{type: :created}]
 
     @impl PropertyDamage.Model
-    def extra_projections(), do: []
+    def assertion_projections(), do: []
   end
 
   defmodule WorkerTestAdapter do
@@ -650,10 +650,10 @@ defmodule PropertyDamage.LoadTestTest do
       def commands(), do: [MockCommand]
 
       @impl PropertyDamage.Model
-      def state_projection(), do: MockProjection
+      def command_sequence_projection(), do: MockProjection
 
       @impl PropertyDamage.Model
-      def extra_projections(), do: []
+      def assertion_projections(), do: []
 
       @impl PropertyDamage.Model
       def simulator, do: __MODULE__
@@ -839,10 +839,10 @@ defmodule PropertyDamage.LoadTestTest do
       def commands(), do: [{1, MockCommand}]
 
       @impl true
-      def state_projection(), do: MockProjection
+      def command_sequence_projection(), do: MockProjection
 
       @impl true
-      def extra_projections(), do: [FailingAssertionProjection]
+      def assertion_projections(), do: [FailingAssertionProjection]
     end
 
     @tag :integration

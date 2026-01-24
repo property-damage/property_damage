@@ -9,11 +9,11 @@ defmodule PropertyDamage.Model do
   ## Required Callbacks
 
   - `commands/0` - List of command modules (optionally weighted)
-  - `command_sequence_state/0` - Projection module used for command generation
+  - `command_sequence_projection/0` - Projection module used for command generation
 
   ## Optional Callbacks
 
-  - `extra_projections/0` - Additional projections for state tracking and/or assertions
+  - `assertion_projections/0` - Projections that verify invariants
   - `injectable_events/0` - Events that can arrive from Adapter.Injector modules
   - `setup_once/1` - Setup that runs once at the start (not during shrinking)
   - `setup_each/1` - Setup that runs before each execution (including shrink attempts)
@@ -25,25 +25,25 @@ defmodule PropertyDamage.Model do
 
   The framework generates command sequences through this loop:
 
-  1. **State Check**: Get current state from `command_sequence_state/0` projection
+  1. **State Check**: Get current state from `command_sequence_projection/0`
   2. **Filter Commands**: Evaluate each command's `when:` precondition against state
   3. **Select Command**: Choose from valid commands based on `weight:`
   4. **Generate Instance**: Call the selected command's `with:` generator with state
   5. **Simulate Execution**: Call `simulate/2` to predict resulting events
-  6. **Update State**: Apply predicted events to state projection
+  6. **Update State**: Apply predicted events to the projection
   7. **Repeat**: Go to step 2 until sequence length reached
 
   During execution, real events replace simulated predictions, and assertion
   projections verify invariants.
 
   ```
-  command_sequence_state.init()
+  command_sequence_projection.init()
     → filter commands by `when:` predicate
     → select command (weighted random)
     → generate command data (module generator + `with:` overrides)
     → simulator.simulate(command, state)
     → synthetic events
-    → command_sequence_state.apply(events)
+    → command_sequence_projection.apply(events)
     → updated state
     → repeat until max_commands or terminate?/3 returns true
   ```
@@ -60,11 +60,11 @@ defmodule PropertyDamage.Model do
         def commands, do: [CreateOrder, ViewOrder, CancelOrder]
 
         @impl true
-        def command_sequence_state, do: ModelState
+        def command_sequence_projection, do: ModelState
 
-        # Optional: additional projections for assertions or extra state tracking
+        # Optional: projections that verify invariants
         @impl true
-        def extra_projections, do: [OrderBalances]
+        def assertion_projections, do: [OrderBalances]
 
         # Terminate when order is deleted
         @impl true
@@ -250,19 +250,9 @@ defmodule PropertyDamage.Model do
   ## Example
 
       @impl true
-      def command_sequence_state, do: MyApp.OrderStateProjection
+      def command_sequence_projection, do: MyApp.OrderStateProjection
   """
-  @callback command_sequence_state() :: module()
-
-  @doc """
-  Returns the projection module used for state tracking.
-
-  **Deprecated**: Use `command_sequence_state/0` instead.
-
-  This callback is kept for backwards compatibility. If both are defined,
-  `command_sequence_state/0` takes precedence.
-  """
-  @callback state_projection() :: module()
+  @callback command_sequence_projection() :: module()
 
   @doc """
   Returns the module implementing the Simulator behaviour.
@@ -283,15 +273,15 @@ defmodule PropertyDamage.Model do
   @callback simulator() :: module()
 
   @doc """
-  Returns list of additional projection modules.
+  Returns list of assertion projection modules.
 
-  These projections can track extra state and/or define assertions via
-  `use PropertyDamage.Model.Projection`. Their state is updated with each command
-  and event, and any assertions are run according to their trigger conditions.
+  These projections verify invariants via `use PropertyDamage.Model.Projection`.
+  Their state is updated with each command and event, and assertions are run
+  according to their `@trigger` conditions.
 
   Optional - defaults to `[]` if not implemented.
   """
-  @callback extra_projections() :: [module()]
+  @callback assertion_projections() :: [module()]
 
   @doc """
   Returns list of event modules that can be injected from outside.
@@ -385,19 +375,14 @@ defmodule PropertyDamage.Model do
   @callback terminate?(state :: map(), command :: struct(), events :: [struct()]) :: boolean()
 
   @optional_callbacks [
-    extra_projections: 0,
+    assertion_projections: 0,
     injectable_events: 0,
     setup_once: 1,
     setup_each: 1,
     teardown_each: 1,
     teardown_once: 1,
     terminate?: 3,
-    simulator: 0,
-    # At least one of these must be implemented:
-    # - command_sequence_state/0 (preferred)
-    # - state_projection/0 (deprecated)
-    command_sequence_state: 0,
-    state_projection: 0
+    simulator: 0
   ]
 
   @typedoc """

@@ -221,8 +221,8 @@ defmodule PropertyDamage.GuidedRunner do
       {:ok, result} ->
         if result.success do
           # Calculate fitness from final state
-          state_projection = model.state_projection()
-          final_state = Map.get(result.projections, state_projection)
+          command_sequence_projection = model.command_sequence_projection()
+          final_state = Map.get(result.projections, command_sequence_projection)
           fitness = TargetedGeneration.calculate_fitness(model, final_state)
           targets = TargetedGeneration.reached_targets(model, final_state)
 

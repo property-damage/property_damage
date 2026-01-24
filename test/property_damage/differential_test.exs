@@ -167,10 +167,10 @@ defmodule PropertyDamage.DifferentialTest do
     def commands, do: [TestCommand]
 
     @impl PropertyDamage.Model
-    def state_projection, do: TestProjection
+    def command_sequence_projection, do: TestProjection
 
     @impl PropertyDamage.Model
-    def extra_projections, do: [TestAssertions]
+    def assertion_projections, do: [TestAssertions]
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__

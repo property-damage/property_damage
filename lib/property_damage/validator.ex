@@ -65,8 +65,8 @@ defmodule PropertyDamage.Validator do
   """
   @spec valid_sequence?([struct()], module()) :: boolean()
   def valid_sequence?(commands, model) do
-    state_projection = model.state_projection()
-    initial_state = state_projection.init()
+    command_sequence_projection = model.command_sequence_projection()
+    initial_state = command_sequence_projection.init()
 
     # Normalize the model's commands to get when:/with: options
     normalized_commands =
@@ -74,7 +74,13 @@ defmodule PropertyDamage.Validator do
       |> Model.normalize_commands()
       |> build_command_lookup()
 
-    validate_commands(commands, initial_state, state_projection, model, normalized_commands)
+    validate_commands(
+      commands,
+      initial_state,
+      command_sequence_projection,
+      model,
+      normalized_commands
+    )
   end
 
   # Build a lookup map from command module to its options

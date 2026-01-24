@@ -22,8 +22,8 @@ defmodule PropertyDamage.LinearizationTest do
     @behaviour PropertyDamage.Model
 
     def commands, do: []
-    def state_projection, do: TestProjection
-    def extra_projections, do: []
+    def command_sequence_projection, do: TestProjection
+    def assertion_projections, do: []
   end
 
   describe "generate_linearizations/1" do

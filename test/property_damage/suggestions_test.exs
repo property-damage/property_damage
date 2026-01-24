@@ -68,10 +68,10 @@ defmodule PropertyDamage.SuggestionsTest do
     def commands, do: []
 
     @impl true
-    def state_projection, do: EmptyProjection
+    def command_sequence_projection, do: EmptyProjection
 
     @impl true
-    def extra_projections, do: [TestProjection]
+    def assertion_projections, do: [TestProjection]
   end
 
   # Model with no projections
@@ -82,10 +82,10 @@ defmodule PropertyDamage.SuggestionsTest do
     def commands, do: []
 
     @impl true
-    def state_projection, do: EmptyProjection
+    def command_sequence_projection, do: EmptyProjection
 
     @impl true
-    def extra_projections, do: []
+    def assertion_projections, do: []
   end
 
   # ============================================================================

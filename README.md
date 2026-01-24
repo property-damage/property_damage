@@ -165,10 +165,10 @@ defmodule MyApp.TestModel do
   end
 
   @impl true
-  def state_projection, do: MyApp.Projections.Users
+  def command_sequence_projection, do: MyApp.Projections.Users
 
   @impl true
-  def extra_projections do
+  def assertion_projections do
     [MyApp.Assertions.UniqueEmails, MyApp.Assertions.ValidEmails]
   end
 end
@@ -538,8 +538,8 @@ defmodule MyModel do
 
   # Required
   def commands, do: [{CommandModule, weight: N}, ...]
-  def state_projection, do: MyStateProjection
-  def extra_projections, do: [MyExtraProjection, ...]  # Optional
+  def command_sequence_projection, do: MyStateProjection
+  def assertion_projections, do: [MyExtraProjection, ...]  # Optional
 
   # Optional
   def injectable_events, do: []  # For Adapter.Injector
@@ -979,7 +979,7 @@ Detect deadlocks, livelocks, and starvation with the Liveness projection.
 
 ```elixir
 defmodule MyModel do
-  def extra_projections do
+  def assertion_projections do
     [
       {PropertyDamage.Model.Projection.Liveness, [
         max_pending_duration_ms: 10_000,

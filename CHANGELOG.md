@@ -7,21 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: Renamed `state_projection/0` to `command_sequence_projection/0`
+  - Clearer name: returns the projection used for command sequence generation
+- **BREAKING**: Renamed `extra_projections/0` to `assertion_projections/0`
+  - Clearer name: these projections verify invariants
+
 ### Added
 
-- New `command_sequence_state/0` callback in `PropertyDamage.Model` behaviour
-  - Clearer name reflecting purpose: provides state for command sequence generation
-  - Used by preconditions (`when:`) and generators (`with:`) during sequence generation
 - Documentation of command sequence generation loop in `PropertyDamage.Model` moduledoc
 - New guide: "Building Reusable Components" (`guides/reusable_components.md`)
   - Explains protocols for state access across different state structures
   - Covers reusable command configurations and assertion projections
-
-### Deprecated
-
-- `state_projection/0` callback is deprecated in favor of `command_sequence_state/0`
-  - Old callback still works but emits a deprecation warning
-  - Migration: rename `def state_projection` to `def command_sequence_state`
 
 ## [0.1.0] - 2024-12-27
 

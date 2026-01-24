@@ -186,10 +186,10 @@ defmodule MyApp.TestModel do
   end
 
   @impl true
-  def state_projection, do: ModelState
+  def command_sequence_projection, do: ModelState
 
   @impl true
-  def extra_projections, do: [UserInvariants]
+  def assertion_projections, do: [UserInvariants]
 
   @impl true
   def injectable_events, do: []

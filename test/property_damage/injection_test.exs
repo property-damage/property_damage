@@ -56,8 +56,8 @@ defmodule PropertyDamage.InjectionTest do
 
   # Test model
   defmodule TestModel do
-    def state_projection, do: ResourceProjection
-    def extra_projections, do: []
+    def command_sequence_projection, do: ResourceProjection
+    def assertion_projections, do: []
     def commands, do: [CreateResource, SimpleCommand]
     def simulate(_cmd, _state), do: []
   end

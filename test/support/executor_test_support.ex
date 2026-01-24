@@ -55,10 +55,10 @@ defmodule PropertyDamage.Test.ExecutorModel do
   end
 
   @impl true
-  def state_projection, do: ModelState
+  def command_sequence_projection, do: ModelState
 
   @impl true
-  def extra_projections, do: [TestAssertions]
+  def assertion_projections, do: [TestAssertions]
 
   @impl true
   def simulator, do: __MODULE__
@@ -88,10 +88,10 @@ defmodule PropertyDamage.Test.FailingModel do
   def commands, do: [CreateItem]
 
   @impl true
-  def state_projection, do: ModelState
+  def command_sequence_projection, do: ModelState
 
   @impl true
-  def extra_projections, do: [FailingAssertion]
+  def assertion_projections, do: [FailingAssertion]
 
   @impl true
   def simulator, do: __MODULE__
@@ -167,9 +167,9 @@ defmodule PropertyDamage.Test.SimpleModel do
   def commands, do: [CreateItem, ViewItem]
 
   @impl true
-  def state_projection, do: ModelState
+  def command_sequence_projection, do: ModelState
 
-  # No extra_projections - optional callback
+  # No assertion_projections - optional callback
 end
 
 # ============================================================================
@@ -235,8 +235,8 @@ defmodule PropertyDamage.Test.MultiCheckModel do
   def commands, do: [CreateItem]
 
   @impl true
-  def state_projection, do: ModelState
+  def command_sequence_projection, do: ModelState
 
   @impl true
-  def extra_projections, do: [MultiCheckAssertion]
+  def assertion_projections, do: [MultiCheckAssertion]
 end

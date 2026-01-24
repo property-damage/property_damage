@@ -167,16 +167,16 @@ defmodule PropertyDamage.Replay do
         {:ok, event_queue} = EventQueue.start_link()
 
         # Initialize projections (state projection + extra projections)
-        state_projection = model.state_projection()
+        command_sequence_projection = model.command_sequence_projection()
 
-        extra_projections =
-          if function_exported?(model, :extra_projections, 0) do
-            model.extra_projections()
+        assertion_projections =
+          if function_exported?(model, :assertion_projections, 0) do
+            model.assertion_projections()
           else
             []
           end
 
-        all_projections = [state_projection | extra_projections]
+        all_projections = [command_sequence_projection | assertion_projections]
 
         initial_projections =
           all_projections
@@ -498,16 +498,16 @@ defmodule PropertyDamage.Replay do
   end
 
   defp run_checks(model, projections) do
-    state_projection = model.state_projection()
+    command_sequence_projection = model.command_sequence_projection()
 
-    extra_projections =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
 
-    all_projections = [state_projection | extra_projections]
+    all_projections = [command_sequence_projection | assertion_projections]
 
     # Run assertions for each projection
     # Note: In replay mode, we run all assertions since we can't track step counts

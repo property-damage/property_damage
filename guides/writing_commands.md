@@ -145,8 +145,8 @@ defmodule MyTest.OrderModel do
   @behaviour PropertyDamage.Model.Simulator
 
   def commands, do: [CreateOrder, CancelOrder]
-  def state_projection, do: MyTest.OrderProjection
-  def extra_projections, do: []
+  def command_sequence_projection, do: MyTest.OrderProjection
+  def assertion_projections, do: []
 
   # Return self as the simulator module
   def simulator, do: __MODULE__
@@ -194,8 +194,8 @@ defmodule MyTest.OrderModel do
     ]
   end
 
-  def state_projection, do: MyTest.OrderProjection
-  def extra_projections, do: []
+  def command_sequence_projection, do: MyTest.OrderProjection
+  def assertion_projections, do: []
 
   # Return self as the simulator (delegates to Simulation module)
   def simulator, do: __MODULE__

@@ -731,16 +731,16 @@ defmodule PropertyDamage.Executor do
 
   # Initialize all projection states
   defp init_projections(model) do
-    state_projection = model.state_projection()
+    cmd_seq_projection = model.command_sequence_projection()
 
-    extra_projections =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
 
-    all_projections = [state_projection | extra_projections]
+    all_projections = [cmd_seq_projection | assertion_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
@@ -1618,17 +1618,17 @@ defmodule PropertyDamage.Executor do
        ) do
     require Logger
 
-    # Get all projections that may have assertions (state + extra)
-    state_projection = model.state_projection()
+    # Get all projections that may have assertions
+    cmd_seq_projection = model.command_sequence_projection()
 
-    extra_projections =
-      if function_exported?(model, :extra_projections, 0) do
-        model.extra_projections()
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
       else
         []
       end
 
-    all_projections = [state_projection | extra_projections]
+    all_projections = [cmd_seq_projection | assertion_projections]
 
     result =
       Enum.reduce_while(
@@ -2031,16 +2031,16 @@ defmodule PropertyDamage.Executor do
       state
     else
       # Get all projections
-      state_projection = model.state_projection()
+      cmd_seq_projection = model.command_sequence_projection()
 
-      extra_projections =
-        if function_exported?(model, :extra_projections, 0) do
-          model.extra_projections()
+      assertion_projections =
+        if function_exported?(model, :assertion_projections, 0) do
+          model.assertion_projections()
         else
           []
         end
 
-      all_projections = [state_projection | extra_projections]
+      all_projections = [cmd_seq_projection | assertion_projections]
 
       # For each event, check if any @poll_state assertions should be spawned
       new_pollers =

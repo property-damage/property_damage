@@ -95,8 +95,8 @@ defmodule Mix.Tasks.Pd.Scaffold do
       ]
     end
 
-    def state_projection, do: MyAppTest.Projections.State
-    def extra_projections, do: [MyAppTest.Projections.UniqueUsers]
+    def command_sequence_projection, do: MyAppTest.Projections.State
+    def assertion_projections, do: [MyAppTest.Projections.UniqueUsers]
   end
   ```
 
@@ -1182,14 +1182,14 @@ defmodule Mix.Tasks.Pd.Scaffold do
       end
 
       @impl true
-      def state_projection do
+      def command_sequence_projection do
         # TODO: Add state tracking projection
         # Example: Projections.ResourceState
-        raise "state_projection/0 not implemented - add your state projection module"
+        raise "command_sequence_projection/0 not implemented - add your state projection module"
       end
 
       @impl true
-      def extra_projections do
+      def assertion_projections do
         # TODO: Add extra projections (with @trigger/@poll_state assertions)
         # Example: [Projections.ResourceExists, Projections.ValidState]
         []

@@ -136,7 +136,7 @@ defmodule AuthOnlyModel do
     ]
   end
 
-  def command_sequence_state, do: FlatStateProjection
+  def command_sequence_projection, do: FlatStateProjection
 end
 
 defmodule FullPaymentModel do
@@ -153,7 +153,7 @@ defmodule FullPaymentModel do
     ]
   end
 
-  def command_sequence_state, do: NestedStateProjection
+  def command_sequence_projection, do: NestedStateProjection
 end
 ```
 
