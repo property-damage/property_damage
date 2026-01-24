@@ -9,7 +9,7 @@ defmodule PropertyDamage.Model do
   ## Required Callbacks
 
   - `commands/0` - List of command modules (optionally weighted)
-  - `state_projection/0` - Projection module used for command preconditions
+  - `command_sequence_state/0` - Projection module used for command generation
 
   ## Optional Callbacks
 
@@ -20,6 +20,33 @@ defmodule PropertyDamage.Model do
   - `teardown_each/1` - Cleanup after each execution
   - `teardown_once/1` - Final cleanup after all shrinking complete
   - `terminate?/3` - Control when command generation should stop
+
+  ## Command Sequence Generation
+
+  The framework generates command sequences through this loop:
+
+  1. **State Check**: Get current state from `command_sequence_state/0` projection
+  2. **Filter Commands**: Evaluate each command's `when:` precondition against state
+  3. **Select Command**: Choose from valid commands based on `weight:`
+  4. **Generate Instance**: Call the selected command's `with:` generator with state
+  5. **Simulate Execution**: Call `simulate/2` to predict resulting events
+  6. **Update State**: Apply predicted events to state projection
+  7. **Repeat**: Go to step 2 until sequence length reached
+
+  During execution, real events replace simulated predictions, and assertion
+  projections verify invariants.
+
+  ```
+  command_sequence_state.init()
+    → filter commands by `when:` predicate
+    → select command (weighted random)
+    → generate command data (module generator + `with:` overrides)
+    → simulator.simulate(command, state)
+    → synthetic events
+    → command_sequence_state.apply(events)
+    → updated state
+    → repeat until max_commands or terminate?/3 returns true
+  ```
 
   ## Example
 
@@ -33,7 +60,7 @@ defmodule PropertyDamage.Model do
         def commands, do: [CreateOrder, ViewOrder, CancelOrder]
 
         @impl true
-        def state_projection, do: ModelState
+        def command_sequence_state, do: ModelState
 
         # Optional: additional projections for assertions or extra state tracking
         @impl true
@@ -210,12 +237,30 @@ defmodule PropertyDamage.Model do
   @callback commands() :: [command_spec()]
 
   @doc """
-  Returns the projection module used for state tracking.
+  Returns the projection module used for command sequence generation.
 
   This projection's state is passed to:
-  - `when:` predicates in command specs
-  - `with:` override functions in command specs
-  - `simulate/2` for determining expected events
+  - `when:` predicates in command specs (preconditions)
+  - `with:` override functions in command specs (generators)
+  - `simulate/2` for predicting expected events
+
+  During sequence generation, the simulator predicts events and this projection
+  applies them to update state, enabling valid subsequent command selection.
+
+  ## Example
+
+      @impl true
+      def command_sequence_state, do: MyApp.OrderStateProjection
+  """
+  @callback command_sequence_state() :: module()
+
+  @doc """
+  Returns the projection module used for state tracking.
+
+  **Deprecated**: Use `command_sequence_state/0` instead.
+
+  This callback is kept for backwards compatibility. If both are defined,
+  `command_sequence_state/0` takes precedence.
   """
   @callback state_projection() :: module()
 
@@ -347,7 +392,12 @@ defmodule PropertyDamage.Model do
     teardown_each: 1,
     teardown_once: 1,
     terminate?: 3,
-    simulator: 0
+    simulator: 0,
+    # At least one of these must be implemented:
+    # - command_sequence_state/0 (preferred)
+    # - state_projection/0 (deprecated)
+    command_sequence_state: 0,
+    state_projection: 0
   ]
 
   @typedoc """

@@ -97,21 +97,43 @@ defmodule PropertyDamage.Generator do
     max_commands = Keyword.get(opts, :max_commands, @default_max_commands)
     branching_opts = Keyword.get(opts, :branching, nil)
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
-    state_projection = model.state_projection()
+    command_sequence_state = get_command_sequence_state(model)
 
     StreamData.bind(StreamData.constant(nil), fn _ ->
       if branching_opts do
         do_generate_branching_sequence(
           commands,
-          state_projection,
+          command_sequence_state,
           model,
           max_commands,
           branching_opts
         )
       else
-        do_generate_linear_sequence(commands, state_projection, model, max_commands)
+        do_generate_linear_sequence(commands, command_sequence_state, model, max_commands)
       end
     end)
+  end
+
+  # Returns the projection module for command sequence state.
+  # Prefers command_sequence_state/0, falls back to state_projection/0 with deprecation warning.
+  defp get_command_sequence_state(model) do
+    cond do
+      function_exported?(model, :command_sequence_state, 0) ->
+        model.command_sequence_state()
+
+      function_exported?(model, :state_projection, 0) ->
+        IO.warn(
+          "#{inspect(model)}.state_projection/0 is deprecated. " <>
+            "Use command_sequence_state/0 instead.",
+          []
+        )
+
+        model.state_projection()
+
+      true ->
+        raise ArgumentError,
+              "#{inspect(model)} must implement command_sequence_state/0 callback"
+    end
   end
 
   @doc """
@@ -160,12 +182,12 @@ defmodule PropertyDamage.Generator do
   # Linear Sequence Generation
   # ============================================================================
 
-  defp do_generate_linear_sequence(commands, state_projection, model, max_commands) do
-    initial_state = state_projection.init()
+  defp do_generate_linear_sequence(commands, command_sequence_state, model, max_commands) do
+    initial_state = command_sequence_state.init()
 
     generate_linear_recursive(
       commands,
-      state_projection,
+      command_sequence_state,
       model,
       initial_state,
       max_commands,
@@ -174,11 +196,11 @@ defmodule PropertyDamage.Generator do
     |> StreamData.map(&Sequence.linear/1)
   end
 
-  defp generate_linear_recursive(_commands, _projection, _model, _state, 0, acc) do
+  defp generate_linear_recursive(_commands, _cmd_seq_state, _model, _state, 0, acc) do
     StreamData.constant(Enum.reverse(acc))
   end
 
-  defp generate_linear_recursive(commands, projection, model, state, remaining, acc) do
+  defp generate_linear_recursive(commands, cmd_seq_state, model, state, remaining, acc) do
     valid_commands = filter_valid_commands(commands, state)
 
     case valid_commands do
@@ -191,7 +213,7 @@ defmodule PropertyDamage.Generator do
 
           StreamData.bind(generator, fn command ->
             events = simulate_command(model, state, command)
-            new_state = update_state(state, command, events, projection)
+            new_state = update_state(state, command, events, cmd_seq_state)
             new_acc = [command | acc]
 
             if should_terminate?(model, new_state, command, events) do
@@ -199,7 +221,7 @@ defmodule PropertyDamage.Generator do
             else
               generate_linear_recursive(
                 commands,
-                projection,
+                cmd_seq_state,
                 model,
                 new_state,
                 remaining - 1,
@@ -215,18 +237,18 @@ defmodule PropertyDamage.Generator do
   # Branching Sequence Generation
   # ============================================================================
 
-  defp do_generate_branching_sequence(commands, state_projection, model, max_commands, opts) do
+  defp do_generate_branching_sequence(commands, cmd_seq_state, model, max_commands, opts) do
     branch_probability = Keyword.get(opts, :branch_probability, @default_branch_probability)
     max_branches = Keyword.get(opts, :max_branches, @default_max_branches)
     max_branch_length = Keyword.get(opts, :max_branch_length, @default_max_branch_length)
     min_prefix_length = Keyword.get(opts, :min_prefix_length, @default_min_prefix_length)
 
-    initial_state = state_projection.init()
+    initial_state = cmd_seq_state.init()
 
     # First, generate the prefix (before any branching)
     generate_prefix(
       commands,
-      state_projection,
+      cmd_seq_state,
       model,
       initial_state,
       min_prefix_length,
@@ -240,7 +262,7 @@ defmodule PropertyDamage.Generator do
           # Generate branches
           generate_with_branches(
             commands,
-            state_projection,
+            cmd_seq_state,
             model,
             state_after_prefix,
             prefix,
@@ -252,7 +274,7 @@ defmodule PropertyDamage.Generator do
           # Continue as linear sequence
           generate_linear_recursive(
             commands,
-            state_projection,
+            cmd_seq_state,
             model,
             state_after_prefix,
             remaining,
@@ -266,7 +288,7 @@ defmodule PropertyDamage.Generator do
     end)
   end
 
-  defp generate_prefix(commands, projection, model, state, min_length, max_total, acc) do
+  defp generate_prefix(commands, cmd_seq_state, model, state, min_length, max_total, acc) do
     if length(acc) >= min_length do
       # Met minimum, return what we have
       remaining = max_total - length(acc)
@@ -286,7 +308,7 @@ defmodule PropertyDamage.Generator do
 
             StreamData.bind(generator, fn command ->
               events = simulate_command(model, state, command)
-              new_state = update_state(state, command, events, projection)
+              new_state = update_state(state, command, events, cmd_seq_state)
               new_acc = [command | acc]
 
               if should_terminate?(model, new_state, command, events) do
@@ -295,7 +317,7 @@ defmodule PropertyDamage.Generator do
               else
                 generate_prefix(
                   commands,
-                  projection,
+                  cmd_seq_state,
                   model,
                   new_state,
                   min_length,
@@ -311,7 +333,7 @@ defmodule PropertyDamage.Generator do
 
   defp generate_with_branches(
          commands,
-         projection,
+         cmd_seq_state,
          model,
          state_at_branch,
          prefix,
@@ -330,7 +352,7 @@ defmodule PropertyDamage.Generator do
       for _ <- 1..num_branches do
         generate_branch(
           commands,
-          projection,
+          cmd_seq_state,
           model,
           state_at_branch,
           per_branch_max,
@@ -341,7 +363,7 @@ defmodule PropertyDamage.Generator do
     # Combine all branches
     StreamData.bind(combine_branches(branch_generators), fn branches ->
       # Compute merged state after all branches
-      merged_state = merge_branch_states(state_at_branch, branches, projection, model)
+      merged_state = merge_branch_states(state_at_branch, branches, cmd_seq_state, model)
 
       # Remaining commands for suffix
       branch_command_count = Enum.sum(Enum.map(branches, &length/1))
@@ -350,7 +372,7 @@ defmodule PropertyDamage.Generator do
       # Generate suffix
       generate_linear_recursive(
         commands,
-        projection,
+        cmd_seq_state,
         model,
         merged_state,
         suffix_remaining,
@@ -371,11 +393,11 @@ defmodule PropertyDamage.Generator do
     end)
   end
 
-  defp generate_branch(_commands, _projection, _model, _state, 0, acc) do
+  defp generate_branch(_commands, _cmd_seq_state, _model, _state, 0, acc) do
     StreamData.constant(Enum.reverse(acc))
   end
 
-  defp generate_branch(commands, projection, model, state, remaining, acc) do
+  defp generate_branch(commands, cmd_seq_state, model, state, remaining, acc) do
     valid_commands = filter_valid_commands(commands, state)
 
     case valid_commands do
@@ -393,7 +415,7 @@ defmodule PropertyDamage.Generator do
 
               StreamData.bind(generator, fn command ->
                 events = simulate_command(model, state, command)
-                new_state = update_state(state, command, events, projection)
+                new_state = update_state(state, command, events, cmd_seq_state)
                 new_acc = [command | acc]
 
                 if should_terminate?(model, new_state, command, events) do
@@ -401,7 +423,7 @@ defmodule PropertyDamage.Generator do
                 else
                   generate_branch(
                     commands,
-                    projection,
+                    cmd_seq_state,
                     model,
                     new_state,
                     remaining - 1,
@@ -425,7 +447,7 @@ defmodule PropertyDamage.Generator do
     end)
   end
 
-  defp merge_branch_states(base_state, branches, projection, model) do
+  defp merge_branch_states(base_state, branches, cmd_seq_state, model) do
     # Apply all branch commands to get merged state
     # Note: This is a simplification - real parallel execution would need
     # linearization checking. For generation, we just need a plausible state.
@@ -434,7 +456,7 @@ defmodule PropertyDamage.Generator do
     Enum.reduce(all_branch_commands, base_state, fn command, state ->
       # Simulate and apply
       events = simulate_command(model, state, command)
-      update_state(state, command, events, projection)
+      update_state(state, command, events, cmd_seq_state)
     end)
   end
 
