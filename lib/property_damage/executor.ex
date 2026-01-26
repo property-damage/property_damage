@@ -85,6 +85,7 @@ defmodule PropertyDamage.Executor do
     MockServiceRegistry,
     Linearization,
     StatePoller,
+    ResourcePoller,
     External,
     Placeholder,
     PlaceholderRegistry
@@ -97,6 +98,10 @@ defmodule PropertyDamage.Executor do
   # Process dictionary key for injection context during adapter execution.
   # This allows adapters to inject events mid-execution using ctx.inject.(event).
   @injection_ctx_key :pd_injection_context
+
+  # Process dictionary key for tracking resource pollers started during execute.
+  # This allows collecting pollers spawned by ctx.start_poller.(opts).
+  @resource_pollers_key :pd_resource_pollers
 
   @typedoc """
   Assertion mode controls whether and how assertion failures are handled.
@@ -329,6 +334,7 @@ defmodule PropertyDamage.Executor do
       stutter_config: stutter_config,
       mock_registry: mock_registry,
       active_pollers: [],
+      active_resource_pollers: [],
       model: model
     }
 
@@ -386,6 +392,7 @@ defmodule PropertyDamage.Executor do
       stutter_config: stutter_config,
       mock_registry: mock_registry,
       active_pollers: [],
+      active_resource_pollers: [],
       model: model
     }
 
@@ -641,6 +648,10 @@ defmodule PropertyDamage.Executor do
     pollers = Map.get(state, :active_pollers, [])
     Enum.each(pollers, &StatePoller.stop/1)
 
+    # Stop any active resource pollers when we fail early
+    resource_pollers = Map.get(state, :active_resource_pollers, [])
+    Enum.each(resource_pollers, &ResourcePoller.stop/1)
+
     assertion_failures = Map.get(state, :assertion_failures, [])
 
     # Extract stacktrace from failure reason if embedded
@@ -661,12 +672,16 @@ defmodule PropertyDamage.Executor do
   end
 
   defp finalize_result(state, linearization) do
-    # Finalize all active pollers - wait for them to complete
+    # Finalize all active state pollers - wait for them to complete
     {state, assertion_failures, halt_failure} = finalize_pollers(state)
 
-    # Check if any poller timed out in :halt mode
+    # Check if any state poller timed out in :halt mode
     case halt_failure do
       {:timeout, _id, info} ->
+        # Stop resource pollers - we're failing anyway
+        resource_pollers = Map.get(state, :active_resource_pollers, [])
+        Enum.each(resource_pollers, &ResourcePoller.stop/1)
+
         %{
           success: false,
           event_log: Enum.reverse(state.event_log),
@@ -680,20 +695,42 @@ defmodule PropertyDamage.Executor do
         }
 
       _ ->
-        # In :record mode, success is false if there were any failures recorded
-        success = Enum.empty?(assertion_failures)
+        # Finalize resource pollers
+        {state, resource_failures, resource_halt} = finalize_resource_pollers(state)
 
-        %{
-          success: success,
-          event_log: Enum.reverse(state.event_log),
-          projections: state.projections,
-          refs: state.refs,
-          failed_at_index: nil,
-          failure_reason: nil,
-          stacktrace: nil,
-          linearization: linearization,
-          assertion_failures: assertion_failures
-        }
+        combined_failures = assertion_failures ++ resource_failures
+
+        # Check if any resource poller failed in :halt mode
+        case resource_halt do
+          {:error, _id, reason} ->
+            %{
+              success: false,
+              event_log: Enum.reverse(state.event_log),
+              projections: state.projections,
+              refs: state.refs,
+              failed_at_index: nil,
+              failure_reason: {:resource_poller_error, reason},
+              stacktrace: nil,
+              linearization: linearization,
+              assertion_failures: combined_failures
+            }
+
+          _ ->
+            # In :record mode, success is false if there were any failures recorded
+            success = Enum.empty?(combined_failures)
+
+            %{
+              success: success,
+              event_log: Enum.reverse(state.event_log),
+              projections: state.projections,
+              refs: state.refs,
+              failed_at_index: nil,
+              failure_reason: nil,
+              stacktrace: nil,
+              linearization: linearization,
+              assertion_failures: combined_failures
+            }
+        end
     end
   end
 
@@ -994,8 +1031,31 @@ defmodule PropertyDamage.Executor do
 
         Process.put(@injection_ctx_key, injection_ctx)
 
-        # Add inject function to adapter context
-        adapter_context_with_inject = Map.put(adapter_context, :inject, &inject_event/1)
+        # 2b. Initialize resource poller tracking
+        Process.put(@resource_pollers_key, [])
+
+        # Build start_poller closure for resource polling
+        start_poller_fn = fn opts ->
+          poller =
+            ResourcePoller.start(
+              Keyword.merge(opts,
+                event_queue: event_queue,
+                command_index: index,
+                branch_id: state.branch_id
+              )
+            )
+
+          # Track started poller in process dictionary
+          pollers = Process.get(@resource_pollers_key, [])
+          Process.put(@resource_pollers_key, [poller | pollers])
+          poller
+        end
+
+        # Add inject function and start_poller to adapter context
+        adapter_context_with_inject =
+          adapter_context
+          |> Map.put(:inject, &inject_event/1)
+          |> Map.put(:start_poller, start_poller_fn)
 
         # 3. Execute via adapter (with settle logic for probes/async)
         result =
@@ -1014,6 +1074,10 @@ defmodule PropertyDamage.Executor do
         # Get accumulated state from injection context (includes any injected events)
         final_injection_ctx = Process.get(@injection_ctx_key)
         Process.delete(@injection_ctx_key)
+
+        # Collect resource pollers started during execution
+        started_resource_pollers = Process.get(@resource_pollers_key, [])
+        Process.delete(@resource_pollers_key)
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections
@@ -1103,6 +1167,9 @@ defmodule PropertyDamage.Executor do
                       stutter_config: state.stutter_config,
                       mock_registry: mock_registry,
                       active_pollers: Map.get(state, :active_pollers, []),
+                      active_resource_pollers:
+                        Map.get(state, :active_resource_pollers, []) ++
+                          started_resource_pollers,
                       model: Map.get(state, :model)
                     }
 
@@ -1126,6 +1193,9 @@ defmodule PropertyDamage.Executor do
                       stutter_config: state.stutter_config,
                       mock_registry: mock_registry,
                       active_pollers: Map.get(state, :active_pollers, []),
+                      active_resource_pollers:
+                        Map.get(state, :active_resource_pollers, []) ++
+                          started_resource_pollers,
                       model: Map.get(state, :model)
                     }
 
@@ -1145,6 +1215,9 @@ defmodule PropertyDamage.Executor do
                       stutter_config: state.stutter_config,
                       mock_registry: mock_registry,
                       active_pollers: Map.get(state, :active_pollers, []),
+                      active_resource_pollers:
+                        Map.get(state, :active_resource_pollers, []) ++
+                          started_resource_pollers,
                       model: Map.get(state, :model)
                     }
 
@@ -1165,6 +1238,9 @@ defmodule PropertyDamage.Executor do
                   stutter_config: state.stutter_config,
                   mock_registry: mock_registry,
                   active_pollers: Map.get(state, :active_pollers, []),
+                  active_resource_pollers:
+                    Map.get(state, :active_resource_pollers, []) ++
+                      started_resource_pollers,
                   model: Map.get(state, :model)
                 }
 
@@ -1246,6 +1322,9 @@ defmodule PropertyDamage.Executor do
                       stutter_config: state.stutter_config,
                       mock_registry: mock_registry,
                       active_pollers: Map.get(state, :active_pollers, []),
+                      active_resource_pollers:
+                        Map.get(state, :active_resource_pollers, []) ++
+                          started_resource_pollers,
                       model: Map.get(state, :model)
                     }
 
@@ -1269,6 +1348,9 @@ defmodule PropertyDamage.Executor do
                       stutter_config: state.stutter_config,
                       mock_registry: mock_registry,
                       active_pollers: Map.get(state, :active_pollers, []),
+                      active_resource_pollers:
+                        Map.get(state, :active_resource_pollers, []) ++
+                          started_resource_pollers,
                       model: Map.get(state, :model)
                     }
 
@@ -1288,6 +1370,9 @@ defmodule PropertyDamage.Executor do
                       stutter_config: state.stutter_config,
                       mock_registry: mock_registry,
                       active_pollers: Map.get(state, :active_pollers, []),
+                      active_resource_pollers:
+                        Map.get(state, :active_resource_pollers, []) ++
+                          started_resource_pollers,
                       model: Map.get(state, :model)
                     }
 
@@ -1308,6 +1393,9 @@ defmodule PropertyDamage.Executor do
                   stutter_config: state.stutter_config,
                   mock_registry: mock_registry,
                   active_pollers: Map.get(state, :active_pollers, []),
+                  active_resource_pollers:
+                    Map.get(state, :active_resource_pollers, []) ++
+                      started_resource_pollers,
                   model: Map.get(state, :model)
                 }
 
@@ -1555,7 +1643,7 @@ defmodule PropertyDamage.Executor do
     end)
   end
 
-  # Drain and process events from injector adapters
+  # Drain and process events from injector adapters and resource pollers
   defp process_injector_events(nil, event_log, projections, _branch_id),
     do: {projections, event_log}
 
@@ -1563,15 +1651,30 @@ defmodule PropertyDamage.Executor do
     entries = EventQueue.drain(event_queue)
 
     Enum.reduce(entries, {projections, event_log}, fn queue_entry, {projs, log} ->
-      entry = %Entry{
-        timestamp: queue_entry.timestamp,
-        command_index: nil,
-        event: queue_entry.event,
-        source: :injector,
-        injector_adapter: queue_entry.adapter_module,
-        nemesis_module: nil,
-        branch_id: branch_id
-      }
+      # Build entry based on source type
+      entry =
+        case queue_entry do
+          %{source: :resource_poller} ->
+            Entry.from_resource_poller(
+              queue_entry.event,
+              queue_entry.command_index,
+              queue_entry.poller_id,
+              timestamp: queue_entry.timestamp,
+              branch_id: queue_entry.branch_id || branch_id
+            )
+
+          _ ->
+            # Regular injector adapter entry
+            %Entry{
+              timestamp: queue_entry.timestamp,
+              command_index: nil,
+              event: queue_entry.event,
+              source: :injector,
+              injector_adapter: queue_entry.adapter_module,
+              nemesis_module: nil,
+              branch_id: branch_id
+            }
+        end
 
       new_projs = update_projections(projs, queue_entry.event)
       {new_projs, [entry | log]}
@@ -2167,6 +2270,113 @@ defmodule PropertyDamage.Executor do
       updated_state = %{state | active_pollers: []}
       {updated_state, assertion_failures ++ new_failures, halt_failure}
     end
+  end
+
+  @doc false
+  # Finalize all active resource pollers - wait for them to complete or timeout/error
+  # Returns {state, failures, halt_failure}
+  defp finalize_resource_pollers(state) do
+    pollers = Map.get(state, :active_resource_pollers, [])
+    assertion_mode = Map.get(state, :assertion_mode, :halt)
+
+    if Enum.empty?(pollers) do
+      {state, [], nil}
+    else
+      # Wait for all resource pollers to complete
+      results = ResourcePoller.await_all(pollers)
+
+      # Process results - separate successes from failures
+      {failed_pollers, _succeeded} =
+        Enum.split_with(results, fn {_id, result} ->
+          case result do
+            {:success, _} -> false
+            {:timeout_ignored, _} -> false
+            {:error, _, _} -> true
+          end
+        end)
+
+      # Handle failures based on assertion_mode
+      new_failures =
+        case assertion_mode do
+          :halt ->
+            # In halt mode, we don't record - we'll return error
+            []
+
+          :record ->
+            # Record all resource poller errors
+            Enum.map(failed_pollers, fn {_id, result} ->
+              resource_poller_result_to_failure(result)
+            end)
+
+          :log ->
+            # Log and continue
+            require Logger
+
+            for {_id, result} <- failed_pollers do
+              case result do
+                {:error, id, reason} ->
+                  message = format_resource_poller_error(reason)
+                  Logger.warning("Resource poller #{inspect(id)} error: #{message}")
+              end
+            end
+
+            []
+
+          :disabled ->
+            []
+        end
+
+      # Check if we should halt
+      halt_failure =
+        if assertion_mode == :halt and not Enum.empty?(failed_pollers) do
+          [{_id, first_failure} | _] = failed_pollers
+          first_failure
+        else
+          nil
+        end
+
+      updated_state = %{state | active_resource_pollers: []}
+      {updated_state, new_failures, halt_failure}
+    end
+  end
+
+  defp resource_poller_result_to_failure({:error, id, reason}) do
+    %{
+      assertion_name: :resource_poller,
+      reason: {:resource_poller_error, reason},
+      command: nil,
+      command_index: nil,
+      step_type: :resource_poll,
+      module: nil,
+      timestamp: System.monotonic_time(:millisecond),
+      resource_poller_id: id
+    }
+  end
+
+  # Format resource poller errors for logging
+  # Uses Exception.message/1 for exceptions, inspect for other terms
+  defp format_resource_poller_error({:poll_fn_error, exception, _stacktrace}) do
+    "poll_fn raised: #{Exception.message(exception)}"
+  end
+
+  defp format_resource_poller_error({:handler_error, exception, _stacktrace}) do
+    "handler raised: #{Exception.message(exception)}"
+  end
+
+  defp format_resource_poller_error({:on_timeout_error, exception, _stacktrace}) do
+    "on_timeout raised: #{Exception.message(exception)}"
+  end
+
+  defp format_resource_poller_error({:timeout, info}) do
+    "timeout after #{info.elapsed_ms}ms (#{info.poll_count} polls)"
+  end
+
+  defp format_resource_poller_error(%{__exception__: true} = exception) do
+    Exception.message(exception)
+  end
+
+  defp format_resource_poller_error(reason) do
+    inspect(reason)
   end
 
   defp timeout_to_failure({:timeout, _id, info}) do

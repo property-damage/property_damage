@@ -163,6 +163,7 @@ defmodule PropertyDamage.Adapter do
   |-----|------|-------------|
   | *(from setup)* | any | Whatever your `setup/1` returned (e.g., `:client`, `:conn`) |
   | `:inject` | function | Call with event to inject it immediately into projections |
+  | `:start_poller` | function | Start a background resource poller (see ResourcePoller) |
   | `:stutter` | map | Present only during retry executions (stutter/idempotency testing) |
 
   The `:stutter` map (when present) contains:
@@ -209,6 +210,7 @@ defmodule PropertyDamage.Adapter do
   This map contains:
   - All keys from your `user_context()` returned by `setup/1`
   - `:inject` - Function to inject events mid-execution (always present)
+  - `:start_poller` - Function to start background resource polling (always present)
   - `:stutter` - Stutter context (only present during retry executions)
 
   ## Example
@@ -219,6 +221,14 @@ defmodule PropertyDamage.Adapter do
 
         # Inject events mid-execution (for async commands)
         context.inject.(%OrderCreated{id: id})
+
+        # Start a background poller for async resources
+        context.start_poller.(
+          poll_fn: fn -> check_status(client, id) end,
+          handler: fn response -> handle_status(response) end,
+          interval_ms: 500,
+          timeout_ms: 30_000
+        )
 
         # Check for stutter/retry context
         case context do
@@ -231,6 +241,7 @@ defmodule PropertyDamage.Adapter do
   """
   @type context :: %{
           :inject => (struct() -> :ok),
+          :start_poller => (keyword() -> PropertyDamage.ResourcePoller.t()),
           optional(:stutter) => stutter_context(),
           optional(atom()) => any()
         }

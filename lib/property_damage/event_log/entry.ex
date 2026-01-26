@@ -7,7 +7,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Event Sources
 
-  Events can come from seven sources:
+  Events can come from eight sources:
 
   1. **Command events** (`:command` source) - Events produced by executing
      commands against the SUT. These have a `command_index` indicating
@@ -40,6 +40,12 @@ defmodule PropertyDamage.EventLog.Entry do
      batch all events at the end. They have a `command_index` indicating
      which command's adapter injected them.
 
+  8. **Resource poller events** (`:resource_poller` source) - Events injected
+     by background resource pollers started via `ctx.start_poller.(opts)`.
+     These are processed between commands when the EventQueue is drained.
+     They have a `command_index` indicating which command started the poller,
+     and a `resource_poller_id` identifying the specific poller instance.
+
   ## Example Event Log
 
       [
@@ -66,7 +72,7 @@ defmodule PropertyDamage.EventLog.Entry do
   - `timestamp` - Monotonic time in milliseconds when event was recorded
   - `command_index` - Index of command that produced this event (nil for injected/telemetry events)
   - `event` - The actual event struct
-  - `source` - One of `:command`, `:injector`, `:nemesis`, `:telemetry`, `:stutter`, `:mock`, or `:injected`
+  - `source` - One of `:command`, `:injector`, `:nemesis`, `:telemetry`, `:stutter`, `:mock`, `:injected`, or `:resource_poller`
   - `injector_adapter` - Module that received the event (only for `:injector` source)
   - `nemesis_module` - Module that produced the event (only for `:nemesis` source)
   - `telemetry_receiver` - Module that received the span (only for `:telemetry` source)
@@ -75,12 +81,21 @@ defmodule PropertyDamage.EventLog.Entry do
   - `branch_id` - Branch identifier for parallel execution (nil for linear sequences)
   - `stutter_attempt` - Attempt number for stutter retries (only for `:stutter` source)
   - `stutter_comparison` - Comparison result with original events (only for `:stutter` source)
+  - `resource_poller_id` - Reference identifying the poller instance (only for `:resource_poller` source)
   """
   @type t :: %__MODULE__{
           timestamp: integer(),
           command_index: non_neg_integer() | nil,
           event: struct(),
-          source: :command | :injector | :nemesis | :telemetry | :stutter | :mock | :injected,
+          source:
+            :command
+            | :injector
+            | :nemesis
+            | :telemetry
+            | :stutter
+            | :mock
+            | :injected
+            | :resource_poller,
           injector_adapter: module() | nil,
           nemesis_module: module() | nil,
           telemetry_receiver: module() | nil,
@@ -88,7 +103,8 @@ defmodule PropertyDamage.EventLog.Entry do
           span_id: String.t() | nil,
           branch_id: non_neg_integer() | nil,
           stutter_attempt: pos_integer() | nil,
-          stutter_comparison: :match | {:mismatch, map()} | nil
+          stutter_comparison: :match | {:mismatch, map()} | nil,
+          resource_poller_id: reference() | nil
         }
 
   defstruct [
@@ -103,7 +119,8 @@ defmodule PropertyDamage.EventLog.Entry do
     :span_id,
     :branch_id,
     :stutter_attempt,
-    :stutter_comparison
+    :stutter_comparison,
+    :resource_poller_id
   ]
 
   @doc """
@@ -464,4 +481,62 @@ defmodule PropertyDamage.EventLog.Entry do
   @spec injected?(t()) :: boolean()
   def injected?(%__MODULE__{source: :injected}), do: true
   def injected?(%__MODULE__{}), do: false
+
+  @doc """
+  Create a new entry for a resource poller event.
+
+  Resource poller events are injected by background pollers started via
+  `ctx.start_poller.(opts)`. They are processed between commands when
+  the EventQueue is drained.
+
+  ## Parameters
+
+  - `event` - The event struct
+  - `command_index` - Index of the command that started the poller
+  - `poller_id` - Reference identifying the poller instance
+
+  ## Options
+
+  - `:timestamp` - Override timestamp (default: current monotonic time)
+  - `:branch_id` - Branch identifier for parallel execution
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_resource_poller(%StatusChanged{}, 3, make_ref())
+      iex> entry.source
+      :resource_poller
+      iex> entry.command_index
+      3
+  """
+  @spec from_resource_poller(struct(), non_neg_integer(), reference(), keyword()) :: t()
+  def from_resource_poller(event, command_index, poller_id, opts \\ []) do
+    %__MODULE__{
+      timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
+      command_index: command_index,
+      event: event,
+      source: :resource_poller,
+      injector_adapter: nil,
+      nemesis_module: nil,
+      telemetry_receiver: nil,
+      trace_id: nil,
+      span_id: nil,
+      branch_id: Keyword.get(opts, :branch_id),
+      stutter_attempt: nil,
+      stutter_comparison: nil,
+      resource_poller_id: poller_id
+    }
+  end
+
+  @doc """
+  Check if an entry was injected by a resource poller.
+
+  ## Examples
+
+      iex> entry = PropertyDamage.EventLog.Entry.from_resource_poller(%SomeEvent{}, 0, make_ref())
+      iex> PropertyDamage.EventLog.Entry.resource_poller?(entry)
+      true
+  """
+  @spec resource_poller?(t()) :: boolean()
+  def resource_poller?(%__MODULE__{source: :resource_poller}), do: true
+  def resource_poller?(%__MODULE__{}), do: false
 end

@@ -118,6 +118,39 @@ defmodule PropertyDamage.EventQueue do
   end
 
   @doc """
+  Push an event from a resource poller.
+
+  Events are timestamped automatically with monotonic time and tagged
+  with their source as `:resource_poller`.
+
+  ## Parameters
+
+  - `queue` - The event queue pid
+  - `poller_id` - Reference identifying the poller instance
+  - `command_index` - Index of the command that started the poller
+  - `event` - The event struct
+  - `branch_id` - Optional branch identifier for parallel execution
+
+  ## Example
+
+      EventQueue.push_from_poller(queue, poller_ref, 5, %StatusChanged{id: "123"}, nil)
+  """
+  @spec push_from_poller(pid(), reference(), non_neg_integer(), struct(), non_neg_integer() | nil) ::
+          :ok
+  def push_from_poller(queue, poller_id, command_index, event, branch_id \\ nil) do
+    entry = %{
+      event: event,
+      source: :resource_poller,
+      poller_id: poller_id,
+      command_index: command_index,
+      branch_id: branch_id,
+      timestamp: System.monotonic_time(:millisecond)
+    }
+
+    Agent.update(queue, fn events -> events ++ [entry] end)
+  end
+
+  @doc """
   Drain all pending events.
 
   Returns the list of events and clears the queue. Events are returned
