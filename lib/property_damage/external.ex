@@ -1,3 +1,33 @@
+defprotocol PropertyDamage.ExternalMarker do
+  @moduledoc """
+  Protocol for custom external marker types.
+
+  Domain libraries can define their own external marker types that implement
+  this protocol, enabling external field markers without depending on PropertyDamage.
+
+  ## Example
+
+      defmodule MyDomain.ExternalId do
+        defstruct [:field_name]
+      end
+
+      defimpl PropertyDamage.ExternalMarker, for: MyDomain.ExternalId do
+        def external?(_), do: true
+      end
+
+  Then in your test project, these markers will be recognized automatically.
+  """
+
+  @doc "Returns true if this value is an external marker"
+  @fallback_to_any true
+  @spec external?(term()) :: boolean()
+  def external?(value)
+end
+
+defimpl PropertyDamage.ExternalMarker, for: Any do
+  def external?(_), do: false
+end
+
 defmodule PropertyDamage.External do
   @moduledoc """
   Sentinel value marking a field as server-generated (external).
@@ -60,6 +90,19 @@ defmodule PropertyDamage.External do
         ]
       end
 
+  ## Custom External Markers
+
+  Domain libraries that don't depend on PropertyDamage can use atom sentinels
+  or custom structs implementing the `PropertyDamage.ExternalMarker` protocol:
+
+      # In domain library (no PropertyDamage dependency)
+      defmodule MyDomain.Events.OrderCreated do
+        defstruct [id: :__external__, :amount]
+      end
+
+      # In test project
+      PropertyDamage.run(model: M, adapter: A, external_markers: [:__external__])
+
   ## Limitations
 
   Variable-length lists where the count isn't known at struct definition
@@ -96,6 +139,11 @@ defmodule PropertyDamage.External do
   @doc """
   Check if a value is an external marker.
 
+  Recognizes:
+  - `%PropertyDamage.External{}` struct (always)
+  - Atoms configured in app config `:property_damage, :external_markers`
+  - Values implementing `PropertyDamage.ExternalMarker` protocol
+
   ## Examples
 
       iex> PropertyDamage.External.external?(%PropertyDamage.External{})
@@ -103,13 +151,52 @@ defmodule PropertyDamage.External do
 
       iex> PropertyDamage.External.external?("some_id")
       false
+
+      # With app config: config :property_damage, external_markers: [:__external__]
+      # PropertyDamage.External.external?(:__external__)
+      # => true
   """
   @spec external?(term()) :: boolean()
   def external?(%__MODULE__{}), do: true
-  def external?(_), do: false
+
+  def external?(value) when is_atom(value) and not is_nil(value) do
+    markers = Application.get_env(:property_damage, :external_markers, [])
+    value in markers
+  end
+
+  def external?(value) do
+    PropertyDamage.ExternalMarker.external?(value)
+  end
+
+  @doc """
+  Check if a value is an external marker with explicit markers list.
+
+  The explicit markers list is combined with app config markers.
+
+  ## Examples
+
+      iex> PropertyDamage.External.external?(:__external__, [:__external__])
+      true
+
+      iex> PropertyDamage.External.external?(%PropertyDamage.External{}, [])
+      true
+  """
+  @spec external?(term(), [atom()]) :: boolean()
+  def external?(%__MODULE__{}, _markers), do: true
+
+  def external?(value, markers) when is_atom(value) and not is_nil(value) and is_list(markers) do
+    app_markers = Application.get_env(:property_damage, :external_markers, [])
+    value in markers or value in app_markers
+  end
+
+  def external?(value, _markers) do
+    PropertyDamage.ExternalMarker.external?(value)
+  end
 
   @doc """
   Get paths to fields marked as external() in a struct module.
+
+  Uses app config markers only. For explicit markers, use `external_paths/2`.
 
   Returns a list of paths where each path is a list of keys/indices.
   Paths are returned in depth-first order.
@@ -130,39 +217,56 @@ defmodule PropertyDamage.External do
   """
   @spec external_paths(module()) :: [[atom() | non_neg_integer()]]
   def external_paths(module) when is_atom(module) do
+    external_paths(module, [])
+  end
+
+  @doc """
+  Get paths to fields marked as external() in a struct module with explicit markers.
+
+  The explicit markers list is combined with app config markers.
+
+  ## Examples
+
+      # Domain library uses :__external__ as marker
+      External.external_paths(DomainEvent, [:__external__])
+      #=> [[:id]]
+  """
+  @spec external_paths(module(), [atom()]) :: [[atom() | non_neg_integer()]]
+  def external_paths(module, markers) when is_atom(module) and is_list(markers) do
     module.__struct__()
     |> Map.from_struct()
-    |> find_external_paths([], [])
+    |> find_external_paths([], [], markers)
     |> Enum.reverse()
   end
 
-  defp find_external_paths(%__MODULE__{}, current_path, acc) do
-    [Enum.reverse(current_path) | acc]
-  end
+  defp find_external_paths(value, current_path, acc, markers) do
+    cond do
+      external?(value, markers) ->
+        [Enum.reverse(current_path) | acc]
 
-  defp find_external_paths(%{__struct__: _} = struct, current_path, acc) do
-    struct
-    |> Map.from_struct()
-    |> Enum.reduce(acc, fn {key, value}, acc ->
-      find_external_paths(value, [key | current_path], acc)
-    end)
-  end
+      is_struct(value) ->
+        value
+        |> Map.from_struct()
+        |> Enum.reduce(acc, fn {key, v}, a ->
+          find_external_paths(v, [key | current_path], a, markers)
+        end)
 
-  defp find_external_paths(map, current_path, acc) when is_map(map) do
-    Enum.reduce(map, acc, fn {key, value}, acc ->
-      find_external_paths(value, [key | current_path], acc)
-    end)
-  end
+      is_map(value) ->
+        Enum.reduce(value, acc, fn {key, v}, a ->
+          find_external_paths(v, [key | current_path], a, markers)
+        end)
 
-  defp find_external_paths(list, current_path, acc) when is_list(list) do
-    list
-    |> Enum.with_index()
-    |> Enum.reduce(acc, fn {value, index}, acc ->
-      find_external_paths(value, [index | current_path], acc)
-    end)
-  end
+      is_list(value) ->
+        value
+        |> Enum.with_index()
+        |> Enum.reduce(acc, fn {v, index}, a ->
+          find_external_paths(v, [index | current_path], a, markers)
+        end)
 
-  defp find_external_paths(_other, _current_path, acc), do: acc
+      true ->
+        acc
+    end
+  end
 
   @doc """
   Get the value at a path in a nested structure.
@@ -222,6 +326,8 @@ defmodule PropertyDamage.External do
   @doc """
   Check if a data structure contains any external markers.
 
+  Uses app config markers only. For explicit markers, use `contains_external?/2`.
+
   Useful for validation - commands should not contain externals.
 
   ## Example
@@ -233,36 +339,59 @@ defmodule PropertyDamage.External do
       false
   """
   @spec contains_external?(term()) :: boolean()
-  def contains_external?(%__MODULE__{}), do: true
+  def contains_external?(value), do: contains_external?(value, [])
 
-  def contains_external?(%{__struct__: _} = struct) do
+  @doc """
+  Check if a data structure contains any external markers with explicit markers list.
+
+  The explicit markers list is combined with app config markers.
+
+  ## Example
+
+      iex> PropertyDamage.External.contains_external?(%{id: :__external__}, [:__external__])
+      true
+  """
+  @spec contains_external?(term(), [atom()]) :: boolean()
+  def contains_external?(%__MODULE__{}, _markers), do: true
+
+  def contains_external?(value, markers) when is_atom(value) and not is_nil(value) do
+    external?(value, markers)
+  end
+
+  def contains_external?(%{__struct__: _} = struct, markers) do
     struct
     |> Map.from_struct()
     |> Map.values()
-    |> Enum.any?(&contains_external?/1)
+    |> Enum.any?(&contains_external?(&1, markers))
   end
 
-  def contains_external?(map) when is_map(map) do
+  def contains_external?(map, markers) when is_map(map) do
     map
     |> Map.values()
-    |> Enum.any?(&contains_external?/1)
+    |> Enum.any?(&contains_external?(&1, markers))
   end
 
-  def contains_external?(list) when is_list(list) do
-    Enum.any?(list, &contains_external?/1)
+  def contains_external?(list, markers) when is_list(list) do
+    Enum.any?(list, &contains_external?(&1, markers))
   end
 
-  def contains_external?(tuple) when is_tuple(tuple) do
+  def contains_external?(tuple, markers) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list()
-    |> Enum.any?(&contains_external?/1)
+    |> Enum.any?(&contains_external?(&1, markers))
   end
 
-  def contains_external?(_), do: false
+  def contains_external?(value, markers) do
+    PropertyDamage.ExternalMarker.external?(value) or external?(value, markers)
+  end
 end
 
 defimpl Inspect, for: PropertyDamage.External do
   def inspect(_external, _opts) do
     "external()"
   end
+end
+
+defimpl PropertyDamage.ExternalMarker, for: PropertyDamage.External do
+  def external?(_), do: true
 end

@@ -59,7 +59,8 @@ defmodule PropertyDamage.SeedLibrary do
           last_run: String.t() | nil,
           status: :failing | :fixed | :flaky | :unknown,
           run_count: non_neg_integer(),
-          fail_count: non_neg_integer()
+          fail_count: non_neg_integer(),
+          dependency_versions: %{atom() => String.t()}
         }
 
   @type t :: %{
@@ -107,7 +108,8 @@ defmodule PropertyDamage.SeedLibrary do
       last_run: nil,
       status: :failing,
       run_count: 0,
-      fail_count: 0
+      fail_count: 0,
+      dependency_versions: PropertyDamage.Persistence.capture_dependency_versions(failure)
     }
 
     # Check for duplicate seed
@@ -144,7 +146,8 @@ defmodule PropertyDamage.SeedLibrary do
       last_run: nil,
       status: Keyword.get(opts, :status, :unknown),
       run_count: 0,
-      fail_count: 0
+      fail_count: 0,
+      dependency_versions: Keyword.get(opts, :dependency_versions, %{})
     }
 
     if Enum.any?(library.entries, &(&1.seed == seed)) do
@@ -258,16 +261,19 @@ defmodule PropertyDamage.SeedLibrary do
   def load(path \\ @default_file) do
     with {:ok, content} <- File.read(path),
          {:ok, data} <- Jason.decode(content, keys: :atoms) do
-      # Convert string status to atoms
+      # Convert string status to atoms and handle dependency_versions
       entries =
         Enum.map(data.entries, fn entry ->
-          %{
+          base = %{
             entry
             | status: to_status_atom(entry.status),
               failure_type: to_atom_safe(entry.failure_type),
               check_name: to_atom_safe(entry.check_name),
               tags: Enum.map(entry.tags, &to_atom_safe/1)
           }
+
+          # Handle dependency_versions field (may be missing in old libraries)
+          Map.put(base, :dependency_versions, atomize_dep_versions(entry[:dependency_versions]))
         end)
 
       {:ok, %{data | entries: entries}}
@@ -342,7 +348,8 @@ defmodule PropertyDamage.SeedLibrary do
             last_run: nil,
             status: to_status_atom(e.status),
             run_count: 0,
-            fail_count: 0
+            fail_count: 0,
+            dependency_versions: atomize_dep_versions(e[:dependency_versions] || %{})
           }
         end)
 
@@ -428,6 +435,12 @@ defmodule PropertyDamage.SeedLibrary do
   defp to_atom_safe(nil), do: nil
   defp to_atom_safe(atom) when is_atom(atom), do: atom
   defp to_atom_safe(string) when is_binary(string), do: String.to_atom(string)
+
+  defp atomize_dep_versions(nil), do: %{}
+
+  defp atomize_dep_versions(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_atom_safe(k), v} end)
+  end
 
   defp status_icon(:failing), do: "x"
   defp status_icon(:fixed), do: "o"

@@ -164,6 +164,7 @@ defmodule PropertyDamage.Executor do
     stutter_config = Keyword.get(opts, :stutter_config)
     mock_registry = Keyword.get(opts, :mock_registry)
     assertion_mode = Keyword.get(opts, :assertion_mode, :halt)
+    external_markers = Keyword.get(opts, :external_markers, [])
 
     with {:ok, adapter_context} <- adapter.setup(adapter_config) do
       try do
@@ -176,7 +177,8 @@ defmodule PropertyDamage.Executor do
             event_queue,
             stutter_config,
             mock_registry,
-            assertion_mode
+            assertion_mode,
+            external_markers
           )
 
         {:ok, result}
@@ -220,7 +222,8 @@ defmodule PropertyDamage.Executor do
           pid() | nil,
           Stutter.Config.t() | nil,
           pid() | nil,
-          assertion_mode()
+          assertion_mode(),
+          [atom()]
         ) ::
           result()
   def execute_sequence(
@@ -231,7 +234,8 @@ defmodule PropertyDamage.Executor do
         event_queue \\ nil,
         stutter_config \\ nil,
         mock_registry \\ nil,
-        assertion_mode \\ :halt
+        assertion_mode \\ :halt,
+        external_markers \\ []
       )
 
   def execute_sequence(
@@ -242,7 +246,8 @@ defmodule PropertyDamage.Executor do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode
+        assertion_mode,
+        external_markers
       ) do
     # Linear sequence: just execute prefix ++ suffix
     commands = Sequence.to_list(sequence)
@@ -255,7 +260,8 @@ defmodule PropertyDamage.Executor do
       event_queue,
       stutter_config,
       mock_registry,
-      assertion_mode
+      assertion_mode,
+      external_markers
     )
   end
 
@@ -267,7 +273,8 @@ defmodule PropertyDamage.Executor do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode
+        assertion_mode,
+        external_markers
       ) do
     # Branching sequence: execute prefix, branches, suffix
     execute_branching(
@@ -278,7 +285,8 @@ defmodule PropertyDamage.Executor do
       event_queue,
       stutter_config,
       mock_registry,
-      assertion_mode
+      assertion_mode,
+      external_markers
     )
   end
 
@@ -291,7 +299,8 @@ defmodule PropertyDamage.Executor do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode
+        assertion_mode,
+        external_markers
       )
       when is_list(commands) do
     execute_linear(
@@ -302,7 +311,8 @@ defmodule PropertyDamage.Executor do
       event_queue,
       stutter_config,
       mock_registry,
-      assertion_mode
+      assertion_mode,
+      external_markers
     )
   end
 
@@ -318,7 +328,8 @@ defmodule PropertyDamage.Executor do
          event_queue,
          stutter_config,
          mock_registry,
-         assertion_mode
+         assertion_mode,
+         external_markers
        ) do
     initial_state = %{
       event_log: [],
@@ -335,7 +346,8 @@ defmodule PropertyDamage.Executor do
       mock_registry: mock_registry,
       active_pollers: [],
       active_resource_pollers: [],
-      model: model
+      model: model,
+      external_markers: external_markers
     }
 
     result =
@@ -374,7 +386,8 @@ defmodule PropertyDamage.Executor do
          event_queue,
          stutter_config,
          mock_registry,
-         assertion_mode
+         assertion_mode,
+         external_markers
        ) do
     %Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence
 
@@ -393,7 +406,8 @@ defmodule PropertyDamage.Executor do
       mock_registry: mock_registry,
       active_pollers: [],
       active_resource_pollers: [],
-      model: model
+      model: model,
+      external_markers: external_markers
     }
 
     # Phase 1: Execute prefix
@@ -789,10 +803,6 @@ defmodule PropertyDamage.Executor do
     mock_registry = Map.get(state, :mock_registry)
 
     cond do
-      # Check if this is a mock_config command
-      mock_config_command?(command) ->
-        execute_mock_config_command(command, index, state, model, mock_registry)
-
       # Check if this is a nemesis command
       Nemesis.nemesis_command?(command) ->
         execute_nemesis_command(command, index, state, model, adapter_context, event_queue)
@@ -809,86 +819,6 @@ defmodule PropertyDamage.Executor do
           event_queue,
           mock_registry
         )
-    end
-  end
-
-  # Check if command has semantics :mock_config
-  defp mock_config_command?(command) when is_struct(command) do
-    module = command.__struct__
-
-    if function_exported?(module, :semantics, 0) do
-      module.semantics() == :mock_config
-    else
-      false
-    end
-  end
-
-  defp mock_config_command?(_), do: false
-
-  # Execute a mock_config command (notifies mocks, doesn't execute against SUT)
-  defp execute_mock_config_command(command, index, state, model, mock_registry) do
-    # Notify mock registry of the command
-    if mock_registry do
-      MockServiceRegistry.notify_command(mock_registry, command)
-    end
-
-    # Update projections with command (mock configs can affect model state)
-    projections = update_projections(state.projections, command)
-
-    assertion_mode = Map.get(state, :assertion_mode, :halt)
-    assertion_failures = Map.get(state, :assertion_failures, [])
-
-    # Run checks
-    check_ctx = %{
-      command: command,
-      events: [],
-      command_index: index,
-      step_count: state.step_count + 1,
-      projections: projections,
-      branch_id: state.branch_id
-    }
-
-    case run_checks(
-           model,
-           projections,
-           check_ctx,
-           state.assertion_counters,
-           assertion_mode,
-           assertion_failures
-         ) do
-      {:ok, assertion_counters, updated_failures} ->
-        new_state = %{
-          event_log: state.event_log,
-          projections: projections,
-          projections_before: state.projections_before,
-          refs: state.refs,
-          step_count: state.step_count + 1,
-          assertion_counters: assertion_counters,
-          assertion_failures: updated_failures,
-          assertion_mode: assertion_mode,
-          branch_id: state.branch_id,
-          stutter_config: state.stutter_config,
-          mock_registry: mock_registry
-        }
-
-        {:ok, new_state}
-
-      {:error, assertion_name, reason, assertion_counters} ->
-        failed_state = %{
-          event_log: state.event_log,
-          projections: projections,
-          projections_before: state.projections_before,
-          refs: state.refs,
-          step_count: state.step_count + 1,
-          assertion_counters: assertion_counters,
-          assertion_failures: assertion_failures,
-          assertion_mode: assertion_mode,
-          branch_id: state.branch_id,
-          stutter_config: state.stutter_config,
-          mock_registry: mock_registry
-        }
-
-        {:error, {:assertion_failed, assertion_name, reason}, failed_state}
     end
   end
 
@@ -1093,7 +1023,10 @@ defmodule PropertyDamage.Executor do
             refs = maybe_bind_ref(command, events, base_refs)
 
             # 4b. Resolve external values from events (new placeholder system)
-            updated_registry = resolve_externals_from_events(events, index, placeholder_registry)
+            external_markers = Map.get(state, :external_markers, [])
+
+            updated_registry =
+              resolve_externals_from_events(events, index, placeholder_registry, external_markers)
 
             # 5. Update projections with command
             projections = update_projections(base_projections, resolved_command)
@@ -1252,7 +1185,10 @@ defmodule PropertyDamage.Executor do
             refs = maybe_bind_ref(command, events, base_refs)
 
             # Resolve external values from events (new placeholder system)
-            updated_registry = resolve_externals_from_events(events, index, placeholder_registry)
+            external_markers = Map.get(state, :external_markers, [])
+
+            updated_registry =
+              resolve_externals_from_events(events, index, placeholder_registry, external_markers)
 
             projections = update_projections(base_projections, resolved_command)
 
@@ -2614,14 +2550,15 @@ defmodule PropertyDamage.Executor do
 
   # Process executed events to resolve externals in the placeholder registry.
   # For each event, detect external paths and resolve placeholders with real values.
-  defp resolve_externals_from_events(events, command_index, registry) do
+  defp resolve_externals_from_events(events, command_index, registry, external_markers) do
     events
     |> Enum.with_index()
     |> Enum.reduce(registry, fn {event, event_index}, reg ->
       event_module = event.__struct__
 
       # Get paths that were marked as external() in the struct definition
-      external_paths = External.external_paths(event_module)
+      # Uses both the PropertyDamage.External struct and any custom markers
+      external_paths = External.external_paths(event_module, external_markers)
 
       # For each external path, extract the real value and resolve the placeholder
       Enum.reduce(external_paths, reg, fn path, r ->

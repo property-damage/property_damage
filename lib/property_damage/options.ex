@@ -72,6 +72,25 @@ defmodule PropertyDamage.Options do
       default: [],
       doc: "List of InjectorAdapter modules for event injection."
     ],
+    external_markers: [
+      type: {:list, :atom},
+      default: [],
+      doc: """
+      Additional atoms to treat as external markers.
+
+      This allows domain libraries to mark server-generated fields without
+      depending on PropertyDamage:
+
+          # In domain library (no PropertyDamage dependency)
+          defstruct [id: :__external__, :amount]
+
+          # In test project
+          PropertyDamage.run(model: M, adapter: A, external_markers: [:__external__])
+
+      These markers are combined with any markers configured in app config
+      via `config :property_damage, external_markers: [...]`.
+      """
+    ],
     adapter_config: [
       type: :map,
       default: %{},

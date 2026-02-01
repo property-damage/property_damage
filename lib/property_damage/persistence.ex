@@ -38,10 +38,15 @@ defmodule PropertyDamage.Persistence do
   Example: `2025-12-26T14-30-00-check_failed-NonNegativeBalance-seed512902757.pd`
   """
 
-  alias PropertyDamage.FailureReport
+  alias PropertyDamage.{FailureReport, Sequence}
 
-  @version 1
+  @version 2
   @extension ".pd"
+
+  @type warning ::
+          {:property_damage_version_mismatch, String.t(), String.t()}
+          | {:dependency_version_mismatch, atom(), String.t(), String.t()}
+          | {:dependency_missing, atom(), String.t()}
 
   @type save_opts :: [
           filename: String.t(),
@@ -93,22 +98,69 @@ defmodule PropertyDamage.Persistence do
 
   ## Returns
 
-  - `{:ok, report}` - Successfully loaded FailureReport
+  - `{:ok, report}` - Successfully loaded FailureReport with no version warnings
+  - `{:ok, report, warnings}` - Loaded with version compatibility warnings
   - `{:error, reason}` - File not found, corrupted, incompatible version, etc.
+
+  Version warnings indicate that the saved test may not reproduce correctly
+  due to changes in PropertyDamage or dependency versions. Warnings include:
+
+  - `{:property_damage_version_mismatch, saved_version, current_version}`
+  - `{:dependency_version_mismatch, app, saved_version, current_version}`
+  - `{:dependency_missing, app, saved_version}`
 
   ## Examples
 
       {:ok, failure} = Persistence.load("failures/currency-bug.pd")
       PropertyDamage.replay(failure)
+
+      # With version warnings
+      {:ok, failure, warnings} = Persistence.load("failures/old-test.pd")
+      IO.warn("Version mismatch: \#{inspect(warnings)}")
   """
-  @spec load(Path.t()) :: {:ok, FailureReport.t()} | {:error, term()}
+  @spec load(Path.t()) ::
+          {:ok, FailureReport.t()} | {:ok, FailureReport.t(), [warning()]} | {:error, term()}
   def load(path) do
     with {:ok, binary} <- File.read(path),
-         {:ok, report} <- decode(binary) do
-      {:ok, report}
+         {:ok, report, warnings} <- decode(binary) do
+      if warnings == [] do
+        {:ok, report}
+      else
+        {:ok, report, warnings}
+      end
     else
       {:error, :enoent} -> {:error, {:file_not_found, path}}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Load a failure report, raising on version warnings.
+
+  Use this when you want strict version compatibility. Raises `ArgumentError`
+  if there are any version mismatches between the saved file and current
+  environment.
+
+  ## Examples
+
+      report = Persistence.load!("failures/currency-bug.pd")
+  """
+  @spec load!(Path.t()) :: FailureReport.t()
+  def load!(path) do
+    case load(path) do
+      {:ok, report} ->
+        report
+
+      {:ok, _report, warnings} ->
+        raise ArgumentError, """
+        Version compatibility warnings loading #{path}:
+        #{format_warnings(warnings)}
+
+        Use Persistence.load/1 to load with warnings, or regenerate the test.
+        """
+
+      {:error, reason} ->
+        raise ArgumentError, "Failed to load #{path}: #{inspect(reason)}"
     end
   end
 
@@ -179,6 +231,7 @@ defmodule PropertyDamage.Persistence do
   def valid?(path) do
     case load(path) do
       {:ok, _} -> true
+      {:ok, _, _warnings} -> true
       {:error, _} -> false
     end
   end
@@ -204,8 +257,8 @@ defmodule PropertyDamage.Persistence do
       timestamp: DateTime.to_iso8601(report.timestamp),
       model: report.model && inspect(report.model),
       adapter: report.adapter && inspect(report.adapter),
-      shrunk_command_count: length(PropertyDamage.Sequence.to_list(report.shrunk_sequence)),
-      original_command_count: length(PropertyDamage.Sequence.to_list(report.original_sequence)),
+      shrunk_command_count: length(Sequence.to_list(report.shrunk_sequence)),
+      original_command_count: length(Sequence.to_list(report.original_sequence)),
       reproduction_command: FailureReport.reproduction_command(report)
     }
     |> Jason.encode!(pretty: true)
@@ -226,8 +279,14 @@ defmodule PropertyDamage.Persistence do
 
   defp encode(%FailureReport{} = report) do
     payload = %{
-      version: @version,
-      report: report
+      format_version: @version,
+      report: report,
+      metadata: %{
+        property_damage_version: pd_version(),
+        elixir_version: System.version(),
+        dependency_versions: capture_dependency_versions(report),
+        saved_at: DateTime.utc_now() |> DateTime.to_iso8601()
+      }
     }
 
     term_binary = :erlang.term_to_binary(payload, [:compressed])
@@ -241,26 +300,146 @@ defmodule PropertyDamage.Persistence do
     >>
   end
 
-  defp decode(<<"PD", version::8, stored_checksum::32, term_binary::binary>>) do
-    if version > @version do
-      {:error, {:incompatible_version, version, @version}}
-    else
-      actual_checksum = :erlang.crc32(term_binary)
+  # V1 format - no metadata, no warnings
+  defp decode(<<"PD", 1::8, stored_checksum::32, term_binary::binary>>) do
+    actual_checksum = :erlang.crc32(term_binary)
 
-      if actual_checksum != stored_checksum do
-        {:error, :checksum_mismatch}
-      else
-        try do
-          %{report: report} = :erlang.binary_to_term(term_binary, [:safe])
-          {:ok, report}
-        rescue
-          ArgumentError -> {:error, :corrupted_data}
-        end
+    if actual_checksum != stored_checksum do
+      {:error, :checksum_mismatch}
+    else
+      try do
+        %{report: report} = :erlang.binary_to_term(term_binary, [:safe])
+        {:ok, report, []}
+      rescue
+        ArgumentError -> {:error, :corrupted_data}
       end
     end
   end
 
+  # V2 format - has metadata
+  defp decode(<<"PD", 2::8, stored_checksum::32, term_binary::binary>>) do
+    actual_checksum = :erlang.crc32(term_binary)
+
+    if actual_checksum != stored_checksum do
+      {:error, :checksum_mismatch}
+    else
+      try do
+        payload = :erlang.binary_to_term(term_binary, [:safe])
+        warnings = check_version_compatibility(payload[:metadata] || %{})
+        {:ok, payload.report, warnings}
+      rescue
+        ArgumentError -> {:error, :corrupted_data}
+      end
+    end
+  end
+
+  defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
+       when version > @version do
+    {:error, {:incompatible_version, version, @version}}
+  end
+
   defp decode(_), do: {:error, :invalid_format}
+
+  defp pd_version do
+    case Application.spec(:property_damage, :vsn) do
+      nil -> "unknown"
+      vsn -> to_string(vsn)
+    end
+  end
+
+  @doc """
+  Capture dependency versions from a failure report.
+
+  Extracts struct modules from commands and events, then looks up their
+  application versions. This enables version tracking for saved test files.
+  """
+  @spec capture_dependency_versions(FailureReport.t()) :: %{atom() => String.t()}
+  def capture_dependency_versions(%FailureReport{} = report) do
+    modules = extract_struct_modules(report)
+
+    modules
+    |> Enum.map(&module_to_app_version/1)
+    |> Enum.reject(&is_nil/1)
+    |> Map.new()
+  end
+
+  defp extract_struct_modules(%FailureReport{shrunk_sequence: seq, event_log: events}) do
+    command_modules =
+      seq
+      |> Sequence.to_list()
+      |> Enum.map(& &1.__struct__)
+
+    event_modules =
+      events
+      |> Enum.map(fn entry -> entry.event && entry.event.__struct__ end)
+      |> Enum.reject(&is_nil/1)
+
+    Enum.uniq(command_modules ++ event_modules)
+  end
+
+  defp module_to_app_version(module) do
+    case :application.get_application(module) do
+      {:ok, app} ->
+        case Application.spec(app, :vsn) do
+          nil -> nil
+          vsn -> {app, to_string(vsn)}
+        end
+
+      :undefined ->
+        nil
+    end
+  end
+
+  defp check_version_compatibility(metadata) do
+    warnings = []
+
+    # Check PropertyDamage version
+    saved = metadata[:property_damage_version]
+    current = pd_version()
+
+    warnings =
+      if saved && saved != current && saved != "unknown" do
+        [{:property_damage_version_mismatch, saved, current} | warnings]
+      else
+        warnings
+      end
+
+    # Check dependency versions - warn on ANY version change
+    # since struct changes can happen in any release (major, minor, or patch)
+    saved_deps = metadata[:dependency_versions] || %{}
+
+    dep_warnings =
+      Enum.flat_map(saved_deps, fn {app, saved_vsn} ->
+        case Application.spec(app, :vsn) do
+          nil ->
+            [{:dependency_missing, app, saved_vsn}]
+
+          current_vsn ->
+            current = to_string(current_vsn)
+
+            if current != saved_vsn do
+              [{:dependency_version_mismatch, app, saved_vsn, current}]
+            else
+              []
+            end
+        end
+      end)
+
+    warnings ++ dep_warnings
+  end
+
+  defp format_warnings(warnings) do
+    Enum.map_join(warnings, "\n", fn
+      {:property_damage_version_mismatch, saved, current} ->
+        "  - PropertyDamage: saved=#{saved}, current=#{current}"
+
+      {:dependency_version_mismatch, app, saved, current} ->
+        "  - #{app}: saved=#{saved}, current=#{current}"
+
+      {:dependency_missing, app, saved} ->
+        "  - #{app}: was #{saved}, now missing"
+    end)
+  end
 
   defp generate_filename(%FailureReport{} = report) do
     timestamp =
@@ -295,7 +474,16 @@ defmodule PropertyDamage.Persistence do
               failure_type: report.failure_type,
               check_name: report.check_name,
               timestamp: report.timestamp,
-              shrunk_size: length(PropertyDamage.Sequence.to_list(report.shrunk_sequence))
+              shrunk_size: length(Sequence.to_list(report.shrunk_sequence))
+            }
+
+          {:ok, report, _warnings} ->
+            %{
+              seed: report.seed,
+              failure_type: report.failure_type,
+              check_name: report.check_name,
+              timestamp: report.timestamp,
+              shrunk_size: length(Sequence.to_list(report.shrunk_sequence))
             }
 
           {:error, _} ->

@@ -42,6 +42,15 @@ defmodule PropertyDamage.ExternalTest do
     ]
   end
 
+  # Test modules for custom markers
+  defmodule AtomMarkerEvent do
+    defstruct [:amount, id: :__external__, created_at: :__external__]
+  end
+
+  defmodule NestedAtomMarkerEvent do
+    defstruct [:name, ids: %{order: :__external__, confirm: :__external__}]
+  end
+
   describe "external/0" do
     test "returns an External struct" do
       assert %External{} = External.external()
@@ -71,6 +80,38 @@ defmodule PropertyDamage.ExternalTest do
       refute External.external?(%{})
       refute External.external?([])
       refute External.external?({:tuple})
+    end
+
+    test "returns false for atom markers without config" do
+      # Without app config, atom markers are not recognized
+      refute External.external?(:__external__)
+      refute External.external?(:server_generated)
+    end
+  end
+
+  describe "external?/2 with explicit markers" do
+    test "returns true for External struct regardless of markers" do
+      assert External.external?(%External{}, [])
+      assert External.external?(%External{}, [:other])
+    end
+
+    test "returns true for atom in markers list" do
+      assert External.external?(:__external__, [:__external__])
+      assert External.external?(:server_generated, [:server_generated, :other])
+    end
+
+    test "returns false for atom not in markers list" do
+      refute External.external?(:__external__, [:other_marker])
+      refute External.external?(:random_atom, [])
+    end
+
+    test "returns false for nil even with markers" do
+      refute External.external?(nil, [:__external__])
+    end
+
+    test "returns false for non-atoms even with markers" do
+      refute External.external?("__external__", [:__external__])
+      refute External.external?(123, [:__external__])
     end
   end
 
@@ -117,6 +158,37 @@ defmodule PropertyDamage.ExternalTest do
       paths = External.external_paths(DeeplyNestedEvent)
 
       assert [:data, :nested, :deep] in paths
+      assert length(paths) == 1
+    end
+  end
+
+  describe "external_paths/2 with explicit markers" do
+    test "finds atom marker fields with explicit markers" do
+      paths = External.external_paths(AtomMarkerEvent, [:__external__])
+
+      assert [:id] in paths
+      assert [:created_at] in paths
+      assert length(paths) == 2
+    end
+
+    test "finds nested atom marker fields" do
+      paths = External.external_paths(NestedAtomMarkerEvent, [:__external__])
+
+      assert [:ids, :order] in paths
+      assert [:ids, :confirm] in paths
+      assert length(paths) == 2
+    end
+
+    test "returns empty for atom markers without explicit list" do
+      paths = External.external_paths(AtomMarkerEvent, [])
+      assert paths == []
+    end
+
+    test "combines explicit markers with External struct detection" do
+      # Still finds External{} structs even when looking for atom markers
+      paths = External.external_paths(SimpleEvent, [:__external__])
+
+      assert [:id] in paths
       assert length(paths) == 1
     end
   end
@@ -262,10 +334,54 @@ defmodule PropertyDamage.ExternalTest do
     end
   end
 
+  describe "contains_external?/2 with explicit markers" do
+    test "returns true for atom marker in data" do
+      assert External.contains_external?(%{id: :__external__}, [:__external__])
+    end
+
+    test "returns true for nested atom marker" do
+      data = %{outer: %{inner: :__external__}}
+      assert External.contains_external?(data, [:__external__])
+    end
+
+    test "returns false for atom marker not in list" do
+      refute External.contains_external?(%{id: :__external__}, [:other])
+    end
+
+    test "still finds External struct with empty markers" do
+      assert External.contains_external?(%{id: %External{}}, [])
+    end
+
+    test "handles mixed External struct and atom markers" do
+      data = %{id: %External{}, ref: :__external__}
+      assert External.contains_external?(data, [:__external__])
+    end
+  end
+
   describe "Inspect protocol" do
     test "renders as external()" do
       ext = External.external()
       assert inspect(ext) == "external()"
     end
   end
+
+  describe "ExternalMarker protocol" do
+    test "External struct implements protocol" do
+      assert PropertyDamage.ExternalMarker.external?(%External{})
+    end
+
+    test "regular values return false via Any implementation" do
+      refute PropertyDamage.ExternalMarker.external?("string")
+      refute PropertyDamage.ExternalMarker.external?(123)
+      refute PropertyDamage.ExternalMarker.external?(%{})
+    end
+  end
+
+  # NOTE: Protocol implementations cannot be tested dynamically because
+  # protocols are consolidated at compile time. The ExternalMarker protocol
+  # implementation for custom types should be tested in integration tests
+  # or in projects that define the protocol implementation at compile time.
+  #
+  # See the guide "Contract Testing with Shared Libraries" for examples
+  # of how to properly implement the protocol in a separate module.
 end
