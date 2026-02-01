@@ -443,8 +443,9 @@ defmodule PropertyDamage.Generator do
   # ============================================================================
 
   defp filter_valid_commands(commands, state) do
-    Enum.filter(commands, fn {_weight, _cmd_module, opts} ->
-      case Keyword.get(opts, :when) do
+    Enum.filter(commands, fn {_weight, _cmd_module, spec} ->
+      # spec is now a map with :when key
+      case Map.get(spec, :when) do
         nil -> true
         pred when is_function(pred, 1) -> pred.(state)
       end
@@ -468,11 +469,13 @@ defmodule PropertyDamage.Generator do
     end
   end
 
-  defp get_command_generator(cmd_module, opts, state) do
+  defp get_command_generator(cmd_module, spec, state) do
+    # spec is now a map with :with key
     overrides =
-      case Keyword.get(opts, :with) do
+      case Map.get(spec, :with) do
         nil -> %{}
         fun when is_function(fun, 1) -> fun.(state)
+        map when is_map(map) -> map
       end
 
     cmd_module.generator(overrides)

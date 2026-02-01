@@ -44,8 +44,9 @@ defmodule PropertyDamage.Settle do
   Get the settle configuration for a command.
 
   Returns the command's settle_config if implemented, otherwise returns defaults.
+  Also accepts a command spec map with a :settle key.
   """
-  @spec get_config(module() | struct()) :: map()
+  @spec get_config(module() | struct() | map()) :: map()
   def get_config(command) when is_struct(command) do
     get_config(command.__struct__)
   end
@@ -58,12 +59,42 @@ defmodule PropertyDamage.Settle do
     end
   end
 
+  # Spec map with :settle key
+  def get_config(%{settle: settle}) when is_map(settle) do
+    Map.merge(@default_config, settle)
+  end
+
+  # Plain map without :settle - use defaults
+  def get_config(map) when is_map(map), do: @default_config
+
+  @doc """
+  Get the execution mode from a command spec map.
+
+  Returns the :execution value from the spec map, or :sync if not present.
+  """
+  @spec get_execution(map()) :: :sync | :probe | :async
+  def get_execution(%{execution: execution}), do: execution
+  def get_execution(_), do: :sync
+
+  @doc """
+  Get the settle configuration from a command spec map.
+
+  Returns the :settle value from the spec map merged with defaults.
+  """
+  @spec get_settle_config(map()) :: map()
+  def get_settle_config(%{settle: settle}) when is_map(settle) do
+    Map.merge(@default_config, settle)
+  end
+
+  def get_settle_config(_), do: @default_config
+
   @doc """
   Get the semantics of a command.
 
   Returns the command's semantics if implemented, otherwise returns :sync (default).
+  Also accepts a command spec map with an :execution key.
   """
-  @spec get_semantics(module() | struct() | map()) :: :sync | :probe | :async | :mock_config
+  @spec get_semantics(module() | struct() | map()) :: :sync | :probe | :async
   def get_semantics(command) when is_struct(command) do
     get_semantics(command.__struct__)
   end
@@ -76,8 +107,11 @@ defmodule PropertyDamage.Settle do
     end
   end
 
+  # Spec map with :execution key
+  def get_semantics(%{execution: execution}), do: execution
+
   # Plain maps are always sync
-  def get_semantics(command) when is_map(command), do: :sync
+  def get_semantics(map) when is_map(map), do: :sync
 
   @doc """
   Check if a command requires settling (is a probe or async).

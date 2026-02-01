@@ -6,6 +6,67 @@ defmodule PropertyDamage.Command do
   They are represented as structs containing their arguments, and define how to
   generate valid field values.
 
+  ## Command Specification
+
+  Commands define a `command_spec/1` function that returns a complete specification map
+  describing execution semantics, shrinking hints, and generation options. This follows
+  the proven `child_spec/1` pattern from Elixir's standard library.
+
+  The spec map structure:
+
+      %{
+        command: module(),                    # The command module
+        execution: :sync | :probe | :async,   # Execution mode
+        settle: %{                            # Settle config (for probe/async)
+          timeout_ms: pos_integer(),
+          interval_ms: pos_integer(),
+          backoff: :linear | :exponential
+        },
+        shrink: :prefer_remove | :neutral | :prefer_keep,  # Shrinking priority
+        when: (state -> boolean),             # Precondition
+        with: (state -> map) | map,           # Generator overrides
+        weight: pos_integer()                 # Generation weight
+      }
+
+  ## Using PropertyDamage.Command
+
+  The `use` macro provides a default `command_spec/1` implementation:
+
+      defmodule MyTest.Commands.CreateOrder do
+        use PropertyDamage.Command
+
+        defstruct [:amount, :currency]
+
+        @impl true
+        def generator(overrides \\\\ %{}) do
+          %{amount: StreamData.positive_integer(), currency: StreamData.constant("USD")}
+          |> PropertyDamage.Generator.merge_overrides(overrides)
+          |> StreamData.fixed_map()
+        end
+      end
+
+  Commands can customize defaults via `use` options:
+
+      defmodule MyTest.Commands.GetOrder do
+        use PropertyDamage.Command,
+          execution: :probe,
+          shrink: :prefer_remove,
+          settle: %{timeout_ms: 5_000, interval_ms: 200, backoff: :exponential}
+
+        defstruct [:order_ref]
+
+        @impl true
+        def generator(overrides \\\\ %{}), do: # ...
+      end
+
+  Or override `command_spec/1` entirely for dynamic specs:
+
+      def command_spec(overrides \\\\ []) do
+        defaults = PropertyDamage.Command.framework_defaults()
+        Map.merge(defaults, %{command: __MODULE__, execution: :probe})
+        |> Map.merge(Map.new(overrides))
+      end
+
   ## Pure Generator Architecture
 
   Commands define a pure `generator/1` function that produces field maps. The generator
@@ -59,6 +120,39 @@ defmodule PropertyDamage.Command do
           end
         end
       end
+
+  ## Model Integration
+
+  Models can specify commands in three forms, all of which result in a command spec:
+
+      def commands do
+        [
+          # Module only - uses command's command_spec/1 with empty overrides
+          CreateOrder,
+
+          # {Module, opts} - opts passed to command_spec/1
+          {ViewOrder, weight: 2, shrink: :prefer_keep},
+
+          # Map form - merged with resolved spec
+          %{command: CancelOrder, weight: 1, when: &has_orders?/1}
+        ]
+      end
+
+  ## Migration from Legacy Callbacks
+
+  The `command_spec/1` pattern consolidates multiple callbacks:
+
+  | Legacy Callback     | Spec Field     |
+  |---------------------|----------------|
+  | `semantics/0`       | `:execution`   |
+  | `settle_config/0`   | `:settle`      |
+  | `read_only?/0`      | `:shrink`      |
+  | Model's `when:`     | `:when`        |
+  | Model's `with:`     | `:with`        |
+  | Model's `weight:`   | `:weight`      |
+
+  Legacy callbacks continue to work - the framework falls back to them when
+  `command_spec/1` is not implemented.
 
   ## Design Principles
 
@@ -208,10 +302,6 @@ defmodule PropertyDamage.Command do
     Used for operations that return "processing" status and require polling.
     Async commands are protected during shrinking if their ref is used by other commands.
 
-  - `:mock_config` - Configures mock service behavior. Not sent to the SUT adapter.
-    Instead, mock adapters receive this command via `on_command/2` to update
-    their behavior. Useful for testing different third-party service responses.
-
   ## Examples
 
       # Sync (default) - creates/modifies state synchronously
@@ -222,11 +312,8 @@ defmodule PropertyDamage.Command do
 
       # Async - waits for async completion
       def semantics, do: :async
-
-      # Mock config - configures mock services
-      def semantics, do: :mock_config
   """
-  @callback semantics() :: :sync | :probe | :async | :mock_config
+  @callback semantics() :: :sync | :probe | :async
 
   @doc """
   (Optional) Returns settle configuration for probes and async commands.
@@ -309,6 +396,38 @@ defmodule PropertyDamage.Command do
   """
   @callback acceptable_retry_events() :: [module()]
 
+  @doc """
+  (Optional) Returns the complete command specification.
+
+  The command_spec/1 function returns a map containing all configuration for
+  a command: execution semantics, shrinking hints, generation options, and
+  more. This consolidates what was previously spread across multiple callbacks.
+
+  ## Parameters
+
+  - `overrides` - Keyword list of options to override defaults. Typically passed
+    from the Model's command list.
+
+  ## Returns
+
+  A map with the following fields:
+
+  - `:command` - The command module
+  - `:execution` - Execution mode (`:sync`, `:probe`, or `:async`)
+  - `:settle` - Settle configuration for probe/async commands
+  - `:shrink` - Shrinking priority (`:prefer_remove`, `:neutral`, or `:prefer_keep`)
+  - `:when` - Precondition function `(state -> boolean)`
+  - `:with` - Generator overrides `(state -> map)` or map
+  - `:weight` - Generation weight (positive integer)
+
+  ## Example
+
+      def command_spec(overrides \\\\ []) do
+        PropertyDamage.Command.build_spec(__MODULE__, [execution: :probe], overrides)
+      end
+  """
+  @callback command_spec(overrides :: keyword()) :: map()
+
   @optional_callbacks [
     label: 2,
     creates_ref: 0,
@@ -318,6 +437,168 @@ defmodule PropertyDamage.Command do
     settle_config: 0,
     idempotent?: 0,
     idempotency_key: 1,
-    acceptable_retry_events: 0
+    acceptable_retry_events: 0,
+    command_spec: 1
   ]
+
+  # ===========================================================================
+  # __using__ Macro
+  # ===========================================================================
+
+  @doc """
+  Provides a default `command_spec/1` implementation when you `use PropertyDamage.Command`.
+
+  ## Options
+
+  All options are passed through to `command_spec/1` as defaults:
+
+  - `:execution` - Execution mode (`:sync`, `:probe`, or `:async`), default `:sync`
+  - `:settle` - Settle configuration map for probe/async commands
+  - `:shrink` - Shrinking priority (`:prefer_remove`, `:neutral`, `:prefer_keep`), default `:neutral`
+  - `:weight` - Default generation weight, default `1`
+
+  ## Example
+
+      defmodule MyCommand do
+        use PropertyDamage.Command, execution: :probe, shrink: :prefer_remove
+
+        defstruct [:id]
+
+        @impl true
+        def generator(overrides \\\\ %{}) do
+          %{id: StreamData.positive_integer()}
+          |> PropertyDamage.Generator.merge_overrides(overrides)
+          |> StreamData.fixed_map()
+        end
+      end
+
+      # MyCommand.command_spec([]) returns:
+      # %{
+      #   command: MyCommand,
+      #   execution: :probe,
+      #   shrink: :prefer_remove,
+      #   settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear},
+      #   when: fn _ -> true end,
+      #   with: %{},
+      #   weight: 1
+      # }
+  """
+  defmacro __using__(opts \\ []) do
+    quote bind_quoted: [opts: opts] do
+      @behaviour PropertyDamage.Command
+      @command_defaults opts
+
+      @doc false
+      def command_spec(overrides \\ []) do
+        PropertyDamage.Command.build_spec(__MODULE__, @command_defaults, overrides)
+      end
+
+      defoverridable command_spec: 1
+    end
+  end
+
+  # ===========================================================================
+  # Spec Building Functions
+  # ===========================================================================
+
+  @doc """
+  Returns the framework's default spec values.
+
+  These are the baseline defaults that get overridden by module defaults
+  and call-time overrides.
+  """
+  @spec framework_defaults() :: map()
+  def framework_defaults do
+    %{
+      execution: :sync,
+      settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear},
+      shrink: :neutral,
+      when: fn _ -> true end,
+      with: %{},
+      weight: 1
+    }
+  end
+
+  @doc """
+  Builds a command spec by layering defaults.
+
+  Priority (highest to lowest):
+  1. Call-time overrides (from Model's command list)
+  2. Module defaults (from `use PropertyDamage.Command` opts)
+  3. Framework defaults
+
+  ## Parameters
+
+  - `module` - The command module
+  - `module_defaults` - Defaults provided via `use` opts
+  - `overrides` - Call-time overrides from Model
+
+  ## Example
+
+      build_spec(CreateOrder, [execution: :sync], [weight: 2])
+      # => %{command: CreateOrder, execution: :sync, weight: 2, ...}
+  """
+  @spec build_spec(module(), keyword(), keyword()) :: map()
+  def build_spec(module, module_defaults, overrides) do
+    framework_defaults()
+    |> Map.merge(%{command: module})
+    |> Map.merge(Map.new(module_defaults))
+    |> Map.merge(Map.new(overrides))
+  end
+
+  @doc """
+  Builds a command spec from legacy callbacks.
+
+  Used for backward compatibility when a command doesn't implement `command_spec/1`
+  but does implement legacy callbacks like `semantics/0`, `settle_config/0`, etc.
+
+  ## Parameters
+
+  - `module` - The command module
+
+  ## Returns
+
+  A spec map built from legacy callbacks, with framework defaults for
+  any callbacks not implemented.
+  """
+  @spec build_spec_from_legacy(module()) :: map()
+  def build_spec_from_legacy(module) do
+    %{
+      command: module,
+      execution: get_legacy_semantics(module),
+      settle: get_legacy_settle(module),
+      shrink: get_legacy_shrink(module),
+      when: fn _ -> true end,
+      with: %{},
+      weight: 1
+    }
+  end
+
+  # Private helpers for reading legacy callbacks
+
+  defp get_legacy_semantics(module) do
+    if function_exported?(module, :semantics, 0) do
+      module.semantics()
+    else
+      :sync
+    end
+  end
+
+  defp get_legacy_settle(module) do
+    default = %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear}
+
+    if function_exported?(module, :settle_config, 0) do
+      Map.merge(default, module.settle_config())
+    else
+      default
+    end
+  end
+
+  defp get_legacy_shrink(module) do
+    if function_exported?(module, :read_only?, 0) and module.read_only?() do
+      :prefer_remove
+    else
+      :neutral
+    end
+  end
 end

@@ -199,20 +199,33 @@ defmodule PropertyDamage.ModelTest do
   end
 
   describe "normalize_commands/1" do
-    test "normalizes {weight, module} tuples to 3-tuple with empty opts" do
+    test "normalizes {weight, module} tuples to 3-tuple with spec map" do
       commands = [{3, CreateItem}, {1, ViewItem}]
 
       result = Model.normalize_commands(commands)
 
-      assert result == [{3, CreateItem, []}, {1, ViewItem, []}]
+      assert [{3, CreateItem, spec1}, {1, ViewItem, spec2}] = result
+      # Spec is now a map with resolved values
+      assert is_map(spec1)
+      assert spec1.weight == 3
+      assert spec1.command == CreateItem
+      assert is_map(spec2)
+      assert spec2.weight == 1
+      assert spec2.command == ViewItem
     end
 
-    test "wraps simple modules with weight 1 and empty opts" do
+    test "wraps simple modules with weight 1 and spec map" do
       commands = [CreateItem, ViewItem]
 
       result = Model.normalize_commands(commands)
 
-      assert result == [{1, CreateItem, []}, {1, ViewItem, []}]
+      assert [{1, CreateItem, spec1}, {1, ViewItem, spec2}] = result
+      assert is_map(spec1)
+      assert spec1.weight == 1
+      assert spec1.command == CreateItem
+      assert is_map(spec2)
+      assert spec2.weight == 1
+      assert spec2.command == ViewItem
     end
 
     test "handles mixed list" do
@@ -220,7 +233,9 @@ defmodule PropertyDamage.ModelTest do
 
       result = Model.normalize_commands(commands)
 
-      assert result == [{3, CreateItem, []}, {1, ViewItem, []}]
+      assert [{3, CreateItem, spec1}, {1, ViewItem, spec2}] = result
+      assert spec1.weight == 3
+      assert spec2.weight == 1
     end
 
     test "extracts weight from opts in new format" do
@@ -228,9 +243,9 @@ defmodule PropertyDamage.ModelTest do
 
       result = Model.normalize_commands(commands)
 
-      assert [{3, CreateItem, opts}] = result
-      assert Keyword.get(opts, :weight) == 3
-      assert is_function(Keyword.get(opts, :when), 1)
+      assert [{3, CreateItem, spec}] = result
+      assert spec.weight == 3
+      assert is_function(spec.when, 1)
     end
 
     test "defaults weight to 1 when not specified in opts" do
@@ -238,8 +253,24 @@ defmodule PropertyDamage.ModelTest do
 
       result = Model.normalize_commands(commands)
 
-      assert [{1, ViewItem, opts}] = result
-      assert is_function(Keyword.get(opts, :when), 1)
+      assert [{1, ViewItem, spec}] = result
+      assert is_function(spec.when, 1)
+    end
+
+    test "spec map contains all required fields" do
+      commands = [CreateItem]
+
+      result = Model.normalize_commands(commands)
+
+      assert [{1, CreateItem, spec}] = result
+      assert is_map(spec)
+      assert Map.has_key?(spec, :command)
+      assert Map.has_key?(spec, :execution)
+      assert Map.has_key?(spec, :settle)
+      assert Map.has_key?(spec, :shrink)
+      assert Map.has_key?(spec, :when)
+      assert Map.has_key?(spec, :with)
+      assert Map.has_key?(spec, :weight)
     end
   end
 

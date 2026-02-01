@@ -83,10 +83,10 @@ defmodule PropertyDamage.Validator do
     )
   end
 
-  # Build a lookup map from command module to its options
+  # Build a lookup map from command module to its spec map
   defp build_command_lookup(normalized_commands) do
-    Map.new(normalized_commands, fn {_weight, module, opts} ->
-      {module, opts}
+    Map.new(normalized_commands, fn {_weight, module, spec} ->
+      {module, spec}
     end)
   end
 
@@ -95,9 +95,9 @@ defmodule PropertyDamage.Validator do
   defp validate_commands([command | rest], state, projection, model, lookup) do
     command_module = command.__struct__
 
-    # Get the when: predicate from the command's options
-    opts = Map.get(lookup, command_module, [])
-    when_pred = Keyword.get(opts, :when)
+    # Get the when: predicate from the command's spec
+    spec = Map.get(lookup, command_module, %{})
+    when_pred = Map.get(spec, :when)
 
     # Check precondition (when: option)
     precondition_passes =

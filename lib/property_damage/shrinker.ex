@@ -421,12 +421,22 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp shrink_single_branch(branch, state) do
-    # Try removing commands from this branch
-    do_shrink_single_branch(branch, state, 0)
+    # Try removing commands from this branch, prioritizing probe commands
+    prioritized_indices = sort_indices_by_shrink_priority(branch)
+    do_shrink_single_branch(branch, state, prioritized_indices)
   end
 
-  defp do_shrink_single_branch(branch, state, index) do
-    if exceeded_limits_branch?(state) or index >= length(branch) or length(branch) <= 1 do
+  defp do_shrink_single_branch(branch, state, []) do
+    {branch, state}
+  end
+
+  defp do_shrink_single_branch(branch, state, _indices)
+       when length(branch) <= 1 do
+    {branch, state}
+  end
+
+  defp do_shrink_single_branch(branch, state, [index | rest_indices]) do
+    if exceeded_limits_branch?(state) do
       {branch, state}
     else
       # Try removing command at index
@@ -438,9 +448,11 @@ defmodule PropertyDamage.Shrinker do
 
       if still_fails_branch?(candidate_seq, state) do
         new_state = %{state | sequence: candidate_seq}
-        do_shrink_single_branch(candidate_branch, new_state, index)
+        # Recompute priorities for the shrunk branch
+        new_prioritized = sort_indices_by_shrink_priority(candidate_branch)
+        do_shrink_single_branch(candidate_branch, new_state, new_prioritized)
       else
-        do_shrink_single_branch(branch, state, index + 1)
+        do_shrink_single_branch(branch, state, rest_indices)
       end
     end
   end
@@ -462,15 +474,21 @@ defmodule PropertyDamage.Shrinker do
 
   defp shrink_seq_part(state, part) do
     commands = Map.get(state.sequence, part)
-    do_shrink_seq_part(state, part, commands, 0)
+    # Prioritize probe commands for removal
+    prioritized_indices = sort_indices_by_shrink_priority(commands)
+    do_shrink_seq_part(state, part, commands, prioritized_indices)
   end
 
-  defp do_shrink_seq_part(state, _part, commands, index)
-       when index >= length(commands) or length(commands) == 0 do
+  defp do_shrink_seq_part(state, _part, _commands, []) do
     state
   end
 
-  defp do_shrink_seq_part(state, part, commands, index) do
+  defp do_shrink_seq_part(state, _part, commands, _indices)
+       when length(commands) == 0 do
+    state
+  end
+
+  defp do_shrink_seq_part(state, part, commands, [index | rest_indices]) do
     if exceeded_limits_branch?(state) do
       state
     else
@@ -481,9 +499,11 @@ defmodule PropertyDamage.Shrinker do
 
       if still_fails_branch?(candidate_seq, state) do
         new_state = %{state | sequence: candidate_seq}
-        do_shrink_seq_part(new_state, part, candidate_commands, index)
+        # Recompute priorities for the shrunk commands
+        new_prioritized = sort_indices_by_shrink_priority(candidate_commands)
+        do_shrink_seq_part(new_state, part, candidate_commands, new_prioritized)
       else
-        do_shrink_seq_part(state, part, commands, index + 1)
+        do_shrink_seq_part(state, part, commands, rest_indices)
       end
     end
   end
@@ -585,7 +605,9 @@ defmodule PropertyDamage.Shrinker do
   # Keep running linear shrinking until no commands are removed in a full pass
   defp do_linear_shrink_fixpoint(state) do
     original_count = length(state.commands)
-    state = do_linear_shrink(state, 0)
+    # Get indices sorted by shrink priority (probe commands first)
+    prioritized_indices = sort_indices_by_shrink_priority(state.commands)
+    state = do_linear_shrink(state, prioritized_indices)
     new_count = length(state.commands)
 
     if new_count < original_count and not exceeded_limits?(state) do
@@ -596,8 +618,52 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
-  defp do_linear_shrink(state, index) do
-    if exceeded_limits?(state) or index >= length(state.commands) do
+  # Sort command indices by shrink priority.
+  # Commands with :prefer_remove (probes, read-only) are prioritized for removal.
+  # Commands with :prefer_keep are removed last.
+  # Uses command_spec/1 if available, falls back to semantics-based heuristics.
+  defp sort_indices_by_shrink_priority(commands) do
+    commands
+    |> Enum.with_index()
+    |> Enum.sort_by(fn {cmd, _idx} ->
+      shrink_priority_for_command(cmd)
+    end)
+    |> Enum.map(fn {_cmd, idx} -> idx end)
+  end
+
+  # Determine shrink priority for a command.
+  # Returns 0 for prefer_remove (try first), 1 for neutral, 2 for prefer_keep (try last).
+  defp shrink_priority_for_command(cmd) when is_struct(cmd) do
+    module = cmd.__struct__
+
+    # Try command_spec/1 first
+    if function_exported?(module, :command_spec, 1) do
+      spec = module.command_spec([])
+
+      case Map.get(spec, :shrink, :neutral) do
+        :prefer_remove -> 0
+        :neutral -> 1
+        :prefer_keep -> 2
+      end
+    else
+      # Fallback to semantics-based heuristics (legacy behavior)
+      case Settle.get_semantics(cmd) do
+        # Probe commands are read-only, prioritize for removal
+        :probe -> 0
+        # All other commands have equal priority
+        _ -> 1
+      end
+    end
+  end
+
+  defp shrink_priority_for_command(_cmd), do: 1
+
+  defp do_linear_shrink(state, []) do
+    state
+  end
+
+  defp do_linear_shrink(state, [index | rest_indices]) do
+    if exceeded_limits?(state) do
       state
     else
       command = Enum.at(state.commands, index)
@@ -605,17 +671,19 @@ defmodule PropertyDamage.Shrinker do
 
       # Skip if this is a protected async command
       if protected_async?(command, remaining) do
-        do_linear_shrink(state, index + 1)
+        do_linear_shrink(state, rest_indices)
       else
         candidate = List.delete_at(state.commands, index)
 
         state = increment_iterations(state)
 
         if valid_candidate?(candidate, state) and still_fails?(candidate, state) do
+          # Command was removed, recompute priorities for remaining commands
           new_state = %{state | commands: candidate}
-          do_linear_shrink(new_state, index)
+          new_prioritized = sort_indices_by_shrink_priority(candidate)
+          do_linear_shrink(new_state, new_prioritized)
         else
-          do_linear_shrink(state, index + 1)
+          do_linear_shrink(state, rest_indices)
         end
       end
     end

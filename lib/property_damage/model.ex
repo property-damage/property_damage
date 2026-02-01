@@ -386,28 +386,29 @@ defmodule PropertyDamage.Model do
   ]
 
   @typedoc """
-  Normalized command specification with weight, module, and options.
+  Normalized command specification with weight, module, and resolved spec.
+
+  The spec is a map containing all configuration for the command, resolved
+  from `command_spec/1` or legacy callbacks.
   """
-  @type normalized_command :: {pos_integer(), module(), command_opts()}
+  @type normalized_command :: {pos_integer(), module(), map()}
 
   @doc """
-  Normalize command list to `{weight, module, opts}` format.
+  Normalize command list to `{weight, module, spec}` format.
 
   Handles all input formats:
-  - `Module` → `{1, Module, []}`
-  - `{Module, weight}` → `{weight, Module, []}`
-  - `{Module, opts}` → `{weight, Module, opts}` (weight from opts or default 1)
+  - `Module` → `{weight, Module, spec}` using command_spec/1 or legacy callbacks
+  - `{Module, weight}` → `{weight, Module, spec}` (legacy format)
+  - `{Module, opts}` → `{weight, Module, spec}` opts passed to command_spec/1
+  - `%{command: Module, ...}` → `{weight, Module, spec}` map merged with resolved spec
 
   ## Examples
 
       iex> PropertyDamage.Model.normalize_commands([CreateOrder])
-      [{1, CreateOrder, []}]
+      [{1, CreateOrder, %{command: CreateOrder, execution: :sync, ...}}]
 
-      iex> PropertyDamage.Model.normalize_commands([{ViewOrder, 2}])
-      [{2, ViewOrder, []}]
-
-      iex> PropertyDamage.Model.normalize_commands([{CancelOrder, weight: 3, when: &some_fn/1}])
-      [{3, CancelOrder, [weight: 3, when: &some_fn/1]}]
+      iex> PropertyDamage.Model.normalize_commands([{ViewOrder, weight: 2}])
+      [{2, ViewOrder, %{command: ViewOrder, weight: 2, ...}}]
   """
   @spec normalize_commands([command_spec()]) :: [normalized_command()]
   def normalize_commands(commands) do
@@ -416,26 +417,60 @@ defmodule PropertyDamage.Model do
 
   @doc """
   Normalize a single command specification.
+
+  Resolves the command's spec using `command_spec/1` if available,
+  otherwise falls back to legacy callbacks.
   """
   @spec normalize_command_spec(command_spec()) :: normalized_command()
   def normalize_command_spec(spec) do
     case spec do
       # Simple module
       module when is_atom(module) ->
-        {1, module, []}
+        resolved = resolve_spec(module, [])
+        {resolved.weight, module, resolved}
 
       # {module, weight} format (legacy)
       {module, weight} when is_atom(module) and is_integer(weight) and weight > 0 ->
-        {weight, module, []}
+        resolved = resolve_spec(module, weight: weight)
+        {resolved.weight, module, resolved}
 
       # {weight, module} format (legacy)
       {weight, module} when is_integer(weight) and weight > 0 and is_atom(module) ->
-        {weight, module, []}
+        resolved = resolve_spec(module, weight: weight)
+        {resolved.weight, module, resolved}
 
       # {module, opts} format (new)
       {module, opts} when is_atom(module) and is_list(opts) ->
-        weight = Keyword.get(opts, :weight, 1)
-        {weight, module, opts}
+        resolved = resolve_spec(module, opts)
+        {resolved.weight, module, resolved}
+
+      # Map form with :command key
+      %{command: module} = map when is_atom(module) ->
+        opts = map |> Map.delete(:command) |> Map.to_list()
+        resolved = resolve_spec(module, opts)
+        {resolved.weight, module, resolved}
+    end
+  end
+
+  @doc """
+  Resolve command spec from module, using command_spec/1 or legacy callbacks.
+
+  ## Parameters
+
+  - `module` - The command module
+  - `opts` - Override options to pass to command_spec/1
+
+  ## Returns
+
+  A complete spec map.
+  """
+  @spec resolve_spec(module(), keyword()) :: map()
+  def resolve_spec(module, opts) do
+    if function_exported?(module, :command_spec, 1) do
+      module.command_spec(opts)
+    else
+      PropertyDamage.Command.build_spec_from_legacy(module)
+      |> Map.merge(Map.new(opts))
     end
   end
 end
