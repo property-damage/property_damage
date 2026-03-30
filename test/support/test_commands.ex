@@ -100,3 +100,35 @@ defmodule PropertyDamage.Test.Commands.MinimalCommand do
     StreamData.constant(%{})
   end
 end
+
+defmodule PropertyDamage.Test.Commands.ProbeItem do
+  @moduledoc """
+  Test command with :probe semantics for testing shrinking priority.
+
+  Probe commands are read-only polling operations that should be
+  prioritized for removal during shrinking (see DR-008).
+  """
+  @behaviour PropertyDamage.Command
+
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+  defstruct [:item_ref]
+
+  @impl true
+  def semantics, do: :probe
+
+  @impl true
+  def read_only?, do: true
+
+  @impl true
+  def downstream_observables, do: [PropertyDamage.Test.Events.ItemViewed]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{
+      item_ref: nil
+    }
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end

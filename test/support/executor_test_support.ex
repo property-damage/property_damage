@@ -240,3 +240,71 @@ defmodule PropertyDamage.Test.MultiCheckModel do
   @impl true
   def assertion_projections, do: [MultiCheckAssertion]
 end
+
+# ============================================================================
+# Probe Shrinking Priority Test Support
+# ============================================================================
+
+defmodule PropertyDamage.Test.ProbeModel do
+  @moduledoc """
+  Model with probe and non-probe commands for testing shrinking priority.
+
+  This model allows testing that probe commands are prioritized for removal
+  during shrinking (see DR-008).
+  """
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
+
+  alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
+  alias PropertyDamage.Test.Projections.{ModelState, FailingAssertion}
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+
+  @impl true
+  def commands, do: [CreateItem, ProbeItem]
+
+  @impl true
+  def command_sequence_projection, do: ModelState
+
+  @impl true
+  def assertion_projections, do: [FailingAssertion]
+
+  @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+    [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+  end
+
+  def simulate(%ProbeItem{item_ref: item_ref}, _state) do
+    [%ItemViewed{item_ref: item_ref}]
+  end
+end
+
+defmodule PropertyDamage.Test.ProbeAdapter do
+  @moduledoc """
+  Adapter that supports probe commands for shrinking priority tests.
+  """
+  use PropertyDamage.Adapter
+
+  alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+
+  @impl true
+  def setup(config) do
+    {:ok, Map.merge(%{item_counter: 0}, config)}
+  end
+
+  @impl true
+  def teardown(_context), do: :ok
+
+  @impl true
+  def execute(%CreateItem{name: name, quantity: qty}, context) do
+    item_ref = "item_#{context.item_counter}"
+    {:ok, [%ItemCreated{item_ref: item_ref, name: name, quantity: qty}]}
+  end
+
+  def execute(%ProbeItem{item_ref: ref}, _context) do
+    {:ok, [%ItemViewed{item_ref: ref}]}
+  end
+end

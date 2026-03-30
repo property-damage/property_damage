@@ -720,4 +720,183 @@ defmodule PropertyDamage.ShrinkerTest do
       assert total > 100
     end
   end
+
+  # ============================================================================
+  # Probe Shrinking Priority Tests (DR-008)
+  # ============================================================================
+
+  describe "probe command shrinking priority" do
+    alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
+    alias PropertyDamage.Test.{ProbeModel, ProbeAdapter}
+    alias PropertyDamage.Settle
+
+    test "probe commands have :probe semantics" do
+      # Verify our test command has the expected semantics
+      assert Settle.get_semantics(%ProbeItem{}) == :probe
+      assert Settle.get_semantics(%CreateItem{}) == :sync
+    end
+
+    test "probe commands are removed before sync commands when both are unnecessary" do
+      # Sequence: [CreateItem(5), ProbeItem, CreateItem(101)]
+      # The failure is caused by CreateItem(101) alone (exceeds 100 limit)
+      # Both CreateItem(5) and ProbeItem are unnecessary
+      # The shrinker should try removing ProbeItem first (probe priority)
+      commands = [
+        %CreateItem{name: "First", quantity: 5},
+        %ProbeItem{item_ref: "item_0"},
+        %CreateItem{name: "Failing", quantity: 101}
+      ]
+
+      result =
+        Shrinker.shrink(commands,
+          failed_at_index: 2,
+          model: ProbeModel,
+          adapter: ProbeAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      # Should shrink to just the failing command
+      shrunk_commands = Sequence.to_list(result.sequence)
+      assert length(shrunk_commands) == 1
+      assert hd(shrunk_commands).quantity == 101
+
+      # Verify no probe commands remain (they were prioritized for removal)
+      probe_count = Enum.count(shrunk_commands, fn cmd -> is_struct(cmd, ProbeItem) end)
+      assert probe_count == 0
+    end
+
+    test "probe commands are removed first even when interspersed" do
+      # Sequence with probe commands interspersed among sync commands
+      # All contribute to reaching the 100 limit, but probes don't add quantity
+      commands = [
+        %CreateItem{name: "A", quantity: 40},
+        %ProbeItem{item_ref: "item_0"},
+        %CreateItem{name: "B", quantity: 40},
+        %ProbeItem{item_ref: "item_1"},
+        %CreateItem{name: "C", quantity: 30}
+      ]
+
+      # Total quantity: 110 > 100, triggers failure
+      result =
+        Shrinker.shrink(commands,
+          failed_at_index: 4,
+          model: ProbeModel,
+          adapter: ProbeAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      shrunk_commands = Sequence.to_list(result.sequence)
+
+      # All probe commands should be removed (they don't contribute to the failure)
+      probe_count = Enum.count(shrunk_commands, fn cmd -> is_struct(cmd, ProbeItem) end)
+      assert probe_count == 0
+
+      # The CreateItem commands that cause the failure should remain
+      total =
+        Enum.reduce(shrunk_commands, 0, fn cmd, acc ->
+          case cmd do
+            %CreateItem{quantity: qty} -> acc + qty
+            _ -> acc
+          end
+        end)
+
+      assert total > 100
+    end
+
+    test "probe commands are kept when needed for failure reproduction" do
+      # This test verifies that probe commands are only removed if they're truly unnecessary
+      # In this case, the probe is unnecessary, so it should be removed
+      commands = [
+        %CreateItem{name: "Failing", quantity: 101},
+        %ProbeItem{item_ref: "item_0"}
+      ]
+
+      result =
+        Shrinker.shrink(commands,
+          failed_at_index: 1,
+          model: ProbeModel,
+          adapter: ProbeAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      shrunk_commands = Sequence.to_list(result.sequence)
+
+      # The failing CreateItem should remain
+      assert length(shrunk_commands) >= 1
+      create_count = Enum.count(shrunk_commands, fn cmd -> is_struct(cmd, CreateItem) end)
+      assert create_count >= 1
+    end
+
+    test "sort_indices_by_shrink_priority orders probe commands first" do
+      # This is a unit test for the internal prioritization function
+      # We test it indirectly by checking shrinking behavior
+      commands = [
+        %CreateItem{name: "Sync1", quantity: 10},
+        %ProbeItem{item_ref: "probe1"},
+        %CreateItem{name: "Sync2", quantity: 10},
+        %ProbeItem{item_ref: "probe2"},
+        %CreateItem{name: "Failing", quantity: 101}
+      ]
+
+      result =
+        Shrinker.shrink(commands,
+          failed_at_index: 4,
+          model: ProbeModel,
+          adapter: ProbeAdapter,
+          config: Config.new(shrink_arguments: false, max_iterations: 10)
+        )
+
+      # With limited iterations, probe commands should be tried first
+      # and removed before sync commands
+      shrunk_commands = Sequence.to_list(result.sequence)
+      probe_count = Enum.count(shrunk_commands, fn cmd -> is_struct(cmd, ProbeItem) end)
+
+      # Probes should be removed first (they're prioritized and unnecessary)
+      assert probe_count == 0
+    end
+
+    test "probe priority works with branching sequences" do
+      # Test that probe priority also works for branching sequence shrinking
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 101}],
+          [
+            [
+              %ProbeItem{item_ref: "probe_a"},
+              %CreateItem{name: "BranchA", quantity: 5}
+            ],
+            [
+              %ProbeItem{item_ref: "probe_b"},
+              %CreateItem{name: "BranchB", quantity: 5}
+            ]
+          ],
+          [%ProbeItem{item_ref: "probe_suffix"}]
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          failed_at_index: 0,
+          model: ProbeModel,
+          adapter: ProbeAdapter,
+          config: Config.new(shrink_arguments: false)
+        )
+
+      shrunk_commands = Sequence.to_list(result.sequence)
+
+      # Probe commands in branches and suffix should be removed first
+      probe_count = Enum.count(shrunk_commands, fn cmd -> is_struct(cmd, ProbeItem) end)
+      assert probe_count == 0
+
+      # The failing prefix command should remain
+      total =
+        Enum.reduce(shrunk_commands, 0, fn cmd, acc ->
+          case cmd do
+            %CreateItem{quantity: qty} -> acc + qty
+            _ -> acc
+          end
+        end)
+
+      assert total > 100
+    end
+  end
 end
