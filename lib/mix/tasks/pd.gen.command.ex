@@ -10,7 +10,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
 
       --creates-ref NAME    (DEPRECATED) Field name for ref this command creates.
                             Use `external()` in event structs instead.
-      --semantics SEM       Command semantics (sync, probe, async, mock_config)
+      --semantics SEM       Command semantics (sync, probe, async)
       --fields FIELDS       Comma-separated field names
 
   ## Note on creates_ref Deprecation

@@ -128,7 +128,9 @@ defmodule PropertyDamage.MockServiceAdapter do
 
   ## Configuration Commands
 
-  Define commands that configure mock behavior without interacting with the SUT:
+  Define commands that configure mock behavior. These commands are executed
+  against the SUT like normal commands, but the `on_command/2` callback
+  allows mock adapters to react and update their behavior:
 
       defmodule ConfigurePayment do
         @behaviour PropertyDamage.Command
@@ -137,9 +139,6 @@ defmodule PropertyDamage.MockServiceAdapter do
 
         @impl true
         def precondition(_state), do: true
-
-        @impl true
-        def semantics, do: :mock_config  # Signals this is mock configuration
 
         @impl true
         def new!(state, overrides \\\\ %{}) do
@@ -151,8 +150,8 @@ defmodule PropertyDamage.MockServiceAdapter do
         end
       end
 
-  Commands with `semantics: :mock_config` are executed by notifying mock adapters
-  rather than calling the SUT.
+  The mock adapter's `on_command/2` callback receives all commands, allowing
+  it to react to configuration commands and update its internal state.
   """
 
   @doc """
@@ -192,9 +191,6 @@ defmodule PropertyDamage.MockServiceAdapter do
 
   Called before each command is executed against the SUT. Use this to
   update mock behavior based on commands.
-
-  Commands with `semantics: :mock_config` are handled entirely by this callback
-  and are not sent to the SUT adapter.
 
   ## Parameters
 
@@ -273,23 +269,6 @@ defmodule PropertyDamage.MockServiceAdapter do
       """
       @spec __emits__() :: [module()]
       def __emits__, do: unquote(emits)
-    end
-  end
-
-  @doc """
-  Check if a command is a mock configuration command.
-
-  Mock config commands have `semantics: :mock_config` and are handled by
-  mock adapters rather than the SUT adapter.
-  """
-  @spec mock_config_command?(struct()) :: boolean()
-  def mock_config_command?(command) when is_struct(command) do
-    module = command.__struct__
-
-    if function_exported?(module, :semantics, 0) do
-      module.semantics() == :mock_config
-    else
-      false
     end
   end
 end

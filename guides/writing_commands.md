@@ -368,7 +368,7 @@ end
 
 ### `semantics/0`
 
-Declare execution semantics (`:sync`, `:probe`, `:async`, `:mock_config`):
+Declare execution semantics (`:sync`, `:probe`, `:async`):
 
 ```elixir
 def semantics, do: :probe  # For read operations that may need retry/settle

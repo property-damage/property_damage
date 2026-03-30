@@ -36,7 +36,6 @@ Commands declare their behavior via the `semantics/0` callback:
 | `:sync` | Standard operations (default) | Yes | Execute once |
 | `:probe` | Query and wait for consistency | No | Retry until success |
 | `:async` | Create and wait for completion | Yes | Retry until complete |
-| `:mock_config` | Configure mock services | No | Not sent to SUT |
 
 ## Probe Commands
 

@@ -680,7 +680,6 @@ end
 | `:sync` | Mutates state (default) | Execute once |
 | `:probe` | Queries state | Retry until success or timeout |
 | `:async` | Waits for async completion | Retry until complete |
-| `:mock_config` | Configures mock services | Not sent to SUT |
 
 ### Adapter Integration
 

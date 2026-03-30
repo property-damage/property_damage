@@ -93,9 +93,8 @@ defmodule PropertyDamage.MockServiceRegistry do
   Notify all mocks of a command being executed.
 
   Each mock's `on_command/2` is called with the command.
-  Returns true if any mock handles this as a config command.
   """
-  @spec notify_command(t(), struct()) :: {:ok, boolean()}
+  @spec notify_command(t(), struct()) :: :ok
   def notify_command(registry, command) do
     GenServer.call(registry, {:notify_command, command})
   end
@@ -210,10 +209,6 @@ defmodule PropertyDamage.MockServiceRegistry do
 
   @impl true
   def handle_call({:notify_command, command}, _from, state) do
-    alias PropertyDamage.MockServiceAdapter
-
-    is_mock_config = MockServiceAdapter.mock_config_command?(command)
-
     # Update each adapter's state via on_command
     new_adapters =
       Enum.reduce(state.adapters, %{}, fn {module, adapter_state}, acc ->
@@ -221,7 +216,7 @@ defmodule PropertyDamage.MockServiceRegistry do
         Map.put(acc, module, new_adapter_state)
       end)
 
-    {:reply, {:ok, is_mock_config}, %{state | adapters: new_adapters}}
+    {:reply, :ok, %{state | adapters: new_adapters}}
   end
 
   @impl true
