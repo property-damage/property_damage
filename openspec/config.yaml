@@ -1,0 +1,30 @@
+schema: spec-driven
+
+context: |
+  Project: PropertyDamage — Stateful Property-Based Testing (SPBT) framework for Elixir
+  Tech stack: Elixir, StreamData, Telemetry, NimbleOptions, Jason
+  Testing: ExUnit (mix test)
+  Domain: Automated testing of distributed systems via command sequence generation,
+          execution against a System Under Test (SUT), invariant verification, and
+          failure shrinking to minimal reproductions
+  Architecture: Five core behaviours (Command, Model, Projection, Adapter, Nemesis),
+                two-phase execution (symbolic generation → concrete execution),
+                event-sourced state tracking, hierarchical delta debugging shrinking
+  Conventions: Behaviours over use macros, pure generators, model-command agnosticism,
+               transport-agnostic commands, RFC 2119 keywords in specs
+
+rules:
+  proposal:
+    - Reference affected Decision Records (DR-001 through DR-020) when relevant
+    - Identify which of the 14 spec domains are impacted
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Every requirement MUST use RFC 2119 keywords (SHALL, MUST, SHOULD, MAY)
+    - Every requirement MUST have at least one scenario
+    - Focus on observable behavior, not implementation internals
+  design:
+    - Reference the relevant spec domain(s) and decision records
+    - Include impact on the two-phase execution model if applicable
+  tasks:
+    - Include test verification steps
+    - Reference specific test files when modifying existing behavior
