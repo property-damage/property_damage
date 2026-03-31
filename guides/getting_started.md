@@ -239,6 +239,39 @@ defmodule MyApp.TestAdapter do
 end
 ```
 
+### Adapter Variations
+
+The example above uses HTTP, but adapters can target any transport:
+
+**In-memory** — Call application functions directly for fast tests:
+
+    def execute(%CreateOrder{amount: amt}, ctx) do
+      case MyApp.Orders.create(%{amount: amt}) do
+        {:ok, order} -> {:ok, [%OrderCreated{id: order.id, amount: amt}]}
+        {:error, reason} -> {:ok, [%OrderRejected{reason: reason}]}
+      end
+    end
+
+**gRPC** — Use a gRPC channel:
+
+    def setup(config) do
+      {:ok, channel} = GRPC.Stub.connect(config.grpc_host)
+      {:ok, %{channel: channel}}
+    end
+
+    def execute(%CreateOrder{amount: amt}, %{channel: ch}) do
+      {:ok, reply} = OrderService.Stub.create(ch, %CreateRequest{amount: amt})
+      {:ok, [%OrderCreated{id: reply.id, amount: amt}]}
+    end
+
+**Testing in IEx** — Test your adapter manually:
+
+    iex> {:ok, ctx} = MyAdapter.setup(%{base_url: "http://localhost:4000"})
+    iex> {:ok, events} = MyAdapter.execute(%CreateOrder{amount: 100}, ctx)
+    iex> MyAdapter.teardown(ctx)
+
+See the [Cheatsheet](cheatsheet.md) for complete adapter templates.
+
 ## Step 7: Run the Tests
 
 ### Basic Run
@@ -271,6 +304,21 @@ defmodule MyApp.PropertyTest do
   end
 end
 ```
+
+### Verbose Mode
+
+To see what PropertyDamage generates, add `verbose: true`:
+
+    PropertyDamage.run(
+      model: OrderModel,
+      adapter: OrderAdapter,
+      adapter_config: %{base_url: "http://localhost:4000"},
+      verbose: true
+    )
+
+This prints each generated command, execution result, and assertion check — useful for
+understanding the test flow. See the [Debugging Failures](debugging_failures.md) guide
+for more.
 
 ## Understanding Results
 

@@ -104,6 +104,52 @@ defmodule MyTest.OrderModel do
 end
 ```
 
+## Symbolic References
+
+When a command creates a new entity (e.g., CreateOrder produces an order with a
+server-generated ID), the framework needs to pass that ID to future commands. Symbolic
+references solve this "chicken-and-egg" problem.
+
+### Why Refs Exist
+
+During sequence generation, the SUT hasn't been contacted yet — there are no real IDs.
+The framework creates symbolic placeholders that are resolved to real values during
+execution.
+
+### Lifecycle
+
+    Generation phase:
+      CreateOrder{amount: 100}       →  OrderCreated{id: #Ref<0.123>}
+      GetOrder{order_ref: #Ref<0.123>}
+
+    Execution phase:
+      CreateOrder{amount: 100}       →  OrderCreated{id: "ord_abc123"}
+      GetOrder{order_ref: "ord_abc123"}  ← ref resolved from event
+
+1. **Generation**: The framework wraps `make_ref/0` in a `PropertyDamage.Ref` struct
+2. **Simulation**: The simulator predicts events containing the ref
+3. **State tracking**: Projections store the symbolic ref as a key
+4. **Execution**: After the adapter returns real events, the framework extracts concrete
+   values from fields marked with `external()` and binds them to the ref
+5. **Resolution**: Subsequent commands have their ref fields replaced with concrete values
+
+### External Field Markers
+
+Mark server-generated fields in event structs with `external()`:
+
+    defmodule OrderCreated do
+      import PropertyDamage, only: [external: 0]
+      defstruct [id: external(), :amount, :currency]
+    end
+
+The framework detects external fields automatically and captures their values during
+execution.
+
+### Ref-Aware Shrinking
+
+The shrinker respects ref dependencies: if command A creates a ref consumed by command B,
+command A cannot be removed while B remains in the sequence.
+
 ## Model-Level Wiring
 
 All state-dependent configuration lives in the Model:
@@ -373,6 +419,58 @@ Declare execution semantics (`:sync`, `:probe`, `:async`):
 ```elixir
 def semantics, do: :probe  # For read operations that may need retry/settle
 ```
+
+## Execution Semantics
+
+Commands declare their execution mode via `command_spec/1` or the legacy `semantics/0`
+callback. The execution mode determines how the framework handles the command during
+testing.
+
+### Sync (default)
+
+Synchronous commands mutate the SUT and complete immediately. The adapter's `execute/2`
+is called once and events are recorded.
+
+    use PropertyDamage.Command, execution: :sync
+
+Most commands are sync. Use for operations like create, update, delete.
+
+### Probe
+
+Probes are read-only queries that verify SUT state without mutation. The framework
+applies settle/retry logic — re-executing the probe until it succeeds or times out.
+
+    use PropertyDamage.Command, execution: :probe, shrink: :prefer_remove,
+      settle: %{timeout_ms: 5_000, interval_ms: 200, backoff: :exponential}
+
+Key behaviors:
+- Retried automatically according to settle configuration
+- Prioritized for removal during shrinking (read-only commands rarely contribute to bugs)
+- Do not mutate SUT state — safe to retry
+- Use for verifying eventual consistency (e.g., "does the order appear in search results?")
+
+### Async
+
+Async commands create a resource and wait for it to settle. The adapter handles
+internal polling, optionally injecting intermediate events via `context.inject`.
+
+    use PropertyDamage.Command, execution: :async
+
+Use for operations that return "processing" status and require polling for completion.
+Async commands whose refs are used by downstream commands are protected during shrinking.
+
+### Settle Configuration
+
+Probes and async commands use settle configuration for retry behavior:
+
+    settle: %{
+      timeout_ms: 5_000,     # Max wait time (default: 2000)
+      interval_ms: 200,       # Time between retries (default: 300)
+      backoff: :exponential   # :linear (constant interval) or :exponential (doubling)
+    }
+
+With `:linear` backoff, retries happen at fixed intervals. With `:exponential`, the
+interval doubles after each retry (capped at the timeout).
 
 ## Summary
 

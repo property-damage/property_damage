@@ -473,6 +473,36 @@ end
 - Poor error messages to users
 - Missing security event logging
 
+## MockServiceAdapter vs Nemesis
+
+PropertyDamage provides two complementary approaches to fault testing:
+
+**Nemesis** operates at the infrastructure level — network partitions, latency spikes,
+CPU pressure, clock skew. Nemesis faults affect how the SUT communicates, not what
+responses it receives.
+
+**MockServiceAdapter** operates at the application level — controlling what third-party
+APIs return. Mock a payment provider declining transactions, an email service timing out,
+or a shipping API returning partial failures.
+
+| Concern | Use Nemesis | Use MockServiceAdapter |
+|---------|-------------|----------------------|
+| Network unreachable | ✓ | |
+| API returns 500 | | ✓ |
+| High latency | ✓ | |
+| API declines request | | ✓ |
+| Packet loss | ✓ | |
+| API returns unexpected format | | ✓ |
+| Clock drift | ✓ | |
+| Third-party behavior changes | | ✓ |
+
+**Rule of thumb:** If the fault is about the pipe (network, infrastructure), use Nemesis.
+If the fault is about what comes through the pipe (API responses, business logic), use
+MockServiceAdapter.
+
+See [Mocking Third Parties](mocking_third_parties.md) for complete MockServiceAdapter
+usage.
+
 ## Next Steps
 
 - See `example_tests/travel_booking/` for a complete chaos engineering example

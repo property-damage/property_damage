@@ -258,6 +258,27 @@ else
 end
 ```
 
+## Verbose Output Mode
+
+Enable verbose output to see what PropertyDamage generates and executes:
+
+    PropertyDamage.run(
+      model: MyModel,
+      adapter: MyAdapter,
+      verbose: true
+    )
+
+Verbose mode shows:
+- Each generated command with field values and symbolic refs
+- Execution results (events returned by the adapter)
+- Assertion checks (which triggers fired, pass/fail)
+- Projection state updates
+
+This is useful when:
+- Commands aren't being generated as expected (check `when:` predicates)
+- You want to understand what sequences look like before failures
+- Debugging adapter issues (seeing exact command values sent)
+
 ## Shrinking Deep Dive
 
 ### How Shrinking Works
@@ -267,6 +288,49 @@ PropertyDamage shrinks by:
 1. **Removing commands** - Try removing each command
 2. **Simplifying values** - Try smaller numbers, shorter strings
 3. **Simplifying refs** - Try using earlier refs
+
+### Shrinking in Action
+
+Here's what a shrinking run looks like in practice. Suppose a test fails at command
+index 15 in a 23-command sequence:
+
+    Original sequence: 23 commands, failure at index 15
+
+    Phase 1: Sequence Shrinking
+
+    Step 1 — Drop unexecuted (commands 16-22):
+      18 commands remaining, failure still at index 15 ✓
+
+    Step 2 — Hierarchical shrinking (by dependency depth):
+      Try removing depth-3 group (commands 10, 13, 14): failure at index 12 ✓
+      15 commands remaining
+      Try removing depth-2 group (commands 6, 8): no failure ✗ (rejected)
+      Try removing depth-1 group (commands 3, 5): failure at index 10 ✓
+      13 commands remaining
+
+    Step 3 — Linear shrinking (one at a time):
+      Try removing command 0: no failure ✗
+      Try removing command 1: failure at index 9 ✓ → 12 commands
+      Try removing command 2: no failure ✗
+      ...
+      Try removing command 7: failure at index 5 ✓ → 8 commands
+      ...done, no more removable
+
+    Result: 4 commands (from original 23)
+
+    Phase 2: Argument Shrinking
+
+      command 0: amount 4827 → 1 ✓
+      command 1: currency "GBP" → "A" ✓
+      command 2: amount 391 → 0, no failure ✗ → try 195, failure ✓
+      ...
+
+    Final: 4 commands with simplified arguments
+
+Each candidate is only accepted if it reproduces the **same failure** — same failure
+type and same check name. If removing a command causes a different failure, it's
+rejected. This ensures the minimal sequence demonstrates the original bug, not a
+different one.
 
 ### When Shrinking Gets Stuck
 
