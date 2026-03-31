@@ -2,6 +2,52 @@
 
 Remaining features and improvements for PropertyDamage.
 
+## Re-Shrink with Larger Budget
+
+Allow resuming shrinking from a previous result when the shrunk case is still too large.
+
+**Features:**
+- Re-trigger shrinking with more time/iterations from a previous best result
+- Persistence/caching of command sequences (not just seeds)
+- CLI/API for "resume shrinking from X with budget Y"
+
+**Design questions:**
+- How to reference a cached sequence? (hash? timestamp? user-provided name?)
+- What format for persistence? (binary term, JSON, Elixir literal?)
+- Store intermediate shrink states or just the best-so-far?
+
+---
+
+## Shrinking Configuration
+
+Expand beyond boolean `@read_only` and `:prefer_remove`/`:neutral`/`:prefer_keep` to richer shrinking hints.
+
+**Ideas:**
+- Numeric priority/weight for finer-grained control
+- User-provided shrinking strategy callback
+- Domain-informed hints: "this command is more likely to trigger failures"
+
+**Affects:**
+- Shrinking algorithm must respect priorities/weights
+- Documentation needs guidance on tuning for efficient shrinking
+
+---
+
+## Pluggable Data Generator
+
+Allow alternatives to StreamData at the Model level.
+
+**Features:**
+- Generator interface abstraction (generate, shrink)
+- Configurable at Model level, default to StreamData
+- Graceful handling when alternative generator doesn't support shrinking
+
+**Considerations:**
+- PropCheck, custom generators, or external sources
+- How shrinking interacts with non-StreamData generators
+
+---
+
 ## Interactive Debugger
 
 Step-through execution and debugging tools for analyzing test failures.
