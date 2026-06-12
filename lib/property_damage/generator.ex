@@ -63,8 +63,10 @@ defmodule PropertyDamage.Generator do
   - `model` - Model module defining commands and state projection
   - `opts` - Options:
     - `:max_commands` - Maximum total commands per sequence (default: 50)
-    - `:seed` - RNG seed for reproducibility
     - `:branching` - Keyword list for branching configuration (see below)
+
+  Note: the returned generator is pure; reproducibility comes from consuming
+  it with `generate_value/3` and an explicit seed.
 
   ## Branching Options
 
@@ -112,6 +114,42 @@ defmodule PropertyDamage.Generator do
         do_generate_linear_sequence(commands, projection, model, max_commands)
       end
     end)
+  end
+
+  # Size passed to StreamData when realizing a value. Constant (rather than
+  # growing per run) so that a sequence is a pure function of the seed alone,
+  # which is what makes "reproduce with seed N" exact.
+  @generation_size 30
+
+  @doc """
+  Deterministically realizes a single value from a StreamData generator.
+
+  Consuming a generator via `Enum`/`Enumerable` seeds from the wall clock
+  (see `StreamData` docs), which silently breaks seed reproducibility.
+  All framework code MUST realize generated values through this function.
+  """
+  @spec generate_value(StreamData.t(val), integer(), keyword()) :: val when val: var
+  def generate_value(generator, seed, opts \\ []) when is_integer(seed) do
+    size = Keyword.get(opts, :size, @generation_size)
+
+    generator
+    |> StreamData.seeded(seed)
+    |> StreamData.resize(size)
+    |> Enum.at(0)
+  end
+
+  @doc """
+  Derives the effective seed for a given run number from the base seed.
+
+  Run 0 uses the base seed unchanged, so re-running a failure's reported
+  seed with `max_runs: 1` regenerates exactly the failing sequence.
+  Later runs get independent, well-mixed sub-seeds.
+  """
+  @spec run_seed(integer(), non_neg_integer()) :: integer()
+  def run_seed(seed, 0) when is_integer(seed), do: seed
+
+  def run_seed(seed, run_number) when is_integer(seed) and is_integer(run_number) do
+    :erlang.phash2({seed, run_number}, 4_294_967_296)
   end
 
   @doc """

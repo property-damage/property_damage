@@ -210,12 +210,12 @@ defmodule PropertyDamage.GuidedRunner do
 
   # Evaluate a single seed
   defp evaluate_seed(seed, model, adapter, adapter_config, max_commands) do
-    # Seed RNG
-    :rand.seed(:exsss, {seed, seed, seed})
+    # Seed the process RNG (execution-time randomness only)
+    :rand.seed(:exsss, seed)
 
-    # Generate and execute sequence
+    # Generate and execute sequence, deterministically derived from the seed
     generator = Generator.generate_sequence(model, max_commands: max_commands)
-    sequence = generate_one(generator)
+    sequence = Generator.generate_value(generator, seed)
 
     case Executor.run(sequence, model, adapter, adapter_config: adapter_config) do
       {:ok, result} ->
@@ -250,14 +250,6 @@ defmodule PropertyDamage.GuidedRunner do
 
       {:error, reason} ->
         {:error, %{seed: seed, failure_reason: reason}}
-    end
-  end
-
-  # Generate one sequence from a StreamData generator
-  defp generate_one(generator) do
-    case Enumerable.reduce(generator, {:cont, nil}, fn val, _ -> {:halt, val} end) do
-      {:halted, value} -> value
-      {:done, _} -> Sequence.linear([])
     end
   end
 

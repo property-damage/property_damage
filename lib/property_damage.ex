@@ -415,8 +415,10 @@ defmodule PropertyDamage do
          branching,
          stutter_config
        ) do
-    # Seed the RNG
-    :rand.seed(:exsss, {seed, seed, seed})
+    # Seed the process RNG (consumed by execution-time randomness such as
+    # stutter decisions; sequence generation is seeded explicitly per run
+    # via Generator.generate_value/2, NOT through the process RNG)
+    :rand.seed(:exsss, seed)
 
     # Generate sequences and run
     generator_opts = [max_commands: max_commands]
@@ -486,8 +488,11 @@ defmodule PropertyDamage do
          run_number,
          total_commands
        ) do
-    # Generate a command sequence
-    sequence = generate_one(generator)
+    # Generate a command sequence, deterministically derived from the seed.
+    # Run 0 uses the base seed itself so a reported seed reproduces exactly
+    # with max_runs: 1.
+    run_seed = Generator.run_seed(seed, run_number)
+    sequence = generate_one(generator, run_seed)
     command_count = Sequence.command_count(sequence)
 
     if verbose do
@@ -554,7 +559,9 @@ defmodule PropertyDamage do
               total_commands + command_count
             )
           else
-            # Failure - shrink and report
+            # Failure - shrink and report. Pass the run's EFFECTIVE seed so
+            # the report's "reproduce with this seed" is exact (run 0 of a
+            # reproduction derives the identical sequence from it).
             handle_failure(
               sequence,
               result,
@@ -566,7 +573,7 @@ defmodule PropertyDamage do
               shrinker_config,
               on_failure,
               verbose,
-              seed,
+              run_seed,
               run_number
             )
           end
@@ -586,12 +593,8 @@ defmodule PropertyDamage do
     end
   end
 
-  defp generate_one(generator) do
-    # Use StreamData's internal generation to get a single value
-    case Enumerable.reduce(generator, {:cont, nil}, fn val, _ -> {:halt, val} end) do
-      {:halted, value} -> value
-      {:done, _} -> []
-    end
+  defp generate_one(generator, run_seed) do
+    Generator.generate_value(generator, run_seed)
   end
 
   defp setup_injectors(injector_adapters, event_queue) do

@@ -138,30 +138,27 @@ defmodule PropertyDamageTest do
   end
 
   describe "run/1 failure handling" do
+    # FailingModel's invariant fails when the CUMULATIVE quantity exceeds
+    # 100, so a failure is certain well within these run bounds. The seed is
+    # fixed: failure is mandatory, not opportunistic.
     test "returns {:error, failure_report} on failure" do
-      # FailingModel has a check that fails when quantity > 100
       result =
         PropertyDamage.run(
           model: FailingModel,
           adapter: SimpleAdapter,
+          seed: 42,
           max_runs: 100,
           max_commands: 50,
           validate: false,
           shrink: false
         )
 
-      # This test may or may not fail depending on generated values
-      # If it succeeds, that's fine too
-      case result do
-        {:ok, _stats} ->
-          :ok
+      assert {:error, %PropertyDamage.FailureReport{} = report} = result
+      assert report.check_name == :quantity_limit
+      assert is_integer(report.failed_at_index)
 
-        {:error, report} ->
-          assert is_map(report)
-          assert is_list(report.original_commands)
-          assert is_list(report.shrunk_commands)
-          assert report.shrunk_commands == report.original_commands
-      end
+      # With shrink: false the shrunk sequence is the original
+      assert report.shrunk_sequence == report.original_sequence
     end
 
     test "invokes on_failure callback" do
@@ -175,6 +172,7 @@ defmodule PropertyDamageTest do
         PropertyDamage.run(
           model: FailingModel,
           adapter: SimpleAdapter,
+          seed: 42,
           max_runs: 100,
           max_commands: 50,
           validate: false,
@@ -182,14 +180,9 @@ defmodule PropertyDamageTest do
           on_failure: on_failure
         )
 
-      case result do
-        {:ok, _stats} ->
-          :ok
-
-        {:error, _report} ->
-          assert_received {:failure_report, report}
-          assert is_map(report)
-      end
+      assert {:error, _report} = result
+      assert_received {:failure_report, report}
+      assert %PropertyDamage.FailureReport{check_name: :quantity_limit} = report
     end
   end
 
@@ -199,22 +192,24 @@ defmodule PropertyDamageTest do
         PropertyDamage.run(
           model: FailingModel,
           adapter: SimpleAdapter,
+          seed: 42,
           max_runs: 100,
           max_commands: 50,
           validate: false,
           shrink: true
         )
 
-      case result do
-        {:ok, _stats} ->
-          :ok
+      assert {:error, report} = result
 
-        {:error, report} ->
-          # Shrunk sequence should be <= original
-          assert length(report.shrunk_commands) <= length(report.original_commands)
-          assert report.shrink_iterations >= 0
-          assert report.shrink_time_ms >= 0
-      end
+      original = PropertyDamage.Sequence.to_list(report.original_sequence)
+      shrunk = PropertyDamage.Sequence.to_list(report.shrunk_sequence)
+
+      assert length(shrunk) <= length(original)
+
+      # Failure equivalence: the shrunk sequence must still violate the
+      # invariant (cumulative quantity above the limit)
+      shrunk_total = shrunk |> Enum.map(& &1.quantity) |> Enum.sum()
+      assert shrunk_total > 100
     end
   end
 

@@ -280,22 +280,15 @@ defmodule PropertyDamage.IEx do
     branching = Keyword.get(opts, :branching, nil)
     verbose = Keyword.get(opts, :verbose, false)
 
-    # Seed RNG
-    :rand.seed(:exsss, {seed, seed, seed})
-
-    # Generate sequence
+    # Generate sequence (explicitly seeded; matches what run/1 generates
+    # for run 0 of the same seed)
     generator_opts = [max_commands: max_commands]
 
     generator_opts =
       if branching, do: Keyword.put(generator_opts, :branching, branching), else: generator_opts
 
     generator = Generator.generate_sequence(model, generator_opts)
-
-    sequence =
-      case Enumerable.reduce(generator, {:cont, nil}, fn val, _ -> {:halt, val} end) do
-        {:halted, value} -> value
-        {:done, _} -> Sequence.linear([])
-      end
+    sequence = Generator.generate_value(generator, seed) || Sequence.linear([])
 
     # Print sequence
     IO.puts("")

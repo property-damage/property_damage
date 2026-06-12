@@ -248,8 +248,9 @@ defmodule PropertyDamage.Differential do
   # ============================================================================
 
   defp run_interleaved(config, targets, _baseline) do
-    # Seed the RNG
-    :rand.seed(:exsss, {config.seed, config.seed, config.seed})
+    # Seed the process RNG (execution-time randomness only; sequence
+    # generation is seeded explicitly per run)
+    :rand.seed(:exsss, config.seed)
 
     # Setup all targets
     with {:ok, target_contexts} <- setup_all_targets(targets, config) do
@@ -269,10 +270,10 @@ defmodule PropertyDamage.Differential do
   end
 
   defp run_interleaved_loop(config, targets, target_contexts, run_number, divergences) do
-    # Generate a command sequence
+    # Generate a command sequence, deterministically derived from the seed
     generator_opts = [max_commands: config.max_commands]
     generator = Generator.generate_sequence(config.model, generator_opts)
-    sequence = generate_one(generator)
+    sequence = generate_one(generator, Generator.run_seed(config.seed, run_number))
     commands = Sequence.to_list(sequence)
 
     if config.verbose do
@@ -434,8 +435,9 @@ defmodule PropertyDamage.Differential do
   # ============================================================================
 
   defp run_sequential(config, targets, baseline) do
-    # Seed the RNG
-    :rand.seed(:exsss, {config.seed, config.seed, config.seed})
+    # Seed the process RNG (execution-time randomness only; sequence
+    # generation is seeded explicitly per run)
+    :rand.seed(:exsss, config.seed)
 
     # Pre-generate all sequences
     sequences = generate_sequences(config)
@@ -468,8 +470,8 @@ defmodule PropertyDamage.Differential do
     generator_opts = [max_commands: config.max_commands]
     generator = Generator.generate_sequence(config.model, generator_opts)
 
-    for _ <- 1..config.max_runs do
-      sequence = generate_one(generator)
+    for run_number <- 0..(config.max_runs - 1) do
+      sequence = generate_one(generator, Generator.run_seed(config.seed, run_number))
       Sequence.to_list(sequence)
     end
   end
@@ -779,11 +781,8 @@ defmodule PropertyDamage.Differential do
     :ok
   end
 
-  defp generate_one(generator) do
-    case Enumerable.reduce(generator, {:cont, nil}, fn val, _ -> {:halt, val} end) do
-      {:halted, value} -> value
-      {:done, _} -> []
-    end
+  defp generate_one(generator, run_seed) do
+    Generator.generate_value(generator, run_seed)
   end
 
   defp init_projections(model) do
