@@ -318,9 +318,35 @@ defmodule PropertyDamage.ExecutorTest do
       {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
 
       model_state = result.projections[ModelState]
-      # The executor takes the last branch's projection state
-      # So we expect at least one item (this is implementation-dependent)
-      assert map_size(model_state.items) >= 1
+
+      # EVERY branch's effects must survive the merge, not just the last one's
+      assert map_size(model_state.items) == 3
+
+      names = model_state.items |> Map.values() |> Enum.map(& &1.name) |> Enum.sort()
+      assert names == ["BranchA", "BranchB", "Prefix"]
+    end
+
+    test "final event log is chronological across prefix and branches" do
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 10}],
+          [
+            [
+              %CreateItem{name: "BranchA1", quantity: 20},
+              %CreateItem{name: "BranchA2", quantity: 21}
+            ],
+            [%CreateItem{name: "BranchB", quantity: 30}]
+          ],
+          [%CreateItem{name: "Suffix", quantity: 40}]
+        )
+
+      {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
+
+      names = Enum.map(result.event_log, & &1.event.name)
+
+      # Branches execute sequentially in order, and each branch's events must
+      # appear in intra-branch order (not reversed)
+      assert names == ["Prefix", "BranchA1", "BranchA2", "BranchB", "Suffix"]
     end
 
     test "handles empty branches list" do

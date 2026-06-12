@@ -368,16 +368,17 @@ defmodule PropertyDamage.FailureReport.Formatter do
     commands = Sequence.to_list(report.shrunk_sequence)
     refs = report.refs_at_failure || %{}
 
-    # Calculate failed_at for shrunk sequence (may differ from original)
-    shrunk_len = length(commands)
-    failed_at = min(report.failed_at_index, shrunk_len - 1)
+    # Branch-aware flattened marker position; nil (no marker) when the
+    # index is absent or out of range, rather than mismarking the last
+    # command
+    failed_at = flattened_failure_index(report, length(commands))
 
     commands_text =
       commands
       |> Enum.take(max_commands)
       |> Enum.with_index()
       |> Enum.map(fn {cmd, idx} ->
-        is_failure = idx == failed_at
+        is_failure = failed_at != nil and idx == failed_at
         marker = if is_failure, do: "#{red(color)}►#{reset()}", else: " "
         idx_color = if is_failure, do: red(color), else: dim(color)
         failure_label = if is_failure, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
@@ -397,6 +398,35 @@ defmodule PropertyDamage.FailureReport.Formatter do
     #{section_header("Minimal Reproduction (#{length(commands)} commands)", color)}
     #{commands_text}#{truncated}
     """
+  end
+
+  # Translate the executor's (failed_at_index, branch_id) into a position in
+  # the FLATTENED command list (prefix ++ branch0 ++ branch1 ++ ... ++
+  # suffix). Branch indices are prefix-relative and overlap across branches;
+  # suffix indices already continue after the sum of branch lengths, so they
+  # map to the flattened position unchanged.
+  defp flattened_failure_index(report, flattened_length) do
+    seq = report.shrunk_sequence
+    index = report.failed_at_index
+
+    flat =
+      cond do
+        not is_integer(index) ->
+          nil
+
+        report.branch_id == nil or seq == nil or Sequence.linear?(seq) ->
+          index
+
+        true ->
+          prefix_len = length(seq.prefix)
+
+          earlier_branches =
+            seq.branches |> Enum.take(report.branch_id) |> Enum.map(&length/1) |> Enum.sum()
+
+          prefix_len + earlier_branches + (index - prefix_len)
+      end
+
+    if is_integer(flat) and flat >= 0 and flat < flattened_length, do: flat, else: nil
   end
 
   defp terminal_original_sequence(report, opts) do

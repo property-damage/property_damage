@@ -451,7 +451,14 @@ defmodule PropertyDamage.Executor do
              ) do
           {:ok, branch_results, branch_event_logs, linearization} ->
             # Phase 3: Merge branch states and execute suffix
-            merged_state = merge_branch_states(prefix_state, branch_results, branch_event_logs)
+            merged_state =
+              merge_branch_states(
+                prefix_state,
+                branch_results,
+                branch_event_logs,
+                linearization,
+                branch_start_index
+              )
 
             suffix_start_index = branch_start_index + count_branch_commands(branches)
 
@@ -485,7 +492,14 @@ defmodule PropertyDamage.Executor do
             finalize_result({:failed, index, {:branch_failure, branch_id, reason}, state})
 
           {:linearization_failed, branch_results, branch_event_logs} ->
-            merged_state = merge_branch_states(prefix_state, branch_results, branch_event_logs)
+            merged_state =
+              merge_branch_states(
+                prefix_state,
+                branch_results,
+                branch_event_logs,
+                :no_linearization,
+                branch_start_index
+              )
 
             finalize_result(
               {:failed, branch_start_index,
@@ -560,17 +574,28 @@ defmodule PropertyDamage.Executor do
             {branch_id, Enum.reverse(state.event_log)}
           end)
 
-        # Try to find a valid linearization
-        branch_commands = Enum.map(successful_results, fn {_, _, commands} -> commands end)
+        # Resolve each branch's commands against that branch's final refs so
+        # the linearization checker (and the merge replay) sees the concrete
+        # values the projections saw during execution
+        resolved_branch_commands =
+          Enum.map(successful_results, fn {_, state, commands} ->
+            Enum.map(commands, &deep_resolve_refs(&1, state.refs, nil))
+          end)
 
-        case find_linearization(
-               branch_commands,
-               branch_event_logs,
+        case Linearization.check(
+               resolved_branch_commands,
+               Map.new(branch_event_logs),
                prefix_state.projections,
-               model
+               model,
+               start_index: start_index
              ) do
           {:ok, linearization} ->
             {:ok, successful_results, branch_event_logs, linearization}
+
+          {:indeterminate, _checked} = indeterminate ->
+            # Cannot verify (no simulator, or candidate cap reached): proceed
+            # without claiming either way; the result records :indeterminate
+            {:ok, successful_results, branch_event_logs, indeterminate}
 
           :no_linearization ->
             {:linearization_failed, successful_results, branch_event_logs}
@@ -578,40 +603,53 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  defp find_linearization(branch_commands, branch_event_logs, projections, model) do
-    # Convert branch_event_logs from list of {branch_id, events} to map
-    branch_events_map = Map.new(branch_event_logs)
-
-    # Use the Linearization module for proper linearization checking
-    case Linearization.check(branch_commands, branch_events_map, projections, model) do
-      {:ok, linearization} ->
-        {:ok, linearization}
-
-      :no_linearization ->
-        # Fallback to round-robin if no valid linearization is found
-        # This allows tests to proceed while detecting non-linearizability
-        :no_linearization
-    end
-  end
-
-  defp merge_branch_states(prefix_state, branch_results, branch_event_logs) do
+  defp merge_branch_states(
+         prefix_state,
+         branch_results,
+         branch_event_logs,
+         linearization,
+         start_index
+       ) do
     # Merge refs from all branches
     merged_refs =
       Enum.reduce(branch_results, prefix_state.refs, fn {_, state, _}, acc ->
         Map.merge(acc, state.refs)
       end)
 
-    # Merge projections - use the projections from the last command
-    # This is a simplification; proper merge semantics depend on linearization
+    observed = Linearization.observed_events_by_position(Map.new(branch_event_logs), start_index)
+
+    # Replay every branch's (command, observed events) over the prefix
+    # projections, in the verified linearization order when one exists,
+    # otherwise in branch order (which is itself a valid interleaving
+    # whenever branches are independent)
+    replay_items =
+      case linearization do
+        [_ | _] = tagged ->
+          Enum.map(tagged, fn {branch_id, pos, command} ->
+            {command, Map.get(observed, {branch_id, pos}, [])}
+          end)
+
+        _ ->
+          for {branch_id, state, commands} <- branch_results,
+              {command, pos} <- Enum.with_index(commands) do
+            {deep_resolve_refs(command, state.refs, nil), Map.get(observed, {branch_id, pos}, [])}
+          end
+      end
+
     merged_projections =
-      Enum.reduce(branch_results, prefix_state.projections, fn {_, state, _}, _acc ->
-        state.projections
+      Enum.reduce(replay_items, prefix_state.projections, fn {command, events}, projs ->
+        projs = update_projections(projs, command)
+        Enum.reduce(events, projs, fn event, acc -> update_projections(acc, event) end)
       end)
 
-    # Combine all branch event logs with branch IDs
+    # The state's event_log invariant is reverse-chronological. Overall
+    # chronological order is prefix ++ branch0 ++ branch1 ++ ...; so the
+    # branch logs (chronological here) are reversed as a whole and prepended
+    # to the still-reversed prefix log.
     merged_event_log =
       branch_event_logs
       |> Enum.flat_map(fn {_branch_id, events} -> events end)
+      |> Enum.reverse()
       |> Enum.concat(prefix_state.event_log)
 
     # Sum step counts
@@ -620,10 +658,13 @@ defmodule PropertyDamage.Executor do
         acc + (state.step_count - prefix_state.step_count)
       end)
 
-    # Merge assertion counters
+    # Merge assertion counters: prefix value plus the sum of each branch's
+    # delta relative to the prefix
     merged_counters =
       Enum.reduce(branch_results, prefix_state.assertion_counters, fn {_, state, _}, acc ->
-        Map.merge(acc, state.assertion_counters, fn _k, v1, v2 -> max(v1, v2) end)
+        Map.merge(acc, state.assertion_counters, fn key, acc_value, branch_value ->
+          acc_value + (branch_value - Map.get(prefix_state.assertion_counters, key, 0))
+        end)
       end)
 
     # Merge assertion failures from all branches
@@ -632,18 +673,32 @@ defmodule PropertyDamage.Executor do
         acc ++ Map.get(state, :assertion_failures, [])
       end)
 
+    # Pollers spawned during the prefix or inside branches all stay live
+    merged_pollers =
+      [prefix_state | Enum.map(branch_results, fn {_, state, _} -> state end)]
+      |> Enum.flat_map(&Map.get(&1, :active_pollers, []))
+      |> Enum.uniq()
+
+    merged_resource_pollers =
+      [prefix_state | Enum.map(branch_results, fn {_, state, _} -> state end)]
+      |> Enum.flat_map(&Map.get(&1, :active_resource_pollers, []))
+      |> Enum.uniq()
+
+    # Update through the prefix state so every other key (placeholder
+    # registry, stutter config, mock registry, model, external markers, ...)
+    # is preserved instead of silently dropped
     %{
-      event_log: merged_event_log,
-      projections: merged_projections,
-      projections_before: prefix_state.projections_before,
-      refs: merged_refs,
-      step_count: total_steps,
-      assertion_counters: merged_counters,
-      assertion_failures: merged_failures,
-      assertion_mode: Map.get(prefix_state, :assertion_mode, :halt),
-      branch_id: nil,
-      stutter_config: Map.get(prefix_state, :stutter_config),
-      mock_registry: Map.get(prefix_state, :mock_registry)
+      prefix_state
+      | event_log: merged_event_log,
+        projections: merged_projections,
+        projections_before: merged_projections,
+        refs: merged_refs,
+        step_count: total_steps,
+        assertion_counters: merged_counters,
+        assertion_failures: merged_failures,
+        branch_id: nil,
+        active_pollers: merged_pollers,
+        active_resource_pollers: merged_resource_pollers
     }
   end
 

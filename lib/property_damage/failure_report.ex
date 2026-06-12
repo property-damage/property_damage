@@ -187,9 +187,10 @@ defmodule PropertyDamage.FailureReport do
      branch_id} =
       parse_failure_reason(failure_reason)
 
-    # Extract command and events at failure point
+    # Extract command and events at failure point (branch-aware: branch
+    # command indices are prefix-relative and overlap across branches)
     {command_at_failure, events_at_failure} =
-      extract_failure_context(shrunk_sequence, event_log, failed_at_index)
+      extract_failure_context(shrunk_sequence, event_log, failed_at_index, branch_id)
 
     # Extract branch events if parallel
     branch_events = extract_branch_events(event_log)
@@ -431,16 +432,41 @@ defmodule PropertyDamage.FailureReport do
     inspect(violation)
   end
 
-  defp extract_failure_context(sequence, event_log, failed_at_index) do
-    commands = Sequence.to_list(sequence)
-    command = Enum.at(commands, failed_at_index)
+  defp extract_failure_context(_sequence, _event_log, nil, _branch_id), do: {nil, []}
+
+  defp extract_failure_context(sequence, event_log, failed_at_index, branch_id) do
+    command = command_at(sequence, failed_at_index, branch_id)
 
     events =
       event_log
-      |> Enum.filter(fn entry -> entry.command_index == failed_at_index end)
+      |> Enum.filter(fn entry ->
+        entry.command_index == failed_at_index and entry.branch_id == branch_id
+      end)
       |> Enum.map(& &1.event)
 
     {command, events}
+  end
+
+  # Resolve an executor command index against the sequence structure.
+  # Executor indexing: prefix commands are 0..len(prefix)-1; EVERY branch's
+  # commands continue from len(prefix) (overlapping across branches, hence
+  # branch_id); suffix indices continue after the SUM of branch lengths.
+  defp command_at(sequence, index, branch_id) do
+    cond do
+      Sequence.linear?(sequence) ->
+        sequence |> Sequence.to_list() |> Enum.at(index)
+
+      branch_id != nil ->
+        branch = Enum.at(sequence.branches || [], branch_id) || []
+        Enum.at(branch, index - length(sequence.prefix))
+
+      index < length(sequence.prefix) ->
+        Enum.at(sequence.prefix, index)
+
+      true ->
+        total_branch = sequence.branches |> Enum.map(&length/1) |> Enum.sum()
+        Enum.at(sequence.suffix, index - length(sequence.prefix) - total_branch)
+    end
   end
 
   defp extract_branch_events(event_log) do

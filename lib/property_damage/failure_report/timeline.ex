@@ -78,7 +78,9 @@ defmodule PropertyDamage.FailureReport.Timeline do
     failed_at_index = Keyword.get(opts, :failed_at_index)
 
     if Sequence.branching?(sequence) do
-      format_branching_sequence(sequence, failed_at_index, color, column_width)
+      # Without a report there is no branch attribution; nil marks the
+      # failing index in every branch that has a command there
+      format_branching_sequence(sequence, failed_at_index, nil, color, column_width)
     else
       format_linear_sequence(sequence, failed_at_index, color)
     end
@@ -133,10 +135,16 @@ defmodule PropertyDamage.FailureReport.Timeline do
   # ============================================================================
 
   defp format_branching_timeline(sequence, report, color, column_width) do
-    format_branching_sequence(sequence, report.failed_at_index, color, column_width)
+    format_branching_sequence(
+      sequence,
+      report.failed_at_index,
+      report.branch_id,
+      color,
+      column_width
+    )
   end
 
-  defp format_branching_sequence(sequence, failed_at_index, color, column_width) do
+  defp format_branching_sequence(sequence, failed_at_index, failed_branch_id, color, column_width) do
     %Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence
 
     sections = []
@@ -169,7 +177,14 @@ defmodule PropertyDamage.FailureReport.Timeline do
         prefix_len = length(prefix)
 
         branch_text =
-          format_branches_section(branches, prefix_len, failed_at_index, color, column_width)
+          format_branches_section(
+            branches,
+            prefix_len,
+            failed_at_index,
+            failed_branch_id,
+            color,
+            column_width
+          )
 
         [
           "\n#{yellow(color)}BRANCHES#{reset()} #{dim(color)}(parallel)#{reset()}\n#{branch_text}"
@@ -179,11 +194,13 @@ defmodule PropertyDamage.FailureReport.Timeline do
         sections
       end
 
-    # Suffix section
+    # Suffix section. Executor suffix indices continue after the SUM of all
+    # branch lengths (each branch restarts at prefix_len, but the suffix
+    # does not).
     sections =
       if length(suffix) > 0 do
         prefix_len = length(prefix)
-        branch_cmd_count = if branches, do: Enum.map(branches, &length/1) |> Enum.max(), else: 0
+        branch_cmd_count = if branches, do: Enum.map(branches, &length/1) |> Enum.sum(), else: 0
         suffix_start = prefix_len + branch_cmd_count
         suffix_text = format_suffix_section(suffix, suffix_start, failed_at_index, color)
 
@@ -212,7 +229,14 @@ defmodule PropertyDamage.FailureReport.Timeline do
     |> Enum.join("\n")
   end
 
-  defp format_branches_section(branches, prefix_len, failed_at_index, color, column_width) do
+  defp format_branches_section(
+         branches,
+         prefix_len,
+         failed_at_index,
+         failed_branch_id,
+         color,
+         column_width
+       ) do
     num_branches = length(branches)
 
     # Find max branch length
@@ -243,7 +267,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
         cells =
           branches
           |> Enum.with_index()
-          |> Enum.map(fn {branch_cmds, _branch_idx} ->
+          |> Enum.map(fn {branch_cmds, branch_idx} ->
             cmd_idx = prefix_len + row_idx
 
             case Enum.at(branch_cmds, row_idx) do
@@ -251,7 +275,12 @@ defmodule PropertyDamage.FailureReport.Timeline do
                 pad_cell("", column_width)
 
               cmd ->
-                is_failure = cmd_idx == failed_at_index
+                # Branch indices overlap, so the marker needs branch
+                # attribution when available
+                is_failure =
+                  cmd_idx == failed_at_index and
+                    (failed_branch_id == nil or branch_idx == failed_branch_id)
+
                 format_branch_cell(cmd, cmd_idx, is_failure, color, column_width)
             end
           end)

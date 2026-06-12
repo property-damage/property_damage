@@ -1,8 +1,6 @@
 defmodule PropertyDamage.Test.TestAdapter do
   @moduledoc """
-  Test adapter implementing all callbacks.
-
-  Records calls for verification in tests.
+  Test adapter implementing all callbacks, with unique per-run item refs.
   """
   use PropertyDamage.Adapter
 
@@ -11,24 +9,20 @@ defmodule PropertyDamage.Test.TestAdapter do
 
   @impl true
   def setup(config) do
-    context = %{
-      call_log: [],
-      config: config,
-      item_counter: 0
-    }
-
-    {:ok, context}
+    Process.put({__MODULE__, :item_counter}, 0)
+    {:ok, %{config: config}}
   end
 
   @impl true
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, context) do
-    item_id = "item_#{context.item_counter}"
+  def execute(%CreateItem{name: name, quantity: qty}, _context) do
+    counter = Process.get({__MODULE__, :item_counter}, 0)
+    Process.put({__MODULE__, :item_counter}, counter + 1)
 
     event = %ItemCreated{
-      item_ref: item_id,
+      item_ref: "item_#{counter}",
       name: name,
       quantity: qty
     }

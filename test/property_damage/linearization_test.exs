@@ -116,69 +116,232 @@ defmodule PropertyDamage.LinearizationTest do
     end
   end
 
-  describe "check/4" do
-    test "finds valid linearization for simple branches" do
-      # Create simple branch commands
-      cmd_a = %{id: :a, value: 10}
-      cmd_b = %{id: :b, value: 20}
+  # ============================================================================
+  # Counter model: the canonical linearizability example. The simulator
+  # predicts Incremented{from: n, to: n+1}; a lost update (two increments
+  # both observing from: 0) is explainable by NO sequential order.
+  # ============================================================================
 
-      branch_commands = [[cmd_a], [cmd_b]]
-
-      # Create matching events using Entry.from_command/3
-      branch_events = %{
-        0 => [
-          Entry.from_command(%{type: :add, value: 10}, 0, timestamp: 1)
-        ],
-        1 => [
-          Entry.from_command(%{type: :add, value: 20}, 1, timestamp: 2)
-        ]
-      }
-
-      projections = %{TestProjection => TestProjection.init()}
-
-      result = Linearization.check(branch_commands, branch_events, projections, TestModel)
-
-      assert {:ok, linearization} = result
-      assert length(linearization) == 2
+  defmodule Counter do
+    defmodule Incr do
+      defstruct [:id]
     end
 
-    test "returns first valid linearization found" do
-      cmd_a = %{id: :a}
-      cmd_b = %{id: :b}
+    defmodule Incremented do
+      defstruct [:from, :to]
+    end
+  end
 
-      branch_commands = [[cmd_a], [cmd_b]]
+  defmodule CounterProjection do
+    def init, do: %{count: 0}
 
-      # Both orderings produce the same final state (no events)
+    def apply(state, %Counter.Incremented{to: to}), do: %{state | count: to}
+    def apply(state, _), do: state
+  end
+
+  defmodule CounterModel do
+    @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
+
+    @impl PropertyDamage.Model
+    def commands, do: []
+
+    @impl PropertyDamage.Model
+    def command_sequence_projection, do: CounterProjection
+
+    @impl PropertyDamage.Model
+    def assertion_projections, do: []
+
+    @impl PropertyDamage.Model
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    def simulate(%Counter.Incr{}, state) do
+      [%Counter.Incremented{from: state.count, to: state.count + 1}]
+    end
+
+    def simulate(_, _), do: []
+  end
+
+  defp counter_projections do
+    %{CounterProjection => CounterProjection.init()}
+  end
+
+  defp incr_entry(from, to, command_index) do
+    Entry.from_command(%Counter.Incremented{from: from, to: to}, command_index, timestamp: 1)
+  end
+
+  describe "check/5" do
+    test "accepts a healthy sequential history of two parallel increments" do
+      branch_commands = [[%Counter.Incr{id: :a}], [%Counter.Incr{id: :b}]]
+
+      # Branch a observed 0->1, branch b observed 1->2: order a,b explains it
       branch_events = %{
-        0 => [],
-        1 => []
+        0 => [incr_entry(0, 1, 0)],
+        1 => [incr_entry(1, 2, 0)]
       }
 
+      assert {:ok, linearization} =
+               Linearization.check(
+                 branch_commands,
+                 branch_events,
+                 counter_projections(),
+                 CounterModel
+               )
+
+      assert [{0, 0, %Counter.Incr{id: :a}}, {1, 0, %Counter.Incr{id: :b}}] = linearization
+    end
+
+    test "rejects a lost update: no sequential order explains it" do
+      branch_commands = [[%Counter.Incr{id: :a}], [%Counter.Incr{id: :b}]]
+
+      # BOTH increments observed 0->1: the classic race. Whichever command
+      # goes second should have seen from: 1.
+      branch_events = %{
+        0 => [incr_entry(0, 1, 0)],
+        1 => [incr_entry(0, 1, 0)]
+      }
+
+      assert Linearization.check(
+               branch_commands,
+               branch_events,
+               counter_projections(),
+               CounterModel
+             ) == :no_linearization
+    end
+
+    test "respects start_index when translating entry indices to positions" do
+      branch_commands = [[%Counter.Incr{id: :a}], [%Counter.Incr{id: :b}]]
+
+      # Branches started at executor index 3 (after a 3-command prefix)
+      branch_events = %{
+        0 => [incr_entry(0, 1, 3)],
+        1 => [incr_entry(1, 2, 3)]
+      }
+
+      assert {:ok, _} =
+               Linearization.check(
+                 branch_commands,
+                 branch_events,
+                 counter_projections(),
+                 CounterModel,
+                 start_index: 3
+               )
+    end
+
+    test "finds the valid order regardless of branch position" do
+      branch_commands = [[%Counter.Incr{id: :a}], [%Counter.Incr{id: :b}]]
+
+      # Branch b went FIRST: observed b: 0->1, a: 1->2
+      branch_events = %{
+        0 => [incr_entry(1, 2, 0)],
+        1 => [incr_entry(0, 1, 0)]
+      }
+
+      assert {:ok, linearization} =
+               Linearization.check(
+                 branch_commands,
+                 branch_events,
+                 counter_projections(),
+                 CounterModel
+               )
+
+      assert [{1, 0, %Counter.Incr{id: :b}}, {0, 0, %Counter.Incr{id: :a}}] = linearization
+    end
+
+    test "is indeterminate for models without a simulator" do
+      branch_commands = [[%{id: :a}], [%{id: :b}]]
+      branch_events = %{0 => [], 1 => []}
       projections = %{TestProjection => TestProjection.init()}
 
-      result = Linearization.check(branch_commands, branch_events, projections, TestModel)
+      assert Linearization.check(branch_commands, branch_events, projections, TestModel) ==
+               {:indeterminate, 0}
+    end
 
-      # Should find a valid linearization
-      assert {:ok, _linearization} = result
+    test "is indeterminate when the candidate cap is reached without success" do
+      # Two racing increments (refutable), but a cap of 1 examines only the
+      # first interleaving: refuted, not exhausted, so indeterminate
+      branch_commands = [[%Counter.Incr{id: :a}], [%Counter.Incr{id: :b}]]
+
+      branch_events = %{
+        0 => [incr_entry(0, 1, 0)],
+        1 => [incr_entry(0, 1, 0)]
+      }
+
+      assert {:indeterminate, 1} =
+               Linearization.check(
+                 branch_commands,
+                 branch_events,
+                 counter_projections(),
+                 CounterModel,
+                 max_candidates: 1
+               )
     end
   end
 
   describe "verify/4" do
-    test "verifies a valid linearization" do
-      cmd_a = %{id: :a, value: 10}
-      linearization = [cmd_a]
+    test "accepts a consistent tagged linearization" do
+      linearization = [{0, 0, %Counter.Incr{id: :a}}, {1, 0, %Counter.Incr{id: :b}}]
 
-      branch_events = %{
-        0 => [
-          Entry.from_command(%{type: :add, value: 10}, 0, timestamp: 1)
-        ]
+      observed = %{
+        {0, 0} => [%Counter.Incremented{from: 0, to: 1}],
+        {1, 0} => [%Counter.Incremented{from: 1, to: 2}]
       }
 
-      projections = %{TestProjection => TestProjection.init()}
+      assert Linearization.verify(linearization, observed, counter_projections(), CounterModel)
+    end
 
-      result = Linearization.verify(linearization, branch_events, projections, TestModel)
+    test "refutes an inconsistent tagged linearization" do
+      # Claims a runs first, but a observed from: 1 (it actually ran second)
+      linearization = [{0, 0, %Counter.Incr{id: :a}}, {1, 0, %Counter.Incr{id: :b}}]
 
-      assert result == true
+      observed = %{
+        {0, 0} => [%Counter.Incremented{from: 1, to: 2}],
+        {1, 0} => [%Counter.Incremented{from: 0, to: 1}]
+      }
+
+      refute Linearization.verify(linearization, observed, counter_projections(), CounterModel)
+    end
+
+    test "treats nil predicted fields as wildcards" do
+      defmodule NilSimModel do
+        @behaviour PropertyDamage.Model
+        @behaviour PropertyDamage.Model.Simulator
+
+        @impl PropertyDamage.Model
+        def commands, do: []
+        @impl PropertyDamage.Model
+        def command_sequence_projection, do: CounterProjection
+        @impl PropertyDamage.Model
+        def assertion_projections, do: []
+        @impl PropertyDamage.Model
+        def simulator, do: __MODULE__
+
+        @impl PropertyDamage.Model.Simulator
+        def simulate(%Counter.Incr{}, _state) do
+          # Server-decided values predicted as nil: wildcard
+          [%Counter.Incremented{from: nil, to: nil}]
+        end
+
+        def simulate(_, _), do: []
+      end
+
+      linearization = [{0, 0, %Counter.Incr{id: :a}}]
+      observed = %{{0, 0} => [%Counter.Incremented{from: 0, to: 1}]}
+
+      assert Linearization.verify(
+               linearization,
+               observed,
+               counter_projections(),
+               NilSimModel
+             )
+    end
+
+    test "refutes when an expected event has no observed counterpart" do
+      linearization = [{0, 0, %Counter.Incr{id: :a}}]
+      observed = %{{0, 0} => []}
+
+      refute Linearization.verify(linearization, observed, counter_projections(), CounterModel)
     end
   end
 end

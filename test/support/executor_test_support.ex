@@ -115,20 +115,30 @@ defmodule PropertyDamage.Test.SimpleAdapter do
 
   @impl true
   def setup(config) do
-    {:ok, Map.merge(%{item_counter: 0}, config)}
+    # The adapter contract has no context threading across execute calls,
+    # so the counter lives in the executor's process dictionary, reset per
+    # run. Refs are item_0, item_1, ... and deterministic across runs.
+    Process.put({__MODULE__, :item_counter}, 0)
+    {:ok, config}
   end
 
   @impl true
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, context) do
-    item_ref = "item_#{context.item_counter}"
+  def execute(%CreateItem{name: name, quantity: qty}, _context) do
+    item_ref = "item_#{next_counter()}"
     {:ok, [%ItemCreated{item_ref: item_ref, name: name, quantity: qty}]}
   end
 
   def execute(%ViewItem{item_ref: ref}, _context) do
     {:ok, [%ItemViewed{item_ref: ref}]}
+  end
+
+  defp next_counter do
+    counter = Process.get({__MODULE__, :item_counter}, 0)
+    Process.put({__MODULE__, :item_counter}, counter + 1)
+    counter
   end
 end
 
@@ -292,15 +302,18 @@ defmodule PropertyDamage.Test.ProbeAdapter do
 
   @impl true
   def setup(config) do
-    {:ok, Map.merge(%{item_counter: 0}, config)}
+    Process.put({__MODULE__, :item_counter}, 0)
+    {:ok, config}
   end
 
   @impl true
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, context) do
-    item_ref = "item_#{context.item_counter}"
+  def execute(%CreateItem{name: name, quantity: qty}, _context) do
+    counter = Process.get({__MODULE__, :item_counter}, 0)
+    Process.put({__MODULE__, :item_counter}, counter + 1)
+    item_ref = "item_#{counter}"
     {:ok, [%ItemCreated{item_ref: item_ref, name: name, quantity: qty}]}
   end
 

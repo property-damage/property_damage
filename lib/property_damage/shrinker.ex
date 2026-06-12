@@ -220,9 +220,7 @@ defmodule PropertyDamage.Shrinker do
 
     start_time = System.monotonic_time(:millisecond)
 
-    # Get command list and truncate at failure point
     commands = Sequence.to_list(sequence)
-    commands = Enum.take(commands, failed_at_index + 1)
 
     # Compute the failure signature we need to preserve
     original_signature =
@@ -243,6 +241,21 @@ defmodule PropertyDamage.Shrinker do
       start_time: start_time,
       original_signature: original_signature
     }
+
+    # Truncating at the failure point is an optimization, not an assumption
+    # we may act on blindly: the index can be nil (poll timeouts, record
+    # mode) or branch-relative (converted branching sequences), so the
+    # truncated base must be VERIFIED to still fail before it replaces the
+    # full sequence.
+    shrink_state =
+      with true <- is_integer(failed_at_index),
+           truncated = Enum.take(commands, failed_at_index + 1),
+           true <- length(truncated) < length(commands),
+           true <- still_fails?(truncated, shrink_state) do
+        %{shrink_state | commands: truncated, iterations: shrink_state.iterations + 1}
+      else
+        _ -> shrink_state
+      end
 
     # Phase 1: Sequence shrinking
     shrink_state = shrink_sequence(shrink_state)
@@ -406,11 +419,11 @@ defmodule PropertyDamage.Shrinker do
     else
       # Shrink each branch individually
       {new_branches, new_state} =
-        Enum.reduce(Enum.with_index(branches), {[], state}, fn {branch, _idx}, {acc, s} ->
+        Enum.reduce(Enum.with_index(branches), {[], state}, fn {branch, idx}, {acc, s} ->
           if exceeded_limits_branch?(s) do
             {[branch | acc], s}
           else
-            {shrunk_branch, updated_state} = shrink_single_branch(branch, s)
+            {shrunk_branch, updated_state} = shrink_single_branch(branch, idx, s)
             {[shrunk_branch | acc], updated_state}
           end
         end)
@@ -420,28 +433,29 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
-  defp shrink_single_branch(branch, state) do
+  defp shrink_single_branch(branch, branch_idx, state) do
     # Try removing commands from this branch, prioritizing probe commands
     prioritized_indices = sort_indices_by_shrink_priority(branch)
-    do_shrink_single_branch(branch, state, prioritized_indices)
+    do_shrink_single_branch(branch, branch_idx, state, prioritized_indices)
   end
 
-  defp do_shrink_single_branch(branch, state, []) do
+  defp do_shrink_single_branch(branch, _branch_idx, state, []) do
     {branch, state}
   end
 
-  defp do_shrink_single_branch(branch, state, _indices)
+  defp do_shrink_single_branch(branch, _branch_idx, state, _indices)
        when length(branch) <= 1 do
     {branch, state}
   end
 
-  defp do_shrink_single_branch(branch, state, [index | rest_indices]) do
+  defp do_shrink_single_branch(branch, branch_idx, state, [index | rest_indices]) do
     if exceeded_limits_branch?(state) do
       {branch, state}
     else
-      # Try removing command at index
+      # Try removing command at index. The branch is replaced BY POSITION:
+      # value-matching would also mutate a structurally identical sibling.
       candidate_branch = List.delete_at(branch, index)
-      new_branches = replace_branch(state.sequence.branches, branch, candidate_branch)
+      new_branches = List.replace_at(state.sequence.branches, branch_idx, candidate_branch)
       candidate_seq = %{state.sequence | branches: new_branches}
 
       state = increment_iterations_branch(state)
@@ -450,15 +464,11 @@ defmodule PropertyDamage.Shrinker do
         new_state = %{state | sequence: candidate_seq}
         # Recompute priorities for the shrunk branch
         new_prioritized = sort_indices_by_shrink_priority(candidate_branch)
-        do_shrink_single_branch(candidate_branch, new_state, new_prioritized)
+        do_shrink_single_branch(candidate_branch, branch_idx, new_state, new_prioritized)
       else
-        do_shrink_single_branch(branch, state, rest_indices)
+        do_shrink_single_branch(branch, branch_idx, state, rest_indices)
       end
     end
-  end
-
-  defp replace_branch(branches, old_branch, new_branch) do
-    Enum.map(branches, fn b -> if b == old_branch, do: new_branch, else: b end)
   end
 
   defp shrink_prefix_suffix(state) do
