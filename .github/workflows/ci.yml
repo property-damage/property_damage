@@ -62,3 +62,33 @@ jobs:
       - run: mix deps.get
 
       - run: ./scripts/check_package_contents.sh
+
+  bench:
+    name: Bench (${{ matrix.bench }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: [cachex_bench]
+    defaults:
+      run:
+        working-directory: benches/${{ matrix.bench }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            benches/${{ matrix.bench }}/deps
+            benches/${{ matrix.bench }}/_build
+          key: bench-${{ matrix.bench }}-${{ hashFiles(format('benches/{0}/mix.lock', matrix.bench)) }}
+          restore-keys: bench-${{ matrix.bench }}-
+
+      - run: mix deps.get
+
+      - run: mix test
