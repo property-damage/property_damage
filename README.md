@@ -49,9 +49,27 @@ end
 
 ## Quick Start
 
-### 1. Define Commands
+### 1. Define Events
 
-Commands represent operations that can be executed against your system:
+Events represent the outcomes of operations. Fields the server generates
+(like IDs) are marked with `external()` so PropertyDamage can track them
+symbolically during generation and resolve them during execution:
+
+```elixir
+defmodule MyApp.Events do
+  import PropertyDamage, only: [external: 0]
+
+  defmodule UserCreated do
+    # id is assigned by the System Under Test
+    defstruct [:name, :email, id: external()]
+  end
+end
+```
+
+### 2. Define Commands
+
+Commands are pure data generators. State-dependent logic (preconditions,
+overrides) lives in the Model, not here:
 
 ```elixir
 defmodule MyApp.Commands.CreateUser do
@@ -60,96 +78,83 @@ defmodule MyApp.Commands.CreateUser do
   defstruct [:name, :email]
 
   @impl true
-  def new!(state, generators) do
-    %__MODULE__{
-      name: Faker.Person.name(),
-      email: Faker.Internet.email()
+  def generator(overrides \\ %{}) do
+    %{
+      name: StreamData.string(:alphanumeric, min_length: 1, max_length: 20),
+      email:
+        StreamData.map(
+          StreamData.string(:alphanumeric, min_length: 5),
+          &"#{&1}@example.com"
+        )
     }
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
-
-  @impl true
-  def precondition(_state), do: true
-
-  @impl true
-  def events(command, response) do
-    [%MyApp.Events.UserCreated{
-      id: response["id"],
-      name: command.name,
-      email: command.email
-    }]
-  end
-
-  @impl true
-  def ref(_command, response), do: response["id"]
 end
 ```
 
-### 2. Define Projections
+### 3. Define Projections and Invariants
 
-Projections maintain state by processing events:
+Projections reduce events into state. Functions tagged with `@trigger`
+are invariants, checked at the configured points:
 
 ```elixir
 defmodule MyApp.Projections.Users do
   use PropertyDamage.Model.Projection
 
-  def init, do: %{}
+  alias MyApp.Events.UserCreated
 
-  def handles?(%MyApp.Events.UserCreated{}), do: true
-  def handles?(_), do: false
-
-  def apply(state, %MyApp.Events.UserCreated{} = event) do
-    Map.put(state, event.id, %{name: event.name, email: event.email})
-  end
-end
-```
-
-### 3. Define Assertions (Invariants)
-
-Assertions verify that invariants hold after each command. Use `Model.Projection` to define assertions with optional state tracking:
-
-```elixir
-defmodule MyApp.Assertions.UniqueEmails do
-  use PropertyDamage.Model.Projection
-
-  # Track users state (optional - defaults to %{})
+  @impl true
   def init, do: %{users: %{}}
 
-  # Update state on events (optional - defaults to returning state unchanged)
-  def apply(state, %UserCreated{id: id, email: email}) do
-    put_in(state, [:users, id], %{email: email})
+  @impl true
+  def apply(state, %UserCreated{id: id, name: name, email: email}) do
+    put_in(state, [:users, id], %{name: name, email: email})
   end
-  def apply(state, _), do: state
 
-  # Assert unique emails after every step
+  def apply(state, _event), do: state
+
+  # Checked after every command
   @trigger every: 1
   def assert_unique_emails(state, _cmd_or_event) do
-    emails = Map.values(state.users) |> Enum.map(& &1.email)
-    unless length(emails) == length(Enum.uniq(emails)) do
+    emails = state.users |> Map.values() |> Enum.map(& &1.email)
+
+    if length(emails) != length(Enum.uniq(emails)) do
       PropertyDamage.fail!("Duplicate emails found", emails: emails)
     end
   end
 end
 ```
 
-For simpler assertions that don't need state tracking, you can skip `init/0` and `apply/2`:
+(`@trigger every: MyApp.Commands.CreateUser` runs a check only after that
+command; see the [invariants guide](guides/writing_invariants.md) for more.)
+
+### 4. Define a Simulator
+
+During generation, no real system is available. The simulator predicts a
+command's events so projections can build state for preconditions and
+overrides; during execution, real events from the SUT take over:
 
 ```elixir
-defmodule MyApp.Assertions.ValidEmails do
-  use PropertyDamage.Model.Projection
+defmodule MyApp.Simulator do
+  @behaviour PropertyDamage.Model.Simulator
 
-  # Just define assertions - defaults are injected
-  @trigger every: CreateUser
-  def assert_valid_email(_state, %CreateUser{email: email}) do
-    unless String.contains?(email, "@") do
-      PropertyDamage.fail!("Invalid email", email: email)
-    end
+  alias MyApp.Commands.CreateUser
+  alias MyApp.Events.UserCreated
+
+  @impl true
+  def simulate(%CreateUser{name: name, email: email}, _state) do
+    [%UserCreated{name: name, email: email}]
   end
+
+  def simulate(_command, _state), do: []
 end
 ```
 
-### 4. Define a Model
+### 5. Define a Model
 
-The model ties everything together:
+The model ties everything together and owns the state-dependent logic:
+selection weights, `when:` preconditions, and `with:` generator overrides:
 
 ```elixir
 defmodule MyApp.TestModel do
@@ -158,9 +163,11 @@ defmodule MyApp.TestModel do
   @impl true
   def commands do
     [
-      {MyApp.Commands.CreateUser, weight: 10},
-      {MyApp.Commands.UpdateUser, weight: 5},
-      {MyApp.Commands.DeleteUser, weight: 3}
+      {MyApp.Commands.CreateUser, weight: 3}
+      # {MyApp.Commands.DeleteUser,
+      #  weight: 1,
+      #  when: fn state -> map_size(state.users) > 0 end,
+      #  with: fn state -> %{id: Enum.random(Map.keys(state.users))} end}
     ]
   end
 
@@ -168,42 +175,60 @@ defmodule MyApp.TestModel do
   def command_sequence_projection, do: MyApp.Projections.Users
 
   @impl true
-  def assertion_projections do
-    [MyApp.Assertions.UniqueEmails, MyApp.Assertions.ValidEmails]
-  end
+  def assertion_projections, do: [MyApp.Projections.Users]
+
+  @impl true
+  def simulator, do: MyApp.Simulator
 end
 ```
 
-### 5. Define an Adapter
+### 6. Define an Adapter
 
-The adapter executes commands against your actual system:
+The adapter executes commands against your actual system and returns the
+events that occurred:
 
 ```elixir
 defmodule MyApp.TestAdapter do
-  @behaviour PropertyDamage.Adapter
+  use PropertyDamage.Adapter
+
+  alias MyApp.Commands.CreateUser
+  alias MyApp.Events.UserCreated
 
   @impl true
-  def execute(%MyApp.Commands.CreateUser{} = cmd, config) do
-    Req.post!("#{config.base_url}/users", json: %{
-      name: cmd.name,
-      email: cmd.email
-    }).body
-  end
+  def setup(config), do: {:ok, config}
 
-  # ... other commands
+  @impl true
+  def teardown(_context), do: :ok
+
+  @impl true
+  def execute(%CreateUser{} = cmd, context) do
+    response =
+      Req.post!("#{context.base_url}/users",
+        json: %{name: cmd.name, email: cmd.email}
+      ).body
+
+    {:ok, [%UserCreated{id: response["id"], name: cmd.name, email: cmd.email}]}
+  end
 end
 ```
 
-### 6. Run Tests
+### 7. Run Tests
 
 ```elixir
-PropertyDamage.run(
-  model: MyApp.TestModel,
-  adapter: MyApp.TestAdapter,
-  adapter_config: %{base_url: "http://localhost:4000"},
-  max_commands: 50,
-  max_runs: 100
-)
+case PropertyDamage.run(
+       model: MyApp.TestModel,
+       adapter: MyApp.TestAdapter,
+       adapter_config: %{base_url: "http://localhost:4000"},
+       max_commands: 50,
+       max_runs: 100
+     ) do
+  {:ok, stats} ->
+    IO.puts("#{stats.runs} runs passed (seed #{stats.seed})")
+
+  {:error, failure} ->
+    # A shrunk, minimal reproduction with full diagnostics
+    IO.inspect(failure, pretty: true)
+end
 ```
 
 ## Debugging Failures
