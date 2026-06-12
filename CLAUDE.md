@@ -73,6 +73,11 @@ All user-facing contracts are defined as behaviours:
 
 Test support modules live in `test/support/` and are compiled during test via `elixirc_paths(:test)` in mix.exs. Key files: `test_commands.ex`, `test_model.ex`, `test_projections.ex`, `test_adapter.ex`.
 
+## Specs and documentation
+
+- **OpenSpec** (`openspec/`) — Behavioral specifications across 14 domains (command, model, projection, execution-engine, shrinking, etc.) under `openspec/specs/`. Requirements use RFC 2119 keywords (SHALL, MUST, SHOULD, MAY) with Given/When/Then scenarios, and reference Decision Records (DR-001 through DR-020). Conventions are in `openspec/config.yaml`. When changing observable behavior, check whether the affected domain spec needs updating.
+- **Guides** (`guides/`) — User-facing guides wired into ex_doc via the `extras` in mix.exs. New features or behavior changes often need a corresponding guide update.
+
 ## Dependencies
 
 - `stream_data` — Property-based data generation
