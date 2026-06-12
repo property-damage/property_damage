@@ -208,7 +208,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
         )
 
       case result do
-        :ok -> :ok
+        {:ok, _stats} -> :ok
         {:error, %FailureReport{} = report} -> {:error, report}
         {:error, reason} -> {:error, %{reason: reason}}
       end

@@ -168,11 +168,10 @@ defmodule PropertyDamage.Export.ExUnit do
     "%PropertyDamage.Ref{ref: make_ref(), label: #{inspect(ref.label)}, resolved: PropertyDamage.Ref.Unresolved}"
   end
 
+  # Note: is_atom also covers booleans and nil, which inspect correctly
   defp format_field_value(value) when is_atom(value), do: inspect(value)
   defp format_field_value(value) when is_binary(value), do: inspect(value)
   defp format_field_value(value) when is_number(value), do: inspect(value)
-  defp format_field_value(value) when is_boolean(value), do: inspect(value)
-  defp format_field_value(nil), do: "nil"
 
   defp format_field_value(value) when is_list(value) do
     items = Enum.map(value, &format_field_value/1) |> Enum.join(", ")

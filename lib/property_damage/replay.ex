@@ -207,11 +207,11 @@ defmodule PropertyDamage.Replay do
 
   ## Returns
 
-  - `{:ok, session, step}` - Command executed, step contains results
+  - `{:ok, session, step}` - Command executed; `step.result` holds the outcome,
+    including `{:error, ...}` when the command itself failed
   - `{:done, session}` - No more commands to execute
-  - `{:error, reason}` - Execution failed
   """
-  @spec step(t()) :: {:ok, t(), step()} | {:done, t()} | {:error, term()}
+  @spec step(t()) :: {:ok, t(), step()} | {:done, t()}
   def step(%__MODULE__{current_index: idx, commands: commands} = session)
       when idx + 1 >= length(commands) do
     {:done, %{session | status: :completed}}
@@ -292,10 +292,10 @@ defmodule PropertyDamage.Replay do
 
   ## Returns
 
-  - `{:ok, session, [step]}` - Commands executed
-  - `{:error, reason}` - Execution failed
+  - `{:ok, session, [step]}` - Commands executed; failed commands appear as
+    steps whose `result` is `{:error, ...}`
   """
-  @spec step_to(t(), non_neg_integer()) :: {:ok, t(), [step()]} | {:error, term()}
+  @spec step_to(t(), non_neg_integer()) :: {:ok, t(), [step()]}
   def step_to(%__MODULE__{} = session, target_index) do
     step_to_loop(session, target_index, [])
   end
@@ -393,10 +393,6 @@ defmodule PropertyDamage.Replay do
       {:done, final_session} ->
         stop(final_session)
         {:ok, final_session.steps}
-
-      {:error, reason} ->
-        stop(session)
-        {:error, reason}
     end
   end
 
@@ -411,9 +407,6 @@ defmodule PropertyDamage.Replay do
 
       {:done, final_session} ->
         {:ok, final_session, Enum.reverse(acc)}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 

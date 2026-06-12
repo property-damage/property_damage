@@ -75,6 +75,18 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
   # ============================================================================
 
   @impl PropertyDamage.Adapter
+  def setup(%__MODULE__{} = adapter) do
+    # Must precede the is_map clause: structs are maps, so the general
+    # clause would otherwise swallow the adapter struct
+    case adapter.inner_adapter.setup(%{}) do
+      {:ok, inner_context} ->
+        {:ok, %{adapter | inner_context: inner_context}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   def setup(config) when is_map(config) do
     # Extract the mutating adapter from config if present
     case Map.get(config, :__mutating_adapter__) do
@@ -91,16 +103,6 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
 
       nil ->
         {:error, :not_a_mutating_adapter}
-    end
-  end
-
-  def setup(%__MODULE__{} = adapter) do
-    case adapter.inner_adapter.setup(%{}) do
-      {:ok, inner_context} ->
-        {:ok, %{adapter | inner_context: inner_context}}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 

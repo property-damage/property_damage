@@ -231,6 +231,14 @@ Run with: python #{Common.generate_filename(%FailureReport{seed: metadata.seed},
     "refs[#{inspect(sanitize_label(label))}]"
   end
 
+  # Booleans and nil must precede the is_atom clause: they are atoms in
+  # Elixir but must render as Python literals, not strings
+  defp format_body_value(value, _cmd_index) when is_boolean(value) do
+    if value, do: "True", else: "False"
+  end
+
+  defp format_body_value(nil, _cmd_index), do: "None"
+
   defp format_body_value(value, _cmd_index) when is_atom(value) do
     inspect(to_string(value))
   end
@@ -243,10 +251,6 @@ Run with: python #{Common.generate_filename(%FailureReport{seed: metadata.seed},
     to_string(value)
   end
 
-  defp format_body_value(value, _cmd_index) when is_boolean(value) do
-    if value, do: "True", else: "False"
-  end
-
   defp format_body_value(value, _cmd_index) when is_list(value) do
     Jason.encode!(value)
   end
@@ -254,8 +258,6 @@ Run with: python #{Common.generate_filename(%FailureReport{seed: metadata.seed},
   defp format_body_value(value, _cmd_index) when is_map(value) do
     Jason.encode!(value)
   end
-
-  defp format_body_value(nil, _cmd_index), do: "None"
 
   defp format_body_value(value, _cmd_index) do
     inspect(value)

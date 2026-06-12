@@ -87,36 +87,29 @@ defmodule PropertyDamage.Mutation.Runner do
 
   defp test_command_mutations(command, operators, config, report) do
     # First, run a baseline test to get sample events
-    case get_sample_events(command, config) do
-      {:ok, sample_events} ->
-        # Generate mutations from each operator
-        mutations =
-          operators
-          |> Enum.flat_map(fn operator ->
-            generate_mutations_for_command(operator, sample_events, config)
-          end)
-          |> Enum.take(config.mutations_per_command * length(operators))
+    sample_events = get_sample_events(command, config)
 
-        # Test each mutation
-        Enum.reduce(mutations, report, fn {operator, mutation}, acc_report ->
-          result = test_single_mutation(command, operator, mutation, config)
-          maybe_report_progress(result, config)
-          Report.record_result(acc_report, result)
-        end)
+    # Generate mutations from each operator
+    mutations =
+      operators
+      |> Enum.flat_map(fn operator ->
+        generate_mutations_for_command(operator, sample_events, config)
+      end)
+      |> Enum.take(config.mutations_per_command * length(operators))
 
-      {:error, _reason} ->
-        # Can't get sample events for this command, skip it
-        report
-    end
+    # Test each mutation
+    Enum.reduce(mutations, report, fn {operator, mutation}, acc_report ->
+      result = test_single_mutation(command, operator, mutation, config)
+      maybe_report_progress(result, config)
+      Report.record_result(acc_report, result)
+    end)
   end
 
   defp get_sample_events(command, config) do
-    # Run a single test to get sample events for this command type
-    # This gives us realistic events to mutate
-    case run_baseline_test(command, config) do
-      {:ok, events} -> {:ok, events}
-      {:error, reason} -> {:error, reason}
-    end
+    # Run a single test to get sample events for this command type.
+    # This gives us realistic events to mutate; both passing and failing
+    # baseline runs yield events.
+    run_baseline_test(command, config)
   end
 
   defp run_baseline_test(_command, config) do
@@ -132,14 +125,11 @@ defmodule PropertyDamage.Mutation.Runner do
 
     case result do
       {:ok, run_result} ->
-        # Extract events from the run
-        events = extract_events_from_result(run_result)
-        {:ok, events}
+        extract_events_from_result(run_result)
 
       {:error, failure} ->
         # Even a failing run gives us events
-        events = extract_events_from_failure(failure)
-        {:ok, events}
+        extract_events_from_failure(failure)
     end
   end
 

@@ -57,8 +57,6 @@ defmodule PropertyDamage.Integration do
   Supported formats: `:terminal`, `:markdown`, `:junit`, `:json`
   """
 
-  require Logger
-
   alias PropertyDamage.FailureIntelligence
 
   # Suppress warnings for optional Req dependency and :ssl (guarded at runtime)
@@ -394,10 +392,10 @@ defmodule PropertyDamage.Integration do
         end
 
         case result do
-          %{success: true} ->
+          {:ok, _stats} ->
             {:cont, %{acc | passed: acc.passed + 1}}
 
-          %{success: false} = failure ->
+          {:error, failure} ->
             # Save failure if requested
             if save_failures do
               save_failure(failure, save_failures, run_num)
@@ -429,14 +427,16 @@ defmodule PropertyDamage.Integration do
   end
 
   defp print_run_progress(run_num, max_runs, result) do
-    status = if result.success, do: "✓", else: "✗"
-    commands = result[:commands_executed] || result[:history] |> length()
-    duration = result[:duration_ms] || 0
+    detail =
+      case result do
+        {:ok, stats} ->
+          "#{String.pad_leading("#{stats.total_commands}", 3)} commands ✓"
 
-    IO.puts(
-      "Run #{String.pad_leading("#{run_num}", 3)}/#{max_runs}: " <>
-        "#{String.pad_leading("#{commands}", 3)} commands #{status} (#{duration}ms)"
-    )
+        {:error, failure} ->
+          "failed at command #{failure.failed_at_index} ✗ (seed #{failure.seed})"
+      end
+
+    IO.puts("Run #{String.pad_leading("#{run_num}", 3)}/#{max_runs}: #{detail}")
   end
 
   defp save_failure(failure, dir, run_num) do
@@ -484,8 +484,8 @@ defmodule PropertyDamage.Integration do
         IO.puts("")
         IO.puts("First failure:")
         failure = hd(result.failures)
-        IO.puts("  Seed: #{failure[:seed]}")
-        IO.puts("  Invariant: #{inspect(failure[:check_name] || failure[:failure_reason])}")
+        IO.puts("  Seed: #{failure.seed}")
+        IO.puts("  Invariant: #{inspect(failure.check_name || failure.failure_reason)}")
       end
     end
 
@@ -537,46 +537,48 @@ defmodule PropertyDamage.Integration do
         new_run_count = run_count + 1
 
         new_bugs =
-          if result.success do
-            bugs
-          else
-            # Check if this is a new unique bug
-            fingerprint = FailureIntelligence.fingerprint(result)
+          case result do
+            {:ok, _stats} ->
+              bugs
 
-            is_new =
-              not Enum.any?(bugs, fn bug ->
-                FailureIntelligence.similar?(bug.fingerprint, fingerprint)
-              end)
+            {:error, failure} ->
+              # Check if this is a new unique bug
+              is_new =
+                not Enum.any?(bugs, fn bug ->
+                  FailureIntelligence.similar?(bug.failure, failure)
+                end)
 
-            if is_new do
-              bug = %{
-                fingerprint: fingerprint,
-                failure: result,
-                occurrences: 1,
-                first_seen_run: new_run_count
-              }
+              if is_new do
+                fingerprint = FailureIntelligence.fingerprint(failure)
 
-              if save_to do
-                save_failure(result, save_to, new_run_count)
-              end
+                bug = %{
+                  fingerprint: fingerprint,
+                  failure: failure,
+                  occurrences: 1,
+                  first_seen_run: new_run_count
+                }
 
-              if verbose do
-                IO.puts(
-                  "  [#{length(bugs) + 1}/#{stop_after}] New bug: #{inspect(fingerprint.check_name)}"
-                )
-              end
-
-              [bug | bugs]
-            else
-              # Increment occurrence count for existing bug
-              Enum.map(bugs, fn bug ->
-                if FailureIntelligence.similar?(bug.fingerprint, fingerprint) do
-                  %{bug | occurrences: bug.occurrences + 1}
-                else
-                  bug
+                if save_to do
+                  save_failure(failure, save_to, new_run_count)
                 end
-              end)
-            end
+
+                if verbose do
+                  IO.puts(
+                    "  [#{length(bugs) + 1}/#{stop_after}] New bug: #{inspect(fingerprint.check_name)}"
+                  )
+                end
+
+                [bug | bugs]
+              else
+                # Increment occurrence count for existing bug
+                Enum.map(bugs, fn bug ->
+                  if FailureIntelligence.similar?(bug.failure, failure) do
+                    %{bug | occurrences: bug.occurrences + 1}
+                  else
+                    bug
+                  end
+                end)
+              end
           end
 
         # Print progress periodically
@@ -617,7 +619,7 @@ defmodule PropertyDamage.Integration do
       |> Enum.take(5)
       |> Enum.with_index(1)
       |> Enum.each(fn {failure, idx} ->
-        IO.puts("  #{idx}. Seed: #{failure[:seed]}, Check: #{inspect(failure[:check_name])}")
+        IO.puts("  #{idx}. Seed: #{failure.seed}, Check: #{inspect(failure.check_name)}")
       end)
 
       if length(result.failures) > 5 do
@@ -662,9 +664,9 @@ defmodule PropertyDamage.Integration do
         """
         ### Failure #{idx}
 
-        - **Seed**: `#{failure[:seed]}`
-        - **Check**: `#{inspect(failure[:check_name])}`
-        - **Error**: #{failure[:error_message] || "N/A"}
+        - **Seed**: `#{failure.seed}`
+        - **Check**: `#{inspect(failure.check_name)}`
+        - **Error**: #{failure.failure_message || "N/A"}
         """
       end)
       |> Enum.join("\n")
@@ -681,9 +683,9 @@ defmodule PropertyDamage.Integration do
       result.failures
       |> Enum.map(fn failure ->
         """
-            <testcase name="seed_#{failure[:seed]}" classname="#{inspect(result.model)}" time="0">
-              <failure message="#{escape_xml(inspect(failure[:check_name]))}">
-                #{escape_xml(failure[:error_message] || "Check failed")}
+            <testcase name="seed_#{failure.seed}" classname="#{inspect(result.model)}" time="0">
+              <failure message="#{escape_xml(inspect(failure.check_name))}">
+                #{escape_xml(failure.failure_message || "Check failed")}
               </failure>
             </testcase>
         """

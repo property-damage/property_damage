@@ -195,10 +195,6 @@ defmodule PropertyDamage.Flakiness do
         {:ok, :deterministic} ->
           if verbose, do: IO.puts("ok")
           []
-
-        {:error, _} ->
-          if verbose, do: IO.puts("error")
-          []
       end
     end)
   end

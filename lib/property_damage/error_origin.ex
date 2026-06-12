@@ -163,17 +163,10 @@ defmodule PropertyDamage.ErrorOrigin do
   end
 
   # Check for wrapped exceptions in generic adapter errors
+  # (UndefinedFunctionError, FunctionClauseError, and ArgumentError are already
+  # handled by the dedicated clauses above)
   def classify({:adapter_error, reason}, stacktrace) when is_exception(reason) do
     case reason do
-      %UndefinedFunctionError{} ->
-        classify_undefined_function_error(reason, stacktrace, :adapter_error)
-
-      %FunctionClauseError{} ->
-        classify_function_clause_error(reason, stacktrace, :adapter_error)
-
-      %ArgumentError{} ->
-        classify_argument_error(reason, stacktrace, :adapter_error)
-
       %KeyError{} = e ->
         # KeyError during adapter execution - likely test code error
         %{

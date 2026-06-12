@@ -33,8 +33,6 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   use GenServer
 
-  require Logger
-
   alias PropertyDamage.LoadTest.Metrics
   alias PropertyDamage.{Generator, Ref, Placeholder, Sequence}
   alias PropertyDamage.Model.Projection

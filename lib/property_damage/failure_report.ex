@@ -1,20 +1,3 @@
-defimpl Inspect, for: PropertyDamage.FailureReport do
-  @moduledoc false
-
-  def inspect(report, opts) do
-    # For IEx/IO.inspect, show the formatted report instead of raw struct
-    if opts.limit == :infinity or opts.pretty do
-      # User wants detailed output - show formatted report
-      formatted = PropertyDamage.FailureReport.Formatter.format(report, :terminal, color: false)
-      Inspect.Algebra.concat(["#FailureReport<\n", formatted, ">"])
-    else
-      # Brief output - show compact format
-      compact = PropertyDamage.FailureReport.Formatter.format(report, :compact)
-      Inspect.Algebra.concat(["#FailureReport<", compact, ">"])
-    end
-  end
-end
-
 defmodule PropertyDamage.FailureReport do
   @moduledoc """
   Rich failure report with comprehensive diagnostic information.
@@ -467,6 +450,21 @@ defmodule PropertyDamage.FailureReport do
     |> case do
       empty when map_size(empty) == 0 -> nil
       grouped -> grouped
+    end
+  end
+end
+
+defimpl Inspect, for: PropertyDamage.FailureReport do
+  def inspect(report, opts) do
+    # For IEx/IO.inspect, show the formatted report instead of raw struct
+    if opts.limit == :infinity or opts.pretty do
+      # User wants detailed output - show formatted report
+      formatted = PropertyDamage.FailureReport.Formatter.format(report, :terminal, color: false)
+      Inspect.Algebra.concat(["#FailureReport<\n", formatted, ">"])
+    else
+      # Brief output - show compact format
+      compact = PropertyDamage.FailureReport.Formatter.format(report, :compact)
+      Inspect.Algebra.concat(["#FailureReport<", compact, ">"])
     end
   end
 end
