@@ -302,7 +302,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     for {path, methods} <- paths,
         {method, op} <- methods,
         is_map(op),
-        method in ["get", "post", "put", "patch", "delete"],
+        Enum.member?(["get", "post", "put", "patch", "delete"], method),
         operation_id = Map.get(op, "operationId"),
         filter == nil or MapSet.member?(filter, operation_id) do
       %{
@@ -552,7 +552,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
       #{if op.method == "POST", do: "# DEPRECATED: Use external() in event structs instead of creates_ref\n  # def creates_ref, do: :id\n  # See: event struct below should use `defstruct [id: external(), ...]`", else: ""}
 
-      #{if op.method in ["GET", "HEAD", "OPTIONS"], do: "def read_only?, do: true", else: ""}
+      #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "def read_only?, do: true", else: ""}
 
       # HTTP Info (for adapter)
       def __http_method__, do: :#{String.downcase(op.method)}
@@ -782,7 +782,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     operations
     |> Enum.flat_map(fn op ->
       op.responses
-      |> Enum.filter(fn {status, _} -> status in ["200", "201", "202"] end)
+      |> Enum.filter(fn {status, _} -> Enum.member?(["200", "201", "202"], status) end)
       |> Enum.map(fn _ -> infer_event_name(op) end)
     end)
     |> Enum.uniq()
@@ -794,7 +794,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     |> Enum.flat_map(fn op ->
       op.responses
       |> Enum.filter(fn {status, resp} ->
-        status in ["200", "201", "202"] and resp.schema != nil
+        Enum.member?(["200", "201", "202"], status) and resp.schema != nil
       end)
       |> Enum.map(fn {_status, resp} ->
         fields = extract_schema_fields(resp.schema)

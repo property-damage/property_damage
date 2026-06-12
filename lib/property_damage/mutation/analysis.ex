@@ -83,8 +83,10 @@ defmodule PropertyDamage.Mutation.Analysis do
   defp find_unchecked_fields(report) do
     # Find fields that were mutated but never caused failures
     report.survived_mutations
+    # Enum.member? instead of `in`: the `in` expansion here trips an
+    # "unsafe variable" error in Erlang's cover compiler (mix test --cover)
     |> Enum.filter(fn result ->
-      result.operator in [:value, :omission, :boundary]
+      Enum.member?([:value, :omission, :boundary], result.operator)
     end)
     |> Enum.map(fn result ->
       case result.mutation do

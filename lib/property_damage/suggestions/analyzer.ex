@@ -193,7 +193,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
 
     # Numeric field suggestions
     suggestions =
-      if focus in [:all, :numeric] do
+      if Enum.member?([:all, :numeric], focus) do
         suggestions ++ generate_numeric_suggestions(patterns, existing_checks)
       else
         suggestions
@@ -201,7 +201,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
 
     # Currency consistency suggestions
     suggestions =
-      if focus in [:all, :consistency] do
+      if Enum.member?([:all, :consistency], focus) do
         suggestions ++
           generate_currency_suggestions(patterns, cross_event_fields, existing_checks)
       else
@@ -210,7 +210,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
 
     # Reference field suggestions
     suggestions =
-      if focus in [:all, :references] do
+      if Enum.member?([:all, :references], focus) do
         suggestions ++ generate_reference_suggestions(patterns, existing_checks)
       else
         suggestions
@@ -218,7 +218,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
 
     # Status/state transition suggestions
     suggestions =
-      if focus in [:all, :status] do
+      if Enum.member?([:all, :status], focus) do
         suggestions ++ generate_status_suggestions(patterns, existing_checks)
       else
         suggestions
@@ -226,7 +226,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
 
     # Cross-event consistency suggestions
     suggestions =
-      if focus in [:all, :consistency] do
+      if Enum.member?([:all, :consistency], focus) do
         suggestions ++ generate_cross_event_suggestions(cross_event_fields, existing_checks)
       else
         suggestions
@@ -385,8 +385,8 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     cross_event_fields
     |> Enum.reject(fn {field, _events} ->
       # Skip common fields that don't need consistency checks
-      field in [:__struct__, :inserted_at, :updated_at, :id] or
-        field in checked_field_names
+      Enum.member?([:__struct__, :inserted_at, :updated_at, :id], field) or
+        Enum.member?(checked_field_names, field)
     end)
     |> Enum.filter(fn {field, events} ->
       # Only suggest for fields with multiple appearances and meaningful names

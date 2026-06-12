@@ -274,8 +274,10 @@ defmodule PropertyDamage.Suggestions.Patterns do
     if reference_field?(field) do
       false
     else
-      # Only match "count" if it's a standalone word or at the end
-      field in @numeric_patterns or
+      # Only match "count" if it's a standalone word or at the end.
+      # Enum.member? instead of `in`: the `in` expansion inside `or` chains
+      # trips an "unsafe variable" error in Erlang's cover compiler.
+      Enum.member?(@numeric_patterns, field) or
         (String.contains?(field_str, ["amount", "balance", "total", "price"]) or
            String.ends_with?(field_str, "count") or
            String.ends_with?(field_str, "_count"))
@@ -308,7 +310,7 @@ defmodule PropertyDamage.Suggestions.Patterns do
     field_str = Atom.to_string(field)
 
     cond do
-      field in [:balance, :amount, :total] -> 0.95
+      Enum.member?([:balance, :amount, :total], field) -> 0.95
       String.contains?(field_str, "balance") -> 0.95
       String.contains?(field_str, "amount") -> 0.90
       String.contains?(field_str, "count") -> 0.85
