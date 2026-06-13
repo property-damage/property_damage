@@ -348,7 +348,8 @@ defmodule PropertyDamage.Executor do
       active_resource_pollers: [],
       model: model,
       external_markers: external_markers,
-      event_queue: event_queue
+      event_queue: event_queue,
+      command_specs: build_command_specs(model)
     }
 
     result =
@@ -409,7 +410,8 @@ defmodule PropertyDamage.Executor do
       active_resource_pollers: [],
       model: model,
       external_markers: external_markers,
-      event_queue: event_queue
+      event_queue: event_queue,
+      command_specs: build_command_specs(model)
     }
 
     # Phase 1: Execute prefix
@@ -1084,10 +1086,21 @@ defmodule PropertyDamage.Executor do
           |> Map.put(:inject, &inject_event/1)
           |> Map.put(:start_poller, start_poller_fn)
 
-        # 3. Execute via adapter (with settle logic for probes/async)
+        # 3. Execute via adapter (with settle logic for probes/async).
+        # Commands may be plain maps in low-level/test usage, hence the guard.
+        command_spec =
+          if is_struct(command) do
+            Map.get(Map.get(state, :command_specs, %{}), command.__struct__)
+          end
+
         result =
           try do
-            execute_with_settle(resolved_command, adapter, adapter_context_with_inject)
+            execute_with_settle(
+              resolved_command,
+              adapter,
+              adapter_context_with_inject,
+              command_spec
+            )
           rescue
             e ->
               # Capture stacktrace for adapter exceptions
@@ -1395,10 +1408,25 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Execute command with settle logic for probes/bridges
-  defp execute_with_settle(command, adapter, adapter_context) do
-    if Settle.requires_settling?(command) do
-      config = Settle.get_config(command)
+  # Build a %{command_module => resolved_spec} lookup so execution-time
+  # settle behaviour comes from the normalized command spec (which honors
+  # `use PropertyDamage.Command, execution: :probe`, model-level overrides,
+  # AND legacy semantics/0 callbacks via build_spec_from_legacy) rather than
+  # only the struct's legacy callbacks.
+  defp build_command_specs(model) do
+    model.commands()
+    |> PropertyDamage.Model.normalize_commands()
+    |> Map.new(fn {_weight, module, spec} -> {module, spec} end)
+  rescue
+    _ -> %{}
+  end
+
+  # Execute command with settle logic for probes/async, sourced from the spec
+  defp execute_with_settle(command, adapter, adapter_context, spec) do
+    execution = settle_execution(command, spec)
+
+    if execution in [:probe, :async] do
+      config = settle_config(command, spec)
 
       Settle.settle(
         fn -> adapter.execute(command, adapter_context) end,
@@ -1410,6 +1438,13 @@ defmodule PropertyDamage.Executor do
       adapter.execute(command, adapter_context)
     end
   end
+
+  defp settle_execution(command, nil), do: Settle.get_semantics(command)
+  defp settle_execution(_command, spec), do: Map.get(spec, :execution, :sync)
+
+  defp settle_config(command, nil), do: Settle.get_config(command)
+  defp settle_config(_command, %{settle: settle}) when is_map(settle), do: settle
+  defp settle_config(command, _spec), do: Settle.get_config(command)
 
   # Resolve all refs in a command struct, skipping the creates_ref field
   defp resolve_command_refs(command, refs) do

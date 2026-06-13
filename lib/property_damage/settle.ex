@@ -34,9 +34,11 @@ defmodule PropertyDamage.Settle do
   - `:exponential` - Double the interval after each retry (capped at timeout)
   """
 
+  # Matches Command.framework_defaults/0 and the eventual-consistency spec
+  # (interval was previously 100 here, a 3-way mismatch with both).
   @default_config %{
     timeout_ms: 2_000,
-    interval_ms: 100,
+    interval_ms: 300,
     backoff: :linear
   }
 

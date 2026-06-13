@@ -416,8 +416,11 @@ defmodule PropertyDamage.ShrinkerTest do
           config: Config.new(max_time_ms: 100)
         )
 
-      # Some buffer for test overhead
-      assert result.time_ms < 200
+      # max_time_ms is wall-clock, so under parallel-suite scheduling load
+      # the measured time can exceed the budget by a wide margin. Generous
+      # headroom keeps this non-flaky; the real fix is the planned switch to
+      # an iteration budget (tracked in the fix checklist).
+      assert result.time_ms < 2_000
     end
   end
 

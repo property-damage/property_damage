@@ -79,7 +79,7 @@ defmodule PropertyDamage.SettleTest do
       config = Settle.get_config(%SyncCommand{id: 1})
 
       assert config.timeout_ms == 2_000
-      assert config.interval_ms == 100
+      assert config.interval_ms == 300
       assert config.backoff == :linear
     end
 

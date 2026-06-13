@@ -143,6 +143,78 @@ defmodule PropertyDamage.EventualConsistencyTest do
     assert Map.has_key?(result, :projections_before)
   end
 
+  # A probe command declared purely via `use ... execution: :probe` (no
+  # legacy semantics/0). It must actually settle/retry; before the fix it
+  # ran once as :sync.
+  defmodule ProbeCheck do
+    use PropertyDamage.Command, execution: :probe
+    defstruct []
+
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+  end
+
+  defmodule ProbeEvents do
+    defmodule Checked, do: defstruct([])
+  end
+
+  defmodule ProbeProjection do
+    use PropertyDamage.Model.Projection
+    @impl true
+    def init, do: %{}
+    @impl true
+    def apply(state, _), do: state
+  end
+
+  defmodule ProbeModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [ProbeCheck]
+    @impl true
+    def command_sequence_projection, do: ProbeProjection
+    @impl true
+    def assertion_projections, do: []
+  end
+
+  defmodule RetryThenSucceedAdapter do
+    @moduledoc "Returns {:retry, ...} a couple times, then {:ok, ...}."
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(config) do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+      {:ok, Map.put(config, :counter, counter)}
+    end
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(%ProbeCheck{}, ctx) do
+      n = Agent.get_and_update(ctx.counter, fn n -> {n, n + 1} end)
+
+      if n < 2 do
+        {:retry, :not_ready}
+      else
+        {:ok, [%ProbeEvents.Checked{}]}
+      end
+    end
+  end
+
+  test "a spec-declared :probe command settles/retries (DR-019 at runtime)" do
+    seq = PropertyDamage.Sequence.linear([%ProbeCheck{}])
+
+    {:ok, result} =
+      Executor.run(seq, ProbeModel, RetryThenSucceedAdapter,
+        adapter_config: %{},
+        # short interval so the two retries resolve quickly
+        event_queue: nil
+      )
+
+    assert result.success,
+           "probe should have retried to success, got: #{inspect(result.failure_reason)}"
+  end
+
   test "the full run loop builds a FailureReport from a poll timeout" do
     # This drove handle_failure, which used to crash with a KeyError on the
     # poll-timeout result shape before any report could be built.
