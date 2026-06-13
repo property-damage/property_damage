@@ -321,3 +321,136 @@ defmodule PropertyDamage.Test.ProbeAdapter do
     {:ok, [%ItemViewed{item_ref: ref}]}
   end
 end
+
+# ============================================================================
+# Hierarchical Shrinking Test Support (multi-level dependency graphs)
+#
+# These modules exist to give the hierarchical shrinking strategy real
+# end-to-end coverage. Linear test sequences (<= the granularity threshold)
+# never reach `hierarchical_shrink/1`, and a dependency-free sequence collapses
+# to a single depth level, which doesn't exercise the cross-level index
+# bookkeeping. A producer/consumer chain plus late-positioned independent
+# "filler" roots produces a position/depth inversion: removing a deep chain
+# node leaves the surviving set non-contiguous, which is exactly where stale
+# indices would bite.
+# ============================================================================
+
+defmodule PropertyDamage.Test.Events.LinkAdded do
+  @moduledoc false
+  defstruct [:ref, :weight]
+end
+
+defmodule PropertyDamage.Test.Commands.Link do
+  @moduledoc """
+  A command that both produces a ref (`:ref`) and optionally consumes one
+  (`:parent`), so chains of Links form a multi-level dependency graph. The
+  `:weight` field feeds a cumulative-sum assertion.
+  """
+  @behaviour PropertyDamage.Command
+
+  defstruct [:ref, :parent, :weight]
+
+  @impl true
+  def creates_ref, do: :ref
+
+  @impl true
+  def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+end
+
+defmodule PropertyDamage.Test.Projections.LinkState do
+  @moduledoc false
+  use PropertyDamage.Model.Projection
+
+  @impl true
+  def init, do: %{}
+
+  @impl true
+  def apply(state, _), do: state
+end
+
+defmodule PropertyDamage.Test.Projections.LinkWeightAssertion do
+  @moduledoc """
+  Fails once the cumulative weight of executed Links exceeds 100.
+  """
+  use PropertyDamage.Model.Projection
+
+  alias PropertyDamage.Test.Events.LinkAdded
+
+  @impl true
+  def init, do: %{total_weight: 0}
+
+  @impl true
+  def apply(state, %LinkAdded{weight: weight}) do
+    %{state | total_weight: state.total_weight + (weight || 0)}
+  end
+
+  def apply(state, _), do: state
+
+  @trigger every: 1
+  def assert_weight_limit(state, _cmd_or_event) do
+    unless state.total_weight <= 100 do
+      PropertyDamage.fail!("Cumulative weight exceeds limit",
+        total: state.total_weight,
+        limit: 100
+      )
+    end
+  end
+end
+
+defmodule PropertyDamage.Test.LinkModel do
+  @moduledoc """
+  Model wiring Link commands to the cumulative-weight assertion, with a
+  simulator so the shrinker's validity check (`Validator.valid_sequence?/2`)
+  has something to simulate.
+  """
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
+
+  alias PropertyDamage.Test.Commands.Link
+  alias PropertyDamage.Test.Projections.{LinkState, LinkWeightAssertion}
+  alias PropertyDamage.Test.Events.LinkAdded
+
+  @impl true
+  def commands, do: [Link]
+
+  @impl true
+  def command_sequence_projection, do: LinkState
+
+  @impl true
+  def assertion_projections, do: [LinkWeightAssertion]
+
+  @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%Link{weight: weight}, _state) do
+    [%LinkAdded{ref: nil, weight: weight}]
+  end
+end
+
+defmodule PropertyDamage.Test.LinkAdapter do
+  @moduledoc """
+  Adapter for Link commands. Binds each Link's produced ref to a deterministic
+  per-run id (the ref value is irrelevant to the assertion; only `:weight` is).
+  """
+  use PropertyDamage.Adapter
+
+  alias PropertyDamage.Test.Commands.Link
+  alias PropertyDamage.Test.Events.LinkAdded
+
+  @impl true
+  def setup(config) do
+    Process.put({__MODULE__, :counter}, 0)
+    {:ok, config}
+  end
+
+  @impl true
+  def teardown(_context), do: :ok
+
+  @impl true
+  def execute(%Link{weight: weight}, _context) do
+    counter = Process.get({__MODULE__, :counter}, 0)
+    Process.put({__MODULE__, :counter}, counter + 1)
+    {:ok, [%LinkAdded{ref: "link_#{counter}", weight: weight}]}
+  end
+end

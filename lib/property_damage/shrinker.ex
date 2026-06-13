@@ -572,36 +572,57 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp hierarchical_shrink(state) do
-    graph = Graph.build(state.commands)
+    # The dependency graph and its depth levels are built ONCE, so their node
+    # indices live in a single index space: positions in `original_commands`.
+    # Candidates must therefore be rebuilt from `original_commands` and the set
+    # of surviving original indices tracked explicitly. An earlier version
+    # mutated `state.commands` between levels and re-derived indices from the
+    # progressively-shrunk list, so after the first accepted removal the
+    # original-space `level` numbers no longer matched positions in
+    # `state.commands` — producing no-op acceptances, wrong-target removals,
+    # and missed shrinks exactly on the long sequences this strategy exists for.
+    original_commands = state.commands
+    graph = Graph.build(original_commands)
     levels = Graph.compress(graph)
 
-    state = try_remove_levels(state, graph, Enum.reverse(levels))
+    kept = MapSet.new(0..(length(original_commands) - 1))
+
+    state = try_remove_levels(state, original_commands, graph, Enum.reverse(levels), kept)
 
     linear_shrink(state)
   end
 
-  defp try_remove_levels(state, _graph, []), do: state
+  defp try_remove_levels(state, _original, _graph, [], _kept), do: state
 
-  defp try_remove_levels(state, graph, [level | rest]) do
+  defp try_remove_levels(state, original, graph, [level | rest], kept) do
     if exceeded_limits?(state) do
       state
     else
-      keep_indices =
-        state.commands
-        |> Enum.with_index()
-        |> Enum.reject(fn {_cmd, idx} -> idx in level end)
-        |> Enum.map(fn {_cmd, idx} -> idx end)
+      # Drop this level's nodes, then pull back any ancestors that surviving
+      # nodes still depend on so refs stay resolvable. Everything here is in
+      # the original index space, which `graph` agrees with.
+      candidate_keep = MapSet.difference(kept, MapSet.new(level))
 
-      expanded = Graph.expand_super_node(graph, keep_indices)
-      candidate = select_commands(state.commands, expanded)
+      expanded =
+        graph
+        |> Graph.expand_super_node(MapSet.to_list(candidate_keep))
+        |> MapSet.new()
 
-      state = increment_iterations(state)
-
-      if still_fails?(candidate, state) do
-        new_state = %{state | commands: candidate}
-        try_remove_levels(new_state, graph, rest)
+      if MapSet.equal?(expanded, kept) do
+        # The level's nodes are all required ancestors of survivors, so nothing
+        # actually came out. Skip without spending a SUT execution.
+        try_remove_levels(state, original, graph, rest, kept)
       else
-        try_remove_levels(state, graph, rest)
+        candidate = select_commands(original, MapSet.to_list(expanded))
+
+        state = increment_iterations(state)
+
+        if valid_candidate?(candidate, state) and still_fails?(candidate, state) do
+          new_state = %{state | commands: candidate}
+          try_remove_levels(new_state, original, graph, rest, expanded)
+        else
+          try_remove_levels(state, original, graph, rest, kept)
+        end
       end
     end
   end
@@ -838,9 +859,15 @@ defmodule PropertyDamage.Shrinker do
   end
 
   # Check if a failure matches the original signature
-  defp check_failure_equivalence(_failure_reason, nil) do
-    # No original signature - accept any failure (backwards compatibility)
-    true
+  defp check_failure_equivalence(failure_reason, nil) do
+    # No original signature: we can't prove equivalence, so for backwards
+    # compatibility we accept any failure EXCEPT ones that are unmistakably
+    # shrink artifacts. A dangling-ref / ref-resolution error only appears
+    # because a producing command was removed; accepting it would pass off a
+    # different bug as the "minimal repro". (When a signature IS present, the
+    # type check below already rejects these unless the original was itself a
+    # ref-resolution error.)
+    failure_signature(failure_reason).type != :ref_resolution_error
   end
 
   defp check_failure_equivalence(failure_reason, original_signature) do
