@@ -75,7 +75,7 @@ defmodule PropertyDamage.Livebook do
   - State: State progression timeline
   - Failures: Failure analysis (if any)
   """
-  @spec visualize(PropertyDamage.result()) :: struct()
+  @spec visualize(map()) :: struct()
   def visualize(result) do
     ensure_kino!()
 
@@ -93,7 +93,7 @@ defmodule PropertyDamage.Livebook do
   @doc """
   Create a DataTable showing run results.
   """
-  @spec results_table(PropertyDamage.result()) :: struct()
+  @spec results_table(map()) :: struct()
   def results_table(result) do
     ensure_kino!()
 
@@ -120,7 +120,7 @@ defmodule PropertyDamage.Livebook do
   @doc """
   Create command execution statistics visualization.
   """
-  @spec command_stats(PropertyDamage.result()) :: struct()
+  @spec command_stats(map()) :: struct()
   def command_stats(result) do
     ensure_kino!()
 
@@ -149,7 +149,7 @@ defmodule PropertyDamage.Livebook do
   @doc """
   Create a state timeline visualization showing state progression.
   """
-  @spec state_timeline(PropertyDamage.result()) :: struct()
+  @spec state_timeline(map()) :: struct()
   def state_timeline(result) do
     ensure_kino!()
 
@@ -160,7 +160,7 @@ defmodule PropertyDamage.Livebook do
   @doc """
   Create detailed failure analysis visualization.
   """
-  @spec failure_details(PropertyDamage.result()) :: struct()
+  @spec failure_details(map()) :: struct()
   def failure_details(result) do
     ensure_kino!()
 
@@ -198,7 +198,7 @@ defmodule PropertyDamage.Livebook do
   @doc """
   Create an interactive command stepper for exploring execution.
   """
-  @spec command_stepper(PropertyDamage.result()) :: struct()
+  @spec command_stepper(map()) :: struct()
   def command_stepper(result) do
     ensure_kino!()
 
@@ -239,7 +239,7 @@ defmodule PropertyDamage.Livebook do
   @doc """
   Create a state diff visualization comparing model vs actual state.
   """
-  @spec state_diff(PropertyDamage.result()) :: struct()
+  @spec state_diff(map()) :: struct()
   def state_diff(result) do
     ensure_kino!()
 
@@ -255,7 +255,7 @@ defmodule PropertyDamage.Livebook do
   @doc """
   Create an interactive failure explorer.
   """
-  @spec explore_failure(PropertyDamage.result()) :: struct()
+  @spec explore_failure(map()) :: struct()
   def explore_failure(result) do
     ensure_kino!()
 

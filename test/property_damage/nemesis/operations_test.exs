@@ -528,7 +528,9 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       failure = CertificateExpiry.get_failure()
       assert failure.failure_type == :wrong_host
-      assert failure.error != nil
+      # The error is derived from the failure type; assert its shape rather than
+      # just non-nil (which the type system knows is always true here).
+      assert {:tls_alert, {:handshake_failure, _message}} = failure.error
 
       CertificateExpiry.restore(command, %{})
     end

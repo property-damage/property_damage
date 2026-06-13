@@ -39,7 +39,7 @@ defmodule PropertyDamage.Livebook.Charts do
   @doc """
   Create a bar chart showing command execution counts.
   """
-  @spec command_bar_chart(PropertyDamage.result()) :: struct()
+  @spec command_bar_chart(map()) :: struct()
   def command_bar_chart(result) do
     if vega_lite_available?() do
       data = build_command_count_data(result)
@@ -52,7 +52,7 @@ defmodule PropertyDamage.Livebook.Charts do
   @doc """
   Create a histogram of command execution times.
   """
-  @spec timing_histogram(PropertyDamage.result()) :: struct()
+  @spec timing_histogram(map()) :: struct()
   def timing_histogram(result) do
     if vega_lite_available?() do
       data = build_timing_data(result)
@@ -65,7 +65,7 @@ defmodule PropertyDamage.Livebook.Charts do
   @doc """
   Create a pie chart showing success vs failure rates.
   """
-  @spec success_pie_chart(PropertyDamage.result()) :: struct()
+  @spec success_pie_chart(map()) :: struct()
   def success_pie_chart(result) do
     if vega_lite_available?() do
       data = build_success_data(result)
@@ -78,7 +78,7 @@ defmodule PropertyDamage.Livebook.Charts do
   @doc """
   Create a timeline chart showing command execution over time.
   """
-  @spec execution_timeline(PropertyDamage.result()) :: struct()
+  @spec execution_timeline(map()) :: struct()
   def execution_timeline(result) do
     if vega_lite_available?() do
       data = build_timeline_data(result)
@@ -91,7 +91,7 @@ defmodule PropertyDamage.Livebook.Charts do
   @doc """
   Create a heatmap showing command transitions.
   """
-  @spec command_transition_heatmap(PropertyDamage.result()) :: struct()
+  @spec command_transition_heatmap(map()) :: struct()
   def command_transition_heatmap(result) do
     if vega_lite_available?() do
       data = build_transition_data(result)
@@ -104,7 +104,7 @@ defmodule PropertyDamage.Livebook.Charts do
   @doc """
   Create a stacked bar chart for check results.
   """
-  @spec check_results_chart(PropertyDamage.result()) :: struct()
+  @spec check_results_chart(map()) :: struct()
   def check_results_chart(result) do
     if vega_lite_available?() do
       data = build_check_data(result)

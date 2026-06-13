@@ -330,7 +330,7 @@ defmodule PropertyDamage.Diff do
   defp compare_state_sequences(left_states, right_states) do
     max_len = max(length(left_states), length(right_states))
 
-    for i <- 0..(max_len - 1), reduce: [] do
+    for i <- 0..(max_len - 1)//1, reduce: [] do
       acc ->
         left_state = Enum.at(left_states, i, %{})
         right_state = Enum.at(right_states, i, %{})
