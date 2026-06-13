@@ -471,9 +471,12 @@ defmodule PropertyDamage.ErrorOrigin do
 
   defp format_stacktrace_hint([]), do: nil
 
-  defp format_stacktrace_hint([{module, function, arity, location} | _]) do
+  defp format_stacktrace_hint([{module, function, arity_or_args, location} | _]) do
     file = Keyword.get(location, :file, "unknown")
     line = Keyword.get(location, :line, 0)
+    # Stack frames may carry an args list instead of an integer arity
+    # (badarg/undef/function_clause); normalize to a count.
+    arity = if is_list(arity_or_args), do: length(arity_or_args), else: arity_or_args
     "#{module_name(module)}.#{function}/#{arity} at #{file}:#{line}"
   end
 
@@ -488,6 +491,9 @@ defmodule PropertyDamage.ErrorOrigin do
 
   defp module_name(module) when is_atom(module) do
     module |> Module.split() |> List.last()
+  rescue
+    # Erlang modules (e.g. :erlang) aren't Elixir modules
+    ArgumentError -> Atom.to_string(module)
   end
 
   defp module_name(_), do: "unknown"

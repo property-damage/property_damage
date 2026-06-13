@@ -282,11 +282,19 @@ defmodule PropertyDamage.FailureReport do
       :check_failed -> "Invariant Violation: #{check_name}"
       :idempotency_violation -> "Idempotency Violation"
       :poll_timeout -> "Poll Timeout: #{check_name}"
+      :poll_error -> "Poll Predicate Error"
       :adapter_error -> "Adapter Error"
+      :settle_timeout -> "Settle Timeout"
+      :nemesis_error -> "Fault Injection Error"
+      :resource_poller_error -> "Resource Poller Error"
+      :stutter_execution_failed -> "Stutter Execution Failed"
       :linearization_failed -> "Linearization Failed"
       :branch_failure -> "Branch Execution Failed"
       :ref_resolution_error -> "Ref Resolution Error"
       :unknown -> "Unknown Failure"
+      # Total fallback (e.g. nil on a hand-built struct) so rendering/Inspect
+      # never crashes with a CaseClauseError
+      _ -> "Failure"
     end
   end
 
@@ -368,18 +376,18 @@ defmodule PropertyDamage.FailureReport do
   # ============================================================================
 
   defp parse_failure_reason({:check_failed, check_name, message}) do
-    {:check_failed, check_name, to_string(message), nil, nil, nil}
+    {:check_failed, check_name, extract_message(message), nil, nil, nil}
   end
 
   defp parse_failure_reason({:assertion_failed, check_name, reason}) do
-    message =
-      case reason do
-        %{message: msg} -> msg
-        e when is_exception(e) -> Exception.message(e)
-        other -> inspect(other)
-      end
+    {:check_failed, check_name, extract_message(reason), nil, nil, nil}
+  end
 
-    {:check_failed, check_name, to_string(message), nil, nil, nil}
+  defp parse_failure_reason({:projection_violation, projection, exception}) do
+    message =
+      "projection #{inspect(projection)} rejected the transition: " <> extract_message(exception)
+
+    {:check_failed, projection, message, nil, nil, nil}
   end
 
   defp parse_failure_reason({:idempotency_violation, violation}) do
@@ -392,8 +400,28 @@ defmodule PropertyDamage.FailureReport do
     {:poll_timeout, info.triggered_by.assertion_name, message, nil, info, nil}
   end
 
+  defp parse_failure_reason({:poll_error, reason}) do
+    {:poll_error, nil, "Poll predicate error: #{inspect(reason)}", nil, nil, nil}
+  end
+
   defp parse_failure_reason({:adapter_error, reason}) do
-    {:adapter_error, nil, inspect(reason), nil, nil, nil}
+    {:adapter_error, nil, extract_message(reason), nil, nil, nil}
+  end
+
+  defp parse_failure_reason({:settle_timeout, reason}) do
+    {:settle_timeout, nil, "Command did not settle: #{inspect(reason)}", nil, nil, nil}
+  end
+
+  defp parse_failure_reason({:nemesis_error, reason}) do
+    {:nemesis_error, nil, "Fault injection failed: #{inspect(reason)}", nil, nil, nil}
+  end
+
+  defp parse_failure_reason({:resource_poller_error, reason}) do
+    {:resource_poller_error, nil, "Resource poller error: #{inspect(reason)}", nil, nil, nil}
+  end
+
+  defp parse_failure_reason({:stutter_execution_failed, details}) do
+    {:stutter_execution_failed, nil, "Stutter retry failed: #{inspect(details)}", nil, nil, nil}
   end
 
   defp parse_failure_reason({:linearization_failed, message}) do
@@ -401,8 +429,8 @@ defmodule PropertyDamage.FailureReport do
   end
 
   defp parse_failure_reason({:branch_failure, branch_id, reason}) do
-    {inner_type, check_name, message, _, _, _} = parse_failure_reason(reason)
-    {inner_type, check_name, message, nil, nil, branch_id}
+    {inner_type, check_name, message, idempotency, poll_info, _} = parse_failure_reason(reason)
+    {inner_type, check_name, message, idempotency, poll_info, branch_id}
   end
 
   defp parse_failure_reason({:ref_resolution_error, reason}) do
@@ -412,6 +440,15 @@ defmodule PropertyDamage.FailureReport do
   defp parse_failure_reason(other) do
     {:unknown, nil, inspect(other), nil, nil, nil}
   end
+
+  # Extract a human message from an assertion/exception reason. The
+  # is_exception clause MUST precede %{message: msg}: exceptions like
+  # KeyError/FunctionClauseError carry message: nil and compute it lazily,
+  # so matching the map first yielded empty strings.
+  defp extract_message(reason) when is_exception(reason), do: Exception.message(reason)
+  defp extract_message(%{message: msg}) when is_binary(msg), do: msg
+  defp extract_message(msg) when is_binary(msg), do: msg
+  defp extract_message(other), do: inspect(other)
 
   defp format_poll_timeout_message(info) do
     """

@@ -1050,9 +1050,17 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp serialize_map(map) when is_map(map) do
     for {k, v} <- map, into: %{} do
-      {to_string(k), serialize_value(v)}
+      {serialize_key(k), serialize_value(v)}
     end
   end
+
+  # JSON keys must be strings. Atoms/binaries/numbers stringify cleanly;
+  # tuple/ref/pid/struct keys (common in projection state) would crash
+  # to_string, so they go through inspect.
+  defp serialize_key(k) when is_atom(k), do: to_string(k)
+  defp serialize_key(k) when is_binary(k), do: k
+  defp serialize_key(k) when is_number(k), do: to_string(k)
+  defp serialize_key(k), do: inspect(k)
 
   defp serialize_value(%{__struct__: mod} = struct) do
     %{"_type" => module_name(mod), "_fields" => struct |> Map.from_struct() |> serialize_map()}
@@ -1064,9 +1072,14 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp serialize_value(tuple) when is_tuple(tuple),
     do: tuple |> Tuple.to_list() |> serialize_value()
 
+  # Keep nil/booleans/numbers/strings as native JSON values
+  defp serialize_value(nil), do: nil
+  defp serialize_value(value) when is_boolean(value), do: value
+  defp serialize_value(value) when is_number(value) or is_binary(value), do: value
   defp serialize_value(atom) when is_atom(atom), do: to_string(atom)
-  defp serialize_value(ref) when is_reference(ref), do: inspect(ref)
-  defp serialize_value(other), do: other
+
+  # pids, ports, references, functions: not JSON-encodable, so inspect them
+  defp serialize_value(other), do: inspect(other)
 
   # ============================================================================
   # Compact Format
@@ -1093,6 +1106,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp module_name(module) when is_atom(module) do
     module |> Module.split() |> List.last()
+  rescue
+    # Erlang modules (e.g. :erlang) and plain atoms aren't Elixir modules
+    ArgumentError -> Atom.to_string(module)
   end
 
   defp event_summary(event) do
