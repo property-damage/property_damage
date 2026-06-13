@@ -350,7 +350,7 @@ defmodule PropertyDamage.Livebook do
     | **Failed** | #{stats.failed_commands} |
     | **Events Generated** | #{stats.total_events} |
     | **Checks Run** | #{stats.checks_run} |
-    #{if result.shrunk_sequence, do: "| **Shrunk From** | #{stats.original_length} → #{stats.shrunk_length} commands |", else: ""}
+    #{if Map.get(result, :shrunk_sequence), do: "| **Shrunk From** | #{stats.original_length} → #{stats.shrunk_length} commands |", else: ""}
 
     #{failure_summary_section(result)}
     """
@@ -409,7 +409,7 @@ defmodule PropertyDamage.Livebook do
       total_events: total_events,
       checks_run: count_checks(result),
       original_length: get_in(result, [:shrink_info, :original_length]) || length(history),
-      shrunk_length: length(result.shrunk_sequence || history)
+      shrunk_length: length(Map.get(result, :shrunk_sequence) || history)
     }
   end
 
