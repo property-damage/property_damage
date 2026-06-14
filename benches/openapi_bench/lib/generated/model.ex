@@ -8,41 +8,32 @@ defmodule OpenapiBench.Generated.Model do
   @behaviour PropertyDamage.Model
 
   alias OpenapiBench.Generated.Commands
-  # alias OpenapiBench.Generated.Events
-  # alias OpenapiBench.Generated.Projections
 
   @impl true
   def commands do
+    # Balanced reads/writes so PUT/GET collide on the small 0..4 key space and
+    # the read-consistency invariant is actually exercised.
     [
-      {5, Commands.GetValue},
-      {2, Commands.PutValue}
+      {4, Commands.GetValue},
+      {4, Commands.PutValue}
     ]
   end
 
   @impl true
-  def command_sequence_projection do
-    # TODO: Add state tracking projection
-    # Example: Projections.ResourceState
-    raise "command_sequence_projection/0 not implemented - add your state projection module"
-  end
+  def command_sequence_projection, do: OpenapiBench.Consistency
 
   @impl true
-  def assertion_projections do
-    # TODO: Add extra projections (with @trigger/@poll_state assertions)
-    # Example: [Projections.ResourceExists, Projections.ValidState]
-    []
-  end
+  def assertion_projections, do: [OpenapiBench.Consistency]
 
-  # Optional lifecycle callbacks
-  # @impl true
-  # def setup_once(config), do: {:ok, config}
-  #
-  # @impl true
-  # def setup_each(config), do: {:ok, config}
-  #
-  # @impl true
-  # def teardown_each(_config), do: :ok
-  #
-  # @impl true
-  # def teardown_once(_config), do: :ok
+  @impl true
+  def simulator, do: OpenapiBench.Simulator
+
+  # Reset the SUT between sequences (and shrink attempts) so runs never share
+  # key/value state. The `bug` flag (default false) rides in adapter_config and
+  # seeds the read-consistency violation for the non-vacuity test.
+  @impl true
+  def setup_each(%{adapter_config: config}) do
+    OpenapiBench.Server.reset(Map.get(config, :bug, false))
+    :ok
+  end
 end

@@ -30,9 +30,34 @@ it set, `PUT` answers `200` with the requested value but silently drops the
 write, so a later `GET` is `404`, a read-consistency violation the generated
 suite must catch and shrink.
 
+## Generated vs hand-written
+
+`lib/generated/` is the output of `mix pd.scaffold --from spec/openapi.json
+--output lib/generated --namespace OpenapiBench.Generated`, then the documented
+"next steps" filled in:
+
+- `commands/*.ex` and `adapter.ex` are used **unmodified** apart from each
+  command's `events/3` (next-step 2: map an HTTP response to event structs).
+- `model.ex` is customized (next-steps 4 & 6): wires the projection, simulator,
+  and a `setup_each/1` that resets the SUT per sequence.
+
+The invariant pieces the scaffold cannot infer are hand-written under
+`lib/openapi_bench/`: `consistency.ex` (the read-consistency projection +
+assertion) and `simulator.ex`. Regenerating with `mix pd.scaffold` reproduces
+the `lib/generated/` base; the diff is exactly the next-step fill-ins above.
+
+The point: the same generated client that passes `scaffold_run_test` (faithful
+SUT) catches the seeded SUT bug in `seeded_bug_test` and shrinks it to the
+minimal `PutValue -> GetValue` on one key. The bug lives in the SUT, not in a
+hand-written lying adapter, so this proves the generated code drives the API for
+real.
+
 ## Running
 
 ```bash
 mix test          # starts the in-process server, then runs
 PD_OPENAPI_URL=http://host:port mix test   # point at an external SUT instead
+
+# Regenerate the lib/generated/ base from the spec:
+mix pd.scaffold --from spec/openapi.json --output lib/generated --namespace OpenapiBench.Generated
 ```

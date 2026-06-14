@@ -27,13 +27,17 @@ defmodule OpenapiBench.Generated.Commands.GetValue do
     |> StreamData.fixed_map()
   end
 
-  # Map an HTTP response to events. `status` is the HTTP status code and
-  # `response` the decoded body; return a list of event structs, typically
-  # keyed on status (e.g. a 200 vs a 404). The adapter calls this for every
-  # completed HTTP response, so non-2xx outcomes can become events too.
-  # Example:
-  #   def events(_command, 200, body), do: [%OpenapiBench.Generated.Events.ValueRetrieved{}]
-  #   def events(_command, 404, _body), do: []
+  # Customized (scaffold next-step 2): map a read to a ValueRetrieved event. A
+  # 404 is a legitimate observation ("no value under that key") and becomes a
+  # read of :unset, keyed off the command so the model can check consistency.
+  def events(_command, 200, %{"key" => key, "value" => value}) do
+    [%OpenapiBench.Generated.Events.ValueRetrieved{key: key, value: value}]
+  end
+
+  def events(command, 404, _response) do
+    [%OpenapiBench.Generated.Events.ValueRetrieved{key: command.key, value: :unset}]
+  end
+
   def events(command, status, response) do
     _ = {command, status, response}
     []

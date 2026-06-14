@@ -24,6 +24,24 @@ defmodule OpenapiBench.Server do
   @doc "Base URL the generated adapter and tests should hit."
   def base_url, do: Application.fetch_env!(:openapi_bench, :base_url)
 
+  @doc """
+  Reset the SUT to an empty store and set its `bug` flag, for per-sequence
+  isolation. In-process this pokes the Agent directly; against an external URL
+  it calls the `POST /__reset__` admin endpoint over HTTP.
+  """
+  def reset(bug) do
+    if url = external_url() do
+      Application.ensure_all_started(:inets)
+      body = Jason.encode!(%{bug: bug})
+      headers = [{~c"content-type", ~c"application/json"}]
+      target = String.to_charlist(url <> "/__reset__")
+      {:ok, _} = :httpc.request(:post, {target, headers, ~c"application/json", body}, [], [])
+      :ok
+    else
+      OpenapiBench.Store.reset(bug)
+    end
+  end
+
   defp external_url, do: Application.get_env(:openapi_bench, :external_url)
   defp port, do: Application.fetch_env!(:openapi_bench, :port)
 
