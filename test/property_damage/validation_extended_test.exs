@@ -70,7 +70,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
 
     @impl true
     def commands do
-      [{-5, PropertyDamage.ValidationExtendedTest.ValidCommand}]
+      [{PropertyDamage.ValidationExtendedTest.ValidCommand, -5}]
     end
 
     @impl true
@@ -320,8 +320,8 @@ defmodule PropertyDamage.ValidationExtendedTest do
     @impl true
     def commands do
       [
-        {100, PropertyDamage.ValidationExtendedTest.ValidCommand},
-        {1, PropertyDamage.ValidationExtendedTest.ValidCommand}
+        {PropertyDamage.ValidationExtendedTest.ValidCommand, weight: 100},
+        {PropertyDamage.ValidationExtendedTest.ValidCommand, weight: 1}
       ]
     end
 

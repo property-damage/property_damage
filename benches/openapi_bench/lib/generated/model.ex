@@ -14,8 +14,8 @@ defmodule OpenapiBench.Generated.Model do
     # Balanced reads/writes so PUT/GET collide on the small 0..4 key space and
     # the read-consistency invariant is actually exercised.
     [
-      {4, Commands.GetValue},
-      {4, Commands.PutValue}
+      {Commands.GetValue, weight: 4},
+      {Commands.PutValue, weight: 4}
     ]
   end
 

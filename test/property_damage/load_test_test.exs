@@ -836,7 +836,7 @@ defmodule PropertyDamage.LoadTestTest do
       @behaviour PropertyDamage.Model
 
       @impl true
-      def commands, do: [{1, MockCommand}]
+      def commands, do: [{MockCommand, weight: 1}]
 
       @impl true
       def command_sequence_projection, do: MockProjection

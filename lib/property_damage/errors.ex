@@ -218,7 +218,7 @@ defmodule PropertyDamage.Errors do
           """
           def commands do
             # Return list of command modules (optionally weighted)
-            [{3, CreateEntity}, {1, DeleteEntity}]
+            [{CreateEntity, weight: 3}, {DeleteEntity, weight: 1}]
           end
           """
 

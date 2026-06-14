@@ -199,9 +199,9 @@ defmodule Mix.Tasks.Pd.Gen.Model do
 
   defp generate_commands_list([]) do
     """
-    # {3, CreateEntity},   # High weight - frequent
-          # {2, UpdateEntity},   # Medium weight
-          # {1, DeleteEntity}    # Low weight - rare
+    # {CreateEntity, weight: 3},   # High weight - frequent
+          # {UpdateEntity, weight: 2},   # Medium weight
+          # {DeleteEntity, weight: 1}    # Low weight - rare
     """
   end
 

@@ -101,8 +101,8 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
     def commands do
       [
-        {5, Commands.CreateUser},
-        {3, Commands.GetUser},
+        {Commands.CreateUser, weight: 5},
+        {Commands.GetUser, weight: 3},
         # ...
       ]
     end
@@ -1202,7 +1202,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
     commands_list =
       commands_with_weights
-      |> Enum.map_join(",\n", fn {weight, mod} -> "      {#{weight}, #{mod}}" end)
+      |> Enum.map_join(",\n", fn {weight, mod} -> "      {#{mod}, weight: #{weight}}" end)
 
     """
     defmodule #{namespace}.Model do

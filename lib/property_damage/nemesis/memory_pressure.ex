@@ -20,8 +20,8 @@ defmodule PropertyDamage.Nemesis.MemoryPressure do
 
       def commands do
         [
-          {5, ProcessData},
-          {1, PropertyDamage.Nemesis.MemoryPressure}
+          {ProcessData, weight: 5},
+          {PropertyDamage.Nemesis.MemoryPressure, weight: 1}
         ]
       end
 

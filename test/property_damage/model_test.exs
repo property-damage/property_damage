@@ -199,8 +199,8 @@ defmodule PropertyDamage.ModelTest do
   end
 
   describe "normalize_commands/1" do
-    test "normalizes {weight, module} tuples to 3-tuple with spec map" do
-      commands = [{3, CreateItem}, {1, ViewItem}]
+    test "normalizes {module, weight} tuples to 3-tuple with spec map" do
+      commands = [{CreateItem, 3}, {ViewItem, 1}]
 
       result = Model.normalize_commands(commands)
 
@@ -212,6 +212,12 @@ defmodule PropertyDamage.ModelTest do
       assert is_map(spec2)
       assert spec2.weight == 1
       assert spec2.command == ViewItem
+    end
+
+    test "rejects the removed weight-first {weight, module} form" do
+      assert_raise CaseClauseError, fn ->
+        Model.normalize_commands([{3, CreateItem}])
+      end
     end
 
     test "wraps simple modules with weight 1 and spec map" do
@@ -229,7 +235,7 @@ defmodule PropertyDamage.ModelTest do
     end
 
     test "handles mixed list" do
-      commands = [{3, CreateItem}, ViewItem]
+      commands = [{CreateItem, 3}, ViewItem]
 
       result = Model.normalize_commands(commands)
 

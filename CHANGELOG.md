@@ -29,6 +29,11 @@ end, and trimmed the documented surface to what has been validated.
   (clearer name: returns the projection used for command sequence generation).
 - **BREAKING**: Renamed `extra_projections/0` to `assertion_projections/0`
   (clearer name: these projections verify invariants).
+- **BREAKING**: Removed the weight-first `{weight, Module}` command-spec form.
+  It was undocumented, absent from the `command_spec` typespec, and inconsistent
+  with every other (module-first) form. Use `{Module, weight: n}` (or
+  `{Module, weight}`). `mix pd.scaffold` / `mix pd.gen.model` now emit the
+  keyword form, and all moduledoc examples were updated.
 - Sequence generation is now a pure function of the run seed (seeded
   `StreamData`), so a reported seed reproduces the failing sequence exactly.
 - Probe/async settle behaviour is sourced from the command spec (DR-019) at
@@ -46,6 +51,10 @@ end, and trimmed the documented surface to what has been validated.
 
 ### Fixed
 
+- `Coverage.new/1` mis-parsed command specs: it read the raw command list with a
+  weight-first `{_weight, cmd}` pattern, so the documented `{Module, weight: n}`
+  keyword form bound the options list as the "command". It now routes through
+  `Model.normalize_commands/1` and handles every spec form.
 - Step-by-step `Replay` rebuilt as a stepping shell over the executor (it
   previously could not execute a single step against any model).
 - Eventual-consistency pipeline rebuilt: probe/async settle and `@poll_state`

@@ -23,8 +23,8 @@ defmodule PropertyDamage.Nemesis.ResourceExhaustion do
 
       def commands do
         [
-          {5, OpenConnection},
-          {1, PropertyDamage.Nemesis.ResourceExhaustion}
+          {OpenConnection, weight: 5},
+          {PropertyDamage.Nemesis.ResourceExhaustion, weight: 1}
         ]
       end
 

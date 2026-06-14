@@ -16,8 +16,8 @@ defmodule PropertyDamage.Nemesis.ProcessKill do
 
       def commands do
         [
-          {5, ProcessData},
-          {1, PropertyDamage.Nemesis.ProcessKill}
+          {ProcessData, weight: 5},
+          {PropertyDamage.Nemesis.ProcessKill, weight: 1}
         ]
       end
 

@@ -143,12 +143,13 @@ defmodule PropertyDamage.Validation do
     :ok
   end
 
-  # {weight, module} format (legacy)
-  defp validate_command_spec!({weight, _cmd}) when is_integer(weight) and weight > 0 do
+  # {module, weight} format (bare integer)
+  defp validate_command_spec!({cmd, weight})
+       when is_atom(cmd) and is_integer(weight) and weight > 0 do
     :ok
   end
 
-  defp validate_command_spec!({weight, cmd}) when is_integer(weight) do
+  defp validate_command_spec!({cmd, weight}) when is_atom(cmd) and is_integer(weight) do
     raise ArgumentError, Error.format_config_error(:invalid_command_weight, {weight, cmd})
   end
 

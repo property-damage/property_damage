@@ -28,9 +28,9 @@ defmodule PropertyDamage.Nemesis.ClockSkew do
 
       def commands do
         [
-          {5, CreateSession},
-          {5, CheckSessionExpiry},
-          {1, PropertyDamage.Nemesis.ClockSkew}
+          {CreateSession, weight: 5},
+          {CheckSessionExpiry, weight: 5},
+          {PropertyDamage.Nemesis.ClockSkew, weight: 1}
         ]
       end
 

@@ -28,8 +28,8 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
       # In your model
       def commands do
         [
-          {5, QueryDatabase},
-          {1, PropertyDamage.Nemesis.NetworkPartition}
+          {QueryDatabase, weight: 5},
+          {PropertyDamage.Nemesis.NetworkPartition, weight: 1}
         ]
       end
 
