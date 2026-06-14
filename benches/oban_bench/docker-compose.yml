@@ -1,0 +1,22 @@
+name: pd_oban_bench
+
+# Dedicated, ephemeral Postgres for the Oban bench. Independent of any
+# Postgres on the host. The host port is configurable via PD_OBAN_PG_PORT
+# (default 5434, chosen to avoid the conventional 5432). Data lives in a
+# tmpfs so every fresh container starts from a clean slate.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pd_oban_bench
+    ports:
+      - "${PD_OBAN_PG_PORT:-5434}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pd_oban_bench"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
