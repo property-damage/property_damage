@@ -6,6 +6,12 @@ defmodule PropertyDamage.Replay do
   inspecting the state after each step. This is invaluable for understanding
   exactly how the system reached the failure state.
 
+  Replay is a thin **stepping shell over the Executor**: every command runs
+  through the exact same engine path as a real run (ref/placeholder resolution,
+  settle for probe/async commands, nemesis injection, injector and mock events,
+  projection updates, `@trigger` assertions, and stutter). This is what makes a
+  recorded failure replay to the identical step sequence and state.
+
   ## Usage Modes
 
   ### Functional Mode (Recommended for scripts)
@@ -24,6 +30,7 @@ defmodule PropertyDamage.Replay do
       IO.inspect(step.projections)                  # Inspect state
       {:ok, session, step} = Replay.step(session)  # Next command
       # ...continue stepping...
+      :ok = Replay.stop(session)                    # Release the adapter/queue
 
   ### Jump to Failure Point
 
@@ -37,13 +44,27 @@ defmodule PropertyDamage.Replay do
   - `index` - Command index in sequence
   - `command` - The command struct
   - `command_name` - Short name for display
-  - `events` - Events produced by this command
+  - `events` - Events produced by this command (in chronological order)
   - `projections` - Projection states after this command
+  - `projections_before` - Projection states before this command
   - `refs` - Ref resolution map
-  - `result` - `:ok`, `{:check_failed, ...}`, or error
+  - `result` - `:ok`, `{:check_failed, name, exception}`, or `{:error, reason}`
+
+  ## Limitations
+
+  - **Branching sequences are not steppable.** Interactive stepping is linear by
+    nature; the fork/merge semantics of a parallel sequence cannot be reproduced
+    one command at a time. `start/2` and `run/2` return
+    `{:error, :branching_replay_unsupported}` for a branching `shrunk_sequence`.
+    Inspect a branching failure via the `FailureReport` fields or re-run it
+    through `PropertyDamage.Executor.run/4`.
+  - **Config not stored in the report must be re-supplied.** The `FailureReport`
+    records the model, adapter, and sequence, but not `stutter`/`external_markers`
+    config. Pass those via `opts` (`:stutter_config`, `:external_markers`) if the
+    original run used them and you need a bit-faithful replay.
   """
 
-  alias PropertyDamage.{FailureReport, Sequence, EventQueue, Ref, Options}
+  alias PropertyDamage.{FailureReport, Sequence, EventQueue, Options, Executor}
 
   defstruct [
     :failure,
@@ -52,10 +73,9 @@ defmodule PropertyDamage.Replay do
     :adapter,
     :adapter_config,
     :event_queue,
+    :adapter_context,
+    :exec_state,
     :current_index,
-    :projections,
-    :refs,
-    :event_log,
     :steps,
     :status
   ]
@@ -68,7 +88,7 @@ defmodule PropertyDamage.Replay do
           projections: map(),
           projections_before: map(),
           refs: map(),
-          result: :ok | {:check_failed, atom(), String.t()} | {:error, term()}
+          result: :ok | {:check_failed, atom(), Exception.t()} | {:error, term()}
         }
 
   @type t :: %__MODULE__{
@@ -77,11 +97,10 @@ defmodule PropertyDamage.Replay do
           model: module(),
           adapter: module(),
           adapter_config: map(),
-          event_queue: pid(),
+          event_queue: pid() | nil,
+          adapter_context: map() | nil,
+          exec_state: map() | nil,
           current_index: integer(),
-          projections: map(),
-          refs: map(),
-          event_log: [term()],
           steps: [step()],
           status: :ready | :in_progress | :completed | :failed
         }
@@ -100,7 +119,8 @@ defmodule PropertyDamage.Replay do
 
   - `:adapter_config` - Override adapter configuration
   - `:stop_on_failure` - Stop at first failure (default: true)
-  - `:include_projections` - Include projection states (default: true)
+  - `:stutter_config` - Stutter config to apply during replay (not stored in the report)
+  - `:external_markers` - External markers to apply during replay (not stored in the report)
 
   ## Returns
 
@@ -115,7 +135,8 @@ defmodule PropertyDamage.Replay do
         IO.puts("[\#{step.index}] \#{step.command_name}")
         case step.result do
           :ok -> IO.puts("  -> OK")
-          {:check_failed, check, msg} -> IO.puts("  -> FAILED: \#{check} - \#{msg}")
+          {:check_failed, check, _} -> IO.puts("  -> FAILED: \#{check}")
+          {:error, reason} -> IO.puts("  -> ERROR: \#{inspect(reason)}")
         end
       end)
   """
@@ -135,17 +156,20 @@ defmodule PropertyDamage.Replay do
   @doc """
   Start an interactive replay session.
 
-  Use `step/1` to advance through commands one at a time.
+  Sets up the adapter and an event queue, then leaves the session positioned
+  before the first command. Use `step/1` to advance, and `stop/1` when done to
+  tear the adapter and queue down.
 
   ## Options
 
-  - `:adapter_config` - Override adapter configuration
+  See `run/2` for the supported options.
 
   ## Example
 
       {:ok, session} = Replay.start(failure)
       {:ok, session, step1} = Replay.step(session)
       {:ok, session, step2} = Replay.step(session)
+      :ok = Replay.stop(session)
   """
   @spec start(FailureReport.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def start(%FailureReport{} = failure, opts \\ []) do
@@ -160,28 +184,35 @@ defmodule PropertyDamage.Replay do
       is_nil(adapter) ->
         {:error, :missing_adapter}
 
+      branching?(failure.shrunk_sequence) ->
+        {:error, :branching_replay_unsupported}
+
       true ->
-        adapter_config = opts[:adapter_config]
-        commands = Sequence.to_list(failure.shrunk_sequence)
+        do_start(failure, model, adapter, opts)
+    end
+  end
 
-        {:ok, event_queue} = EventQueue.start_link()
+  defp do_start(failure, model, adapter, opts) do
+    adapter_config = opts[:adapter_config] || %{}
+    commands = Sequence.to_list(failure.shrunk_sequence)
 
-        # Initialize projections (state projection + extra projections)
-        command_sequence_projection = model.command_sequence_projection()
+    # Mirror the run loop: model.setup_each runs before adapter setup so the
+    # SUT starts in the same per-run state the original failure observed.
+    if function_exported?(model, :setup_each, 1) do
+      model.setup_each(%{adapter_config: adapter_config, replay: true})
+    end
 
-        assertion_projections =
-          if function_exported?(model, :assertion_projections, 0) do
-            model.assertion_projections()
-          else
-            []
-          end
+    {:ok, event_queue} = EventQueue.start_link()
 
-        all_projections = [command_sequence_projection | assertion_projections]
-
-        initial_projections =
-          all_projections
-          |> Enum.map(fn proj -> {proj, proj.init()} end)
-          |> Map.new()
+    case adapter.setup(adapter_config) do
+      {:ok, adapter_context} ->
+        exec_state =
+          Executor.init_state(model,
+            event_queue: event_queue,
+            stutter_config: opts[:stutter_config],
+            external_markers: opts[:external_markers] || [],
+            assertion_mode: :halt
+          )
 
         session = %__MODULE__{
           failure: failure,
@@ -190,15 +221,18 @@ defmodule PropertyDamage.Replay do
           adapter: adapter,
           adapter_config: adapter_config,
           event_queue: event_queue,
+          adapter_context: adapter_context,
+          exec_state: exec_state,
           current_index: -1,
-          projections: initial_projections,
-          refs: %{},
-          event_log: [],
           steps: [],
           status: :ready
         }
 
         {:ok, session}
+
+      {:error, reason} ->
+        EventQueue.stop(event_queue)
+        {:error, {:adapter_setup_failed, reason}}
     end
   end
 
@@ -208,7 +242,7 @@ defmodule PropertyDamage.Replay do
   ## Returns
 
   - `{:ok, session, step}` - Command executed; `step.result` holds the outcome,
-    including `{:error, ...}` when the command itself failed
+    including `{:check_failed, ...}` / `{:error, ...}` when the command failed
   - `{:done, session}` - No more commands to execute
   """
   @spec step(t()) :: {:ok, t(), step()} | {:done, t()}
@@ -221,70 +255,77 @@ defmodule PropertyDamage.Replay do
     next_index = session.current_index + 1
     command = Enum.at(session.commands, next_index)
 
-    # Call setup_each if this is the first command
-    session =
-      if next_index == 0 do
-        call_setup_each(session)
-      else
-        session
-      end
+    before_state = session.exec_state
+    before_log_count = length(before_state.event_log)
+    projections_before = before_state.projections
 
-    # Resolve refs
-    resolved_command = resolve_refs(command, session.refs)
+    case Executor.step_command(
+           command,
+           next_index,
+           before_state,
+           session.model,
+           session.adapter,
+           session.adapter_context,
+           session.event_queue
+         ) do
+      {:ok, new_exec_state} ->
+        emit_step(
+          session,
+          new_exec_state,
+          command,
+          next_index,
+          before_log_count,
+          projections_before,
+          :ok,
+          :in_progress
+        )
 
-    # Capture projections before
-    projections_before = session.projections
-
-    # Execute command
-    case execute_command(resolved_command, session) do
-      {:ok, events, response} ->
-        # Update refs
-        new_refs = update_refs(session.refs, command, response, next_index)
-
-        # Apply events to projections
-        new_projections = apply_events(session.projections, events)
-
-        # Run checks
-        result = run_checks(session.model, new_projections)
-
-        # Build step info
-        step = %{
-          index: next_index,
-          command: command,
-          command_name: command.__struct__ |> Module.split() |> List.last(),
-          events: events,
-          projections: new_projections,
-          projections_before: projections_before,
-          refs: new_refs,
-          result: result
-        }
-
-        new_session = %{
-          session
-          | current_index: next_index,
-            projections: new_projections,
-            refs: new_refs,
-            event_log: session.event_log ++ events,
-            steps: session.steps ++ [step],
-            status: if(result == :ok, do: :in_progress, else: :failed)
-        }
-
-        {:ok, new_session, step}
-
-      {:error, reason} ->
-        step = %{
-          index: next_index,
-          command: command,
-          command_name: command.__struct__ |> Module.split() |> List.last(),
-          events: [],
-          projections: session.projections,
-          projections_before: projections_before,
-          refs: session.refs,
-          result: {:error, reason}
-        }
-
-        {:ok, %{session | status: :failed, steps: session.steps ++ [step]}, step}
+      {:error, reason, failed_state} ->
+        emit_step(
+          session,
+          failed_state,
+          command,
+          next_index,
+          before_log_count,
+          projections_before,
+          normalize_result(reason),
+          :failed
+        )
     end
+  end
+
+  defp emit_step(
+         session,
+         exec_state,
+         command,
+         index,
+         before_log_count,
+         projections_before,
+         result,
+         status
+       ) do
+    events = events_since(exec_state.event_log, before_log_count)
+
+    step = %{
+      index: index,
+      command: command,
+      command_name: command_name(command),
+      events: events,
+      projections: exec_state.projections,
+      projections_before: projections_before,
+      refs: exec_state.refs,
+      result: result
+    }
+
+    new_session = %{
+      session
+      | exec_state: exec_state,
+        current_index: index,
+        steps: session.steps ++ [step],
+        status: status
+    }
+
+    {:ok, new_session, step}
   end
 
   @doc """
@@ -293,7 +334,7 @@ defmodule PropertyDamage.Replay do
   ## Returns
 
   - `{:ok, session, [step]}` - Commands executed; failed commands appear as
-    steps whose `result` is `{:error, ...}`
+    steps whose `result` is `{:check_failed, ...}` or `{:error, ...}`
   """
   @spec step_to(t(), non_neg_integer()) :: {:ok, t(), [step()]}
   def step_to(%__MODULE__{} = session, target_index) do
@@ -304,7 +345,8 @@ defmodule PropertyDamage.Replay do
   Get the current state of projections.
   """
   @spec current_state(t()) :: map()
-  def current_state(%__MODULE__{projections: projections}), do: projections
+  def current_state(%__MODULE__{exec_state: nil}), do: %{}
+  def current_state(%__MODULE__{exec_state: exec_state}), do: exec_state.projections
 
   @doc """
   Get all executed steps so far.
@@ -326,11 +368,34 @@ defmodule PropertyDamage.Replay do
   @doc """
   Clean up session resources.
 
-  Call this when done with an interactive session.
+  Stops any pollers spawned during stepping, the event queue, tears the adapter
+  down, and runs `teardown_each/1` if the model defines it. Safe to call more
+  than once.
   """
   @spec stop(t()) :: :ok
-  def stop(%__MODULE__{event_queue: eq}) when is_pid(eq) do
-    EventQueue.stop(eq)
+  def stop(%__MODULE__{} = session) do
+    if session.exec_state, do: Executor.stop_pollers(session.exec_state)
+
+    if is_pid(session.event_queue) and Process.alive?(session.event_queue) do
+      EventQueue.stop(session.event_queue)
+    end
+
+    if session.adapter && session.adapter_context do
+      try do
+        session.adapter.teardown(session.adapter_context)
+      rescue
+        _ -> :ok
+      end
+    end
+
+    if session.model && function_exported?(session.model, :teardown_each, 1) do
+      try do
+        session.model.teardown_each(%{adapter_config: session.adapter_config})
+      rescue
+        _ -> :ok
+      end
+    end
+
     :ok
   end
 
@@ -350,7 +415,7 @@ defmodule PropertyDamage.Replay do
 
     events_str =
       step.events
-      |> Enum.map(fn e -> e.__struct__ |> Module.split() |> List.last() end)
+      |> Enum.map(&command_name/1)
       |> Enum.join(", ")
 
     """
@@ -403,139 +468,44 @@ defmodule PropertyDamage.Replay do
   defp step_to_loop(session, target_index, acc) do
     case step(session) do
       {:ok, new_session, step} ->
-        step_to_loop(new_session, target_index, [step | acc])
+        # Stop advancing once a command fails: there is nothing meaningful to
+        # step past a failure in a halt-mode replay.
+        if step.result == :ok do
+          step_to_loop(new_session, target_index, [step | acc])
+        else
+          {:ok, new_session, Enum.reverse([step | acc])}
+        end
 
       {:done, final_session} ->
         {:ok, final_session, Enum.reverse(acc)}
     end
   end
 
-  defp call_setup_each(session) do
-    if function_exported?(session.model, :setup_each, 1) do
-      session.model.setup_each(%{adapter_config: session.adapter_config})
-    end
+  # The executor's event_log is reverse-chronological; the entries this command
+  # added sit in front. Take the new ones, drop back to chronological order, and
+  # surface the bare event structs (what callers historically inspected).
+  defp events_since(event_log, before_count) do
+    added = length(event_log) - before_count
 
-    session
+    event_log
+    |> Enum.take(max(added, 0))
+    |> Enum.reverse()
+    |> Enum.map(& &1.event)
   end
 
-  defp resolve_refs(command, refs) do
-    deep_resolve_refs(command, refs)
-  end
+  # Preserve the documented step.result shape: an assertion failure surfaces as
+  # {:check_failed, name, exception}; everything else as {:error, reason}.
+  defp normalize_result({:assertion_failed, name, {exception, _stacktrace}}),
+    do: {:check_failed, name, exception}
 
-  defp deep_resolve_refs(%Ref{} = ref, refs) do
-    case Map.get(refs, ref.ref) do
-      nil -> ref
-      value -> Ref.resolve(ref, value)
-    end
-  end
+  defp normalize_result({:assertion_failed, name, exception}),
+    do: {:check_failed, name, exception}
 
-  defp deep_resolve_refs(%{__struct__: _} = struct, refs) do
-    struct
-    |> Map.from_struct()
-    |> Enum.map(fn {k, v} -> {k, deep_resolve_refs(v, refs)} end)
-    |> Map.new()
-    |> then(&struct(struct.__struct__, &1))
-  end
+  defp normalize_result(reason), do: {:error, reason}
 
-  defp deep_resolve_refs(map, refs) when is_map(map) do
-    for {k, v} <- map, into: %{} do
-      {deep_resolve_refs(k, refs), deep_resolve_refs(v, refs)}
-    end
-  end
+  defp command_name(%{__struct__: mod}), do: mod |> Module.split() |> List.last()
+  defp command_name(other), do: inspect(other)
 
-  defp deep_resolve_refs(list, refs) when is_list(list) do
-    Enum.map(list, &deep_resolve_refs(&1, refs))
-  end
-
-  defp deep_resolve_refs(tuple, refs) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> deep_resolve_refs(refs)
-    |> List.to_tuple()
-  end
-
-  defp deep_resolve_refs(other, _refs), do: other
-
-  defp execute_command(command, session) do
-    try do
-      response = session.adapter.execute(command, session.adapter_config)
-      events = command.__struct__.events(command, response)
-      {:ok, events, response}
-    rescue
-      e -> {:error, {:execution_error, e}}
-    catch
-      :exit, reason -> {:error, {:exit, reason}}
-    end
-  end
-
-  defp update_refs(refs, command, response, index) do
-    case command.__struct__.ref(command, response) do
-      nil -> refs
-      ref_value -> Map.put(refs, {:ref, index}, ref_value)
-    end
-  end
-
-  defp apply_events(projections, events) do
-    Enum.reduce(events, projections, fn event, projs ->
-      Enum.reduce(projs, %{}, fn {proj_mod, state}, acc ->
-        new_state =
-          if proj_mod.handles?(event) do
-            proj_mod.apply(state, event)
-          else
-            state
-          end
-
-        Map.put(acc, proj_mod, new_state)
-      end)
-    end)
-  end
-
-  defp run_checks(model, projections) do
-    command_sequence_projection = model.command_sequence_projection()
-
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
-      else
-        []
-      end
-
-    all_projections = [command_sequence_projection | assertion_projections]
-
-    # Run assertions for each projection
-    # Note: In replay mode, we run all assertions since we can't track step counts
-    Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
-      projection_state = Map.get(projections, projection)
-
-      assertions =
-        if function_exported?(projection, :__assertions__, 0) do
-          projection.__assertions__()
-        else
-          []
-        end
-
-      case run_projection_assertions(projection, projection_state, assertions) do
-        :ok -> {:cont, :ok}
-        {:check_failed, _, _} = error -> {:halt, error}
-      end
-    end)
-  end
-
-  defp run_projection_assertions(_projection, _state, []), do: :ok
-
-  defp run_projection_assertions(projection, state, [assertion | rest]) do
-    # In replay mode, run assertions with every_step trigger always
-    # For other triggers (every: N, every: Module), we run them anyway
-    # since replay is for debugging and should show all potential issues
-    try do
-      assertion_fn = assertion.function_name
-      apply(projection, assertion_fn, [state, nil])
-      # Success - no exception raised
-      run_projection_assertions(projection, state, rest)
-    rescue
-      e ->
-        # Assertion failed by raising exception
-        {:check_failed, assertion.name, e}
-    end
-  end
+  defp branching?(%Sequence{} = seq), do: not Sequence.linear?(seq)
+  defp branching?(_), do: false
 end

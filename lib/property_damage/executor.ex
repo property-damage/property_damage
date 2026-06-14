@@ -331,26 +331,15 @@ defmodule PropertyDamage.Executor do
          assertion_mode,
          external_markers
        ) do
-    initial_state = %{
-      event_log: [],
-      projections: init_projections(model),
-      projections_before: nil,
-      refs: %{},
-      placeholder_registry: PlaceholderRegistry.new(),
-      step_count: 0,
-      assertion_counters: %{step: 0, command: 0, event: 0},
-      assertion_failures: [],
-      assertion_mode: assertion_mode,
-      branch_id: nil,
-      stutter_config: stutter_config,
-      mock_registry: mock_registry,
-      active_pollers: [],
-      active_resource_pollers: [],
-      model: model,
-      external_markers: external_markers,
-      event_queue: event_queue,
-      command_specs: build_command_specs(model)
-    }
+    initial_state =
+      build_initial_state(
+        model,
+        event_queue,
+        stutter_config,
+        mock_registry,
+        assertion_mode,
+        external_markers
+      )
 
     result =
       commands
@@ -393,26 +382,15 @@ defmodule PropertyDamage.Executor do
        ) do
     %Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence
 
-    initial_state = %{
-      event_log: [],
-      projections: init_projections(model),
-      projections_before: nil,
-      refs: %{},
-      placeholder_registry: PlaceholderRegistry.new(),
-      step_count: 0,
-      assertion_counters: %{step: 0, command: 0, event: 0},
-      assertion_failures: [],
-      assertion_mode: assertion_mode,
-      branch_id: nil,
-      stutter_config: stutter_config,
-      mock_registry: mock_registry,
-      active_pollers: [],
-      active_resource_pollers: [],
-      model: model,
-      external_markers: external_markers,
-      event_queue: event_queue,
-      command_specs: build_command_specs(model)
-    }
+    initial_state =
+      build_initial_state(
+        model,
+        event_queue,
+        stutter_config,
+        mock_registry,
+        assertion_mode,
+        external_markers
+      )
 
     # Phase 1: Execute prefix
     prefix_result =
@@ -864,6 +842,99 @@ defmodule PropertyDamage.Executor do
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
     end
+  end
+
+  # Build the executor's internal per-run state map. Shared by linear and
+  # branching execution (and exposed to the stepping shell via init_state/2)
+  # so the state shape lives in exactly one place.
+  defp build_initial_state(
+         model,
+         event_queue,
+         stutter_config,
+         mock_registry,
+         assertion_mode,
+         external_markers
+       ) do
+    %{
+      event_log: [],
+      projections: init_projections(model),
+      projections_before: nil,
+      refs: %{},
+      placeholder_registry: PlaceholderRegistry.new(),
+      step_count: 0,
+      assertion_counters: %{step: 0, command: 0, event: 0},
+      assertion_failures: [],
+      assertion_mode: assertion_mode,
+      branch_id: nil,
+      stutter_config: stutter_config,
+      mock_registry: mock_registry,
+      active_pollers: [],
+      active_resource_pollers: [],
+      model: model,
+      external_markers: external_markers,
+      event_queue: event_queue,
+      command_specs: build_command_specs(model)
+    }
+  end
+
+  # ============================================================================
+  # Stepping API (used by PropertyDamage.Replay)
+  # ============================================================================
+
+  @doc false
+  # Build a fresh executor state for stepping a sequence one command at a time.
+  # The caller owns the adapter lifecycle (setup/teardown) and the event queue.
+  @spec init_state(module(), keyword()) :: map()
+  def init_state(model, opts \\ []) do
+    build_initial_state(
+      model,
+      Keyword.get(opts, :event_queue),
+      Keyword.get(opts, :stutter_config),
+      Keyword.get(opts, :mock_registry),
+      Keyword.get(opts, :assertion_mode, :halt),
+      Keyword.get(opts, :external_markers, [])
+    )
+  end
+
+  @doc false
+  # Execute exactly one command against an existing executor state, capturing
+  # the pre-command projections first (as the linear loop does). This is the
+  # single per-command engine path: ref/placeholder resolution, settle, nemesis,
+  # injector/mock events, projections, assertions, stutter, and pollers all run
+  # exactly as in a full run. Returns {:ok, new_state} or
+  # {:error, reason, failed_state}.
+  @spec step_command(
+          struct() | map(),
+          non_neg_integer(),
+          map(),
+          module(),
+          module(),
+          map(),
+          pid() | nil
+        ) ::
+          {:ok, map()} | {:error, term(), map()}
+  def step_command(command, index, state, model, adapter, adapter_context, event_queue) do
+    state_with_before = %{state | projections_before: state.projections}
+
+    execute_command(
+      command,
+      index,
+      state_with_before,
+      model,
+      adapter,
+      adapter_context,
+      event_queue
+    )
+  end
+
+  @doc false
+  # Stop any pollers spawned during stepping. Best-effort cleanup for the
+  # stepping shell; a full run finalizes pollers through finalize_result/2.
+  @spec stop_pollers(map()) :: :ok
+  def stop_pollers(state) do
+    Enum.each(Map.get(state, :active_pollers, []), &StatePoller.stop/1)
+    Enum.each(Map.get(state, :active_resource_pollers, []), &ResourcePoller.stop/1)
+    :ok
   end
 
   # Execute a single command
