@@ -47,7 +47,7 @@ defmodule PropertyDamage.Suggestions do
      code for implementing missing checks.
   """
 
-  alias PropertyDamage.Suggestions.{Analyzer, Patterns, Formatter}
+  alias PropertyDamage.Suggestions.{Analyzer, Formatter, Patterns}
 
   @type suggestion :: %{
           type: atom(),

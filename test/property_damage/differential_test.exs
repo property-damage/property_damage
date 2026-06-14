@@ -2,7 +2,7 @@ defmodule PropertyDamage.DifferentialTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Differential
-  alias PropertyDamage.Differential.{Target, Result, Equivalence, Baseline}
+  alias PropertyDamage.Differential.{Baseline, Equivalence, Result, Target}
 
   # ============================================================================
   # Test Support - Adapters

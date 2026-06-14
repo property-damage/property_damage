@@ -5,8 +5,8 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   Examines a model's structure and generates suggestions for missing checks.
   """
 
-  alias PropertyDamage.Suggestions.Patterns
   alias PropertyDamage.Model
+  alias PropertyDamage.Suggestions.Patterns
 
   @doc """
   Analyzes a model and returns a comprehensive analysis with suggestions.

@@ -5,10 +5,10 @@ defmodule PropertyDamage.Adapter.InjectorTest do
   alias PropertyDamage.EventQueue
 
   alias PropertyDamage.Test.{
-    SimpleInjectorAdapter,
-    RespondingInjectorAdapter,
     FailingInjectorAdapter,
-    NoEmitsInjectorAdapter
+    NoEmitsInjectorAdapter,
+    RespondingInjectorAdapter,
+    SimpleInjectorAdapter
   }
 
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}

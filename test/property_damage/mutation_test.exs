@@ -2,8 +2,8 @@ defmodule PropertyDamage.MutationTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Mutation
-  alias PropertyDamage.Mutation.{Operator, Report, Formatter, Analysis}
-  alias PropertyDamage.Mutation.Operators.{Value, Omission, Status, Event, Boundary}
+  alias PropertyDamage.Mutation.{Analysis, Formatter, Operator, Report}
+  alias PropertyDamage.Mutation.Operators.{Boundary, Event, Omission, Status, Value}
 
   # ============================================================================
   # Test Fixtures

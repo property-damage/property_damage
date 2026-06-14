@@ -194,7 +194,7 @@ defmodule PropertyDamage.GeneratorTest do
     end
 
     test "generates valid command structs" do
-      alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
+      alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
 
       generator = Generator.generate_sequence(FullModel, max_commands: 10)
       seq = Enum.take(generator, 1) |> hd()
@@ -297,7 +297,7 @@ defmodule PropertyDamage.GeneratorTest do
     end
 
     test "branching sequences contain valid commands" do
-      alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
+      alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
 
       generator =
         Generator.generate_sequence(FullModel,

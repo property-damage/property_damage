@@ -4,7 +4,7 @@ defmodule PropertyDamage.Test.TestAdapter do
   """
   use PropertyDamage.Adapter
 
-  alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
+  alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
   @impl true

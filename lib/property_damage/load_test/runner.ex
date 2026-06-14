@@ -43,7 +43,7 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   require Logger
 
-  alias PropertyDamage.LoadTest.{Metrics, WorkerPool, Worker, RampStrategy}
+  alias PropertyDamage.LoadTest.{Metrics, RampStrategy, Worker, WorkerPool}
   alias PropertyDamage.Options
 
   defstruct [

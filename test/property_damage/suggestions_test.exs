@@ -2,7 +2,7 @@ defmodule PropertyDamage.SuggestionsTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Suggestions
-  alias PropertyDamage.Suggestions.{Patterns, Analyzer, Formatter}
+  alias PropertyDamage.Suggestions.{Analyzer, Formatter, Patterns}
 
   # ============================================================================
   # Test Fixtures

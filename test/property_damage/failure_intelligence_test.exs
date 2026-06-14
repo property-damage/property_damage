@@ -2,7 +2,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.FailureIntelligence
-  alias PropertyDamage.FailureIntelligence.{Fingerprint, Similarity, Patterns}
+  alias PropertyDamage.FailureIntelligence.{Fingerprint, Patterns, Similarity}
   alias PropertyDamage.FailureReport
 
   # ============================================================================

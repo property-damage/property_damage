@@ -2,16 +2,16 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Nemesis.{
+    CertificateExpiry,
+    ClockSkew,
+    CPUStress,
+    MemoryPressure,
     NetworkLatency,
     NetworkPartition,
     PacketLoss,
-    MemoryPressure,
-    CPUStress,
-    ClockSkew,
     ProcessKill,
     ResourceExhaustion,
-    SlowIO,
-    CertificateExpiry
+    SlowIO
   }
 
   describe "NetworkLatency" do
