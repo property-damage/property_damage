@@ -280,7 +280,7 @@ If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
 def terminate?(_state, _history, _step), do: true
 
 # This runs 5-10 commands per sequence
-def terminate?(_state, _history, step), do: step >= Enum.random(5..10)
+def terminate?(_state, _history, step), do: step >= 8
 ```
 
 Longer sequences mean more commands per arrival, potentially improving

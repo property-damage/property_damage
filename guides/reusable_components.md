@@ -109,11 +109,15 @@ defmodule MyDomain.CommandConfigs do
         PaymentAccess.approved_auth_ids(state) != []
       end,
       with: fn state ->
-        auth_id = Enum.random(PaymentAccess.approved_auth_ids(state))
-        auth = PaymentAccess.get_authorization(state, auth_id)
+        # Pick inside the seeded stream with StreamData.member_of, NOT
+        # Enum.random: Enum.random draws from the process RNG, which is not the
+        # generation seed, so the same reported seed would not reproduce the
+        # same choice. (To couple `amount` to the chosen auth's limit you would
+        # select and bound it inside the command's own generator/1 via
+        # StreamData.bind, since `with:` overrides are per-field.)
         %{
-          auth_id: StreamData.constant(auth_id),
-          amount: StreamData.integer(1..auth.amount)
+          auth_id: StreamData.member_of(PaymentAccess.approved_auth_ids(state)),
+          amount: StreamData.positive_integer()
         }
       end}
   end
@@ -208,7 +212,7 @@ For simpler cases, direct state access is fine:
 # Simple: just access state directly
 {CancelOrder,
   when: fn state -> map_size(state.orders) > 0 end,
-  with: fn state -> %{order_id: Enum.random(Map.keys(state.orders))} end}
+  with: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
 ```
 
 ## Alternative: Helper Modules
@@ -221,22 +225,21 @@ defmodule PaymentHelpers do
     Enum.any?(auths, fn {_, auth} -> auth.status == :approved end)
   end
 
-  def random_approved_auth(%{authorizations: auths}) do
+  def approved_auth_ids(%{authorizations: auths}) do
     auths
     |> Enum.filter(fn {_, auth} -> auth.status == :approved end)
-    |> Enum.random()
-    |> elem(0)
+    |> Enum.map(&elem(&1, 0))
   end
 end
 ```
 
-Then use in command specs:
+Then use in command specs (selecting inside the seeded stream):
 
 ```elixir
 {CapturePayment,
   when: &PaymentHelpers.has_approved_auths?/1,
   with: fn state ->
-    %{auth_id: PaymentHelpers.random_approved_auth(state)}
+    %{auth_id: StreamData.member_of(PaymentHelpers.approved_auth_ids(state))}
   end}
 ```
 

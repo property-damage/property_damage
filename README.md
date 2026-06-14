@@ -160,7 +160,7 @@ defmodule MyApp.TestModel do
       # {MyApp.Commands.DeleteUser,
       #  weight: 1,
       #  when: fn state -> map_size(state.users) > 0 end,
-      #  with: fn state -> %{id: Enum.random(Map.keys(state.users))} end}
+      #  with: fn state -> %{id: StreamData.member_of(Map.keys(state.users))} end}
     ]
   end
 
