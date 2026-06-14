@@ -364,12 +364,35 @@ defmodule PropertyDamage.Executor do
                adapter_context,
                event_queue
              ) do
-          {:ok, new_state} -> {:cont, new_state}
-          {:error, reason, failed_state} -> {:halt, {:failed, index, reason, failed_state}}
+          {:ok, new_state} ->
+            # Lift any auto-restoring fault whose duration has elapsed, so a
+            # time-bounded fault stops affecting later commands.
+            {:cont, restore_elapsed_faults(new_state, adapter_context, event_queue)}
+
+          {:error, reason, failed_state} ->
+            {:halt, {:failed, index, reason, failed_state}}
         end
       end)
 
-    finalize_result(result)
+    result
+    |> restore_remaining_faults(adapter_context, event_queue)
+    |> finalize_result()
+  end
+
+  # Restore any still-active faults at sequence end so none leak past the run.
+  # On success the restore events flow into the reported state; on failure it is
+  # best-effort environment cleanup and the failed state is reported unchanged.
+  defp restore_remaining_faults(
+         {:failed, index, reason, failed_state},
+         adapter_context,
+         event_queue
+       ) do
+    _ = restore_all_faults(failed_state, adapter_context, event_queue)
+    {:failed, index, reason, failed_state}
+  end
+
+  defp restore_remaining_faults(state, adapter_context, event_queue) do
+    restore_all_faults(state, adapter_context, event_queue)
   end
 
   # ============================================================================
@@ -421,14 +444,19 @@ defmodule PropertyDamage.Executor do
                adapter_context,
                event_queue
              ) do
-          {:ok, new_state} -> {:cont, new_state}
-          {:error, reason, failed_state} -> {:halt, {:failed, index, reason, failed_state}}
+          {:ok, new_state} ->
+            {:cont, restore_elapsed_faults(new_state, adapter_context, event_queue)}
+
+          {:error, reason, failed_state} ->
+            {:halt, {:failed, index, reason, failed_state}}
         end
       end)
 
     case prefix_result do
       {:failed, index, reason, state} ->
-        finalize_result({:failed, index, reason, state})
+        {:failed, index, reason, state}
+        |> restore_remaining_faults(adapter_context, event_queue)
+        |> finalize_result()
 
       prefix_state ->
         # Phase 2: Execute branches from forked state
@@ -477,14 +505,16 @@ defmodule PropertyDamage.Executor do
                        event_queue
                      ) do
                   {:ok, new_state} ->
-                    {:cont, new_state}
+                    {:cont, restore_elapsed_faults(new_state, adapter_context, event_queue)}
 
                   {:error, reason, failed_state} ->
                     {:halt, {:failed, index, reason, failed_state}}
                 end
               end)
 
-            finalize_result(suffix_result, linearization)
+            suffix_result
+            |> restore_remaining_faults(adapter_context, event_queue)
+            |> finalize_result(linearization)
 
           {:error, branch_id, index, reason, state} ->
             finalize_result({:failed, index, {:branch_failure, branch_id, reason}, state})
@@ -1186,6 +1216,96 @@ defmodule PropertyDamage.Executor do
       {:error, reason} ->
         {:error, {:nemesis_error, reason}, state}
     end
+  end
+
+  # ============================================================================
+  # Nemesis Auto-Restore
+  # ============================================================================
+  #
+  # Faults are injected and tracked in `active_faults` (keyed by
+  # {nemesis_module, index} with :command, :started_at and :duration_ms), but
+  # the behaviour + moduledoc promise that auto-restoring faults lift on their
+  # own. These two helpers keep that promise: `restore_elapsed_faults/3` runs
+  # after each command so a time-bounded fault lifts mid-sequence, and
+  # `restore_all_faults/3` runs at sequence end so no fault leaks past the run.
+  #
+  # inject/2 and restore/2 both run in the executor loop process (linear and
+  # branching alike execute commands synchronously here), so process-dictionary
+  # backed faults (CPUStress, MemoryPressure, ...) clean up in the same process
+  # that created them.
+
+  @doc false
+  # Restore every auto-restoring fault whose duration has elapsed.
+  @spec restore_elapsed_faults(map(), map(), pid() | nil) :: map()
+  def restore_elapsed_faults(state, adapter_context, event_queue) do
+    now = System.monotonic_time(:millisecond)
+
+    state
+    |> Map.get(:active_faults, %{})
+    |> Enum.filter(fn {_key, fault} -> fault_elapsed?(fault, now) end)
+    |> restore_faults(state, adapter_context, event_queue)
+  end
+
+  @doc false
+  # Restore every still-active fault, regardless of elapsed time (sequence end).
+  @spec restore_all_faults(map(), map(), pid() | nil) :: map()
+  def restore_all_faults(state, adapter_context, event_queue) do
+    state
+    |> Map.get(:active_faults, %{})
+    |> Map.to_list()
+    |> restore_faults(state, adapter_context, event_queue)
+  end
+
+  defp fault_elapsed?(%{duration_ms: duration, started_at: started}, now)
+       when is_integer(duration) and is_integer(started),
+       do: now - started >= duration
+
+  defp fault_elapsed?(_fault, _now), do: false
+
+  defp restore_faults([], state, _adapter_context, _event_queue), do: state
+
+  defp restore_faults(faults, state, adapter_context, event_queue) do
+    Enum.reduce(faults, state, fn {{nemesis_module, index} = key, fault}, acc ->
+      nemesis_context = %{
+        adapter_context: adapter_context,
+        event_queue: event_queue,
+        active_faults: Map.get(acc, :active_faults, %{})
+      }
+
+      result =
+        try do
+          nemesis_module.restore(fault.command, nemesis_context)
+        rescue
+          e -> {:error, {:restore_raised, e}}
+        end
+
+      case result do
+        {:ok, events} ->
+          {projections, event_log} =
+            process_nemesis_events(
+              events,
+              nemesis_module,
+              index,
+              acc.event_log,
+              acc.projections,
+              acc.branch_id
+            )
+
+          acc
+          |> put_state(%{projections: projections, event_log: event_log})
+          |> drop_active_fault(key)
+
+        {:error, _reason} ->
+          # Best-effort cleanup: drop the tracking entry so we never retry it
+          # endlessly, but leave the run result otherwise intact.
+          drop_active_fault(acc, key)
+      end
+    end)
+  end
+
+  defp drop_active_fault(state, key) do
+    faults = state |> Map.get(:active_faults, %{}) |> Map.delete(key)
+    put_state(state, %{active_faults: faults})
   end
 
   # Execute a regular (non-nemesis) command
