@@ -1,0 +1,42 @@
+name: pd_redis_bench
+
+# Dedicated, ephemeral Redis + Toxiproxy for the Redis bench. Independent of
+# anything on the host. Redis is reachable directly (baseline, no faults) and
+# also through Toxiproxy, which the fault-injection suites point at so they can
+# add latency / packet-loss / partition toxics between commands.
+#
+# Host ports (all overridable):
+#   PD_REDIS_PORT       (default 6390) -> Redis directly
+#   PD_TOXIPROXY_PORT   (default 8474) -> Toxiproxy control API
+#   PD_REDIS_PROXY_PORT (default 6391) -> Redis through Toxiproxy
+#
+# Redis runs with no persistence (--save '' --appendonly no), so every fresh
+# container starts from a clean slate.
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${PD_REDIS_PORT:-6390}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    # The proxy listen port must match inside the container and on the host so
+    # the upstream `localhost:<proxy>` the test configures the proxy to forward
+    # resolves consistently. The control API is on 8474.
+    ports:
+      - "${PD_TOXIPROXY_PORT:-8474}:8474"
+      - "${PD_REDIS_PROXY_PORT:-6391}:6391"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
