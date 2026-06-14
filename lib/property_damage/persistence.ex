@@ -81,15 +81,17 @@ defmodule PropertyDamage.Persistence do
     overwrite = Keyword.get(opts, :overwrite, false)
     path = Path.join(directory, filename)
 
-    cond do
-      not File.dir?(directory) ->
-        {:error, {:directory_not_found, directory}}
-
-      File.exists?(path) and not overwrite ->
-        {:error, {:file_exists, path}}
-
-      true ->
-        do_save(report, path)
+    if File.exists?(path) and not overwrite do
+      {:error, {:file_exists, path}}
+    else
+      # Create the target directory if needed. Previously save returned
+      # {:directory_not_found, _}, and callers in the on_failure / regression
+      # path discarded that error, so failures were silently not persisted
+      # whenever the directory had not been pre-created.
+      case File.mkdir_p(directory) do
+        :ok -> do_save(report, path)
+        {:error, reason} -> {:error, {:mkdir_failed, directory, reason}}
+      end
     end
   end
 

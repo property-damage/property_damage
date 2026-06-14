@@ -684,8 +684,27 @@ defmodule PropertyDamage do
       Progress.print_failure(failure_report)
     end
 
+    # A raising on_failure handler must not destroy the failure we just found:
+    # catch it, warn, and still return the report.
     if on_failure do
-      on_failure.(failure_report)
+      try do
+        on_failure.(failure_report)
+      rescue
+        e ->
+          require Logger
+
+          Logger.warning(
+            "on_failure handler raised #{inspect(e.__struct__)}: #{Exception.message(e)} " <>
+              "-- the failure report is preserved."
+          )
+      catch
+        kind, reason ->
+          require Logger
+
+          Logger.warning(
+            "on_failure handler #{kind} #{inspect(reason)} -- the failure report is preserved."
+          )
+      end
     end
 
     {:error, failure_report}

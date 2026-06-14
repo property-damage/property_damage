@@ -32,6 +32,17 @@ defmodule PropertyDamage.PersistenceTest do
 
   describe "save and load round-trip" do
     @tag :tmp_dir
+    test "creates a missing target directory instead of failing silently", %{tmp_dir: dir} do
+      report = create_test_report()
+      nested = Path.join([dir, "failures", "nested"])
+      refute File.dir?(nested)
+
+      assert {:ok, path} = Persistence.save(report, nested)
+      assert File.exists?(path)
+      assert {:ok, _loaded} = Persistence.load(path)
+    end
+
+    @tag :tmp_dir
     test "saves and loads report with v2 format", %{tmp_dir: dir} do
       report = create_test_report()
       {:ok, path} = Persistence.save(report, dir)
