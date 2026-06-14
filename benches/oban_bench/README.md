@@ -38,12 +38,36 @@ container and are instant. Teardown is deliberately a separate, explicit command
 rather than automatic per run, so repeated runs stay fast and a crashed run
 never leaves a half-removed container behind.
 
-Configuration:
+### Requirements
 
-- `PD_OBAN_PG_PORT` — host port for the container (default `5434`).
-- `PD_OBAN_DATABASE_URL` — if set, the container step is skipped and the bench
-  connects to this database instead. This is the CI path (point it at a service
-  container), and the escape hatch for hosts without Docker.
+Docker with the Compose v2 plugin (`docker compose ... --wait`) must be on your
+`PATH`. If you do not have Docker, set `PD_OBAN_DATABASE_URL` (below) to point at
+any Postgres you provide; the container step is then skipped entirely.
+
+### Mix tasks
+
+- `mix bench.db.up` — bring the container up (or no-op if already healthy, or
+  if `PD_OBAN_DATABASE_URL` is set). Runs automatically before `mix test`.
+- `mix bench.db.down` — stop and remove the container and its volume.
+- `mix test` — `bench.db.up` + `ecto.create` + `ecto.migrate` + the tests.
+
+### Configuration (environment variables)
+
+- `PD_OBAN_PG_PORT` — host port the container publishes Postgres on
+  (default `5434`). Both `docker-compose.yml` and `config/config.exs` read it,
+  so they never drift. The in-container credentials are
+  `postgres` / `postgres`, database `pd_oban_bench`.
+- `PD_OBAN_DATABASE_URL` — if set (and non-empty), the container step is skipped
+  and the bench connects to this database instead. This is the CI path (point it
+  at a service container) and the escape hatch for hosts without Docker. It is an
+  Ecto URL:
+
+  ```bash
+  export PD_OBAN_DATABASE_URL="ecto://postgres:postgres@localhost:5432/pd_oban_bench"
+  mix test
+  ```
+
+  When this is set, `PD_OBAN_PG_PORT` is ignored (the port comes from the URL).
 
 ## Layout
 
