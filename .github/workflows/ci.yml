@@ -46,11 +46,11 @@ jobs:
       - if: matrix.lint
         run: mix format --check-formatted
 
-      # Non-blocking for now: credo surfaces style/refactoring signal but the
-      # backlog is large (see action plan); not a release gate yet.
+      # Blocking: the codebase is credo-strict clean. Structural-complexity
+      # checks (Nesting/CyclomaticComplexity/FunctionArity) are disabled in
+      # .credo.exs with rationale; everything else is enforced.
       - if: matrix.lint
         run: mix credo --strict
-        continue-on-error: true
 
       - run: mix test
 
