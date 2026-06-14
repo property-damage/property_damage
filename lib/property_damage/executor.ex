@@ -489,7 +489,7 @@ defmodule PropertyDamage.Executor do
           {:error, branch_id, index, reason, state} ->
             finalize_result({:failed, index, {:branch_failure, branch_id, reason}, state})
 
-          {:linearization_failed, branch_results, branch_event_logs} ->
+          {:linearization_failed, branch_results, branch_event_logs, refutation} ->
             merged_state =
               merge_branch_states(
                 prefix_state,
@@ -499,13 +499,29 @@ defmodule PropertyDamage.Executor do
                 branch_start_index
               )
 
-            finalize_result(
-              {:failed, branch_start_index,
-               {:linearization_failed, "No valid linearization found for branch execution"},
-               merged_state}
-            )
+            {failed_index, reason} =
+              linearization_failure(refutation, branch_start_index)
+
+            finalize_result({:failed, failed_index, reason, merged_state})
         end
     end
+  end
+
+  # Translate a Linearization refutation into the {failed_index, reason} the
+  # report expects. When the cause is a specific synchronous assertion, mirror
+  # the linear path's shape exactly ({:branch_failure, branch_id,
+  # {:assertion_failed, name, {exception, stacktrace}}}) so the report,
+  # shrinker, and formatter behave identically to a real assertion failure. A
+  # nil refutation means every ordering failed purely on event compatibility
+  # (a classic race, e.g. a lost update): report it as a linearization failure.
+  defp linearization_failure(nil, branch_start_index) do
+    {branch_start_index,
+     {:linearization_failed, "No valid linearization found for branch execution"}}
+  end
+
+  defp linearization_failure(refutation, branch_start_index) do
+    %{branch_id: branch_id, position: position, reason: reason} = refutation
+    {branch_start_index + position, {:branch_failure, branch_id, reason}}
   end
 
   defp execute_all_branches(
@@ -522,11 +538,24 @@ defmodule PropertyDamage.Executor do
       branches
       |> Enum.with_index()
       |> Enum.map(fn {branch_commands, branch_id} ->
-        # Fork state for this branch
+        # Fork state for this branch.
+        #
+        # Synchronous assertions are DISABLED inside branches on purpose. A
+        # forked branch only sees the prefix plus its own commands, never the
+        # concurrently-executing sibling branches' effects, so running
+        # @trigger assertions against this partial state over-reports races
+        # (e.g. a read that legally observed a sibling's write fails against a
+        # model that never recorded it). Branch correctness is decided AFTER
+        # all branches run, by the assertion-aware Linearization.check below,
+        # which evaluates assertions against observed events and the model
+        # prediction drawn from one consistent ordering. Real execution errors
+        # (adapter errors, ref-resolution failures, raised transition
+        # invariants) are unaffected: those still halt the branch here.
         branch_state = %{
           prefix_state
           | event_log: [],
-            branch_id: branch_id
+            branch_id: branch_id,
+            assertion_mode: :disabled
         }
 
         # Calculate command indices for this branch
@@ -589,7 +618,8 @@ defmodule PropertyDamage.Executor do
                Map.new(branch_event_logs),
                prefix_state.projections,
                model,
-               start_index: start_index
+               start_index: start_index,
+               counters: prefix_state.assertion_counters
              ) do
           {:ok, linearization} ->
             {:ok, successful_results, branch_event_logs, linearization}
@@ -599,8 +629,12 @@ defmodule PropertyDamage.Executor do
             # without claiming either way; the result records :indeterminate
             {:ok, successful_results, branch_event_logs, indeterminate}
 
-          :no_linearization ->
-            {:linearization_failed, successful_results, branch_event_logs}
+          {:no_linearization, refutation} ->
+            # No ordering reproduces the observed events AND satisfies the
+            # assertions. `refutation` (when present) names the synchronous
+            # assertion that failed in the furthest-progressing ordering, so
+            # the report can match the precision of a linear failure.
+            {:linearization_failed, successful_results, branch_event_logs, refutation}
         end
     end
   end

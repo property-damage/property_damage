@@ -202,12 +202,14 @@ defmodule PropertyDamage.LinearizationTest do
         1 => [incr_entry(0, 1, 0)]
       }
 
+      # A lost update is refuted purely on event incompatibility (no assertion
+      # is involved), so the refutation detail is nil.
       assert Linearization.check(
                branch_commands,
                branch_events,
                counter_projections(),
                CounterModel
-             ) == :no_linearization
+             ) == {:no_linearization, nil}
     end
 
     test "respects start_index when translating entry indices to positions" do
