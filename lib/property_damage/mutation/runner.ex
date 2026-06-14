@@ -165,7 +165,7 @@ defmodule PropertyDamage.Mutation.Runner do
   end
 
   defp generate_mutations_for_command(operator, events, config) do
-    if length(events) == 0 do
+    if events == [] do
       []
     else
       mutations =

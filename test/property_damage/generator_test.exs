@@ -291,7 +291,7 @@ defmodule PropertyDamage.GeneratorTest do
         if Sequence.branching?(seq) do
           # Branching sequences should have at least one command in prefix
           # (min_prefix_length is a soft constraint)
-          assert length(seq.prefix) >= 1
+          assert seq.prefix != []
         end
       end
     end

@@ -171,7 +171,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     # Extract authentication schemes
     auth_schemes = extract_auth_schemes(spec)
 
-    if length(auth_schemes) > 0 do
+    if auth_schemes != [] do
       Mix.shell().info("Authentication: #{Enum.map_join(auth_schemes, ", ", & &1.name)}")
     end
 
@@ -423,7 +423,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     # Events from responses
     events = collect_event_names(operations)
 
-    if length(events) > 0 do
+    if events != [] do
       Mix.shell().info("\nEvents:")
 
       for event <- events do
@@ -435,7 +435,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       Mix.shell().info("\nAdapter:")
       Mix.shell().info("  - #{namespace}.Adapter")
 
-      if length(auth_schemes) > 0 do
+      if auth_schemes != [] do
         Mix.shell().info("    (with #{length(auth_schemes)} auth scheme(s))")
       end
 
@@ -465,7 +465,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     # Generate events
     events_data = collect_events_data(operations)
 
-    if length(events_data) > 0 do
+    if events_data != [] do
       Mix.shell().info("\nGenerating events...")
 
       for event <- events_data do
@@ -557,8 +557,8 @@ defmodule Mix.Tasks.Pd.Scaffold do
       # HTTP Info (for adapter)
       def __http_method__, do: :#{String.downcase(op.method)}
       def __http_path__, do: "#{op.path}"
-      #{if length(path_params) > 0, do: "def __path_params__, do: #{inspect(Enum.map(path_params, &String.to_atom(&1.field_name)))}", else: ""}
-      #{if length(query_params) > 0, do: "def __query_params__, do: #{inspect(Enum.map(query_params, &String.to_atom(&1.field_name)))}", else: ""}
+      #{if path_params != [], do: "def __path_params__, do: #{inspect(Enum.map(path_params, &String.to_atom(&1.field_name)))}", else: ""}
+      #{if query_params != [], do: "def __query_params__, do: #{inspect(Enum.map(query_params, &String.to_atom(&1.field_name)))}", else: ""}
     end
     """
   end
@@ -1043,7 +1043,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   end
 
   defp generate_execute_clause(op, _namespace, auth_schemes) do
-    has_auth = length(auth_schemes) > 0
+    has_auth = auth_schemes != []
 
     """
       @impl true

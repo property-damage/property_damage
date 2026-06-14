@@ -118,7 +118,7 @@ defmodule Mix.Tasks.Pd.Validate do
 
         print_validation_results(model, adapter, warnings, verbose)
 
-        if strict and length(warnings) > 0 do
+        if strict and warnings != [] do
           IO.puts("")
           print_color(:red, "FAILED: #{length(warnings)} warning(s) in strict mode\n")
           System.halt(1)
@@ -226,7 +226,7 @@ defmodule Mix.Tasks.Pd.Validate do
     end
 
     if Enum.empty?(errors) do
-      if length(warnings) > 0 do
+      if warnings != [] do
         print_color(:yellow, "\nWARNINGS:\n")
 
         for warning <- warnings do
@@ -234,7 +234,7 @@ defmodule Mix.Tasks.Pd.Validate do
         end
       end
 
-      if strict and length(warnings) > 0 do
+      if strict and warnings != [] do
         print_color(:red, "\nFAILED: #{length(warnings)} warning(s) in strict mode\n")
         System.halt(1)
       else
@@ -266,7 +266,7 @@ defmodule Mix.Tasks.Pd.Validate do
     IO.puts("Commands:   #{length(commands)}")
     IO.puts("Extra:      #{length(extra_projs)}")
 
-    if length(warnings) > 0 do
+    if warnings != [] do
       IO.puts("")
       print_color(:yellow, "WARNINGS (#{length(warnings)}):\n")
 

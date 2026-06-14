@@ -258,7 +258,7 @@ defmodule PropertyDamage.Analysis do
     """
     Shrunk to #{length(command_explanations)} commands.
     #{if trigger, do: "Failure triggered by: #{trigger.command_name} at index #{trigger.index}", else: ""}
-    #{if length(deps) > 0, do: "Dependencies: #{length(deps)} command(s) required to set up state", else: ""}
+    #{if deps != [], do: "Dependencies: #{length(deps)} command(s) required to set up state", else: ""}
     Failure type: #{FailureReport.failure_type_summary(report)}
     """
     |> String.trim()

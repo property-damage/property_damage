@@ -236,7 +236,7 @@ defmodule PropertyDamage.InjectionTest do
       assert length(command_entries) == 2
 
       injected_entries = Enum.filter(result.event_log, &Entry.injected?/1)
-      assert length(injected_entries) == 0
+      assert injected_entries == []
 
       # Refs should still be bound from returned events
       assert Map.has_key?(result.refs, ref.ref)

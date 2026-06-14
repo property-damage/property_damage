@@ -355,7 +355,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       clusters = Patterns.cluster_failures(failures)
 
       # Should have at least 2 clusters: one for check failures, one for exception
-      assert length(clusters) >= 1
+      assert clusters != []
     end
 
     test "returns cluster with size and representative" do
@@ -366,7 +366,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
       clusters = Patterns.cluster_failures(failures)
 
-      assert length(clusters) >= 1
+      assert clusters != []
       cluster = hd(clusters)
 
       assert Map.has_key?(cluster, :id)

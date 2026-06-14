@@ -101,7 +101,7 @@ defmodule Mix.Tasks.Pd.Integration do
     # Parse arguments
     {opts, _, invalid} = OptionParser.parse(args, strict: @switches)
 
-    if length(invalid) > 0 do
+    if invalid != [] do
       IO.puts("Unknown options: #{inspect(invalid)}")
       print_usage()
       System.halt(2)
@@ -196,7 +196,7 @@ defmodule Mix.Tasks.Pd.Integration do
 
       {:ok, bugs} when is_list(bugs) ->
         # Bug hunt mode
-        if length(bugs) > 0, do: System.halt(1), else: System.halt(0)
+        if bugs != [], do: System.halt(1), else: System.halt(0)
 
       {:error, _} ->
         System.halt(1)

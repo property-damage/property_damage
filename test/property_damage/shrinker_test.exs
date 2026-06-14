@@ -717,7 +717,7 @@ defmodule PropertyDamage.ShrinkerTest do
 
       # Should still shrink correctly
       shrunk_commands = Sequence.to_list(result.sequence)
-      assert length(shrunk_commands) >= 1
+      assert shrunk_commands != []
 
       total = Enum.reduce(shrunk_commands, 0, fn cmd, acc -> acc + cmd.quantity end)
       assert total > 100
@@ -825,7 +825,7 @@ defmodule PropertyDamage.ShrinkerTest do
       shrunk_commands = Sequence.to_list(result.sequence)
 
       # The failing CreateItem should remain
-      assert length(shrunk_commands) >= 1
+      assert shrunk_commands != []
       create_count = Enum.count(shrunk_commands, fn cmd -> is_struct(cmd, CreateItem) end)
       assert create_count >= 1
     end

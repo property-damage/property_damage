@@ -95,7 +95,7 @@ defmodule PropertyDamage.Errors do
       |> Enum.filter(fn {_k, v} -> is_map(v) end)
       |> Enum.map(fn {k, v} -> "#{k}: #{map_size(v)} items" end)
 
-    if length(summaries) > 0 do
+    if summaries != [] do
       "Current state has: #{Enum.join(summaries, ", ")}"
     else
       "State appears empty or has no map fields"
@@ -383,7 +383,7 @@ defmodule PropertyDamage.Errors do
   """
   def unresolved_ref(ref, available_refs) do
     available_str =
-      if length(available_refs) > 0 do
+      if available_refs != [] do
         Enum.join(available_refs, ", ")
       else
         "(none)"

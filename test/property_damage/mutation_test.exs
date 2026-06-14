@@ -90,7 +90,7 @@ defmodule PropertyDamage.MutationTest do
 
       # Should have mutations for the numeric field
       amount_mutations = Enum.filter(mutations, &(&1.target == :amount))
-      assert length(amount_mutations) > 0
+      assert amount_mutations != []
 
       # Should include various mutation types
       types = Enum.map(amount_mutations, & &1.type)
@@ -105,7 +105,7 @@ defmodule PropertyDamage.MutationTest do
       mutations = Value.generate_mutations(events)
 
       desc_mutations = Enum.filter(mutations, &(&1.target == :description))
-      assert length(desc_mutations) > 0
+      assert desc_mutations != []
 
       types = Enum.map(desc_mutations, & &1.type)
       assert :empty in types
@@ -151,7 +151,7 @@ defmodule PropertyDamage.MutationTest do
       mutations = Omission.generate_mutations(events)
 
       field_removals = Enum.filter(mutations, &(&1.type == :remove_field))
-      assert length(field_removals) > 0
+      assert field_removals != []
 
       targets = Enum.map(field_removals, & &1.target)
       assert :id in targets
@@ -171,7 +171,7 @@ defmodule PropertyDamage.MutationTest do
       mutations = Omission.generate_mutations(events)
 
       event_removals = Enum.filter(mutations, &(&1.type == :remove_event))
-      assert length(event_removals) == 0
+      assert event_removals == []
     end
 
     test "applies field removal mutation" do
@@ -242,7 +242,7 @@ defmodule PropertyDamage.MutationTest do
       mutations = Event.generate_mutations(events)
 
       ref_mutations = Enum.filter(mutations, &(&1.type == :wrong_ref))
-      assert length(ref_mutations) > 0
+      assert ref_mutations != []
 
       targets = Enum.map(ref_mutations, & &1.target)
       assert :id in targets or :ref_id in targets
@@ -510,7 +510,7 @@ defmodule PropertyDamage.MutationTest do
     test "identifies weak commands", %{report: report} do
       analysis = Analysis.analyze(report)
 
-      assert length(analysis.weak_commands) > 0
+      assert analysis.weak_commands != []
       {cmd, score} = hd(analysis.weak_commands)
       assert cmd == TestEvent
       assert score == 0.5
@@ -534,7 +534,7 @@ defmodule PropertyDamage.MutationTest do
     test "generates suggestions", %{report: report} do
       analysis = Analysis.analyze(report)
 
-      assert length(analysis.suggestions) > 0
+      assert analysis.suggestions != []
     end
 
     test "generates summary", %{report: report} do

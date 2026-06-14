@@ -115,7 +115,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
   end
 
   defp format_suggestions_terminal(analysis) do
-    if length(analysis.suggestions) == 0 do
+    if analysis.suggestions == [] do
       """
 
       ┌─ No Suggestions ────────────────────────────────────────────────────┐
@@ -134,7 +134,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
         |> Enum.map(fn priority ->
           suggestions = Map.get(by_priority, priority, [])
 
-          if length(suggestions) > 0 do
+          if suggestions != [] do
             format_priority_section(priority, suggestions)
           else
             nil
@@ -173,7 +173,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
   defp format_field_coverage_terminal(analysis) do
     coverage = analysis.field_coverage
 
-    if length(coverage.uncovered_fields) == 0 do
+    if coverage.uncovered_fields == [] do
       nil
     else
       header = "\n┌─ Unchecked Fields #{String.duplicate("─", @box_width - 20)}┐"
@@ -236,7 +236,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
   end
 
   defp format_suggestions_markdown(analysis) do
-    if length(analysis.suggestions) == 0 do
+    if analysis.suggestions == [] do
       """
       ## Suggestions
 
@@ -250,7 +250,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
         |> Enum.map(fn priority ->
           suggestions = Map.get(by_priority, priority, [])
 
-          if length(suggestions) > 0 do
+          if suggestions != [] do
             format_priority_section_markdown(priority, suggestions)
           else
             nil
@@ -321,7 +321,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
   defp format_field_coverage_markdown(analysis) do
     coverage = analysis.field_coverage
 
-    if length(coverage.uncovered_fields) == 0 do
+    if coverage.uncovered_fields == [] do
       nil
     else
       fields =

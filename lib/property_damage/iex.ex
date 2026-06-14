@@ -114,7 +114,7 @@ defmodule PropertyDamage.IEx do
     IO.puts(String.duplicate("─", 65))
     IO.puts("  State:      #{inspect(state_proj)}")
 
-    if length(extra_projs) > 0 do
+    if extra_projs != [] do
       IO.puts("  Extra:      #{length(extra_projs)} projection(s)")
 
       for proj <- extra_projs do
@@ -143,7 +143,7 @@ defmodule PropertyDamage.IEx do
         function_exported?(model, name, arity)
       end)
 
-    if length(implemented) > 0 do
+    if implemented != [] do
       IO.puts("OPTIONAL CALLBACKS")
       IO.puts(String.duplicate("─", 65))
 
@@ -158,7 +158,7 @@ defmodule PropertyDamage.IEx do
   defp print_hints(model) do
     hints = collect_hints(model)
 
-    if length(hints) > 0 do
+    if hints != [] do
       IO.puts("HINTS")
       IO.puts(String.duplicate("─", 65))
 
@@ -322,7 +322,7 @@ defmodule PropertyDamage.IEx do
     IO.puts(String.duplicate("─", 65))
 
     # Print prefix
-    if length(seq.prefix) > 0 do
+    if seq.prefix != [] do
       IO.puts("PREFIX:")
 
       seq.prefix
@@ -348,7 +348,7 @@ defmodule PropertyDamage.IEx do
     end)
 
     # Print suffix
-    if length(seq.suffix) > 0 do
+    if seq.suffix != [] do
       IO.puts("SUFFIX:")
       offset = length(seq.prefix) + Enum.sum(Enum.map(seq.branches, &length/1))
 
@@ -410,7 +410,7 @@ defmodule PropertyDamage.IEx do
         ":ref#{idx} → #{cmd_name} (#{ref})"
       end)
 
-    if length(refs_created) > 0 do
+    if refs_created != [] do
       IO.puts("Refs created:")
 
       for ref_info <- refs_created do

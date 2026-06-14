@@ -257,7 +257,7 @@ defmodule PropertyDamage.Model.Projection.LivenessTest do
 
       # Check with high threshold
       ops = Liveness.operations_pending_longer_than(state, 100_000)
-      assert length(ops) == 0
+      assert ops == []
     end
   end
 

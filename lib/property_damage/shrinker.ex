@@ -542,7 +542,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp do_shrink_seq_part(state, _part, commands, _indices)
-       when length(commands) == 0 do
+       when commands == [] do
     state
   end
 
@@ -830,7 +830,7 @@ defmodule PropertyDamage.Shrinker do
     String.slice(s, 0, div(byte_size(s), 2))
   end
 
-  defp shrink_value(list) when is_list(list) and length(list) > 0 do
+  defp shrink_value(list) when is_list(list) and list != [] do
     Enum.take(list, div(length(list), 2))
   end
 

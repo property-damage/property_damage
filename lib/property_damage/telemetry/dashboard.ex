@@ -353,7 +353,7 @@ defmodule PropertyDamage.Telemetry.Dashboard do
   defp render_events_html(state) do
     events = state[:recent_events] || []
 
-    if length(events) > 0 do
+    if events != [] do
       event_rows =
         events
         |> Enum.map_join("\n", fn event ->

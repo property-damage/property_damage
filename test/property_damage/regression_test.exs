@@ -348,8 +348,8 @@ defmodule PropertyDamage.RegressionTest do
       processed = Enum.reject(results, & &1.skipped)
       skipped = Enum.filter(results, & &1.skipped)
 
-      assert length(processed) >= 1
-      assert length(skipped) >= 0
+      assert processed != []
+      assert is_list(skipped)
     end
   end
 

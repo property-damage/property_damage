@@ -122,7 +122,7 @@ defmodule PropertyDamage.Differential.Result do
     metrics = if map_size(result.metrics) > 0, do: "\n" <> format_metrics(result), else: ""
 
     divergences =
-      if length(result.divergences) > 0, do: "\n" <> format_divergences(result), else: ""
+      if result.divergences != [], do: "\n" <> format_divergences(result), else: ""
 
     summary <> metrics <> divergences
   end

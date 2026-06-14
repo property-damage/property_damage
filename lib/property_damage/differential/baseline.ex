@@ -381,7 +381,7 @@ defmodule PropertyDamage.Differential.Baseline do
       |> Enum.flat_map(& &1.timings)
       |> Enum.sort()
 
-    if length(all_timings) > 0 do
+    if all_timings != [] do
       %{
         latency_p50: percentile(all_timings, 50),
         latency_p95: percentile(all_timings, 95),
@@ -400,7 +400,7 @@ defmodule PropertyDamage.Differential.Baseline do
 
   defp calculate_aggregate_metrics(_), do: %{}
 
-  defp percentile(sorted_list, p) when length(sorted_list) > 0 do
+  defp percentile(sorted_list, p) when sorted_list != [] do
     k = p / 100.0 * (length(sorted_list) - 1)
     f = :erlang.trunc(k)
     c = f + 1
@@ -414,7 +414,7 @@ defmodule PropertyDamage.Differential.Baseline do
     end
   end
 
-  defp mean(list) when length(list) > 0, do: Enum.sum(list) / length(list)
+  defp mean(list) when list != [], do: Enum.sum(list) / length(list)
 
   defp count_errors(runs) do
     runs

@@ -152,7 +152,7 @@ defmodule PropertyDamage.SuggestionsTest do
 
       # Should find currency in multiple events
       currency_patterns = Enum.filter(patterns, &(&1.type == :currency))
-      assert length(currency_patterns) >= 1
+      assert currency_patterns != []
 
       # Should have higher confidence for fields in multiple events
       currency_pattern = hd(currency_patterns)
@@ -294,7 +294,7 @@ defmodule PropertyDamage.SuggestionsTest do
     test "finds existing checks" do
       analysis = Analyzer.analyze(TestModel)
 
-      assert length(analysis.existing_checks) >= 1
+      assert analysis.existing_checks != []
 
       check_names = Enum.map(analysis.existing_checks, & &1.name)
       assert :balance_non_negative in check_names

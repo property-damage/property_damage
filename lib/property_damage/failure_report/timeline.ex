@@ -159,7 +159,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
 
     # Prefix section
     sections =
-      if length(prefix) > 0 do
+      if prefix != [] do
         prefix_text = format_prefix_section(prefix, failed_at_index, color)
 
         [
@@ -172,7 +172,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
 
     # Branches section
     sections =
-      if branches && length(branches) > 0 do
+      if branches && branches != [] do
         prefix_len = length(prefix)
 
         branch_text =
@@ -197,7 +197,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
     # branch lengths (each branch restarts at prefix_len, but the suffix
     # does not).
     sections =
-      if length(suffix) > 0 do
+      if suffix != [] do
         prefix_len = length(prefix)
         branch_cmd_count = if branches, do: Enum.map(branches, &length/1) |> Enum.sum(), else: 0
         suffix_start = prefix_len + branch_cmd_count
@@ -375,7 +375,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
     cmd_name = short_module_name(cmd.__struct__)
     cmd_line = "#{bold(color)}[#{idx}]#{reset()} #{cyan(color)}#{cmd_name}#{reset()}#{marker}"
 
-    if length(events) == 0 do
+    if events == [] do
       cmd_line <> "\n    #{dim(color)}(no events)#{reset()}"
     else
       events_text =

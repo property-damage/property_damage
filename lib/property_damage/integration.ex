@@ -480,7 +480,7 @@ defmodule PropertyDamage.Integration do
     else
       IO.puts("✗ #{result.failed}/#{result.total_runs} runs failed (#{result.duration_ms}ms)")
 
-      if length(result.failures) > 0 do
+      if result.failures != [] do
         IO.puts("")
         IO.puts("First failure:")
         failure = hd(result.failures)

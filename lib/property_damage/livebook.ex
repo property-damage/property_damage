@@ -577,7 +577,7 @@ defmodule PropertyDamage.Livebook do
 
   defp format_failed_command(_), do: "*Not available*"
 
-  defp format_failure_sequence(%{shrunk_sequence: seq}) when is_list(seq) and length(seq) > 0 do
+  defp format_failure_sequence(%{shrunk_sequence: seq}) when is_list(seq) and seq != [] do
     seq
     |> Enum.with_index(1)
     |> Enum.map_join("\n", fn {cmd, idx} ->
@@ -682,7 +682,7 @@ defmodule PropertyDamage.Livebook do
     Kino.Frame.render(frame, Kino.Markdown.new(md))
   end
 
-  defp format_step_events(%{events: events}) when is_list(events) and length(events) > 0 do
+  defp format_step_events(%{events: events}) when is_list(events) and events != [] do
     event_list =
       events
       |> Enum.map_join("\n", fn event ->

@@ -203,7 +203,7 @@ Run with: python #{Common.generate_filename(%FailureReport{seed: metadata.seed},
 
     # Add headers if present
     args =
-      if length(spec.headers) > 0 do
+      if spec.headers != [] do
         headers = generate_headers_dict(spec.headers)
         args ++ ["headers=#{headers}"]
       else

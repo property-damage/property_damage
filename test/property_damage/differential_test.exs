@@ -387,7 +387,7 @@ defmodule PropertyDamage.DifferentialTest do
         )
 
       assert result.status == :divergent
-      assert length(result.divergences) > 0
+      assert result.divergences != []
 
       [div | _] = result.divergences
       assert div.divergent_target == "divergent"

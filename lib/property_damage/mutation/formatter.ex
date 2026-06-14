@@ -137,7 +137,7 @@ defmodule PropertyDamage.Mutation.Formatter do
   end
 
   defp format_survived_terminal(report) do
-    if length(report.survived_mutations) == 0 do
+    if report.survived_mutations == [] do
       "\n┌─ All Mutations Killed ──────────────────────────────────────────────┐\n│ Great! All mutations were detected by your tests.                    │\n└─────────────────────────────────────────────────────────────────────┘"
     else
       header = "┌─ Survived Mutations (Weaknesses) ──────────────────────────────────┐"
@@ -243,7 +243,7 @@ defmodule PropertyDamage.Mutation.Formatter do
   end
 
   defp format_survived_markdown(report) do
-    if length(report.survived_mutations) == 0 do
+    if report.survived_mutations == [] do
       "\n## Survived Mutations\n\nAll mutations were killed! Your tests are effective.\n"
     else
       header = """

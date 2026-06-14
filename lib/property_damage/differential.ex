@@ -657,7 +657,7 @@ defmodule PropertyDamage.Differential do
         |> Enum.flat_map(& &1.timings)
         |> Enum.sort()
 
-      if length(all_timings) > 0 do
+      if all_timings != [] do
         %{
           latency_p50: percentile(all_timings, 50),
           latency_p95: percentile(all_timings, 95),
@@ -677,7 +677,7 @@ defmodule PropertyDamage.Differential do
     end
   end
 
-  defp percentile(sorted_list, p) when length(sorted_list) > 0 do
+  defp percentile(sorted_list, p) when sorted_list != [] do
     k = p / 100.0 * (length(sorted_list) - 1)
     f = :erlang.trunc(k)
     c = f + 1
@@ -691,7 +691,7 @@ defmodule PropertyDamage.Differential do
     end
   end
 
-  defp mean(list) when length(list) > 0 do
+  defp mean(list) when list != [] do
     Enum.sum(list) / length(list)
   end
 
@@ -718,7 +718,7 @@ defmodule PropertyDamage.Differential do
   defp build_result(config, targets, divergences, metrics) do
     status =
       cond do
-        length(divergences) > 0 -> :divergent
+        divergences != [] -> :divergent
         true -> :equivalent
       end
 
@@ -754,7 +754,7 @@ defmodule PropertyDamage.Differential do
 
     errors = Enum.filter(results, &match?({:error, _, _}, &1))
 
-    if length(errors) > 0 do
+    if errors != [] do
       # Teardown any that succeeded
       for {:ok, name, ctx} <- results do
         target = Enum.find(targets, &(&1.name == name))

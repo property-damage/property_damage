@@ -129,7 +129,7 @@ defmodule PropertyDamage.Mutation.Analysis do
       Enum.filter(survived, fn r -> r.operator == :value end)
 
     suggestions =
-      if length(value_survivors) > 0 do
+      if value_survivors != [] do
         fields =
           value_survivors
           |> Enum.map(fn r -> r.mutation[:target] end)
@@ -137,7 +137,7 @@ defmodule PropertyDamage.Mutation.Analysis do
           |> Enum.uniq()
           |> Enum.take(3)
 
-        if length(fields) > 0 do
+        if fields != [] do
           suggestions ++
             ["Add checks that verify exact values for: #{Enum.join(fields, ", ")}"]
         else
@@ -152,7 +152,7 @@ defmodule PropertyDamage.Mutation.Analysis do
       Enum.filter(survived, fn r -> r.operator == :omission end)
 
     suggestions =
-      if length(omission_survivors) > 0 do
+      if omission_survivors != [] do
         fields =
           omission_survivors
           |> Enum.map(fn r -> r.mutation[:target] end)
@@ -160,7 +160,7 @@ defmodule PropertyDamage.Mutation.Analysis do
           |> Enum.uniq()
           |> Enum.take(3)
 
-        if length(fields) > 0 do
+        if fields != [] do
           suggestions ++
             ["Add presence validation for fields: #{Enum.join(fields, ", ")}"]
         else
@@ -175,7 +175,7 @@ defmodule PropertyDamage.Mutation.Analysis do
       Enum.filter(survived, fn r -> r.operator == :boundary end)
 
     suggestions =
-      if length(boundary_survivors) > 0 do
+      if boundary_survivors != [] do
         suggestions ++
           ["Add boundary checks for numeric fields (zero, negative, max values)"]
       else
@@ -248,7 +248,7 @@ defmodule PropertyDamage.Mutation.Analysis do
   end
 
   defp format_weak_commands_terminal(analysis) do
-    if length(analysis.weak_commands) == 0 do
+    if analysis.weak_commands == [] do
       nil
     else
       header = "┌─ Weak Commands (< 80% kill rate) ──────────────────────────────────┐"
@@ -267,7 +267,7 @@ defmodule PropertyDamage.Mutation.Analysis do
   end
 
   defp format_weak_operators_terminal(analysis) do
-    if length(analysis.weak_operators) == 0 do
+    if analysis.weak_operators == [] do
       nil
     else
       header = "┌─ Weak Operators (< 80% kill rate) ─────────────────────────────────┐"
@@ -285,7 +285,7 @@ defmodule PropertyDamage.Mutation.Analysis do
   end
 
   defp format_unchecked_fields_terminal(analysis) do
-    if length(analysis.unchecked_fields) == 0 do
+    if analysis.unchecked_fields == [] do
       nil
     else
       header = "┌─ Unchecked Fields ──────────────────────────────────────────────────┐"
@@ -299,7 +299,7 @@ defmodule PropertyDamage.Mutation.Analysis do
   end
 
   defp format_suggestions_terminal(analysis) do
-    if length(analysis.suggestions) == 0 do
+    if analysis.suggestions == [] do
       nil
     else
       header = "┌─ Suggestions ───────────────────────────────────────────────────────┐"
@@ -333,7 +333,7 @@ defmodule PropertyDamage.Mutation.Analysis do
   end
 
   defp format_weak_commands_markdown(analysis) do
-    if length(analysis.weak_commands) == 0 do
+    if analysis.weak_commands == [] do
       nil
     else
       header = """
@@ -356,7 +356,7 @@ defmodule PropertyDamage.Mutation.Analysis do
   end
 
   defp format_unchecked_fields_markdown(analysis) do
-    if length(analysis.unchecked_fields) == 0 do
+    if analysis.unchecked_fields == [] do
       nil
     else
       fields =
@@ -368,7 +368,7 @@ defmodule PropertyDamage.Mutation.Analysis do
   end
 
   defp format_suggestions_markdown(analysis) do
-    if length(analysis.suggestions) == 0 do
+    if analysis.suggestions == [] do
       nil
     else
       suggestions =

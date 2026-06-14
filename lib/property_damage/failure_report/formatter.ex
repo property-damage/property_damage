@@ -570,7 +570,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp diff_states(_, _), do: ""
 
   defp terminal_event_log(report, max_events, color) do
-    if length(report.event_log) > 0 do
+    if report.event_log != [] do
       events_text =
         report.event_log
         |> Enum.take(max_events)
@@ -876,7 +876,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp markdown_event_log(report, max_events) do
-    if length(report.event_log) > 0 do
+    if report.event_log != [] do
       events_text =
         report.event_log
         |> Enum.take(max_events)
@@ -968,7 +968,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       end
 
     data =
-      if length(report.event_log) > 0 do
+      if report.event_log != [] do
         Map.put(data, "event_log", serialize_event_log(report.event_log))
       else
         data

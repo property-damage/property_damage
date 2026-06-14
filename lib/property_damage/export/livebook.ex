@@ -239,7 +239,7 @@ defmodule PropertyDamage.Export.LiveBook do
       end
 
     opts =
-      if length(spec.headers) > 0 do
+      if spec.headers != [] do
         headers = inspect(spec.headers)
         opts ++ ["headers: #{headers}"]
       else

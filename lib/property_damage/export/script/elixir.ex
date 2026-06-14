@@ -200,7 +200,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
 
     # Add headers if present
     opts =
-      if length(spec.headers) > 0 do
+      if spec.headers != [] do
         headers = inspect(spec.headers)
         opts ++ ["headers: #{headers}"]
       else

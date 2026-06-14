@@ -473,7 +473,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     uncovered = Enum.reject(all_fields, &(&1 in checked_fields))
 
     coverage_pct =
-      if length(all_fields) > 0 do
+      if all_fields != [] do
         Float.round(length(covered) / length(all_fields) * 100, 1)
       else
         100.0

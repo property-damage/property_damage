@@ -543,7 +543,7 @@ defmodule PropertyDamage.Generator do
       _ ->
         # 30% chance to end branch early (creates varied branch lengths)
         StreamData.bind(StreamData.float(min: 0.0, max: 1.0), fn roll ->
-          if roll < 0.3 and length(acc) > 0 do
+          if roll < 0.3 and acc != [] do
             StreamData.constant({Enum.reverse(acc), acc_ph})
           else
             StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->

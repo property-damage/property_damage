@@ -160,7 +160,7 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       # Verify memory was allocated (check process dictionary)
       keys = Process.get_keys() |> Enum.filter(&match?({:nemesis_memory, _}, &1))
-      assert length(keys) > 0
+      assert keys != []
 
       # Clean up
       MemoryPressure.restore(command, %{})
@@ -177,7 +177,7 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
 
       # Verify memory was released
       keys = Process.get_keys() |> Enum.filter(&match?({:nemesis_memory, _}, &1))
-      assert length(keys) == 0
+      assert keys == []
     end
 
     test "new! generates valid commands" do
