@@ -31,7 +31,16 @@ What it validates:
   PropertyDamage surfaces the fault honestly as a connection error rather than a
   false consistency violation. This is the oracle the nemesis audit builds on.
 
-The nemesis audit is a later 6d sub-rung built on this same proxy.
+- **Nemesis audit** (`test/nemesis_audit_test.exs`): proves each of the 10
+  built-in nemesis implementations either REALLY injects its fault (an
+  observable differential) or is honestly reported as `simulated: true`. The
+  network trio (`NetworkLatency` / `NetworkPartition` / `PacketLoss`) is driven
+  through the bench's real Toxiproxy proxy (round-trip time / connectivity
+  changes), the host-effect nemeses against real BEAM/host state (stress
+  processes, allocated memory, ETS tables, a killed pid), and the cooperative
+  ones (`ClockSkew` / `SlowIO` / `CertificateExpiry`) via their public API. Each
+  also verifies `restore/2` lifts the fault. This retires the Phase 2 "chaos
+  theater" finding.
 
 ## Infrastructure
 
