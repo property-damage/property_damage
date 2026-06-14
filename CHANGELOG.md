@@ -58,6 +58,15 @@ end, and trimmed the documented surface to what has been validated.
 - Failure output made crash-proof (JSON serialization, error classification,
   formatter). Malformed adapter returns, raising adapters, and raising
   projections now produce graceful failure reports instead of crashing the run.
+- Nemesis auto-restore now actually runs: faults whose `duration_ms` elapses are
+  lifted between commands, and any still-active faults are restored at sequence
+  end (`restore/2` previously had no call sites despite the behaviour promise).
+- Nemesis silent no-ops are gone: the Toxiproxy-backed network nemeses
+  (`NetworkLatency`, `NetworkPartition`, `PacketLoss`) tag their events with
+  `simulated: true` when Toxiproxy is not configured, so a fault that injected
+  nothing can no longer be mistaken for a real one (`Nemesis.simulated_event?/1`
+  reads the marker). All 10 nemesis implementations are now audited (real
+  injection or honest simulation) against a live Redis + Toxiproxy bench.
 
 ## [0.1.0] - 2024-12-27
 
