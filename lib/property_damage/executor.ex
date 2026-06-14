@@ -261,7 +261,8 @@ defmodule PropertyDamage.Executor do
       stutter_config,
       mock_registry,
       assertion_mode,
-      external_markers
+      external_markers,
+      sequence.registry
     )
   end
 
@@ -329,7 +330,8 @@ defmodule PropertyDamage.Executor do
          stutter_config,
          mock_registry,
          assertion_mode,
-         external_markers
+         external_markers,
+         registry \\ nil
        ) do
     initial_state =
       build_initial_state(
@@ -338,7 +340,8 @@ defmodule PropertyDamage.Executor do
         stutter_config,
         mock_registry,
         assertion_mode,
-        external_markers
+        external_markers,
+        registry
       )
 
     result =
@@ -389,7 +392,8 @@ defmodule PropertyDamage.Executor do
         stutter_config,
         mock_registry,
         assertion_mode,
-        external_markers
+        external_markers,
+        sequence.registry
       )
 
     # Phase 1: Execute prefix
@@ -853,14 +857,17 @@ defmodule PropertyDamage.Executor do
          stutter_config,
          mock_registry,
          assertion_mode,
-         external_markers
+         external_markers,
+         registry
        ) do
     %{
       event_log: [],
       projections: init_projections(model),
       projections_before: nil,
       refs: %{},
-      placeholder_registry: PlaceholderRegistry.new(),
+      # Seed the placeholder registry from the generated sequence (DR-021); the
+      # id-indexed registry + producer_link transport from generation to here.
+      placeholder_registry: registry || PlaceholderRegistry.new(),
       step_count: 0,
       assertion_counters: %{step: 0, command: 0, event: 0},
       assertion_failures: [],
@@ -892,7 +899,8 @@ defmodule PropertyDamage.Executor do
       Keyword.get(opts, :stutter_config),
       Keyword.get(opts, :mock_registry),
       Keyword.get(opts, :assertion_mode, :halt),
-      Keyword.get(opts, :external_markers, [])
+      Keyword.get(opts, :external_markers, []),
+      Keyword.get(opts, :placeholder_registry)
     )
   end
 

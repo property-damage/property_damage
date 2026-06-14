@@ -104,6 +104,20 @@ defmodule PropertyDamage.PlaceholderRegistry do
   end
 
   @doc """
+  Resolve a placeholder by its ID with a concrete value (DR-021).
+
+  Returns the registry unchanged if no placeholder has that ID. This is the
+  id-based write that execution-time capture uses, paired with `ids_at_position/2`.
+  """
+  @spec resolve(t(), reference(), term()) :: t()
+  def resolve(%__MODULE__{} = reg, id, value) do
+    case Map.get(reg.placeholders, id) do
+      nil -> reg
+      p -> %{reg | placeholders: Map.put(reg.placeholders, id, Placeholder.resolve(p, value))}
+    end
+  end
+
+  @doc """
   Get a placeholder by its ID.
   """
   @spec get(t(), reference()) :: Placeholder.t() | nil
