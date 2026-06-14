@@ -111,20 +111,20 @@ defmodule PropertyDamage.Export.Common do
       event
       |> Map.from_struct()
       |> Enum.filter(fn {key, value} ->
-        is_ref_field?(key) and is_bindable_value?(value)
+        ref_field?(key) and bindable_value?(value)
       end)
       |> Enum.into(acc)
     end)
   end
 
-  defp is_ref_field?(key) do
+  defp ref_field?(key) do
     key_str = to_string(key)
     String.ends_with?(key_str, "_ref") or String.ends_with?(key_str, "_id") or key == :id
   end
 
-  defp is_bindable_value?(value) when is_binary(value), do: true
-  defp is_bindable_value?(value) when is_integer(value), do: true
-  defp is_bindable_value?(_), do: false
+  defp bindable_value?(value) when is_binary(value), do: true
+  defp bindable_value?(value) when is_integer(value), do: true
+  defp bindable_value?(_), do: false
 
   # ============================================================================
   # Value Serialization

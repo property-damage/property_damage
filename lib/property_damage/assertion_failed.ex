@@ -1,3 +1,7 @@
+# `AssertionFailed` is an intentional public name: it is raised by the
+# documented `fail!/2` and matched on by users since v0.1. The "*Error"
+# naming convention is enforced for every other exception in the codebase.
+# credo:disable-for-next-line Credo.Check.Consistency.ExceptionNames
 defmodule PropertyDamage.AssertionFailed do
   @moduledoc """
   Simple exception for assertion failures.

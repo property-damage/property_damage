@@ -79,7 +79,7 @@ defmodule PropertyDamage.Mutation.Operators.Event do
         event
         |> Map.from_struct()
         |> Enum.filter(fn {key, value} ->
-          is_ref_field?(key) and not is_nil(value)
+          ref_field?(key) and not is_nil(value)
         end)
         |> Enum.map(fn {field, value} ->
           Operator.new_mutation(:event,
@@ -97,7 +97,7 @@ defmodule PropertyDamage.Mutation.Operators.Event do
     end)
   end
 
-  defp is_ref_field?(key) do
+  defp ref_field?(key) do
     key_str = to_string(key)
 
     String.ends_with?(key_str, "_ref") or
