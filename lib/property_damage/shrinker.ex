@@ -232,6 +232,12 @@ defmodule PropertyDamage.Shrinker do
 
     shrink_state = %{
       commands: commands,
+      # Parallel to `commands`: the original structured position of each command
+      # (DR-021). A linear sequence is all {:prefix, i}. Kept in lockstep with
+      # removals so the placeholder registry's producer_link can be remapped to
+      # each candidate's positions before re-execution.
+      positions: original_positions(commands),
+      registry: sequence.registry,
       model: model,
       adapter: adapter,
       adapter_config: adapter_config,
@@ -250,9 +256,15 @@ defmodule PropertyDamage.Shrinker do
     shrink_state =
       with true <- is_integer(failed_at_index),
            truncated = Enum.take(commands, failed_at_index + 1),
+           truncated_positions = Enum.take(shrink_state.positions, failed_at_index + 1),
            true <- length(truncated) < length(commands),
-           true <- still_fails?(truncated, shrink_state) do
-        %{shrink_state | commands: truncated, iterations: shrink_state.iterations + 1}
+           true <- still_fails?(truncated, truncated_positions, shrink_state) do
+        %{
+          shrink_state
+          | commands: truncated,
+            positions: truncated_positions,
+            iterations: shrink_state.iterations + 1
+        }
       else
         _ -> shrink_state
       end
@@ -271,10 +283,46 @@ defmodule PropertyDamage.Shrinker do
     end_time = System.monotonic_time(:millisecond)
 
     %{
-      sequence: Sequence.linear(shrink_state.commands),
+      # Carry the remapped registry so the shrunk sequence (reported and
+      # replayed) still resolves its externals.
+      sequence:
+        Sequence.with_registry(
+          Sequence.linear(shrink_state.commands),
+          remap_registry(shrink_state.registry, shrink_state.positions)
+        ),
       iterations: shrink_state.iterations,
       time_ms: end_time - start_time
     }
+  end
+
+  # The original structured positions of a flat (linear) command list.
+  defp original_positions(commands) do
+    commands |> Enum.with_index() |> Enum.map(fn {_cmd, i} -> {:prefix, i} end)
+  end
+
+  # Remap the placeholder registry's producer_link from original positions onto
+  # a candidate's positions (DR-021). `positions[new_i]` is the original position
+  # of the command now at candidate index new_i; producers that were dropped lose
+  # their entry (their placeholders simply won't resolve, which is correct: a
+  # surviving consumer of a removed producer makes the candidate fail to
+  # reproduce). Resolution of embedded placeholders stays by id and is unaffected.
+  defp remap_registry(nil, _positions), do: nil
+
+  defp remap_registry(registry, positions) do
+    orig_to_new =
+      positions
+      |> Enum.with_index()
+      |> Map.new(fn {orig_position, new_i} -> {orig_position, {:prefix, new_i}} end)
+
+    new_link =
+      Enum.reduce(registry.producer_link, %{}, fn {orig_position, ids}, acc ->
+        case Map.get(orig_to_new, orig_position) do
+          nil -> acc
+          new_position -> Map.put(acc, new_position, ids)
+        end
+      end)
+
+    %{registry | producer_link: new_link}
   end
 
   # ============================================================================
@@ -582,19 +630,31 @@ defmodule PropertyDamage.Shrinker do
     # `state.commands` — producing no-op acceptances, wrong-target removals,
     # and missed shrinks exactly on the long sequences this strategy exists for.
     original_commands = state.commands
+    # Positions parallel to original_commands, fixed for the whole level sweep
+    # (the graph's index space is original_commands). Candidate positions are
+    # selected from this by surviving original index (DR-021).
+    original_positions = state.positions
     graph = Graph.build(original_commands)
     levels = Graph.compress(graph)
 
     kept = MapSet.new(0..(length(original_commands) - 1))
 
-    state = try_remove_levels(state, original_commands, graph, Enum.reverse(levels), kept)
+    state =
+      try_remove_levels(
+        state,
+        original_commands,
+        original_positions,
+        graph,
+        Enum.reverse(levels),
+        kept
+      )
 
     linear_shrink(state)
   end
 
-  defp try_remove_levels(state, _original, _graph, [], _kept), do: state
+  defp try_remove_levels(state, _original, _orig_positions, _graph, [], _kept), do: state
 
-  defp try_remove_levels(state, original, graph, [level | rest], kept) do
+  defp try_remove_levels(state, original, orig_positions, graph, [level | rest], kept) do
     if exceeded_limits?(state) do
       state
     else
@@ -611,17 +671,20 @@ defmodule PropertyDamage.Shrinker do
       if MapSet.equal?(expanded, kept) do
         # The level's nodes are all required ancestors of survivors, so nothing
         # actually came out. Skip without spending a SUT execution.
-        try_remove_levels(state, original, graph, rest, kept)
+        try_remove_levels(state, original, orig_positions, graph, rest, kept)
       else
-        candidate = select_commands(original, MapSet.to_list(expanded))
+        survivors = Enum.sort(MapSet.to_list(expanded))
+        candidate = select_commands(original, survivors)
+        candidate_positions = Enum.map(survivors, &Enum.at(orig_positions, &1))
 
         state = increment_iterations(state)
 
-        if valid_candidate?(candidate, state) and still_fails?(candidate, state) do
-          new_state = %{state | commands: candidate}
-          try_remove_levels(new_state, original, graph, rest, expanded)
+        if valid_candidate?(candidate, state) and
+             still_fails?(candidate, candidate_positions, state) do
+          new_state = %{state | commands: candidate, positions: candidate_positions}
+          try_remove_levels(new_state, original, orig_positions, graph, rest, expanded)
         else
-          try_remove_levels(state, original, graph, rest, kept)
+          try_remove_levels(state, original, orig_positions, graph, rest, kept)
         end
       end
     end
@@ -705,12 +768,14 @@ defmodule PropertyDamage.Shrinker do
         do_linear_shrink(state, rest_indices)
       else
         candidate = List.delete_at(state.commands, index)
+        candidate_positions = List.delete_at(state.positions, index)
 
         state = increment_iterations(state)
 
-        if valid_candidate?(candidate, state) and still_fails?(candidate, state) do
+        if valid_candidate?(candidate, state) and
+             still_fails?(candidate, candidate_positions, state) do
           # Command was removed, recompute priorities for remaining commands
-          new_state = %{state | commands: candidate}
+          new_state = %{state | commands: candidate, positions: candidate_positions}
           new_prioritized = sort_indices_by_shrink_priority(candidate)
           do_linear_shrink(new_state, new_prioritized)
         else
@@ -735,7 +800,8 @@ defmodule PropertyDamage.Shrinker do
         candidate = List.replace_at(state.commands, index, shrunk_command)
         state = increment_iterations(state)
 
-        if valid_candidate?(candidate, state) and still_fails?(candidate, state) do
+        # Argument shrinking replaces in place, so positions are unchanged.
+        if valid_candidate?(candidate, state) and still_fails?(candidate, state.positions, state) do
           new_state = %{state | commands: candidate}
           do_shrink_arguments(new_state, index)
         else
@@ -785,7 +851,7 @@ defmodule PropertyDamage.Shrinker do
     Validator.valid_sequence?(commands, state.model)
   end
 
-  defp still_fails?(commands, state) do
+  defp still_fails?(commands, positions, state) do
     # Call setup_each to reset SUT state before each shrink attempt
     setup_each_result = call_setup_each(state.model, state.adapter_config)
 
@@ -794,7 +860,16 @@ defmodule PropertyDamage.Shrinker do
         # Regenerate idempotency keys to ensure fresh SUT state
         commands = regenerate_idempotency_keys(commands)
 
-        case Executor.run(commands, state.model, state.adapter,
+        # Build the candidate as a sequence carrying a registry whose
+        # producer_link is remapped to the candidate's positions (DR-021), so
+        # externals resolve against the shrunk sequence's own indices.
+        candidate_sequence =
+          Sequence.with_registry(
+            Sequence.linear(commands),
+            remap_registry(state.registry, positions)
+          )
+
+        case Executor.run(candidate_sequence, state.model, state.adapter,
                adapter_config: state.adapter_config,
                event_queue: state.event_queue
              ) do
