@@ -78,6 +78,20 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
       assert %FailureReport{} = rep
       assert is_binary(Formatter.format(rep, :terminal, color: false))
     end
+
+    test "an intentional fail!/2 assertion is a SUT error" do
+      reason = %PropertyDamage.AssertionFailed{message: "balance negative"}
+      assert ErrorOrigin.classify({:assertion_failed, :balance, reason}).origin == :sut_error
+    end
+
+    test "an assertion whose code crashes is a TEST CODE error, not a SUT bug" do
+      # The assertion function itself raised (e.g. KeyError on a missing field)
+      # rather than calling fail!/2 -- that is a broken test, not a SUT bug.
+      for reason <- [%KeyError{key: :foo}, {%KeyError{key: :foo}, []}] do
+        classification = ErrorOrigin.classify({:assertion_failed, :x, reason})
+        assert classification.origin == :test_code_error
+      end
+    end
   end
 
   describe "exception message extraction" do
