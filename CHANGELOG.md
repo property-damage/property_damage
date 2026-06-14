@@ -67,6 +67,18 @@ end, and trimmed the documented surface to what has been validated.
   nothing can no longer be mistaken for a real one (`Nemesis.simulated_event?/1`
   reads the marker). All 10 nemesis implementations are now audited (real
   injection or honest simulation) against a live Redis + Toxiproxy bench.
+- `mix pd.scaffold` now emits a suite that actually compiles and runs against a
+  live HTTP API (validated end to end against a real OpenAPI spec). The
+  generated adapter previously returned `{:ok, response}` (the raw body), which
+  the executor rejects as a malformed return, and collapsed every non-2xx to an
+  `{:error, _}` the run halts on. It now maps each completed HTTP response
+  through the command's `events/3` (status-aware, so a `404`/`409` can be an
+  observation) and returns `{:ok, events}`; transport failures stay
+  `{:error, _}`. Also fixed: missing `@impl true` on generated `read_only?/0`,
+  the adapter missing the required `timeout/1` callback (now `use
+  PropertyDamage.Adapter`), an undefined-`Req` warning under
+  `--warnings-as-errors`, non-`mix format`-clean output, and a moduledoc that
+  taught a nonexistent `new!/2`/`Faker`/`Req.post!` API.
 
 ## [0.1.0] - 2024-12-27
 
