@@ -58,10 +58,19 @@ defmodule PropertyDamage.Replay do
     `{:error, :branching_replay_unsupported}` for a branching `shrunk_sequence`.
     Inspect a branching failure via the `FailureReport` fields or re-run it
     through `PropertyDamage.Executor.run/4`.
-  - **Config not stored in the report must be re-supplied.** The `FailureReport`
-    records the model, adapter, and sequence, but not `stutter`/`external_markers`
-    config. Pass those via `opts` (`:stutter_config`, `:external_markers`) if the
-    original run used them and you need a bit-faithful replay.
+  - **Stutter config is not stored in the report.** The `FailureReport` records
+    the model, adapter, and sequence, but not the `stutter:` config a run was
+    given. If the original run used stutter and you want it re-applied during
+    replay, pass it via `opts` (`:stutter_config`). It is deliberately not
+    persisted yet: stutter is not seed-deterministic (decisions consume the
+    process `:rand` stream at execution time), so persisting the config alone
+    would not make replay reproduce *which* commands stuttered, and a
+    `{:custom, fn}` comparison cannot survive the `[:safe]` term decode used by
+    `PropertyDamage.Persistence`. Persisting it belongs with the determinism
+    hardening that introduces a generation-time stutter plan; see that item in
+    the project's fix checklist. (`external_markers` is not a gap: real runs
+    never set it, and external paths are derived from the event struct
+    definitions, which are reachable from the persisted model.)
   """
 
   alias PropertyDamage.{FailureReport, Sequence, EventQueue, Options, Executor}
