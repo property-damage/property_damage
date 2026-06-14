@@ -4,6 +4,28 @@ Invariants are the heart of property-based testing. They define what "correct"
 means for your system. This guide covers how to write invariants that catch
 real bugs.
 
+## How an Invariant Signals Failure
+
+A synchronous assertion (a `@trigger`-annotated function in an assertion
+projection) **fails by raising**. The executor runs your assertion and treats a
+raised exception as a violation; if the function returns without raising, the
+assertion passed. The return value is ignored.
+
+Use `PropertyDamage.fail!/2` to raise a structured failure:
+
+```elixir
+@trigger every: 1
+def assert_balance_non_negative(state, _cmd_or_event) do
+  if state.balance < 0 do
+    PropertyDamage.fail!("balance is negative", balance: state.balance)
+  end
+end
+```
+
+> **Do not** return `{:error, "..."}` to signal a violation. A returned tuple is
+> discarded, so the assertion silently passes and the bug is never caught. Raise
+> (via `PropertyDamage.fail!/2` or any exception) instead.
+
 ## What Makes a Good Invariant?
 
 Good invariants are:
@@ -42,10 +64,8 @@ def assert_balance_matches_ledger(state, _cmd_or_event) do
       account.balance != expected
     end)
 
-  if Enum.empty?(mismatches) do
-    :ok
-  else
-    {:error, "Balance mismatches: #{inspect(mismatches)}"}
+  unless Enum.empty?(mismatches) do
+    PropertyDamage.fail!("Balance mismatches", mismatches: mismatches)
   end
 end
 ```
@@ -60,11 +80,9 @@ def assert_emails_unique(state, _cmd_or_event) do
   emails = Enum.map(state.users, fn {_id, user} -> user.email end)
   unique_emails = Enum.uniq(emails)
 
-  if length(emails) == length(unique_emails) do
-    :ok
-  else
+  unless length(emails) == length(unique_emails) do
     duplicates = emails -- unique_emails
-    {:error, "Duplicate emails: #{inspect(duplicates)}"}
+    PropertyDamage.fail!("Duplicate emails", duplicates: duplicates)
   end
 end
 ```
@@ -92,10 +110,8 @@ def assert_valid_status_transitions(state, _cmd_or_event) do
       to not in valid_next
     end)
 
-  if Enum.empty?(invalid) do
-    :ok
-  else
-    {:error, "Invalid transitions: #{inspect(invalid)}"}
+  unless Enum.empty?(invalid) do
+    PropertyDamage.fail!("Invalid transitions", invalid: invalid)
   end
 end
 ```
@@ -115,10 +131,8 @@ def assert_orders_reference_valid_users(state, _cmd_or_event) do
       order.user_id not in user_ids
     end)
 
-  if Enum.empty?(orphan_orders) do
-    :ok
-  else
-    {:error, "Orphan orders: #{inspect(Enum.map(orphan_orders, &elem(&1, 0)))}"}
+  unless Enum.empty?(orphan_orders) do
+    PropertyDamage.fail!("Orphan orders", ids: Enum.map(orphan_orders, &elem(&1, 0)))
   end
 end
 ```
@@ -134,10 +148,8 @@ def assert_balances_non_negative(state, _cmd_or_event) do
     state.accounts
     |> Enum.filter(fn {_id, account} -> account.balance < 0 end)
 
-  if Enum.empty?(negative) do
-    :ok
-  else
-    {:error, "Negative balances: #{inspect(negative)}"}
+  unless Enum.empty?(negative) do
+    PropertyDamage.fail!("Negative balances", negative: negative)
   end
 end
 
@@ -147,10 +159,8 @@ def assert_inventory_non_negative(state, _cmd_or_event) do
     state.inventory
     |> Enum.filter(fn {_sku, qty} -> qty < 0 end)
 
-  if Enum.empty?(negative) do
-    :ok
-  else
-    {:error, "Negative inventory: #{inspect(negative)}"}
+  unless Enum.empty?(negative) do
+    PropertyDamage.fail!("Negative inventory", negative: negative)
   end
 end
 ```
@@ -168,37 +178,41 @@ def assert_expiry_after_creation(state, _cmd_or_event) do
       DateTime.compare(auth.expires_at, auth.created_at) != :gt
     end)
 
-  if Enum.empty?(invalid) do
-    :ok
-  else
-    {:error, "Authorizations with invalid expiry: #{inspect(invalid)}"}
+  unless Enum.empty?(invalid) do
+    PropertyDamage.fail!("Authorizations with invalid expiry", invalid: invalid)
   end
 end
 ```
 
 ## Invariant Triggers
 
-Control when invariants are checked using the `@trigger` attribute:
+Control when invariants are checked using the `@trigger` attribute. The trigger
+takes an `every:` key:
 
 ```elixir
-# Check after every event (every: 1)
+# Check after every step (every: 1)
 @trigger every: 1
 def assert_balance_non_negative(state, _cmd_or_event) do
   # ...
 end
 
-# Check only at end of sequence (expensive checks)
-@trigger at: :end_of_sequence
+# Sample expensive checks periodically (every Nth step)
+@trigger every: 25
 def assert_full_consistency_check(state, _cmd_or_event) do
   # ...
 end
 
-# Check after specific event types
+# Check after a specific command/event module
 @trigger every: OrderCreated
 def assert_order_valid(state, _cmd_or_event) do
   # ...
 end
 ```
+
+Supported `every:` forms: `1` (every step), `N` (every Nth step),
+`:command`/`:event` (after any command/event), `Module`/`[Modules]` (after a
+specific module), and `{N, target}` variants. There is no "end of sequence"
+trigger; sample with `every: N` for expensive checks.
 
 ## Tracking State for Invariants
 
@@ -227,12 +241,10 @@ defmodule MyApp.Projections.AuditInvariants do
 
   def apply(state, _), do: state
 
-  @trigger at: :end_of_sequence
+  @trigger every: 25
   def assert_no_suspicious_patterns(state, _cmd_or_event) do
-    if Enum.empty?(state.suspicious_patterns) do
-      :ok
-    else
-      {:error, "Suspicious patterns detected: #{inspect(state.suspicious_patterns)}"}
+    unless Enum.empty?(state.suspicious_patterns) do
+      PropertyDamage.fail!("Suspicious patterns detected", patterns: state.suspicious_patterns)
     end
   end
 end
@@ -246,13 +258,9 @@ When using nemesis (chaos engineering), some invariants may not apply:
 @trigger every: 1
 def assert_latency_within_sla(state, _cmd_or_event) do
   # Skip SLA check during active network partition
-  if Map.get(state.active_faults, :network_partition) do
-    :ok
-  else
-    if state.last_latency_ms < 100 do
-      :ok
-    else
-      {:error, "SLA violated: #{state.last_latency_ms}ms"}
+  unless Map.get(state.active_faults, :network_partition) do
+    if state.last_latency_ms >= 100 do
+      PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
     end
   end
 end
@@ -268,7 +276,9 @@ end
 # Don't do this - relies on implementation details
 @trigger every: 1
 def assert_cache_hit_ratio(state, _cmd_or_event) do
-  if state.cache.hits / state.cache.total > 0.8, do: :ok, else: {:error, "Low cache hits"}
+  if state.cache.hits / state.cache.total <= 0.8 do
+    PropertyDamage.fail!("Low cache hits")
+  end
 end
 ```
 
@@ -291,10 +301,8 @@ end
 # Don't do this - can fail due to timing
 @trigger every: 1
 def assert_recent_activity(state, _cmd_or_event) do
-  if DateTime.diff(DateTime.utc_now(), state.last_activity, :second) < 60 do
-    :ok
-  else
-    {:error, "No recent activity"}
+  if DateTime.diff(DateTime.utc_now(), state.last_activity, :second) >= 60 do
+    PropertyDamage.fail!("No recent activity")
   end
 end
 ```
@@ -306,7 +314,7 @@ end
 @trigger every: 1
 def assert_activity_ordering(state, _cmd_or_event) do
   sorted = Enum.sort_by(state.activities, & &1.timestamp)
-  if state.activities == sorted, do: :ok, else: {:error, "Out of order"}
+  unless state.activities == sorted, do: PropertyDamage.fail!("Out of order")
 end
 ```
 
@@ -318,7 +326,7 @@ end
 # Too specific - will break with any change
 @trigger every: 1
 def assert_exact_balance(state, _cmd_or_event) do
-  if state.accounts["acc_1"].balance == 1000, do: :ok, else: {:error, "Wrong"}
+  unless state.accounts["acc_1"].balance == 1000, do: PropertyDamage.fail!("Wrong")
 end
 ```
 
@@ -330,7 +338,7 @@ end
 def assert_credits_minus_debits(state, _cmd_or_event) do
   expected = state.total_credits - state.total_debits
   actual = Enum.reduce(state.accounts, 0, fn {_, acc}, sum -> sum + acc.balance end)
-  if expected == actual, do: :ok, else: {:error, "Mismatch"}
+  unless expected == actual, do: PropertyDamage.fail!("Mismatch")
 end
 ```
 
@@ -348,7 +356,7 @@ Use mutation testing to verify your invariants catch bugs:
 # If mutation score is low, invariants need improvement
 if report.mutation_score < 0.80 do
   analysis = PropertyDamage.Mutation.analyze(report)
-  IO.puts("Weak invariants: #{inspect(analysis.weak_checks)}")
+  IO.puts("Weak commands: #{inspect(analysis.weak_commands)}")
 end
 ```
 
@@ -356,4 +364,4 @@ end
 
 - [Debugging Failures](debugging_failures.md) - What to do when invariants catch bugs
 - [Chaos Engineering](chaos_engineering.md) - Testing resilience with nemesis
-- See `PropertyDamage.Suggestions` for AI-powered invariant recommendations
+- See `PropertyDamage.Suggestions` for invariant recommendations

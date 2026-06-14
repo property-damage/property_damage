@@ -21,9 +21,9 @@ The report includes:
 - **seed** - Random seed for reproducibility
 - **original_sequence** - Full command sequence that failed
 - **shrunk_sequence** - Minimal reproduction (after shrinking)
-- **shrink_info** - How much shrinking reduced the sequence
-- **invariant_violated** - Which check failed
-- **error_message** - Description of the failure
+- **shrink_iterations** / **shrink_time_ms** - How much shrinking it took
+- **check_name** - Which assertion failed
+- **failure_message** / **failure_reason** - Description of the failure
 - **state_at_failure** - Model state when failure occurred
 
 ## Step 1: Reproduce the Failure
@@ -45,8 +45,9 @@ The shrunk sequence is the minimal reproduction. Every command in it is
 necessary for the failure:
 
 ```elixir
-# Print the shrunk sequence
+# Print the shrunk sequence (a %PropertyDamage.Sequence{}; flatten with to_list/1)
 failure.shrunk_sequence
+|> PropertyDamage.Sequence.to_list()
 |> Enum.with_index()
 |> Enum.each(fn {cmd, idx} ->
   IO.puts("[#{idx}] #{inspect(cmd)}")
@@ -66,8 +67,9 @@ Example output:
 Use `explain/1` to understand why each command matters:
 
 ```elixir
+# explain/1 returns a map; format it for printing
 explanation = PropertyDamage.explain(failure)
-IO.puts(explanation)
+IO.puts(PropertyDamage.Analysis.format_explanation(explanation))
 ```
 
 Output:
@@ -94,14 +96,15 @@ Command Analysis:
 Replay the sequence step by step to observe state changes:
 
 ```elixir
-{:ok, replay} = PropertyDamage.Replay.step_through(failure)
+# replay/2 returns {:ok, [step]}; each step is
+# %{index, command, command_name, events, projections}
+{:ok, steps} = PropertyDamage.replay(failure)
 
-replay.steps
-|> Enum.each(fn step ->
+Enum.each(steps, fn step ->
   IO.puts("=== Step #{step.index} ===")
   IO.puts("Command: #{inspect(step.command)}")
   IO.puts("Events: #{inspect(step.events)}")
-  IO.puts("State after: #{inspect(step.state_after)}")
+  IO.puts("Projections after: #{inspect(step.projections)}")
   IO.puts("")
 end)
 ```
@@ -125,11 +128,11 @@ Generate visual diagrams of the failing sequence:
 
 ```elixir
 # Mermaid diagram
-diagram = PropertyDamage.Diagram.to_mermaid(failure)
+diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
 File.write!("failure.mmd", diagram)
 
 # PlantUML diagram
-diagram = PropertyDamage.Diagram.to_plantuml(failure)
+diagram = PropertyDamage.Diagram.from_failure_report(failure, :plantuml)
 File.write!("failure.puml", diagram)
 ```
 
@@ -138,16 +141,18 @@ File.write!("failure.puml", diagram)
 Compare a passing run with the failing run:
 
 ```elixir
-# Get a passing trace
-{:ok, passing} = PropertyDamage.run(
-  model: MyModel,
-  adapter: MyAdapter,
-  seed: 12345  # A known good seed
-)
+# run/1 does not expose a `.trace` field; build a Trace for each run from its
+# commands, event-log entries, and per-command state snapshots:
+#   PropertyDamage.Diff.create_trace(commands, events, states, result)
+# where result is :pass or {:fail, reason}.
+passing_trace = PropertyDamage.Diff.create_trace(commands, events, states, :pass)
 
-# Compare traces
-diff = PropertyDamage.Diff.compare_traces(passing.trace, failure.trace)
-IO.puts(PropertyDamage.Diff.format(diff, :terminal))
+failing_trace =
+  PropertyDamage.Diff.create_trace(commands, events, states, {:fail, failure.failure_reason})
+
+# Compare traces and print the divergence
+diff = PropertyDamage.Diff.compare_traces(passing_trace, failing_trace)
+IO.puts(PropertyDamage.Diff.format(diff, format: :terminal))
 ```
 
 Output highlights where traces diverge:
@@ -235,26 +240,27 @@ After fixing the bug:
 
 ```elixir
 # Run with the same seed - should pass now
-result = PropertyDamage.run(
-  model: MyModel,
-  adapter: MyAdapter,
-  seed: failure.seed
-)
+assert {:ok, _stats} =
+         PropertyDamage.run(
+           model: MyModel,
+           adapter: MyAdapter,
+           seed: failure.seed
+         )
 
-assert result.success, "Fix didn't work!"
-
-# Use fix verification for comprehensive check
-{:ok, verification} = PropertyDamage.FailureIntelligence.verify_fix(
+# Use fix verification for a comprehensive check. The model is positional;
+# :adapter and :max_variations go in the opts.
+verification = PropertyDamage.FailureIntelligence.verify_fix(
   failure,
-  model: MyModel,
+  MyModel,
   adapter: MyAdapter,
-  variations: 50  # Test with seed variations
+  max_variations: 50  # Test with seed variations
 )
 
-if verification.verified do
+# verification.status is :verified | :still_failing | :partially_fixed | :flaky
+if verification.status == :verified do
   IO.puts("Fix verified!")
 else
-  IO.puts("Fix incomplete: #{inspect(verification.still_failing)}")
+  IO.puts("Fix incomplete (#{verification.status}): #{inspect(verification.failed_variations)}")
 end
 ```
 
@@ -345,16 +351,18 @@ If the shrunk sequence is still large:
 )
 ```
 
-### Understanding Shrink Info
+### Understanding Shrink Stats
+
+The report carries the shrink effort directly; sequence lengths come from the
+original and shrunk sequences:
 
 ```elixir
-IO.inspect(failure.shrink_info)
-# => %{
-#   original_length: 47,
-#   shrunk_length: 3,
-#   iterations: 156,
-#   strategy: :default
-# }
+IO.puts("shrink iterations: #{failure.shrink_iterations}")
+IO.puts("shrink time: #{failure.shrink_time_ms}ms")
+
+original_len = failure.original_sequence |> PropertyDamage.Sequence.to_list() |> length()
+shrunk_len = failure.shrunk_sequence |> PropertyDamage.Sequence.to_list() |> length()
+IO.puts("#{original_len} -> #{shrunk_len} commands")
 ```
 
 ## Flakiness Detection
@@ -362,16 +370,17 @@ IO.inspect(failure.shrink_info)
 If a failure doesn't reproduce consistently:
 
 ```elixir
-flakiness = PropertyDamage.Flakiness.detect(
-  model: MyModel,
-  adapter: MyAdapter,
-  seed: failure.seed,
-  iterations: 10
-)
+# check_determinism re-runs the seed and returns
+# {:ok, :deterministic} | {:ok, :flaky, stats} | {:error, reason}
+case PropertyDamage.check_determinism(MyModel, MyAdapter, failure.seed, runs: 10) do
+  {:ok, :deterministic} ->
+    IO.puts("Reproduces deterministically")
 
-if flakiness.is_flaky do
-  IO.puts("Flaky! Passes #{flakiness.pass_rate * 100}% of the time")
-  IO.puts("Likely causes: #{inspect(flakiness.likely_causes)}")
+  {:ok, :flaky, stats} ->
+    IO.puts("Flaky! #{inspect(stats)}")
+
+  {:error, reason} ->
+    IO.puts("Could not check: #{inspect(reason)}")
 end
 ```
 

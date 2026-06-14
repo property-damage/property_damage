@@ -177,8 +177,9 @@ The saved file includes:
 ```elixir
 case PropertyDamage.Persistence.load("failures/bug-123.pd") do
   {:ok, report} ->
-    # Versions match, safe to replay
-    PropertyDamage.Replay.run(report, adapter: MyAdapter)
+    # Versions match, safe to replay (the adapter is taken from the report;
+    # pass adapter_config: if you need to override its setup config)
+    PropertyDamage.Replay.run(report)
 
   {:ok, report, warnings} ->
     # Version mismatch detected
@@ -230,11 +231,14 @@ matrix:
 
 ### Strategy 3: Regenerate on Upgrade
 
-When upgrading dependencies that change struct definitions:
+When upgrading dependencies that change struct definitions, regenerate ExUnit
+tests from the saved failures with the current struct versions:
 
-```bash
-# Regenerate all saved tests with current versions
-mix property_damage.regenerate failures/
+```elixir
+for path <- Path.wildcard("failures/*.pd") do
+  {:ok, report} = PropertyDamage.load_failure(path)
+  PropertyDamage.generate_test(report, format: :exunit)
+end
 ```
 
 ### Strategy 4: Shared Seed Library
@@ -279,47 +283,91 @@ end
 
 ### Model Library (order_model)
 
-```elixir
-# lib/order_model.ex
-defmodule OrderModel do
-  use PropertyDamage.Model
+The command and projection modules live in `order_model` and implement the
+PropertyDamage behaviours. The **shared contract surface is the event struct**
+(`CompanyDomain.Events.OrderCreated`): it flows through the projection and the
+adapter without either side depending on PropertyDamage.
 
-  alias CompanyDomain.Commands.CreateOrder
+```elixir
+# lib/order_model/commands/create_order.ex
+defmodule OrderModel.Commands.CreateOrder do
+  use PropertyDamage.Command
+
+  defstruct [:customer_id, :amount, :currency]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{
+      customer_id: StreamData.string(:alphanumeric, min_length: 8),
+      amount: StreamData.positive_integer(),
+      currency: StreamData.member_of(["USD", "EUR", "GBP"])
+    }
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+# lib/order_model/projections/order_state.ex
+defmodule OrderModel.Projections.OrderState do
+  use PropertyDamage.Model.Projection
+
+  # OrderCreated is the shared struct from company_domain
   alias CompanyDomain.Events.OrderCreated
 
-  projection OrderState do
-    field :orders, %{}, "Map of order_id => order"
+  @impl true
+  def init, do: %{orders: %{}}
 
-    on %OrderCreated{} = event do
-      put_in(state.orders[event.id], %{
-        customer_id: event.customer_id,
-        amount: event.amount,
-        currency: event.currency
-      })
-    end
+  @impl true
+  def apply(state, %OrderCreated{} = event) do
+    put_in(state, [:orders, event.id], %{
+      customer_id: event.customer_id,
+      amount: event.amount,
+      currency: event.currency
+    })
   end
 
-  command CreateOrder do
-    def generate(state) do
-      StreamData.fixed_map(%{
-        customer_id: StreamData.string(:alphanumeric, min_length: 8),
-        amount: StreamData.positive_integer(),
-        currency: StreamData.member_of(["USD", "EUR", "GBP"])
-      })
-      |> StreamData.map(&struct!(CreateOrder, &1))
-    end
+  def apply(state, _), do: state
+end
 
-    def events(_command, _state) do
-      [%OrderCreated{}]
-    end
+# lib/order_model/projections/order_invariants.ex
+defmodule OrderModel.Projections.OrderInvariants do
+  use PropertyDamage.Model.Projection
+
+  alias CompanyDomain.Events.OrderCreated
+
+  @impl true
+  def init, do: %{orders: %{}}
+
+  @impl true
+  def apply(state, %OrderCreated{} = event) do
+    put_in(state, [:orders, event.id], %{amount: event.amount})
   end
 
-  check :OrdersHaveValidAmount do
-    trigger on: OrderCreated
+  def apply(state, _), do: state
 
-    assert state.orders |> Map.values() |> Enum.all?(& &1.amount > 0),
-      "All orders must have positive amounts"
+  @trigger every: OrderCreated
+  def assert_orders_have_valid_amount(state, _event) do
+    unless Enum.all?(state.orders, fn {_id, o} -> o.amount > 0 end) do
+      PropertyDamage.fail!("All orders must have positive amounts")
+    end
   end
+end
+
+# lib/order_model.ex
+defmodule OrderModel do
+  @behaviour PropertyDamage.Model
+
+  alias OrderModel.Commands.CreateOrder
+  alias OrderModel.Projections.{OrderState, OrderInvariants}
+
+  @impl true
+  def commands, do: [{CreateOrder, weight: 1}]
+
+  @impl true
+  def command_sequence_projection, do: OrderState
+
+  @impl true
+  def assertion_projections, do: [OrderInvariants]
 end
 ```
 

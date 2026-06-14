@@ -265,8 +265,9 @@ PropertyDamage.run(
     comparison: :strict        # :strict | {:structural, fields} | {:custom, fun}
   },
 
-  # Fault injection
-  nemesis: [PartitionNetwork, InjectLatency],
+  # Event injection (InjectorAdapter modules). Nemesis fault injection is wired
+  # differently: add nemesis modules to the model's commands/0 list.
+  injector_adapters: [MyApp.WebhookInjector],
 
   # Callbacks
   on_failure: fn report -> IO.inspect(report) end,

@@ -117,49 +117,54 @@ defmodule MyApp.Projections.NemesisInvariants do
     }
   end
 
-  # Track fault injection
+  # Track fault injection. There is no generic fault event: each nemesis emits
+  # its own injected/restored structs (NetworkLatencyInjected,
+  # NetworkLatencyRestored, PacketLossInjected, ...). Match the ones your model
+  # uses; the injected struct carries a `simulated: true | false` flag.
   @impl true
-  def apply(state, %PropertyDamage.Nemesis.Events.FaultInjected{} = event) do
-    put_in(state, [:active_faults, event.fault_type], event)
+  def apply(state, %NetworkLatencyInjected{} = event) do
+    put_in(state, [:active_faults, :network_latency], event)
   end
 
-  def apply(state, %PropertyDamage.Nemesis.Events.FaultRestored{} = event) do
-    update_in(state, [:active_faults], &Map.delete(&1, event.fault_type))
+  def apply(state, %NetworkLatencyRestored{}) do
+    update_in(state, [:active_faults], &Map.delete(&1, :network_latency))
   end
 
   def apply(state, _), do: state
 
-  # Verify all faults were cleaned up
-  @trigger at: :end_of_sequence
-  def assert_no_orphaned_faults(state, _cmd_or_event) do
-    if map_size(state.active_faults) == 0 do
-      :ok
-    else
-      {:error, "Orphaned faults: #{inspect(state.active_faults)}"}
-    end
-  end
+  # Use the tracked faults to RELAX other invariants while a fault is active
+  # (see "Relaxing Invariants During Faults" below). The executor
+  # auto-restores faults whose duration has elapsed and restores any still
+  # active at the end of the sequence, so there is no end-of-sequence
+  # "orphaned fault" check to write.
 end
 ```
 
 ### 3. Update Your Adapter
 
-Handle faults in your adapter:
+The network nemeses (NetworkLatency, NetworkPartition, PacketLoss) act at the
+Toxiproxy layer and need no adapter changes: route your SUT through the proxy
+and they degrade the connection transparently (and tag their events
+`simulated: true` when no Toxiproxy is configured). The cooperative nemeses
+(SlowIO, CertificateExpiry, ClockSkew) instead expose a helper your adapter
+calls:
 
 ```elixir
 defmodule MyApp.ChaosAdapter do
   @behaviour PropertyDamage.Adapter
 
-  alias PropertyDamage.Nemesis.{NetworkLatency, CertificateExpiry}
+  alias PropertyDamage.Nemesis.{SlowIO, CertificateExpiry}
 
   @impl true
   def execute(cmd, ctx) do
-    # Check for network latency
-    if NetworkLatency.should_delay?() do
-      NetworkLatency.apply_delay()
+    # Cooperative nemeses expose a helper your adapter consults. SlowIO and
+    # CertificateExpiry are the ones with an adapter-facing API:
+    if SlowIO.should_delay?() do
+      SlowIO.apply_delay()
     end
 
-    # Check for certificate failure
     if CertificateExpiry.should_fail?() do
+      # Returns an SSL error tuple to feed back as a failed observation
       CertificateExpiry.get_ssl_error()
     else
       do_execute(cmd, ctx)
@@ -186,10 +191,8 @@ alias PropertyDamage.Nemesis.NetworkLatency
   duration_ms: 10_000
 }
 
-# In adapter:
-if NetworkLatency.should_delay?() do
-  NetworkLatency.apply_delay()  # Sleeps for configured duration
-end
+# Applied at the Toxiproxy layer in inject/2 -- no adapter cooperation needed.
+# Without a configured Toxiproxy the injected event is tagged simulated: true.
 ```
 
 ### NetworkPartition
@@ -205,10 +208,9 @@ alias PropertyDamage.Nemesis.NetworkPartition
   duration_ms: 5000
 }
 
-# Asymmetric - requests work, responses don't
+# Asymmetric - one direction degraded
 %NetworkPartition{
   partition_type: :asymmetric,
-  direction: :responses,
   duration_ms: 5000
 }
 ```
@@ -238,8 +240,8 @@ alias PropertyDamage.Nemesis.MemoryPressure
 
 # Allocate 100MB
 %MemoryPressure{
-  allocation_mb: 100,
-  allocation_style: :bulk,  # or :fragmented
+  megabytes: 100,
+  allocation_pattern: :bulk,  # or :fragmented
   duration_ms: 5000
 }
 ```
@@ -251,9 +253,9 @@ Stress the scheduler:
 ```elixir
 alias PropertyDamage.Nemesis.CPUStress
 
-# 80% CPU usage across all schedulers
+# High load across all schedulers (intensity is a 1-10 level, default 5)
 %CPUStress{
-  intensity: 0.8,
+  intensity: 8,
   schedulers: :all,  # or specific count
   duration_ms: 5000
 }
@@ -268,18 +270,16 @@ Simulate clock drift:
 ```elixir
 alias PropertyDamage.Nemesis.ClockSkew
 
-# Jump forward 1 hour
+# Jump forward 1 hour (positive skew = future), no ongoing drift
 %ClockSkew{
   skew_ms: 3_600_000,
-  direction: :forward,
-  drift_rate: 0  # No ongoing drift
+  drift_rate: 1.0  # 1.0 = normal rate (no drift); >1.0 fast, <1.0 slow
 }
 
-# Backward drift at 10x speed
+# Jump back 1 hour, then run 2x fast
 %ClockSkew{
-  skew_ms: 0,
-  direction: :backward,
-  drift_rate: 10.0,  # 10 seconds per second
+  skew_ms: -3_600_000,
+  drift_rate: 2.0,
   duration_ms: 5000
 }
 

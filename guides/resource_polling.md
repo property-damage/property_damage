@@ -12,7 +12,7 @@ Use `ctx.start_poller.(opts)` when your adapter needs to:
 
 ### vs. Blocking Settle
 
-**Use blocking settle** (via `@probe` or `@bridge` semantics) when:
+**Use blocking settle** (via `:probe` or `:async` command semantics) when:
 - You want to wait until the resource settles before returning
 - The entire command should be considered atomic
 - Events should only be emitted once the final state is reached

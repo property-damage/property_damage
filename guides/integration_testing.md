@@ -406,10 +406,10 @@ You can also use the integration testing API directly in Elixir:
 # Check results
 if result.success do
   IO.puts("All tests passed!")
-  IO.puts("Runs: #{result.runs_completed}")
+  IO.puts("Runs: #{result.total_runs}")
 else
   IO.puts("Tests failed!")
-  IO.puts("Failures: #{result.failures}")
+  IO.puts("Failures: #{result.failed}")
 end
 ```
 
@@ -426,11 +426,11 @@ end
   save_to: "discovered_bugs/"
 )
 
-# Analyze findings
+# Analyze findings. Each bug is %{fingerprint, failure, occurrences, first_seen_run}
 for bug <- bugs do
-  IO.puts("Bug: #{bug.description}")
-  IO.puts("Seed: #{bug.seed}")
-  IO.puts("Commands: #{length(bug.commands)}")
+  IO.puts("Fingerprint: #{bug.fingerprint}")
+  IO.puts("Seed: #{bug.failure.seed}")
+  IO.puts("Occurrences: #{bug.occurrences} (first seen on run #{bug.first_seen_run})")
 end
 ```
 
@@ -504,15 +504,16 @@ For programmatic analysis:
 ```json
 {
   "success": false,
-  "runs_completed": 100,
+  "total_runs": 100,
   "passed": 98,
-  "failures": 2,
-  "duration_ms": 45200,
-  "failed_runs": [
+  "failed": 2,
+  "model": "Elixir.MyApp.Model",
+  "adapter": "Elixir.MyApp.Adapter",
+  "failures": [
     {
       "seed": 12345678,
-      "commands": [...],
-      "error": "Balance went negative"
+      "failure_reason": "Balance went negative",
+      "shrunk_sequence": "..."
     }
   ]
 }

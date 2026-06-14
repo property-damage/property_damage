@@ -94,9 +94,13 @@ case PropertyDamage.Linearization.check(branches, branch_events, projections, mo
     # A valid sequential ordering exists -- consistent behavior
     :ok
 
-  :no_linearization ->
+  {:no_linearization, _refutation} ->
     # No valid ordering explains the results -- race condition detected
     raise "Non-linearizable execution!"
+
+  {:indeterminate, _checked} ->
+    # Could not verify (no simulator, or the interleaving cap was reached)
+    :ok
 end
 ```
 
@@ -158,9 +162,7 @@ defmodule AccountModel do
 end
 
 defmodule BalanceInvariant do
-  @behaviour PropertyDamage.Model.Projection
-
-  @trigger every: :command
+  use PropertyDamage.Model.Projection
 
   def init, do: %{deposits: 0, withdrawals: 0, observed_balance: 0}
 
@@ -174,6 +176,7 @@ defmodule BalanceInvariant do
 
   def apply(state, _event), do: state
 
+  @trigger every: :command
   def assert_balance_consistent(state, _event) do
     expected = state.deposits - state.withdrawals
 

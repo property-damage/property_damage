@@ -213,9 +213,7 @@ testing:
 
 ```elixir
 defmodule IdempotencyProjection do
-  @behaviour PropertyDamage.Model.Projection
-
-  @trigger every: :command
+  use PropertyDamage.Model.Projection
 
   def init, do: %{seen_keys: MapSet.new(), creation_counts: %{}}
 
@@ -228,6 +226,7 @@ defmodule IdempotencyProjection do
 
   def apply(state, _event), do: state
 
+  @trigger every: :command
   def assert_no_duplicate_creation(state, _event) do
     duplicates = Enum.filter(state.creation_counts, fn {_k, v} -> v > 1 end)
 

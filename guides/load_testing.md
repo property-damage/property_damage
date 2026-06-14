@@ -70,13 +70,11 @@ Report.save(report, "load_test_report.md", :markdown)
 | Option | Description | Default |
 |--------|-------------|---------|
 | `adapter_config` | Adapter configuration | `%{}` |
-| `pool_size` | Number of workers (see below) | auto |
 | `ramp_up` | How to ramp up to target rate | `:immediate` |
 | `ramp_down` | How to ramp down at end | `:immediate` |
 | `think_time` | `{min_ms, max_ms}` between commands | `{0, 0}` |
 | `arrival_jitter` | `{min_ms, max_ms}` jitter per arrival | `{0, 0}` |
-| `max_queue_size` | Queue depth before dropping arrivals | `100` |
-| `metrics_interval` | How often to sample metrics | `{1, :second}` |
+| `metrics_interval` | How often to sample metrics | `{1, :seconds}` |
 | `on_metrics` | Callback for periodic metrics | `nil` |
 | `on_complete` | Callback when test finishes | `nil` |
 | `assertion_mode` | `:disabled`, `:log`, or `:fail` | `:disabled` |
@@ -132,7 +130,7 @@ Runner.start_link(
 |------|---------|
 | **Arrival** | One command sequence spawned |
 | **Command** | One individual operation executed |
-| **Drop** | Arrival that couldn't run (pool exhausted) |
+| **Drop** | Arrival whose worker could not be created (e.g. `adapter.setup` failed) |
 
 A single arrival may execute multiple commands before the sequence terminates.
 
@@ -193,64 +191,21 @@ all of them.
 
 ## Throughput Tuning
 
-When arrivals are being dropped or throughput is lower than expected:
+When throughput is lower than expected or you see drops:
 
-### 1. Increase Pool Size
+### 1. The worker pool sizes itself
 
-By default, pool size auto-calculates as `min(arrival_rate * 2, 500)` with
-a minimum of 10 workers. Override this with the `pool_size` option:
+There is no `pool_size` option. The worker pool is dynamic: a worker is
+checked out (or created on demand) for each arrival, so it grows to whatever
+concurrency the arrival rate and command latency demand. You do not tune it.
 
-```elixir
-Runner.start_link(
-  arrival_rate: 50,
-  duration: {5, :minutes},
-  pool_size: 200,  # Override auto-calculated value
-  # ...
-)
-```
+A **drop** is therefore not pool saturation: it means a worker could not be
+created for an arrival (for example `adapter.setup/1` failed). A non-trivial
+drop rate points at the adapter or the SUT refusing connections, not at a
+queue depth to raise. Watch `pool_utilization` and `peak_workers` in
+`Runner.status/1` to see how far the pool grew.
 
-**When to increase pool size:**
-
-- Commands are slow (>100ms average) and you're seeing drops
-- The SUT can handle more concurrent requests than the default allows
-- You need to stress test connection pooling behavior
-
-**When to decrease pool size:**
-
-- You want to limit concurrency to avoid overwhelming the SUT
-- Testing how the system behaves under resource constraints
-- Simulating a fixed number of concurrent users
-
-**Sizing guidance:**
-
-```
-Required workers ≥ arrival_rate × avg_command_latency_seconds
-
-Example: 50 arrivals/sec with 200ms avg latency
-  → 50 × 0.2 = 10 workers minimum
-  → Auto-calc gives: min(50 × 2, 500) = 100 workers (plenty of headroom)
-
-Example: 50 arrivals/sec with 2s avg latency (slow commands)
-  → 50 × 2 = 100 workers minimum
-  → Auto-calc gives: 100 workers (borderline - consider pool_size: 150)
-```
-
-### 2. Increase max_queue_size
-
-When all workers are busy, arrivals queue up. Once the queue exceeds
-`max_queue_size`, arrivals are dropped:
-
-```elixir
-Runner.start_link(
-  # ...
-  max_queue_size: 500  # Default is 100
-)
-```
-
-A larger queue absorbs traffic bursts but increases memory usage and
-queue wait times.
-
-### 3. Lower Arrival Rate
+### 2. Lower Arrival Rate
 
 Match the arrival rate to what your system can actually handle:
 
@@ -319,11 +274,10 @@ status = Runner.status(runner)
 
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
-| High drop rate (>10%) | Pool saturation | Increase pool size or lower arrival rate |
+| High drop rate (>10%) | Workers failing to start (`adapter.setup`) or SUT refusing connections | Check adapter setup and SUT connection limits; lower arrival rate |
 | Commands ≈ Arrivals | Early termination | Check `terminate?/3` returns `false` initially |
-| Peak util 100%, avg util low | Bursty traffic | Increase pool size or add ramp-up |
-| Peak and avg util both high | Sustained overload | Increase pool size significantly |
-| High avg queue time | Pool undersized | Increase pool size |
+| Peak util 100%, avg util low | Bursty traffic | Add ramp-up to smooth the arrival curve |
+| Peak and avg util both high | Sustained overload | Lower arrival rate or scale the SUT |
 | Low arrivals/sec vs target | Ramp-up or drops | Check ramp config and drop rate |
 | Latency spikes | SUT bottleneck | Profile SUT, check for resource contention |
 

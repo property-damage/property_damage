@@ -293,14 +293,13 @@ defmodule MyApp.PropertyTest do
   use ExUnit.Case
 
   test "system maintains invariants" do
-    result = PropertyDamage.run(
-      model: MyApp.TestModel,
-      adapter: MyApp.TestAdapter,
-      adapter_config: %{base_url: "http://localhost:4000"},
-      max_runs: 100
-    )
-
-    assert result.success, "Property test failed: #{inspect(result.failure)}"
+    assert {:ok, _stats} =
+             PropertyDamage.run(
+               model: MyApp.TestModel,
+               adapter: MyApp.TestAdapter,
+               adapter_config: %{base_url: "http://localhost:4000"},
+               max_runs: 100
+             )
   end
 end
 ```

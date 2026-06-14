@@ -176,10 +176,10 @@ dry_run(AccountModel, commands: 10)
 debug_command(%CreateAccount{name: "test"}, AccountAdapter)
 
 # Show projection state after applying a list of events
-inspect_state(AccountState, [%AccountCreated{id: "1", name: "alice"}])
+inspect_state([%AccountCreated{id: "1", name: "alice"}], AccountState)
 
 # See which commands are valid given a state
-check_preconditions(AccountModel, %{accounts: %{"1" => %{name: "alice"}}})
+check_preconditions(%{accounts: %{"1" => %{name: "alice"}}}, AccountModel)
 ```
 
 ## Run Configurations
@@ -222,10 +222,7 @@ PropertyDamage.run(
   verbose: true
 )
 
-# Chaos / fault injection
-PropertyDamage.run(
-  model: M,
-  adapter: A,
-  nemesis: [PartitionNetwork, InjectLatency]
-)
+# Chaos / fault injection: nemeses are added to the model's commands/0 list
+# (with low weights), not passed as a run option. See the Chaos Engineering guide.
+PropertyDamage.run(model: ChaosModel, adapter: A)
 ```

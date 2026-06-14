@@ -86,9 +86,12 @@ defmodule MyApp.RegressionTest do
 
   describe "payment webhook regression" do
     test "payment confirmation triggers webhook" do
+      # CreatePayment declares `creates_ref/0`; bind a symbolic ref and reuse it
+      payment_ref = PropertyDamage.Ref.symbolic(label: "payment")
+
       commands = [
         %CreatePayment{amount: 1000, currency: "USD"},
-        %ConfirmPayment{payment_id: {:ref, :payment_id}}  # Uses ref from first command
+        %ConfirmPayment{payment_id: payment_ref}  # resolved to CreatePayment's id
       ]
 
       {:ok, events} = PropertyDamage.execute(commands,
