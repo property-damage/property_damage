@@ -427,24 +427,36 @@ defmodule PropertyDamage.Model do
       # Simple module
       module when is_atom(module) ->
         resolved = resolve_spec(module, [])
-        {resolved.weight, module, resolved}
+        {validate_weight!(resolved.weight, module), module, resolved}
 
       # {module, weight} format (legacy)
       {module, weight} when is_atom(module) and is_integer(weight) and weight > 0 ->
         resolved = resolve_spec(module, weight: weight)
-        {resolved.weight, module, resolved}
+        {validate_weight!(resolved.weight, module), module, resolved}
 
       # {module, opts} format (new)
       {module, opts} when is_atom(module) and is_list(opts) ->
         resolved = resolve_spec(module, opts)
-        {resolved.weight, module, resolved}
+        {validate_weight!(resolved.weight, module), module, resolved}
 
       # Map form with :command key
       %{command: module} = map when is_atom(module) ->
         opts = map |> Map.delete(:command) |> Map.to_list()
         resolved = resolve_spec(module, opts)
-        {resolved.weight, module, resolved}
+        {validate_weight!(resolved.weight, module), module, resolved}
     end
+  end
+
+  # A command's weight is its bucket size in the weighted random selection;
+  # zero/negative/non-integer weights make total_weight non-positive and break
+  # the generator's `StreamData.integer(1..total_weight)` draw. Reject them with
+  # a clear error at normalization rather than failing obscurely at generation.
+  defp validate_weight!(weight, _module) when is_integer(weight) and weight > 0, do: weight
+
+  defp validate_weight!(weight, module) do
+    raise ArgumentError,
+          "Invalid weight #{inspect(weight)} for command #{inspect(module)}: " <>
+            "weight must be a positive integer."
   end
 
   @doc """

@@ -246,7 +246,27 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_run!(keyword()) :: keyword()
   def validate_run!(opts) do
-    NimbleOptions.validate!(opts, @run_schema)
+    opts
+    |> NimbleOptions.validate!(@run_schema)
+    |> validate_branching_bounds!()
+  end
+
+  # Cross-field check NimbleOptions can't express: branching cannot begin until
+  # `min_prefix_length` commands have run, but the prefix is capped by
+  # `max_commands`. If min_prefix_length > max_commands the generator can never
+  # reach the branch point and prefix generation spins. Fail fast and clearly.
+  defp validate_branching_bounds!(opts) do
+    with branching when is_list(branching) <- Keyword.get(opts, :branching),
+         max_commands when is_integer(max_commands) <- Keyword.get(opts, :max_commands, 50),
+         min_prefix when is_integer(min_prefix) <- Keyword.get(branching, :min_prefix_length, 3),
+         true <- min_prefix > max_commands do
+      raise ArgumentError,
+            "Invalid branching options: min_prefix_length (#{min_prefix}) must be <= " <>
+              "max_commands (#{max_commands}); otherwise branching can never start and " <>
+              "generation would not terminate."
+    else
+      _ -> opts
+    end
   end
 
   # ============================================================================
