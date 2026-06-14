@@ -35,7 +35,7 @@ Add `property_damage` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:property_damage, "~> 0.1.0"}
+    {:property_damage, "~> 0.2"}
   ]
 end
 ```
@@ -1504,7 +1504,7 @@ PropertyDamage
     └── Scaffold     - OpenAPI code generation
 ```
 
-> The codebase also ships several modules that are **not part of the v0.1
+> The codebase also ships several modules that are **not part of the v0.2
 > validated surface** and are intentionally left out of this README and the
 > docs front page: load testing, mutation testing, invariant suggestions,
 > failure intelligence (clustering/verification), production forensics,

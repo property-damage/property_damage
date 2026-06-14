@@ -47,7 +47,7 @@ jobs:
         run: mix format --check-formatted
 
       # Non-blocking for now: credo surfaces style/refactoring signal but the
-      # backlog is large (see action plan); not a v0.1 gate.
+      # backlog is large (see action plan); not a v0.2 gate.
       - if: matrix.lint
         run: mix credo --strict
         continue-on-error: true

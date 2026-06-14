@@ -1,7 +1,7 @@
 defmodule PropertyDamage.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/property-damage/property_damage"
 
   def project do
@@ -125,10 +125,10 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.SeedLibrary,
           PropertyDamage.Regression
         ],
-        # Modules that ship but are NOT part of the v0.1 validated surface
+        # Modules that ship but are NOT part of the v0.2 validated surface
         # (see the README note). Grouped last and clearly labelled so the docs
         # do not advertise them alongside the validated core.
-        "Advanced (not in v0.1 surface)": [
+        "Advanced (not in v0.2 surface)": [
           PropertyDamage.Analysis,
           PropertyDamage.Flakiness,
           PropertyDamage.Mutation,

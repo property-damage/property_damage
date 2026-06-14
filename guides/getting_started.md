@@ -20,7 +20,7 @@ Add PropertyDamage to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:property_damage, "~> 0.1.0"},
+    {:property_damage, "~> 0.2"},
     {:stream_data, "~> 1.0"}
   ]
 end
