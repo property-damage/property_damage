@@ -1284,7 +1284,7 @@ defmodule PropertyDamage do
         import PropertyDamage, only: [external: 0]
 
         # id is server-generated, amount comes from the command
-        defstruct [id: external(), :amount, :customer_id]
+        defstruct [:amount, :customer_id, id: external()]
       end
 
   ## Multiple Externals

@@ -51,7 +51,7 @@ defmodule MyApp.Events do
 
   defmodule UserCreated do
     # user_id is server-generated, email and name come from the command
-    defstruct [user_id: external(), :email, :name]
+    defstruct [:email, :name, user_id: external()]
   end
 
   defmodule UserUpdated do

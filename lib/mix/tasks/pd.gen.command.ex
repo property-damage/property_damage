@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
 
       defmodule MyApp.Events.UserCreated do
         import PropertyDamage, only: [external: 0]
-        defstruct [id: external(), :name, :email]  # id is server-generated
+        defstruct [:name, :email, id: external()]  # id is server-generated
       end
 
   See `PropertyDamage.external/0` for full documentation.
@@ -74,7 +74,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
 
           defmodule MyApp.Events.YourEvent do
             import PropertyDamage, only: [external: 0]
-            defstruct [#{creates_ref}: external(), ...]
+            defstruct [:other_field, #{creates_ref}: external()]
           end
 
       See `PropertyDamage.external/0` for documentation.

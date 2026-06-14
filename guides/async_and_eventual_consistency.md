@@ -191,7 +191,7 @@ defmodule MyTest.Events.AuthorizationCreated do
   import PropertyDamage, only: [external: 0]
 
   # authorization_id is server-generated
-  defstruct [authorization_id: external(), :account_id, :amount, :currency, :status]
+  defstruct [:account_id, :amount, :currency, :status, authorization_id: external()]
 end
 ```
 

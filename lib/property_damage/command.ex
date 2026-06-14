@@ -243,7 +243,7 @@ defmodule PropertyDamage.Command do
       # New approach
       defmodule OrderCreated do
         import PropertyDamage, only: [external: 0]
-        defstruct [id: external(), :amount]  # id is server-generated
+        defstruct [:amount, id: external()]  # id is server-generated
       end
 
   See `PropertyDamage.external/0` for full documentation.

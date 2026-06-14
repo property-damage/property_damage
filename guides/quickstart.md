@@ -46,7 +46,7 @@ configurable intervals (every step, every N commands, on specific event types).
 # --- Event ---
 defmodule AccountCreated do
   import PropertyDamage, only: [external: 0]
-  defstruct [id: external(), :name]
+  defstruct [:name, id: external()]
 end
 
 # --- Command ---

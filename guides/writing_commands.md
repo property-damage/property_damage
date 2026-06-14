@@ -46,7 +46,7 @@ defmodule MyTest.Events.OrderCreated do
   import PropertyDamage, only: [external: 0]
 
   # order_id is server-generated, amount and currency come from the command
-  defstruct [order_id: external(), :amount, :currency]
+  defstruct [:amount, :currency, order_id: external()]
 end
 ```
 
@@ -139,7 +139,7 @@ Mark server-generated fields in event structs with `external()`:
 
     defmodule OrderCreated do
       import PropertyDamage, only: [external: 0]
-      defstruct [id: external(), :amount, :currency]
+      defstruct [:amount, :currency, id: external()]
     end
 
 The framework detects external fields automatically and captures their values during

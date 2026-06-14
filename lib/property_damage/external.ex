@@ -41,7 +41,7 @@ defmodule PropertyDamage.External do
         import PropertyDamage, only: [external: 0]
 
         # id is server-generated, amount and customer_id come from the command
-        defstruct [id: external(), :amount, :customer_id]
+        defstruct [:amount, :customer_id, id: external()]
       end
 
   ## Multiple Externals
@@ -131,7 +131,7 @@ defmodule PropertyDamage.External do
 
   ## Example
 
-      defstruct [id: external(), :name, :amount]
+      defstruct [:name, :amount, id: external()]
   """
   @spec external() :: t()
   def external, do: %__MODULE__{}
@@ -203,7 +203,7 @@ defmodule PropertyDamage.External do
 
   ## Examples
 
-      # Simple: defstruct [id: external(), :amount]
+      # Simple: defstruct [:amount, id: external()]
       External.external_paths(OrderCreated)
       #=> [[:id]]
 

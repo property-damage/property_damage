@@ -61,7 +61,7 @@ current projection states, enabling realistic responses based on test state.
 ```elixir
 defmodule PaymentAuthorized do
   import PropertyDamage, only: [external: 0]
-  defstruct [transaction_id: external(), :order_id, :amount]
+  defstruct [:order_id, :amount, transaction_id: external()]
 end
 
 defmodule PaymentDeclined do

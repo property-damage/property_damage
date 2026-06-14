@@ -33,7 +33,7 @@ defmodule PropertyDamage.Ref do
       # New approach
       defmodule OrderCreated do
         import PropertyDamage, only: [external: 0]
-        defstruct [id: external(), :amount]
+        defstruct [:amount, id: external()]
       end
 
       defmodule CreateOrder do

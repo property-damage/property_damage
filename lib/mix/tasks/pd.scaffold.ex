@@ -550,7 +550,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
         []
       end
 
-      #{if op.method == "POST", do: "# DEPRECATED: Use external() in event structs instead of creates_ref\n  # def creates_ref, do: :id\n  # See: event struct below should use `defstruct [id: external(), ...]`", else: ""}
+      #{if op.method == "POST", do: "# DEPRECATED: Use external() in event structs instead of creates_ref\n  # def creates_ref, do: :id\n  # See: event struct below should use `defstruct [..., id: external()]`", else: ""}
 
       #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "def read_only?, do: true", else: ""}
 
