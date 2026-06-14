@@ -1259,7 +1259,7 @@ defmodule PropertyDamage.Executor do
         assertion_failures = Map.get(state, :assertion_failures, [])
 
         case result do
-          {:ok, events} ->
+          {:ok, events} when is_list(events) ->
             # 4. Bind new ref if command creates one (from returned events)
             refs = maybe_bind_ref(command, events, base_refs)
 
@@ -1530,6 +1530,12 @@ defmodule PropertyDamage.Executor do
 
           {:error, reason} ->
             {:error, {:adapter_error, reason}, state}
+
+          # Adapter returned something other than {:ok, list} / {:error, _} /
+          # {:timeout, _}: report a graceful failure instead of crashing the run
+          # with a CaseClauseError (this clause sits outside the execute rescue).
+          other ->
+            {:error, {:malformed_adapter_return, other}, state}
         end
 
       {:error, reason} ->
