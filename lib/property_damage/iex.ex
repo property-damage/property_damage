@@ -576,9 +576,10 @@ defmodule PropertyDamage.IEx do
     resolved_fields =
       Map.new(fields, fn {key, value} ->
         resolved_value =
-          cond do
-            is_atom(value) and Map.has_key?(refs, value) -> refs[value]
-            true -> value
+          if is_atom(value) and Map.has_key?(refs, value) do
+            refs[value]
+          else
+            value
           end
 
         {key, resolved_value}

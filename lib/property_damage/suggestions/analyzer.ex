@@ -81,18 +81,16 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   end
 
   defp get_emitted_events(cmd_module) do
-    cond do
+    if function_exported?(cmd_module, :__info__, 1) do
       # Check for @emits module attribute
-      function_exported?(cmd_module, :__info__, 1) ->
-        attrs = cmd_module.__info__(:attributes)
+      attrs = cmd_module.__info__(:attributes)
 
-        case Keyword.get(attrs, :emits) do
-          nil -> infer_events_from_module_name(cmd_module)
-          events -> List.flatten(events)
-        end
-
-      true ->
-        infer_events_from_module_name(cmd_module)
+      case Keyword.get(attrs, :emits) do
+        nil -> infer_events_from_module_name(cmd_module)
+        events -> List.flatten(events)
+      end
+    else
+      infer_events_from_module_name(cmd_module)
     end
   end
 

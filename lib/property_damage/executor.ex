@@ -1002,23 +1002,20 @@ defmodule PropertyDamage.Executor do
     mock_registry = Map.get(state, :mock_registry)
 
     try do
-      cond do
-        # Check if this is a nemesis command
-        Nemesis.nemesis_command?(command) ->
-          execute_nemesis_command(command, index, state, model, adapter_context, event_queue)
-
-        # Regular command
-        true ->
-          execute_regular_command(
-            command,
-            index,
-            state,
-            model,
-            adapter,
-            adapter_context,
-            event_queue,
-            mock_registry
-          )
+      # Check if this is a nemesis command
+      if Nemesis.nemesis_command?(command) do
+        execute_nemesis_command(command, index, state, model, adapter_context, event_queue)
+      else
+        execute_regular_command(
+          command,
+          index,
+          state,
+          model,
+          adapter,
+          adapter_context,
+          event_queue,
+          mock_registry
+        )
       end
     rescue
       e in PropertyDamage.ProjectionError ->
@@ -1583,24 +1580,20 @@ defmodule PropertyDamage.Executor do
 
   # Resolve all refs in a command struct, skipping the creates_ref field
   defp resolve_command_refs(command, refs) do
-    try do
-      # Get the field to skip (the one this command creates)
-      skip_field = get_creates_ref_field(command)
-      resolved = deep_resolve_refs(command, refs, skip_field)
-      {:ok, resolved}
-    rescue
-      e ->
-        stacktrace = __STACKTRACE__
-        {:error, {Exception.message(e), stacktrace}}
-    end
+    # Get the field to skip (the one this command creates)
+    skip_field = get_creates_ref_field(command)
+    resolved = deep_resolve_refs(command, refs, skip_field)
+    {:ok, resolved}
+  rescue
+    e ->
+      stacktrace = __STACKTRACE__
+      {:error, {Exception.message(e), stacktrace}}
   end
 
   # Combined resolution: resolve both refs (legacy) and placeholders (new system)
   defp resolve_refs_and_placeholders(command, refs, placeholder_registry) do
-    with {:ok, refs_resolved} <- resolve_command_refs(command, refs),
-         {:ok, fully_resolved} <-
-           resolve_command_placeholders(refs_resolved, placeholder_registry) do
-      {:ok, fully_resolved}
+    with {:ok, refs_resolved} <- resolve_command_refs(command, refs) do
+      resolve_command_placeholders(refs_resolved, placeholder_registry)
     end
   end
 
@@ -2806,14 +2799,12 @@ defmodule PropertyDamage.Executor do
   # Resolve placeholders in a command before execution.
   # Similar to resolve_command_refs but for the new placeholder system.
   defp resolve_command_placeholders(command, registry) do
-    try do
-      resolved = deep_resolve_placeholders(command, registry)
-      {:ok, resolved}
-    rescue
-      e in ArgumentError ->
-        stacktrace = __STACKTRACE__
-        {:error, {e.message, stacktrace}}
-    end
+    resolved = deep_resolve_placeholders(command, registry)
+    {:ok, resolved}
+  rescue
+    e in ArgumentError ->
+      stacktrace = __STACKTRACE__
+      {:error, {e.message, stacktrace}}
   end
 
   defp deep_resolve_placeholders(%Placeholder{} = p, registry) do

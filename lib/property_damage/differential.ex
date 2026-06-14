@@ -206,12 +206,10 @@ defmodule PropertyDamage.Differential do
     # Validate: only one reference for correctness mode
     references = Enum.filter(targets, &(&1.role == :reference))
 
-    cond do
-      length(references) > 1 ->
-        {:error, {:invalid_targets, "only one target can have role: :reference"}}
-
-      true ->
-        {:ok, targets}
+    if length(references) > 1 do
+      {:error, {:invalid_targets, "only one target can have role: :reference"}}
+    else
+      {:ok, targets}
     end
   end
 
@@ -717,9 +715,10 @@ defmodule PropertyDamage.Differential do
 
   defp build_result(config, targets, divergences, metrics) do
     status =
-      cond do
-        divergences != [] -> :divergent
-        true -> :equivalent
+      if divergences != [] do
+        :divergent
+      else
+        :equivalent
       end
 
     reference = Enum.find(targets, &(&1.role == :reference))

@@ -408,7 +408,7 @@ defmodule PropertyDamage.LoadTestTest do
     @behaviour PropertyDamage.Model.Projection
 
     @impl true
-    def init(), do: %{count: 0}
+    def init, do: %{count: 0}
 
     @impl true
     def apply(state, _), do: %{state | count: state.count + 1}
@@ -419,10 +419,10 @@ defmodule PropertyDamage.LoadTestTest do
     @behaviour PropertyDamage.Model.Simulator
 
     @impl PropertyDamage.Model
-    def commands(), do: [WorkerTestCommand]
+    def commands, do: [WorkerTestCommand]
 
     @impl PropertyDamage.Model
-    def command_sequence_projection(), do: WorkerTestProjection
+    def command_sequence_projection, do: WorkerTestProjection
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -431,7 +431,7 @@ defmodule PropertyDamage.LoadTestTest do
     def simulate(_cmd, _state), do: [%{type: :created}]
 
     @impl PropertyDamage.Model
-    def assertion_projections(), do: []
+    def assertion_projections, do: []
   end
 
   defmodule WorkerTestAdapter do
@@ -636,7 +636,7 @@ defmodule PropertyDamage.LoadTestTest do
       @behaviour PropertyDamage.Model.Projection
 
       @impl true
-      def init(), do: %{count: 0}
+      def init, do: %{count: 0}
 
       @impl true
       def apply(state, _), do: %{state | count: state.count + 1}
@@ -647,13 +647,13 @@ defmodule PropertyDamage.LoadTestTest do
       @behaviour PropertyDamage.Model.Simulator
 
       @impl PropertyDamage.Model
-      def commands(), do: [MockCommand]
+      def commands, do: [MockCommand]
 
       @impl PropertyDamage.Model
-      def command_sequence_projection(), do: MockProjection
+      def command_sequence_projection, do: MockProjection
 
       @impl PropertyDamage.Model
-      def assertion_projections(), do: []
+      def assertion_projections, do: []
 
       @impl PropertyDamage.Model
       def simulator, do: __MODULE__
@@ -818,7 +818,7 @@ defmodule PropertyDamage.LoadTestTest do
       use PropertyDamage.Model.Projection
 
       @impl true
-      def init(), do: %{count: 0}
+      def init, do: %{count: 0}
 
       @impl true
       def apply(state, _), do: %{state | count: state.count + 1}
@@ -836,13 +836,13 @@ defmodule PropertyDamage.LoadTestTest do
       @behaviour PropertyDamage.Model
 
       @impl true
-      def commands(), do: [{1, MockCommand}]
+      def commands, do: [{1, MockCommand}]
 
       @impl true
-      def command_sequence_projection(), do: MockProjection
+      def command_sequence_projection, do: MockProjection
 
       @impl true
-      def assertion_projections(), do: [FailingAssertionProjection]
+      def assertion_projections, do: [FailingAssertionProjection]
     end
 
     @tag :integration

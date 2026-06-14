@@ -356,12 +356,10 @@ defmodule PropertyDamage.Differential.Baseline do
   defp get_model_version(model) do
     # Try to get a version/hash of the model module
     # This helps detect when the model has changed
-    try do
-      info = model.__info__(:md5)
-      Base.encode16(info, case: :lower)
-    rescue
-      _ -> nil
-    end
+    info = model.__info__(:md5)
+    Base.encode16(info, case: :lower)
+  rescue
+    _ -> nil
   end
 
   defp parse_datetime(iso_string) when is_binary(iso_string) do

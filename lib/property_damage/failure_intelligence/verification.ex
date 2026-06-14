@@ -196,26 +196,24 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   # ============================================================================
 
   defp run_seed(seed, model, adapter, adapter_config) do
-    try do
-      result =
-        PropertyDamage.run(
-          model: model,
-          adapter: adapter,
-          adapter_config: adapter_config,
-          seed: seed,
-          max_runs: 1,
-          quiet: true
-        )
+    result =
+      PropertyDamage.run(
+        model: model,
+        adapter: adapter,
+        adapter_config: adapter_config,
+        seed: seed,
+        max_runs: 1,
+        quiet: true
+      )
 
-      case result do
-        {:ok, _stats} -> :ok
-        {:error, %FailureReport{} = report} -> {:error, report}
-        {:error, reason} -> {:error, %{reason: reason}}
-      end
-    rescue
-      e ->
-        {:error, %{exception: e}}
+    case result do
+      {:ok, _stats} -> :ok
+      {:error, %FailureReport{} = report} -> {:error, report}
+      {:error, reason} -> {:error, %{reason: reason}}
     end
+  rescue
+    e ->
+      {:error, %{exception: e}}
   end
 
   defp generate_variations(original_seed, count, range) do

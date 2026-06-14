@@ -361,7 +361,10 @@ defmodule PropertyDamage.Telemetry.Collector do
         check_stats: check_stats
     }
 
-    if not passed do
+    if passed do
+      broadcast(new_state, :check_passed, metadata)
+      new_state
+    else
       event = %{
         type: :check_failed,
         check_name: check_name,
@@ -371,9 +374,6 @@ defmodule PropertyDamage.Telemetry.Collector do
 
       new_state = add_recent_event(new_state, event)
       broadcast(new_state, :check_failed, event)
-      new_state
-    else
-      broadcast(new_state, :check_passed, metadata)
       new_state
     end
   end

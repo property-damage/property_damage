@@ -251,12 +251,10 @@ defmodule Mix.Tasks.Pd.Integration do
 
   defp guess_health_url(base_url) do
     # Try common health check paths
-    cond do
-      String.ends_with?(base_url, "/") ->
-        base_url <> "api/health"
-
-      true ->
-        base_url <> "/api/health"
+    if String.ends_with?(base_url, "/") do
+      base_url <> "api/health"
+    else
+      base_url <> "/api/health"
     end
   end
 

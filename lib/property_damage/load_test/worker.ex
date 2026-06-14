@@ -409,13 +409,11 @@ defmodule PropertyDamage.LoadTest.Worker do
   # ============================================================================
 
   defp resolve_command_refs(command, refs) do
-    try do
-      skip_field = get_creates_ref_field(command)
-      resolved = deep_resolve_refs(command, refs, skip_field)
-      {:ok, resolved}
-    rescue
-      e -> {:error, Exception.message(e)}
-    end
+    skip_field = get_creates_ref_field(command)
+    resolved = deep_resolve_refs(command, refs, skip_field)
+    {:ok, resolved}
+  rescue
+    e -> {:error, Exception.message(e)}
   end
 
   defp get_creates_ref_field(command) do

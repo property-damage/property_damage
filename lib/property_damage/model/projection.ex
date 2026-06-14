@@ -460,34 +460,32 @@ defmodule PropertyDamage.Model.Projection do
   # Capture the predicate source from the function body for debugging
   # Tries to extract the fn expression from the body
   defp capture_predicate_source(body) do
-    try do
-      # The body is typically a block with a fn expression
-      case body do
-        # Direct fn expression: fn x -> ... end
-        {:fn, _, _} = fn_expr ->
-          Macro.to_string(fn_expr)
+    # The body is typically a block with a fn expression
+    case body do
+      # Direct fn expression: fn x -> ... end
+      {:fn, _, _} = fn_expr ->
+        Macro.to_string(fn_expr)
 
-        # Block with single expression
-        [do: {:fn, _, _} = fn_expr] ->
-          Macro.to_string(fn_expr)
+      # Block with single expression
+      [do: {:fn, _, _} = fn_expr] ->
+        Macro.to_string(fn_expr)
 
-        # Block with single expression (alternate form)
-        {:__block__, _, [{:fn, _, _} = fn_expr]} ->
-          Macro.to_string(fn_expr)
+      # Block with single expression (alternate form)
+      {:__block__, _, [{:fn, _, _} = fn_expr]} ->
+        Macro.to_string(fn_expr)
 
-        # Block ending with fn expression
-        [do: {:__block__, _, exprs}] when is_list(exprs) ->
-          case List.last(exprs) do
-            {:fn, _, _} = fn_expr -> Macro.to_string(fn_expr)
-            _ -> Macro.to_string(body)
-          end
+      # Block ending with fn expression
+      [do: {:__block__, _, exprs}] when is_list(exprs) ->
+        case List.last(exprs) do
+          {:fn, _, _} = fn_expr -> Macro.to_string(fn_expr)
+          _ -> Macro.to_string(body)
+        end
 
-        # Fallback: stringify the whole body
-        _ ->
-          Macro.to_string(body)
-      end
-    rescue
-      _ -> "unable to capture predicate source"
+      # Fallback: stringify the whole body
+      _ ->
+        Macro.to_string(body)
     end
+  rescue
+    _ -> "unable to capture predicate source"
   end
 end
