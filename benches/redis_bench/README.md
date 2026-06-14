@@ -22,9 +22,16 @@ What it validates:
   increments faithfully but reports every read as the initial `0`. The first
   read after any increment is then inconsistent, and PropertyDamage shrinks it
   to the minimal `Increment -> ReadValue` pair.
+- **Fault injection / live oracle** (`test/fault_injection_test.exs`): real
+  network faults via [Toxiproxy](https://github.com/Shopify/toxiproxy) in front
+  of Redis. Each fault is proven REAL by a differential (a latency toxic
+  measurably slows the round-trip; a disabled proxy partitions the connection).
+  Under a latency toxic, linearizability still holds (Redis stays atomic); under
+  a partition, the `ProxyAdapter` reports `{:error, {:redis_unavailable, _}}` so
+  PropertyDamage surfaces the fault honestly as a connection error rather than a
+  false consistency violation. This is the oracle the nemesis audit builds on.
 
-Later 6d sub-rungs build on this same model: fault injection via Toxiproxy
-(linearization under latency / partition) and the nemesis audit.
+The nemesis audit is a later 6d sub-rung built on this same proxy.
 
 ## Infrastructure
 
@@ -84,3 +91,6 @@ fault-injection suites additionally need Toxiproxy; see their own setup.)
 - `lib/redis_bench/model.ex` — projection with the read-consistency invariant,
   simulator, model
 - `lib/redis_bench/adapter.ex` — the faithful adapter (drives `INCR` / `GET`)
+- `lib/redis_bench/toxiproxy.ex` — Toxiproxy control-API client + latency probe
+- `lib/redis_bench/proxy_adapter.ex` — adapter that drives Redis *through* the
+  proxy and reports connection failures honestly
