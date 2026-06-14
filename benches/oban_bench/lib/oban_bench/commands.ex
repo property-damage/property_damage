@@ -2,8 +2,13 @@ defmodule ObanBench.Events do
   @moduledoc "Events describing the async work as it progresses."
 
   defmodule Enqueued do
-    @moduledoc "A job was enqueued for `counter` (synchronous result of the command)."
-    defstruct [:counter, :job_id]
+    @moduledoc """
+    A job was enqueued for `counter` (synchronous result of the command).
+
+    `key` is the deduplication key used by the uniqueness bench; it is `nil`
+    for the plain eventual-consistency and retry benches, which do not dedupe.
+    """
+    defstruct [:counter, :job_id, :key]
   end
 
   defmodule Incremented do
