@@ -113,7 +113,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
     import StreamData
 
     bind(integer(5..50), fn loss ->
-      bind(integer(1000..10000), fn duration ->
+      bind(integer(1000..10_000), fn duration ->
         constant(%__MODULE__{
           loss_percent: Map.get(overrides, :loss_percent, loss),
           duration_ms: Map.get(overrides, :duration_ms, duration),

@@ -124,7 +124,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
 
     bind(integer(50..500), fn latency ->
       bind(integer(0..50), fn jitter ->
-        bind(integer(1000..10000), fn duration ->
+        bind(integer(1000..10_000), fn duration ->
           constant(%__MODULE__{
             latency_ms: Map.get(overrides, :latency_ms, latency),
             jitter_ms: Map.get(overrides, :jitter_ms, jitter),

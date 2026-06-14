@@ -35,7 +35,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
   def create_failure_report(opts \\ []) do
     %FailureReport{
-      seed: Keyword.get(opts, :seed, 12345),
+      seed: Keyword.get(opts, :seed, 12_345),
       failure_type: Keyword.get(opts, :failure_type, :check_failed),
       check_name: Keyword.get(opts, :check_name, :balance_non_negative),
       failure_message: Keyword.get(opts, :message, "Balance -100 is negative"),
@@ -617,7 +617,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     test "format_result generates readable output" do
       result = %{
         status: :verified,
-        original_seed: 12345,
+        original_seed: 12_345,
         original_passes: true,
         variations_run: 10,
         variations_passed: 10,

@@ -31,9 +31,9 @@ defmodule PropertyDamage.EventLog.EntryTest do
     end
 
     test "accepts custom timestamp" do
-      entry = Entry.from_command(%TestEvent{}, 0, timestamp: 12345)
+      entry = Entry.from_command(%TestEvent{}, 0, timestamp: 12_345)
 
-      assert entry.timestamp == 12345
+      assert entry.timestamp == 12_345
     end
   end
 
@@ -50,9 +50,9 @@ defmodule PropertyDamage.EventLog.EntryTest do
     end
 
     test "accepts custom timestamp" do
-      entry = Entry.from_injector(%TestEvent{}, TestInjector, timestamp: 54321)
+      entry = Entry.from_injector(%TestEvent{}, TestInjector, timestamp: 54_321)
 
-      assert entry.timestamp == 54321
+      assert entry.timestamp == 54_321
     end
   end
 

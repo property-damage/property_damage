@@ -53,7 +53,7 @@ defmodule PropertyDamageTest do
         adapter: SimpleAdapter,
         max_runs: 3,
         max_commands: 5,
-        seed: 12345,
+        seed: 12_345,
         validate: false
       ]
 
@@ -61,7 +61,7 @@ defmodule PropertyDamageTest do
       {:ok, stats2} = PropertyDamage.run(opts)
 
       assert stats1.seed == stats2.seed
-      assert stats1.seed == 12345
+      assert stats1.seed == 12_345
     end
   end
 

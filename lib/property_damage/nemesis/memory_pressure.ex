@@ -118,7 +118,7 @@ defmodule PropertyDamage.Nemesis.MemoryPressure do
 
     bind(integer(50..500), fn mb ->
       bind(member_of(@patterns), fn pattern ->
-        bind(integer(1000..10000), fn duration ->
+        bind(integer(1000..10_000), fn duration ->
           constant(%__MODULE__{
             megabytes: Map.get(overrides, :megabytes, mb),
             allocation_pattern: Map.get(overrides, :allocation_pattern, pattern),

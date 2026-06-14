@@ -118,7 +118,7 @@ defmodule PropertyDamage.TelemetryTest do
            adapter: TestAdapter,
            max_runs: 10,
            max_commands: 5,
-           seed: 12345
+           seed: 12_345
          }}
       )
 
@@ -140,7 +140,7 @@ defmodule PropertyDamage.TelemetryTest do
            adapter: TestAdapter,
            max_runs: 10,
            max_commands: 5,
-           seed: 12345
+           seed: 12_345
          }}
       )
 
@@ -193,7 +193,7 @@ defmodule PropertyDamage.TelemetryTest do
            adapter: TestAdapter,
            max_runs: 10,
            max_commands: 5,
-           seed: 12345
+           seed: 12_345
          }}
       )
 

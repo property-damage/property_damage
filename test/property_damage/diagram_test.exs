@@ -187,7 +187,7 @@ defmodule PropertyDamage.DiagramTest do
       ]
 
       report = %FailureReport{
-        seed: 12345,
+        seed: 12_345,
         run_number: 1,
         failed_at_index: 1,
         failure_type: :check_failed,

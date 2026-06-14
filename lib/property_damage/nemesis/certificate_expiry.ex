@@ -188,7 +188,7 @@ defmodule PropertyDamage.Nemesis.CertificateExpiry do
     import StreamData
 
     bind(member_of(@failure_types), fn failure_type ->
-      bind(integer(1000..15000), fn duration ->
+      bind(integer(1000..15_000), fn duration ->
         constant(%__MODULE__{
           failure_type: Map.get(overrides, :failure_type, failure_type),
           duration_ms: Map.get(overrides, :duration_ms, duration),

@@ -111,7 +111,7 @@ defmodule PropertyDamage.Nemesis.CPUStress do
     import StreamData
 
     bind(integer(1..10), fn intensity ->
-      bind(integer(1000..10000), fn duration ->
+      bind(integer(1000..10_000), fn duration ->
         constant(%__MODULE__{
           intensity: Map.get(overrides, :intensity, intensity),
           schedulers: Map.get(overrides, :schedulers, :all),

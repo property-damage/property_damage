@@ -839,7 +839,7 @@ defmodule PropertyDamage do
   # Strategy configuration helpers
   defp strategy_iterations(:quick, opts), do: Keyword.get(opts, :max_iterations, 500)
   defp strategy_iterations(:thorough, opts), do: Keyword.get(opts, :max_iterations, 2000)
-  defp strategy_iterations(:exhaustive, opts), do: Keyword.get(opts, :max_iterations, 10000)
+  defp strategy_iterations(:exhaustive, opts), do: Keyword.get(opts, :max_iterations, 10_000)
 
   defp strategy_time(:quick, opts), do: Keyword.get(opts, :max_time_ms, 10_000)
   defp strategy_time(:thorough, opts), do: Keyword.get(opts, :max_time_ms, 60_000)

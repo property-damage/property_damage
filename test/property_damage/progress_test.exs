@@ -30,7 +30,7 @@ defmodule PropertyDamage.ProgressTest do
     test "prints seed when provided" do
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_header(TestModel, TestAdapter, seed: 12345)
+          Progress.print_header(TestModel, TestAdapter, seed: 12_345)
         end)
 
       assert output =~ "Seed:         12345"
@@ -70,7 +70,7 @@ defmodule PropertyDamage.ProgressTest do
       shrunk_sequence = Sequence.linear([%TestCommand{id: 1}])
 
       report = %FailureReport{
-        seed: 12345,
+        seed: 12_345,
         run_number: 5,
         failed_at_index: 2,
         failure_reason: {:check_failed, :test_check, "Test failed"},
@@ -101,7 +101,7 @@ defmodule PropertyDamage.ProgressTest do
       stats = %{
         runs: 100,
         total_commands: 5000,
-        seed: 12345
+        seed: 12_345
       }
 
       output =
@@ -119,7 +119,7 @@ defmodule PropertyDamage.ProgressTest do
       stats = %{
         runs: 100,
         total_commands: 5000,
-        seed: 12345,
+        seed: 12_345,
         duration_ms: 2500
       }
 

@@ -77,7 +77,7 @@ defmodule PropertyDamage.RegressionTest do
 
     test "handler can be called with a failure report" do
       handler = Regression.handler([])
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
 
       # Should not raise
       result = handler.(failure)
@@ -87,7 +87,7 @@ defmodule PropertyDamage.RegressionTest do
 
   describe "Regression.handle_failure/2" do
     test "returns result map with all fields" do
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       result = Regression.handle_failure(failure, [])
 
       assert Map.has_key?(result, :saved_failure)
@@ -98,7 +98,7 @@ defmodule PropertyDamage.RegressionTest do
     end
 
     test "with no options, nothing is saved" do
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       result = Regression.handle_failure(failure, [])
 
       assert result.saved_failure == nil
@@ -109,7 +109,7 @@ defmodule PropertyDamage.RegressionTest do
 
     @tag :tmp_dir
     test "save_failures option saves failure file", %{tmp_dir: tmp_dir} do
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       result = Regression.handle_failure(failure, save_failures: tmp_dir)
 
       assert {:ok, path} = result.saved_failure
@@ -120,7 +120,7 @@ defmodule PropertyDamage.RegressionTest do
     @tag :tmp_dir
     test "seed_library option adds to library", %{tmp_dir: tmp_dir} do
       library_path = Path.join(tmp_dir, "seeds.json")
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       result = Regression.handle_failure(failure, seed_library: library_path)
 
       assert {:ok, ^library_path} = result.added_to_library
@@ -130,12 +130,12 @@ defmodule PropertyDamage.RegressionTest do
       {:ok, content} = File.read(library_path)
       data = Jason.decode!(content)
       assert length(data["entries"]) == 1
-      assert hd(data["entries"])["seed"] == 12345
+      assert hd(data["entries"])["seed"] == 12_345
     end
 
     @tag :tmp_dir
     test "generate_tests option creates ExUnit test", %{tmp_dir: tmp_dir} do
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       result = Regression.handle_failure(failure, generate_tests: tmp_dir)
 
       assert {:ok, path} = result.generated_test
@@ -151,7 +151,7 @@ defmodule PropertyDamage.RegressionTest do
     @tag :tmp_dir
     test "tags option adds tags to library entries", %{tmp_dir: tmp_dir} do
       library_path = Path.join(tmp_dir, "seeds.json")
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
 
       Regression.handle_failure(failure,
         seed_library: library_path,
@@ -174,7 +174,7 @@ defmodule PropertyDamage.RegressionTest do
     @tag :tmp_dir
     test "creates handler that saves failures", %{tmp_dir: tmp_dir} do
       handler = Regression.save_failure(tmp_dir)
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
 
       {:ok, path} = handler.(failure)
       assert File.exists?(path)
@@ -186,7 +186,7 @@ defmodule PropertyDamage.RegressionTest do
     test "creates handler that adds to library", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "seeds.json")
       handler = Regression.add_to_library(path, tags: [:test])
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
 
       {:ok, ^path} = handler.(failure)
       assert File.exists?(path)
@@ -197,7 +197,7 @@ defmodule PropertyDamage.RegressionTest do
     @tag :tmp_dir
     test "creates handler that generates tests", %{tmp_dir: tmp_dir} do
       handler = Regression.generate_test(tmp_dir)
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
 
       {:ok, path} = handler.(failure)
       assert File.exists?(path)
@@ -213,7 +213,7 @@ defmodule PropertyDamage.RegressionTest do
       handler3 = fn _f -> :counters.add(call_count, 1, 1) end
 
       composed = Regression.compose([handler1, handler2, handler3])
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       composed.(failure)
 
       assert :counters.get(call_count, 1) == 3
@@ -227,7 +227,7 @@ defmodule PropertyDamage.RegressionTest do
       handler3 = fn _f -> :counters.add(call_count, 1, 1) end
 
       composed = Regression.compose([handler1, handler2, handler3])
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       results = composed.(failure)
 
       assert :counters.get(call_count, 1) == 2
@@ -242,7 +242,7 @@ defmodule PropertyDamage.RegressionTest do
 
   describe "Regression.check_duplicate/2" do
     test "returns false when no existing failures" do
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       {is_dup, reason} = Regression.check_duplicate(failure, [])
 
       assert is_dup == false
@@ -252,11 +252,11 @@ defmodule PropertyDamage.RegressionTest do
     @tag :tmp_dir
     test "returns true when similar failure exists", %{tmp_dir: tmp_dir} do
       # Save an existing failure
-      failure1 = make_failure(12345)
+      failure1 = make_failure(12_345)
       {:ok, _path} = PropertyDamage.Persistence.save(failure1, tmp_dir)
 
       # Check a similar failure
-      failure2 = make_failure(12346)
+      failure2 = make_failure(12_346)
 
       {is_dup, reason} =
         Regression.check_duplicate(failure2,
@@ -271,11 +271,11 @@ defmodule PropertyDamage.RegressionTest do
 
     @tag :tmp_dir
     test "respects dedup_threshold", %{tmp_dir: tmp_dir} do
-      failure1 = make_failure(12345, failure_type: :check_failed, check_name: :check_a)
+      failure1 = make_failure(12_345, failure_type: :check_failed, check_name: :check_a)
       {:ok, _path} = PropertyDamage.Persistence.save(failure1, tmp_dir)
 
       # Different failure type - should be less similar
-      failure2 = make_failure(12346, failure_type: :invariant_violated, check_name: :check_b)
+      failure2 = make_failure(12_346, failure_type: :invariant_violated, check_name: :check_b)
 
       # With high threshold, should not be duplicate
       {is_dup, _} =
@@ -290,14 +290,14 @@ defmodule PropertyDamage.RegressionTest do
 
   describe "Regression.find_duplicate/3" do
     test "returns nil for empty list" do
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
       assert Regression.find_duplicate(failure, [], 0.9) == nil
     end
 
     test "finds similar failure" do
-      failure1 = make_failure(12345)
-      failure2 = make_failure(12346)
-      failure3 = make_failure(12347)
+      failure1 = make_failure(12_345)
+      failure2 = make_failure(12_346)
+      failure3 = make_failure(12_347)
 
       result = Regression.find_duplicate(failure1, [failure2, failure3], 0.5)
       assert result != nil
@@ -314,9 +314,9 @@ defmodule PropertyDamage.RegressionTest do
     @tag :tmp_dir
     test "processes multiple failures", %{tmp_dir: tmp_dir} do
       failures = [
-        make_failure(12345),
-        make_failure(12346),
-        make_failure(12347)
+        make_failure(12_345),
+        make_failure(12_346),
+        make_failure(12_347)
       ]
 
       results = Regression.process_batch(failures, save_failures: tmp_dir)
@@ -332,9 +332,9 @@ defmodule PropertyDamage.RegressionTest do
     test "deduplicates within batch", %{tmp_dir: tmp_dir} do
       # Create similar failures
       failures = [
-        make_failure(12345),
-        make_failure(12346),
-        make_failure(12347)
+        make_failure(12_345),
+        make_failure(12_346),
+        make_failure(12_347)
       ]
 
       results =
@@ -428,9 +428,9 @@ defmodule PropertyDamage.RegressionTest do
     test "multiple failures accumulate in same library", %{tmp_dir: tmp_dir} do
       library_path = Path.join(tmp_dir, "seeds.json")
 
-      failure1 = make_failure(12345)
-      failure2 = make_failure(12346)
-      failure3 = make_failure(12347)
+      failure1 = make_failure(12_345)
+      failure2 = make_failure(12_346)
+      failure3 = make_failure(12_347)
 
       Regression.handle_failure(failure1, seed_library: library_path)
       Regression.handle_failure(failure2, seed_library: library_path)
@@ -441,16 +441,16 @@ defmodule PropertyDamage.RegressionTest do
 
       assert length(data["entries"]) == 3
       seeds = Enum.map(data["entries"], & &1["seed"])
-      assert 12345 in seeds
-      assert 12346 in seeds
-      assert 12347 in seeds
+      assert 12_345 in seeds
+      assert 12_346 in seeds
+      assert 12_347 in seeds
     end
 
     @tag :tmp_dir
     test "same seed is not added twice", %{tmp_dir: tmp_dir} do
       library_path = Path.join(tmp_dir, "seeds.json")
 
-      failure = make_failure(12345)
+      failure = make_failure(12_345)
 
       Regression.handle_failure(failure, seed_library: library_path)
       # Try to add same seed again
@@ -461,7 +461,7 @@ defmodule PropertyDamage.RegressionTest do
 
       # SeedLibrary should deduplicate by seed
       seeds = Enum.map(data["entries"], & &1["seed"])
-      assert Enum.count(seeds, &(&1 == 12345)) == 1
+      assert Enum.count(seeds, &(&1 == 12_345)) == 1
     end
   end
 end

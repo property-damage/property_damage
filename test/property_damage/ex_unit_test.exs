@@ -4,7 +4,7 @@ defmodule PropertyDamage.ExUnitTest do
   describe "format_failure/1" do
     test "formats basic failure report" do
       report = %{
-        seed: 12345,
+        seed: 12_345,
         run_number: 0,
         original_commands: [%{type: :create}, %{type: :view}],
         shrunk_commands: [%{type: :create}],

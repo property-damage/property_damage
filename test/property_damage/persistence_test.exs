@@ -13,7 +13,7 @@ defmodule PropertyDamage.PersistenceTest do
   end
 
   defp create_test_report(opts \\ []) do
-    seed = Keyword.get(opts, :seed, 12345)
+    seed = Keyword.get(opts, :seed, 12_345)
     commands = Keyword.get(opts, :commands, [%TestCommand{id: "1", amount: 100}])
     events = Keyword.get(opts, :events, [])
 

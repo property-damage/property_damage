@@ -281,9 +281,9 @@ defmodule PropertyDamage.InjectionTest do
 
     test "supports timestamp option" do
       event = %ResourceCreated{resource_id: "123", name: "test"}
-      entry = Entry.from_injected(event, 0, timestamp: 12345)
+      entry = Entry.from_injected(event, 0, timestamp: 12_345)
 
-      assert entry.timestamp == 12345
+      assert entry.timestamp == 12_345
     end
   end
 

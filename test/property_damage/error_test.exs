@@ -12,7 +12,7 @@ defmodule PropertyDamage.ErrorTest do
       result =
         Error.format({:check_failed, :balance_valid, "Balance is negative"}, %{
           command_index: 3,
-          seed: 12345
+          seed: 12_345
         })
 
       assert result =~ "Check Failed: :balance_valid"

@@ -110,7 +110,7 @@ defmodule PropertyDamage.Nemesis.ResourceExhaustion do
       default_count = default_count_for(resource)
 
       bind(integer(div(default_count, 2)..(default_count * 2)), fn count ->
-        bind(integer(1000..10000), fn duration ->
+        bind(integer(1000..10_000), fn duration ->
           constant(%__MODULE__{
             resource: Map.get(overrides, :resource, resource),
             count: Map.get(overrides, :count, count),

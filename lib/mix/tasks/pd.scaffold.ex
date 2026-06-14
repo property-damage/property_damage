@@ -630,7 +630,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   def schema_to_type(%{"type" => "integer", "minimum" => min, "maximum" => max}),
     do: {:integer, min, max}
 
-  def schema_to_type(%{"type" => "integer", "minimum" => min}), do: {:integer, min, 10000}
+  def schema_to_type(%{"type" => "integer", "minimum" => min}), do: {:integer, min, 10_000}
   def schema_to_type(%{"type" => "integer", "maximum" => max}), do: {:integer, 0, max}
   def schema_to_type(%{"type" => "integer"}), do: :integer
 

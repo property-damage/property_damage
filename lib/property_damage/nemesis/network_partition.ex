@@ -124,7 +124,7 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
     import StreamData
 
     bind(member_of(@partition_types), fn type ->
-      bind(integer(1000..15000), fn duration ->
+      bind(integer(1000..15_000), fn duration ->
         constant(%__MODULE__{
           partition_type: Map.get(overrides, :partition_type, type),
           duration_ms: Map.get(overrides, :duration_ms, duration),

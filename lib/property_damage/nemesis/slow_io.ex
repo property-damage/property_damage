@@ -175,7 +175,7 @@ defmodule PropertyDamage.Nemesis.SlowIO do
     bind(integer(50..500), fn delay ->
       bind(integer(0..100), fn jitter ->
         bind(member_of(@targets), fn target ->
-          bind(integer(1000..10000), fn duration ->
+          bind(integer(1000..10_000), fn duration ->
             constant(%__MODULE__{
               delay_ms: Map.get(overrides, :delay_ms, delay),
               jitter_ms: Map.get(overrides, :jitter_ms, jitter),

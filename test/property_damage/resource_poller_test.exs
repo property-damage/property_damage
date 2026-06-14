@@ -502,7 +502,7 @@ defmodule PropertyDamage.ResourcePollerTest do
           poll_fn: fn -> :pending end,
           handler: fn _ -> :continue end,
           interval_ms: 1000,
-          timeout_ms: 10000,
+          timeout_ms: 10_000,
           event_queue: queue,
           command_index: 0
         )
@@ -545,7 +545,7 @@ defmodule PropertyDamage.ResourcePollerTest do
           poll_fn: fn -> :pending end,
           handler: fn _ -> :continue end,
           interval_ms: 1000,
-          timeout_ms: 60000,
+          timeout_ms: 60_000,
           event_queue: queue,
           command_index: 0
         )

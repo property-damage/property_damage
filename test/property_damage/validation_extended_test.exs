@@ -155,13 +155,13 @@ defmodule PropertyDamage.ValidationExtendedTest do
         adapter: ValidAdapter,
         max_commands: 100,
         max_runs: 50,
-        seed: 12345
+        seed: 12_345
       ]
 
       validated = Options.validate_run!(opts)
       assert validated[:max_commands] == 100
       assert validated[:max_runs] == 50
-      assert validated[:seed] == 12345
+      assert validated[:seed] == 12_345
     end
   end
 

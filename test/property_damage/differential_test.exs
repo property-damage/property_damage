@@ -362,7 +362,7 @@ defmodule PropertyDamage.DifferentialTest do
           compare: :correctness,
           max_runs: 5,
           max_commands: 3,
-          seed: 12345
+          seed: 12_345
         )
 
       assert result.mode == :correctness
@@ -383,7 +383,7 @@ defmodule PropertyDamage.DifferentialTest do
           compare: :correctness,
           max_runs: 5,
           max_commands: 3,
-          seed: 12345
+          seed: 12_345
         )
 
       assert result.status == :divergent
@@ -408,7 +408,7 @@ defmodule PropertyDamage.DifferentialTest do
           equivalence: :structural,
           max_runs: 3,
           max_commands: 2,
-          seed: 12345
+          seed: 12_345
         )
 
       assert result.status == :equivalent
@@ -431,7 +431,7 @@ defmodule PropertyDamage.DifferentialTest do
           compare: :performance,
           max_runs: 3,
           max_commands: 2,
-          seed: 12345
+          seed: 12_345
         )
 
       assert result.mode == :performance
@@ -455,7 +455,7 @@ defmodule PropertyDamage.DifferentialTest do
           compare: :performance,
           max_runs: 3,
           max_commands: 3,
-          seed: 12345
+          seed: 12_345
         )
 
       fast_p50 = result.metrics["fast"].latency_p50
@@ -476,7 +476,7 @@ defmodule PropertyDamage.DifferentialTest do
           compare: :performance,
           max_runs: 2,
           max_commands: 2,
-          seed: 12345
+          seed: 12_345
         )
 
       working_metrics = result.metrics["working"]
@@ -512,7 +512,7 @@ defmodule PropertyDamage.DifferentialTest do
         mode: :correctness,
         execution: :interleaved,
         runs: 100,
-        seed: 12345,
+        seed: 12_345,
         reference: "oracle",
         status: :equivalent,
         divergences: [],
@@ -553,7 +553,7 @@ defmodule PropertyDamage.DifferentialTest do
       config = %{
         model: TestModel,
         targets: [{ReferenceAdapter, name: "test"}],
-        seed: 12345
+        seed: 12_345
       }
 
       # Export
@@ -563,7 +563,7 @@ defmodule PropertyDamage.DifferentialTest do
       # Load
       {:ok, baseline} = Baseline.load(path)
 
-      assert baseline.seed == 12345
+      assert baseline.seed == 12_345
       assert length(baseline.runs) == 1
     end
 
@@ -588,7 +588,7 @@ defmodule PropertyDamage.DifferentialTest do
           compare: :performance,
           max_runs: 2,
           max_commands: 2,
-          seed: 12345
+          seed: 12_345
         )
 
       assert "fast-config" in result.targets
@@ -618,7 +618,7 @@ defmodule PropertyDamage.DifferentialTest do
           compare: :correctness,
           max_runs: 2,
           max_commands: 2,
-          seed: 12345
+          seed: 12_345
         )
 
       assert result.execution == :interleaved
@@ -635,7 +635,7 @@ defmodule PropertyDamage.DifferentialTest do
           compare: :performance,
           max_runs: 2,
           max_commands: 2,
-          seed: 12345
+          seed: 12_345
         )
 
       assert result.execution == :sequential
@@ -653,7 +653,7 @@ defmodule PropertyDamage.DifferentialTest do
           execution: :sequential,
           max_runs: 2,
           max_commands: 2,
-          seed: 12345
+          seed: 12_345
         )
 
       assert result.execution == :sequential

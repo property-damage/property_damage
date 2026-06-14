@@ -166,7 +166,7 @@ defmodule PropertyDamage.Nemesis.ClockSkew do
       # Drift rate: 0.8 to 1.2 (20% slow to 20% fast)
       bind(float(min: 0.8, max: 1.2), fn drift ->
         bind(member_of(@modes), fn mode ->
-          bind(integer(1000..10000), fn duration ->
+          bind(integer(1000..10_000), fn duration ->
             constant(%__MODULE__{
               skew_ms: Map.get(overrides, :skew_ms, skew),
               drift_rate: Map.get(overrides, :drift_rate, Float.round(drift, 2)),
