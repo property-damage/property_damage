@@ -58,7 +58,8 @@ defmodule PropertyDamage.Sequence do
           prefix: [command()],
           branches: [[command()]] | nil,
           suffix: [command()],
-          registry: PropertyDamage.PlaceholderRegistry.t() | nil
+          # Internal placeholder registry (DR-021); opaque to users.
+          registry: term() | nil
         }
 
   defstruct prefix: [], branches: nil, suffix: [], registry: nil
@@ -106,13 +107,11 @@ defmodule PropertyDamage.Sequence do
     %__MODULE__{prefix: prefix, branches: branches, suffix: suffix}
   end
 
-  @doc """
-  Attach a placeholder registry to a sequence (DR-021).
-
-  Used by sequence generation to carry the id-indexed registry + producer-link
-  from generation to execution. `to_list/1` deliberately drops it.
-  """
-  @spec with_registry(t(), PropertyDamage.PlaceholderRegistry.t() | nil) :: t()
+  @doc false
+  # Attach a placeholder registry to a sequence (DR-021). Internal plumbing:
+  # sequence generation uses this to carry the id-indexed registry + producer
+  # link from generation to execution. `to_list/1` deliberately drops it.
+  @spec with_registry(t(), term() | nil) :: t()
   def with_registry(%__MODULE__{} = seq, registry) do
     %{seq | registry: registry}
   end

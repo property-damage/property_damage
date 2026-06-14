@@ -749,7 +749,7 @@ defmodule PropertyDamage.Generator do
         %{order_id: PropertyDamage.Generator.external_from(state, path: [:id])}
       end}
   """
-  @spec available_externals(map(), keyword()) :: [Placeholder.t()]
+  @spec available_externals(map(), keyword()) :: [struct()]
   def available_externals(state, opts \\ []) do
     state
     |> PlaceholderRegistry.collect_placeholders()
@@ -764,7 +764,7 @@ defmodule PropertyDamage.Generator do
   a `with:` function can guard on `nil`. Accepts the same options as
   `available_externals/2`.
   """
-  @spec external_from(map(), keyword()) :: StreamData.t(Placeholder.t() | nil)
+  @spec external_from(map(), keyword()) :: StreamData.t(struct() | nil)
   def external_from(state, opts \\ []) do
     case available_externals(state, opts) do
       [] -> StreamData.constant(nil)

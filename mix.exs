@@ -47,19 +47,30 @@ defmodule PropertyDamage.MixProject do
       extras: [
         "README.md",
         "guides/getting_started.md",
+        "guides/quickstart.md",
+        "guides/cheatsheet.md",
         "guides/writing_commands.md",
         "guides/writing_invariants.md",
         "guides/debugging_failures.md",
         "guides/async_and_eventual_consistency.md",
+        "guides/resource_polling.md",
+        "guides/idempotency_testing.md",
+        "guides/parallel_testing.md",
         "guides/chaos_engineering.md",
+        "guides/mocking_third_parties.md",
+        "guides/contract_testing_with_shared_libraries.md",
         "guides/differential_testing.md",
         "guides/integration_testing.md",
-        "guides/load_testing.md",
         "guides/reusable_components.md",
         "guides/static_regression_tests.md",
+        "guides/performance_tuning.md",
+        "guides/load_testing.md",
         "CHANGELOG.md"
       ],
       groups_for_extras: [
+        # Matched first: keep the deferred load-testing guide out of the main
+        # Guides group so it is not advertised alongside the validated surface.
+        "Advanced (deferred)": ~r/guides\/load_testing/,
         Guides: ~r/guides\/.*/
       ],
       groups_for_modules: [
@@ -75,15 +86,12 @@ defmodule PropertyDamage.MixProject do
         Execution: [
           PropertyDamage.Executor,
           PropertyDamage.Linearization,
+          PropertyDamage.Settle,
           PropertyDamage.EventQueue,
           PropertyDamage.Ref
         ],
-        "Shrinking & Analysis": [
-          PropertyDamage.Shrinker,
-          PropertyDamage.Analysis,
-          PropertyDamage.Replay,
-          PropertyDamage.Coverage,
-          PropertyDamage.Flakiness
+        Shrinking: [
+          PropertyDamage.Shrinker
         ],
         "Fault Injection": [
           PropertyDamage.Nemesis.NetworkLatency,
@@ -97,30 +105,41 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Nemesis.ResourceExhaustion,
           PropertyDamage.Nemesis.CertificateExpiry
         ],
-        "Testing Tools": [
-          PropertyDamage.Mutation,
-          PropertyDamage.Suggestions,
-          PropertyDamage.FailureIntelligence,
-          PropertyDamage.LoadTest
-        ],
-        "Debugging & Export": [
+        "Diagnostics & Reporting": [
+          PropertyDamage.FailureReport,
+          PropertyDamage.Replay,
+          PropertyDamage.Coverage,
           PropertyDamage.Diagram,
           PropertyDamage.Diff,
-          PropertyDamage.Export,
-          PropertyDamage.Forensics
+          PropertyDamage.Telemetry
         ],
-        Integration: [
-          PropertyDamage.Integration,
-          PropertyDamage.Livebook,
-          PropertyDamage.Livebook.Charts,
-          PropertyDamage.Telemetry,
-          PropertyDamage.Telemetry.Collector,
-          PropertyDamage.Telemetry.Dashboard
+        Export: [
+          PropertyDamage.Export
         ],
-        Persistence: [
+        Differential: [
+          PropertyDamage.Differential
+        ],
+        "Persistence & Regression": [
           PropertyDamage.Persistence,
           PropertyDamage.SeedLibrary,
           PropertyDamage.Regression
+        ],
+        # Modules that ship but are NOT part of the v0.1 validated surface
+        # (see the README note). Grouped last and clearly labelled so the docs
+        # do not advertise them alongside the validated core.
+        "Advanced (not in v0.1 surface)": [
+          PropertyDamage.Analysis,
+          PropertyDamage.Flakiness,
+          PropertyDamage.Mutation,
+          PropertyDamage.Suggestions,
+          PropertyDamage.FailureIntelligence,
+          PropertyDamage.LoadTest,
+          PropertyDamage.Forensics,
+          PropertyDamage.Integration,
+          PropertyDamage.Livebook,
+          PropertyDamage.Livebook.Charts,
+          PropertyDamage.Telemetry.Collector,
+          PropertyDamage.Telemetry.Dashboard
         ]
       ],
       source_url: @source_url,
