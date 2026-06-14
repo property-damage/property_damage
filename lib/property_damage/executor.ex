@@ -2818,7 +2818,7 @@ defmodule PropertyDamage.Executor do
       %{resolved: nil} = placeholder ->
         raise ArgumentError,
               "Unresolved placeholder at #{inspect(placeholder.path)} " <>
-                "(command #{placeholder.command_index}, event #{placeholder.event_index})"
+                "(position #{inspect(placeholder.position)}, event #{placeholder.event_index})"
 
       %{resolved: value} ->
         value

@@ -87,8 +87,7 @@ defmodule PropertyDamage.Shrinker.Graph do
 
     # Also track placeholder producers. A placeholder's producer is identified
     # by its structured position (DR-021); for the linear command list the graph
-    # operates on, {:prefix, i} maps directly to index i. (Legacy placeholders
-    # built via Placeholder.new/4 fall back to the flat command_index.)
+    # operates on, {:prefix, i} maps directly to index i.
     producers = add_placeholder_producers(commands, producers)
 
     # Second pass: identify consumers and build edges
@@ -155,9 +154,10 @@ defmodule PropertyDamage.Shrinker.Graph do
   end
 
   # The producing command's index for a placeholder, in the linear command-list
-  # index space the graph uses.
+  # index space the graph uses. Non-prefix positions have no producer in this
+  # space (nil → no dependency edge).
   defp placeholder_producer_index(%Placeholder{position: {:prefix, i}}), do: i
-  defp placeholder_producer_index(%Placeholder{command_index: cmd_idx}), do: cmd_idx
+  defp placeholder_producer_index(%Placeholder{}), do: nil
 
   # Collect all Placeholder structs from a data structure
   defp collect_placeholders(data), do: do_collect_placeholders(data, [])

@@ -18,233 +18,171 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
       assert %PlaceholderRegistry{} = reg
       assert reg.placeholders == %{}
-      assert reg.by_location == %{}
+      assert reg.producer_link == %{}
     end
   end
 
   describe "register/2" do
-    test "adds placeholder to registry" do
+    test "adds placeholder to the id index" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
 
       reg = PlaceholderRegistry.register(reg, p)
 
       assert Map.has_key?(reg.placeholders, p.id)
     end
 
-    test "indexes by location" do
+    test "indexes by producer position" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
 
       reg = PlaceholderRegistry.register(reg, p)
 
-      location = {TestEvent, [:id], 0, 0}
-      assert Map.has_key?(reg.by_location, location)
-      assert reg.by_location[location] == p.id
+      assert PlaceholderRegistry.ids_at_position(reg, {:prefix, 0}) == [p.id]
     end
 
-    test "can register multiple placeholders" do
+    test "collects multiple placeholders at the same position in order" do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(OtherEvent, [:ref], 1, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p2 = Placeholder.new_at(TestEvent, [:other], {:prefix, 0}, 0)
 
-      reg =
-        reg
-        |> PlaceholderRegistry.register(p1)
-        |> PlaceholderRegistry.register(p2)
+      reg = reg |> PlaceholderRegistry.register(p1) |> PlaceholderRegistry.register(p2)
+
+      assert PlaceholderRegistry.ids_at_position(reg, {:prefix, 0}) == [p1.id, p2.id]
+    end
+
+    test "can register multiple placeholders at distinct positions" do
+      reg = PlaceholderRegistry.new()
+      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], {:branch, 1, 0}, 0)
+
+      reg = reg |> PlaceholderRegistry.register(p1) |> PlaceholderRegistry.register(p2)
 
       assert map_size(reg.placeholders) == 2
-      assert map_size(reg.by_location) == 2
+      assert PlaceholderRegistry.ids_at_position(reg, {:prefix, 0}) == [p1.id]
+      assert PlaceholderRegistry.ids_at_position(reg, {:branch, 1, 0}) == [p2.id]
+    end
+  end
+
+  describe "ids_at_position/2" do
+    test "returns [] for a position with no producers" do
+      assert PlaceholderRegistry.ids_at_position(PlaceholderRegistry.new(), {:prefix, 9}) == []
     end
   end
 
   describe "get/2" do
     test "returns placeholder by ID" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
       reg = PlaceholderRegistry.register(reg, p)
 
-      result = PlaceholderRegistry.get(reg, p.id)
-
-      assert result == p
+      assert PlaceholderRegistry.get(reg, p.id) == p
     end
 
     test "returns nil for unknown ID" do
-      reg = PlaceholderRegistry.new()
-
-      assert PlaceholderRegistry.get(reg, make_ref()) == nil
+      assert PlaceholderRegistry.get(PlaceholderRegistry.new(), make_ref()) == nil
     end
   end
 
-  describe "get_by_location/5" do
-    test "returns placeholder by location" do
+  describe "resolve/3 (by id)" do
+    test "resolves a placeholder by its id" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
       reg = PlaceholderRegistry.register(reg, p)
 
-      result = PlaceholderRegistry.get_by_location(reg, TestEvent, [:id], 0, 0)
+      reg = PlaceholderRegistry.resolve(reg, p.id, "order_123")
 
-      assert result == p
+      assert PlaceholderRegistry.get(reg, p.id).resolved == "order_123"
     end
 
-    test "returns nil for unknown location" do
+    test "returns the registry unchanged for an unknown id" do
       reg = PlaceholderRegistry.new()
-
-      assert PlaceholderRegistry.get_by_location(reg, TestEvent, [:id], 0, 0) == nil
-    end
-  end
-
-  describe "resolve_by_location/6" do
-    test "resolves placeholder by location" do
-      reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
       reg = PlaceholderRegistry.register(reg, p)
 
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 0, 0, "order_123")
+      reg2 = PlaceholderRegistry.resolve(reg, make_ref(), "value")
 
-      resolved = PlaceholderRegistry.get(reg, p.id)
-      assert resolved.resolved == "order_123"
-    end
-
-    test "returns unchanged registry for unknown location" do
-      reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      reg = PlaceholderRegistry.register(reg, p)
-
-      reg2 = PlaceholderRegistry.resolve_by_location(reg, OtherEvent, [:ref], 0, 0, "value")
-
-      # Placeholder should still be unresolved
       assert PlaceholderRegistry.get(reg2, p.id).resolved == nil
     end
 
-    test "resolves correct placeholder when multiple exist" do
+    test "resolves only the targeted placeholder when several exist" do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(TestEvent, [:id], 1, 0)
-      p3 = Placeholder.new(OtherEvent, [:ref], 0, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p2 = Placeholder.new_at(TestEvent, [:id], {:prefix, 1}, 0)
 
       reg =
         reg
         |> PlaceholderRegistry.register(p1)
         |> PlaceholderRegistry.register(p2)
-        |> PlaceholderRegistry.register(p3)
+        |> PlaceholderRegistry.resolve(p2.id, "order_456")
 
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 1, 0, "order_456")
-
-      # Only p2 should be resolved
       assert PlaceholderRegistry.get(reg, p1.id).resolved == nil
       assert PlaceholderRegistry.get(reg, p2.id).resolved == "order_456"
-      assert PlaceholderRegistry.get(reg, p3.id).resolved == nil
     end
   end
 
   describe "deep_resolve/2" do
-    test "resolves single placeholder" do
+    setup do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      reg = PlaceholderRegistry.register(reg, p)
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 0, 0, "order_123")
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
 
-      result = PlaceholderRegistry.deep_resolve(reg, p)
+      reg =
+        reg |> PlaceholderRegistry.register(p) |> PlaceholderRegistry.resolve(p.id, "order_123")
 
-      assert result == "order_123"
+      {:ok, reg: reg, p: p}
     end
 
-    test "resolves placeholder in map" do
-      reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      reg = PlaceholderRegistry.register(reg, p)
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 0, 0, "order_123")
-
-      data = %{id: p, name: "test"}
-      result = PlaceholderRegistry.deep_resolve(reg, data)
-
-      assert result == %{id: "order_123", name: "test"}
+    test "resolves single placeholder", %{reg: reg, p: p} do
+      assert PlaceholderRegistry.deep_resolve(reg, p) == "order_123"
     end
 
-    test "resolves placeholder in list" do
-      reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      reg = PlaceholderRegistry.register(reg, p)
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 0, 0, "order_123")
-
-      data = [p, "other"]
-      result = PlaceholderRegistry.deep_resolve(reg, data)
-
-      assert result == ["order_123", "other"]
+    test "resolves placeholder in map", %{reg: reg, p: p} do
+      assert PlaceholderRegistry.deep_resolve(reg, %{id: p, name: "test"}) ==
+               %{id: "order_123", name: "test"}
     end
 
-    test "resolves placeholder in tuple" do
-      reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      reg = PlaceholderRegistry.register(reg, p)
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 0, 0, "order_123")
-
-      data = {:ok, p}
-      result = PlaceholderRegistry.deep_resolve(reg, data)
-
-      assert result == {:ok, "order_123"}
+    test "resolves placeholder in list", %{reg: reg, p: p} do
+      assert PlaceholderRegistry.deep_resolve(reg, [p, "other"]) == ["order_123", "other"]
     end
 
-    test "resolves placeholder in struct" do
-      reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      reg = PlaceholderRegistry.register(reg, p)
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 0, 0, "order_123")
-
-      data = %TestEvent{id: p, amount: 100}
-      result = PlaceholderRegistry.deep_resolve(reg, data)
-
-      assert %TestEvent{} = result
-      assert result.id == "order_123"
-      assert result.amount == 100
+    test "resolves placeholder in tuple", %{reg: reg, p: p} do
+      assert PlaceholderRegistry.deep_resolve(reg, {:ok, p}) == {:ok, "order_123"}
     end
 
-    test "resolves deeply nested placeholder" do
-      reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      reg = PlaceholderRegistry.register(reg, p)
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 0, 0, "order_123")
+    test "resolves placeholder in struct", %{reg: reg, p: p} do
+      result = PlaceholderRegistry.deep_resolve(reg, %TestEvent{id: p, amount: 100})
 
-      data = %{outer: %{inner: [p]}}
-      result = PlaceholderRegistry.deep_resolve(reg, data)
+      assert %TestEvent{id: "order_123", amount: 100} = result
+    end
 
-      assert result == %{outer: %{inner: ["order_123"]}}
+    test "resolves deeply nested placeholder", %{reg: reg, p: p} do
+      assert PlaceholderRegistry.deep_resolve(reg, %{outer: %{inner: [p]}}) ==
+               %{outer: %{inner: ["order_123"]}}
+    end
+
+    test "resolves placeholder used as a map key", %{reg: reg, p: p} do
+      assert PlaceholderRegistry.deep_resolve(reg, %{p => "value"}) == %{"order_123" => "value"}
     end
 
     test "resolves multiple placeholders" do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(OtherEvent, [:ref], 1, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], {:prefix, 1}, 0)
 
       reg =
         reg
         |> PlaceholderRegistry.register(p1)
         |> PlaceholderRegistry.register(p2)
-        |> PlaceholderRegistry.resolve_by_location(TestEvent, [:id], 0, 0, "order_123")
-        |> PlaceholderRegistry.resolve_by_location(OtherEvent, [:ref], 1, 0, "ref_456")
+        |> PlaceholderRegistry.resolve(p1.id, "order_123")
+        |> PlaceholderRegistry.resolve(p2.id, "ref_456")
 
-      data = %{order_id: p1, other_ref: p2}
-      result = PlaceholderRegistry.deep_resolve(reg, data)
-
-      assert result == %{order_id: "order_123", other_ref: "ref_456"}
+      assert PlaceholderRegistry.deep_resolve(reg, %{order_id: p1, other_ref: p2}) ==
+               %{order_id: "order_123", other_ref: "ref_456"}
     end
 
-    test "resolves placeholder as map key" do
+    test "raises for an unresolved placeholder" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      reg = PlaceholderRegistry.register(reg, p)
-      reg = PlaceholderRegistry.resolve_by_location(reg, TestEvent, [:id], 0, 0, :key)
-
-      data = %{p => "value"}
-      result = PlaceholderRegistry.deep_resolve(reg, data)
-
-      assert result == %{key: "value"}
-    end
-
-    test "raises for unresolved placeholder" do
-      reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
       reg = PlaceholderRegistry.register(reg, p)
 
       assert_raise ArgumentError, ~r/Unresolved placeholder/, fn ->
@@ -252,16 +190,16 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
       end
     end
 
-    test "error includes path, command_index, event_index" do
+    test "unresolved error includes path, position, event" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:ids, :order], 5, 3)
+      p = Placeholder.new_at(TestEvent, [:ids, :order], {:prefix, 5}, 3)
       reg = PlaceholderRegistry.register(reg, p)
 
       assert_raise ArgumentError, ~r/\[:ids, :order\]/, fn ->
         PlaceholderRegistry.deep_resolve(reg, p)
       end
 
-      assert_raise ArgumentError, ~r/command 5/, fn ->
+      assert_raise ArgumentError, ~r/position \{:prefix, 5\}/, fn ->
         PlaceholderRegistry.deep_resolve(reg, p)
       end
 
@@ -270,10 +208,9 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
       end
     end
 
-    test "raises for unknown placeholder ID" do
+    test "raises for an unknown placeholder ID" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      # Note: not registered
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
 
       assert_raise ArgumentError, ~r/Unknown placeholder ID/, fn ->
         PlaceholderRegistry.deep_resolve(reg, p)
@@ -291,48 +228,36 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
   end
 
   describe "contains_placeholder?/1" do
-    test "returns true for Placeholder struct" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-
-      assert PlaceholderRegistry.contains_placeholder?(p)
+    setup do
+      {:ok, p: Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)}
     end
 
-    test "returns true for map containing placeholder" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+    test("true for a Placeholder struct", %{p: p},
+      do: assert(PlaceholderRegistry.contains_placeholder?(p))
+    )
 
+    test "true for a map containing one", %{p: p} do
       assert PlaceholderRegistry.contains_placeholder?(%{id: p})
     end
 
-    test "returns true for nested map containing placeholder" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-
+    test "true when nested", %{p: p} do
       assert PlaceholderRegistry.contains_placeholder?(%{outer: %{inner: p}})
     end
 
-    test "returns true for list containing placeholder" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+    test("true in a list", %{p: p},
+      do: assert(PlaceholderRegistry.contains_placeholder?([p, "other"]))
+    )
 
-      assert PlaceholderRegistry.contains_placeholder?([p, "other"])
+    test("true in a tuple", %{p: p},
+      do: assert(PlaceholderRegistry.contains_placeholder?({:ok, p}))
+    )
+
+    test "true in a struct", %{p: p} do
+      assert PlaceholderRegistry.contains_placeholder?(%TestEvent{id: p, amount: 100})
     end
 
-    test "returns true for tuple containing placeholder" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-
-      assert PlaceholderRegistry.contains_placeholder?({:ok, p})
-    end
-
-    test "returns true for struct containing placeholder" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      event = %TestEvent{id: p, amount: 100}
-
-      assert PlaceholderRegistry.contains_placeholder?(event)
-    end
-
-    test "returns false for map without placeholder" do
+    test "false without a placeholder" do
       refute PlaceholderRegistry.contains_placeholder?(%{id: "123"})
-    end
-
-    test "returns false for simple values" do
       refute PlaceholderRegistry.contains_placeholder?(nil)
       refute PlaceholderRegistry.contains_placeholder?("string")
       refute PlaceholderRegistry.contains_placeholder?(123)
@@ -340,140 +265,67 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
   end
 
   describe "collect_placeholder_ids/1" do
-    test "collects ID from single placeholder" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
+    test "collects ID from a single placeholder" do
+      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
 
-      ids = PlaceholderRegistry.collect_placeholder_ids(p)
-
-      assert ids == [p.id]
+      assert PlaceholderRegistry.collect_placeholder_ids(p) == [p.id]
     end
 
-    test "collects IDs from map" do
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(OtherEvent, [:ref], 1, 0)
-      data = %{id: p1, ref: p2}
+    test "collects IDs from nested structures and deduplicates" do
+      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], {:prefix, 1}, 0)
 
-      ids = PlaceholderRegistry.collect_placeholder_ids(data)
+      ids = PlaceholderRegistry.collect_placeholder_ids(%{a: [p1, p2], b: %{c: p1}})
 
-      assert p1.id in ids
-      assert p2.id in ids
-      assert length(ids) == 2
+      assert Enum.sort(ids) == Enum.sort([p1.id, p2.id])
     end
 
-    test "collects IDs from list" do
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(TestEvent, [:id], 1, 0)
-      data = [p1, "middle", p2]
-
-      ids = PlaceholderRegistry.collect_placeholder_ids(data)
-
-      assert p1.id in ids
-      assert p2.id in ids
-      assert length(ids) == 2
-    end
-
-    test "collects IDs from nested structure" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      data = %{outer: %{inner: [p]}}
-
-      ids = PlaceholderRegistry.collect_placeholder_ids(data)
-
-      assert ids == [p.id]
-    end
-
-    test "deduplicates IDs" do
-      p = Placeholder.new(TestEvent, [:id], 0, 0)
-      data = [p, p, p]
-
-      ids = PlaceholderRegistry.collect_placeholder_ids(data)
-
-      assert ids == [p.id]
-    end
-
-    test "returns empty list for non-placeholder data" do
+    test "returns [] for non-placeholder data" do
       assert PlaceholderRegistry.collect_placeholder_ids(%{id: "123"}) == []
       assert PlaceholderRegistry.collect_placeholder_ids("string") == []
     end
   end
 
-  describe "all/1" do
-    test "returns all placeholders" do
+  describe "collect_placeholders/1" do
+    test "returns the placeholder structs, deduplicated by id" do
+      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], {:prefix, 1}, 0)
+
+      collected = PlaceholderRegistry.collect_placeholders(%{a: p1, b: [p2, p1]})
+
+      assert Enum.sort_by(collected, & &1.id) == Enum.sort_by([p1, p2], & &1.id)
+    end
+  end
+
+  describe "all / resolved / unresolved" do
+    setup do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(OtherEvent, [:ref], 1, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], {:prefix, 1}, 0)
 
       reg =
         reg
         |> PlaceholderRegistry.register(p1)
         |> PlaceholderRegistry.register(p2)
+        |> PlaceholderRegistry.resolve(p1.id, "value")
 
+      {:ok, reg: reg, p1: p1, p2: p2}
+    end
+
+    test "all/1 returns every placeholder", %{reg: reg, p1: p1, p2: p2} do
       all = PlaceholderRegistry.all(reg)
-
       assert length(all) == 2
-      assert p1 in all
-      assert p2 in all
+      assert Enum.map(all, & &1.id) |> Enum.sort() == Enum.sort([p1.id, p2.id])
     end
 
-    test "returns empty list for empty registry" do
-      reg = PlaceholderRegistry.new()
-
-      assert PlaceholderRegistry.all(reg) == []
+    test "resolved/1 returns only resolved", %{reg: reg, p1: p1} do
+      assert [only] = PlaceholderRegistry.resolved(reg)
+      assert only.id == p1.id
     end
-  end
 
-  describe "resolved/1" do
-    test "returns only resolved placeholders" do
-      reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(OtherEvent, [:ref], 1, 0)
-
-      reg =
-        reg
-        |> PlaceholderRegistry.register(p1)
-        |> PlaceholderRegistry.register(p2)
-        |> PlaceholderRegistry.resolve_by_location(TestEvent, [:id], 0, 0, "value")
-
-      resolved = PlaceholderRegistry.resolved(reg)
-
-      assert length(resolved) == 1
-      assert hd(resolved).id == p1.id
-    end
-  end
-
-  describe "unresolved/1" do
-    test "returns only unresolved placeholders" do
-      reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(OtherEvent, [:ref], 1, 0)
-
-      reg =
-        reg
-        |> PlaceholderRegistry.register(p1)
-        |> PlaceholderRegistry.register(p2)
-        |> PlaceholderRegistry.resolve_by_location(TestEvent, [:id], 0, 0, "value")
-
-      unresolved = PlaceholderRegistry.unresolved(reg)
-
-      assert length(unresolved) == 1
-      assert hd(unresolved).id == p2.id
-    end
-  end
-
-  describe "producers/1" do
-    test "returns map from ID to command index" do
-      reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new(TestEvent, [:id], 0, 0)
-      p2 = Placeholder.new(OtherEvent, [:ref], 5, 0)
-
-      reg =
-        reg
-        |> PlaceholderRegistry.register(p1)
-        |> PlaceholderRegistry.register(p2)
-
-      producers = PlaceholderRegistry.producers(reg)
-
-      assert producers[p1.id] == 0
-      assert producers[p2.id] == 5
+    test "unresolved/1 returns only unresolved", %{reg: reg, p2: p2} do
+      assert [only] = PlaceholderRegistry.unresolved(reg)
+      assert only.id == p2.id
     end
   end
 end

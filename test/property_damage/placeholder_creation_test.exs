@@ -108,8 +108,6 @@ defmodule PropertyDamage.PlaceholderCreationTest do
         assert p.event_module == ItemCreated
         assert p.path == [:id]
         assert match?({:prefix, i} when is_integer(i), p.position)
-        # New scheme uses `position`, not the legacy flat command_index.
-        assert p.command_index == nil
         refute Placeholder.resolved?(p)
       end)
 

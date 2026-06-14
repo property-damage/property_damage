@@ -2,17 +2,13 @@ defmodule PropertyDamage.PlaceholderRegistry do
   @moduledoc false
   # Internal module for tracking and resolving placeholders.
   #
-  # The registry maintains these indexes:
-  # - `placeholders`: Map from placeholder ID to placeholder struct
+  # The registry maintains two indexes (DR-021):
+  # - `placeholders`: Map from placeholder ID to placeholder struct. This is
+  #   what transports from generation to execution; consumer resolution is by id.
   # - `producer_link`: Map from structured producer position to the placeholder
-  #   IDs that command produces (DR-021). This is the resolution bridge used at
-  #   execution time; it is keyed by position but the position index is rebuilt
-  #   per run, never resolved against a stale generation index.
-  # - `by_location`: DEPRECATED flat location-key index (see DR-021). Retained
-  #   only for the legacy command_index-based path until it is removed.
-  #
-  # `placeholders` (by ID) is what transports from generation to execution;
-  # the position-driven resolution rides on `producer_link`.
+  #   IDs that command produces. The capture bridge used at execution time; it
+  #   is keyed by position, but the position index is rebuilt per run (and
+  #   remapped through shrinking), never resolved against a stale generation key.
 
   alias PropertyDamage.Placeholder
 
@@ -21,14 +17,10 @@ defmodule PropertyDamage.PlaceholderRegistry do
   """
   @type t :: %__MODULE__{
           placeholders: %{reference() => Placeholder.t()},
-          producer_link: %{Placeholder.position() => [reference()]},
-          by_location: %{
-            {module(), [atom() | non_neg_integer()], non_neg_integer(), non_neg_integer()} =>
-              reference()
-          }
+          producer_link: %{Placeholder.position() => [reference()]}
         }
 
-  defstruct placeholders: %{}, producer_link: %{}, by_location: %{}
+  defstruct placeholders: %{}, producer_link: %{}
 
   @doc """
   Create a new empty registry.
@@ -46,10 +38,9 @@ defmodule PropertyDamage.PlaceholderRegistry do
     reg
     |> Map.update!(:placeholders, &Map.put(&1, p.id, p))
     |> index_by_position(p)
-    |> index_by_location(p)
   end
 
-  # New (DR-021): index by structured producer position when present.
+  # Index by structured producer position (DR-021).
   defp index_by_position(reg, %Placeholder{position: nil}), do: reg
 
   defp index_by_position(reg, %Placeholder{position: position, id: id}) do
@@ -58,49 +49,12 @@ defmodule PropertyDamage.PlaceholderRegistry do
     end)
   end
 
-  # Legacy: index by flat location key only when a command_index is present.
-  defp index_by_location(reg, %Placeholder{command_index: nil}), do: reg
-
-  defp index_by_location(reg, %Placeholder{} = p) do
-    Map.update!(reg, :by_location, &Map.put(&1, Placeholder.location_key(p), p.id))
-  end
-
   @doc """
   Get the placeholder IDs produced at a structured position (DR-021).
   """
   @spec ids_at_position(t(), Placeholder.position()) :: [reference()]
   def ids_at_position(%__MODULE__{} = reg, position) do
     Map.get(reg.producer_link, position, [])
-  end
-
-  @doc """
-  Resolve a placeholder by its location with a concrete value.
-
-  Location is identified by: event_module, path, command_index, event_index.
-
-  Returns the updated registry. If no placeholder exists at the location,
-  returns the registry unchanged.
-  """
-  @spec resolve_by_location(
-          t(),
-          module(),
-          [atom() | non_neg_integer()],
-          non_neg_integer(),
-          non_neg_integer(),
-          term()
-        ) :: t()
-  def resolve_by_location(reg, event_module, path, cmd_idx, evt_idx, value) do
-    location = {event_module, path, cmd_idx, evt_idx}
-
-    case Map.get(reg.by_location, location) do
-      nil ->
-        reg
-
-      id ->
-        placeholder = Map.fetch!(reg.placeholders, id)
-        resolved = Placeholder.resolve(placeholder, value)
-        %{reg | placeholders: Map.put(reg.placeholders, id, resolved)}
-    end
   end
 
   @doc """
@@ -123,25 +77,6 @@ defmodule PropertyDamage.PlaceholderRegistry do
   @spec get(t(), reference()) :: Placeholder.t() | nil
   def get(%__MODULE__{} = reg, id) do
     Map.get(reg.placeholders, id)
-  end
-
-  @doc """
-  Get a placeholder by its location.
-  """
-  @spec get_by_location(
-          t(),
-          module(),
-          [atom() | non_neg_integer()],
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: Placeholder.t() | nil
-  def get_by_location(reg, event_module, path, cmd_idx, evt_idx) do
-    location = {event_module, path, cmd_idx, evt_idx}
-
-    case Map.get(reg.by_location, location) do
-      nil -> nil
-      id -> Map.get(reg.placeholders, id)
-    end
   end
 
   @doc """
@@ -168,7 +103,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
       %{resolved: nil} = p ->
         raise ArgumentError,
               "Unresolved placeholder at #{inspect(p.path)} " <>
-                "(command #{p.command_index}, event #{p.event_index})"
+                "(position #{inspect(p.position)}, event #{p.event_index})"
 
       %{resolved: value} ->
         value
@@ -342,17 +277,5 @@ defmodule PropertyDamage.PlaceholderRegistry do
     reg.placeholders
     |> Map.values()
     |> Enum.reject(&Placeholder.resolved?/1)
-  end
-
-  @doc """
-  Build a map from placeholder ID to producing command index.
-
-  Useful for building dependency graphs.
-  """
-  @spec producers(t()) :: %{reference() => non_neg_integer()}
-  def producers(%__MODULE__{} = reg) do
-    reg.placeholders
-    |> Enum.map(fn {id, p} -> {id, p.command_index} end)
-    |> Map.new()
   end
 end

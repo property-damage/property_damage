@@ -444,7 +444,7 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   # Handle new Placeholder structs - if resolved, use value; otherwise raise
   defp deep_resolve_refs(%Placeholder{resolved: nil} = p, _refs, _skip_field) do
-    raise "Unresolved placeholder at #{inspect(p.path)} (command #{p.command_index}, event #{p.event_index})"
+    raise "Unresolved placeholder at #{inspect(p.path)} (position #{inspect(p.position)}, event #{p.event_index})"
   end
 
   defp deep_resolve_refs(%Placeholder{resolved: value}, _refs, _skip_field), do: value

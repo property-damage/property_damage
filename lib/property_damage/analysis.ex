@@ -239,9 +239,9 @@ defmodule PropertyDamage.Analysis do
   defp ref_label(%Ref{label: label}) when is_binary(label), do: label
   defp ref_label(%Ref{ref: ref}), do: "##{:erlang.phash2(ref)}"
 
-  defp placeholder_label(%Placeholder{path: path, command_index: cmd_idx}) do
+  defp placeholder_label(%Placeholder{path: path, position: position}) do
     path_str = Enum.map_join(path, ".", &to_string/1)
-    "placeholder:#{path_str}@cmd#{cmd_idx}"
+    "placeholder:#{path_str}@#{inspect(position)}"
   end
 
   defp format_refs(refs) when map_size(refs) == 0, do: nil
