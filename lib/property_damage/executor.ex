@@ -349,7 +349,11 @@ defmodule PropertyDamage.Executor do
       |> Enum.with_index()
       |> Enum.reduce_while(initial_state, fn {command, index}, state ->
         # Capture projections before this command executes
-        state_with_before = %{state | projections_before: state.projections}
+        state_with_before = %{
+          state
+          | projections_before: state.projections,
+            current_position: {:prefix, index}
+        }
 
         case execute_command(
                command,
@@ -402,7 +406,11 @@ defmodule PropertyDamage.Executor do
       |> Enum.with_index()
       |> Enum.reduce_while(initial_state, fn {command, index}, state ->
         # Capture projections before this command executes
-        state_with_before = %{state | projections_before: state.projections}
+        state_with_before = %{
+          state
+          | projections_before: state.projections,
+            current_position: {:prefix, index}
+        }
 
         case execute_command(
                command,
@@ -453,7 +461,11 @@ defmodule PropertyDamage.Executor do
               |> Enum.with_index(suffix_start_index)
               |> Enum.reduce_while(merged_state, fn {command, index}, state ->
                 # Capture projections before this command executes
-                state_with_before = %{state | projections_before: state.projections}
+                state_with_before = %{
+                  state
+                  | projections_before: state.projections,
+                    current_position: {:suffix, index - suffix_start_index}
+                }
 
                 case execute_command(
                        command,
@@ -524,7 +536,11 @@ defmodule PropertyDamage.Executor do
           |> Enum.with_index(start_index)
           |> Enum.reduce_while(branch_state, fn {command, index}, state ->
             # Capture projections before this command executes
-            state_with_before = %{state | projections_before: state.projections}
+            state_with_before = %{
+              state
+              | projections_before: state.projections,
+                current_position: {:branch, branch_id, index - start_index}
+            }
 
             case execute_command(
                    command,
@@ -868,6 +884,9 @@ defmodule PropertyDamage.Executor do
       # Seed the placeholder registry from the generated sequence (DR-021); the
       # id-indexed registry + producer_link transport from generation to here.
       placeholder_registry: registry || PlaceholderRegistry.new(),
+      # Structured position of the command currently executing (DR-021); set by
+      # the dispatch loops so external capture keys on position, not a flat index.
+      current_position: nil,
       step_count: 0,
       assertion_counters: %{step: 0, command: 0, event: 0},
       assertion_failures: [],
@@ -922,7 +941,12 @@ defmodule PropertyDamage.Executor do
         ) ::
           {:ok, map()} | {:error, term(), map()}
   def step_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    state_with_before = %{state | projections_before: state.projections}
+    # Replay steps a linear sequence, so positions are {:prefix, index} (DR-021).
+    state_with_before = %{
+      state
+      | projections_before: state.projections,
+        current_position: {:prefix, index}
+    }
 
     execute_command(
       command,
@@ -1211,11 +1235,10 @@ defmodule PropertyDamage.Executor do
             # 4. Bind new ref if command creates one (from returned events)
             refs = maybe_bind_ref(command, events, base_refs)
 
-            # 4b. Resolve external values from events (new placeholder system)
-            external_markers = Map.get(state, :external_markers, [])
-
+            # 4b. Capture external values from real events (DR-021): resolve the
+            # placeholders this command produces, found by its structured position.
             updated_registry =
-              resolve_externals_from_events(events, index, placeholder_registry, external_markers)
+              capture_externals(events, state.current_position, placeholder_registry)
 
             # 5. Update projections with command
             projections = update_projections(base_projections, resolved_command)
@@ -1347,11 +1370,10 @@ defmodule PropertyDamage.Executor do
             # Probe/async settled successfully - treat same as {:ok, events}
             refs = maybe_bind_ref(command, events, base_refs)
 
-            # Resolve external values from events (new placeholder system)
-            external_markers = Map.get(state, :external_markers, [])
-
+            # Capture external values from real events (DR-021), keyed by the
+            # command's structured position.
             updated_registry =
-              resolve_externals_from_events(events, index, placeholder_registry, external_markers)
+              capture_externals(events, state.current_position, placeholder_registry)
 
             projections = update_projections(base_projections, resolved_command)
 
@@ -2802,31 +2824,31 @@ defmodule PropertyDamage.Executor do
 
   defp deep_resolve_placeholders(other, _registry), do: other
 
-  # Process executed events to resolve externals in the placeholder registry.
-  # For each event, detect external paths and resolve placeholders with real values.
-  defp resolve_externals_from_events(events, command_index, registry, external_markers) do
-    events
-    |> Enum.with_index()
-    |> Enum.reduce(registry, fn {event, event_index}, reg ->
-      event_module = event.__struct__
+  # Capture real external values from a command's events into the registry
+  # (DR-021). The command's structured `position` selects the placeholders it
+  # produces (via the registry's producer_link); each is resolved by id with the
+  # value found at its recorded path/event_index in the real events. This is
+  # position-driven, so it is correct under branching (distinct branch positions)
+  # and shrinking (the position is rebuilt per run, never a stale generation key).
+  defp capture_externals(_events, nil, registry), do: registry
 
-      # Get paths that were marked as external() in the struct definition
-      # Uses both the PropertyDamage.External struct and any custom markers
-      external_paths = External.external_paths(event_module, external_markers)
+  defp capture_externals(events, position, registry) do
+    registry
+    |> PlaceholderRegistry.ids_at_position(position)
+    |> Enum.reduce(registry, fn id, reg ->
+      case PlaceholderRegistry.get(reg, id) do
+        %Placeholder{path: path, event_index: event_index} ->
+          case Enum.at(events, event_index) do
+            event when is_struct(event) ->
+              PlaceholderRegistry.resolve(reg, id, External.get_at_path(event, path))
 
-      # For each external path, extract the real value and resolve the placeholder
-      Enum.reduce(external_paths, reg, fn path, r ->
-        real_value = External.get_at_path(event, path)
+            _ ->
+              reg
+          end
 
-        PlaceholderRegistry.resolve_by_location(
-          r,
-          event_module,
-          path,
-          command_index,
-          event_index,
-          real_value
-        )
-      end)
+        _ ->
+          reg
+      end
     end)
   end
 end
