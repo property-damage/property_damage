@@ -179,7 +179,8 @@ defmodule PropertyDamage.StatePoller do
       caller: caller,
       get_state_fn: get_state_fn,
       poll_count: 0,
-      last_state: nil
+      last_state: nil,
+      last_predicate_error: nil
     }
 
     {:ok, pid} = GenServer.start_link(__MODULE__, init_state)
@@ -357,7 +358,8 @@ defmodule PropertyDamage.StatePoller do
         triggered_by: state.triggered_by,
         final_state: state.last_state,
         elapsed_ms: elapsed,
-        poll_count: state.poll_count
+        poll_count: state.poll_count,
+        last_predicate_error: state.last_predicate_error
       }
 
       send(state.caller, {:poller_result, state.id, {:timeout, state.id, timeout_info}})
@@ -379,7 +381,10 @@ defmodule PropertyDamage.StatePoller do
         end
       rescue
         e ->
-          # Predicate raised - treat as not satisfied but log
+          # Predicate raised - treat as not satisfied but log. A predicate that
+          # always raises (e.g. non-exhaustive heads) would otherwise time out
+          # looking like "condition never became true"; we keep the last error
+          # so the timeout report can name the real cause.
           require Logger
 
           Logger.warning(
@@ -387,7 +392,9 @@ defmodule PropertyDamage.StatePoller do
           )
 
           Process.send_after(self(), :poll, state.interval_ms)
-          {:noreply, %{state | poll_count: poll_count, last_state: current_state}}
+
+          {:noreply,
+           %{state | poll_count: poll_count, last_state: current_state, last_predicate_error: e}}
       end
     end
   end

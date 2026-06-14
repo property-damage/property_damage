@@ -200,6 +200,9 @@ defmodule PropertyDamage.Model.Projection do
       Module.register_attribute(__MODULE__, :assertions, accumulate: true)
       Module.register_attribute(__MODULE__, :trigger, accumulate: false)
       Module.register_attribute(__MODULE__, :poll_state, accumulate: false)
+      # Names of functions already registered as assertions, so subsequent
+      # clauses of a multi-clause assertion aren't re-flagged as missing @trigger.
+      Module.register_attribute(__MODULE__, :__pd_assertion_fns__, accumulate: true)
 
       # Register on_definition callback to capture assertion definitions
       @on_definition PropertyDamage.Model.Projection
@@ -209,6 +212,14 @@ defmodule PropertyDamage.Model.Projection do
   end
 
   defmacro __before_compile__(env) do
+    if Module.get_attribute(env.module, :trigger) != nil or
+         Module.get_attribute(env.module, :poll_state) != nil do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description: "dangling @trigger/@poll_state with no following 2-arity assertion function."
+    end
+
     assertions = Module.get_attribute(env.module, :assertions) |> Enum.reverse()
 
     # Check if init/0 is defined
@@ -254,8 +265,20 @@ defmodule PropertyDamage.Model.Projection do
   def __on_definition__(env, :def, name, [_state, _cmd_or_event] = _args, _guards, body) do
     trigger_opts = Module.get_attribute(env.module, :trigger)
     poll_state_opts = Module.get_attribute(env.module, :poll_state)
+    decorated? = trigger_opts != nil or poll_state_opts != nil
+    already_registered? = name in (Module.get_attribute(env.module, :__pd_assertion_fns__) || [])
 
     cond do
+      # A @trigger/@poll_state landing on the projection's own init/apply is a
+      # misplaced (dangling) attribute, not an assertion.
+      decorated? and name in [:init, :apply] ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "@trigger/@poll_state must immediately precede a 2-arity assertion function, " <>
+              "not #{name}/2. Move the attribute directly above your assert_ function."
+
       # @poll_state decorated function - temporal assertion
       poll_state_opts != nil ->
         predicate_source = capture_predicate_source(body)
@@ -268,6 +291,7 @@ defmodule PropertyDamage.Model.Projection do
         }
 
         Module.put_attribute(env.module, :assertions, assertion_def)
+        Module.put_attribute(env.module, :__pd_assertion_fns__, name)
         Module.delete_attribute(env.module, :poll_state)
 
       # @trigger decorated function - synchronous assertion
@@ -282,7 +306,13 @@ defmodule PropertyDamage.Model.Projection do
         }
 
         Module.put_attribute(env.module, :assertions, assertion_def)
+        Module.put_attribute(env.module, :__pd_assertion_fns__, name)
         Module.delete_attribute(env.module, :trigger)
+
+      # A later clause of an already-registered (multi-clause) assertion: the
+      # @trigger sat on the first clause and was consumed; this is fine.
+      already_registered? ->
+        :ok
 
       # assert_* function without attribute - error
       extract_assertion_name_from_function(name) != nil ->
@@ -298,7 +328,22 @@ defmodule PropertyDamage.Model.Projection do
     end
   end
 
-  def __on_definition__(_env, _kind, _name, _args, _guards, _body), do: :ok
+  # Any other definition while a @trigger/@poll_state is pending means the
+  # attribute did not land on a 2-arity assertion (e.g. it sat above init/0 or
+  # a helper). Raise rather than silently attaching it to the wrong function.
+  def __on_definition__(env, kind, name, _args, _guards, _body) do
+    if Module.get_attribute(env.module, :trigger) != nil or
+         Module.get_attribute(env.module, :poll_state) != nil do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "dangling @trigger/@poll_state: it must immediately precede a 2-arity assertion " <>
+            "function, but the next definition is #{kind} #{name}."
+    end
+
+    :ok
+  end
 
   # Check if function name starts with "assert_" and extract the assertion name
   defp extract_assertion_name_from_function(name) when is_atom(name) do
@@ -342,23 +387,44 @@ defmodule PropertyDamage.Model.Projection do
 
       # every: {N, Module} - every Nth of specific module
       {n, module} when is_integer(n) and is_atom(module) ->
+        validate_trigger_module!(module)
         %{type: :every_n, n: n, target: :modules, modules: [module]}
 
       # every: {N, [Modules]} - every Nth of any listed module
       {n, modules} when is_integer(n) and is_list(modules) ->
+        Enum.each(modules, &validate_trigger_module!/1)
         %{type: :every_n, n: n, target: :modules, modules: modules}
 
       # every: Module - after specific module
       module when is_atom(module) ->
+        validate_trigger_module!(module)
         %{type: :modules, modules: [module]}
 
       # every: [Modules] - after any listed module
       modules when is_list(modules) ->
+        Enum.each(modules, &validate_trigger_module!/1)
         %{type: :modules, modules: modules}
 
       other ->
         raise ArgumentError, "Invalid trigger: every: #{inspect(other)}"
     end
+  end
+
+  # Guards against a mistyped atom value (e.g. `every: :commnd`, `every: :end`)
+  # silently normalizing to a never-firing module trigger. :command/:event are
+  # matched earlier; anything else atom-shaped must be a real module name.
+  defp validate_trigger_module!(module) when is_atom(module) do
+    unless match?("Elixir." <> _, Atom.to_string(module)) do
+      raise ArgumentError,
+            "Invalid trigger: every: #{inspect(module)} -- expected :command, :event, an " <>
+              "integer, or a command/event module. A bare atom is not a module and would " <>
+              "produce a trigger that never fires."
+    end
+  end
+
+  defp validate_trigger_module!(other) do
+    raise ArgumentError,
+          "Invalid trigger: every: expected a module, got #{inspect(other)}"
   end
 
   @doc """
