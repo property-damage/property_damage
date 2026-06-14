@@ -660,7 +660,7 @@ defmodule PropertyDamage.Integration do
       failures
       |> Enum.take(10)
       |> Enum.with_index(1)
-      |> Enum.map(fn {failure, idx} ->
+      |> Enum.map_join("\n", fn {failure, idx} ->
         """
         ### Failure #{idx}
 
@@ -669,7 +669,6 @@ defmodule PropertyDamage.Integration do
         - **Error**: #{failure.failure_message || "N/A"}
         """
       end)
-      |> Enum.join("\n")
 
     """
     ## Failures
@@ -681,7 +680,7 @@ defmodule PropertyDamage.Integration do
   defp format_junit_report(result) do
     failures_xml =
       result.failures
-      |> Enum.map(fn failure ->
+      |> Enum.map_join("", fn failure ->
         """
             <testcase name="seed_#{failure.seed}" classname="#{inspect(result.model)}" time="0">
               <failure message="#{escape_xml(inspect(failure.check_name))}">
@@ -690,16 +689,14 @@ defmodule PropertyDamage.Integration do
             </testcase>
         """
       end)
-      |> Enum.join("")
 
     passed_xml =
       1..result.passed
-      |> Enum.map(fn n ->
+      |> Enum.map_join("", fn n ->
         """
             <testcase name="run_#{n}" classname="#{inspect(result.model)}" time="0"/>
         """
       end)
-      |> Enum.join("")
 
     """
     <?xml version="1.0" encoding="UTF-8"?>

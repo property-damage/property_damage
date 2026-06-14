@@ -172,7 +172,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     auth_schemes = extract_auth_schemes(spec)
 
     if length(auth_schemes) > 0 do
-      Mix.shell().info("Authentication: #{Enum.map(auth_schemes, & &1.name) |> Enum.join(", ")}")
+      Mix.shell().info("Authentication: #{Enum.map_join(auth_schemes, ", ", & &1.name)}")
     end
 
     if dry_run do
@@ -646,13 +646,12 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   defp generate_field_docs(fields) do
     fields
-    |> Enum.map(fn f ->
+    |> Enum.map_join("\n", fn f ->
       type_str = format_type_doc(f.type)
       req = if f.required, do: "required", else: "optional"
       desc = if f.description != "", do: " - #{f.description}", else: ""
       "  # #{f.name}: #{type_str} (#{req}, #{f.source})#{desc}"
     end)
-    |> Enum.join("\n")
     |> then(&(&1 <> "\n\n"))
   end
 
@@ -676,11 +675,10 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   defp generate_field_generators(fields) do
     fields
-    |> Enum.map(fn f ->
+    |> Enum.map_join(",\n", fn f ->
       generator = streamdata_generator_for_type(f.type, f.name, f.source)
       "      #{f.name}: #{generator}"
     end)
-    |> Enum.join(",\n")
     |> then(&(&1 <> "\n"))
   end
 
@@ -873,13 +871,12 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   defp generate_event_field_docs(fields) do
     fields
-    |> Enum.map(fn f ->
+    |> Enum.map_join("\n", fn f ->
       type_str = format_type_doc(f.type)
       req = if f.required, do: "required", else: "optional"
       desc = if f.description != "", do: " - #{f.description}", else: ""
       "  # #{f.name}: #{type_str} (#{req})#{desc}"
     end)
-    |> Enum.join("\n")
     |> then(&(&1 <> "\n"))
   end
 
@@ -1042,8 +1039,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   defp generate_execute_clauses(operations, namespace, auth_schemes) do
     operations
-    |> Enum.map(fn op -> generate_execute_clause(op, namespace, auth_schemes) end)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", fn op -> generate_execute_clause(op, namespace, auth_schemes) end)
   end
 
   defp generate_execute_clause(op, _namespace, auth_schemes) do
@@ -1070,7 +1066,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   defp generate_auth_config_example(schemes) do
     schemes
-    |> Enum.map(fn scheme ->
+    |> Enum.map_join(",\n              ", fn scheme ->
       case scheme.type do
         "apiKey" ->
           "api_key: \"your-api-key\""
@@ -1085,7 +1081,6 @@ defmodule Mix.Tasks.Pd.Scaffold do
           "# #{scheme.name}: configure as needed"
       end
     end)
-    |> Enum.join(",\n              ")
   end
 
   defp generate_auth_helpers([]), do: ""
@@ -1093,7 +1088,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   defp generate_auth_helpers(schemes) do
     header_builders =
       schemes
-      |> Enum.map(fn scheme ->
+      |> Enum.map_join("\n", fn scheme ->
         case scheme.type do
           "apiKey" when scheme.in == "header" ->
             """
@@ -1128,7 +1123,6 @@ defmodule Mix.Tasks.Pd.Scaffold do
             "      acc"
         end
       end)
-      |> Enum.join("\n")
 
     """
       defp build_auth_headers(ctx) do
@@ -1157,8 +1151,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
     commands_list =
       commands_with_weights
-      |> Enum.map(fn {weight, mod} -> "      {#{weight}, #{mod}}" end)
-      |> Enum.join(",\n")
+      |> Enum.map_join(",\n", fn {weight, mod} -> "      {#{weight}, #{mod}}" end)
 
     """
     defmodule #{namespace}.Model do
@@ -1232,8 +1225,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     output
     |> Path.split()
     |> Enum.drop_while(&(&1 in ["lib", "test"]))
-    |> Enum.map(&Macro.camelize/1)
-    |> Enum.join(".")
+    |> Enum.map_join(".", &Macro.camelize/1)
     |> then(fn
       "" -> "Generated"
       ns -> ns

@@ -206,13 +206,12 @@ defmodule PropertyDamage.Diagram do
     interactions =
       commands
       |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
+      |> Enum.map_join("\n", fn {cmd, idx} ->
         events = Map.get(events_by_command, idx, [])
         is_failure = idx == failed_at
 
         generate_mermaid_interaction(cmd, events, idx, is_failure, failure_message, opts)
       end)
-      |> Enum.join("\n")
 
     """
     ```mermaid
@@ -242,7 +241,7 @@ defmodule PropertyDamage.Diagram do
     # Event lines
     event_lines =
       events
-      |> Enum.map(fn entry ->
+      |> Enum.map_join("\n", fn entry ->
         event_name = event_name(entry.event)
         event_params = event_params(entry.event, opts)
         event_str = truncate("#{event_name}(#{event_params})", max_len)
@@ -258,7 +257,6 @@ defmodule PropertyDamage.Diagram do
 
         "    SUT-->>Test: #{event_str}#{source_indicator}"
       end)
-      |> Enum.join("\n")
 
     # Failure note
     failure_note =
@@ -300,13 +298,12 @@ defmodule PropertyDamage.Diagram do
     interactions =
       commands
       |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
+      |> Enum.map_join("\n", fn {cmd, idx} ->
         events = Map.get(events_by_command, idx, [])
         is_failure = idx == failed_at
 
         generate_plantuml_interaction(cmd, events, idx, is_failure, failure_message, opts)
       end)
-      |> Enum.join("\n")
 
     """
     @startuml
@@ -340,7 +337,7 @@ defmodule PropertyDamage.Diagram do
     # Event lines
     event_lines =
       events
-      |> Enum.map(fn entry ->
+      |> Enum.map_join("\n", fn entry ->
         event_name = event_name(entry.event)
         event_params = event_params(entry.event, opts)
         event_str = truncate("#{event_name}(#{event_params})", max_len)
@@ -355,7 +352,6 @@ defmodule PropertyDamage.Diagram do
 
         "SUT --> Test : #{event_str}#{source_indicator}"
       end)
-      |> Enum.join("\n")
 
     # Failure note
     failure_note =
@@ -384,13 +380,12 @@ defmodule PropertyDamage.Diagram do
     interactions =
       commands
       |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
+      |> Enum.map_join("\n", fn {cmd, idx} ->
         events = Map.get(events_by_command, idx, [])
         is_failure = idx == failed_at
 
         generate_websequence_interaction(cmd, events, idx, is_failure, failure_message, opts)
       end)
-      |> Enum.join("\n")
 
     header <> "\n" <> interactions
   end
@@ -413,13 +408,12 @@ defmodule PropertyDamage.Diagram do
     # Event lines
     event_lines =
       events
-      |> Enum.map(fn entry ->
+      |> Enum.map_join("\n", fn entry ->
         event_name = event_name(entry.event)
         event_params = event_params(entry.event, opts)
         event_str = truncate("#{event_name}(#{event_params})", max_len)
         "SUT-->Test: #{event_str}"
       end)
-      |> Enum.join("\n")
 
     # Failure note
     failure_note =
@@ -456,8 +450,7 @@ defmodule PropertyDamage.Diagram do
     cmd
     |> Map.from_struct()
     |> Enum.reject(fn {k, _} -> k == :__struct__ end)
-    |> Enum.map(fn {k, v} -> "#{k}: #{format_value(v)}" end)
-    |> Enum.join(", ")
+    |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{format_value(v)}" end)
     |> truncate(max_len)
   end
 
@@ -474,8 +467,7 @@ defmodule PropertyDamage.Diagram do
     |> Map.from_struct()
     |> Enum.reject(fn {k, _} -> k == :__struct__ end)
     |> Enum.take(3)
-    |> Enum.map(fn {k, v} -> "#{k}: #{format_value(v)}" end)
-    |> Enum.join(", ")
+    |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{format_value(v)}" end)
     |> truncate(max_len)
   end
 

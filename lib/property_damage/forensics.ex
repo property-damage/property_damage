@@ -373,10 +373,9 @@ defmodule PropertyDamage.Forensics do
   defp format_event_history(events) do
     events
     |> Enum.with_index()
-    |> Enum.map(fn {event, idx} ->
+    |> Enum.map_join("\n", fn {event, idx} ->
       "  [#{idx}] #{format_event(event)}"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_event(%{__struct__: mod} = event) do
@@ -384,8 +383,7 @@ defmodule PropertyDamage.Forensics do
       event
       |> Map.from_struct()
       |> Enum.filter(fn {_k, v} -> not is_nil(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{inspect(v, limit: 3)}" end)
-      |> Enum.join(", ")
+      |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{inspect(v, limit: 3)}" end)
 
     "#{inspect(mod)} {#{fields}}"
   end
@@ -408,8 +406,7 @@ defmodule PropertyDamage.Forensics do
   def generate_regression_test(failure, model) do
     events_code =
       failure.events_leading_to_failure
-      |> Enum.map(&event_to_code/1)
-      |> Enum.join(",\n      ")
+      |> Enum.map_join(",\n      ", &event_to_code/1)
 
     """
     defmodule #{model}.RegressionTest do
@@ -444,8 +441,7 @@ defmodule PropertyDamage.Forensics do
       event
       |> Map.from_struct()
       |> Enum.filter(fn {_k, v} -> not is_nil(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{inspect(v)}" end)
-      |> Enum.join(", ")
+      |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{inspect(v)}" end)
 
     "%#{inspect(mod)}{#{fields}}"
   end

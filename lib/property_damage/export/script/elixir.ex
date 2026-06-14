@@ -85,11 +85,10 @@ defmodule PropertyDamage.Export.Script.Elixir do
   defp generate_steps(commands, report, adapter, verbose) do
     commands
     |> Enum.with_index()
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join("\n", fn {cmd, idx} ->
       is_failure_point = idx == report.failed_at_index
       generate_step(cmd, idx, adapter, is_failure_point, verbose)
     end)
-    |> Enum.join("\n")
   end
 
   defp generate_step(command, index, adapter, is_failure_point, verbose) do
@@ -218,12 +217,11 @@ defmodule PropertyDamage.Export.Script.Elixir do
   defp generate_body_map(body, command, index) do
     fields =
       body
-      |> Enum.map(fn {key, _default} ->
+      |> Enum.map_join(", ", fn {key, _default} ->
         value = Map.get(command, key)
         formatted = format_body_value(value, index)
         "#{key}: #{formatted}"
       end)
-      |> Enum.join(", ")
 
     "%{#{fields}}"
   end

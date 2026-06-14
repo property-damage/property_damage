@@ -256,12 +256,11 @@ defmodule PropertyDamage.Mutation.Analysis do
 
       rows =
         analysis.weak_commands
-        |> Enum.map(fn {cmd, score} ->
+        |> Enum.map_join("\n", fn {cmd, score} ->
           cmd_name = format_module_name(cmd)
           pct = Float.round(score * 100, 1)
           "│ #{String.pad_trailing(cmd_name, 40)} #{String.pad_leading("#{pct}%", 6)} │"
         end)
-        |> Enum.join("\n")
 
       "\n#{header}\n#{rows}\n#{footer}"
     end
@@ -276,11 +275,10 @@ defmodule PropertyDamage.Mutation.Analysis do
 
       rows =
         analysis.weak_operators
-        |> Enum.map(fn {op, score} ->
+        |> Enum.map_join("\n", fn {op, score} ->
           pct = Float.round(score * 100, 1)
           "│ :#{String.pad_trailing(to_string(op), 39)} #{String.pad_leading("#{pct}%", 6)} │"
         end)
-        |> Enum.join("\n")
 
       "\n#{header}\n#{rows}\n#{footer}"
     end
@@ -310,19 +308,17 @@ defmodule PropertyDamage.Mutation.Analysis do
       rows =
         analysis.suggestions
         |> Enum.with_index(1)
-        |> Enum.map(fn {suggestion, idx} ->
+        |> Enum.map_join("\n", fn {suggestion, idx} ->
           # Wrap long suggestions
           wrapped = wrap_text(suggestion, 64)
 
           wrapped
           |> Enum.with_index()
-          |> Enum.map(fn {line, line_idx} ->
+          |> Enum.map_join("\n", fn {line, line_idx} ->
             prefix = if line_idx == 0, do: "#{idx}. ", else: "   "
             "│ #{String.pad_trailing(prefix <> line, 68)} │"
           end)
-          |> Enum.join("\n")
         end)
-        |> Enum.join("\n")
 
       "\n#{header}\n#{rows}\n#{footer}"
     end
@@ -349,12 +345,11 @@ defmodule PropertyDamage.Mutation.Analysis do
 
       rows =
         analysis.weak_commands
-        |> Enum.map(fn {cmd, score} ->
+        |> Enum.map_join("\n", fn {cmd, score} ->
           cmd_name = format_module_name(cmd)
           pct = Float.round(score * 100, 1)
           "| #{cmd_name} | #{pct}% |"
         end)
-        |> Enum.join("\n")
 
       header <> rows <> "\n"
     end
@@ -366,8 +361,7 @@ defmodule PropertyDamage.Mutation.Analysis do
     else
       fields =
         analysis.unchecked_fields
-        |> Enum.map(&"`#{&1}`")
-        |> Enum.join(", ")
+        |> Enum.map_join(", ", &"`#{&1}`")
 
       "## Unchecked Fields\n\n#{fields}\n"
     end
@@ -379,8 +373,7 @@ defmodule PropertyDamage.Mutation.Analysis do
     else
       suggestions =
         analysis.suggestions
-        |> Enum.map(&"- #{&1}")
-        |> Enum.join("\n")
+        |> Enum.map_join("\n", &"- #{&1}")
 
       "## Suggestions\n\n#{suggestions}\n"
     end

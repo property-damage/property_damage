@@ -339,12 +339,11 @@ defmodule PropertyDamage.Livebook.Charts do
     bars =
       stats
       |> Enum.sort_by(fn {_, count} -> -count end)
-      |> Enum.map(fn {cmd, count} ->
+      |> Enum.map_join("\n", fn {cmd, count} ->
         bar_width = round(count / max_count * 30)
         bar = String.duplicate("█", bar_width)
         "#{format_command(cmd) |> String.pad_trailing(20)} #{bar} #{count}"
       end)
-      |> Enum.join("\n")
 
     md = """
     ## Command Execution Counts
@@ -434,11 +433,10 @@ defmodule PropertyDamage.Livebook.Charts do
       timeline =
         history
         |> Enum.with_index(1)
-        |> Enum.map(fn {entry, idx} ->
+        |> Enum.map_join("\n", fn {entry, idx} ->
           status = if entry[:success] != false, do: "✅", else: "❌"
           "#{idx}. #{status} #{format_command(entry.command)}"
         end)
-        |> Enum.join("\n")
 
       md = """
       ## Execution Timeline
@@ -466,10 +464,9 @@ defmodule PropertyDamage.Livebook.Charts do
       |> Enum.frequencies()
       |> Enum.sort_by(fn {_, count} -> -count end)
       |> Enum.take(10)
-      |> Enum.map(fn {{from, to}, count} ->
+      |> Enum.map_join("\n", fn {{from, to}, count} ->
         "#{from} → #{to}: #{count}"
       end)
-      |> Enum.join("\n")
 
     md = """
     ## Top Command Transitions
@@ -495,12 +492,11 @@ defmodule PropertyDamage.Livebook.Charts do
       stats =
         check_results
         |> Enum.group_by(& &1[:check_name])
-        |> Enum.map(fn {check, results} ->
+        |> Enum.map_join("\n", fn {check, results} ->
           passed = Enum.count(results, & &1[:passed])
           total = length(results)
           "#{format_check(check)}: #{passed}/#{total} passed"
         end)
-        |> Enum.join("\n")
 
       md = """
       ## Check Results

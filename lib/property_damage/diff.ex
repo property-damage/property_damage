@@ -415,8 +415,8 @@ defmodule PropertyDamage.Diff do
 
         event_summary =
           if event_diff && event_diff.status == :different do
-            left_names = Enum.map(event_diff.left_events, &event_name/1) |> Enum.join(", ")
-            right_names = Enum.map(event_diff.right_events, &event_name/1) |> Enum.join(", ")
+            left_names = Enum.map_join(event_diff.left_events, ", ", &event_name/1)
+            right_names = Enum.map_join(event_diff.right_events, ", ", &event_name/1)
             "Events differ: [#{left_names}] vs [#{right_names}]"
           else
             ""
@@ -484,14 +484,13 @@ defmodule PropertyDamage.Diff do
 
     rows =
       diffs
-      |> Enum.map(fn d ->
+      |> Enum.map_join("", fn d ->
         left_str = format_events_short(d.left_events, max_len)
         right_str = format_events_short(d.right_events, max_len)
         status_icon = status_icon(d.status)
 
         "│ Cmd #{d.command_index} #{status_icon}: LEFT: #{left_str}\n│         RIGHT: #{right_str}\n"
       end)
-      |> Enum.join("")
 
     footer = "└──────────────────────────────────────────────────────────────────────┘\n\n"
 
@@ -507,10 +506,10 @@ defmodule PropertyDamage.Diff do
       diffs
       |> Enum.group_by(& &1.command_index)
       |> Enum.sort_by(fn {idx, _} -> idx end)
-      |> Enum.map(fn {idx, field_diffs} ->
+      |> Enum.map_join("", fn {idx, field_diffs} ->
         field_rows =
           field_diffs
-          |> Enum.map(fn d ->
+          |> Enum.map_join("", fn d ->
             left_str = truncate(inspect(d.left_value), max_len)
             right_str = truncate(inspect(d.right_value), max_len)
 
@@ -521,11 +520,9 @@ defmodule PropertyDamage.Diff do
               _ -> ""
             end
           end)
-          |> Enum.join("")
 
         "│ After command #{idx}:\n#{field_rows}"
       end)
-      |> Enum.join("")
 
     footer = "└──────────────────────────────────────────────────────────────────────┘\n"
 
@@ -534,8 +531,7 @@ defmodule PropertyDamage.Diff do
 
   defp format_events_short(events, max_len) do
     events
-    |> Enum.map(&event_name/1)
-    |> Enum.join(", ")
+    |> Enum.map_join(", ", &event_name/1)
     |> truncate(max_len)
     |> case do
       "" -> "(none)"
@@ -580,12 +576,11 @@ defmodule PropertyDamage.Diff do
 
     rows =
       diffs
-      |> Enum.map(fn d ->
+      |> Enum.map_join("\n", fn d ->
         left_str = format_events_short(d.left_events, max_len)
         right_str = format_events_short(d.right_events, max_len)
         "| #{d.command_index} | #{d.status} | #{left_str} | #{right_str} |"
       end)
-      |> Enum.join("\n")
 
     header <> rows <> "\n\n"
   end
@@ -598,12 +593,11 @@ defmodule PropertyDamage.Diff do
 
     rows =
       diffs
-      |> Enum.map(fn d ->
+      |> Enum.map_join("\n", fn d ->
         left_str = truncate(inspect(d.left_value), max_len)
         right_str = truncate(inspect(d.right_value), max_len)
         "| #{d.command_index} | #{d.field} | #{d.status} | #{left_str} | #{right_str} |"
       end)
-      |> Enum.join("\n")
 
     header <> rows <> "\n"
   end

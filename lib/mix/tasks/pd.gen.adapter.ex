@@ -81,8 +81,7 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
     path =
       module_name
       |> String.split(".")
-      |> Enum.map(&Macro.underscore/1)
-      |> Enum.join("/")
+      |> Enum.map_join("/", &Macro.underscore/1)
 
     "lib/#{path}.ex"
   end

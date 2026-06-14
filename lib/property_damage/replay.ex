@@ -424,8 +424,7 @@ defmodule PropertyDamage.Replay do
 
     events_str =
       step.events
-      |> Enum.map(&command_name/1)
-      |> Enum.join(", ")
+      |> Enum.map_join(", ", &command_name/1)
 
     """
     [#{step.index}] #{step.command_name} -> #{status}
@@ -441,8 +440,7 @@ defmodule PropertyDamage.Replay do
 
   def format_history(steps) when is_list(steps) do
     steps
-    |> Enum.map(&format_step/1)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", &format_step/1)
   end
 
   # ============================================================================

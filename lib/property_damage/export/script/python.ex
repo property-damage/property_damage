@@ -93,11 +93,10 @@ Run with: python #{Common.generate_filename(%FailureReport{seed: metadata.seed},
   defp generate_steps(commands, report, adapter, verbose) do
     commands
     |> Enum.with_index()
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join("\n", fn {cmd, idx} ->
       is_failure_point = idx == report.failed_at_index
       generate_step(cmd, idx, adapter, is_failure_point, verbose)
     end)
-    |> Enum.join("\n")
   end
 
   defp generate_step(command, index, adapter, is_failure_point, verbose) do
@@ -217,12 +216,11 @@ Run with: python #{Common.generate_filename(%FailureReport{seed: metadata.seed},
   defp generate_body_dict(body, command, index) do
     fields =
       body
-      |> Enum.map(fn {key, _default} ->
+      |> Enum.map_join(", ", fn {key, _default} ->
         value = Map.get(command, key)
         formatted = format_body_value(value, index)
         ~s("#{key}": #{formatted})
       end)
-      |> Enum.join(", ")
 
     "{#{fields}}"
   end
@@ -266,8 +264,7 @@ Run with: python #{Common.generate_filename(%FailureReport{seed: metadata.seed},
   defp generate_headers_dict(headers) do
     fields =
       headers
-      |> Enum.map(fn {name, value} -> ~s("#{name}": "#{value}") end)
-      |> Enum.join(", ")
+      |> Enum.map_join(", ", fn {name, value} -> ~s("#{name}": "#{value}") end)
 
     "{#{fields}}"
   end

@@ -106,7 +106,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
     body =
       commands
       |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
+      |> Enum.map_join("\n", fn {cmd, idx} ->
         format_linear_command(
           cmd,
           idx,
@@ -115,7 +115,6 @@ defmodule PropertyDamage.FailureReport.Timeline do
           color
         )
       end)
-      |> Enum.join("\n")
 
     header <> body <> "\n\n#{dim(color)}► = Failure point#{reset()}"
   end
@@ -223,10 +222,9 @@ defmodule PropertyDamage.FailureReport.Timeline do
   defp format_prefix_section(prefix, failed_at_index, color) do
     prefix
     |> Enum.with_index()
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join("\n", fn {cmd, idx} ->
       format_linear_command(cmd, idx, idx == failed_at_index, idx == length(prefix) - 1, color)
     end)
-    |> Enum.join("\n")
   end
 
   defp format_branches_section(
@@ -316,7 +314,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
   defp format_suffix_section(suffix, start_idx, failed_at_index, color) do
     suffix
     |> Enum.with_index(start_idx)
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join("\n", fn {cmd, idx} ->
       format_linear_command(
         cmd,
         idx,
@@ -325,7 +323,6 @@ defmodule PropertyDamage.FailureReport.Timeline do
         color
       )
     end)
-    |> Enum.join("\n")
   end
 
   # ============================================================================
@@ -364,12 +361,11 @@ defmodule PropertyDamage.FailureReport.Timeline do
     body =
       commands
       |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
+      |> Enum.map_join("\n\n", fn {cmd, idx} ->
         events = Map.get(events_by_cmd, idx, [])
         is_failure = idx == report.failed_at_index
         format_command_with_events(cmd, idx, events, is_failure, max_events, color)
       end)
-      |> Enum.join("\n\n")
 
     header <> body
   end
@@ -385,13 +381,12 @@ defmodule PropertyDamage.FailureReport.Timeline do
       events_text =
         events
         |> Enum.take(max_events)
-        |> Enum.map(fn entry ->
+        |> Enum.map_join("\n", fn entry ->
           event_name = short_module_name(entry.event.__struct__)
           source = format_source_badge(entry.source, color)
           branch = if entry.branch_id, do: " #{dim(color)}B#{entry.branch_id}#{reset()}", else: ""
           "    #{source}#{branch} #{green(color)}→#{reset()} #{event_name}"
         end)
-        |> Enum.join("\n")
 
       truncated =
         if length(events) > max_events do
@@ -428,8 +423,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
       cmd
       |> Map.from_struct()
       |> Enum.take(3)
-      |> Enum.map(fn {k, v} -> "#{k}: #{inspect_very_short(v)}" end)
-      |> Enum.join(", ")
+      |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{inspect_very_short(v)}" end)
 
     "{#{fields}}"
   end

@@ -171,7 +171,7 @@ defmodule PropertyDamage.Export.Common do
 
     case format do
       :elixir ->
-        items = Enum.map(value, &serialize_value(&1, opts)) |> Enum.join(", ")
+        items = Enum.map_join(value, ", ", &serialize_value(&1, opts))
         "[#{items}]"
 
       _ ->
@@ -186,10 +186,9 @@ defmodule PropertyDamage.Export.Common do
       :elixir ->
         items =
           value
-          |> Enum.map(fn {k, v} ->
+          |> Enum.map_join(", ", fn {k, v} ->
             "#{serialize_map_key(k)}: #{serialize_value(v, opts)}"
           end)
-          |> Enum.join(", ")
 
         "%{#{items}}"
 
@@ -276,8 +275,7 @@ defmodule PropertyDamage.Export.Common do
     else
       field_strs =
         fields
-        |> Enum.map(fn {k, v} -> "#{k}: #{format_comment_value(v)}" end)
-        |> Enum.join(", ")
+        |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{format_comment_value(v)}" end)
 
       "%#{name}{#{field_strs}}"
     end

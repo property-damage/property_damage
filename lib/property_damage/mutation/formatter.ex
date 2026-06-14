@@ -102,14 +102,13 @@ defmodule PropertyDamage.Mutation.Formatter do
       rows =
         report.by_command
         |> Enum.sort_by(fn {_cmd, stats} -> -stats.score end)
-        |> Enum.map(fn {cmd, stats} ->
+        |> Enum.map_join("\n", fn {cmd, stats} ->
           cmd_name = format_command_name(cmd)
           bar = progress_bar(stats.score)
           pct = Float.round(stats.score * 100, 0)
 
           "│ #{String.pad_trailing(cmd_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats.total}) │"
         end)
-        |> Enum.join("\n")
 
       "\n#{header}\n#{rows}\n#{footer}"
     end
@@ -125,14 +124,13 @@ defmodule PropertyDamage.Mutation.Formatter do
       rows =
         report.by_operator
         |> Enum.sort_by(fn {_op, stats} -> -stats.score end)
-        |> Enum.map(fn {op, stats} ->
+        |> Enum.map_join("\n", fn {op, stats} ->
           op_name = ":#{op}"
           bar = progress_bar(stats.score)
           pct = Float.round(stats.score * 100, 0)
 
           "│ #{String.pad_trailing(op_name, 16)} #{bar} #{String.pad_leading("#{pct}%", 4)} (#{stats.killed}/#{stats.total}) │"
         end)
-        |> Enum.join("\n")
 
       "\n#{header}\n#{rows}\n#{footer}"
     end
@@ -149,12 +147,11 @@ defmodule PropertyDamage.Mutation.Formatter do
         report.survived_mutations
         |> Enum.take(10)
         |> Enum.with_index(1)
-        |> Enum.map(fn {result, idx} ->
+        |> Enum.map_join("\n", fn {result, idx} ->
           cmd_name = format_command_name(result.command)
           mutation_desc = format_mutation_short(result.mutation)
           "│ #{idx}. #{cmd_name}: #{String.pad_trailing(mutation_desc, 50)} │"
         end)
-        |> Enum.join("\n")
 
       more =
         if length(report.survived_mutations) > 10 do
@@ -212,12 +209,11 @@ defmodule PropertyDamage.Mutation.Formatter do
       rows =
         report.by_command
         |> Enum.sort_by(fn {_cmd, stats} -> -stats.score end)
-        |> Enum.map(fn {cmd, stats} ->
+        |> Enum.map_join("\n", fn {cmd, stats} ->
           cmd_name = format_command_name(cmd)
           pct = Float.round(stats.score * 100, 1)
           "| #{cmd_name} | #{pct}% | #{stats.killed} | #{stats.survived} | #{stats.total} |"
         end)
-        |> Enum.join("\n")
 
       header <> rows <> "\n"
     end
@@ -237,11 +233,10 @@ defmodule PropertyDamage.Mutation.Formatter do
       rows =
         report.by_operator
         |> Enum.sort_by(fn {_op, stats} -> -stats.score end)
-        |> Enum.map(fn {op, stats} ->
+        |> Enum.map_join("\n", fn {op, stats} ->
           pct = Float.round(stats.score * 100, 1)
           "| `:#{op}` | #{pct}% | #{stats.killed} | #{stats.survived} | #{stats.total} |"
         end)
-        |> Enum.join("\n")
 
       header <> rows <> "\n"
     end
@@ -261,12 +256,11 @@ defmodule PropertyDamage.Mutation.Formatter do
       rows =
         report.survived_mutations
         |> Enum.with_index(1)
-        |> Enum.map(fn {result, idx} ->
+        |> Enum.map_join("\n", fn {result, idx} ->
           cmd_name = format_command_name(result.command)
           mutation_desc = format_mutation_short(result.mutation)
           "| #{idx} | #{cmd_name} | `:#{result.operator}` | #{mutation_desc} |"
         end)
-        |> Enum.join("\n")
 
       header <> rows <> "\n"
     end

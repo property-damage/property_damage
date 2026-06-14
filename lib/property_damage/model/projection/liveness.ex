@@ -194,11 +194,10 @@ defmodule PropertyDamage.Model.Projection.Liveness do
   defp format_stuck_operations(stuck) do
     details =
       stuck
-      |> Enum.map(fn op ->
+      |> Enum.map_join("; ", fn op ->
         "#{inspect(op.command_module)} at index #{op.command_index} " <>
           "(pending #{op.elapsed_ms}ms, expecting one of #{inspect(op.expected_completions)})"
       end)
-      |> Enum.join("; ")
 
     "Stuck operations detected: #{details}"
   end

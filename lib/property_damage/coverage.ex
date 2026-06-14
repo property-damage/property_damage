@@ -342,7 +342,7 @@ defmodule PropertyDamage.Coverage do
       header =
         header_padding <>
           "→ " <>
-          (names |> Enum.map(&String.pad_trailing(&1, col_width)) |> Enum.join("  "))
+          (names |> Enum.map_join("  ", &String.pad_trailing(&1, col_width)))
 
       separator = String.duplicate("─", String.length(header))
 
@@ -362,8 +362,7 @@ defmodule PropertyDamage.Coverage do
       # Also show counts per state class
       class_counts =
         classes
-        |> Enum.map(fn c -> "  #{c}: #{Map.get(counts, c, 0)}x" end)
-        |> Enum.join("\n")
+        |> Enum.map_join("\n", fn c -> "  #{c}: #{Map.get(counts, c, 0)}x" end)
 
       """
       State Class Transition Matrix
@@ -424,14 +423,13 @@ defmodule PropertyDamage.Coverage do
     untested_str =
       case stats.untested_commands do
         [] -> "  (all commands tested)"
-        cmds -> cmds |> Enum.map(&("  - " <> short_name(&1))) |> Enum.join("\n")
+        cmds -> cmds |> Enum.map_join("\n", &("  - " <> short_name(&1)))
       end
 
     top_cmds =
       tracker
       |> top_commands(5)
-      |> Enum.map(fn {cmd, count} -> "  #{short_name(cmd)}: #{count}x" end)
-      |> Enum.join("\n")
+      |> Enum.map_join("\n", fn {cmd, count} -> "  #{short_name(cmd)}: #{count}x" end)
 
     """
     ═══════════════════════════════════════════════════════════════
@@ -472,8 +470,7 @@ defmodule PropertyDamage.Coverage do
       else
         untested
         |> Enum.take(10)
-        |> Enum.map(fn {from, to} -> "  #{short_name(from)} → #{short_name(to)}" end)
-        |> Enum.join("\n")
+        |> Enum.map_join("\n", fn {from, to} -> "  #{short_name(from)} → #{short_name(to)}" end)
       end
 
     suffix =
@@ -598,7 +595,7 @@ defmodule PropertyDamage.Coverage do
       header =
         header_padding <>
           "→ " <>
-          (names |> Enum.map(&String.pad_trailing(&1, col_width)) |> Enum.join("  "))
+          (names |> Enum.map_join("  ", &String.pad_trailing(&1, col_width)))
 
       separator = String.duplicate("─", String.length(header))
 

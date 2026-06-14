@@ -135,8 +135,7 @@ defmodule PropertyDamage.Export.ExUnit do
 
     command_strs =
       commands
-      |> Enum.map(&format_command/1)
-      |> Enum.join(",\n")
+      |> Enum.map_join(",\n", &format_command/1)
 
     """
         commands = [
@@ -154,8 +153,7 @@ defmodule PropertyDamage.Export.ExUnit do
     else
       field_strs =
         fields
-        |> Enum.map(fn {k, v} -> "#{k}: #{format_field_value(v)}" end)
-        |> Enum.join(", ")
+        |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{format_field_value(v)}" end)
 
       "      %#{inspect(module)}{#{field_strs}}"
     end
@@ -174,7 +172,7 @@ defmodule PropertyDamage.Export.ExUnit do
   defp format_field_value(value) when is_number(value), do: inspect(value)
 
   defp format_field_value(value) when is_list(value) do
-    items = Enum.map(value, &format_field_value/1) |> Enum.join(", ")
+    items = Enum.map_join(value, ", ", &format_field_value/1)
     "[#{items}]"
   end
 
@@ -183,10 +181,9 @@ defmodule PropertyDamage.Export.ExUnit do
       format_command(value)
     else
       items =
-        Enum.map(value, fn {k, v} ->
+        Enum.map_join(value, ", ", fn {k, v} ->
           "#{format_map_key(k)} => #{format_field_value(v)}"
         end)
-        |> Enum.join(", ")
 
       "%{#{items}}"
     end

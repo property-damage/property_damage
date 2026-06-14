@@ -139,11 +139,10 @@ defmodule PropertyDamage.Telemetry.Dashboard do
     modes = [:overview, :commands, :checks, :events]
 
     modes
-    |> Enum.map(fn mode ->
+    |> Enum.map_join("\n", fn mode ->
       active = if mode == current, do: "active", else: ""
       "<button class=\"pd-nav-btn #{active}\">#{mode}</button>"
     end)
-    |> Enum.join("\n")
   end
 
   defp render_view(:overview, state), do: render_overview_html(state)
@@ -263,7 +262,7 @@ defmodule PropertyDamage.Telemetry.Dashboard do
       rows =
         command_stats
         |> Enum.sort_by(fn {_, s} -> -(s[:count] || 0) end)
-        |> Enum.map(fn {cmd, stats} ->
+        |> Enum.map_join("\n", fn {cmd, stats} ->
           """
           <tr>
             <td>#{short_module_name(cmd)}</td>
@@ -273,7 +272,6 @@ defmodule PropertyDamage.Telemetry.Dashboard do
           </tr>
           """
         end)
-        |> Enum.join("\n")
 
       """
       <div class="pd-commands">
@@ -305,7 +303,7 @@ defmodule PropertyDamage.Telemetry.Dashboard do
       rows =
         check_stats
         |> Enum.sort_by(fn {name, _} -> name end)
-        |> Enum.map(fn {check, stats} ->
+        |> Enum.map_join("\n", fn {check, stats} ->
           passed = stats[:passed] || 0
           failed = stats[:failed] || 0
           total = passed + failed
@@ -328,7 +326,6 @@ defmodule PropertyDamage.Telemetry.Dashboard do
           </tr>
           """
         end)
-        |> Enum.join("\n")
 
       """
       <div class="pd-checks">
@@ -359,7 +356,7 @@ defmodule PropertyDamage.Telemetry.Dashboard do
     if length(events) > 0 do
       event_rows =
         events
-        |> Enum.map(fn event ->
+        |> Enum.map_join("\n", fn event ->
           event_type = event[:type] || :unknown
           timestamp = event[:timestamp] || 0
 
@@ -371,7 +368,6 @@ defmodule PropertyDamage.Telemetry.Dashboard do
           </div>
           """
         end)
-        |> Enum.join("\n")
 
       """
       <div class="pd-events">

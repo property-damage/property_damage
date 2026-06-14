@@ -54,15 +54,13 @@ defmodule PropertyDamage.Stutter.Violation do
   def format(%__MODULE__{} = violation) do
     attempts_str =
       violation.attempts
-      |> Enum.map(fn attempt ->
+      |> Enum.map_join("\n", fn attempt ->
         events_str =
           attempt.events
-          |> Enum.map(&inspect(&1.__struct__))
-          |> Enum.join(", ")
+          |> Enum.map_join(", ", &inspect(&1.__struct__))
 
         "  Attempt #{attempt.attempt}: [#{events_str}]"
       end)
-      |> Enum.join("\n")
 
     """
     Idempotency violation at command index #{violation.command_index}

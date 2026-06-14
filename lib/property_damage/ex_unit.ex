@@ -220,8 +220,7 @@ defmodule PropertyDamage.ExUnit do
   defp format_commands(commands) do
     commands
     |> Enum.with_index()
-    |> Enum.map(fn {cmd, idx} -> "  #{idx}. #{inspect(cmd)}" end)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", fn {cmd, idx} -> "  #{idx}. #{inspect(cmd)}" end)
   end
 
   defp format_failure_reason({:check_failed, name, reason}) do

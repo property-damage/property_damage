@@ -381,8 +381,7 @@ defmodule PropertyDamage.IEx do
 
   defp format_fields_compact(fields) do
     fields
-    |> Enum.map(fn {k, v} -> "#{k}: #{inspect(v)}" end)
-    |> Enum.join(", ")
+    |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{inspect(v)}" end)
     |> String.slice(0, 50)
     |> then(fn s ->
       if String.length(s) == 50, do: s <> "...", else: s

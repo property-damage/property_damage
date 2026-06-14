@@ -160,13 +160,12 @@ defmodule PropertyDamage.Suggestions.Formatter do
     rows =
       suggestions
       |> Enum.with_index(1)
-      |> Enum.map(fn {s, idx} ->
+      |> Enum.map_join("\n", fn {s, idx} ->
         desc = truncate(s.description, @box_width - 8)
         field_info = if s.field, do: " (#{s.field})", else: ""
         line = "#{idx}. #{desc}#{field_info}"
         "│   #{String.pad_trailing(line, @box_width - 4)}│"
       end)
-      |> Enum.join("\n")
 
     "#{header}\n#{rows}"
   end
@@ -183,8 +182,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
       fields =
         coverage.uncovered_fields
         |> Enum.take(10)
-        |> Enum.map(&inspect/1)
-        |> Enum.join(", ")
+        |> Enum.map_join(", ", &inspect/1)
 
       content = "│ #{String.pad_trailing(fields, @box_width - 2)}│"
 
@@ -289,7 +287,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
     rows =
       suggestions
       |> Enum.with_index(1)
-      |> Enum.map(fn {s, idx} ->
+      |> Enum.map_join("\n", fn {s, idx} ->
         field_badge = if s.field, do: " `#{s.field}`", else: ""
         event_badge = if s.event, do: " (#{s.event |> Module.split() |> List.last()})", else: ""
 
@@ -316,7 +314,6 @@ defmodule PropertyDamage.Suggestions.Formatter do
         #{example}
         """
       end)
-      |> Enum.join("\n")
 
     "#{header}#{rows}"
   end
@@ -329,8 +326,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
     else
       fields =
         coverage.uncovered_fields
-        |> Enum.map(&"`#{&1}`")
-        |> Enum.join(", ")
+        |> Enum.map_join(", ", &"`#{&1}`")
 
       """
       ## Unchecked Fields

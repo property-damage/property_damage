@@ -113,8 +113,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     path =
       module_name
       |> String.split(".")
-      |> Enum.map(&Macro.underscore/1)
-      |> Enum.join("/")
+      |> Enum.map_join("/", &Macro.underscore/1)
 
     "lib/#{path}.ex"
   end
@@ -169,14 +168,13 @@ defmodule Mix.Tasks.Pd.Gen.Command do
   defp generate_generator_body(fields) do
     field_generators =
       fields
-      |> Enum.map(fn field ->
+      |> Enum.map_join(",\n      ", fn field ->
         if String.ends_with?(field, "_ref") do
           "#{field}: StreamData.constant(:TODO_pick_from_state)"
         else
           "#{field}: StreamData.constant(:TODO)"
         end
       end)
-      |> Enum.join(",\n      ")
 
     """
     %{

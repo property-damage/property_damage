@@ -240,10 +240,9 @@ defmodule PropertyDamage.Flakiness do
 
     flaky_details =
       flaky
-      |> Enum.map(fn {seed, {:ok, :flaky, stats}} ->
+      |> Enum.map_join("\n", fn {seed, {:ok, :flaky, stats}} ->
         "  Seed #{seed}: #{stats.passes}/#{stats.runs} passes (#{format_variance_type(stats.variance_type)})"
       end)
-      |> Enum.join("\n")
 
     """
     Flakiness Check Results
@@ -350,7 +349,6 @@ defmodule PropertyDamage.Flakiness do
 
   defp format_failure_types(types) do
     types
-    |> Enum.map(fn {type, count} -> "#{type}: #{count}" end)
-    |> Enum.join(", ")
+    |> Enum.map_join(", ", fn {type, count} -> "#{type}: #{count}" end)
   end
 end

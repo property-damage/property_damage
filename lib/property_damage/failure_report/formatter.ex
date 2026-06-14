@@ -271,12 +271,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
     if violation do
       attempts_text =
         violation.attempts
-        |> Enum.map(fn att ->
+        |> Enum.map_join("\n", fn att ->
           retry_label = if att.is_retry, do: " (retry)", else: " (original)"
-          events_summary = Enum.map(att.events, &event_summary/1) |> Enum.join(", ")
+          events_summary = Enum.map_join(att.events, ", ", &event_summary/1)
           "  Attempt #{att.attempt}#{retry_label}: [#{events_summary}]"
         end)
-        |> Enum.join("\n")
 
       diff_text = format_comparison_diff(violation.comparison_result, color)
 
@@ -301,10 +300,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp format_comparison_diff(result, color) when is_map(result) do
     result
-    |> Enum.map(fn {key, value} ->
+    |> Enum.map_join("\n", fn {key, value} ->
       "  #{yellow(color)}#{key}:#{reset()} #{inspect(value)}"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_comparison_diff(result, _color), do: "  #{inspect(result)}"
@@ -377,7 +375,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       commands
       |> Enum.take(max_commands)
       |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
+      |> Enum.map_join("\n", fn {cmd, idx} ->
         is_failure = failed_at != nil and idx == failed_at
         marker = if is_failure, do: "#{red(color)}►#{reset()}", else: " "
         idx_color = if is_failure, do: red(color), else: dim(color)
@@ -385,7 +383,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
         "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command_with_refs(cmd, refs, color)}#{failure_label}"
       end)
-      |> Enum.join("\n")
 
     truncated =
       if length(commands) > max_commands do
@@ -445,7 +442,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         commands
         |> Enum.take(max_commands)
         |> Enum.with_index()
-        |> Enum.map(fn {cmd, idx} ->
+        |> Enum.map_join("\n", fn {cmd, idx} ->
           is_failure = idx == report.failed_at_index
           marker = if is_failure, do: "#{red(color)}►#{reset()}", else: " "
           idx_color = if is_failure, do: red(color), else: dim(color)
@@ -453,7 +450,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
           "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command_with_refs(cmd, refs, color)}#{failure_label}"
         end)
-        |> Enum.join("\n")
 
       truncated =
         if length(commands) > max_commands do
@@ -479,8 +475,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp format_fields_with_refs(fields, refs) do
     fields
-    |> Enum.map(fn {k, v} -> "#{k}: #{inspect_with_ref(v, refs)}" end)
-    |> Enum.join(", ")
+    |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{inspect_with_ref(v, refs)}" end)
     |> then(&"{#{&1}}")
   end
 
@@ -510,7 +505,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         # Show transition view
         transition_text =
           report.state_at_failure
-          |> Enum.map(fn {projection, after_state} ->
+          |> Enum.map_join("\n", fn {projection, after_state} ->
             proj_name = module_name(projection)
             before_state = Map.get(report.state_before_failure, projection, %{})
 
@@ -532,7 +527,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
             #{indent_text(after_summary, "      ")}#{change_text}
             """
           end)
-          |> Enum.join("\n")
 
         """
         #{section_header("State Transition", color)}
@@ -543,12 +537,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
         # Only show after state
         state_text =
           report.state_at_failure
-          |> Enum.map(fn {projection, state} ->
+          |> Enum.map_join("\n\n", fn {projection, state} ->
             proj_name = module_name(projection)
             state_summary = summarize_state(state)
             "  #{cyan(color)}#{proj_name}#{reset()}\n#{indent_text(state_summary, "    ")}"
           end)
-          |> Enum.join("\n\n")
 
         """
         #{section_header("Projection States at Failure", color)}
@@ -567,12 +560,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
     |> Enum.filter(fn key ->
       Map.get(before, key) != Map.get(after_state, key)
     end)
-    |> Enum.map(fn key ->
+    |> Enum.map_join("\n", fn key ->
       before_val = Map.get(before, key)
       after_val = Map.get(after_state, key)
       "#{key}: #{summarize_value(before_val)} → #{summarize_value(after_val)}"
     end)
-    |> Enum.join("\n")
   end
 
   defp diff_states(_, _), do: ""
@@ -583,7 +575,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         report.event_log
         |> Enum.take(max_events)
         |> Enum.with_index()
-        |> Enum.map(fn {entry, idx} ->
+        |> Enum.map_join("\n", fn {entry, idx} ->
           source_badge = source_badge(entry.source, color)
           cmd_idx = if entry.command_index, do: "[#{entry.command_index}]", else: "[?]"
           event_name = module_name(entry.event.__struct__)
@@ -591,7 +583,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
           "  #{dim(color)}#{String.pad_leading("#{idx}", 3)}#{reset()} #{source_badge} #{dim(color)}#{cmd_idx}#{branch}#{reset()} #{event_name}"
         end)
-        |> Enum.join("\n")
 
       truncated =
         if length(report.event_log) > max_events do
@@ -781,12 +772,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
     if violation do
       attempts_text =
         violation.attempts
-        |> Enum.map(fn att ->
+        |> Enum.map_join("\n", fn att ->
           retry_label = if att.is_retry, do: "(retry)", else: "(original)"
-          events = Enum.map(att.events, &event_summary/1) |> Enum.join(", ")
+          events = Enum.map_join(att.events, ", ", &event_summary/1)
           "| #{att.attempt} | #{retry_label} | #{events} |"
         end)
-        |> Enum.join("\n")
 
       """
       **Type:** Idempotency Violation
@@ -839,12 +829,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
       commands
       |> Enum.take(max_commands)
       |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
+      |> Enum.map_join("\n\n", fn {cmd, idx} ->
         marker = if idx == report.failed_at_index, do: "► ", else: "  "
 
         "#{marker}# [#{idx}] #{module_name(cmd.__struct__)}\n#{marker}#{inspect(cmd, pretty: true)}"
       end)
-      |> Enum.join("\n\n")
 
     truncated =
       if length(commands) > max_commands do
@@ -866,7 +855,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     if report.state_at_failure && map_size(report.state_at_failure) > 0 do
       state_text =
         report.state_at_failure
-        |> Enum.map(fn {projection, state} ->
+        |> Enum.map_join("\n", fn {projection, state} ->
           """
           ### #{module_name(projection)}
 
@@ -875,7 +864,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
           ```
           """
         end)
-        |> Enum.join("\n")
 
       """
       ## Projection States at Failure
@@ -892,14 +880,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
       events_text =
         report.event_log
         |> Enum.take(max_events)
-        |> Enum.map(fn entry ->
+        |> Enum.map_join("\n", fn entry ->
           source = String.upcase(to_string(entry.source))
           cmd_idx = entry.command_index || "?"
           event_name = module_name(entry.event.__struct__)
           branch = if entry.branch_id, do: " (B#{entry.branch_id})", else: ""
           "| #{source} | #{cmd_idx}#{branch} | `#{event_name}` |"
         end)
-        |> Enum.join("\n")
 
       truncated =
         if length(report.event_log) > max_events do
@@ -1134,10 +1121,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp summarize_state(state) when is_map(state) do
     state
-    |> Enum.map(fn {k, v} ->
+    |> Enum.map_join("\n", fn {k, v} ->
       "#{k}: #{summarize_value(v)}"
     end)
-    |> Enum.join("\n")
   end
 
   defp summarize_state(other), do: inspect(other, limit: 5)
@@ -1152,8 +1138,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp indent_text(text, prefix) do
     text
     |> String.split("\n")
-    |> Enum.map(&"#{prefix}#{&1}")
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", &"#{prefix}#{&1}")
   end
 
   defp section_header(title, color) do

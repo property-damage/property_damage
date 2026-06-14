@@ -348,8 +348,7 @@ defmodule PropertyDamage.FailureIntelligence.Patterns do
       pattern_list =
         clusters
         |> Enum.take(3)
-        |> Enum.map(fn c -> "  - #{c.pattern.description}" end)
-        |> Enum.join("\n")
+        |> Enum.map_join("\n", fn c -> "  - #{c.pattern.description}" end)
 
       """
       Analyzed #{total} failures:

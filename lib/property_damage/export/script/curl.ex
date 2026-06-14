@@ -85,11 +85,10 @@ defmodule PropertyDamage.Export.Script.Curl do
   defp generate_steps(commands, report, adapter, env_var, verbose) do
     commands
     |> Enum.with_index()
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join("\n", fn {cmd, idx} ->
       is_failure_point = idx == report.failed_at_index
       generate_step(cmd, idx, adapter, env_var, is_failure_point, verbose)
     end)
-    |> Enum.join("\n")
   end
 
   defp generate_step(command, index, adapter, env_var, is_failure_point, verbose) do

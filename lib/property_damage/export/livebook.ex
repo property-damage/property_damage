@@ -256,12 +256,11 @@ defmodule PropertyDamage.Export.LiveBook do
   defp generate_body_map(body, command, index) do
     fields =
       body
-      |> Enum.map(fn {key, _default} ->
+      |> Enum.map_join(", ", fn {key, _default} ->
         value = Map.get(command, key)
         formatted = format_body_value(value, index)
         "#{key}: #{formatted}"
       end)
-      |> Enum.join(", ")
 
     "%{#{fields}}"
   end

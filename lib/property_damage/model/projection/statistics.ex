@@ -262,11 +262,10 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   defp format_failures(failures, metrics) do
     details =
       failures
-      |> Enum.map(fn {metric, comparator, threshold} ->
+      |> Enum.map_join("; ", fn {metric, comparator, threshold} ->
         value = Map.get(metrics, metric, 0)
         "#{metric} = #{Float.round(value * 1.0, 4)} (expected #{comparator} #{threshold})"
       end)
-      |> Enum.join("; ")
 
     "Statistical assertion failures: #{details}"
   end

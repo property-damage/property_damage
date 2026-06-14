@@ -148,8 +148,7 @@ defmodule PropertyDamage.LoadTest.Report do
     error_details =
       if map_size(metrics.errors_by_type) > 0 do
         metrics.errors_by_type
-        |> Enum.map(fn {type, count} -> "#{type}: #{count}" end)
-        |> Enum.join(", ")
+        |> Enum.map_join(", ", fn {type, count} -> "#{type}: #{count}" end)
       else
         "none"
       end
@@ -175,11 +174,10 @@ defmodule PropertyDamage.LoadTest.Report do
           failures_by_exception
           |> Enum.sort_by(fn {_, count} -> -count end)
           |> Enum.take(5)
-          |> Enum.map(fn {module, count} ->
+          |> Enum.map_join(", ", fn {module, count} ->
             name = module |> to_string() |> String.replace("Elixir.", "")
             "#{name}: #{count}"
           end)
-          |> Enum.join(", ")
         else
           "none"
         end
@@ -210,7 +208,7 @@ defmodule PropertyDamage.LoadTest.Report do
         metrics.by_command
         |> Enum.sort_by(fn {_, data} -> -data.count end)
         |> Enum.take(10)
-        |> Enum.map(fn {module, data} ->
+        |> Enum.map_join("\n", fn {module, data} ->
           name =
             module
             |> to_string()
@@ -227,7 +225,6 @@ defmodule PropertyDamage.LoadTest.Report do
 
           "│ #{name}#{count}#{p50}#{p95}#{errors}  │"
         end)
-        |> Enum.join("\n")
 
       footer = """
       └──────────────────────────────────────────────────────────────────────┘
@@ -304,10 +301,9 @@ defmodule PropertyDamage.LoadTest.Report do
           threshold = min_val + range * (row / (height - 1))
 
           chars =
-            Enum.map(samples, fn val ->
+            Enum.map_join(samples, "", fn val ->
               if val >= threshold, do: "█", else: " "
             end)
-            |> Enum.join("")
             |> String.pad_trailing(width)
 
           "│ #{chars} │"
@@ -387,8 +383,7 @@ defmodule PropertyDamage.LoadTest.Report do
 
   defp format_errors_markdown(errors) do
     errors
-    |> Enum.map(fn {type, count} -> "- `#{type}`: #{count}" end)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", fn {type, count} -> "- `#{type}`: #{count}" end)
   end
 
   defp format_commands_markdown(commands) when map_size(commands) == 0,
@@ -397,12 +392,11 @@ defmodule PropertyDamage.LoadTest.Report do
   defp format_commands_markdown(commands) do
     commands
     |> Enum.sort_by(fn {_, data} -> -data.count end)
-    |> Enum.map(fn {module, data} ->
+    |> Enum.map_join("\n", fn {module, data} ->
       name = module |> to_string() |> String.replace("Elixir.", "")
 
       "| `#{name}` | #{data.count} | #{format_float(data.latency_p50)} | #{format_float(data.latency_p95)} | #{data.error_count} |"
     end)
-    |> Enum.join("\n")
   end
 
   # ============================================================================
@@ -415,8 +409,7 @@ defmodule PropertyDamage.LoadTest.Report do
     |> String.graphemes()
     |> Enum.reverse()
     |> Enum.chunk_every(3)
-    |> Enum.map(&Enum.join/1)
-    |> Enum.join(",")
+    |> Enum.map_join(",", &Enum.join/1)
     |> String.reverse()
   end
 
@@ -453,11 +446,10 @@ defmodule PropertyDamage.LoadTest.Report do
         if map_size(failures_by_exception) > 0 do
           failures_by_exception
           |> Enum.sort_by(fn {_, count} -> -count end)
-          |> Enum.map(fn {module, count} ->
+          |> Enum.map_join("\n", fn {module, count} ->
             name = module |> to_string() |> String.replace("Elixir.", "")
             "| `#{name}` | #{count} |"
           end)
-          |> Enum.join("\n")
         else
           "| - | - |"
         end

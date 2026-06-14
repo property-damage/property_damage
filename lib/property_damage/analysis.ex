@@ -666,36 +666,33 @@ defmodule PropertyDamage.Analysis do
   defp generate_command_code(commands) do
     commands
     |> Enum.with_index()
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join("\n\n", fn {cmd, idx} ->
       cmd_name = cmd.__struct__ |> Module.split() |> List.last()
       fields = cmd |> Map.from_struct() |> Map.drop([:__struct__]) |> inspect()
       "    # [#{idx}] #{cmd_name}\n    # #{fields}"
     end)
-    |> Enum.join("\n\n")
   end
 
   defp format_commands_markdown(commands, failed_at) do
     commands
     |> Enum.with_index()
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join("\n", fn {cmd, idx} ->
       cmd_name = cmd.__struct__ |> Module.split() |> List.last()
       marker = if idx == failed_at, do: " ← **FAILURE**", else: ""
       fields = format_command_fields(cmd)
       "#{idx}. `#{cmd_name}`#{marker}\n   - #{fields}"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_command_fields(cmd) do
     cmd
     |> Map.from_struct()
     |> Map.drop([:__struct__, :idempotency_key])
-    |> Enum.map(fn {k, v} ->
+    |> Enum.map_join(", ", fn {k, v} ->
       case v do
         %Ref{} -> "#{k}: <ref>"
         _ -> "#{k}: #{inspect(v)}"
       end
     end)
-    |> Enum.join(", ")
   end
 end

@@ -502,7 +502,7 @@ defmodule PropertyDamage.Livebook do
       entries =
         history
         |> Enum.with_index(1)
-        |> Enum.map(fn {entry, idx} ->
+        |> Enum.map_join("\n---\n\n", fn {entry, idx} ->
           status = if entry[:success] != false, do: "✅", else: "❌"
           cmd = format_command_name(entry.command)
           events = length(Map.get(entry, :events, []))
@@ -515,7 +515,6 @@ defmodule PropertyDamage.Livebook do
           #{format_state_change(entry)}
           """
         end)
-        |> Enum.join("\n---\n\n")
 
       """
       ## State Timeline
@@ -581,20 +580,18 @@ defmodule PropertyDamage.Livebook do
   defp format_failure_sequence(%{shrunk_sequence: seq}) when is_list(seq) and length(seq) > 0 do
     seq
     |> Enum.with_index(1)
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join("\n", fn {cmd, idx} ->
       "#{idx}. `#{format_command_name(cmd.command)}` - #{inspect(cmd.args, limit: 3)}"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_failure_sequence(%{history: history}) when is_list(history) do
     history
     |> Enum.take(-5)
     |> Enum.with_index(1)
-    |> Enum.map(fn {entry, idx} ->
+    |> Enum.map_join("\n", fn {entry, idx} ->
       "#{idx}. `#{format_command_name(entry.command)}`"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_failure_sequence(_), do: "*Not available*"
@@ -688,10 +685,9 @@ defmodule PropertyDamage.Livebook do
   defp format_step_events(%{events: events}) when is_list(events) and length(events) > 0 do
     event_list =
       events
-      |> Enum.map(fn event ->
+      |> Enum.map_join("\n", fn event ->
         "- `#{inspect(event, limit: 5)}`"
       end)
-      |> Enum.join("\n")
 
     """
     **Events Generated:**

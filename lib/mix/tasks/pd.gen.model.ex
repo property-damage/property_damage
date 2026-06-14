@@ -91,8 +91,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
     path =
       module_name
       |> String.split(".")
-      |> Enum.map(&Macro.underscore/1)
-      |> Enum.join("/")
+      |> Enum.map_join("/", &Macro.underscore/1)
 
     "lib/#{path}.ex"
   end
@@ -209,12 +208,11 @@ defmodule Mix.Tasks.Pd.Gen.Model do
   defp generate_commands_list(commands) do
     commands
     |> Enum.with_index(1)
-    |> Enum.map(fn {cmd, idx} ->
+    |> Enum.map_join(",\n      ", fn {cmd, idx} ->
       # Give decreasing weights
       weight = max(1, 4 - idx)
       "{#{weight}, #{cmd}}"
     end)
-    |> Enum.join(",\n      ")
   end
 
   defp generate_projection_section(nil, namespace) do

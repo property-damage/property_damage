@@ -395,12 +395,11 @@ defmodule PropertyDamage.SeedLibrary do
       library.entries
       |> Enum.sort_by(& &1.discovered_at, :desc)
       |> Enum.take(10)
-      |> Enum.map(fn e ->
+      |> Enum.map_join("\n", fn e ->
         tags_str = if e.tags != [], do: " [#{Enum.join(e.tags, ", ")}]", else: ""
         status_icon = status_icon(e.status)
         "  #{status_icon} #{e.seed} - #{e.failure_type}#{tags_str}"
       end)
-      |> Enum.join("\n")
 
     header <> "\nRecent entries:\n" <> entries_str
   end
