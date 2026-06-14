@@ -37,7 +37,8 @@ defmodule PropertyDamage.MixProject do
       {:telemetry, "~> 1.0"},
       {:nimble_options, "~> 1.0"},
       {:jason, "~> 1.4"},
-      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
