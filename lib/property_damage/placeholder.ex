@@ -15,13 +15,28 @@ defmodule PropertyDamage.Placeholder do
   # 4. Deep-resolved before projection apply/2 and command execution
 
   @typedoc """
+  Structured position of the producing command in a sequence.
+
+  Branching-aware so two parallel branches producing the same event module do
+  not collide (the legacy flat `command_index` could not distinguish them).
+  See DR-021.
+  """
+  @type position ::
+          {:prefix, non_neg_integer()}
+          | {:branch, non_neg_integer(), non_neg_integer()}
+          | {:suffix, non_neg_integer()}
+
+  @typedoc """
   A placeholder for an external (server-generated) value.
 
   Fields:
   - `id` - Unique identity from `make_ref/0`
   - `event_module` - The event struct module this belongs to
   - `path` - Path to the external field within the event (e.g., [:ids, :order])
-  - `command_index` - Index of the command that produced this event
+  - `position` - Structured position of the producing command (DR-021). The
+    resolution identity; supersedes the flat `command_index`.
+  - `command_index` - Legacy flat producer index (nil for placeholders minted
+    via `new_at/4`); retained only for the deprecated location-key path.
   - `event_index` - Index of the event within the command's event list
   - `resolved` - The resolved concrete value (nil until resolved)
   """
@@ -29,12 +44,13 @@ defmodule PropertyDamage.Placeholder do
           id: reference(),
           event_module: module(),
           path: [atom() | non_neg_integer()],
-          command_index: non_neg_integer(),
+          position: position() | nil,
+          command_index: non_neg_integer() | nil,
           event_index: non_neg_integer(),
           resolved: term() | nil
         }
 
-  defstruct [:id, :event_module, :path, :command_index, :event_index, :resolved]
+  defstruct [:id, :event_module, :path, :position, :command_index, :event_index, :resolved]
 
   @doc """
   Create a new placeholder for an external field.
@@ -53,6 +69,26 @@ defmodule PropertyDamage.Placeholder do
       event_module: event_module,
       path: path,
       command_index: command_index,
+      event_index: event_index,
+      resolved: nil
+    }
+  end
+
+  @doc """
+  Create a new placeholder identified by a structured `position` (DR-021).
+
+  This is the constructor used by sequence generation. Unlike `new/4`, the
+  producer is identified by a branching-aware `position` rather than a flat
+  `command_index` (which is left `nil`).
+  """
+  @spec new_at(module(), [atom() | non_neg_integer()], position(), non_neg_integer()) :: t()
+  def new_at(event_module, path, position, event_index) do
+    %__MODULE__{
+      id: make_ref(),
+      event_module: event_module,
+      path: path,
+      position: position,
+      command_index: nil,
       event_index: event_index,
       resolved: nil
     }
@@ -113,11 +149,17 @@ defimpl Inspect, for: PropertyDamage.Placeholder do
   @moduledoc false
 
   def inspect(
-        %{path: path, command_index: cmd_idx, event_index: evt_idx, resolved: resolved},
+        %{
+          path: path,
+          position: position,
+          command_index: cmd_idx,
+          event_index: evt_idx,
+          resolved: resolved
+        },
         _opts
       ) do
     path_str = Enum.map_join(path, ".", &to_string/1)
-    loc_str = "cmd#{cmd_idx}/evt#{evt_idx}"
+    loc_str = "#{loc(position, cmd_idx)}/evt#{evt_idx}"
 
     case resolved do
       nil ->
@@ -127,4 +169,9 @@ defimpl Inspect, for: PropertyDamage.Placeholder do
         "<Placeholder:#{path_str}@#{loc_str} -> #{Kernel.inspect(value)}>"
     end
   end
+
+  defp loc({:prefix, i}, _), do: "pre#{i}"
+  defp loc({:branch, b, i}, _), do: "br#{b}.#{i}"
+  defp loc({:suffix, i}, _), do: "suf#{i}"
+  defp loc(nil, cmd_idx), do: "cmd#{cmd_idx}"
 end

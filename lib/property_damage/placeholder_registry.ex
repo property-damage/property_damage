@@ -2,13 +2,17 @@ defmodule PropertyDamage.PlaceholderRegistry do
   @moduledoc false
   # Internal module for tracking and resolving placeholders.
   #
-  # The registry maintains two indexes:
+  # The registry maintains these indexes:
   # - `placeholders`: Map from placeholder ID to placeholder struct
-  # - `by_location`: Map from location key to placeholder ID
+  # - `producer_link`: Map from structured producer position to the placeholder
+  #   IDs that command produces (DR-021). This is the resolution bridge used at
+  #   execution time; it is keyed by position but the position index is rebuilt
+  #   per run, never resolved against a stale generation index.
+  # - `by_location`: DEPRECATED flat location-key index (see DR-021). Retained
+  #   only for the legacy command_index-based path until it is removed.
   #
-  # This dual indexing enables:
-  # - Fast lookup by ID during deep_resolve
-  # - Fast lookup by location during resolution from real events
+  # `placeholders` (by ID) is what transports from generation to execution;
+  # the position-driven resolution rides on `producer_link`.
 
   alias PropertyDamage.Placeholder
 
@@ -17,13 +21,14 @@ defmodule PropertyDamage.PlaceholderRegistry do
   """
   @type t :: %__MODULE__{
           placeholders: %{reference() => Placeholder.t()},
+          producer_link: %{Placeholder.position() => [reference()]},
           by_location: %{
             {module(), [atom() | non_neg_integer()], non_neg_integer(), non_neg_integer()} =>
               reference()
           }
         }
 
-  defstruct placeholders: %{}, by_location: %{}
+  defstruct placeholders: %{}, producer_link: %{}, by_location: %{}
 
   @doc """
   Create a new empty registry.
@@ -38,13 +43,34 @@ defmodule PropertyDamage.PlaceholderRegistry do
   """
   @spec register(t(), Placeholder.t()) :: t()
   def register(%__MODULE__{} = reg, %Placeholder{} = p) do
-    location = Placeholder.location_key(p)
+    reg
+    |> Map.update!(:placeholders, &Map.put(&1, p.id, p))
+    |> index_by_position(p)
+    |> index_by_location(p)
+  end
 
-    %{
-      reg
-      | placeholders: Map.put(reg.placeholders, p.id, p),
-        by_location: Map.put(reg.by_location, location, p.id)
-    }
+  # New (DR-021): index by structured producer position when present.
+  defp index_by_position(reg, %Placeholder{position: nil}), do: reg
+
+  defp index_by_position(reg, %Placeholder{position: position, id: id}) do
+    Map.update!(reg, :producer_link, fn link ->
+      Map.update(link, position, [id], &(&1 ++ [id]))
+    end)
+  end
+
+  # Legacy: index by flat location key only when a command_index is present.
+  defp index_by_location(reg, %Placeholder{command_index: nil}), do: reg
+
+  defp index_by_location(reg, %Placeholder{} = p) do
+    Map.update!(reg, :by_location, &Map.put(&1, Placeholder.location_key(p), p.id))
+  end
+
+  @doc """
+  Get the placeholder IDs produced at a structured position (DR-021).
+  """
+  @spec ids_at_position(t(), Placeholder.position()) :: [reference()]
+  def ids_at_position(%__MODULE__{} = reg, position) do
+    Map.get(reg.producer_link, position, [])
   end
 
   @doc """
@@ -235,6 +261,46 @@ defmodule PropertyDamage.PlaceholderRegistry do
   end
 
   defp do_collect_ids(_, acc), do: acc
+
+  @doc """
+  Collect all `Placeholder` structs reachable in a data structure.
+
+  Used by the consumer-routing affordance to surface the externals available
+  in projection state to command generators (DR-021). Order is depth-first as
+  encountered; duplicates (same id) are removed keeping the first.
+  """
+  @spec collect_placeholders(term()) :: [Placeholder.t()]
+  def collect_placeholders(data) do
+    data
+    |> do_collect_placeholders([])
+    |> Enum.reverse()
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  defp do_collect_placeholders(%Placeholder{} = p, acc), do: [p | acc]
+
+  defp do_collect_placeholders(%{__struct__: _} = struct, acc) do
+    struct
+    |> Map.from_struct()
+    |> Map.values()
+    |> Enum.reduce(acc, &do_collect_placeholders/2)
+  end
+
+  defp do_collect_placeholders(map, acc) when is_map(map) do
+    Enum.reduce(map, acc, fn {k, v}, a ->
+      a |> then(&do_collect_placeholders(k, &1)) |> then(&do_collect_placeholders(v, &1))
+    end)
+  end
+
+  defp do_collect_placeholders(list, acc) when is_list(list) do
+    Enum.reduce(list, acc, &do_collect_placeholders/2)
+  end
+
+  defp do_collect_placeholders(tuple, acc) when is_tuple(tuple) do
+    tuple |> Tuple.to_list() |> Enum.reduce(acc, &do_collect_placeholders/2)
+  end
+
+  defp do_collect_placeholders(_, acc), do: acc
 
   @doc """
   Get all placeholders in the registry.

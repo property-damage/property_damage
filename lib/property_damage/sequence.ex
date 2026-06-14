@@ -57,10 +57,11 @@ defmodule PropertyDamage.Sequence do
   @type t :: %__MODULE__{
           prefix: [command()],
           branches: [[command()]] | nil,
-          suffix: [command()]
+          suffix: [command()],
+          registry: PropertyDamage.PlaceholderRegistry.t() | nil
         }
 
-  defstruct prefix: [], branches: nil, suffix: []
+  defstruct prefix: [], branches: nil, suffix: [], registry: nil
 
   @doc """
   Create a linear (non-branching) sequence.
@@ -103,6 +104,17 @@ defmodule PropertyDamage.Sequence do
   def branching(prefix, branches, suffix \\ [])
       when is_list(prefix) and is_list(branches) and is_list(suffix) do
     %__MODULE__{prefix: prefix, branches: branches, suffix: suffix}
+  end
+
+  @doc """
+  Attach a placeholder registry to a sequence (DR-021).
+
+  Used by sequence generation to carry the id-indexed registry + producer-link
+  from generation to execution. `to_list/1` deliberately drops it.
+  """
+  @spec with_registry(t(), PropertyDamage.PlaceholderRegistry.t() | nil) :: t()
+  def with_registry(%__MODULE__{} = seq, registry) do
+    %{seq | registry: registry}
   end
 
   @doc """
@@ -189,19 +201,21 @@ defmodule PropertyDamage.Sequence do
       %PropertyDamage.Sequence{prefix: [2, 4, 6], branches: nil, suffix: []}
   """
   @spec map(t(), (command() -> command())) :: t()
-  def map(%__MODULE__{prefix: prefix, branches: nil, suffix: suffix}, fun) do
+  def map(%__MODULE__{prefix: prefix, branches: nil, suffix: suffix} = seq, fun) do
     %__MODULE__{
       prefix: Enum.map(prefix, fun),
       branches: nil,
-      suffix: Enum.map(suffix, fun)
+      suffix: Enum.map(suffix, fun),
+      registry: seq.registry
     }
   end
 
-  def map(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix}, fun) do
+  def map(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix} = seq, fun) do
     %__MODULE__{
       prefix: Enum.map(prefix, fun),
       branches: Enum.map(branches, fn branch -> Enum.map(branch, fun) end),
-      suffix: Enum.map(suffix, fun)
+      suffix: Enum.map(suffix, fun),
+      registry: seq.registry
     }
   end
 
@@ -211,15 +225,16 @@ defmodule PropertyDamage.Sequence do
   Empty branches are removed. If all branches become empty, converts to linear.
   """
   @spec filter(t(), (command() -> boolean())) :: t()
-  def filter(%__MODULE__{prefix: prefix, branches: nil, suffix: suffix}, pred) do
+  def filter(%__MODULE__{prefix: prefix, branches: nil, suffix: suffix} = seq, pred) do
     %__MODULE__{
       prefix: Enum.filter(prefix, pred),
       branches: nil,
-      suffix: Enum.filter(suffix, pred)
+      suffix: Enum.filter(suffix, pred),
+      registry: seq.registry
     }
   end
 
-  def filter(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix}, pred) do
+  def filter(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix} = seq, pred) do
     filtered_prefix = Enum.filter(prefix, pred)
     filtered_suffix = Enum.filter(suffix, pred)
 
@@ -231,13 +246,19 @@ defmodule PropertyDamage.Sequence do
     case filtered_branches do
       [] ->
         # No branches left, convert to linear
-        %__MODULE__{prefix: filtered_prefix, branches: nil, suffix: filtered_suffix}
+        %__MODULE__{
+          prefix: filtered_prefix,
+          branches: nil,
+          suffix: filtered_suffix,
+          registry: seq.registry
+        }
 
       _ ->
         %__MODULE__{
           prefix: filtered_prefix,
           branches: filtered_branches,
-          suffix: filtered_suffix
+          suffix: filtered_suffix,
+          registry: seq.registry
         }
     end
   end

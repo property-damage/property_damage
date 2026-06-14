@@ -38,7 +38,8 @@ defmodule PropertyDamage.Generator do
       merge_overrides(base, %{currency: StreamData.member_of(["USD", "EUR"])})
   """
 
-  alias PropertyDamage.Sequence
+  alias PropertyDamage.{Placeholder, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.External
 
   @type command :: struct()
   @type state :: map()
@@ -98,6 +99,7 @@ defmodule PropertyDamage.Generator do
   def generate_sequence(model, opts \\ []) do
     max_commands = Keyword.get(opts, :max_commands, @default_max_commands)
     branching_opts = Keyword.get(opts, :branching, nil)
+    markers = Keyword.get(opts, :external_markers, [])
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
     projection = model.command_sequence_projection()
 
@@ -108,10 +110,11 @@ defmodule PropertyDamage.Generator do
           projection,
           model,
           max_commands,
-          branching_opts
+          branching_opts,
+          markers
         )
       else
-        do_generate_linear_sequence(commands, projection, model, max_commands)
+        do_generate_linear_sequence(commands, projection, model, max_commands, markers)
       end
     end)
   end
@@ -198,7 +201,7 @@ defmodule PropertyDamage.Generator do
   # Linear Sequence Generation
   # ============================================================================
 
-  defp do_generate_linear_sequence(commands, projection, model, max_commands) do
+  defp do_generate_linear_sequence(commands, projection, model, max_commands, markers) do
     initial_state = projection.init()
 
     generate_linear_recursive(
@@ -207,21 +210,40 @@ defmodule PropertyDamage.Generator do
       model,
       initial_state,
       max_commands,
-      []
+      [],
+      [],
+      markers,
+      &{:prefix, &1}
     )
-    |> StreamData.map(&Sequence.linear/1)
+    |> StreamData.map(fn {cmds, placeholders} ->
+      attach_registry(Sequence.linear(cmds), placeholders)
+    end)
   end
 
-  defp generate_linear_recursive(_commands, _projection, _model, _state, 0, acc) do
-    StreamData.constant(Enum.reverse(acc))
+  # Recursion threads two accumulators: `acc` (commands, reversed) and `acc_ph`
+  # (placeholders minted so far). `pos_fun` maps a command's local 0-based index
+  # to its structured position (DR-021), so the same recursion serves the linear
+  # path ({:prefix, i}), the branch-continuation suffix, and post-branch suffix.
+  defp generate_linear_recursive(_commands, _projection, _model, _state, 0, acc, acc_ph, _m, _pf) do
+    StreamData.constant({Enum.reverse(acc), acc_ph})
   end
 
-  defp generate_linear_recursive(commands, projection, model, state, remaining, acc) do
+  defp generate_linear_recursive(
+         commands,
+         projection,
+         model,
+         state,
+         remaining,
+         acc,
+         acc_ph,
+         markers,
+         pos_fun
+       ) do
     valid_commands = filter_valid_commands(commands, state)
 
     case valid_commands do
       [] ->
-        StreamData.constant(Enum.reverse(acc))
+        StreamData.constant({Enum.reverse(acc), acc_ph})
 
       _ ->
         StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
@@ -229,11 +251,13 @@ defmodule PropertyDamage.Generator do
 
           StreamData.bind(generator, fn command ->
             events = simulate_command(model, state, command)
+            {events, minted} = instantiate_placeholders(events, pos_fun.(length(acc)), markers)
             new_state = update_state(state, command, events, projection)
             new_acc = [command | acc]
+            new_acc_ph = acc_ph ++ minted
 
             if should_terminate?(model, new_state, command, events) do
-              StreamData.constant(Enum.reverse(new_acc))
+              StreamData.constant({Enum.reverse(new_acc), new_acc_ph})
             else
               generate_linear_recursive(
                 commands,
@@ -241,7 +265,10 @@ defmodule PropertyDamage.Generator do
                 model,
                 new_state,
                 remaining - 1,
-                new_acc
+                new_acc,
+                new_acc_ph,
+                markers,
+                pos_fun
               )
             end
           end)
@@ -253,7 +280,7 @@ defmodule PropertyDamage.Generator do
   # Branching Sequence Generation
   # ============================================================================
 
-  defp do_generate_branching_sequence(commands, projection, model, max_commands, opts) do
+  defp do_generate_branching_sequence(commands, projection, model, max_commands, opts, markers) do
     branch_probability = Keyword.get(opts, :branch_probability, @default_branch_probability)
     max_branches = Keyword.get(opts, :max_branches, @default_max_branches)
     max_branch_length = Keyword.get(opts, :max_branch_length, @default_max_branch_length)
@@ -269,9 +296,13 @@ defmodule PropertyDamage.Generator do
       initial_state,
       min_prefix_length,
       max_commands,
-      []
+      [],
+      [],
+      markers
     )
-    |> StreamData.bind(fn {prefix, state_after_prefix, remaining} ->
+    |> StreamData.bind(fn {prefix, state_after_prefix, remaining, prefix_ph} ->
+      prefix_len = length(prefix)
+
       # Decide whether to branch
       StreamData.bind(StreamData.float(min: 0.0, max: 1.0), fn roll ->
         if roll < branch_probability and remaining > max_branch_length do
@@ -282,33 +313,49 @@ defmodule PropertyDamage.Generator do
             model,
             state_after_prefix,
             prefix,
+            prefix_ph,
             remaining,
             max_branches,
-            max_branch_length
+            max_branch_length,
+            markers
           )
         else
-          # Continue as linear sequence
+          # Continue as linear sequence: the whole thing stays linear, so suffix
+          # positions continue the prefix's {:prefix, _} numbering.
           generate_linear_recursive(
             commands,
             projection,
             model,
             state_after_prefix,
             remaining,
-            []
+            [],
+            [],
+            markers,
+            &{:prefix, prefix_len + &1}
           )
-          |> StreamData.map(fn suffix_cmds ->
-            Sequence.linear(prefix ++ suffix_cmds)
+          |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
+            attach_registry(Sequence.linear(prefix ++ suffix_cmds), prefix_ph ++ suffix_ph)
           end)
         end
       end)
     end)
   end
 
-  defp generate_prefix(commands, projection, model, state, min_length, max_total, acc) do
+  defp generate_prefix(
+         commands,
+         projection,
+         model,
+         state,
+         min_length,
+         max_total,
+         acc,
+         acc_ph,
+         markers
+       ) do
     if length(acc) >= min_length do
       # Met minimum, return what we have
       remaining = max_total - length(acc)
-      StreamData.constant({Enum.reverse(acc), state, remaining})
+      StreamData.constant({Enum.reverse(acc), state, remaining, acc_ph})
     else
       valid_commands = filter_valid_commands(commands, state)
 
@@ -316,7 +363,7 @@ defmodule PropertyDamage.Generator do
         [] ->
           # No valid commands, end early
           remaining = max_total - length(acc)
-          StreamData.constant({Enum.reverse(acc), state, remaining})
+          StreamData.constant({Enum.reverse(acc), state, remaining, acc_ph})
 
         _ ->
           StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
@@ -324,12 +371,14 @@ defmodule PropertyDamage.Generator do
 
             StreamData.bind(generator, fn command ->
               events = simulate_command(model, state, command)
+              {events, minted} = instantiate_placeholders(events, {:prefix, length(acc)}, markers)
               new_state = update_state(state, command, events, projection)
               new_acc = [command | acc]
+              new_acc_ph = acc_ph ++ minted
 
               if should_terminate?(model, new_state, command, events) do
                 remaining = max_total - length(new_acc)
-                StreamData.constant({Enum.reverse(new_acc), new_state, remaining})
+                StreamData.constant({Enum.reverse(new_acc), new_state, remaining, new_acc_ph})
               else
                 generate_prefix(
                   commands,
@@ -338,7 +387,9 @@ defmodule PropertyDamage.Generator do
                   new_state,
                   min_length,
                   max_total,
-                  new_acc
+                  new_acc,
+                  new_acc_ph,
+                  markers
                 )
               end
             end)
@@ -353,9 +404,11 @@ defmodule PropertyDamage.Generator do
          model,
          state_at_branch,
          prefix,
+         prefix_ph,
          remaining,
          max_branches,
-         max_branch_length
+         max_branch_length,
+         markers
        ) do
     # Decide number of branches (at least 2)
     num_branches = min(max_branches, max(2, div(remaining, max_branch_length)))
@@ -363,7 +416,10 @@ defmodule PropertyDamage.Generator do
     # Calculate max length per branch
     per_branch_max = min(max_branch_length, div(remaining, num_branches))
 
-    # Generate each branch independently from the same state snapshot
+    # Generate each branch independently from the same state snapshot.
+    # NOTE (R3 cluster A): branch-internal placeholder minting (the {:branch, b, i}
+    # positions and the branch-collapse remap) lands with branching capture in
+    # cluster C. Branches currently contribute no placeholders.
     branch_generators =
       for _ <- 1..num_branches do
         generate_branch(
@@ -392,18 +448,35 @@ defmodule PropertyDamage.Generator do
         model,
         merged_state,
         suffix_remaining,
-        []
+        [],
+        [],
+        markers,
+        &{:suffix, &1}
       )
-      |> StreamData.map(fn suffix_cmds ->
+      |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
         # Filter out empty branches
         non_empty_branches = Enum.reject(branches, &Enum.empty?/1)
+        all_ph = prefix_ph ++ suffix_ph
 
         if length(non_empty_branches) >= 2 do
-          Sequence.branching(prefix, non_empty_branches, suffix_cmds)
+          attach_registry(Sequence.branching(prefix, non_empty_branches, suffix_cmds), all_ph)
         else
-          # Less than 2 branches, convert to linear
+          # Less than 2 branches, convert to linear. The sequence is now flat, so
+          # the post-branch suffix's {:suffix, i} positions must be remapped onto
+          # the continuing {:prefix, _} numbering.
           flattened = List.flatten(non_empty_branches)
-          Sequence.linear(prefix ++ flattened ++ suffix_cmds)
+          base = length(prefix) + length(flattened)
+
+          remapped_suffix_ph =
+            Enum.map(suffix_ph, fn
+              %Placeholder{position: {:suffix, i}} = p -> %{p | position: {:prefix, base + i}}
+              p -> p
+            end)
+
+          attach_registry(
+            Sequence.linear(prefix ++ flattened ++ suffix_cmds),
+            prefix_ph ++ remapped_suffix_ph
+          )
         end
       end)
     end)
@@ -554,4 +627,96 @@ defmodule PropertyDamage.Generator do
 
   defp lift(%StreamData{} = gen), do: gen
   defp lift(value), do: StreamData.constant(value)
+
+  # ============================================================================
+  # Placeholder instantiation (DR-021)
+  # ============================================================================
+
+  # Replace external() markers in simulated events with %Placeholder{} structs,
+  # so projection state (and any consumer command that reads it) carries a
+  # resolvable placeholder rather than a raw %External{} sentinel. Returns the
+  # substituted events plus the list of minted placeholders for this command.
+  defp instantiate_placeholders(events, position, markers) when is_list(events) do
+    events
+    |> Enum.with_index()
+    |> Enum.map_reduce([], fn {event, event_index}, minted ->
+      mint_event_placeholders(event, event_index, position, markers, minted)
+    end)
+  end
+
+  defp instantiate_placeholders(events, _position, _markers), do: {events, []}
+
+  defp mint_event_placeholders(event, event_index, position, markers, minted)
+       when is_struct(event) do
+    paths = External.external_paths(event.__struct__, markers)
+
+    Enum.reduce(paths, {event, minted}, fn path, {ev, ms} ->
+      ph = Placeholder.new_at(ev.__struct__, path, position, event_index)
+      {External.put_at_path(ev, path, ph), ms ++ [ph]}
+    end)
+  end
+
+  defp mint_event_placeholders(event, _event_index, _position, _markers, minted) do
+    {event, minted}
+  end
+
+  defp attach_registry(sequence, []), do: sequence
+
+  defp attach_registry(sequence, placeholders) do
+    Sequence.with_registry(sequence, build_registry(placeholders))
+  end
+
+  defp build_registry(placeholders) do
+    Enum.reduce(placeholders, PlaceholderRegistry.new(), &PlaceholderRegistry.register(&2, &1))
+  end
+
+  # ============================================================================
+  # Consumer-routing affordance (DR-021)
+  # ============================================================================
+
+  @doc """
+  List the external placeholders available in projection `state`.
+
+  During generation, `external()` markers in simulated events become
+  `%PropertyDamage.Placeholder{}` structs embedded in projection state. This
+  surfaces them so a model's `with:` function can route one into a command that
+  consumes a server-generated value.
+
+  ## Options
+
+  - `:event_module` - keep only placeholders produced by this event module
+  - `:path` - keep only placeholders at this field path (e.g. `[:id]`)
+
+  ## Example
+
+      # In the model's command list:
+      {ViewOrder, with: fn state ->
+        %{order_id: PropertyDamage.Generator.external_from(state, path: [:id])}
+      end}
+  """
+  @spec available_externals(map(), keyword()) :: [Placeholder.t()]
+  def available_externals(state, opts \\ []) do
+    state
+    |> PlaceholderRegistry.collect_placeholders()
+    |> filter_by(:event_module, Keyword.get(opts, :event_module), &(&1.event_module == &2))
+    |> filter_by(:path, Keyword.get(opts, :path), &(&1.path == &2))
+  end
+
+  @doc """
+  A seeded generator that picks one external placeholder from `state`.
+
+  Returns `StreamData.constant(nil)` when no matching external is available, so
+  a `with:` function can guard on `nil`. Accepts the same options as
+  `available_externals/2`.
+  """
+  @spec external_from(map(), keyword()) :: StreamData.t(Placeholder.t() | nil)
+  def external_from(state, opts \\ []) do
+    case available_externals(state, opts) do
+      [] -> StreamData.constant(nil)
+      placeholders -> StreamData.member_of(placeholders)
+    end
+  end
+
+  defp filter_by(list, _key, nil, _pred), do: list
+  defp filter_by(list, _key, value, pred), do: Enum.filter(list, &pred.(&1, value))
 end
