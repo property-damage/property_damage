@@ -95,10 +95,13 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     assert result.failure_reason == {:malformed_adapter_return, {:ok, :not_a_list}}
   end
 
-  test "a sync command returning {:retry, _} is reported, not a CaseClauseError" do
+  test "a sync command returning {:retry, _} is reported as a clear contract error, not a CaseClauseError" do
     assert {:ok, result} = run(NoopModel, :sync_retry)
     assert result.failed_at_index == 0
-    assert result.failure_reason == {:malformed_adapter_return, {:retry, :not_ready}}
+    # {:retry, _} is the probe/async settle protocol; a :sync command must not
+    # return it. Surface a specific contract error, not generic :malformed.
+    assert {:retry_from_sync_command, details} = result.failure_reason
+    assert details.reason == :not_ready
   end
 
   test "a plain {:error, reason} is reported as adapter_error" do

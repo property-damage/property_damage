@@ -1682,9 +1682,20 @@ defmodule PropertyDamage.Executor do
           {:error, reason} ->
             {:error, {:adapter_error, reason}, state}
 
+          {:retry, reason} ->
+            # {:retry, _} is the probe/async settle protocol: only :probe/:async
+            # commands run through Settle, which consumes {:retry, _} by
+            # re-invoking execute until {:settled, _} or timeout. Reaching this
+            # case means a :sync command returned {:retry, _}, which it must not.
+            command_module = if is_struct(resolved_command), do: resolved_command.__struct__
+
+            {:error, {:retry_from_sync_command, %{command: command_module, reason: reason}},
+             state}
+
           # Adapter returned something other than {:ok, list} / {:error, _} /
-          # {:timeout, _}: report a graceful failure instead of crashing the run
-          # with a CaseClauseError (this clause sits outside the execute rescue).
+          # {:timeout, _} / {:retry, _}: report a graceful failure instead of
+          # crashing the run with a CaseClauseError (this clause sits outside
+          # the execute rescue).
           other ->
             {:error, {:malformed_adapter_return, other}, state}
         end

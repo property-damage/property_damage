@@ -288,9 +288,24 @@ defmodule PropertyDamage.Adapter do
 
   - `{:ok, events}` - Command succeeded, events to record
   - `{:error, reason}` - Command failed, execution stops
+
+  For `:probe`/`:async` (settle) commands only, `execute/2` may also return:
+
+  - `{:settled, events}` - The eventually-consistent condition is met; treated
+    like `{:ok, events}` and stops the settle loop.
+  - `{:retry, reason}` - Not settled yet. The framework re-invokes `execute/2`
+    per the command's `settle_config/0` until `{:settled, _}` or the timeout.
+
+  The framework owns the retry loop: an adapter returns `{:retry, _}` to ask to
+  be called again, it does not sleep/poll inside `execute/2`. Returning
+  `{:retry, _}` from a `:sync` command is a contract violation and is reported
+  as `{:retry_from_sync_command, _}`.
   """
   @callback execute(command :: struct(), context()) ::
-              {:ok, [event :: struct()]} | {:error, term()}
+              {:ok, [event :: struct()]}
+              | {:error, term()}
+              | {:settled, [event :: struct()]}
+              | {:retry, term()}
 
   @doc """
   Optional callback for commands that need to register injector handlers.
