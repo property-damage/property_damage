@@ -66,10 +66,10 @@ defmodule PropertyDamage.Nemesis do
 
       def commands do
         [
-          {5, CreateOrder},       # Normal commands
-          {3, ViewOrder},
-          {1, PartitionNetwork},  # Nemesis commands (lower weight)
-          {1, InjectLatency}
+          {CreateOrder, weight: 5},       # Normal commands
+          {ViewOrder, weight: 3},
+          {PartitionNetwork, weight: 1},  # Nemesis commands (lower weight)
+          {InjectLatency, weight: 1}
         ]
       end
 

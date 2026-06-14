@@ -35,7 +35,7 @@ defmodule PropertyDamage.Errors do
   """
   def no_valid_commands(model, state) do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
-    command_names = Enum.map(commands, fn {_, cmd} -> format_module(cmd) end)
+    command_names = Enum.map(commands, fn {_weight, cmd, _spec} -> format_module(cmd) end)
 
     """
 
@@ -218,7 +218,7 @@ defmodule PropertyDamage.Errors do
           """
           def commands do
             # Return list of command modules (optionally weighted)
-            [{3, CreateEntity}, {1, DeleteEntity}]
+            [{CreateEntity, weight: 3}, {DeleteEntity, weight: 1}]
           end
           """
 

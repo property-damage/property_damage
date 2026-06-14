@@ -309,8 +309,8 @@ defmodule PropertyDamage.Error do
 
       def commands do
         [
-          {10, MyApp.Commands.CreateUser},
-          {5, MyApp.Commands.UpdateUser}
+          {MyApp.Commands.CreateUser, weight: 10},
+          {MyApp.Commands.UpdateUser, weight: 5}
         ]
       end
     """
@@ -327,8 +327,8 @@ defmodule PropertyDamage.Error do
     Example:
       def commands do
         [
-          {10, MyApp.Commands.CreateUser},  # weight 10
-          {5, MyApp.Commands.UpdateUser}    # weight 5
+          {MyApp.Commands.CreateUser, weight: 10},  # weight 10
+          {MyApp.Commands.UpdateUser, weight: 5}    # weight 5
         ]
       end
     """

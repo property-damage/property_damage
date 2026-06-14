@@ -19,8 +19,8 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
 
       def commands do
         [
-          {5, SendMessage},
-          {1, PropertyDamage.Nemesis.PacketLoss}
+          {SendMessage, weight: 5},
+          {PropertyDamage.Nemesis.PacketLoss, weight: 1}
         ]
       end
 

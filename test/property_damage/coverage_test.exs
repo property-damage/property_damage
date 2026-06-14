@@ -36,9 +36,9 @@ defmodule PropertyDamage.CoverageTest do
     @impl true
     def commands do
       [
-        {3, TestCommand.Create},
-        {2, TestCommand.Update},
-        {1, TestCommand.Delete}
+        {TestCommand.Create, weight: 3},
+        {TestCommand.Update, weight: 2},
+        {TestCommand.Delete, weight: 1}
       ]
     end
 

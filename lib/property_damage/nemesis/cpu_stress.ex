@@ -20,8 +20,8 @@ defmodule PropertyDamage.Nemesis.CPUStress do
 
       def commands do
         [
-          {5, HandleRequest},
-          {1, PropertyDamage.Nemesis.CPUStress}
+          {HandleRequest, weight: 5},
+          {PropertyDamage.Nemesis.CPUStress, weight: 1}
         ]
       end
 

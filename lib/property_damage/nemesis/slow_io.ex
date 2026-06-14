@@ -31,9 +31,9 @@ defmodule PropertyDamage.Nemesis.SlowIO do
 
       def commands do
         [
-          {5, ReadDocument},
-          {5, WriteDocument},
-          {1, PropertyDamage.Nemesis.SlowIO}
+          {ReadDocument, weight: 5},
+          {WriteDocument, weight: 5},
+          {PropertyDamage.Nemesis.SlowIO, weight: 1}
         ]
       end
 

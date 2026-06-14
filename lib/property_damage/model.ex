@@ -434,11 +434,6 @@ defmodule PropertyDamage.Model do
         resolved = resolve_spec(module, weight: weight)
         {resolved.weight, module, resolved}
 
-      # {weight, module} format (legacy)
-      {weight, module} when is_integer(weight) and weight > 0 and is_atom(module) ->
-        resolved = resolve_spec(module, weight: weight)
-        {resolved.weight, module, resolved}
-
       # {module, opts} format (new)
       {module, opts} when is_atom(module) and is_list(opts) ->
         resolved = resolve_spec(module, opts)

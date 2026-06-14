@@ -36,8 +36,8 @@ defmodule PropertyDamage.Nemesis.CertificateExpiry do
 
       def commands do
         [
-          {5, SecureAPICall},
-          {1, PropertyDamage.Nemesis.CertificateExpiry}
+          {SecureAPICall, weight: 5},
+          {PropertyDamage.Nemesis.CertificateExpiry, weight: 1}
         ]
       end
 

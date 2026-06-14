@@ -105,7 +105,8 @@ defmodule PropertyDamage.Coverage do
   def new(model, opts \\ []) do
     command_modules =
       model.commands()
-      |> Enum.map(fn {_weight, cmd} -> cmd end)
+      |> PropertyDamage.Model.normalize_commands()
+      |> Enum.map(fn {_weight, module, _spec} -> module end)
       |> MapSet.new()
 
     %__MODULE__{

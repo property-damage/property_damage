@@ -129,7 +129,7 @@ defmodule PropertyDamage.Validation do
     # Normalize and validate modules
     normalized = PropertyDamage.Model.normalize_commands(commands)
 
-    for {_weight, cmd} <- normalized do
+    for {_weight, cmd, _spec} <- normalized do
       # Validate command module exists
       unless Code.ensure_loaded?(cmd) do
         raise ArgumentError,
@@ -143,12 +143,13 @@ defmodule PropertyDamage.Validation do
     :ok
   end
 
-  # {weight, module} format (legacy)
-  defp validate_command_spec!({weight, _cmd}) when is_integer(weight) and weight > 0 do
+  # {module, weight} format (bare integer)
+  defp validate_command_spec!({cmd, weight})
+       when is_atom(cmd) and is_integer(weight) and weight > 0 do
     :ok
   end
 
-  defp validate_command_spec!({weight, cmd}) when is_integer(weight) do
+  defp validate_command_spec!({cmd, weight}) when is_atom(cmd) and is_integer(weight) do
     raise ArgumentError, Error.format_config_error(:invalid_command_weight, {weight, cmd})
   end
 
@@ -214,7 +215,7 @@ defmodule PropertyDamage.Validation do
     normalized = PropertyDamage.Model.normalize_commands(commands)
     IO.puts(io, "Commands (#{length(normalized)}):")
 
-    for {weight, cmd} <- normalized do
+    for {weight, cmd, _spec} <- normalized do
       IO.puts(io, "  - #{inspect(cmd)} (weight: #{weight})")
     end
 
@@ -371,7 +372,7 @@ defmodule PropertyDamage.Validation do
     commands = model.commands()
     normalized = PropertyDamage.Model.normalize_commands(commands)
 
-    for {_weight, cmd} <- normalized,
+    for {_weight, cmd, _spec} <- normalized,
         not Code.ensure_loaded?(cmd),
         reduce: [] do
       acc -> ["Command module #{inspect(cmd)} does not exist" | acc]
@@ -433,7 +434,7 @@ defmodule PropertyDamage.Validation do
     commands = model.commands()
     normalized = PropertyDamage.Model.normalize_commands(commands)
 
-    for {_weight, cmd} <- normalized,
+    for {_weight, cmd, _spec} <- normalized,
         not function_exported?(cmd, :downstream_observables, 0),
         reduce: [] do
       acc ->
@@ -450,7 +451,7 @@ defmodule PropertyDamage.Validation do
 
     # Collect all events that commands can produce
     produced_events =
-      for {_weight, cmd} <- normalized,
+      for {_weight, cmd, _spec} <- normalized,
           function_exported?(cmd, :downstream_observables, 0),
           event <- cmd.downstream_observables() do
         event
@@ -476,7 +477,7 @@ defmodule PropertyDamage.Validation do
 
     # Commands are not orphan events, filter them out
     command_modules =
-      for {_weight, cmd} <- normalized do
+      for {_weight, cmd, _spec} <- normalized do
         cmd
       end
 

@@ -28,8 +28,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
       defmodule MyModel do
         def commands do
           [
-            {5, CreateOrder},
-            {1, PropertyDamage.Nemesis.NetworkLatency}  # Low weight for chaos
+            {CreateOrder, weight: 5},
+            {PropertyDamage.Nemesis.NetworkLatency, weight: 1}  # Low weight for chaos
           ]
         end
       end

@@ -619,11 +619,11 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "@behaviour PropertyDamage.Model"
       assert code =~ "def commands do"
       # GET has weight 5
-      assert code =~ "{5, Commands.ListPets}"
+      assert code =~ "{Commands.ListPets, weight: 5}"
       # POST has weight 3
-      assert code =~ "{3, Commands.CreatePet}"
+      assert code =~ "{Commands.CreatePet, weight: 3}"
       # DELETE has weight 1
-      assert code =~ "{1, Commands.DeletePet}"
+      assert code =~ "{Commands.DeletePet, weight: 1}"
       assert code =~ "def command_sequence_projection do"
       assert code =~ "def assertion_projections do"
     end

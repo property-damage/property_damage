@@ -33,8 +33,8 @@ defmodule PropertyDamage.RegressionTest do
     @impl true
     def commands do
       [
-        {3, PropertyDamage.RegressionTest.TestCommand.Create},
-        {2, PropertyDamage.RegressionTest.TestCommand.Update}
+        {PropertyDamage.RegressionTest.TestCommand.Create, weight: 3},
+        {PropertyDamage.RegressionTest.TestCommand.Update, weight: 2}
       ]
     end
 
