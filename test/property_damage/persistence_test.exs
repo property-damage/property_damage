@@ -1,7 +1,7 @@
 defmodule PropertyDamage.PersistenceTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Persistence, FailureReport, Sequence}
+  alias PropertyDamage.{FailureReport, Persistence, Sequence}
 
   # Test command/event structs for version capture
   defmodule TestCommand do

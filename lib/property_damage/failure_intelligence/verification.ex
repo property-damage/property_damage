@@ -8,8 +8,8 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   3. The fix is robust across different conditions
   """
 
-  alias PropertyDamage.FailureReport
   alias PropertyDamage.FailureIntelligence.{Fingerprint, Patterns}
+  alias PropertyDamage.FailureReport
 
   @type verification_result :: %{
           status: :verified | :still_failing | :partially_fixed | :flaky,

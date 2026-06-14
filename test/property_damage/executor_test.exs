@@ -1,15 +1,15 @@
 defmodule PropertyDamage.ExecutorTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, EventQueue, Ref}
+  alias PropertyDamage.{EventQueue, Executor, Ref}
 
   alias PropertyDamage.Test.{
+    ErrorAdapter,
     ExecutorModel,
     FailingModel,
-    SimpleModel,
     SimpleAdapter,
-    ErrorAdapter,
-    SimpleInjectorAdapter
+    SimpleInjectorAdapter,
+    SimpleModel
   }
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}

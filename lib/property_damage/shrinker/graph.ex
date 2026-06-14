@@ -36,7 +36,7 @@ defmodule PropertyDamage.Shrinker.Graph do
   Node 2 can be removed independently of nodes 1 and 3.
   """
 
-  alias PropertyDamage.{Ref, Placeholder}
+  alias PropertyDamage.{Placeholder, Ref}
 
   @typedoc """
   Dependency graph structure.

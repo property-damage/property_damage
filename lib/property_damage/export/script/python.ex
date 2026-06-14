@@ -9,8 +9,8 @@ defmodule PropertyDamage.Export.Script.Python do
   - Are self-contained and runnable with `python script.py`
   """
 
-  alias PropertyDamage.{FailureReport, Ref}
   alias PropertyDamage.Export.{Common, HTTPSpec}
+  alias PropertyDamage.{FailureReport, Ref}
 
   @doc """
   Generates a Python script from a failure report.

@@ -38,8 +38,8 @@ defmodule PropertyDamage.Test.ExecutorModel do
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
 
   @impl true
   def commands do
@@ -81,8 +81,8 @@ defmodule PropertyDamage.Test.FailingModel do
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.CreateItem
-  alias PropertyDamage.Test.Projections.{ModelState, FailingAssertion}
   alias PropertyDamage.Test.Events.ItemCreated
+  alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
 
   @impl true
   def commands, do: [CreateItem]
@@ -266,8 +266,8 @@ defmodule PropertyDamage.Test.ProbeModel do
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
-  alias PropertyDamage.Test.Projections.{ModelState, FailingAssertion}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+  alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
 
   @impl true
   def commands, do: [CreateItem, ProbeItem]
@@ -407,8 +407,8 @@ defmodule PropertyDamage.Test.LinkModel do
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.Link
-  alias PropertyDamage.Test.Projections.{LinkState, LinkWeightAssertion}
   alias PropertyDamage.Test.Events.LinkAdded
+  alias PropertyDamage.Test.Projections.{LinkState, LinkWeightAssertion}
 
   @impl true
   def commands, do: [Link]

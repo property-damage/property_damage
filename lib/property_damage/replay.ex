@@ -73,7 +73,7 @@ defmodule PropertyDamage.Replay do
     definitions, which are reachable from the persisted model.)
   """
 
-  alias PropertyDamage.{FailureReport, Sequence, EventQueue, Options, Executor}
+  alias PropertyDamage.{EventQueue, Executor, FailureReport, Options, Sequence}
 
   defstruct [
     :failure,

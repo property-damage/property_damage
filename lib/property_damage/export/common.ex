@@ -9,8 +9,8 @@ defmodule PropertyDamage.Export.Common do
   - Generating metadata (timestamps, headers, etc.)
   """
 
-  alias PropertyDamage.{FailureReport, Sequence, Ref}
   alias PropertyDamage.Export.HTTPSpec
+  alias PropertyDamage.{FailureReport, Ref, Sequence}
 
   # ============================================================================
   # Command Extraction

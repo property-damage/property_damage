@@ -9,7 +9,7 @@ defmodule PropertyDamage.Progress do
   - Success summaries with statistics
   """
 
-  alias PropertyDamage.{FailureReport, Error, Sequence}
+  alias PropertyDamage.{Error, FailureReport, Sequence}
 
   @doc """
   Print the test run header showing what's being tested.

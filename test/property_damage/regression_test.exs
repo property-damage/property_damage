@@ -1,8 +1,8 @@
 defmodule PropertyDamage.RegressionTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Regression
   alias PropertyDamage.FailureReport
+  alias PropertyDamage.Regression
   alias PropertyDamage.Sequence
 
   # ============================================================================

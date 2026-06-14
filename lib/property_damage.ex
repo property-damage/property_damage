@@ -128,17 +128,17 @@ defmodule PropertyDamage do
   """
 
   alias PropertyDamage.{
-    Generator,
-    Executor,
-    Shrinker,
-    Validation,
-    Options,
     EventQueue,
-    Sequence,
-    Stutter,
+    Executor,
     FailureReport,
+    Generator,
+    Options,
     Progress,
-    Telemetry
+    Sequence,
+    Shrinker,
+    Stutter,
+    Telemetry,
+    Validation
   }
 
   alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig

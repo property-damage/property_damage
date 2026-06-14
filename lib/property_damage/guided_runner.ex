@@ -42,7 +42,7 @@ defmodule PropertyDamage.GuidedRunner do
   - `:initial_seeds` - Starting seeds (default: random)
   """
 
-  alias PropertyDamage.{Executor, Generator, Sequence, TargetedGeneration, Options}
+  alias PropertyDamage.{Executor, Generator, Options, Sequence, TargetedGeneration}
 
   @typedoc """
   Result statistics from a guided run.

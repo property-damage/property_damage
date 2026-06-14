@@ -50,7 +50,7 @@ defmodule PropertyDamage.FailureReport do
   - `{:ref_resolution_error, reason}` - Symbolic ref couldn't be resolved
   """
 
-  alias PropertyDamage.{Sequence, EventLog.Entry, ErrorOrigin}
+  alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Sequence}
 
   @type failure_type ::
           :check_failed

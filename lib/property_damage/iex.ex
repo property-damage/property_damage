@@ -20,7 +20,7 @@ defmodule PropertyDamage.IEx do
   - `check_preconditions/2` - See which commands are valid in a state
   """
 
-  alias PropertyDamage.{Generator, Sequence, Model}
+  alias PropertyDamage.{Generator, Model, Sequence}
 
   # ============================================================================
   # explain/1 - Model Exploration

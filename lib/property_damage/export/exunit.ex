@@ -16,8 +16,8 @@ defmodule PropertyDamage.Export.ExUnit do
       File.write!("test/regressions/seed_123_test.exs", test_code)
   """
 
-  alias PropertyDamage.FailureReport
   alias PropertyDamage.Export.Common
+  alias PropertyDamage.FailureReport
 
   @doc """
   Generates an ExUnit test module from a failure report.

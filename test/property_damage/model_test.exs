@@ -2,10 +2,10 @@ defmodule PropertyDamage.ModelTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Model
-  alias PropertyDamage.Test.{FullModel, MinimalModel, SimpleWeightModel, WeightedModel}
-  alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+  alias PropertyDamage.Test.{FullModel, MinimalModel, SimpleWeightModel, WeightedModel}
+  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
 
   describe "Model behaviour can be implemented" do
     test "full model with all callbacks" do

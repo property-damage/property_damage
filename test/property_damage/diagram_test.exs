@@ -1,7 +1,7 @@
 defmodule PropertyDamage.DiagramTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Diagram, Sequence, EventLog.Entry, FailureReport}
+  alias PropertyDamage.{Diagram, EventLog.Entry, FailureReport, Sequence}
 
   # Test event/command structs
   defmodule TestCommand do

@@ -1,8 +1,8 @@
 defmodule PropertyDamage.ValidatorTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Validator
   alias PropertyDamage.Ref
+  alias PropertyDamage.Validator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.ExecutorModel

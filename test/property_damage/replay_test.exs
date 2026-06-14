@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ReplayTest do
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Replay, Executor, FailureReport, Sequence}
+  alias PropertyDamage.{Executor, FailureReport, Replay, Sequence}
 
   # ----------------------------------------------------------------------------
   # Self-contained fixture: a counter that fails its invariant on the 3rd bump.

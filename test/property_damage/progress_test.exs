@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ProgressTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Progress, FailureReport, Sequence}
+  alias PropertyDamage.{FailureReport, Progress, Sequence}
 
   # Simple command struct for testing
   defmodule TestCommand do

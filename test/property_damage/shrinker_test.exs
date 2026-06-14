@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ShrinkerTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Shrinker, Sequence}
+  alias PropertyDamage.{Sequence, Shrinker}
   alias PropertyDamage.Shrinker.Config
 
   alias PropertyDamage.Test.Commands.CreateItem
@@ -729,9 +729,9 @@ defmodule PropertyDamage.ShrinkerTest do
   # ============================================================================
 
   describe "probe command shrinking priority" do
-    alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
-    alias PropertyDamage.Test.{ProbeModel, ProbeAdapter}
     alias PropertyDamage.Settle
+    alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
+    alias PropertyDamage.Test.{ProbeAdapter, ProbeModel}
 
     test "probe commands have :probe semantics" do
       # Verify our test command has the expected semantics

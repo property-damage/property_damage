@@ -1,8 +1,8 @@
 defmodule PropertyDamage.LinearizationTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Linearization
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.Linearization
 
   # Simple test projection for linearization tests
   defmodule TestProjection do

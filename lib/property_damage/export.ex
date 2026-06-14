@@ -61,8 +61,8 @@ defmodule PropertyDamage.Export do
   for details.
   """
 
+  alias PropertyDamage.Export.{Common, ExUnit, LiveBook, Script}
   alias PropertyDamage.FailureReport
-  alias PropertyDamage.Export.{ExUnit, Script, LiveBook, Common}
   alias PropertyDamage.Options
 
   @type format ::

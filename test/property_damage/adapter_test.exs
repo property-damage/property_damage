@@ -2,8 +2,8 @@ defmodule PropertyDamage.AdapterTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Adapter
-  alias PropertyDamage.Test.{TestAdapter, DelegatingAdapter, FailingAdapter}
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
+  alias PropertyDamage.Test.{DelegatingAdapter, FailingAdapter, TestAdapter}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
   describe "Adapter behaviour" do

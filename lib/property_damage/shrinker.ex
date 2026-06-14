@@ -87,7 +87,7 @@ defmodule PropertyDamage.Shrinker do
   ```
   """
 
-  alias PropertyDamage.{Validator, Executor, Ref, Placeholder, Sequence, Settle}
+  alias PropertyDamage.{Executor, Placeholder, Ref, Sequence, Settle, Validator}
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """

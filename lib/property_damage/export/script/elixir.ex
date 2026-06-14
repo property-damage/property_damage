@@ -9,8 +9,8 @@ defmodule PropertyDamage.Export.Script.Elixir do
   - Are self-contained and runnable with `elixir script.exs`
   """
 
-  alias PropertyDamage.{FailureReport, Ref}
   alias PropertyDamage.Export.{Common, HTTPSpec}
+  alias PropertyDamage.{FailureReport, Ref}
 
   @doc """
   Generates an Elixir script from a failure report.

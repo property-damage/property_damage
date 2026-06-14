@@ -41,7 +41,7 @@ defmodule PropertyDamage.Coverage do
       end
   """
 
-  alias PropertyDamage.{Sequence, EventLog.Entry}
+  alias PropertyDamage.{EventLog.Entry, Sequence}
 
   defstruct [
     :model,

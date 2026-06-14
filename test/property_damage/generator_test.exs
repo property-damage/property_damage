@@ -168,8 +168,8 @@ defmodule PropertyDamage.GeneratorTest do
   end
 
   describe "generate_sequence/2 - linear sequences" do
-    alias PropertyDamage.Test.FullModel
     alias PropertyDamage.Sequence
+    alias PropertyDamage.Test.FullModel
 
     test "generates linear sequence by default" do
       generator = Generator.generate_sequence(FullModel, max_commands: 10)
@@ -206,8 +206,8 @@ defmodule PropertyDamage.GeneratorTest do
   end
 
   describe "generate_sequence/2 - branching sequences" do
-    alias PropertyDamage.Test.FullModel
     alias PropertyDamage.Sequence
+    alias PropertyDamage.Test.FullModel
 
     test "generates branching sequence with branching option" do
       generator =

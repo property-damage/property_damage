@@ -1,11 +1,11 @@
 defmodule PropertyDamage.ShrinkerHierarchicalTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Shrinker, Sequence, Ref, Executor}
+  alias PropertyDamage.{Executor, Ref, Sequence, Shrinker}
   alias PropertyDamage.Shrinker.Config
 
   alias PropertyDamage.Test.Commands.Link
-  alias PropertyDamage.Test.{LinkModel, LinkAdapter}
+  alias PropertyDamage.Test.{LinkAdapter, LinkModel}
 
   # ============================================================================
   # Hierarchical shrinking end-to-end coverage.

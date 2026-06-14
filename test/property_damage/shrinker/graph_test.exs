@@ -1,8 +1,8 @@
 defmodule PropertyDamage.Shrinker.GraphTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Shrinker.Graph
   alias PropertyDamage.Ref
+  alias PropertyDamage.Shrinker.Graph
 
   # Test command that creates a ref
   defmodule CreateCommand do

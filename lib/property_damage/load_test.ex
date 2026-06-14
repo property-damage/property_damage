@@ -116,7 +116,7 @@ defmodule PropertyDamage.LoadTest do
   ```
   """
 
-  alias PropertyDamage.LoadTest.{Runner, Report}
+  alias PropertyDamage.LoadTest.{Report, Runner}
 
   @type duration :: {pos_integer(), :milliseconds | :seconds | :minutes}
 

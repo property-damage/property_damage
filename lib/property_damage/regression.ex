@@ -64,7 +64,7 @@ defmodule PropertyDamage.Regression do
       ]
   """
 
-  alias PropertyDamage.{FailureReport, Persistence, SeedLibrary, Export, FailureIntelligence}
+  alias PropertyDamage.{Export, FailureIntelligence, FailureReport, Persistence, SeedLibrary}
 
   @type handler :: (FailureReport.t() -> any())
 

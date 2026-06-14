@@ -59,6 +59,8 @@ defmodule PropertyDamage.Livebook do
               Kino.Layout
             ]}
 
+  alias PropertyDamage.Telemetry.Collector
+
   @doc """
   Check if Kino is available.
   """
@@ -185,7 +187,7 @@ defmodule PropertyDamage.Livebook do
     # Subscribe to telemetry updates
     {:ok, _pid} =
       Task.start(fn ->
-        PropertyDamage.Telemetry.Collector.subscribe()
+        Collector.subscribe()
         monitor_loop(frame, initial_monitor_state())
       end)
 
@@ -281,7 +283,7 @@ defmodule PropertyDamage.Livebook do
     ensure_collector_started()
 
     # Subscribe to updates
-    PropertyDamage.Telemetry.Collector.subscribe()
+    Collector.subscribe()
 
     # Render initial state
     Kino.Frame.render(frame, Kino.Markdown.new("🚀 **Starting test run...**"))
@@ -325,9 +327,9 @@ defmodule PropertyDamage.Livebook do
   end
 
   defp ensure_collector_started do
-    case Process.whereis(PropertyDamage.Telemetry.Collector) do
+    case Process.whereis(Collector) do
       nil ->
-        {:ok, _pid} = PropertyDamage.Telemetry.Collector.start_link()
+        {:ok, _pid} = Collector.start_link()
         :ok
 
       _pid ->

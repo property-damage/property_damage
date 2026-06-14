@@ -25,7 +25,7 @@ defmodule PropertyDamage.Analysis do
       PropertyDamage.Analysis.generate_test(failure, format: :exunit)
   """
 
-  alias PropertyDamage.{FailureReport, Sequence, Executor, Validator, Ref, Placeholder}
+  alias PropertyDamage.{Executor, FailureReport, Placeholder, Ref, Sequence, Validator}
   alias PropertyDamage.Shrinker.Graph
 
   # ============================================================================

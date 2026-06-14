@@ -76,19 +76,19 @@ defmodule PropertyDamage.Executor do
   """
 
   alias PropertyDamage.{
-    Ref,
     EventQueue,
+    External,
+    Linearization,
+    MockServiceRegistry,
+    Nemesis,
+    Placeholder,
+    PlaceholderRegistry,
+    Ref,
+    ResourcePoller,
     Sequence,
     Settle,
-    Nemesis,
-    Stutter,
-    MockServiceRegistry,
-    Linearization,
     StatePoller,
-    ResourcePoller,
-    External,
-    Placeholder,
-    PlaceholderRegistry
+    Stutter
   }
 
   alias PropertyDamage.Model.Projection

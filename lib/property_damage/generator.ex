@@ -38,8 +38,8 @@ defmodule PropertyDamage.Generator do
       merge_overrides(base, %{currency: StreamData.member_of(["USD", "EUR"])})
   """
 
-  alias PropertyDamage.{Placeholder, PlaceholderRegistry, Sequence}
   alias PropertyDamage.External
+  alias PropertyDamage.{Placeholder, PlaceholderRegistry, Sequence}
 
   @type command :: struct()
   @type state :: map()

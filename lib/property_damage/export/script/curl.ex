@@ -9,8 +9,8 @@ defmodule PropertyDamage.Export.Script.Curl do
   - Track refs using shell variables
   """
 
-  alias PropertyDamage.{FailureReport, Ref}
   alias PropertyDamage.Export.{Common, HTTPSpec}
+  alias PropertyDamage.{FailureReport, Ref}
 
   @doc """
   Generates a Bash/curl script from a failure report.

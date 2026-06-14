@@ -2,9 +2,9 @@ defmodule PropertyDamage.CommandTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
-  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
   alias PropertyDamage.Ref
+  alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
   describe "CreateItem command" do
     test "compiles correctly with behaviour" do

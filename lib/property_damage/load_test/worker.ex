@@ -33,8 +33,8 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   use GenServer
 
+  alias PropertyDamage.{Generator, Placeholder, Ref, Sequence}
   alias PropertyDamage.LoadTest.Metrics
-  alias PropertyDamage.{Generator, Ref, Placeholder, Sequence}
   alias PropertyDamage.Model.Projection
 
   # Process dictionary key for injection context during adapter execution

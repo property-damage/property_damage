@@ -1,8 +1,8 @@
 defmodule PropertyDamage.ValidationExtendedTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Validation
   alias PropertyDamage.Options
+  alias PropertyDamage.Validation
 
   # ============================================================================
   # Test Fixtures

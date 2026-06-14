@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ExportTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Export, FailureReport, Sequence, Ref}
+  alias PropertyDamage.{Export, FailureReport, Ref, Sequence}
   alias PropertyDamage.Export.HTTPSpec
 
   # ============================================================================

@@ -81,8 +81,8 @@ defmodule PropertyDamage.Differential do
   - Custom function - `fn ref_result, target_result -> boolean`
   """
 
-  alias PropertyDamage.{Generator, Sequence, Options, Placeholder}
-  alias PropertyDamage.Differential.{Target, Result, Baseline, Equivalence}
+  alias PropertyDamage.Differential.{Baseline, Equivalence, Result, Target}
+  alias PropertyDamage.{Generator, Options, Placeholder, Sequence}
 
   @type compare_mode :: :correctness | :performance | :both
 

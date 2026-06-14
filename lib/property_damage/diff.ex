@@ -49,7 +49,7 @@ defmodule PropertyDamage.Diff do
       └───────────────────────────────────────────────────────────────┘
   """
 
-  alias PropertyDamage.{FailureReport, Sequence, EventLog.Entry}
+  alias PropertyDamage.{EventLog.Entry, FailureReport, Sequence}
 
   @type trace :: %{
           commands: [struct()],

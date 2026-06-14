@@ -60,7 +60,7 @@ defmodule PropertyDamage.Diagram do
   - `:show_branches` - Show parallel branches (default: true)
   """
 
-  alias PropertyDamage.{FailureReport, Sequence, EventLog.Entry}
+  alias PropertyDamage.{EventLog.Entry, FailureReport, Sequence}
 
   @type format :: :mermaid | :plantuml | :websequence
   @type options :: [

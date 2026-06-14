@@ -21,9 +21,9 @@ defmodule PropertyDamage.Export.Script do
       File.write!("reproduce.sh", script)
   """
 
-  alias PropertyDamage.FailureReport
   alias PropertyDamage.Export.Script.{Curl, Python}
   alias PropertyDamage.Export.Script.Elixir, as: ElixirScript
+  alias PropertyDamage.FailureReport
 
   @type language :: :elixir | :curl | :python
 

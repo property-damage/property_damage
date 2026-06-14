@@ -18,8 +18,8 @@ defmodule PropertyDamage.Export.LiveBook do
       File.write!("failure_investigation.livemd", notebook)
   """
 
-  alias PropertyDamage.{FailureReport, Ref}
   alias PropertyDamage.Export.{Common, HTTPSpec}
+  alias PropertyDamage.{FailureReport, Ref}
 
   @doc """
   Generates a LiveBook notebook from a failure report.

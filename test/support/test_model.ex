@@ -8,9 +8,9 @@ defmodule PropertyDamage.Test.FullModel do
   @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
 
-  alias PropertyDamage.Test.Commands.{CreateItem, ViewItem, MinimalCommand}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
 
   @impl true
   def commands do
@@ -82,8 +82,8 @@ defmodule PropertyDamage.Test.MinimalModel do
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
 
   @impl true
   def commands do
@@ -125,8 +125,8 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
 
   # Simple list - commands use default weight of 1
   @impl true
@@ -169,8 +169,8 @@ defmodule PropertyDamage.Test.WeightedModel do
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
 
   # Weighted list - CreateItem 3x more likely than ViewItem
   @impl true

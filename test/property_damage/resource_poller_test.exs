@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ResourcePollerTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{ResourcePoller, EventQueue}
+  alias PropertyDamage.{EventQueue, ResourcePoller}
 
   # Test event struct
   defmodule StatusChanged do

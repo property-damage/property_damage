@@ -36,8 +36,8 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   """
   use PropertyDamage.Model.Projection
 
-  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
   @impl true
   def init, do: %{items: %{}, total_quantity: 0, create_count: 0, view_count: 0}

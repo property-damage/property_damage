@@ -1,8 +1,8 @@
 defmodule PropertyDamage.InjectionTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, Ref}
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.{Executor, Ref}
 
   # Test events
   defmodule ResourceCreated do

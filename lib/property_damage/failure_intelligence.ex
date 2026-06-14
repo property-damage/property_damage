@@ -51,8 +51,8 @@ defmodule PropertyDamage.FailureIntelligence do
       end
   """
 
+  alias PropertyDamage.FailureIntelligence.{Fingerprint, Patterns, Similarity, Verification}
   alias PropertyDamage.FailureReport
-  alias PropertyDamage.FailureIntelligence.{Fingerprint, Similarity, Patterns, Verification}
 
   @type analysis :: Patterns.analysis()
   @type verification_result :: Verification.verification_result()
