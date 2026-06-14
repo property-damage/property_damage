@@ -53,13 +53,13 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
     now = System.monotonic_time(:millisecond)
     command = %{command | injected_at: now}
 
-    result =
+    {result, simulated?} =
       case get_toxiproxy(context) do
         {:ok, proxy_config} ->
-          inject_toxiproxy(command, proxy_config)
+          {inject_toxiproxy(command, proxy_config), false}
 
         :not_configured ->
-          :ok
+          {:ok, true}
       end
 
     case result do
@@ -68,7 +68,8 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
           __struct__: PacketLossInjected,
           loss_percent: command.loss_percent,
           target: command.target,
-          injected_at: now
+          injected_at: now,
+          simulated: simulated?
         }
 
         {:ok, [event]}
@@ -82,13 +83,13 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
   def restore(%__MODULE__{} = command, context) do
     now = System.monotonic_time(:millisecond)
 
-    result =
+    {result, simulated?} =
       case get_toxiproxy(context) do
         {:ok, proxy_config} ->
-          restore_toxiproxy(proxy_config)
+          {restore_toxiproxy(proxy_config), false}
 
         :not_configured ->
-          :ok
+          {:ok, true}
       end
 
     case result do
@@ -98,7 +99,8 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
           loss_percent: command.loss_percent,
           target: command.target,
           restored_at: now,
-          duration_ms: now - (command.injected_at || now)
+          duration_ms: now - (command.injected_at || now),
+          simulated: simulated?
         }
 
         {:ok, [event]}
@@ -207,11 +209,17 @@ end
 
 # Event structs
 defmodule PacketLossInjected do
-  @moduledoc "Event emitted when packet loss is injected"
-  defstruct [:loss_percent, :target, :injected_at]
+  @moduledoc """
+  Event emitted when packet loss is injected.
+
+  `simulated: true` means no real packet loss was injected (no Toxiproxy was
+  configured); the fault is a no-op recorded honestly so it can never
+  masquerade as a real one.
+  """
+  defstruct [:loss_percent, :target, :injected_at, simulated: false]
 end
 
 defmodule PacketLossRestored do
   @moduledoc "Event emitted when packet loss is restored"
-  defstruct [:loss_percent, :target, :restored_at, :duration_ms]
+  defstruct [:loss_percent, :target, :restored_at, :duration_ms, simulated: false]
 end

@@ -73,6 +73,25 @@ defmodule PropertyDamage.Nemesis do
         ]
       end
 
+  ## Real vs simulated faults (no silent no-ops)
+
+  Some nemeses can only inject a real fault when their backing mechanism is
+  available. The network nemeses (`NetworkLatency`, `NetworkPartition`,
+  `PacketLoss`) need Toxiproxy configured in the adapter context
+  (`%{toxiproxy: %{proxy_name: ..., api_url: ...}}`); without it they cannot
+  touch the network. Rather than silently no-op while reporting success (the
+  former "chaos theater" behavior), they now tag their events with
+  `simulated: true`, so a fault that did nothing can never be mistaken for one
+  that did. Use `simulated_event?/1` to detect it, or assert against the
+  `:simulated` field directly.
+
+  The host-effect nemeses (`CPUStress`, `MemoryPressure`, `ResourceExhaustion`,
+  `ProcessKill`) always inject real effects in the BEAM. The cooperative ones
+  (`ClockSkew`, `SlowIO`, `CertificateExpiry`) install real state but only
+  change behavior if your adapter consults their public API
+  (e.g. `ClockSkew.now/0`); they are real, not simulated, but require adapter
+  cooperation to observe.
+
   Assertion projections can adjust invariants during active faults:
 
       def check(:latency_within_sla, state, ctx) do
@@ -205,6 +224,24 @@ defmodule PropertyDamage.Nemesis do
     else
       true
     end
+  end
+
+  @doc """
+  Whether a nemesis event represents a *simulated* (no-op) fault.
+
+  Some built-in network nemeses (`NetworkLatency`, `NetworkPartition`,
+  `PacketLoss`) can only inject a real fault when Toxiproxy is configured in the
+  adapter context. Without it they do nothing, but they used to report success
+  as if the fault had landed ("chaos theater"). They now tag their events with
+  `simulated: true` in that case, so a fault that did nothing can never
+  masquerade as a real one. This helper reads that marker.
+
+  Events that carry no `:simulated` field (every other nemesis, all of which
+  inject real effects) are treated as not simulated.
+  """
+  @spec simulated_event?(struct() | map()) :: boolean()
+  def simulated_event?(event) when is_map(event) do
+    Map.get(event, :simulated, false) == true
   end
 
   @doc """

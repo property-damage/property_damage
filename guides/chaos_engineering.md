@@ -28,6 +28,40 @@ PropertyDamage provides these fault injection operations:
 | | `SlowIO` | I/O bound operations |
 | **Security** | `CertificateExpiry` | TLS error handling |
 
+## Real vs simulated faults (important)
+
+Not every nemesis injects a real fault in every environment, and PropertyDamage
+is explicit about which is which so a fault that did nothing can never look like
+one that did:
+
+- **Network faults need Toxiproxy.** `NetworkLatency`, `NetworkPartition` and
+  `PacketLoss` can only degrade the network when Toxiproxy is configured in the
+  adapter context:
+
+  ```elixir
+  # adapter setup/1 returns a context carrying the Toxiproxy endpoint
+  {:ok, %{toxiproxy: %{proxy_name: "redis", api_url: "http://localhost:8474"}}}
+  ```
+
+  Without it, these nemeses do **nothing** and tag their event with
+  `simulated: true`. Check it with `PropertyDamage.Nemesis.simulated_event?/1`,
+  or match on the `:simulated` field, so your invariants are not fooled by a
+  no-op "fault".
+
+- **Host-effect faults are always real.** `CPUStress`, `MemoryPressure`,
+  `ResourceExhaustion` and `ProcessKill` act directly on the BEAM/host with no
+  extra setup.
+
+- **Cooperative faults are real but need your adapter to look.** `ClockSkew`,
+  `SlowIO` and `CertificateExpiry` install real state, but only change behavior
+  if your adapter consults their public API (e.g. `ClockSkew.now/0`,
+  `SlowIO.apply_delay/0`, `CertificateExpiry.should_fail?/1`).
+
+Auto-restoring faults (`auto_restore?/0` returning true, the default) are lifted
+automatically: PropertyDamage calls `restore/2` once a fault's `duration_ms` has
+elapsed during the run, and restores any still-active faults when the sequence
+ends, so a fault never leaks past the test that injected it.
+
 ## Quick Start
 
 ### 1. Create a Chaos Model

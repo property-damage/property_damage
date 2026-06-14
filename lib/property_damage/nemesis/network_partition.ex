@@ -64,13 +64,13 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
     now = System.monotonic_time(:millisecond)
     command = %{command | injected_at: now}
 
-    result =
+    {result, simulated?} =
       case get_toxiproxy(context) do
         {:ok, proxy_config} ->
-          inject_toxiproxy(command, proxy_config)
+          {inject_toxiproxy(command, proxy_config), false}
 
         :not_configured ->
-          inject_simulated(command, context)
+          {inject_simulated(command, context), true}
       end
 
     case result do
@@ -79,7 +79,8 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
           __struct__: NetworkPartitioned,
           partition_type: command.partition_type,
           target: command.target,
-          injected_at: now
+          injected_at: now,
+          simulated: simulated?
         }
 
         {:ok, [event]}
@@ -93,13 +94,13 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
   def restore(%__MODULE__{} = command, context) do
     now = System.monotonic_time(:millisecond)
 
-    result =
+    {result, simulated?} =
       case get_toxiproxy(context) do
         {:ok, proxy_config} ->
-          restore_toxiproxy(command, proxy_config)
+          {restore_toxiproxy(command, proxy_config), false}
 
         :not_configured ->
-          restore_simulated(command, context)
+          {restore_simulated(command, context), true}
       end
 
     case result do
@@ -109,7 +110,8 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
           partition_type: command.partition_type,
           target: command.target,
           restored_at: now,
-          duration_ms: now - (command.injected_at || now)
+          duration_ms: now - (command.injected_at || now),
+          simulated: simulated?
         }
 
         {:ok, [event]}
@@ -253,11 +255,17 @@ end
 
 # Event structs
 defmodule NetworkPartitioned do
-  @moduledoc "Event emitted when network partition is created"
-  defstruct [:partition_type, :target, :injected_at]
+  @moduledoc """
+  Event emitted when network partition is created.
+
+  `simulated: true` means no real partition was injected (no Toxiproxy was
+  configured); the fault is a no-op recorded honestly so it can never
+  masquerade as a real one.
+  """
+  defstruct [:partition_type, :target, :injected_at, simulated: false]
 end
 
 defmodule NetworkPartitionHealed do
   @moduledoc "Event emitted when network partition is healed"
-  defstruct [:partition_type, :target, :restored_at, :duration_ms]
+  defstruct [:partition_type, :target, :restored_at, :duration_ms, simulated: false]
 end

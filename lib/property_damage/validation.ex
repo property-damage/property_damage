@@ -503,7 +503,10 @@ defmodule PropertyDamage.Validation do
   # events in poll_state.after (and thus observe them). Polling assertions have
   # no :trigger key, so reaching for assertion.trigger blindly would crash.
   defp assertion_handled_modules(%{trigger: %{modules: modules}}), do: List.wrap(modules)
-  defp assertion_handled_modules(%{poll_state: %{after: after_events}}), do: List.wrap(after_events)
+
+  defp assertion_handled_modules(%{poll_state: %{after: after_events}}),
+    do: List.wrap(after_events)
+
   defp assertion_handled_modules(_assertion), do: []
 
   defp warn_no_assertion_projections(model) do

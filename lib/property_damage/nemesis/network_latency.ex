@@ -62,13 +62,13 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
     now = System.monotonic_time(:millisecond)
     command = %{command | injected_at: now}
 
-    result =
+    {result, simulated?} =
       case get_toxiproxy(context) do
         {:ok, proxy_config} ->
-          inject_toxiproxy(command, proxy_config)
+          {inject_toxiproxy(command, proxy_config), false}
 
         :not_configured ->
-          inject_simulated(command, context)
+          {inject_simulated(command, context), true}
       end
 
     case result do
@@ -78,7 +78,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
           latency_ms: command.latency_ms,
           jitter_ms: command.jitter_ms,
           target: command.target,
-          injected_at: now
+          injected_at: now,
+          simulated: simulated?
         }
 
         {:ok, [event]}
@@ -92,13 +93,13 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   def restore(%__MODULE__{} = command, context) do
     now = System.monotonic_time(:millisecond)
 
-    result =
+    {result, simulated?} =
       case get_toxiproxy(context) do
         {:ok, proxy_config} ->
-          restore_toxiproxy(command, proxy_config)
+          {restore_toxiproxy(command, proxy_config), false}
 
         :not_configured ->
-          restore_simulated(command, context)
+          {restore_simulated(command, context), true}
       end
 
     case result do
@@ -108,7 +109,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
           latency_ms: command.latency_ms,
           target: command.target,
           restored_at: now,
-          duration_ms: now - (command.injected_at || now)
+          duration_ms: now - (command.injected_at || now),
+          simulated: simulated?
         }
 
         {:ok, [event]}
@@ -239,11 +241,17 @@ end
 
 # Event structs
 defmodule NetworkLatencyInjected do
-  @moduledoc "Event emitted when network latency is injected"
-  defstruct [:latency_ms, :jitter_ms, :target, :injected_at]
+  @moduledoc """
+  Event emitted when network latency is injected.
+
+  `simulated: true` means no real latency was injected (no Toxiproxy was
+  configured); the fault is a no-op recorded honestly so it can never
+  masquerade as a real one.
+  """
+  defstruct [:latency_ms, :jitter_ms, :target, :injected_at, simulated: false]
 end
 
 defmodule NetworkLatencyRestored do
   @moduledoc "Event emitted when network latency is restored"
-  defstruct [:latency_ms, :target, :restored_at, :duration_ms]
+  defstruct [:latency_ms, :target, :restored_at, :duration_ms, simulated: false]
 end
