@@ -8,6 +8,8 @@ Each record below was reconstructed from three sources: the spec citations (whic
 
 All 20 referenced DRs had sufficient evidence to reconstruct; none were left unreconstructed.
 
+Records numbered DR-021 and above are **not** reconstructions: they are forward-looking decisions recorded at the time they were made, and each carries a plain `Accepted` status with a decision date.
+
 ## Index
 
 | DR | Title | Summary |
@@ -32,6 +34,7 @@ All 20 referenced DRs had sufficient evidence to reconstruct; none were left unr
 | [DR-018](DR-018-command-triggered-resource-polling.md) | Command-Triggered Resource Polling | `ctx.start_poller` spawns background ResourcePollers that inject events as resources change. |
 | [DR-019](DR-019-command-spec-pattern.md) | Command Spec Pattern | `command_spec/1` (modeled on `child_spec/1`) with three-tier override priority. |
 | [DR-020](DR-020-composable-version-aware-libraries.md) | Composable, Version-Aware Libraries | Versioned `.pd` files and seed libraries with mismatch warnings; composable regression handlers. |
+| [DR-021](DR-021-placeholder-resolution-identity.md) | Placeholder Resolution Identity | Consumer resolution by id; producer capture by structured position rebuilt per run. Recorded at decision time (not reconstructed). |
 
 ## Which specs cite which DRs
 
