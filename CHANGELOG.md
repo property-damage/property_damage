@@ -55,6 +55,15 @@ end, and trimmed the documented surface to what has been validated.
   weight-first `{_weight, cmd}` pattern, so the documented `{Module, weight: n}`
   keyword form bound the options list as the "command". It now routes through
   `Model.normalize_commands/1` and handles every spec form.
+- Configuration validation, the `pd.validate`/`iex` helpers, and the
+  no-valid-commands error formatter iterated `normalize_commands/1`'s
+  `{weight, module, spec}` output with a stale two-element `{_weight, cmd}`
+  pattern, so most of `Validation` was a silent no-op (command-existence,
+  `downstream_observables`, and orphan-event checks never ran) and the error
+  formatter raised. Corrected to the three-element form. `mix pd.validate` and
+  `PropertyDamage.IEx.check_preconditions/2` also checked the obsolete
+  `new!/2`/`precondition/1` API; they now check `generator/1` and evaluate the
+  spec's `:when` predicate.
 - Step-by-step `Replay` rebuilt as a stepping shell over the executor (it
   previously could not execute a single step against any model).
 - Eventual-consistency pipeline rebuilt: probe/async settle and `@poll_state`

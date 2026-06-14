@@ -168,22 +168,17 @@ defmodule Mix.Tasks.Pd.Validate do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
 
     errors =
-      for {_weight, cmd} <- commands, not Code.ensure_loaded?(cmd), reduce: errors do
+      for {_weight, cmd, _spec} <- commands, not Code.ensure_loaded?(cmd), reduce: errors do
         acc -> ["Command module #{inspect(cmd)} does not exist" | acc]
       end
 
     # Check command callbacks
     errors =
-      for {_weight, cmd} <- commands, Code.ensure_loaded?(cmd), reduce: errors do
+      for {_weight, cmd, _spec} <- commands, Code.ensure_loaded?(cmd), reduce: errors do
         acc ->
-          acc =
-            if function_exported?(cmd, :precondition, 1),
-              do: acc,
-              else: ["Command #{inspect(cmd)} missing precondition/1" | acc]
-
-          if function_exported?(cmd, :new!, 2),
+          if function_exported?(cmd, :generator, 1),
             do: acc,
-            else: ["Command #{inspect(cmd)} missing new!/2" | acc]
+            else: ["Command #{inspect(cmd)} missing generator/1" | acc]
       end
 
     # Check projections
@@ -210,7 +205,7 @@ defmodule Mix.Tasks.Pd.Validate do
 
     # Collect warnings
     warnings =
-      for {_weight, cmd} <- commands,
+      for {_weight, cmd, _spec} <- commands,
           Code.ensure_loaded?(cmd),
           not function_exported?(cmd, :downstream_observables, 0),
           reduce: warnings do
@@ -290,7 +285,7 @@ defmodule Mix.Tasks.Pd.Validate do
     IO.puts("")
     IO.puts("Commands (#{length(commands)}):")
 
-    for {weight, cmd} <- commands do
+    for {weight, cmd, _spec} <- commands do
       name = cmd |> Module.split() |> List.last()
       IO.puts("  #{String.pad_trailing(name, 25)} weight: #{weight}")
     end

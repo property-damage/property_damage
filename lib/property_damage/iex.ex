@@ -84,7 +84,7 @@ defmodule PropertyDamage.IEx do
     IO.puts("  Weight │ Command                    │ Semantics│ Creates Ref")
     IO.puts(String.duplicate("─", 65))
 
-    for {weight, cmd_module} <- commands do
+    for {weight, cmd_module, _spec} <- commands do
       name = cmd_module |> Module.split() |> List.last()
       semantics = get_semantics(cmd_module)
       creates_ref = get_creates_ref(cmd_module)
@@ -177,7 +177,7 @@ defmodule PropertyDamage.IEx do
     commands = model.commands() |> Model.normalize_commands()
 
     has_destructive =
-      Enum.any?(commands, fn {_, cmd} ->
+      Enum.any?(commands, fn {_weight, cmd, _spec} ->
         name = cmd |> Module.split() |> List.last() |> String.downcase()
         String.contains?(name, ["delete", "close", "cancel", "destroy"])
       end)
@@ -190,7 +190,7 @@ defmodule PropertyDamage.IEx do
       end
 
     # Check for unbalanced weights
-    weights = Enum.map(commands, fn {w, _} -> w end)
+    weights = Enum.map(commands, fn {w, _cmd, _spec} -> w end)
     max_weight = Enum.max(weights)
     min_weight = Enum.min(weights)
 
@@ -206,7 +206,7 @@ defmodule PropertyDamage.IEx do
 
     # Check for no probe commands
     has_probes =
-      Enum.any?(commands, fn {_, cmd} ->
+      Enum.any?(commands, fn {_weight, cmd, _spec} ->
         get_semantics(cmd) == :probe
       end)
 
@@ -666,17 +666,17 @@ defmodule PropertyDamage.IEx do
     IO.puts("  Command                    │ Precondition │ Weight")
     IO.puts(String.duplicate("─", 65))
 
-    for {weight, cmd_module} <- commands do
+    for {weight, cmd_module, spec} <- commands do
       name = cmd_module |> Module.split() |> List.last()
       name_str = String.pad_trailing(name, 26)
 
-      valid? = cmd_module.precondition(state)
+      valid? = spec.when.(state)
       status = if valid?, do: "✓ VALID  ", else: "✗ INVALID"
 
       IO.puts("  #{name_str} │ #{status}    │ #{weight}")
     end
 
-    valid_count = Enum.count(commands, fn {_, cmd} -> cmd.precondition(state) end)
+    valid_count = Enum.count(commands, fn {_weight, _cmd, spec} -> spec.when.(state) end)
     IO.puts(String.duplicate("─", 65))
     IO.puts("  #{valid_count}/#{length(commands)} commands valid in current state")
     IO.puts("")
