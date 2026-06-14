@@ -5,9 +5,16 @@ defmodule PropertyDamage.Nemesis.SilentDeceptionTest do
   `simulated: true` when it is not, so a no-op fault can never masquerade as a
   real one.
 
-  Proven to fail pre-fix: before the guard the events carried no `:simulated`
-  field, so `Nemesis.simulated_event?/1` returned false for what was in fact a
-  pure no-op.
+  Note on what this test does and does not prove. The P2 fix *adds* an honest
+  channel (the `:simulated` marker) where none existed, so any test that
+  verifies it must reference the new field and therefore cannot run against the
+  old code at all (it fails to compile, which is a structural artifact, not a
+  behavioral catch). This file is therefore a forward contract guard: it locks
+  in the marker so a future network nemesis, or a revert, can't reintroduce the
+  silent no-op. The *behavioral* proof of the deception (these nemeses report
+  success while leaving the SUT untouched, and only the marker tells the no-op
+  apart from a real fault) needs a live SUT and lives in the Redis bench's
+  nemesis audit (`benches/redis_bench/test/nemesis_audit_test.exs`).
   """
   use ExUnit.Case, async: true
 

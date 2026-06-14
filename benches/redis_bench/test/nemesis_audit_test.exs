@@ -74,12 +74,25 @@ defmodule RedisBench.NemesisAuditTest do
       assert restored_ms < 100, "restore did not lift latency (#{restored_ms}ms)"
     end
 
-    test "NetworkLatency without Toxiproxy is honestly simulated" do
-      {:ok, [injected]} = NetworkLatency.inject(%NetworkLatency{latency_ms: 250}, %{})
-      assert injected.simulated == true
+    test "NetworkLatency without Toxiproxy: a no-op that masquerades as a real fault" do
+      {:ok, clean_ms} = Toxiproxy.probe_ping_ms()
 
-      {:ok, ms} = Toxiproxy.probe_ping_ms()
-      assert ms < 100, "a simulated fault must not actually slow the SUT"
+      # The deception, behaviorally. inject reports success with an event that
+      # looks exactly like the real injection above (same struct, same
+      # latency_ms)...
+      {:ok, [injected]} = NetworkLatency.inject(%NetworkLatency{latency_ms: 250}, %{})
+      assert injected.__struct__ == NetworkLatencyInjected
+      assert injected.latency_ms == 250
+
+      # ...yet the SUT is completely unaffected: the round-trip is unchanged, so
+      # the "fault" did nothing.
+      {:ok, sim_ms} = Toxiproxy.probe_ping_ms()
+      assert sim_ms < 100, "a simulated fault must not actually slow the SUT"
+      assert_in_delta sim_ms, clean_ms, 80
+
+      # The ONLY thing that tells this no-op apart from the real fault is the
+      # simulated marker (the P2 fix). Pre-fix the two were indistinguishable.
+      assert injected.simulated == true
     end
 
     test "NetworkPartition really cuts the proxy, and restore heals it" do
@@ -101,10 +114,18 @@ defmodule RedisBench.NemesisAuditTest do
       assert {:ok, _} = Toxiproxy.probe_ping_ms(), "restore did not heal the partition"
     end
 
-    test "NetworkPartition without Toxiproxy is honestly simulated" do
+    test "NetworkPartition without Toxiproxy: a no-op that masquerades as a real fault" do
+      # Reports success with a real-looking partition event...
       {:ok, [injected]} = NetworkPartition.inject(%NetworkPartition{partition_type: :full}, %{})
-      assert injected.simulated == true
+      assert injected.__struct__ == NetworkPartitioned
+      assert injected.partition_type == :full
+
+      # ...but the proxy is still fully reachable: nothing was cut. (The real
+      # injection above made probe_ping_ms/1 error.)
       assert {:ok, _} = Toxiproxy.probe_ping_ms()
+
+      # Only the marker distinguishes the no-op from the real partition.
+      assert injected.simulated == true
     end
 
     test "PacketLoss really disrupts the proxy, and restore clears it" do
@@ -127,10 +148,18 @@ defmodule RedisBench.NemesisAuditTest do
       assert {:ok, _} = Toxiproxy.probe_ping_ms(), "restore did not clear packet loss"
     end
 
-    test "PacketLoss without Toxiproxy is honestly simulated" do
+    test "PacketLoss without Toxiproxy: a no-op that masquerades as a real fault" do
+      # Reports success with a real-looking packet-loss event...
       {:ok, [injected]} = PacketLoss.inject(%PacketLoss{loss_percent: 100}, %{})
-      assert injected.simulated == true
+      assert injected.__struct__ == PacketLossInjected
+      assert injected.loss_percent == 100
+
+      # ...but the connection works fine: nothing was disrupted. (The real
+      # injection above made probe_ping_ms/1 error.)
       assert {:ok, _} = Toxiproxy.probe_ping_ms()
+
+      # Only the marker distinguishes the no-op from real packet loss.
+      assert injected.simulated == true
     end
   end
 
