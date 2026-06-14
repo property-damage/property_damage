@@ -66,6 +66,19 @@ defmodule PropertyDamage.ExportTest do
     end
   end
 
+  defmodule TestModelStub do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [CreateAccount]
+    @impl true
+    def command_sequence_projection, do: __MODULE__
+  end
+
+  # A command carrying a value with no source literal (a PID).
+  defmodule PidCommand do
+    defstruct [:pid, :name]
+  end
+
   defp create_test_failure_report do
     account_ref = Ref.symbolic(label: "account")
 
@@ -264,6 +277,62 @@ defmodule PropertyDamage.ExportTest do
 
       assert test_code =~ "MyApp.Regressions.CustomTest"
     end
+
+    test "a command with a non-literal field (PID) does not emit invalid #PID<> source" do
+      account_ref = Ref.symbolic(label: "account")
+
+      commands = [%PidCommand{pid: self(), name: "worker"}]
+
+      failure = %FailureReport{
+        seed: 123,
+        failure_type: :check_failed,
+        check_name: :NonNegativeBalance,
+        failure_message: "boom",
+        original_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        model: TestModelStub,
+        adapter: TestHTTPAdapter
+      }
+
+      _ = account_ref
+      code = Export.to_exunit(failure, module_name: PDExportPidCheck)
+
+      refute code =~ "#PID"
+      refute code =~ "#Reference"
+      # parses as valid Elixir (the #PID<...> literal would be a syntax error)
+      assert {:ok, _ast} = Code.string_to_quoted(code)
+    end
+
+    test "the generated test body compiles clean (no unused-var/#PID diagnostics)" do
+      failure = %{create_test_failure_report() | model: TestModelStub}
+
+      code = Export.to_exunit(failure, module_name: PDExportWaeCheck)
+
+      # Compile the generated body as a plain function rather than an ExUnit
+      # test, so we get its compiler diagnostics (unused vars, bad literals)
+      # without the `use ExUnit.Case` module being registered and run.
+      compilable =
+        code
+        |> String.replace("use ExUnit.Case, async: true", "import ExUnit.Assertions")
+        |> String.replace(~r/\n\s*@tag [^\n]+/, "")
+        |> String.replace(~r/test "[^"]+" do/, "def __regression_check__ do")
+
+      {_result, diagnostics} =
+        Code.with_diagnostics(fn ->
+          try do
+            Code.compile_string(compilable)
+          rescue
+            e -> e
+          end
+        end)
+
+      assert diagnostics == [],
+             "generated test body emitted compiler diagnostics:\n" <>
+               Enum.map_join(diagnostics, "\n", &inspect/1)
+
+      :code.purge(PDExportWaeCheck)
+      :code.delete(PDExportWaeCheck)
+    end
   end
 
   # ============================================================================
@@ -330,7 +399,7 @@ defmodule PropertyDamage.ExportTest do
       {:ok, path} = Export.save(failure, tmp_dir, :exunit)
 
       assert File.exists?(path)
-      assert path =~ "reproduce_512902757.exs"
+      assert path =~ ~r/reproduce_512902757_[0-9a-f]+\.exs$/
 
       content = File.read!(path)
       assert content =~ "defmodule"
@@ -400,10 +469,23 @@ defmodule PropertyDamage.ExportTest do
     test "generates filename based on seed" do
       failure = create_test_failure_report()
 
-      assert Common.generate_filename(failure, :exunit) == "reproduce_512902757.exs"
-      assert Common.generate_filename(failure, :curl) == "reproduce_512902757.sh"
-      assert Common.generate_filename(failure, :python) == "reproduce_512902757.py"
-      assert Common.generate_filename(failure, :livebook) == "reproduce_512902757.livemd"
+      assert Common.generate_filename(failure, :exunit) =~
+               ~r/^reproduce_512902757_[0-9a-f]+\.exs$/
+
+      assert Common.generate_filename(failure, :curl) =~ ~r/^reproduce_512902757_[0-9a-f]+\.sh$/
+      assert Common.generate_filename(failure, :python) =~ ~r/^reproduce_512902757_[0-9a-f]+\.py$/
+
+      assert Common.generate_filename(failure, :livebook) =~
+               ~r/^reproduce_512902757_[0-9a-f]+\.livemd$/
+
+      # stable for the same failure, distinct for a different one
+      assert Common.generate_filename(failure, :exunit) ==
+               Common.generate_filename(failure, :exunit)
+
+      other = %{failure | failure_reason: {:check_failed, :Other, "different"}}
+
+      refute Common.generate_filename(other, :exunit) ==
+               Common.generate_filename(failure, :exunit)
     end
 
     test "command_name extracts last part of module" do

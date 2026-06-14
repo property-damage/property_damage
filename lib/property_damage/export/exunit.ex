@@ -137,8 +137,12 @@ defmodule PropertyDamage.Export.ExUnit do
       commands
       |> Enum.map_join(",\n", &format_command/1)
 
+    # Bound with a leading underscore: the regression test reproduces the
+    # failure by re-running with the exact seed (max_runs: 1), so this list is
+    # documentation of the shrunk sequence, not executed. Naming it `commands`
+    # made every generated test fail `--warnings-as-errors` (unused variable).
     """
-        commands = [
+        _commands = [
     #{command_strs}
         ]
     """
@@ -189,7 +193,19 @@ defmodule PropertyDamage.Export.ExUnit do
     end
   end
 
-  defp format_field_value(value), do: inspect(value)
+  # PIDs/references/functions/ports have no valid source literal; inspect/1
+  # renders them as `#PID<...>` etc., which is a syntax error in generated code.
+  defp format_field_value(value)
+       when is_pid(value) or is_reference(value) or is_function(value) or is_port(value),
+       do: "nil"
+
+  defp format_field_value(value) do
+    inspected = inspect(value)
+    # Any other `#...`-prefixed inspect output (e.g. a struct with a custom
+    # Inspect impl) is not a valid literal either; fall back to something that
+    # compiles rather than emitting un-parseable code.
+    if String.starts_with?(inspected, "#"), do: "nil", else: inspected
+  end
 
   defp format_map_key(key) when is_atom(key), do: inspect(key)
   defp format_map_key(key), do: inspect(key)

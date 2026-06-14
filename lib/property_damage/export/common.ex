@@ -343,9 +343,20 @@ defmodule PropertyDamage.Export.Common do
   Generates a filename for the export based on seed and format.
   """
   @spec generate_filename(FailureReport.t(), atom()) :: String.t()
-  def generate_filename(%FailureReport{seed: seed}, format) do
+  def generate_filename(%FailureReport{seed: seed} = report, format) do
     ext = extension_for_format(format)
-    "reproduce_#{seed}#{ext}"
+    "reproduce_#{seed}_#{failure_signature(report)}#{ext}"
+  end
+
+  # A short, stable content signature so two distinct failures that happen to
+  # share a seed (across models, or a randomly-seeded run) don't silently
+  # overwrite each other, while an identical failure maps to the same file.
+  defp failure_signature(%FailureReport{} = report) do
+    {report.failure_type, report.check_name, report.failure_reason, report.shrunk_sequence}
+    |> :erlang.phash2()
+    |> Integer.to_string(16)
+    |> String.downcase()
+    |> String.pad_leading(8, "0")
   end
 
   defp extension_for_format(:exunit), do: ".exs"
