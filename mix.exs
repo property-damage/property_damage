@@ -125,10 +125,10 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.SeedLibrary,
           PropertyDamage.Regression
         ],
-        # Modules that ship but are NOT part of the v0.2 validated surface
-        # (see the README note). Grouped last and clearly labelled so the docs
-        # do not advertise them alongside the validated core.
-        "Advanced (not in v0.2 surface)": [
+        # Modules that ship but are work in progress and not fully supported at
+        # this time (see the README note). Grouped last and clearly labelled so
+        # the docs do not advertise them alongside the validated core.
+        "Advanced (work in progress, not fully supported)": [
           PropertyDamage.Analysis,
           PropertyDamage.Flakiness,
           PropertyDamage.Mutation,

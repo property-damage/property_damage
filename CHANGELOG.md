@@ -7,19 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **BREAKING**: Renamed `state_projection/0` to `command_sequence_projection/0`
-  - Clearer name: returns the projection used for command sequence generation
-- **BREAKING**: Renamed `extra_projections/0` to `assertion_projections/0`
-  - Clearer name: these projections verify invariants
+This cycle made the headline features that 0.1.0 advertised actually work end to
+end, and trimmed the documented surface to what has been validated.
 
 ### Added
 
-- Documentation of command sequence generation loop in `PropertyDamage.Model` moduledoc
-- New guide: "Building Reusable Components" (`guides/reusable_components.md`)
-  - Explains protocols for state access across different state structures
-  - Covers reusable command configurations and assertion projections
+- `external()` server-generated field markers now work end to end (DR-021):
+  placeholders are created during generation, transported to execution via the
+  `Sequence` registry, captured by the producing command's structured position,
+  and remapped through shrinking. New consumer-routing helpers
+  `PropertyDamage.Generator.available_externals/2` and `external_from/2`.
+- Decision Records under `docs/decisions/` (DR-001–DR-021).
+- `credo` as a dev/test lint (non-blocking in CI); `PlaceholderRegistry.resolve/3`.
+- Documentation of the command sequence generation loop in the
+  `PropertyDamage.Model` moduledoc.
+- New guide: "Building Reusable Components" (`guides/reusable_components.md`).
+
+### Changed
+
+- **BREAKING**: Renamed `state_projection/0` to `command_sequence_projection/0`
+  (clearer name: returns the projection used for command sequence generation).
+- **BREAKING**: Renamed `extra_projections/0` to `assertion_projections/0`
+  (clearer name: these projections verify invariants).
+- Sequence generation is now a pure function of the run seed (seeded
+  `StreamData`), so a reported seed reproduces the failing sequence exactly.
+- Probe/async settle behaviour is sourced from the command spec (DR-019) at
+  execution time.
+- Trimmed the README, feature list, and docs to the validated surface. Several
+  modules (load testing, mutation testing, invariant suggestions, failure
+  intelligence clustering/verification, production forensics, flakiness
+  detection, the telemetry dashboard, and Livebook visualization) are documented
+  as work in progress and grouped separately; the inaccurate "AI-powered"
+  framing of `Suggestions` was removed and a chaos/Toxiproxy caveat added to the
+  nemesis docs. ex_doc modules are now grouped by tier and all guides are
+  surfaced.
+- Guides use seeded selection (`StreamData.member_of`) instead of `Enum.random`,
+  and valid `external()` struct syntax.
+
+### Fixed
+
+- Step-by-step `Replay` rebuilt as a stepping shell over the executor (it
+  previously could not execute a single step against any model).
+- Eventual-consistency pipeline rebuilt: probe/async settle and `@poll_state`
+  polling now function (the latter previously crashed the run on the first
+  command).
+- Branching/parallel execution, linearization checking, and branch-aware
+  shrinking rebuilt.
+- Hierarchical shrinking index handling; placeholder resolution is preserved
+  through shrinking.
+- Failure output made crash-proof (JSON serialization, error classification,
+  formatter). Malformed adapter returns, raising adapters, and raising
+  projections now produce graceful failure reports instead of crashing the run.
 
 ## [0.1.0] - 2024-12-27
 
