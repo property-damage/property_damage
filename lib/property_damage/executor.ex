@@ -686,15 +686,22 @@ defmodule PropertyDamage.Executor do
       |> Enum.flat_map(&Map.get(&1, :active_resource_pollers, []))
       |> Enum.uniq()
 
-    # Update through the prefix state so every other key (placeholder
-    # registry, stutter config, mock registry, model, external markers, ...)
-    # is preserved instead of silently dropped
+    # Merge each branch's external resolutions back (DR-021): branches execute
+    # in forked states, so a placeholder produced inside a branch is resolved
+    # only in that branch's registry. Union the resolved values so the suffix
+    # (and the report) observe them.
+    merged_registry =
+      merge_placeholder_registries(prefix_state.placeholder_registry, branch_results)
+
+    # Update through the prefix state so every other key (stutter config, mock
+    # registry, model, external markers, ...) is preserved instead of dropped
     %{
       prefix_state
       | event_log: merged_event_log,
         projections: merged_projections,
         projections_before: merged_projections,
         refs: merged_refs,
+        placeholder_registry: merged_registry,
         step_count: total_steps,
         assertion_counters: merged_counters,
         assertion_failures: merged_failures,
@@ -702,6 +709,27 @@ defmodule PropertyDamage.Executor do
         active_pollers: merged_pollers,
         active_resource_pollers: merged_resource_pollers
     }
+  end
+
+  # Combine branch registries: keep a placeholder's resolved value if any branch
+  # resolved it (branches resolve disjoint placeholders, so there is no conflict).
+  # The id index and producer_link are identical across branches (transported
+  # from generation), so only the resolutions need merging.
+  defp merge_placeholder_registries(base, branch_results) do
+    Enum.reduce(branch_results, base, fn {_id, state, _commands}, acc ->
+      case Map.get(state, :placeholder_registry) do
+        %PlaceholderRegistry{placeholders: branch_phs} ->
+          merged =
+            Map.merge(acc.placeholders, branch_phs, fn _id, a, b ->
+              if Placeholder.resolved?(b), do: b, else: a
+            end)
+
+          %{acc | placeholders: merged}
+
+        _ ->
+          acc
+      end
+    end)
   end
 
   defp count_branch_commands(branches) do

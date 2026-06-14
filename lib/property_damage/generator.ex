@@ -416,24 +416,29 @@ defmodule PropertyDamage.Generator do
     # Calculate max length per branch
     per_branch_max = min(max_branch_length, div(remaining, num_branches))
 
-    # Generate each branch independently from the same state snapshot.
-    # NOTE (R3 cluster A): branch-internal placeholder minting (the {:branch, b, i}
-    # positions and the branch-collapse remap) lands with branching capture in
-    # cluster C. Branches currently contribute no placeholders.
+    # Generate each branch independently from the same state snapshot. Each
+    # branch mints with a {:branch, b, i} position (b is the branch's index in
+    # the full generator list); empty branches are dropped below and surviving
+    # branch indices are remapped to match the executor's branch_id ordering.
     branch_generators =
-      for _ <- 1..num_branches do
+      for b <- 0..(num_branches - 1) do
         generate_branch(
           commands,
           projection,
           model,
           state_at_branch,
           per_branch_max,
-          []
+          [],
+          [],
+          markers,
+          fn i -> {:branch, b, i} end
         )
       end
 
-    # Combine all branches
-    StreamData.bind(combine_branches(branch_generators), fn branches ->
+    # combine_branches yields a list of {branch_commands, branch_placeholders}.
+    StreamData.bind(combine_branches(branch_generators), fn branch_results ->
+      branches = Enum.map(branch_results, fn {branch, _ph} -> branch end)
+
       # Compute merged state after all branches
       merged_state = merge_branch_states(state_at_branch, branches, projection, model)
 
@@ -454,61 +459,108 @@ defmodule PropertyDamage.Generator do
         &{:suffix, &1}
       )
       |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
-        # Filter out empty branches
-        non_empty_branches = Enum.reject(branches, &Enum.empty?/1)
-        all_ph = prefix_ph ++ suffix_ph
-
-        if length(non_empty_branches) >= 2 do
-          attach_registry(Sequence.branching(prefix, non_empty_branches, suffix_cmds), all_ph)
-        else
-          # Less than 2 branches, convert to linear. The sequence is now flat, so
-          # the post-branch suffix's {:suffix, i} positions must be remapped onto
-          # the continuing {:prefix, _} numbering.
-          flattened = List.flatten(non_empty_branches)
-          base = length(prefix) + length(flattened)
-
-          remapped_suffix_ph =
-            Enum.map(suffix_ph, fn
-              %Placeholder{position: {:suffix, i}} = p -> %{p | position: {:prefix, base + i}}
-              p -> p
-            end)
-
-          attach_registry(
-            Sequence.linear(prefix ++ flattened ++ suffix_cmds),
-            prefix_ph ++ remapped_suffix_ph
-          )
-        end
+        assemble_branching(prefix, prefix_ph, branch_results, suffix_cmds, suffix_ph)
       end)
     end)
   end
 
-  defp generate_branch(_commands, _projection, _model, _state, 0, acc) do
-    StreamData.constant(Enum.reverse(acc))
+  # Drop empty branches and build the final sequence. Surviving branches are
+  # renumbered to a contiguous 0..k range (matching the executor's branch_id),
+  # and their placeholders' {:branch, _, i} positions remapped accordingly. If
+  # fewer than 2 branches survive the sequence collapses to linear, so branch
+  # and suffix placeholders are remapped onto the continuing {:prefix, _} space.
+  defp assemble_branching(prefix, prefix_ph, branch_results, suffix_cmds, suffix_ph) do
+    surviving = Enum.reject(branch_results, fn {branch, _ph} -> Enum.empty?(branch) end)
+
+    if length(surviving) >= 2 do
+      {branches, branch_ph} =
+        surviving
+        |> Enum.with_index()
+        |> Enum.map_reduce([], fn {{branch, ph}, new_idx}, acc ->
+          {branch, acc ++ rebranch(ph, new_idx)}
+        end)
+
+      attach_registry(
+        Sequence.branching(prefix, branches, suffix_cmds),
+        prefix_ph ++ branch_ph ++ suffix_ph
+      )
+    else
+      base = length(prefix)
+
+      {flattened, branch_ph, suffix_base} =
+        Enum.reduce(surviving, {[], [], base}, fn {branch, ph}, {cmds, acc, offset} ->
+          {cmds ++ branch, acc ++ to_prefix(ph, offset), offset + length(branch)}
+        end)
+
+      remapped_suffix_ph =
+        Enum.map(suffix_ph, fn
+          %Placeholder{position: {:suffix, i}} = p -> %{p | position: {:prefix, suffix_base + i}}
+          p -> p
+        end)
+
+      attach_registry(
+        Sequence.linear(prefix ++ flattened ++ suffix_cmds),
+        prefix_ph ++ branch_ph ++ remapped_suffix_ph
+      )
+    end
   end
 
-  defp generate_branch(commands, projection, model, state, remaining, acc) do
+  defp rebranch(placeholders, new_idx) do
+    Enum.map(placeholders, fn
+      %Placeholder{position: {:branch, _old, i}} = p -> %{p | position: {:branch, new_idx, i}}
+      p -> p
+    end)
+  end
+
+  defp to_prefix(placeholders, offset) do
+    Enum.map(placeholders, fn
+      %Placeholder{position: {:branch, _old, i}} = p -> %{p | position: {:prefix, offset + i}}
+      p -> p
+    end)
+  end
+
+  defp generate_branch(_commands, _projection, _model, _state, 0, acc, acc_ph, _markers, _pos_fun) do
+    StreamData.constant({Enum.reverse(acc), acc_ph})
+  end
+
+  defp generate_branch(
+         commands,
+         projection,
+         model,
+         state,
+         remaining,
+         acc,
+         acc_ph,
+         markers,
+         pos_fun
+       ) do
     valid_commands = filter_valid_commands(commands, state)
 
     case valid_commands do
       [] ->
-        StreamData.constant(Enum.reverse(acc))
+        StreamData.constant({Enum.reverse(acc), acc_ph})
 
       _ ->
         # 30% chance to end branch early (creates varied branch lengths)
         StreamData.bind(StreamData.float(min: 0.0, max: 1.0), fn roll ->
           if roll < 0.3 and length(acc) > 0 do
-            StreamData.constant(Enum.reverse(acc))
+            StreamData.constant({Enum.reverse(acc), acc_ph})
           else
             StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
               generator = get_command_generator(cmd_module, opts, state)
 
               StreamData.bind(generator, fn command ->
                 events = simulate_command(model, state, command)
+
+                {events, minted} =
+                  instantiate_placeholders(events, pos_fun.(length(acc)), markers)
+
                 new_state = update_state(state, command, events, projection)
                 new_acc = [command | acc]
+                new_acc_ph = acc_ph ++ minted
 
                 if should_terminate?(model, new_state, command, events) do
-                  StreamData.constant(Enum.reverse(new_acc))
+                  StreamData.constant({Enum.reverse(new_acc), new_acc_ph})
                 else
                   generate_branch(
                     commands,
@@ -516,7 +568,10 @@ defmodule PropertyDamage.Generator do
                     model,
                     new_state,
                     remaining - 1,
-                    new_acc
+                    new_acc,
+                    new_acc_ph,
+                    markers,
+                    pos_fun
                   )
                 end
               end)
