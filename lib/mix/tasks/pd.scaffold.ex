@@ -45,18 +45,24 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   ```elixir
   defmodule MyAppTest.Commands.CreateUser do
-    use PropertyDamage.Command
+    @behaviour PropertyDamage.Command
+    import PropertyDamage.Generator, only: [merge_overrides: 2]
     defstruct [:name, :email, :role]
 
     @impl true
-    def new!(_state, _generators) do
-      %__MODULE__{
-        name: Faker.Person.name(),
-        email: Faker.Internet.email(),
-        role: Enum.random(["admin", "user", "guest"])
+    def generator(overrides \\\\ %{}) do
+      %{
+        name: StreamData.string(:alphanumeric, min_length: 5, max_length: 20),
+        email: StreamData.map(StreamData.positive_integer(), &"test_email_\#{&1}@example.com"),
+        role: StreamData.member_of(["admin", "user", "guest"])
       }
+      |> merge_overrides(overrides)
+      |> StreamData.fixed_map()
     end
-    # ...
+
+    # Fill in to map an HTTP response to events (status-aware):
+    def events(_command, 201, body), do: [%MyAppTest.Events.UserCreated{id: body["id"]}]
+    def events(_command, _status, _body), do: []
   end
   ```
 
@@ -64,7 +70,8 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   ```elixir
   defmodule MyAppTest.Events.UserCreated do
-    defstruct [:id, :name, :email, :role, :created_at]
+    import PropertyDamage, only: [external: 0]
+    defstruct [id: external(), name: nil, email: nil, role: nil, created_at: nil]
   end
   ```
 
@@ -72,10 +79,15 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   ```elixir
   defmodule MyAppTest.Adapter do
-    @behaviour PropertyDamage.Adapter
+    use PropertyDamage.Adapter
 
+    @impl true
     def execute(%Commands.CreateUser{} = cmd, ctx) do
-      Req.post!(ctx.base_url <> "/users", json: Map.from_struct(cmd)).body
+      # ... build url/body, then map the response to events via the command:
+      case http_request(:post, url, body, []) do
+        {:ok, status, response} -> {:ok, cmd.__struct__.events(cmd, status, response)}
+        {:error, reason} -> {:error, reason}
+      end
     end
     # ...
   end
@@ -109,7 +121,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   ## After Generation
 
   1. Review and customize generators in command `generator/1` callbacks
-  2. Define events/2 to map responses to your event structs
+  2. Define events/3 (command, status, response) to map responses to your event structs
   3. Add preconditions (when:) and overrides (with:) in the Model's commands()
   4. Implement simulate/2 in the Model for expected events
   5. Configure authentication in the adapter
@@ -497,7 +509,11 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
     Mix.shell().info("\nNext steps:")
     Mix.shell().info("  1. Review and customize generators in command generator/1 callbacks")
-    Mix.shell().info("  2. Define events/2 to map responses to event structs")
+
+    Mix.shell().info(
+      "  2. Define events/3 (command, status, response) to map responses to events"
+    )
+
     Mix.shell().info("  3. Add when:/with: options in Model's commands() for preconditions")
     Mix.shell().info("  4. Implement simulate/2 in Model for expected events")
     Mix.shell().info("  5. Configure authentication in adapter")
@@ -515,7 +531,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     path_params = Enum.filter(op.parameters, &(&1.in == "path"))
     query_params = Enum.filter(op.parameters, &(&1.in == "query"))
 
-    """
+    code = """
     defmodule #{namespace}.Commands.#{op.module_name} do
       @moduledoc \"\"\"
       #{op.method} #{op.path}#{if op.summary != "", do: " - #{op.summary}", else: ""}
@@ -543,16 +559,21 @@ defmodule Mix.Tasks.Pd.Scaffold do
         |> StreamData.fixed_map()
       end
 
-      def events(command, response) do
-        # TODO: Map response to events
-        # Example: [%#{namespace}.Events.#{infer_event_name(op)}{}]
-        _ = {command, response}
+      # Map an HTTP response to events. `status` is the HTTP status code and
+      # `response` the decoded body; return a list of event structs, typically
+      # keyed on status (e.g. a 200 vs a 404). The adapter calls this for every
+      # completed HTTP response, so non-2xx outcomes can become events too.
+      # Example:
+      #   def events(_command, 200, body), do: [%#{namespace}.Events.#{infer_event_name(op)}{}]
+      #   def events(_command, 404, _body), do: []
+      def events(command, status, response) do
+        _ = {command, status, response}
         []
       end
 
-      #{if op.method == "POST", do: "# DEPRECATED: Use external() in event structs instead of creates_ref\n  # def creates_ref, do: :id\n  # See: event struct below should use `defstruct [..., id: external()]`", else: ""}
+      #{if op.method == "POST", do: "# Server-generated fields (e.g. an id) belong in the event struct via\n  # external(): `defstruct [..., id: external()]`. See the Events module.", else: ""}
 
-      #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "def read_only?, do: true", else: ""}
+      #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "@impl true\n      def read_only?, do: true", else: ""}
 
       # HTTP Info (for adapter)
       def __http_method__, do: :#{String.downcase(op.method)}
@@ -561,6 +582,23 @@ defmodule Mix.Tasks.Pd.Scaffold do
       #{if query_params != [], do: "def __query_params__, do: #{inspect(Enum.map(query_params, &String.to_atom(&1.field_name)))}", else: ""}
     end
     """
+
+    format_code(code)
+  end
+
+  # Run generated source through the formatter so the emitted tree is
+  # `mix format`-clean (no stray whitespace from empty interpolations) and a
+  # user's first `mix format` produces no diff. Falls back to the raw string if
+  # the source cannot be parsed, so generation never regresses on odd specs.
+  defp format_code(code) do
+    formatted =
+      code
+      |> Code.format_string!()
+      |> IO.iodata_to_binary()
+
+    formatted <> "\n"
+  rescue
+    _ -> code
   end
 
   defp collect_fields(op) do
@@ -863,6 +901,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
     #{generate_event_field_docs(event.fields)}end
     """
+    |> format_code()
   end
 
   defp inspect_fields(fields) do
@@ -907,7 +946,12 @@ defmodule Mix.Tasks.Pd.Scaffold do
           )
       \"\"\"
 
-      @behaviour PropertyDamage.Adapter
+      use PropertyDamage.Adapter
+
+      # Req is optional: the adapter prefers it when present and falls back to
+      # :httpc. Suppress the undefined-module warning so the generated code
+      # compiles cleanly under --warnings-as-errors without Req as a dependency.
+      @compile {:no_warn_undefined, [Req]}
 
       alias #{namespace}.Commands
 
@@ -989,11 +1033,8 @@ defmodule Mix.Tasks.Pd.Scaffold do
           |> maybe_add_body(method, body)
 
         case Req.request(opts) do
-          {:ok, %{status: status, body: resp_body}} when status in 200..299 ->
-            {:ok, resp_body}
-
           {:ok, %{status: status, body: resp_body}} ->
-            {:error, {status, resp_body}}
+            {:ok, status, resp_body}
 
           {:error, reason} ->
             {:error, reason}
@@ -1023,18 +1064,25 @@ defmodule Mix.Tasks.Pd.Scaffold do
           end
 
         case :httpc.request(method, request, [], body_format: :binary) do
-          {:ok, {{_, status, _}, _, resp_body}} when status in 200..299 ->
-            {:ok, Jason.decode!(resp_body)}
-
           {:ok, {{_, status, _}, _, resp_body}} ->
-            {:error, {status, resp_body}}
+            {:ok, status, decode_body(resp_body)}
 
           {:error, reason} ->
             {:error, reason}
         end
       end
+
+      defp decode_body(""), do: nil
+
+      defp decode_body(body) do
+        case Jason.decode(body) do
+          {:ok, decoded} -> decoded
+          {:error, _} -> body
+        end
+      end
     end
     """
+    |> format_code()
   end
 
   defp generate_execute_clauses(operations, namespace, auth_schemes) do
@@ -1054,8 +1102,11 @@ defmodule Mix.Tasks.Pd.Scaffold do
         body = build_body(cmd)
         headers = #{if has_auth, do: "build_auth_headers(ctx)", else: "[]"}
 
+        # PropertyDamage expects {:ok, [event structs]}. Map every completed HTTP
+        # response (any status) to events via the command's events/3; reserve
+        # {:error, _} for transport failures so a 404/409 can be an observation.
         case http_request(:#{String.downcase(op.method)}, full_url, body, headers) do
-          {:ok, response} -> {:ok, response}
+          {:ok, status, response} -> {:ok, cmd.__struct__.events(cmd, status, response)}
           {:error, reason} -> {:error, reason}
         end
       end
@@ -1202,6 +1253,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       # def teardown_once(_config), do: :ok
     end
     """
+    |> format_code()
   end
 
   @doc false

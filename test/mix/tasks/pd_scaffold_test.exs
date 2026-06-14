@@ -173,6 +173,142 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
     }
   }
 
+  # A spec with no uuid/format fields, so generated code needs no extra deps
+  # (Ecto/Faker). Mirrors benches/openapi_bench so the "generated code is real"
+  # checks below can actually compile what the scaffold emits.
+  @kv_spec %{
+    "openapi" => "3.0.3",
+    "info" => %{"title" => "KV", "version" => "1.0.0"},
+    "servers" => [%{"url" => "http://localhost:4010"}],
+    "paths" => %{
+      "/kv/{key}" => %{
+        "put" => %{
+          "operationId" => "putValue",
+          "parameters" => [
+            %{
+              "name" => "key",
+              "in" => "path",
+              "required" => true,
+              "schema" => %{"type" => "integer", "minimum" => 0, "maximum" => 4}
+            }
+          ],
+          "requestBody" => %{
+            "required" => true,
+            "content" => %{
+              "application/json" => %{
+                "schema" => %{
+                  "type" => "object",
+                  "required" => ["value"],
+                  "properties" => %{"value" => %{"type" => "integer"}}
+                }
+              }
+            }
+          },
+          "responses" => %{
+            "200" => %{
+              "description" => "ok",
+              "content" => %{
+                "application/json" => %{
+                  "schema" => %{
+                    "type" => "object",
+                    "properties" => %{
+                      "key" => %{"type" => "integer"},
+                      "value" => %{"type" => "integer"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "get" => %{
+          "operationId" => "getValue",
+          "parameters" => [
+            %{
+              "name" => "key",
+              "in" => "path",
+              "required" => true,
+              "schema" => %{"type" => "integer", "minimum" => 0, "maximum" => 4}
+            }
+          ],
+          "responses" => %{"200" => %{"description" => "ok"}}
+        }
+      }
+    }
+  }
+
+  # The scaffold is a 0%-tested codegen surface; the substring checks elsewhere
+  # in this file never compile what they assert on. These checks do: they
+  # generate, then compile and format-check the real output, which is the only
+  # way to catch drift like a non-PD-contract adapter return, missing @impl /
+  # required-callback warnings, undefined-module warnings, or stray whitespace.
+  describe "generated code is real (compiles + format-stable)" do
+    test "every generated artifact is mix-format stable" do
+      ns = "PdScaffoldRealTest.FormatStable"
+      ops = Scaffold.extract_operations(@kv_spec, nil)
+      api_info = Scaffold.extract_api_info(@kv_spec, nil)
+
+      sources =
+        Enum.map(ops, &Scaffold.generate_command(&1, ns)) ++
+          [
+            Scaffold.generate_event(sample_event(), ns),
+            Scaffold.generate_adapter(ops, ns, api_info, []),
+            Scaffold.generate_model(ops, ns)
+          ]
+
+      for code <- sources do
+        assert code == reformat(code),
+               "generated source is not mix-format stable:\n#{code}"
+      end
+    end
+
+    test "the generated suite compiles with zero warnings/errors" do
+      ns = "PdScaffoldRealTest.Compiles"
+      ops = Scaffold.extract_operations(@kv_spec, nil)
+      api_info = Scaffold.extract_api_info(@kv_spec, nil)
+
+      # Commands first (the adapter pattern-matches on their structs), then the
+      # event, adapter, and model.
+      ordered =
+        Enum.map(ops, &Scaffold.generate_command(&1, ns)) ++
+          [
+            Scaffold.generate_event(sample_event(), ns),
+            Scaffold.generate_adapter(ops, ns, api_info, []),
+            Scaffold.generate_model(ops, ns)
+          ]
+
+      {_, diagnostics} =
+        Code.with_diagnostics(fn ->
+          Enum.each(ordered, &Code.compile_string/1)
+        end)
+
+      assert diagnostics == [],
+             "generated code emitted compiler diagnostics:\n" <>
+               Enum.map_join(diagnostics, "\n", &inspect/1)
+
+      # The codegen contract that makes it usable by the executor:
+      assert function_exported?(Module.concat(ns, "Commands.PutValue"), :events, 3)
+      assert function_exported?(Module.concat(ns, "Commands.GetValue"), :read_only?, 0)
+      adapter = Module.concat(ns, "Adapter")
+      assert function_exported?(adapter, :execute, 2)
+      # timeout/1 is a required Adapter callback; `use` must inject the default.
+      assert function_exported?(adapter, :timeout, 1)
+    end
+
+    test "the generated adapter maps responses to events (not the raw body)" do
+      ns = "PdScaffoldRealTest.AdapterReturn"
+      ops = Scaffold.extract_operations(@kv_spec, nil)
+      api_info = Scaffold.extract_api_info(@kv_spec, nil)
+
+      adapter_code = Scaffold.generate_adapter(ops, ns, api_info, [])
+
+      # PropertyDamage rejects {:ok, non-list}; the adapter must funnel the HTTP
+      # response through the command's events/3 and return {:ok, events}.
+      assert adapter_code =~ "{:ok, cmd.__struct__.events(cmd, status, response)}"
+      refute adapter_code =~ "{:ok, response} -> {:ok, response}"
+    end
+  end
+
   describe "extract_api_info/2" do
     test "extracts API title, version, and base URL" do
       info = extract_api_info(@sample_openapi_spec, nil)
@@ -395,9 +531,8 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "def generator(overrides"
       assert code =~ "merge_overrides(overrides)"
       assert code =~ "StreamData.fixed_map()"
-      assert code =~ "def events(command, response)"
-      # POST should create a ref
-      assert code =~ "def creates_ref"
+      # events/3 is status-aware so non-2xx responses can become events too
+      assert code =~ "def events(command, status, response)"
     end
 
     test "generates GET command as read_only" do
@@ -452,7 +587,8 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       code = generate_adapter(operations, "PetStore", api_info, auth_schemes)
 
       assert code =~ "defmodule PetStore.Adapter do"
-      assert code =~ "@behaviour PropertyDamage.Adapter"
+      # use (not @behaviour) so the default timeout/1 callback is injected
+      assert code =~ "use PropertyDamage.Adapter"
       assert code =~ "def setup(config)"
       assert code =~ "def teardown(_config)"
       assert code =~ "def execute(%Commands.CreatePet{}"
@@ -503,6 +639,24 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
     test "defaults to Generated when path is just lib" do
       assert infer_namespace("lib/") == "Generated"
     end
+  end
+
+  # Re-run a source string through the formatter (idempotent for format-clean
+  # output). Mirrors the scaffold's own internal formatting step.
+  defp reformat(code) do
+    (code |> Code.format_string!() |> IO.iodata_to_binary()) <> "\n"
+  end
+
+  defp sample_event do
+    %{
+      name: "ValueRetrieved",
+      fields: [
+        %{name: "key", type: :integer, required: true, description: ""},
+        %{name: "value", type: :integer, required: true, description: ""}
+      ],
+      description: "The stored key/value pair",
+      operation: "getValue"
+    }
   end
 
   # Helper aliases for cleaner tests
