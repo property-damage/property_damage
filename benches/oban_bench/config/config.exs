@@ -24,11 +24,13 @@ end
 #
 # The retry bench needs retryable jobs re-staged FAST and reliably on a single
 # node. Two things matter:
-#   * the core Stager only stages while a node holds leadership, and leadership
-#     comes from the Peer. `plugins: false` ALSO stops the Peer from starting,
+#   * the core Stager only stages while a node holds leadership. `plugins: false`
+#     is documented to disable plugins AND leadership: Oban's normalize_peer
+#     forces `{Oban.Peers.Isolated, leader?: false}` whenever plugins is false,
 #     so no node was ever leader and retryable jobs sat forever -- forced
-#     retries never re-ran. Using the Isolated peer (always leader, no database
-#     election) keeps it running and instant.
+#     retries never re-ran. (Setting `peer:` alongside `plugins: false` does not
+#     help; the plugins-false branch overrides it.) Dropping `plugins: false`
+#     lets the Isolated peer default to leader?: true, so staging runs.
 #   * `stage_interval: 50` re-stages within the resource poller's budget; the
 #     default 1s left the first retry pending too long.
 # Both are benign for the non-retrying EC and uniqueness benches.
