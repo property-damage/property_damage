@@ -469,8 +469,7 @@ defmodule PropertyDamage.Validation do
       for proj <- extra_projs,
           function_exported?(proj, :__assertions__, 0),
           assertion <- proj.__assertions__(),
-          %{modules: modules} <- [assertion.trigger],
-          mod <- List.wrap(modules) do
+          mod <- assertion_handled_modules(assertion) do
         mod
       end
       |> Enum.uniq()
@@ -498,6 +497,14 @@ defmodule PropertyDamage.Validation do
         ]
     end
   end
+
+  # Events an assertion observes. Synchronous (@trigger) assertions list them
+  # under trigger.modules; polling (@poll_state) assertions are spawned by the
+  # events in poll_state.after (and thus observe them). Polling assertions have
+  # no :trigger key, so reaching for assertion.trigger blindly would crash.
+  defp assertion_handled_modules(%{trigger: %{modules: modules}}), do: List.wrap(modules)
+  defp assertion_handled_modules(%{poll_state: %{after: after_events}}), do: List.wrap(after_events)
+  defp assertion_handled_modules(_assertion), do: []
 
   defp warn_no_assertion_projections(model) do
     extra_projs =

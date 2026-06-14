@@ -111,4 +111,76 @@ defmodule PropertyDamage.ValidationTest do
       assert output =~ "PropertyDamage Configuration Summary"
     end
   end
+
+  # Regression: warn_orphan_events/1 used to read assertion.trigger blindly,
+  # which crashed (KeyError :trigger) on @poll_state assertions, since those
+  # carry :poll_state instead. Surfaced by the Oban (6b) bench, whose model
+  # validates a projection with a @poll_state assertion. The event a poll
+  # triggers on must also count as handled (not reported as an orphan).
+  describe "validate!/3 with a @poll_state assertion projection" do
+    defmodule PollEvents do
+      defmodule Started, do: defstruct([])
+      defmodule Finished, do: defstruct([])
+    end
+
+    defmodule PollCommand do
+      @behaviour PropertyDamage.Command
+      defstruct []
+
+      @impl true
+      def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+
+      @impl true
+      def downstream_observables, do: [PollEvents.Started]
+    end
+
+    defmodule PollProjection do
+      use PropertyDamage.Model.Projection
+
+      alias PollEvents.{Finished, Started}
+
+      @impl true
+      def init, do: %{done: false}
+
+      @impl true
+      def apply(state, %Finished{}), do: %{state | done: true}
+      def apply(state, _), do: state
+
+      @poll_state after: Started, timeout: {100, :milliseconds}, interval: {10, :milliseconds}
+      def eventually_finished(_state, %Started{}), do: fn s -> s.done end
+    end
+
+    defmodule PollModel do
+      @behaviour PropertyDamage.Model
+
+      @impl true
+      def commands, do: [PollCommand]
+      @impl true
+      def command_sequence_projection, do: PollProjection
+      @impl true
+      def assertion_projections, do: [PollProjection]
+    end
+
+    defmodule PollAdapter do
+      use PropertyDamage.Adapter
+
+      @impl true
+      def setup(config), do: {:ok, config}
+      @impl true
+      def teardown(_ctx), do: :ok
+      @impl true
+      def execute(%PollCommand{}, _ctx), do: {:ok, [%PollEvents.Started{}]}
+    end
+
+    test "validation does not crash on a @poll_state assertion" do
+      assert {:ok, warnings} = Validation.validate!(PollModel, PollAdapter)
+      assert is_list(warnings)
+    end
+
+    test "the poll's trigger event is not reported as an orphan" do
+      {:ok, warnings} = Validation.validate!(PollModel, PollAdapter)
+
+      refute Enum.any?(warnings, &(&1 =~ "Started" and &1 =~ "orphan"))
+    end
+  end
 end
