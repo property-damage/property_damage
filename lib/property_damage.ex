@@ -1322,29 +1322,38 @@ defmodule PropertyDamage do
 
   ## How It Works
 
-  1. In your simulator, return events with external fields unset (or any value):
+  1. In your simulator, return events with external fields unset. `simulate/2`
+     returns a bare list of event structs; `id: external()` is implicit:
 
       def simulate(%CreateOrder{amount: amt}, _state) do
-        {:ok, [%OrderCreated{amount: amt}]}  # id: external() is implicit
+        [%OrderCreated{amount: amt}]
       end
 
   2. The framework automatically:
      - Detects external markers during simulation
-     - Creates internal placeholders to track dependencies
+     - Creates internal placeholders to track dependencies (these flow into
+       projection state in place of the marker)
      - Resolves placeholders with real values from the SUT
 
-  3. In projections, you receive concrete values:
+  3. In projections, you receive concrete values at execution time:
 
       def apply(state, %OrderCreated{id: id, amount: amt}) do
         put_in(state.orders[id], %{amount: amt})  # id is a real value
       end
 
-  4. In command generators, read resolved values from state:
+  4. To make a later command consume a server-generated value, route a
+     placeholder out of state in the model's `with:` function. During
+     generation the projection holds placeholders, which
+     `PropertyDamage.Generator.external_from/2` surfaces as a seeded choice:
 
-      def new!(state, _overrides) do
-        order_id = state.orders |> Map.keys() |> Enum.random()
-        StreamData.constant(%__MODULE__{order_id: order_id})
-      end
+      # in the model's command list
+      {ViewOrder,
+       when: fn state -> map_size(state.orders) > 0 end,
+       with: fn state ->
+         %{order_id: PropertyDamage.Generator.external_from(state, path: [:id])}
+       end}
+
+     The chosen placeholder resolves to the real id before `ViewOrder` runs.
 
   ## Limitations
 
