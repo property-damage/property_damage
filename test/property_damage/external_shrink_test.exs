@@ -118,4 +118,38 @@ defmodule PropertyDamage.ExternalShrinkTest do
     {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
     assert match?({:adapter_error, :consumer_saw_real_id}, replay.failure_reason)
   end
+
+  test "hierarchical shrinking (long sequence) preserves the producer->consumer dependency" do
+    # Above the granularity threshold (8) the hierarchical strategy runs, which
+    # relies on the dependency graph mapping each placeholder to its producer by
+    # structured position. The producer (index 0) must be pulled back whenever
+    # the consumer survives, and the shrunk sequence must still resolve.
+    ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+    reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
+
+    noise = List.duplicate(%Noise{}, 12)
+
+    full =
+      ([%Create{}] ++ noise ++ [%Use{target: ph}])
+      |> Sequence.linear()
+      |> Sequence.with_registry(reg)
+
+    {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
+    assert match?({:adapter_error, :consumer_saw_real_id}, result.failure_reason)
+
+    shrunk =
+      Shrinker.shrink(full,
+        failed_at_index: result.failed_at_index,
+        failure_reason: result.failure_reason,
+        model: Model,
+        adapter: Adapter,
+        adapter_config: %{}
+      )
+
+    commands = Sequence.to_list(shrunk.sequence)
+    assert [%Create{}, %Use{}] = commands
+
+    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
+    assert match?({:adapter_error, :consumer_saw_real_id}, replay.failure_reason)
+  end
 end
