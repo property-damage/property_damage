@@ -135,7 +135,7 @@ defmodule PropertyDamage.Settle do
   ## Options
 
   - `:timeout_ms` - Maximum time to wait (default: 2000)
-  - `:interval_ms` - Time between retries (default: 100)
+  - `:interval_ms` - Time between retries (default: 300)
   - `:backoff` - Backoff strategy, `:linear` or `:exponential` (default: `:linear`)
 
   ## Returns
