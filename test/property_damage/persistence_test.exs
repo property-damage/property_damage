@@ -187,6 +187,32 @@ defmodule PropertyDamage.PersistenceTest do
     end
 
     @tag :tmp_dir
+    test "warns when a loaded report's struct shape has drifted from the current definition",
+         %{tmp_dir: dir} do
+      # Simulate a report saved by a PD version with a different FailureReport
+      # field set: a struct-tagged map missing current fields. binary_to_term
+      # reconstructs the stored shape verbatim, so a silent shape mismatch can
+      # otherwise slip through.
+      drifted = %{__struct__: FailureReport, seed: 7, run_number: 0}
+      payload = %{version: 2, report: drifted, metadata: %{}}
+      term_binary = :erlang.term_to_binary(payload, [:compressed])
+      checksum = :erlang.crc32(term_binary)
+      path = Path.join(dir, "drifted.pd")
+      File.write!(path, <<"PD", 2::8, checksum::32, term_binary::binary>>)
+
+      assert {:ok, _report, warnings} = Persistence.load(path)
+      assert Enum.any?(warnings, &match?({:struct_shape_drift, _, _}, &1))
+    end
+
+    @tag :tmp_dir
+    test "a normally saved report loads without a struct-drift warning", %{tmp_dir: dir} do
+      report = create_test_report()
+      {:ok, path} = Persistence.save(report, dir)
+
+      assert {:ok, _loaded} = Persistence.load(path)
+    end
+
+    @tag :tmp_dir
     test "genuinely malformed bytes (no header) are still an invalid format", %{tmp_dir: dir} do
       path = Path.join(dir, "garbage.pd")
       File.write!(path, "not a pd file at all")

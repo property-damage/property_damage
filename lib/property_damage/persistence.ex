@@ -61,6 +61,7 @@ defmodule PropertyDamage.Persistence do
           {:property_damage_version_mismatch, String.t(), String.t()}
           | {:dependency_version_mismatch, atom(), String.t(), String.t()}
           | {:dependency_missing, atom(), String.t()}
+          | {:struct_shape_drift, [atom()], [atom()]}
 
   @type save_opts :: [
           filename: String.t(),
@@ -325,7 +326,7 @@ defmodule PropertyDamage.Persistence do
     else
       try do
         %{report: report} = :erlang.binary_to_term(term_binary, [:safe])
-        {:ok, report, []}
+        {:ok, report, check_struct_drift(report)}
       rescue
         # The checksum already matched, so the bytes are intact: a [:safe]
         # decode failure here means the term references atoms/modules that do
@@ -345,7 +346,11 @@ defmodule PropertyDamage.Persistence do
     else
       try do
         payload = :erlang.binary_to_term(term_binary, [:safe])
-        warnings = check_version_compatibility(payload[:metadata] || %{})
+
+        warnings =
+          check_version_compatibility(payload[:metadata] || %{}) ++
+            check_struct_drift(payload.report)
+
         {:ok, payload.report, warnings}
       rescue
         # See the v1 clause: post-checksum, this is unknown/unloadable terms
@@ -450,6 +455,27 @@ defmodule PropertyDamage.Persistence do
     warnings ++ dep_warnings
   end
 
+  # Compare a loaded report's field set against the current FailureReport
+  # definition. binary_to_term reconstructs whatever shape was stored, so a
+  # file written by a PD version with a different struct can deserialize into a
+  # struct missing (or carrying stale) fields without any error. Surface that as
+  # a warning rather than letting it pass silently.
+  defp check_struct_drift(report) when is_struct(report, FailureReport) do
+    current = MapSet.new(Map.keys(%FailureReport{}))
+    loaded = MapSet.new(Map.keys(report))
+
+    missing = current |> MapSet.difference(loaded) |> Enum.sort()
+    unexpected = loaded |> MapSet.difference(current) |> Enum.sort()
+
+    if missing == [] and unexpected == [] do
+      []
+    else
+      [{:struct_shape_drift, missing, unexpected}]
+    end
+  end
+
+  defp check_struct_drift(_), do: []
+
   defp format_warnings(warnings) do
     Enum.map_join(warnings, "\n", fn
       {:property_damage_version_mismatch, saved, current} ->
@@ -460,6 +486,10 @@ defmodule PropertyDamage.Persistence do
 
       {:dependency_missing, app, saved} ->
         "  - #{app}: was #{saved}, now missing"
+
+      {:struct_shape_drift, missing, unexpected} ->
+        "  - FailureReport struct shape drifted (missing: #{inspect(missing)}, " <>
+          "unexpected: #{inspect(unexpected)})"
     end)
   end
 
