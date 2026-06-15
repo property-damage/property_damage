@@ -5,7 +5,7 @@ All notable changes to PropertyDamage will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - TBD
 
 This cycle made the headline features that 0.1.0 advertised actually work end to
 end, and trimmed the documented surface to what has been validated.
@@ -41,13 +41,25 @@ end, and trimmed the documented surface to what has been validated.
 - Trimmed the README, feature list, and docs to the validated surface. Several
   modules (load testing, mutation testing, invariant suggestions, failure
   intelligence clustering/verification, production forensics, flakiness
-  detection, the telemetry dashboard, and Livebook visualization) are documented
+  detection, and the telemetry dashboard) are documented
   as work in progress and grouped separately; the inaccurate "AI-powered"
   framing of `Suggestions` was removed and a chaos/Toxiproxy caveat added to the
   nemesis docs. ex_doc modules are now grouped by tier and all guides are
   surfaced.
 - Guides use seeded selection (`StreamData.member_of`) instead of `Enum.random`,
   and valid `external()` struct syntax.
+
+### Removed
+
+- Removed the unvalidated genetic-algorithm guided generation (`GuidedRunner`
+  and the `TargetedGeneration` behaviour). The search was never shown to
+  outperform random generation and had no test coverage. Planned for a future
+  release with a proper validation harness.
+- Removed the interactive Livebook visualization (`PropertyDamage.Livebook` and
+  `PropertyDamage.Livebook.Charts`). The widgets read a run-result shape the
+  engine does not emit, so they could not work as shipped. Failure-to-notebook
+  export (`PropertyDamage.Export` Livebook output) is unaffected. Planned for a
+  future release built on a real result/telemetry source.
 
 ### Fixed
 
@@ -247,5 +259,5 @@ end, and trimmed the documented surface to what has been validated.
 - Interactive Livebook demo notebook
 - ExDoc configuration with module groups
 
-[Unreleased]: https://github.com/example/property_damage/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/example/property_damage/releases/tag/v0.1.0
+[0.2.0]: https://github.com/property-damage/property_damage/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/property-damage/property_damage/releases/tag/v0.1.0
