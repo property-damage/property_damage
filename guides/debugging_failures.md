@@ -164,24 +164,7 @@ Step 2: CreateCapture
            ^^^^ BUG: Should have rejected
 ```
 
-## Step 7: Livebook Exploration
-
-For interactive debugging, use Livebook:
-
-```elixir
-alias PropertyDamage.Livebook
-
-# Interactive failure explorer
-Livebook.explore_failure(failure)
-
-# Step through with UI controls
-Livebook.command_stepper(failure)
-
-# Compare expected vs actual state
-Livebook.state_diff(failure)
-```
-
-## Step 8: Export for Sharing
+## Step 7: Export for Sharing
 
 ### Generate ExUnit Test
 
@@ -211,7 +194,7 @@ notebook = PropertyDamage.Export.to_livebook(failure)
 File.write!("debug/failure_analysis.livemd", notebook)
 ```
 
-## Step 9: Save for Later
+## Step 8: Save for Later
 
 ### Persist the Failure
 
@@ -234,7 +217,7 @@ Track for regression testing:
 PropertyDamage.save_seed_library(library, "seeds.json")
 ```
 
-## Step 10: Verify the Fix
+## Step 9: Verify the Fix
 
 After fixing the bug:
 

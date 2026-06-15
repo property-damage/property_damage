@@ -137,8 +137,6 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.LoadTest,
           PropertyDamage.Forensics,
           PropertyDamage.Integration,
-          PropertyDamage.Livebook,
-          PropertyDamage.Livebook.Charts,
           PropertyDamage.Telemetry.Collector,
           PropertyDamage.Telemetry.Dashboard
         ]

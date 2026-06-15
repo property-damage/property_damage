@@ -2,20 +2,17 @@
 
 ```elixir
 Mix.install([
-  {:property_damage, path: ".."},
-  {:kino, "~> 0.12"},
-  {:vega_lite, "~> 0.1"},
-  {:kino_vega_lite, "~> 0.1"}
+  {:property_damage, path: ".."}
 ])
 ```
 
 ## Introduction
 
-This notebook demonstrates PropertyDamage's Livebook integration for interactive
-exploration of stateful property-based testing. You'll learn how to:
+This notebook demonstrates PropertyDamage, a stateful property-based testing
+framework. You'll learn how to:
 
 - Define models, commands, and projections
-- Run tests with live visualization
+- Run tests and inspect results
 - Analyze coverage and failures
 - Use chaos engineering with nemesis operations
 
@@ -317,87 +314,21 @@ defmodule Demo.Adapter do
 end
 ```
 
-## Part 2: Run Tests with Visualization
+## Part 2: Run Tests
 
-Now let's run the tests with live visualization:
-
-```elixir
-alias PropertyDamage.Livebook
-
-# Run with live progress updates
-result = Livebook.run_with_visualization(
-  model: Demo.Model,
-  adapter: Demo.Adapter,
-  max_runs: 20,
-  max_commands: 15
-)
-```
-
-## Part 3: Visualize Results
-
-### Main Dashboard
-
-The `visualize/1` function creates a tabbed dashboard with all visualizations:
+Run the property test against the model and adapter:
 
 ```elixir
-Livebook.visualize(result)
+result =
+  PropertyDamage.run(
+    model: Demo.Model,
+    adapter: Demo.Adapter,
+    max_runs: 20,
+    max_commands: 15
+  )
 ```
 
-### Results Table
-
-View command execution history in a sortable, filterable table:
-
-```elixir
-Livebook.results_table(result)
-```
-
-### Command Statistics
-
-See execution counts and timing for each command type:
-
-```elixir
-Livebook.command_stats(result)
-```
-
-## Part 4: Charts and Graphs
-
-### Command Execution Chart
-
-```elixir
-alias PropertyDamage.Livebook.Charts
-
-Charts.command_bar_chart(result)
-```
-
-### Timing Distribution
-
-```elixir
-Charts.timing_histogram(result)
-```
-
-### Success Rate
-
-```elixir
-Charts.success_pie_chart(result)
-```
-
-### Command Transitions
-
-See which commands follow which (useful for coverage analysis):
-
-```elixir
-Charts.command_transition_heatmap(result)
-```
-
-## Part 5: Interactive Command Stepper
-
-Step through command execution one at a time to understand failures:
-
-```elixir
-Livebook.command_stepper(result)
-```
-
-## Part 6: Coverage Analysis
+## Part 3: Coverage Analysis
 
 Analyze how thoroughly your model was exercised:
 
@@ -406,7 +337,7 @@ coverage = PropertyDamage.Coverage.from_result(result)
 PropertyDamage.Coverage.format_summary(coverage)
 ```
 
-## Part 7: Chaos Engineering with Nemesis
+## Part 4: Chaos Engineering with Nemesis
 
 PropertyDamage includes nemesis operations for fault injection.
 Here's how to use them:
@@ -457,7 +388,7 @@ CertificateExpiry.get_ssl_error()
 {:ok, _} = CertificateExpiry.restore(cert_cmd, %{})
 ```
 
-## Part 8: Export Results
+## Part 5: Export Results
 
 ### Export to ExUnit Test
 
@@ -480,27 +411,6 @@ Kino.Markdown.new(md)
 # IO.puts(script)
 ```
 
-## Part 9: Live Monitor
-
-Monitor test runs in real-time:
-
-```elixir
-monitor = Livebook.live_monitor()
-```
-
-Run some tests to see the monitor update:
-
-```elixir
-Task.start(fn ->
-  PropertyDamage.run(
-    model: Demo.Model,
-    adapter: Demo.Adapter,
-    max_runs: 10,
-    max_commands: 8
-  )
-end)
-```
-
 ## Tips for Effective Testing
 
 1. **Start Simple**: Begin with basic commands and add complexity gradually
@@ -511,8 +421,8 @@ end)
 3. **Check Coverage**: Use `Coverage.from_result/1` to ensure all commands
    and transitions are being exercised
 
-4. **Debug with Stepper**: When tests fail, use the command stepper to
-   understand exactly what happened
+4. **Debug with Replay**: When tests fail, use step-by-step replay
+   (`PropertyDamage.replay/2`) to understand exactly what happened
 
 5. **Shrinking is Your Friend**: PropertyDamage automatically shrinks
    failing sequences to minimal reproductions
