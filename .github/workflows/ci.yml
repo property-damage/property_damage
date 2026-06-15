@@ -163,16 +163,15 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 20
+      # No service healthcheck: the Toxiproxy image is shell-less, so Docker's
+      # shell-form --health-cmd cannot run and the container would be marked
+      # unhealthy even though the server is up (it starts in ~1s). Readiness is
+      # polled explicitly via the control API in a step below.
       toxiproxy:
         image: ghcr.io/shopify/toxiproxy:2.12.0
         ports:
           - 8474:8474
           - 6391:6391
-        options: >-
-          --health-cmd "/toxiproxy-cli list"
-          --health-interval 2s
-          --health-timeout 3s
-          --health-retries 20
     env:
       PD_REDIS_URL: redis://localhost:6379
       PD_TOXIPROXY_URL: http://localhost:8474
@@ -197,6 +196,18 @@ jobs:
             benches/redis_bench/_build
           key: bench-redis_bench-${{ hashFiles('benches/redis_bench/mix.lock') }}
           restore-keys: bench-redis_bench-
+
+      - name: Wait for the Toxiproxy control API
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8474/version >/dev/null; then
+              echo "toxiproxy control API ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "toxiproxy control API never became ready" >&2
+          exit 1
 
       - run: mix deps.get
 
