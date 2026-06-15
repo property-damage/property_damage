@@ -60,6 +60,25 @@ defmodule Mix.Tasks.PdGenTest do
     compiled
   end
 
+  # Stricter variant: the generated module must compile with NO warnings.
+  # Used for the command generator, whose output must satisfy the
+  # `PropertyDamage.Command` behaviour exactly (a missing required callback or
+  # a stray `@impl` would warn). The adapter/model/projection stubs reference
+  # optional third-party modules (Req/GRPC) and legitimately warn, so they use
+  # `assert_compiles/1` instead.
+  defp assert_compiles_without_warnings(content) do
+    warnings =
+      capture_io(:stderr, fn ->
+        for {mod, _bin} <- Code.compile_string(content) do
+          :code.purge(mod)
+          :code.delete(mod)
+        end
+      end)
+
+    assert warnings == "",
+           "expected generated code to compile without warnings, got:\n#{warnings}\n\nsource:\n#{content}"
+  end
+
   describe "Mix.Tasks.Pd.Gen.Command" do
     test "generates a basic command module" do
       capture_io(fn ->
@@ -71,12 +90,14 @@ defmodule Mix.Tasks.PdGenTest do
 
       content = File.read!(path)
       assert content =~ "@behaviour PropertyDamage.Command"
-      assert content =~ "def precondition"
-      assert content =~ "def new!"
-      # No fields -> constant generator, no overrides merge.
-      assert content =~ "StreamData.constant(%__MODULE__{})"
+      # The required Command callback is generator/1 (not new!/2), returning a
+      # map generator the executor maps to the struct.
+      assert content =~ "def generator"
+      refute content =~ "def new!"
+      # No fields -> constant empty-map generator.
+      assert content =~ "StreamData.constant(%{})"
 
-      assert_compiles(content)
+      assert_compiles_without_warnings(content)
     end
 
     test "generates a command with fields and probe semantics" do
@@ -94,13 +115,14 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "def new!"
+      assert content =~ "def generator"
+      refute content =~ "def new!"
       assert content =~ "def semantics, do: :probe"
       assert content =~ "thing_ref:"
       assert content =~ "name:"
       assert content =~ "PropertyDamage.Generator.merge_overrides(overrides)"
 
-      assert_compiles(content)
+      assert_compiles_without_warnings(content)
     end
 
     test "--creates-ref emits a deprecation warning and creates_ref/0" do
@@ -119,7 +141,7 @@ defmodule Mix.Tasks.PdGenTest do
       content = File.read!(path)
       assert content =~ "def creates_ref, do: :thing_id"
 
-      assert_compiles(content)
+      assert_compiles_without_warnings(content)
     end
   end
 

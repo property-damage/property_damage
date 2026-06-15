@@ -97,12 +97,11 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     Mix.shell().info("Generated #{path}")
     Mix.shell().info("")
     Mix.shell().info("Next steps:")
-    Mix.shell().info("  1. Implement the generator in new!/2")
-    Mix.shell().info("  2. Add precondition logic if needed")
-    Mix.shell().info("  3. Add to your model's commands/0")
+    Mix.shell().info("  1. Fill in the field generators in generator/1")
+    Mix.shell().info("  2. Add to your model's commands/0 (use when: for preconditions)")
 
     if creates_ref do
-      Mix.shell().info("  4. Create a corresponding event module")
+      Mix.shell().info("  3. Create a corresponding event module")
     end
   end
 
@@ -125,22 +124,27 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     semantics_function =
       case semantics do
         "sync" -> ""
-        other -> "\n  def semantics, do: :#{other}\n"
+        other -> "\n  @impl true\n  def semantics, do: :#{other}\n"
       end
 
     creates_ref_function =
       if creates_ref do
-        "\n  def creates_ref, do: :#{creates_ref}\n"
+        "\n  @impl true\n  def creates_ref, do: :#{creates_ref}\n"
       else
         ""
       end
 
     generator_body = generate_generator_body(fields)
+    # With no fields the body ignores overrides; underscore it to stay warning-free.
+    overrides_param = if fields == [], do: "_overrides", else: "overrides"
 
     """
     defmodule #{module_name} do
       @moduledoc \"\"\"
       TODO: Add description for this command.
+
+      Preconditions (when this command may run) belong in the model's
+      `when:` option, not here.
       \"\"\"
 
       @behaviour PropertyDamage.Command
@@ -148,13 +152,9 @@ defmodule Mix.Tasks.Pd.Gen.Command do
       defstruct #{defstruct_line}
 
       @impl true
-      def precondition(_state) do
-        # TODO: Return true if this command can be generated in current state
-        true
-      end
-
-      @impl true
-      def new!(state, overrides \\\\ %{}) do
+      def generator(#{overrides_param} \\\\ %{}) do
+        # Returns a StreamData generator of field maps; the framework maps each
+        # to a %#{module_name}{} struct.
         #{generator_body}
       end
     #{semantics_function}#{creates_ref_function}end
@@ -162,7 +162,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
   end
 
   defp generate_generator_body([]) do
-    "StreamData.constant(%__MODULE__{})"
+    "StreamData.constant(%{})"
   end
 
   defp generate_generator_body(fields) do
@@ -182,7 +182,6 @@ defmodule Mix.Tasks.Pd.Gen.Command do
         }
         |> PropertyDamage.Generator.merge_overrides(overrides)
         |> StreamData.fixed_map()
-        |> StreamData.map(&struct!(__MODULE__, &1))
     """
   end
 end
