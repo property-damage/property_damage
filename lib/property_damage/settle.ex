@@ -161,24 +161,26 @@ defmodule PropertyDamage.Settle do
 
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 
-    do_settle(fun, deadline, interval_ms, backoff, nil)
+    do_settle(fun, deadline, interval_ms, backoff)
   end
 
-  defp do_settle(fun, deadline, interval_ms, backoff, last_reason) do
-    now = System.monotonic_time(:millisecond)
+  defp do_settle(fun, deadline, interval_ms, backoff) do
+    # Attempt first, THEN decide whether to retry. This guarantees the function
+    # runs at least once (e.g. with timeout_ms: 0) and that a final attempt is
+    # made at the deadline rather than bailing out just before it.
+    case fun.() do
+      {:ok, result} ->
+        {:ok, result}
 
-    if now >= deadline do
-      {:timeout, last_reason}
-    else
-      case fun.() do
-        {:ok, result} ->
-          {:ok, result}
+      {:settled, result} ->
+        {:settled, result}
 
-        {:settled, result} ->
-          {:settled, result}
+      {:retry, reason} ->
+        now = System.monotonic_time(:millisecond)
 
-        {:retry, reason} ->
-          # Sleep and retry
+        if now >= deadline do
+          {:timeout, reason}
+        else
           remaining = deadline - now
           sleep_time = min(interval_ms, remaining)
 
@@ -192,15 +194,17 @@ defmodule PropertyDamage.Settle do
               :linear -> interval_ms
             end
 
-          do_settle(fun, deadline, next_interval, backoff, reason)
+          do_settle(fun, deadline, next_interval, backoff)
+        end
 
-        {:error, reason} ->
-          {:error, reason}
+      {:error, reason} ->
+        {:error, reason}
 
-        # Handle legacy returns that don't use the settle protocol
-        other ->
-          {:ok, other}
-      end
+      # A return outside the settle protocol is a contract violation (e.g. a
+      # malformed adapter return); surface it as an error rather than laundering
+      # it into a success.
+      other ->
+        {:error, {:malformed_settle_return, other}}
     end
   end
 

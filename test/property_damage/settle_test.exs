@@ -225,9 +225,53 @@ defmodule PropertyDamage.SettleTest do
       end
     end
 
-    test "handles legacy returns (non-settle protocol)" do
+    test "executes the function at least once even with timeout_ms: 0" do
+      {:ok, agent} = Agent.start_link(fn -> 0 end)
+
+      result =
+        Settle.settle(
+          fn ->
+            Agent.update(agent, &(&1 + 1))
+            {:ok, :ran}
+          end,
+          timeout_ms: 0
+        )
+
+      count = Agent.get(agent, & &1)
+      Agent.stop(agent)
+
+      assert result == {:ok, :ran}
+      assert count == 1
+    end
+
+    test "makes a final attempt at the deadline and reports that attempt's reason" do
+      # timeout_ms: 0 means the deadline is reached on entry. The function must
+      # still be attempted once (the final attempt at the deadline), and the
+      # timeout must carry the reason from that attempt, not a stale nil.
+      {:ok, agent} = Agent.start_link(fn -> 0 end)
+
+      result =
+        Settle.settle(
+          fn ->
+            Agent.update(agent, &(&1 + 1))
+            {:retry, :still_waiting}
+          end,
+          timeout_ms: 0
+        )
+
+      count = Agent.get(agent, & &1)
+      Agent.stop(agent)
+
+      assert count == 1
+      assert result == {:timeout, :still_waiting}
+    end
+
+    test "does not launder a malformed return into a success" do
+      # A function that returns something outside the settle protocol must not
+      # be reported as {:ok, _}; that would let a malformed adapter return pass
+      # as a successful execution.
       result = Settle.settle(fn -> :some_value end)
-      assert result == {:ok, :some_value}
+      assert result == {:error, {:malformed_settle_return, :some_value}}
     end
   end
 

@@ -23,6 +23,16 @@ The system SHALL provide retry logic for probe and async commands, repeatedly ex
 - **AND** the command does not succeed before the timeout expires
 - **THEN** the framework SHALL return a timeout result with the last retry reason
 
+#### Scenario: At least one attempt regardless of timeout
+- **WHEN** a probe or async command is executed with settle logic
+- **AND** the deadline is already reached (for example `timeout_ms: 0`)
+- **THEN** the framework SHALL still attempt the command exactly once before timing out
+- **AND** a resulting timeout SHALL carry the reason from that final attempt
+
+#### Scenario: Malformed return is not treated as success
+- **WHEN** the executed function returns a value outside the settle protocol (not `{:ok, _}`, `{:settled, _}`, `{:retry, _}`, or `{:error, _}`)
+- **THEN** the framework SHALL surface it as an error (`{:error, {:malformed_settle_return, value}}`) rather than reporting it as a successful result
+
 #### Scenario: Hard error stops retries immediately
 - **WHEN** a command returns a hard error (as opposed to a retryable failure)
 - **THEN** the framework SHALL stop retrying immediately
