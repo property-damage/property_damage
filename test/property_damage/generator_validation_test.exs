@@ -32,6 +32,63 @@ defmodule PropertyDamage.GeneratorValidationTest do
     end
   end
 
+  describe "command :when arity validation" do
+    test "a zero-arity when: is rejected with a clear error" do
+      assert_raise ArgumentError, ~r/`when:` for command.*1-arity/s, fn ->
+        Model.normalize_command_spec({Cmd, when: fn -> true end})
+      end
+    end
+
+    test "a two-arity when: is rejected" do
+      assert_raise ArgumentError, ~r/`when:` for command.*1-arity/s, fn ->
+        Model.normalize_command_spec({Cmd, when: fn _a, _b -> true end})
+      end
+    end
+
+    test "a non-function when: is rejected" do
+      assert_raise ArgumentError, ~r/`when:` for command/s, fn ->
+        Model.normalize_command_spec({Cmd, when: true})
+      end
+    end
+
+    test "a one-arity when: still normalizes" do
+      assert {1, Cmd, %{when: pred}} =
+               Model.normalize_command_spec({Cmd, when: fn _state -> true end})
+
+      assert is_function(pred, 1)
+    end
+  end
+
+  describe "command :with arity validation" do
+    test "a zero-arity with: is rejected with a clear error" do
+      assert_raise ArgumentError, ~r/`with:` for command.*1-arity function.*or a map/s, fn ->
+        Model.normalize_command_spec({Cmd, with: fn -> %{} end})
+      end
+    end
+
+    test "a two-arity with: is rejected" do
+      assert_raise ArgumentError, ~r/`with:` for command.*1-arity function.*or a map/s, fn ->
+        Model.normalize_command_spec({Cmd, with: fn _a, _b -> %{} end})
+      end
+    end
+
+    test "a non-map, non-function with: is rejected" do
+      assert_raise ArgumentError, ~r/`with:` for command/s, fn ->
+        Model.normalize_command_spec({Cmd, with: [foo: 1]})
+      end
+    end
+
+    test "a one-arity with: and a map with: both normalize" do
+      assert {1, Cmd, %{with: fun}} =
+               Model.normalize_command_spec({Cmd, with: fn _state -> %{} end})
+
+      assert is_function(fun, 1)
+
+      assert {1, Cmd, %{with: %{x: 1}}} =
+               Model.normalize_command_spec({Cmd, with: %{x: 1}})
+    end
+  end
+
   describe "branching bounds validation" do
     test "min_prefix_length > max_commands is rejected (would never terminate)" do
       assert_raise ArgumentError, ~r/min_prefix_length.*max_commands/, fn ->

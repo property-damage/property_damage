@@ -34,7 +34,8 @@ defmodule PropertyDamage.ExUnit do
   - `:model` - Model module (required)
   - `:adapter` - Adapter module (required)
 
-  **Optional:**
+  **Optional:** every other `PropertyDamage.run/1` option is forwarded as-is,
+  including:
   - `:max_commands` - Max commands per sequence (default: 50)
   - `:max_runs` - Number of test sequences (default: 100)
   - `:seed` - Fixed seed for reproducibility
@@ -42,6 +43,11 @@ defmodule PropertyDamage.ExUnit do
   - `:shrink` - Whether to shrink failures (default: true)
   - `:validate` - Whether to validate config (default: true)
   - `:adapter_config` - Config passed to adapter.setup/1 (default: %{})
+  - `:verbose`, `:assertion_mode`, `:branching`, `:stutter`,
+    `:external_markers`, `:on_failure`, and the rest of the `run/1` surface
+
+  Defaults are applied by `run/1` itself; a `nil` `:seed` is dropped so the
+  run picks a random seed.
 
   ## Failure Formatting
 
@@ -129,35 +135,7 @@ defmodule PropertyDamage.ExUnit do
   defmacro property_damage(name, opts \\ []) do
     quote do
       test unquote(name) do
-        opts = unquote(opts)
-
-        # Model and adapter are required options
-        model = Keyword.fetch!(opts, :model)
-        adapter = Keyword.fetch!(opts, :adapter)
-
-        max_commands = opts[:max_commands] || 50
-        max_runs = opts[:max_runs] || 100
-        injector_adapters = opts[:injector_adapters] || []
-
-        run_opts = [
-          model: model,
-          adapter: adapter,
-          max_commands: max_commands,
-          max_runs: max_runs,
-          injector_adapters: injector_adapters,
-          seed: opts[:seed],
-          shrink: Keyword.get(opts, :shrink, true),
-          validate: Keyword.get(opts, :validate, true),
-          adapter_config: opts[:adapter_config] || %{}
-        ]
-
-        # Remove nil seed
-        run_opts =
-          if run_opts[:seed] do
-            run_opts
-          else
-            Keyword.delete(run_opts, :seed)
-          end
+        run_opts = PropertyDamage.ExUnit.build_run_opts(unquote(opts))
 
         case PropertyDamage.run(run_opts) do
           {:ok, _stats} ->
@@ -167,6 +145,30 @@ defmodule PropertyDamage.ExUnit do
             flunk(PropertyDamage.ExUnit.format_failure(report))
         end
       end
+    end
+  end
+
+  @doc """
+  Assemble the options forwarded to `PropertyDamage.run/1` for a
+  `property_damage/2` test.
+
+  `:model` and `:adapter` are required (a missing one raises `KeyError` with a
+  clear message); every other option is forwarded verbatim, so the full
+  `run/1` surface (`verbose:`, `assertion_mode:`, `branching:`, `stutter:`,
+  `external_markers:`, `on_failure:`, ...) is reachable from the ExUnit macro.
+  `run/1` validates the result and applies its own defaults for any omitted
+  option, so this function deliberately does not re-specify them. A `nil`
+  `:seed` is dropped so `run/1` picks a random seed.
+  """
+  @spec build_run_opts(keyword()) :: keyword()
+  def build_run_opts(opts) do
+    # Required options: fail fast with a clear KeyError rather than letting
+    # run/1 surface a less obvious validation message.
+    Enum.each([:model, :adapter], &Keyword.fetch!(opts, &1))
+
+    case Keyword.fetch(opts, :seed) do
+      {:ok, nil} -> Keyword.delete(opts, :seed)
+      _ -> opts
     end
   end
 

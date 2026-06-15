@@ -79,18 +79,47 @@ defmodule PropertyDamage.ExUnitTest do
     end
   end
 
-  describe "error handling" do
-    test "raises when model is missing" do
-      # KeyError is raised when required option is missing
+  describe "build_run_opts/1" do
+    test "forwards advanced run options that the old whitelist dropped" do
+      opts =
+        PropertyDamage.ExUnit.build_run_opts(
+          model: SomeModel,
+          adapter: SomeAdapter,
+          verbose: true,
+          assertion_mode: :record,
+          branching: [max_branches: 2]
+        )
+
+      assert opts[:verbose] == true
+      assert opts[:assertion_mode] == :record
+      assert opts[:branching] == [max_branches: 2]
+    end
+
+    test "requires :model and :adapter" do
       assert_raise KeyError, fn ->
-        Keyword.fetch!([], :model)
+        PropertyDamage.ExUnit.build_run_opts(adapter: SomeAdapter)
+      end
+
+      assert_raise KeyError, fn ->
+        PropertyDamage.ExUnit.build_run_opts(model: SomeModel)
       end
     end
 
-    test "raises when adapter is missing" do
-      assert_raise KeyError, fn ->
-        Keyword.fetch!([model: Foo], :adapter)
-      end
+    test "drops a nil seed but keeps a real one" do
+      refute Keyword.has_key?(
+               PropertyDamage.ExUnit.build_run_opts(
+                 model: SomeModel,
+                 adapter: SomeAdapter,
+                 seed: nil
+               ),
+               :seed
+             )
+
+      assert PropertyDamage.ExUnit.build_run_opts(
+               model: SomeModel,
+               adapter: SomeAdapter,
+               seed: 7
+             )[:seed] == 7
     end
   end
 end

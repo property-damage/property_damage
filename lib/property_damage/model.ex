@@ -426,25 +426,30 @@ defmodule PropertyDamage.Model do
     case spec do
       # Simple module
       module when is_atom(module) ->
-        resolved = resolve_spec(module, [])
-        {validate_weight!(resolved.weight, module), module, resolved}
+        finalize_spec(resolve_spec(module, []), module)
 
       # {module, weight} format (legacy)
       {module, weight} when is_atom(module) and is_integer(weight) and weight > 0 ->
-        resolved = resolve_spec(module, weight: weight)
-        {validate_weight!(resolved.weight, module), module, resolved}
+        finalize_spec(resolve_spec(module, weight: weight), module)
 
       # {module, opts} format (new)
       {module, opts} when is_atom(module) and is_list(opts) ->
-        resolved = resolve_spec(module, opts)
-        {validate_weight!(resolved.weight, module), module, resolved}
+        finalize_spec(resolve_spec(module, opts), module)
 
       # Map form with :command key
       %{command: module} = map when is_atom(module) ->
         opts = map |> Map.delete(:command) |> Map.to_list()
-        resolved = resolve_spec(module, opts)
-        {validate_weight!(resolved.weight, module), module, resolved}
+        finalize_spec(resolve_spec(module, opts), module)
     end
+  end
+
+  # Validate the resolved spec's selection/generation callbacks and return the
+  # `{weight, module, spec}` tuple. Bad `when:`/`with:` arities used to fail
+  # with an opaque CaseClauseError deep in generation; surface them here.
+  defp finalize_spec(resolved, module) do
+    validate_when!(Map.get(resolved, :when), module)
+    validate_with!(Map.get(resolved, :with), module)
+    {validate_weight!(resolved.weight, module), module, resolved}
   end
 
   # A command's weight is its bucket size in the weighted random selection;
@@ -457,6 +462,47 @@ defmodule PropertyDamage.Model do
     raise ArgumentError,
           "Invalid weight #{inspect(weight)} for command #{inspect(module)}: " <>
             "weight must be a positive integer."
+  end
+
+  # A `when:` precondition is invoked as `pred.(state)` during command
+  # selection; anything but a 1-arity function (or nil) breaks that call.
+  defp validate_when!(nil, _module), do: :ok
+  defp validate_when!(fun, _module) when is_function(fun, 1), do: :ok
+
+  defp validate_when!(fun, module) when is_function(fun) do
+    raise ArgumentError,
+          "Invalid `when:` for command #{inspect(module)}: " <>
+            "expected a 1-arity function `fn state -> boolean end`, " <>
+            "got a function of arity #{fun_arity(fun)}."
+  end
+
+  defp validate_when!(other, module) do
+    raise ArgumentError,
+          "Invalid `when:` for command #{inspect(module)}: " <>
+            "expected a 1-arity function `fn state -> boolean end`, got #{inspect(other)}."
+  end
+
+  # A `with:` override is either a map or invoked as `fun.(state)` to produce a
+  # map during generation; reject other shapes before they hit generation.
+  defp validate_with!(nil, _module), do: :ok
+  defp validate_with!(map, _module) when is_map(map), do: :ok
+  defp validate_with!(fun, _module) when is_function(fun, 1), do: :ok
+
+  defp validate_with!(fun, module) when is_function(fun) do
+    raise ArgumentError,
+          "Invalid `with:` for command #{inspect(module)}: " <>
+            "expected a 1-arity function `fn state -> map end` or a map, " <>
+            "got a function of arity #{fun_arity(fun)}."
+  end
+
+  defp validate_with!(other, module) do
+    raise ArgumentError,
+          "Invalid `with:` for command #{inspect(module)}: " <>
+            "expected a 1-arity function `fn state -> map end` or a map, got #{inspect(other)}."
+  end
+
+  defp fun_arity(fun) do
+    fun |> :erlang.fun_info(:arity) |> elem(1)
   end
 
   @doc """
