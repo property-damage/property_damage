@@ -11,11 +11,11 @@ defmodule PropertyDamage.IExTest do
   alias PropertyDamage.Test.Projections.ModelState
   alias PropertyDamage.Test.SimpleModel
 
-  # `IEx.debug_command/3` consumes `adapter.execute/2` results as either
-  # `{:ok, event_struct}` or `{:error, reason}` (a single event, not a list).
-  # These local adapters match that shape so the happy/error/setup-failure
-  # branches can each be exercised. See the note at the bottom of this file
-  # about the production adapter contract (`{:ok, [events]}`).
+  # `IEx.debug_command/3` consumes `adapter.execute/2` results as `{:ok,
+  # events}` (the contract's event list; a bare struct is also tolerated) or
+  # `{:error, reason}`. These local adapters cover the single-struct/error/
+  # setup-failure branches; a separate test exercises the conforming
+  # `{:ok, [events]}` list shape via `PropertyDamage.Test.SimpleAdapter`.
   defmodule SingleEventAdapter do
     @moduledoc false
     def setup(opts), do: {:ok, Map.new(opts)}
@@ -160,6 +160,19 @@ defmodule PropertyDamage.IExTest do
       assert output =~ "ADAPTER SETUP FAILED"
       assert output =~ ":no_connection"
     end
+
+    test "handles the {:ok, [events]} list contract of a conforming adapter" do
+      command = %CreateItem{name: "widget", quantity: 3}
+
+      output =
+        capture_io(fn ->
+          assert IEx.debug_command(command, PropertyDamage.Test.SimpleAdapter) == :ok
+        end)
+
+      assert output =~ "Status: OK"
+      assert output =~ "RESULT EVENT"
+      assert output =~ "ItemCreated"
+    end
   end
 
   describe "inspect_state/2" do
@@ -220,13 +233,4 @@ defmodule PropertyDamage.IExTest do
       assert output =~ "2/2 commands valid in current state"
     end
   end
-
-  # NOTE: `IEx.debug_command/3` pattern-matches `adapter.execute/2` results as
-  # `{:ok, event}` (a single struct) and calls `Map.from_struct/1` on it. The
-  # production Adapter contract returns `{:ok, [events]}` (a list), so a
-  # conforming adapter such as `PropertyDamage.Test.SimpleAdapter` raises
-  # BadMapError in `print_event_detail/1`. These tests therefore use local
-  # single-event adapters to exercise the function's intended behavior. The
-  # list-shaped result is a real bug in lib/property_damage/iex.ex, left
-  # unfixed here per task constraints.
 end

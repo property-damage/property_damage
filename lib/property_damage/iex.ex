@@ -541,11 +541,13 @@ defmodule PropertyDamage.IEx do
     IO.puts(String.duplicate("─", 65))
 
     case result do
-      {:ok, event} ->
+      {:ok, events} ->
         IO.puts("Status: OK")
         IO.puts("Time: #{elapsed}ms")
         IO.puts("")
-        print_event_detail(event)
+        # The Adapter contract returns {:ok, [events]}; tolerate a bare event
+        # struct too via List.wrap/1.
+        print_result_events(List.wrap(events))
 
       {:error, reason} ->
         IO.puts("Status: ERROR")
@@ -553,6 +555,17 @@ defmodule PropertyDamage.IEx do
         IO.puts("Reason: #{inspect(reason)}")
         IO.puts("")
     end
+  end
+
+  defp print_result_events([]) do
+    IO.puts("RESULT EVENTS")
+    IO.puts(String.duplicate("─", 65))
+    IO.puts("(no events returned)")
+    IO.puts("")
+  end
+
+  defp print_result_events(events) do
+    Enum.each(events, &print_event_detail/1)
   end
 
   defp print_event_detail(event) do
