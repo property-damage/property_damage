@@ -24,14 +24,14 @@ jobs:
             otp: "27"
             lint: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             deps
@@ -58,7 +58,7 @@ jobs:
     name: Hex package contents
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
@@ -81,14 +81,14 @@ jobs:
       run:
         working-directory: benches/${{ matrix.bench }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.20"
           otp-version: "27"
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             benches/${{ matrix.bench }}/deps
@@ -126,14 +126,14 @@ jobs:
       run:
         working-directory: benches/oban_bench
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.20"
           otp-version: "27"
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             benches/oban_bench/deps
@@ -182,14 +182,14 @@ jobs:
       run:
         working-directory: benches/redis_bench
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.20"
           otp-version: "27"
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             benches/redis_bench/deps
