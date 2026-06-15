@@ -722,7 +722,19 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   @doc false
   def streamdata_generator_for_type(:uuid, _name, _source) do
-    "StreamData.constant(Ecto.UUID.generate())"
+    # Seeded (not constant) so repeated draws within a run are distinct, as a
+    # client-supplied id must be, while staying reproducible and shrinkable.
+    # All randomness comes from StreamData, so no external UUID dependency
+    # (Ecto/uniq) and no unseeded entropy (:crypto/System) are pulled in.
+    String.trim("""
+    StreamData.map(StreamData.binary(length: 16), fn <<u0::48, _::4, u1::12, _::2, u2::62>> ->
+      <<u0::48, 4::4, u1::12, 2::2, u2::62>>
+      |> Base.encode16(case: :lower)
+      |> then(fn <<g1::binary-8, g2::binary-4, g3::binary-4, g4::binary-4, g5::binary-12>> ->
+        g1 <> "-" <> g2 <> "-" <> g3 <> "-" <> g4 <> "-" <> g5
+      end)
+    end)
+    """)
   end
 
   def streamdata_generator_for_type(:email, name, _source) do

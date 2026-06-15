@@ -173,9 +173,10 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
     }
   }
 
-  # A spec with no uuid/format fields, so generated code needs no extra deps
-  # (Ecto/Faker). Mirrors benches/openapi_bench so the "generated code is real"
-  # checks below can actually compile what the scaffold emits.
+  # Mirrors benches/openapi_bench so the "generated code is real" checks below
+  # can actually compile what the scaffold emits. Includes a client-supplied
+  # `id` uuid field: the scaffold must emit a dependency-free generator for it
+  # (no Ecto), so the generated code compiles with PD's deps alone.
   @kv_spec %{
     "openapi" => "3.0.3",
     "info" => %{"title" => "KV", "version" => "1.0.0"},
@@ -199,7 +200,10 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
                 "schema" => %{
                   "type" => "object",
                   "required" => ["value"],
-                  "properties" => %{"value" => %{"type" => "integer"}}
+                  "properties" => %{
+                    "value" => %{"type" => "integer"},
+                    "id" => %{"type" => "string", "format" => "uuid"}
+                  }
                 }
               }
             }
@@ -489,10 +493,27 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
   end
 
   describe "streamdata_generator_for_type/3" do
-    test "generates UUID generator" do
+    test "generates a seeded, non-constant UUID generator (no Ecto, distinct draws)" do
       gen = streamdata_generator_for_type(:uuid, "id", "body")
-      assert gen =~ "UUID"
+
+      # No external dependency, and not `constant`: repeated draws within a run
+      # (e.g. client-supplied ids) must differ, while staying seeded so the run
+      # is reproducible and shrinkable.
+      refute gen =~ "Ecto"
+      refute gen =~ "constant"
       assert gen =~ "StreamData"
+
+      # The emitted generator is self-contained; evaluate and exercise it.
+      {generator, _} = Code.eval_string(gen)
+      samples = Enum.take(generator, 8)
+
+      v4 = ~r/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+      assert Enum.all?(samples, &Regex.match?(v4, &1)),
+             "expected valid v4 UUIDs, got #{inspect(samples)}"
+
+      assert length(Enum.uniq(samples)) == length(samples),
+             "expected distinct UUIDs across draws, got #{inspect(samples)}"
     end
 
     test "generates email generator" do
