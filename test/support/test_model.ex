@@ -71,6 +71,37 @@ defmodule PropertyDamage.Test.FullModel do
   def terminate?(_state, _command, _events), do: false
 end
 
+defmodule PropertyDamage.Test.TerminateImmediatelyModel do
+  @moduledoc """
+  Test model whose terminate?/3 fires after the first command. Used to prove
+  that a model-requested termination stops the whole sequence in branching mode
+  (no branches, no suffix appended after the prefix) per DR-013.
+  """
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
+
+  alias PropertyDamage.Test.Commands.CreateItem
+  alias PropertyDamage.Test.Events.ItemCreated
+  alias PropertyDamage.Test.Projections.ModelState
+
+  @impl true
+  def commands, do: [CreateItem]
+
+  @impl true
+  def command_sequence_projection, do: ModelState
+
+  @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+    [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+  end
+
+  @impl true
+  def terminate?(_state, _command, _events), do: true
+end
+
 defmodule PropertyDamage.Test.MinimalModel do
   @moduledoc """
   Minimal test model with only required callbacks.

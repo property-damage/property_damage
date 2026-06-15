@@ -300,44 +300,50 @@ defmodule PropertyDamage.Generator do
       [],
       markers
     )
-    |> StreamData.bind(fn {prefix, state_after_prefix, remaining, prefix_ph} ->
-      prefix_len = length(prefix)
+    |> StreamData.bind(fn
+      {prefix, _state_after_prefix, _remaining, prefix_ph, true} ->
+        # DR-013: the model terminated the sequence during the prefix, so it
+        # stays linear with nothing appended (no branches, no suffix).
+        StreamData.constant(attach_registry(Sequence.linear(prefix), prefix_ph))
 
-      # Decide whether to branch
-      StreamData.bind(StreamData.float(min: 0.0, max: 1.0), fn roll ->
-        if roll < branch_probability and remaining > max_branch_length do
-          # Generate branches
-          generate_with_branches(
-            commands,
-            projection,
-            model,
-            state_after_prefix,
-            prefix,
-            prefix_ph,
-            remaining,
-            max_branches,
-            max_branch_length,
-            markers
-          )
-        else
-          # Continue as linear sequence: the whole thing stays linear, so suffix
-          # positions continue the prefix's {:prefix, _} numbering.
-          generate_linear_recursive(
-            commands,
-            projection,
-            model,
-            state_after_prefix,
-            remaining,
-            [],
-            [],
-            markers,
-            &{:prefix, prefix_len + &1}
-          )
-          |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
-            attach_registry(Sequence.linear(prefix ++ suffix_cmds), prefix_ph ++ suffix_ph)
-          end)
-        end
-      end)
+      {prefix, state_after_prefix, remaining, prefix_ph, false} ->
+        prefix_len = length(prefix)
+
+        # Decide whether to branch
+        StreamData.bind(StreamData.float(min: 0.0, max: 1.0), fn roll ->
+          if roll < branch_probability and remaining > max_branch_length do
+            # Generate branches
+            generate_with_branches(
+              commands,
+              projection,
+              model,
+              state_after_prefix,
+              prefix,
+              prefix_ph,
+              remaining,
+              max_branches,
+              max_branch_length,
+              markers
+            )
+          else
+            # Continue as linear sequence: the whole thing stays linear, so suffix
+            # positions continue the prefix's {:prefix, _} numbering.
+            generate_linear_recursive(
+              commands,
+              projection,
+              model,
+              state_after_prefix,
+              remaining,
+              [],
+              [],
+              markers,
+              &{:prefix, prefix_len + &1}
+            )
+            |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
+              attach_registry(Sequence.linear(prefix ++ suffix_cmds), prefix_ph ++ suffix_ph)
+            end)
+          end
+        end)
     end)
   end
 
@@ -355,7 +361,7 @@ defmodule PropertyDamage.Generator do
     if length(acc) >= min_length do
       # Met minimum, return what we have
       remaining = max_total - length(acc)
-      StreamData.constant({Enum.reverse(acc), state, remaining, acc_ph})
+      StreamData.constant({Enum.reverse(acc), state, remaining, acc_ph, false})
     else
       valid_commands = filter_valid_commands(commands, state)
 
@@ -363,7 +369,7 @@ defmodule PropertyDamage.Generator do
         [] ->
           # No valid commands, end early
           remaining = max_total - length(acc)
-          StreamData.constant({Enum.reverse(acc), state, remaining, acc_ph})
+          StreamData.constant({Enum.reverse(acc), state, remaining, acc_ph, false})
 
         _ ->
           StreamData.bind(weighted_member_of(valid_commands), fn {_weight, cmd_module, opts} ->
@@ -377,8 +383,13 @@ defmodule PropertyDamage.Generator do
               new_acc_ph = acc_ph ++ minted
 
               if should_terminate?(model, new_state, command, events) do
+                # DR-013: terminate? stops the WHOLE sequence, not just the
+                # prefix. Signal it so no branches or suffix get appended.
                 remaining = max_total - length(new_acc)
-                StreamData.constant({Enum.reverse(new_acc), new_state, remaining, new_acc_ph})
+
+                StreamData.constant(
+                  {Enum.reverse(new_acc), new_state, remaining, new_acc_ph, true}
+                )
               else
                 generate_prefix(
                   commands,
