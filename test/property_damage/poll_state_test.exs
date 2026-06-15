@@ -258,6 +258,26 @@ defmodule PropertyDamage.PollStateTest do
       assert assertion.poll_state.timeout_ms == 120_000
       assert assertion.poll_state.interval_ms == 30_000
     end
+
+    test "accepts singular time units" do
+      defmodule SingularTimeProjection do
+        use PropertyDamage.Model.Projection
+
+        def init, do: %{}
+        def apply(state, _), do: state
+
+        @poll_state after: PaymentInitiated, timeout: {2, :second}, interval: {1, :second}
+        def singular_units(_state, %PaymentInitiated{}) do
+          fn _s -> true end
+        end
+      end
+
+      assertion =
+        Enum.find(SingularTimeProjection.__assertions__(), &(&1.name == :singular_units))
+
+      assert assertion.poll_state.timeout_ms == 2000
+      assert assertion.poll_state.interval_ms == 1000
+    end
   end
 
   # ============================================================================

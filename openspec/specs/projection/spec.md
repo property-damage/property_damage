@@ -83,6 +83,10 @@ Projections SHALL support synchronous assertions decorated with the `@trigger` m
 - **WHEN** an assertion is decorated with `@trigger every: {3, CreateOrder}`
 - **THEN** it runs on every 3rd occurrence of `CreateOrder`
 
+#### Scenario: Non-positive sampling count is rejected
+- **WHEN** an assertion is decorated with a sampling count of zero or negative (e.g. `@trigger every: {0, :command}` or `@trigger every: 0`)
+- **THEN** the framework raises an ArgumentError at compile time rather than allowing a runtime ArithmeticError
+
 #### Scenario: Assertion passes by returning without raising
 - **WHEN** a triggered assertion function returns without raising an exception
 - **THEN** the assertion is considered to have passed
@@ -116,7 +120,8 @@ Projections SHALL support temporal assertions decorated with the `@poll_state` m
 #### Scenario: Time values support explicit units
 - **WHEN** a `@poll_state` timeout or interval is specified as `{value, :milliseconds}`
 - **THEN** the value is interpreted in the given unit
-- **AND** supported units are `:milliseconds`, `:seconds`, and `:minutes`
+- **AND** supported units are `:millisecond(s)`, `:second(s)`, and `:minute(s)` (singular and plural forms are both accepted)
+- **AND** an unrecognized unit raises an ArgumentError
 
 ### Requirement: Assertion Detection and Metadata
 
@@ -133,7 +138,12 @@ The framework SHALL detect assertions at compile time using an `@on_definition` 
 
 #### Scenario: Polling assertion metadata
 - **WHEN** a polling assertion is detected
-- **THEN** its metadata includes the assertion name, type `:polling`, normalized poll_state spec, and captured predicate source
+- **THEN** its metadata includes the assertion name, type `:polling`, the function name, normalized poll_state spec, and captured predicate source
+- **AND** the metadata shape is consistent with synchronous assertions (both carry `name`, `type`, and `function_name`, with the `assert_` prefix stripped from `name`)
+
+#### Scenario: At most one trigger attribute per assertion
+- **WHEN** an assertion function is decorated with more than one `@trigger` (or more than one `@poll_state`), or with both `@trigger` and `@poll_state`
+- **THEN** the compiler raises a CompileError rather than silently using one of them
 
 ### Requirement: assert_* Prefix Convention and Enforcement
 

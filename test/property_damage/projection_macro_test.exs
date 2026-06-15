@@ -78,6 +78,77 @@ defmodule PropertyDamage.ProjectionMacroTest do
     end
   end
 
+  test "a zero count in {N, target} raises instead of crashing later with ArithmeticError" do
+    assert_raise ArgumentError, ~r/positive/, fn ->
+      eval("""
+      defmodule PDMT.ZeroCount do
+        use PropertyDamage.Model.Projection
+        @trigger every: {0, :command}
+        def assert_x(s, _), do: :ok
+      end
+      """)
+    end
+  end
+
+  test "a negative count in {N, target} raises" do
+    assert_raise ArgumentError, ~r/positive/, fn ->
+      eval("""
+      defmodule PDMT.NegCount do
+        use PropertyDamage.Model.Projection
+        @trigger every: {-2, :event}
+        def assert_x(s, _), do: :ok
+      end
+      """)
+    end
+  end
+
+  test "stacking two @trigger attributes on one assertion raises" do
+    assert_raise CompileError, ~r/multiple @trigger/, fn ->
+      eval("""
+      defmodule PDMT.DoubleTrigger do
+        use PropertyDamage.Model.Projection
+        @trigger every: 1
+        @trigger every: 2
+        def assert_x(s, _), do: :ok
+      end
+      """)
+    end
+  end
+
+  test "combining @trigger and @poll_state on one assertion raises" do
+    assert_raise CompileError, ~r/both @trigger and @poll_state|cannot combine/, fn ->
+      eval("""
+      defmodule PDMT.TriggerAndPoll do
+        defmodule Ev do
+          defstruct []
+        end
+        use PropertyDamage.Model.Projection
+        @trigger every: 1
+        @poll_state after: Ev, timeout: 1, interval: 1
+        def assert_x(s, _), do: fn _ -> true end
+      end
+      """)
+    end
+  end
+
+  test "polling assertion metadata carries function_name and a stripped name, like synchronous ones" do
+    {result, _} =
+      eval("""
+      defmodule PDMT.UnifiedPollEvent do
+        defstruct []
+      end
+      defmodule PDMT.UnifiedPoll do
+        use PropertyDamage.Model.Projection
+        def init, do: %{}
+        @poll_state after: PDMT.UnifiedPollEvent, timeout: 1, interval: 1
+        def assert_eventually(_s, _), do: fn _ -> true end
+      end
+      PDMT.UnifiedPoll.__assertions__()
+      """)
+
+    assert [%{name: :eventually, function_name: :assert_eventually, type: :polling}] = result
+  end
+
   test "a real command/event module trigger still works" do
     {result, _} =
       eval("""

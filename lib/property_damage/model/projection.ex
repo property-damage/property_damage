@@ -109,6 +109,11 @@ defmodule PropertyDamage.Model.Projection do
   | `@trigger every: {5, :command}` | Every 5th command |
   | `@trigger every: {3, CreateOrder}` | Every 3rd CreateOrder |
 
+  A **step** is each unit processed in the execution stream: every command AND
+  every event increments the step counter. So `every: 1` runs after each command
+  and after each of its events, while `every: {5, :command}` counts commands only.
+  The count in `{N, target}` must be a positive integer.
+
   ## @poll_state Syntax
 
   Use `@poll_state` with the following options:
@@ -119,7 +124,7 @@ defmodule PropertyDamage.Model.Projection do
   | `timeout:` | integer or `{int, unit}` | Max time to poll (integer = seconds) |
   | `interval:` | integer or `{int, unit}` | Polling frequency (integer = seconds) |
 
-  Time units: `:milliseconds`, `:seconds`, `:minutes`
+  Time units (singular or plural): `:millisecond(s)`, `:second(s)`, `:minute(s)`
 
   Example:
 
@@ -171,7 +176,11 @@ defmodule PropertyDamage.Model.Projection do
   Execute an assertion.
 
   Assertions are functions decorated with `@trigger` or `@poll_state`.
-  Called when the assertion's trigger condition is met. The `assert_` prefix is conventional but not required.
+  Called when the assertion's trigger condition is met. The `assert_` prefix is
+  conventional but not required; when present it is stripped from the assertion's
+  reported `:name` (so `def assert_total_ok` is reported as `:total_ok`) while the
+  full function name is kept internally for dispatch. Exactly one `@trigger` or
+  `@poll_state` may decorate an assertion, never both and never more than one.
   Should raise an exception if the assertion fails.
   If the function returns without raising, the assertion passed.
 
@@ -198,8 +207,11 @@ defmodule PropertyDamage.Model.Projection do
 
       # Accumulating attribute for assertion metadata
       Module.register_attribute(__MODULE__, :assertions, accumulate: true)
-      Module.register_attribute(__MODULE__, :trigger, accumulate: false)
-      Module.register_attribute(__MODULE__, :poll_state, accumulate: false)
+      # @trigger / @poll_state accumulate so that stacking more than one on a
+      # single assertion is detectable (and rejected) rather than silently
+      # overwriting; exactly one is expected per assertion.
+      Module.register_attribute(__MODULE__, :trigger, accumulate: true)
+      Module.register_attribute(__MODULE__, :poll_state, accumulate: true)
       # Names of functions already registered as assertions, so subsequent
       # clauses of a multi-clause assertion aren't re-flagged as missing @trigger.
       Module.register_attribute(__MODULE__, :__pd_assertion_fns__, accumulate: true)
@@ -212,8 +224,8 @@ defmodule PropertyDamage.Model.Projection do
   end
 
   defmacro __before_compile__(env) do
-    if Module.get_attribute(env.module, :trigger) != nil or
-         Module.get_attribute(env.module, :poll_state) != nil do
+    if Module.get_attribute(env.module, :trigger) not in [nil, []] or
+         Module.get_attribute(env.module, :poll_state) not in [nil, []] do
       raise CompileError,
         file: env.file,
         line: env.line,
@@ -263,9 +275,12 @@ defmodule PropertyDamage.Model.Projection do
   # Called by @on_definition when any function is defined in the module
   # Detects assertion functions (either @trigger or @poll_state decorated)
   def __on_definition__(env, :def, name, [_state, _cmd_or_event] = _args, _guards, body) do
-    trigger_opts = Module.get_attribute(env.module, :trigger)
-    poll_state_opts = Module.get_attribute(env.module, :poll_state)
-    decorated? = trigger_opts != nil or poll_state_opts != nil
+    # accumulate: true means these come back as lists (newest first), or [].
+    trigger_opts = Module.get_attribute(env.module, :trigger) || []
+    poll_state_opts = Module.get_attribute(env.module, :poll_state) || []
+    has_trigger? = trigger_opts != []
+    has_poll? = poll_state_opts != []
+    decorated? = has_trigger? or has_poll?
     already_registered? = name in (Module.get_attribute(env.module, :__pd_assertion_fns__) || [])
 
     cond do
@@ -279,14 +294,40 @@ defmodule PropertyDamage.Model.Projection do
             "@trigger/@poll_state must immediately precede a 2-arity assertion function, " <>
               "not #{name}/2. Move the attribute directly above your assert_ function."
 
+      # An assertion is synchronous (@trigger) or temporal (@poll_state), never
+      # both -- the two have incompatible semantics.
+      has_trigger? and has_poll? ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "cannot combine both @trigger and @poll_state on the same assertion (#{name}/2); " <>
+              "use one or the other."
+
+      length(trigger_opts) > 1 ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "multiple @trigger attributes on #{name}/2; an assertion may have only one."
+
+      length(poll_state_opts) > 1 ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "multiple @poll_state attributes on #{name}/2; an assertion may have only one."
+
       # @poll_state decorated function - temporal assertion
-      poll_state_opts != nil ->
+      has_poll? ->
+        assertion_name = extract_assertion_name_from_function(name) || name
         predicate_source = capture_predicate_source(body)
 
         assertion_def = %{
-          name: name,
+          name: assertion_name,
           type: :polling,
-          poll_state: normalize_poll_state(poll_state_opts),
+          function_name: name,
+          poll_state: normalize_poll_state(hd(poll_state_opts)),
           predicate_source: predicate_source
         }
 
@@ -295,14 +336,14 @@ defmodule PropertyDamage.Model.Projection do
         Module.delete_attribute(env.module, :poll_state)
 
       # @trigger decorated function - synchronous assertion
-      trigger_opts != nil ->
+      has_trigger? ->
         assertion_name = extract_assertion_name_from_function(name) || name
 
         assertion_def = %{
           name: assertion_name,
           type: :synchronous,
-          trigger: normalize_trigger(trigger_opts),
-          function_name: name
+          function_name: name,
+          trigger: normalize_trigger(hd(trigger_opts))
         }
 
         Module.put_attribute(env.module, :assertions, assertion_def)
@@ -332,8 +373,8 @@ defmodule PropertyDamage.Model.Projection do
   # attribute did not land on a 2-arity assertion (e.g. it sat above init/0 or
   # a helper). Raise rather than silently attaching it to the wrong function.
   def __on_definition__(env, kind, name, _args, _guards, _body) do
-    if Module.get_attribute(env.module, :trigger) != nil or
-         Module.get_attribute(env.module, :poll_state) != nil do
+    if Module.get_attribute(env.module, :trigger) not in [nil, []] or
+         Module.get_attribute(env.module, :poll_state) not in [nil, []] do
       raise CompileError,
         file: env.file,
         line: env.line,
@@ -369,6 +410,11 @@ defmodule PropertyDamage.Model.Projection do
       n when is_integer(n) and n > 1 ->
         %{type: :every_n, n: n, target: :step}
 
+      # every: 0 / negative - not a meaningful sampling rate
+      n when is_integer(n) ->
+        raise ArgumentError,
+              "Invalid trigger: every: #{n} -- the count must be a positive integer"
+
       # every: :command - after any command
       :command ->
         %{type: :wildcard, target: :command}
@@ -376,6 +422,13 @@ defmodule PropertyDamage.Model.Projection do
       # every: :event - after any event
       :event ->
         %{type: :wildcard, target: :event}
+
+      # A non-positive count would make the matcher's `rem(count, n)` raise an
+      # ArithmeticError at runtime; reject it at compile time with a clear
+      # message. (`every: 0`/negative as a bare integer is rejected below.)
+      {n, _target} when is_integer(n) and n < 1 ->
+        raise ArgumentError,
+              "Invalid trigger: every: {#{n}, _} -- the count must be a positive integer"
 
       # every: {N, :command} - every Nth command
       {n, :command} when is_integer(n) ->
@@ -516,12 +569,18 @@ defmodule PropertyDamage.Model.Projection do
   defp normalize_module_list(module) when is_atom(module), do: [module]
   defp normalize_module_list(modules) when is_list(modules), do: modules
 
-  # Normalize time values to milliseconds
-  # Integer alone defaults to seconds (consistent with adapter timeouts)
+  # Normalize time values to milliseconds. Integer alone defaults to seconds
+  # (consistent with adapter timeouts). Both singular and plural unit atoms
+  # are accepted so `{1, :second}` reads as naturally as `{2, :seconds}`.
   defp normalize_time(seconds) when is_integer(seconds), do: seconds * 1000
-  defp normalize_time({value, :milliseconds}), do: value
-  defp normalize_time({value, :seconds}), do: value * 1000
-  defp normalize_time({value, :minutes}), do: value * 60 * 1000
+  defp normalize_time({value, unit}) when unit in [:millisecond, :milliseconds], do: value
+  defp normalize_time({value, unit}) when unit in [:second, :seconds], do: value * 1000
+  defp normalize_time({value, unit}) when unit in [:minute, :minutes], do: value * 60 * 1000
+
+  defp normalize_time({_value, unit}) do
+    raise ArgumentError,
+          "Invalid time unit: #{inspect(unit)} -- expected :millisecond(s), :second(s), or :minute(s)"
+  end
 
   # Capture the predicate source from the function body for debugging
   # Tries to extract the fn expression from the body

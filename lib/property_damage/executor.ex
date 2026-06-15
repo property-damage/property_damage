@@ -2494,8 +2494,10 @@ defmodule PropertyDamage.Executor do
           # Get current projection state
           projection_state = Map.get(state.projections, projection)
 
-          # Call the assertion function to get the predicate
-          predicate = apply(projection, assertion.name, [projection_state, event])
+          # Call the assertion function to get the predicate. Dispatch by
+          # function_name (the actual def), since :name is the logical
+          # (assert_-stripped) name shared with synchronous assertions.
+          predicate = apply(projection, assertion.function_name, [projection_state, event])
 
           # Build state getter for the poller
           get_state_fn = fn proj ->
