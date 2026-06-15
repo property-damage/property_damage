@@ -660,7 +660,9 @@ defmodule PropertyDamage.Generator do
   end
 
   defp simulate_command(model, state, command) do
-    if function_exported?(model, :simulator, 0) do
+    # See PropertyDamage.Linearization: ensure the module is loaded before
+    # function_exported?/3, which is false for a not-yet-loaded module.
+    if Code.ensure_loaded?(model) and function_exported?(model, :simulator, 0) do
       model.simulator().simulate(command, state)
     else
       []
@@ -680,7 +682,7 @@ defmodule PropertyDamage.Generator do
   end
 
   defp should_terminate?(model, state, command, events) do
-    if function_exported?(model, :terminate?, 3) do
+    if Code.ensure_loaded?(model) and function_exported?(model, :terminate?, 3) do
       model.terminate?(state, command, events)
     else
       false

@@ -123,7 +123,9 @@ defmodule PropertyDamage.Validator do
   end
 
   defp simulate_command(model, command, state) do
-    if function_exported?(model, :simulator, 0) do
+    # See PropertyDamage.Linearization: ensure the module is loaded before
+    # function_exported?/3, which is false for a not-yet-loaded module.
+    if Code.ensure_loaded?(model) and function_exported?(model, :simulator, 0) do
       model.simulator().simulate(command, state)
     else
       []

@@ -281,7 +281,7 @@ defmodule PropertyDamage.Linearization do
   end
 
   defp model_assertion_projections(model) do
-    if function_exported?(model, :assertion_projections, 0) do
+    if Code.ensure_loaded?(model) and function_exported?(model, :assertion_projections, 0) do
       model.assertion_projections()
     else
       []
@@ -335,7 +335,7 @@ defmodule PropertyDamage.Linearization do
       state = Map.get(projections, projection)
 
       assertions =
-        if function_exported?(projection, :__assertions__, 0) do
+        if Code.ensure_loaded?(projection) and function_exported?(projection, :__assertions__, 0) do
           Enum.filter(projection.__assertions__(), &(&1.type == :synchronous))
         else
           []
@@ -391,7 +391,13 @@ defmodule PropertyDamage.Linearization do
   # ============================================================================
 
   defp simulator(model) do
-    if function_exported?(model, :simulator, 0), do: model.simulator(), else: nil
+    # Ensure the module is loaded before probing it: function_exported?/3
+    # returns false for a not-yet-loaded module (it does not trigger loading),
+    # which would silently make a model appear to have no simulator and turn a
+    # decidable check into {:indeterminate, 0}.
+    if Code.ensure_loaded?(model) and function_exported?(model, :simulator, 0),
+      do: model.simulator(),
+      else: nil
   end
 
   @doc false
