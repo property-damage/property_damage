@@ -50,7 +50,7 @@ bugs in other targets.
 Compare implementations for latency and throughput:
 
 ```elixir
-result = PropertyDamage.Differential.run(
+{:ok, result} = PropertyDamage.Differential.run(
   model: MyModel,
   targets: [
     {RedisAdapter, name: "redis-backend"},
@@ -111,7 +111,7 @@ PropertyDamage.Differential.run(
 Days or weeks later:
 
 ```elixir
-result = PropertyDamage.Differential.run(
+{:ok, result} = PropertyDamage.Differential.run(
   model: MyModel,
   targets: [{ProdAdapter, name: "v2.4"}],
   compare: :performance,
@@ -313,7 +313,7 @@ defmodule MigrationTest do
     # Define adapter that works with both databases
     # (same schema, different connection strings)
 
-    result = PropertyDamage.Differential.run(
+    {:ok, result} = PropertyDamage.Differential.run(
       model: OrderModel,
       targets: [
         {SQLAdapter, role: :reference, name: "postgres",

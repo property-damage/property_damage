@@ -544,11 +544,15 @@ mix pd.integration --runs 500
 ### 3. Save Failures for Regression
 
 ```bash
-# Save all failures
+# Save all failures (written as bugs/failure_<timestamp>_run<N>.json)
 mix pd.integration --save-failures bugs/
+```
 
-# Later, replay them
-mix pd.replay bugs/seed_12345678.pdtest
+Replay a saved failure programmatically:
+
+```elixir
+{:ok, failure} = PropertyDamage.load_failure("bugs/failure_20260615120000_run42.json")
+PropertyDamage.replay(failure)
 ```
 
 ### 4. Use Appropriate Models

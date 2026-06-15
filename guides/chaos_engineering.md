@@ -312,7 +312,7 @@ alias PropertyDamage.Nemesis.CertificateExpiry
 # In adapter:
 if CertificateExpiry.should_fail?(:api) do
   CertificateExpiry.get_ssl_error()
-  # Returns {:error, {:tls_alert, :certificate_expired}}
+  # Returns {:error, {:tls_alert, {:certificate_expired, ~c"certificate has expired"}}}
 end
 ```
 

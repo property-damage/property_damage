@@ -130,7 +130,7 @@ Runner.start_link(
 |------|---------|
 | **Arrival** | One command sequence spawned |
 | **Command** | One individual operation executed |
-| **Drop** | Arrival whose worker could not be created (e.g. `adapter.setup` failed) |
+| **Completed arrival** | An arrival whose worker ran its sequence to completion (a worker that fails `adapter.setup/1` is spawned but never completes) |
 
 A single arrival may execute multiple commands before the sequence terminates.
 
@@ -141,16 +141,17 @@ A single arrival may execute multiple commands before the sequence terminates.
 │ Total Commands:    15,234                                            │
 │ Commands/Second:   50.78                                             │
 │ Arrivals Spawned:  3,048                                             │
+│ Arrivals Completed: 2,896                                            │
 │ Arrivals/Second:   10.16                                             │
-│ Arrivals Dropped:  152 (4.99%)                                       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Total Commands**: Individual operations completed
 - **Commands/Second**: Average command throughput
 - **Arrivals Spawned**: Sequences that started
+- **Arrivals Completed**: Sequences that ran to completion (a gap below Spawned
+  means workers failed to start or sequences errored out)
 - **Arrivals/Second**: Actual arrival rate achieved
-- **Arrivals Dropped**: Sequences that couldn't start (pool full)
 
 If `Total Commands ≈ Arrivals Spawned`, each sequence runs ~1 command.
 If `Total Commands >> Arrivals Spawned`, sequences run multiple commands.
@@ -159,22 +160,22 @@ If `Total Commands >> Arrivals Spawned`, sequences run multiple commands.
 
 ```
 ┌─ Worker Pool ────────────────────────────────────────────────────────┐
-│ Pool Size:       100                                                 │
+│ Workers Created: 142                                                 │
+│ Peak Workers:    100                                                 │
 │ Peak Utilization: 85.00%                                             │
 │ Avg Utilization: 62.34%                                              │
 │ Total Checkouts: 3,048                                               │
-│ Avg Queue Time:  12.34ms                                             │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Pool Size**: Number of workers available
+- **Workers Created**: Total workers the pool created over the run
+- **Peak Workers**: Maximum workers in use at once
 - **Peak Utilization**: Maximum utilization seen during the test
 - **Avg Utilization**: Average utilization across all checkout attempts
 - **Total Checkouts**: How many times workers were borrowed
-- **Avg Queue Time**: How long arrivals waited for a worker
 
-High peak utilization (>90%) with drops suggests the pool is undersized.
-High average utilization (>70%) indicates sustained load on the pool.
+High peak utilization (>90%) indicates the pool grew to meet bursts; high
+average utilization (>70%) indicates sustained load on the pool.
 
 ### Latency Section
 
@@ -191,7 +192,8 @@ all of them.
 
 ## Throughput Tuning
 
-When throughput is lower than expected or you see drops:
+When throughput is lower than expected, or `Arrivals Completed` lags well
+behind `Arrivals Spawned`:
 
 ### 1. The worker pool sizes itself
 
@@ -199,18 +201,18 @@ There is no `pool_size` option. The worker pool is dynamic: a worker is
 checked out (or created on demand) for each arrival, so it grows to whatever
 concurrency the arrival rate and command latency demand. You do not tune it.
 
-A **drop** is therefore not pool saturation: it means a worker could not be
-created for an arrival (for example `adapter.setup/1` failed). A non-trivial
-drop rate points at the adapter or the SUT refusing connections, not at a
-queue depth to raise. Watch `pool_utilization` and `peak_workers` in
-`Runner.status/1` to see how far the pool grew.
+So a large gap between `Arrivals Spawned` and `Arrivals Completed` is not pool
+saturation: it means workers could not start or their sequences errored out
+(for example `adapter.setup/1` failed). That points at the adapter or the SUT
+refusing connections, not at a queue depth to raise. Watch `pool_utilization`
+and `peak_workers` in `Runner.status/1` to see how far the pool grew.
 
 ### 2. Lower Arrival Rate
 
 Match the arrival rate to what your system can actually handle:
 
 ```elixir
-# If you're seeing 30% drops at rate 100, try rate 70
+# If completions lag spawns at rate 100, try rate 70
 Runner.start_link(
   arrival_rate: 70,
   # ...
@@ -274,11 +276,11 @@ status = Runner.status(runner)
 
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
-| High drop rate (>10%) | Workers failing to start (`adapter.setup`) or SUT refusing connections | Check adapter setup and SUT connection limits; lower arrival rate |
+| Completed << Spawned | Workers failing to start (`adapter.setup`) or SUT refusing connections | Check adapter setup and SUT connection limits; lower arrival rate |
 | Commands ≈ Arrivals | Early termination | Check `terminate?/3` returns `false` initially |
 | Peak util 100%, avg util low | Bursty traffic | Add ramp-up to smooth the arrival curve |
 | Peak and avg util both high | Sustained overload | Lower arrival rate or scale the SUT |
-| Low arrivals/sec vs target | Ramp-up or drops | Check ramp config and drop rate |
+| Low arrivals/sec vs target | Ramp-up or failed arrivals | Check ramp config and the Spawned/Completed gap |
 | Latency spikes | SUT bottleneck | Profile SUT, check for resource contention |
 
 ## Report Formats
@@ -325,7 +327,7 @@ config = [
   think_time: {10, 50},
   on_metrics: fn m ->
     IO.puts("[#{m.duration_ms}ms] #{m.requests_per_second} cmd/s, " <>
-            "p95=#{m.latency_p95}ms, drops=#{m.arrivals_dropped}")
+            "p95=#{m.latency_p95}ms, completed=#{m.arrivals_completed}")
   end
 ]
 
