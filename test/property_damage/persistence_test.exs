@@ -165,6 +165,55 @@ defmodule PropertyDamage.PersistenceTest do
     end
   end
 
+  describe "decode safety" do
+    @tag :tmp_dir
+    test "a valid-checksum file referencing an unknown atom is reported as unsafe terms, not corruption",
+         %{tmp_dir: dir} do
+      # Build a v1 payload whose value is an atom that does NOT exist in this VM.
+      # The name is assembled as raw bytes so it is never interned by the test
+      # itself; :erlang.binary_to_term/[:safe] refuses to create it. The bytes
+      # are intact (checksum matches), so this is an environment mismatch
+      # (unloaded modules/atoms), not corruption.
+      name = "pd_persist_unknown_atom_" <> Integer.to_string(System.unique_integer([:positive]))
+
+      term_binary =
+        <<131, 116, 0, 0, 0, 1, 119, 6, "report", 119, byte_size(name)::8, name::binary>>
+
+      checksum = :erlang.crc32(term_binary)
+      path = Path.join(dir, "unknown-atom.pd")
+      File.write!(path, <<"PD", 1::8, checksum::32, term_binary::binary>>)
+
+      assert {:error, :unsafe_terms} = Persistence.load(path)
+    end
+
+    @tag :tmp_dir
+    test "genuinely malformed bytes (no header) are still an invalid format", %{tmp_dir: dir} do
+      path = Path.join(dir, "garbage.pd")
+      File.write!(path, "not a pd file at all")
+
+      assert {:error, :invalid_format} = Persistence.load(path)
+    end
+  end
+
+  describe "metadata listing does not exhaust the atom table" do
+    @tag :tmp_dir
+    test "an arbitrary filename check-name is not interned as a new atom", %{tmp_dir: dir} do
+      # A directory full of crafted .pd filenames must not let `list/2` mint an
+      # unbounded number of atoms. The check-name segment is parsed with
+      # to_existing_atom; an unknown one drops to the (accurate) full-load path.
+      novel_check = "pd_list_novel_check_atom_unique_marker"
+
+      File.write!(
+        Path.join(dir, "20251226T143000-check_failed-#{novel_check}-seed1.pd"),
+        "garbage"
+      )
+
+      _ = Persistence.list(dir)
+
+      assert_raise ArgumentError, fn -> String.to_existing_atom(novel_check) end
+    end
+  end
+
   describe "capture_dependency_versions/1" do
     test "captures versions from command structs" do
       report = create_test_report()

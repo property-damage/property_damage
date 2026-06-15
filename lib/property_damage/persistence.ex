@@ -36,6 +36,20 @@ defmodule PropertyDamage.Persistence do
   `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
 
   Example: `2025-12-26T14-30-00-check_failed-NonNegativeBalance-seed512902757.pd`
+
+  ## Sensitive data
+
+  A `.pd` file losslessly preserves the failing run: the command structs, the
+  full event log, and projection state at the point of failure. If those carry
+  personal or otherwise sensitive data (account numbers, emails, tokens), so
+  does the saved file. Treat `.pd` files as you would the data they capture:
+
+  - Do not commit them to a public repository or attach them to a public issue.
+  - Scrub or synthesize sensitive fields in your commands/events before saving
+    if the file will be shared, or keep saved failures in a controlled location.
+
+  PropertyDamage does not redact automatically; what the run touched is what the
+  file holds.
   """
 
   alias PropertyDamage.{FailureReport, Sequence}
@@ -313,7 +327,11 @@ defmodule PropertyDamage.Persistence do
         %{report: report} = :erlang.binary_to_term(term_binary, [:safe])
         {:ok, report, []}
       rescue
-        ArgumentError -> {:error, :corrupted_data}
+        # The checksum already matched, so the bytes are intact: a [:safe]
+        # decode failure here means the term references atoms/modules that do
+        # not exist in this VM (e.g. the SUT's command/event structs aren't
+        # loaded), not byte corruption. Report it accurately.
+        ArgumentError -> {:error, :unsafe_terms}
       end
     end
   end
@@ -330,7 +348,9 @@ defmodule PropertyDamage.Persistence do
         warnings = check_version_compatibility(payload[:metadata] || %{})
         {:ok, payload.report, warnings}
       rescue
-        ArgumentError -> {:error, :corrupted_data}
+        # See the v1 clause: post-checksum, this is unknown/unloadable terms
+        # rather than corruption.
+        ArgumentError -> {:error, :unsafe_terms}
       end
     end
   end
@@ -505,7 +525,10 @@ defmodule PropertyDamage.Persistence do
          %{
            timestamp: parse_timestamp(timestamp_str),
            failure_type: String.to_existing_atom(type),
-           check_name: String.to_atom(check),
+           # to_existing_atom (not to_atom): a directory of crafted filenames must
+           # not be able to exhaust the atom table. An unknown check-name raises
+           # ArgumentError below and drops to the accurate full-load fallback.
+           check_name: String.to_existing_atom(check),
            seed: String.to_integer(seed_str)
          }}
 
