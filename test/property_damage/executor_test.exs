@@ -162,6 +162,44 @@ defmodule PropertyDamage.ExecutorTest do
     end
   end
 
+  describe "record assertion mode" do
+    test "recorded failures are returned in chronological order" do
+      # total_quantity accumulates, so once it exceeds 100 every subsequent
+      # command also fails. The recorded failures must read oldest-first.
+      commands = [
+        %CreateItem{name: "A", quantity: 101},
+        %CreateItem{name: "B", quantity: 60},
+        %CreateItem{name: "C", quantity: 70}
+      ]
+
+      {:ok, result} =
+        Executor.run(commands, FailingModel, SimpleAdapter, assertion_mode: :record)
+
+      assert result.success == false
+
+      indices = Enum.map(result.assertion_failures, & &1.command_index)
+      assert length(indices) >= 2
+
+      assert indices == Enum.sort(indices),
+             "expected chronological order, got #{inspect(indices)}"
+    end
+  end
+
+  describe "execute_raw/3" do
+    test "preserves event order across commands" do
+      commands = [
+        %CreateItem{name: "A", quantity: 1},
+        %CreateItem{name: "B", quantity: 2},
+        %CreateItem{name: "C", quantity: 3}
+      ]
+
+      {:ok, events} = Executor.execute_raw(commands, SimpleAdapter, %{adapter_context: %{}})
+
+      names = Enum.map(events, & &1.event.name)
+      assert names == ["A", "B", "C"]
+    end
+  end
+
   describe "adapter errors" do
     test "propagate through result" do
       command = %{fail: true}

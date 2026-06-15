@@ -856,7 +856,9 @@ defmodule PropertyDamage.Executor do
         # Finalize resource pollers
         {state, resource_failures, resource_halt} = finalize_resource_pollers(state)
 
-        combined_failures = assertion_failures ++ resource_failures
+        # assertion_failures accumulate newest-first (prepended in :record mode);
+        # reverse so they read in chronological order, like the event log.
+        combined_failures = Enum.reverse(assertion_failures) ++ resource_failures
 
         # Check if any resource poller failed in :halt mode
         case resource_halt do
@@ -2879,18 +2881,25 @@ defmodule PropertyDamage.Executor do
                state.refs
              ) do
           {:ok, new_events, new_refs} ->
-            {:cont, %{events: state.events ++ new_events, refs: new_refs}}
+            # Accumulate event chunks newest-first and flatten once at the end,
+            # rather than `++`-ing onto the growing list each step (which copies
+            # the whole accumulator every command, an O(n^2) cost).
+            {:cont, %{events: [new_events | state.events], refs: new_refs}}
 
           {:error, reason} ->
-            {:halt, {:error, {:adapter_error, reason, state.events}}}
+            {:halt, {:error, {:adapter_error, reason, flatten_event_chunks(state.events)}}}
         end
       end)
 
     case result do
       {:error, _} = error -> error
-      %{events: events} -> {:ok, events}
+      %{events: chunks} -> {:ok, flatten_event_chunks(chunks)}
     end
   end
+
+  # Event chunks are prepended per command (newest-first); restore execution
+  # order and concatenate in a single pass.
+  defp flatten_event_chunks(chunks), do: chunks |> Enum.reverse() |> Enum.concat()
 
   # Execute a single command in raw mode (no projections/assertions)
   defp execute_raw_command(command, index, adapter, adapter_context, event_queue, refs) do
