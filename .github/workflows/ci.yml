@@ -69,13 +69,14 @@ jobs:
 
       - run: ./scripts/check_package_contents.sh
 
+  # Zero-infra benches: in-process SUTs, no service containers needed.
   bench:
     name: Bench (${{ matrix.bench }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        bench: [cachex_bench]
+        bench: [cachex_bench, openapi_bench]
     defaults:
       run:
         working-directory: benches/${{ matrix.bench }}
@@ -94,6 +95,108 @@ jobs:
             benches/${{ matrix.bench }}/_build
           key: bench-${{ matrix.bench }}-${{ hashFiles(format('benches/{0}/mix.lock', matrix.bench)) }}
           restore-keys: bench-${{ matrix.bench }}-
+
+      - run: mix deps.get
+
+      - run: mix test
+
+  # Oban bench needs a real Postgres. Setting PD_OBAN_DATABASE_URL makes the
+  # bench's mix alias skip its local docker-compose and use this service
+  # container instead (it still runs ecto.create + ecto.migrate before the test).
+  bench_oban:
+    name: Bench (oban_bench)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pd_oban_bench
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pd_oban_bench"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PD_OBAN_DATABASE_URL: ecto://postgres:postgres@localhost:5432/pd_oban_bench
+    defaults:
+      run:
+        working-directory: benches/oban_bench
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            benches/oban_bench/deps
+            benches/oban_bench/_build
+          key: bench-oban_bench-${{ hashFiles('benches/oban_bench/mix.lock') }}
+          restore-keys: bench-oban_bench-
+
+      - run: mix deps.get
+
+      - run: mix test
+
+  # Redis bench needs Redis + Toxiproxy. PD_REDIS_URL makes the bench's mix
+  # alias skip its local docker-compose; PD_REDIS_UPSTREAM points Toxiproxy at
+  # the redis service over the Actions service network (reachable by label).
+  # The proxy listens on 0.0.0.0:6391 inside the toxiproxy container, published
+  # to the runner so the bench connects through it at localhost:6391.
+  bench_redis:
+    name: Bench (redis_bench)
+    runs-on: ubuntu-24.04
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+      toxiproxy:
+        image: ghcr.io/shopify/toxiproxy:2.12.0
+        ports:
+          - 8474:8474
+          - 6391:6391
+        options: >-
+          --health-cmd "/toxiproxy-cli list"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PD_REDIS_URL: redis://localhost:6379
+      PD_TOXIPROXY_URL: http://localhost:8474
+      PD_REDIS_PROXY_HOST: localhost
+      PD_REDIS_PROXY_PORT: "6391"
+      PD_REDIS_UPSTREAM: redis:6379
+    defaults:
+      run:
+        working-directory: benches/redis_bench
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            benches/redis_bench/deps
+            benches/redis_bench/_build
+          key: bench-redis_bench-${{ hashFiles('benches/redis_bench/mix.lock') }}
+          restore-keys: bench-redis_bench-
 
       - run: mix deps.get
 
