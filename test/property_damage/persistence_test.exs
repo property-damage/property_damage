@@ -219,6 +219,24 @@ defmodule PropertyDamage.PersistenceTest do
 
       assert {:error, :invalid_format} = Persistence.load(path)
     end
+
+    @tag :tmp_dir
+    test "rejects a compressed term whose declared size is a decompression bomb",
+         %{tmp_dir: dir} do
+      # The external term format flags compression with the byte 80 after the
+      # 131 version byte, followed by a 32-bit declared uncompressed size. A
+      # tiny file can claim a multi-gigabyte expansion; decoding it would let
+      # the VM preallocate that much. The declared size must be bounded BEFORE
+      # any decompression is attempted, so this is rejected as too large rather
+      # than blindly inflated.
+      huge_size = 4 * 1024 * 1024 * 1024 - 1
+      term_binary = <<131, 80, huge_size::unsigned-32, "compressed-bytes-do-not-matter">>
+      checksum = :erlang.crc32(term_binary)
+      path = Path.join(dir, "bomb.pd")
+      File.write!(path, <<"PD", 2::8, checksum::32, term_binary::binary>>)
+
+      assert {:error, :term_too_large} = Persistence.load(path)
+    end
   end
 
   describe "metadata listing does not exhaust the atom table" do

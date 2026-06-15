@@ -278,7 +278,10 @@ defmodule PropertyDamage.SeedLibrary do
 
       {:ok, %{data | entries: entries}}
     else
-      {:error, :enoent} -> {:ok, new()}
+      # A missing default file just means no library has been created yet, so
+      # start fresh. A missing *explicit* path is almost always a typo, so
+      # surface it rather than masking it with an empty library.
+      {:error, :enoent} when path == @default_file -> {:ok, new()}
       {:error, reason} -> {:error, reason}
     end
   end

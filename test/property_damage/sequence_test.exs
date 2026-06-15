@@ -186,6 +186,25 @@ defmodule PropertyDamage.SequenceTest do
       assert Sequence.linear?(filtered)
       assert filtered.prefix == [%Cmd1{id: 1}]
     end
+
+    test "converts to linear when only one branch survives" do
+      seq =
+        Sequence.branching(
+          [%Cmd1{id: 1}],
+          [[%Cmd1{id: 2}, %Cmd1{id: 3}], [%Cmd1{id: 4}]],
+          [%Cmd1{id: 5}]
+        )
+
+      # Keep ids 1, 3, 5: branch 0 -> [3], branch 1 -> [] (dropped), so a
+      # single branch remains. A one-branch sequence is not parallel, so it
+      # must collapse to linear (prefix ++ branch ++ suffix).
+      filtered = Sequence.filter(seq, fn %{id: id} -> id in [1, 3, 5] end)
+
+      assert Sequence.linear?(filtered)
+      assert filtered.prefix == [%Cmd1{id: 1}, %Cmd1{id: 3}, %Cmd1{id: 5}]
+      assert filtered.branches == nil
+      assert filtered.suffix == []
+    end
   end
 
   describe "append/2" do

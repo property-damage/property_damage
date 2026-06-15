@@ -57,6 +57,13 @@ defmodule PropertyDamage.Persistence do
   @version 2
   @extension ".pd"
 
+  # Upper bound on the term size we are willing to reconstruct from a file.
+  # Compressed external term format declares its uncompressed size in the
+  # header; a hostile file can claim a multi-gigabyte expansion from a few
+  # bytes (a decompression bomb). Legitimate failure reports are tiny, so a
+  # generous 128 MiB cap rejects abuse without affecting real use.
+  @max_uncompressed_size 128 * 1024 * 1024
+
   @type warning ::
           {:property_damage_version_mismatch, String.t(), String.t()}
           | {:dependency_version_mismatch, atom(), String.t(), String.t()}
@@ -321,19 +328,24 @@ defmodule PropertyDamage.Persistence do
   defp decode(<<"PD", 1::8, stored_checksum::32, term_binary::binary>>) do
     actual_checksum = :erlang.crc32(term_binary)
 
-    if actual_checksum != stored_checksum do
-      {:error, :checksum_mismatch}
-    else
-      try do
-        %{report: report} = :erlang.binary_to_term(term_binary, [:safe])
-        {:ok, report, check_struct_drift(report)}
-      rescue
-        # The checksum already matched, so the bytes are intact: a [:safe]
-        # decode failure here means the term references atoms/modules that do
-        # not exist in this VM (e.g. the SUT's command/event structs aren't
-        # loaded), not byte corruption. Report it accurately.
-        ArgumentError -> {:error, :unsafe_terms}
-      end
+    cond do
+      actual_checksum != stored_checksum ->
+        {:error, :checksum_mismatch}
+
+      not within_size_limit?(term_binary) ->
+        {:error, :term_too_large}
+
+      true ->
+        try do
+          %{report: report} = :erlang.binary_to_term(term_binary, [:safe])
+          {:ok, report, check_struct_drift(report)}
+        rescue
+          # The checksum already matched, so the bytes are intact: a [:safe]
+          # decode failure here means the term references atoms/modules that do
+          # not exist in this VM (e.g. the SUT's command/event structs aren't
+          # loaded), not byte corruption. Report it accurately.
+          ArgumentError -> {:error, :unsafe_terms}
+        end
     end
   end
 
@@ -341,22 +353,27 @@ defmodule PropertyDamage.Persistence do
   defp decode(<<"PD", 2::8, stored_checksum::32, term_binary::binary>>) do
     actual_checksum = :erlang.crc32(term_binary)
 
-    if actual_checksum != stored_checksum do
-      {:error, :checksum_mismatch}
-    else
-      try do
-        payload = :erlang.binary_to_term(term_binary, [:safe])
+    cond do
+      actual_checksum != stored_checksum ->
+        {:error, :checksum_mismatch}
 
-        warnings =
-          check_version_compatibility(payload[:metadata] || %{}) ++
-            check_struct_drift(payload.report)
+      not within_size_limit?(term_binary) ->
+        {:error, :term_too_large}
 
-        {:ok, payload.report, warnings}
-      rescue
-        # See the v1 clause: post-checksum, this is unknown/unloadable terms
-        # rather than corruption.
-        ArgumentError -> {:error, :unsafe_terms}
-      end
+      true ->
+        try do
+          payload = :erlang.binary_to_term(term_binary, [:safe])
+
+          warnings =
+            check_version_compatibility(payload[:metadata] || %{}) ++
+              check_struct_drift(payload.report)
+
+          {:ok, payload.report, warnings}
+        rescue
+          # See the v1 clause: post-checksum, this is unknown/unloadable terms
+          # rather than corruption.
+          ArgumentError -> {:error, :unsafe_terms}
+        end
     end
   end
 
@@ -366,6 +383,18 @@ defmodule PropertyDamage.Persistence do
   end
 
   defp decode(_), do: {:error, :invalid_format}
+
+  # The external term format declares its uncompressed size in the header for
+  # compressed terms (`<<131, 80, size::32, ...>>`); bound that BEFORE decoding
+  # so a decompression bomb cannot make the VM preallocate gigabytes. For an
+  # uncompressed term the byte size is already a faithful upper bound.
+  defp within_size_limit?(<<131, 80, uncompressed_size::unsigned-32, _rest::binary>>) do
+    uncompressed_size <= @max_uncompressed_size
+  end
+
+  defp within_size_limit?(term_binary) do
+    byte_size(term_binary) <= @max_uncompressed_size
+  end
 
   defp pd_version do
     case Application.spec(:property_damage, :vsn) do

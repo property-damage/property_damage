@@ -367,7 +367,34 @@ defmodule PropertyDamage.FailureReport.Timeline do
         format_command_with_events(cmd, idx, events, is_failure, max_events, color)
       end)
 
-    header <> body
+    # Events from injectors and other async sources carry command_index: nil;
+    # they are not attributable to a command but must still appear, not vanish.
+    async_section = format_async_events(Map.get(events_by_cmd, nil, []), max_events, color)
+
+    header <> body <> async_section
+  end
+
+  defp format_async_events([], _max_events, _color), do: ""
+
+  defp format_async_events(events, max_events, color) do
+    events_text =
+      events
+      |> Enum.take(max_events)
+      |> Enum.map_join("\n", fn entry ->
+        event_name = short_module_name(entry.event.__struct__)
+        source = format_source_badge(entry.source, color)
+        "    #{source} #{green(color)}→#{reset()} #{event_name}"
+      end)
+
+    truncated =
+      if length(events) > max_events do
+        "\n    #{dim(color)}... and #{length(events) - max_events} more events#{reset()}"
+      else
+        ""
+      end
+
+    "\n\n#{bold(color)}ASYNC#{reset()} #{dim(color)}(no command index)#{reset()}\n" <>
+      events_text <> truncated
   end
 
   defp format_command_with_events(cmd, idx, events, is_failure, max_events, color) do

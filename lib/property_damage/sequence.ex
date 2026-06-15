@@ -221,7 +221,8 @@ defmodule PropertyDamage.Sequence do
   @doc """
   Filter commands in the sequence, preserving structure.
 
-  Empty branches are removed. If all branches become empty, converts to linear.
+  Empty branches are removed. If one or zero branches remain, the result is
+  converted to a linear sequence (a single branch is not parallel).
   """
   @spec filter(t(), (command() -> boolean())) :: t()
   def filter(%__MODULE__{prefix: prefix, branches: nil, suffix: suffix} = seq, pred) do
@@ -249,6 +250,16 @@ defmodule PropertyDamage.Sequence do
           prefix: filtered_prefix,
           branches: nil,
           suffix: filtered_suffix,
+          registry: seq.registry
+        }
+
+      [only_branch] ->
+        # A single remaining branch is not parallel, so inline it linearly
+        # (prefix, then the branch's commands, then suffix).
+        %__MODULE__{
+          prefix: filtered_prefix ++ only_branch ++ filtered_suffix,
+          branches: nil,
+          suffix: [],
           registry: seq.registry
         }
 
