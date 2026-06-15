@@ -250,7 +250,10 @@ defmodule PropertyDamage.FailureReport do
       projections: Keyword.get(opts, :projections, %{}),
       refs: Keyword.get(opts, :refs, %{}),
       model: Keyword.get(opts, :model),
-      adapter: Keyword.get(opts, :adapter)
+      adapter: Keyword.get(opts, :adapter),
+      # Forward the stacktrace so the converted report keeps it and the origin
+      # classifier can attribute the failure (it was silently dropped before).
+      stacktrace: Keyword.get(opts, :stacktrace)
     )
   end
 
@@ -519,7 +522,11 @@ end
 
 defimpl Inspect, for: PropertyDamage.FailureReport do
   def inspect(report, opts) do
-    # For IEx/IO.inspect, show the formatted report instead of raw struct
+    # For IEx/IO.inspect, show the formatted report instead of raw struct. The
+    # formatters assume a report built by FailureReport.new (real sequence and
+    # timestamp); a hand-built or partially-deserialized struct can crash them,
+    # so guard with a minimal, always-safe fallback rather than letting inspect/1
+    # blow up into an #Inspect.Error<...>.
     if opts.limit == :infinity or opts.pretty do
       # User wants detailed output - show formatted report
       formatted = PropertyDamage.FailureReport.Formatter.format(report, :terminal, color: false)
@@ -529,5 +536,21 @@ defimpl Inspect, for: PropertyDamage.FailureReport do
       compact = PropertyDamage.FailureReport.Formatter.format(report, :compact)
       Inspect.Algebra.concat(["#FailureReport<", compact, ">"])
     end
+  rescue
+    _ -> fallback(report)
+  catch
+    _, _ -> fallback(report)
+  end
+
+  defp fallback(report) do
+    type = report.failure_type || :unknown
+
+    Inspect.Algebra.concat([
+      "#FailureReport<",
+      "seed: #{inspect(report.seed)}, ",
+      "type: #{inspect(type)}, ",
+      "failed_at: #{inspect(report.failed_at_index)}",
+      ">"
+    ])
   end
 end

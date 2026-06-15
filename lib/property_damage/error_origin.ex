@@ -416,7 +416,11 @@ defmodule PropertyDamage.ErrorOrigin do
     ~r/Model$/,
     ~r/Projection$/,
     ~r/Adapter$/,
-    ~r/Command/,
+    # Anchored: a singular command module ends in "Command" (FooCommand). The
+    # unanchored ~r/Command/ over-matched any SUT module that merely contained
+    # the word (CommandBus, CommandHandler), hiding real SUT bugs behind a
+    # "fix your test" verdict. The .Commands. namespace is covered below.
+    ~r/Command$/,
     ~r/\.Commands\./,
     ~r/\.Events\./,
     ~r/\.Projections\./,

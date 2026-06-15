@@ -94,6 +94,77 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
     end
   end
 
+  describe "ErrorOrigin module-name matching is anchored" do
+    test "a SUT module that merely contains 'Command' is not test code" do
+      # Acme.CommandBus is the user's production code, not PD test scaffolding.
+      # The unanchored ~r/Command/ pattern misclassified it, hiding a real SUT
+      # bug behind a "fix your test" verdict.
+      stacktrace = [{Acme.CommandBus, :dispatch, 1, [file: ~c"lib/acme/command_bus.ex", line: 9]}]
+
+      classification =
+        ErrorOrigin.classify({:adapter_error, %RuntimeError{message: "boom"}}, stacktrace)
+
+      assert classification.origin == :unknown
+    end
+
+    test "genuine command modules are still classified as test code" do
+      # The .Commands. namespace convention and the singular FooCommand suffix
+      # must both still resolve to a test-code origin.
+      for module <- [MyApp.Commands.CreateUser, MyApp.CreateUserCommand] do
+        stacktrace = [{module, :run, 1, [file: ~c"x.ex", line: 1]}]
+
+        classification =
+          ErrorOrigin.classify({:adapter_error, %RuntimeError{message: "boom"}}, stacktrace)
+
+        assert classification.origin == :test_code_error,
+               "expected #{inspect(module)} to be test code"
+      end
+    end
+  end
+
+  describe "from_legacy preserves the stacktrace" do
+    test "a stacktrace passed via opts reaches the struct and the origin classifier" do
+      legacy = %{
+        seed: 1,
+        run_number: 0,
+        original_sequence: PropertyDamage.Sequence.linear([%SomeEvent{id: 1}]),
+        shrunk_sequence: PropertyDamage.Sequence.linear([%SomeEvent{id: 1}]),
+        failed_at_index: 0,
+        failure_reason: {:adapter_error, %RuntimeError{message: "boom"}},
+        shrink_iterations: 0,
+        shrink_time_ms: 0
+      }
+
+      stacktrace = [{MyApp.Commands.CreateUser, :run, 1, [file: ~c"x.ex", line: 1]}]
+
+      rep = FailureReport.from_legacy(legacy, stacktrace: stacktrace)
+
+      assert rep.stacktrace == stacktrace
+      # The classifier ran with the stacktrace, so it could attribute origin.
+      assert rep.error_origin == :test_code_error
+    end
+  end
+
+  describe "Inspect never raises" do
+    test "inspecting a degenerate hand-built report yields a useful string, not an Inspect.Error" do
+      # A FailureReport built by FailureReport.new always has a real sequence and
+      # timestamp, but a hand-built / partially-deserialized struct may not. The
+      # defimpl must not let inspect/1 blow up into #Inspect.Error<...>.
+      out = inspect(%FailureReport{}, pretty: true)
+
+      assert out =~ "#FailureReport<"
+      refute out =~ "Inspect.Error"
+      refute out =~ "ArithmeticError"
+    end
+
+    test "the compact (non-pretty) inspect path is also crash-safe" do
+      out = inspect(%FailureReport{failure_type: nil}, limit: 5)
+
+      assert out =~ "#FailureReport<"
+      refute out =~ "Inspect.Error"
+    end
+  end
+
   describe "exception message extraction" do
     test "a KeyError assertion failure renders a non-empty message" do
       # KeyError computes its message lazily (message: nil in the struct), so
