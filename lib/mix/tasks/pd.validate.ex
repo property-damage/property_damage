@@ -46,40 +46,57 @@ defmodule Mix.Tasks.Pd.Validate do
 
   @impl true
   def run(args) do
-    # Parse arguments
+    args |> exec() |> halt_on_error()
+  end
+
+  # Run the validation and return its status (`:ok` or `:error`) without halting.
+  # This is the testable seam: `run/1` is a thin wrapper that calls `exec/1` and
+  # translates an `:error` status into a non-zero `System.halt`, so the decision
+  # logic can be exercised in-process without killing the VM.
+  @doc false
+  @spec exec([String.t()]) :: :ok | :error
+  def exec(args) do
     {opts, argv, _} = OptionParser.parse(args, strict: [verbose: :boolean, strict: :boolean])
     verbose = Keyword.get(opts, :verbose, false)
     strict = Keyword.get(opts, :strict, false)
 
-    case argv do
-      [model_str, adapter_str] ->
-        # Ensure code is compiled
-        Mix.Task.run("compile", [])
-
-        # Convert strings to modules
-        model = parse_module(model_str)
-        adapter = parse_module(adapter_str)
-
-        validate_and_report(model, adapter, verbose, strict)
-
-      [model_str] ->
-        # Only model provided - show helpful message
-        Mix.Task.run("compile", [])
-        model = parse_module(model_str)
-
-        IO.puts("\n")
-        print_color(:yellow, "Note: No adapter specified. Validating model only.\n")
-        validate_model_only(model, verbose, strict)
-
-      [] ->
-        print_usage()
-
-      _ ->
-        print_color(:red, "Error: Expected 1 or 2 arguments (model and optional adapter)\n")
-        print_usage()
-        System.halt(1)
-    end
+    dispatch(argv, verbose, strict)
   end
+
+  defp dispatch([model_str, adapter_str], verbose, strict) do
+    # Ensure code is compiled
+    Mix.Task.run("compile", [])
+
+    # Convert strings to modules
+    model = parse_module(model_str)
+    adapter = parse_module(adapter_str)
+
+    validate_and_report(model, adapter, verbose, strict)
+  end
+
+  defp dispatch([model_str], verbose, strict) do
+    # Only model provided - show helpful message
+    Mix.Task.run("compile", [])
+    model = parse_module(model_str)
+
+    IO.puts("\n")
+    print_color(:yellow, "Note: No adapter specified. Validating model only.\n")
+    validate_model_only(model, verbose, strict)
+  end
+
+  defp dispatch([], _verbose, _strict) do
+    print_usage()
+    :ok
+  end
+
+  defp dispatch(_argv, _verbose, _strict) do
+    print_color(:red, "Error: Expected 1 or 2 arguments (model and optional adapter)\n")
+    print_usage()
+    :error
+  end
+
+  defp halt_on_error(:error), do: System.halt(1)
+  defp halt_on_error(_), do: :ok
 
   defp parse_module(string) do
     string
@@ -97,33 +114,35 @@ defmodule Mix.Tasks.Pd.Validate do
     model_exists = Code.ensure_loaded?(model)
     adapter_exists = Code.ensure_loaded?(adapter)
 
-    unless model_exists do
-      print_color(:red, "ERROR: Model module #{inspect(model)} does not exist\n")
-      print_hint("Make sure the module is defined and the project is compiled.")
-      System.halt(1)
-    end
+    cond do
+      not model_exists ->
+        print_color(:red, "ERROR: Model module #{inspect(model)} does not exist\n")
+        print_hint("Make sure the module is defined and the project is compiled.")
+        :error
 
-    unless adapter_exists do
-      print_color(:red, "ERROR: Adapter module #{inspect(adapter)} does not exist\n")
-      print_hint("Make sure the module is defined and the project is compiled.")
-      System.halt(1)
-    end
+      not adapter_exists ->
+        print_color(:red, "ERROR: Adapter module #{inspect(adapter)} does not exist\n")
+        print_hint("Make sure the module is defined and the project is compiled.")
+        :error
 
-    # Run validation
-    case PropertyDamage.Validation.validate!(model, adapter) do
-      {:ok, warnings} ->
-        if verbose do
-          PropertyDamage.Validation.print_summary(model, adapter, warnings)
-        end
+      true ->
+        # Run validation
+        case PropertyDamage.Validation.validate!(model, adapter) do
+          {:ok, warnings} ->
+            if verbose do
+              PropertyDamage.Validation.print_summary(model, adapter, warnings)
+            end
 
-        print_validation_results(model, adapter, warnings, verbose)
+            print_validation_results(model, adapter, warnings, verbose)
 
-        if strict and warnings != [] do
-          IO.puts("")
-          print_color(:red, "FAILED: #{length(warnings)} warning(s) in strict mode\n")
-          System.halt(1)
-        else
-          print_color(:green, "\nVALIDATION PASSED\n")
+            if strict and warnings != [] do
+              IO.puts("")
+              print_color(:red, "FAILED: #{length(warnings)} warning(s) in strict mode\n")
+              :error
+            else
+              print_color(:green, "\nVALIDATION PASSED\n")
+              :ok
+            end
         end
     end
   rescue
@@ -132,53 +151,53 @@ defmodule Mix.Tasks.Pd.Validate do
       print_color(:red, "VALIDATION FAILED\n")
       IO.puts("")
       print_errors_with_hints(e.message)
-      System.halt(1)
+      :error
   end
 
   defp validate_model_only(model, verbose, strict) do
-    unless Code.ensure_loaded?(model) do
+    if Code.ensure_loaded?(model) do
+      validate_loaded_model_only(model, verbose, strict)
+    else
       print_color(:red, "ERROR: Model module #{inspect(model)} does not exist\n")
-      System.halt(1)
+      :error
     end
+  end
 
-    errors = []
-    warnings = []
+  defp validate_loaded_model_only(model, verbose, strict) do
+    case missing_required_callbacks(model) do
+      [] ->
+        report_model_only(model, verbose, strict)
 
-    # Check model callbacks (assertion_projections is optional)
-    required_callbacks = [:commands, :command_sequence_projection]
-
-    errors =
-      for callback <- required_callbacks,
-          not function_exported?(model, callback, 0),
-          reduce: errors do
-        acc -> ["Model missing required callback #{callback}/0" | acc]
-      end
-
-    unless Enum.empty?(errors) do
-      print_color(:red, "ERRORS:\n")
-
-      for error <- errors do
-        IO.puts("  - #{error}")
-      end
-
-      System.halt(1)
+      missing ->
+        print_color(:red, "ERRORS:\n")
+        Enum.each(missing, fn error -> IO.puts("  - #{error}") end)
+        :error
     end
+  end
 
+  defp missing_required_callbacks(model) do
+    for callback <- [:commands, :command_sequence_projection],
+        not function_exported?(model, callback, 0) do
+      "Model missing required callback #{callback}/0"
+    end
+  end
+
+  defp report_model_only(model, verbose, strict) do
     # Check commands
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
 
     errors =
-      for {_weight, cmd, _spec} <- commands, not Code.ensure_loaded?(cmd), reduce: errors do
-        acc -> ["Command module #{inspect(cmd)} does not exist" | acc]
+      for {_weight, cmd, _spec} <- commands, not Code.ensure_loaded?(cmd) do
+        "Command module #{inspect(cmd)} does not exist"
       end
 
     # Check command callbacks
     errors =
-      for {_weight, cmd, _spec} <- commands, Code.ensure_loaded?(cmd), reduce: errors do
-        acc ->
-          if function_exported?(cmd, :generator, 1),
-            do: acc,
-            else: ["Command #{inspect(cmd)} missing generator/1" | acc]
+      for {_weight, cmd, _spec} <- commands,
+          Code.ensure_loaded?(cmd),
+          not function_exported?(cmd, :generator, 1),
+          reduce: errors do
+        acc -> ["Command #{inspect(cmd)} missing generator/1" | acc]
       end
 
     # Check projections
@@ -207,43 +226,37 @@ defmodule Mix.Tasks.Pd.Validate do
     warnings =
       for {_weight, cmd, _spec} <- commands,
           Code.ensure_loaded?(cmd),
-          not function_exported?(cmd, :downstream_observables, 0),
-          reduce: warnings do
-        acc ->
-          [
-            "Command #{cmd |> Module.split() |> List.last()} missing downstream_observables/0"
-            | acc
-          ]
+          not function_exported?(cmd, :downstream_observables, 0) do
+        "Command #{cmd |> Module.split() |> List.last()} missing downstream_observables/0"
       end
 
     if verbose do
       print_model_summary(model, commands)
     end
 
-    if Enum.empty?(errors) do
-      if warnings != [] do
-        print_color(:yellow, "\nWARNINGS:\n")
+    cond do
+      errors != [] ->
+        print_color(:red, "\nERRORS:\n")
+        Enum.each(errors, fn error -> IO.puts("  - #{error}") end)
+        :error
 
-        for warning <- warnings do
-          IO.puts("  - #{warning}")
-        end
-      end
-
-      if strict and warnings != [] do
+      strict and warnings != [] ->
+        print_warnings(warnings)
         print_color(:red, "\nFAILED: #{length(warnings)} warning(s) in strict mode\n")
-        System.halt(1)
-      else
+        :error
+
+      true ->
+        print_warnings(warnings)
         print_color(:green, "\nMODEL VALIDATION PASSED\n")
-      end
-    else
-      print_color(:red, "\nERRORS:\n")
-
-      for error <- errors do
-        IO.puts("  - #{error}")
-      end
-
-      System.halt(1)
+        :ok
     end
+  end
+
+  defp print_warnings([]), do: :ok
+
+  defp print_warnings(warnings) do
+    print_color(:yellow, "\nWARNINGS:\n")
+    Enum.each(warnings, fn warning -> IO.puts("  - #{warning}") end)
   end
 
   defp print_validation_results(model, adapter, warnings, _verbose) do

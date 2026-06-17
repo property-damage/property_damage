@@ -7,10 +7,11 @@ defmodule Mix.Tasks.Pd.ValidateTest do
 
   alias Mix.Tasks.Pd.Validate
 
-  # We deliberately only exercise the SUCCESS paths of `run/1` that return
-  # normally. Every failure path in this task calls `System.halt/1`, which
-  # terminates the BEAM and would kill the test runner, so those paths are not
-  # testable in-process (see the moduledoc note below and the report).
+  # Success paths are exercised through `run/1` (which returns normally on
+  # success). Failure paths are exercised through `exec/1`, the halt-free seam:
+  # `run/1` only translates `exec/1`'s `:error` status into `System.halt/1` at the
+  # boundary, so the decision logic is testable in-process without killing the
+  # test runner.
   #
   # The valid test-support modules used here:
   #   * PropertyDamage.Test.ExecutorModel  - valid model with commands,
@@ -78,5 +79,61 @@ defmodule Mix.Tasks.Pd.ValidateTest do
       assert output =~ "State Projection: PropertyDamage.Test.Projections.ModelState"
       assert output =~ "MODEL VALIDATION PASSED"
     end
+  end
+
+  describe "exec/1 status (halt-free seam)" do
+    test "returns :ok on the two-argument success path" do
+      assert capture_status(fn -> Validate.exec([@model, @adapter]) end) == :ok
+    end
+
+    test "returns :ok on the model-only success path" do
+      assert capture_status(fn -> Validate.exec([@model]) end) == :ok
+    end
+
+    test "returns :error and reports a missing adapter module" do
+      {status, output} =
+        with_output(fn -> Validate.exec([@model, "Nonexistent.Adapter"]) end)
+
+      assert status == :error
+      assert output =~ "Adapter module"
+      assert output =~ "does not exist"
+    end
+
+    test "returns :error and reports a missing model module (model-only)" do
+      {status, output} = with_output(fn -> Validate.exec(["Nonexistent.Model"]) end)
+
+      assert status == :error
+      assert output =~ "Model module"
+      assert output =~ "does not exist"
+    end
+
+    test "returns :error in --strict mode when warnings are present" do
+      {status, output} =
+        with_output(fn -> Validate.exec([@model, @adapter, "--strict"]) end)
+
+      assert status == :error
+      assert output =~ "strict mode"
+    end
+
+    test "returns :error for the wrong number of arguments" do
+      {status, output} = with_output(fn -> Validate.exec(["a", "b", "c"]) end)
+
+      assert status == :error
+      assert output =~ "Expected 1 or 2 arguments"
+    end
+  end
+
+  # Run `fun` while swallowing its stdout, returning only its status.
+  defp capture_status(fun) do
+    {status, _output} = with_output(fun)
+    status
+  end
+
+  # Run `fun`, returning {status, captured_stdout}.
+  defp with_output(fun) do
+    parent = self()
+    output = capture_io(fn -> send(parent, {:status, fun.()}) end)
+    assert_received {:status, status}
+    {status, output}
   end
 end

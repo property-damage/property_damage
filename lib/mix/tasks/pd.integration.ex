@@ -95,32 +95,40 @@ defmodule Mix.Tasks.Pd.Integration do
 
   @impl true
   def run(args) do
+    args |> exec() |> System.halt()
+  end
+
+  # Run the integration task and return its process exit code (0 success,
+  # 1 test/bug failure, 2 usage error) without halting. This is the testable
+  # seam: `run/1` is a thin wrapper that halts with the returned code, so the
+  # decision logic can be exercised in-process without killing the VM.
+  @doc false
+  @spec exec([String.t()]) :: non_neg_integer()
+  def exec(args) do
     # Start applications
     Mix.Task.run("app.start")
 
     # Parse arguments
     {opts, _, invalid} = OptionParser.parse(args, strict: @switches)
 
-    if invalid != [] do
-      IO.puts("Unknown options: #{inspect(invalid)}")
-      print_usage()
-      System.halt(2)
+    with :ok <- check_no_invalid(invalid),
+         {:ok, model} <- fetch_required(opts, :model),
+         {:ok, adapter} <- fetch_required(opts, :adapter),
+         {:ok, url} <- fetch_url(opts),
+         model_module = parse_module(model),
+         adapter_module = parse_module(adapter),
+         :ok <- check_module(model_module, "Model"),
+         :ok <- check_module(adapter_module, "Adapter") do
+      opts
+      |> build_integration_opts(model_module, adapter_module, url)
+      |> run_tests_or_hunt(opts)
+      |> result_to_code()
+    else
+      {:error, code} -> code
     end
+  end
 
-    # Validate required options
-    model = get_required_opt(opts, :model, "MODEL")
-    adapter = get_required_opt(opts, :adapter, "ADAPTER")
-    url = get_opt_with_env(opts, :url, "PROPERTYDAMAGE_BASE_URL", "URL")
-
-    # Parse modules
-    model_module = parse_module(model)
-    adapter_module = parse_module(adapter)
-
-    # Validate modules exist
-    validate_module(model_module, "Model")
-    validate_module(adapter_module, "Adapter")
-
-    # Build options
+  defp build_integration_opts(opts, model_module, adapter_module, url) do
     runs = opts[:runs] || get_env_int("PROPERTYDAMAGE_RUNS") || 100
     commands = opts[:commands] || 50
     verbose = if opts[:quiet], do: false, else: Keyword.get(opts, :verbose, true)
@@ -154,76 +162,75 @@ defmodule Mix.Tasks.Pd.Integration do
       end
 
     # Add report
-    integration_opts =
-      if opts[:report] do
-        format = String.to_atom(opts[:report])
+    if opts[:report] do
+      format = String.to_atom(opts[:report])
 
-        report_opts =
-          if format == :terminal do
-            %{format: format}
-          else
-            path = opts[:report_path] || default_report_path(format)
-            ensure_parent_dir(path)
-            %{format: format, path: path}
-          end
+      report_opts =
+        if format == :terminal do
+          %{format: format}
+        else
+          path = opts[:report_path] || default_report_path(format)
+          ensure_parent_dir(path)
+          %{format: format, path: path}
+        end
 
-        Keyword.put(integration_opts, :report, report_opts)
-      else
-        integration_opts
-      end
-
-    # Run tests
-    result =
-      if opts[:hunt] do
-        PropertyDamage.Integration.hunt_bugs(
-          Keyword.merge(integration_opts,
-            stop_after: opts[:hunt],
-            max_runs: :unlimited,
-            save_to: opts[:save_failures]
-          )
-        )
-      else
-        PropertyDamage.Integration.run(integration_opts)
-      end
-
-    # Exit with appropriate code
-    case result do
-      {:ok, %{success: true}} ->
-        System.halt(0)
-
-      {:ok, %{success: false}} ->
-        System.halt(1)
-
-      {:ok, bugs} when is_list(bugs) ->
-        # Bug hunt mode
-        if bugs != [], do: System.halt(1), else: System.halt(0)
-
-      {:error, _} ->
-        System.halt(1)
+      Keyword.put(integration_opts, :report, report_opts)
+    else
+      integration_opts
     end
   end
 
-  defp get_required_opt(opts, key, _name) do
+  defp run_tests_or_hunt(integration_opts, opts) do
+    if opts[:hunt] do
+      PropertyDamage.Integration.hunt_bugs(
+        Keyword.merge(integration_opts,
+          stop_after: opts[:hunt],
+          max_runs: :unlimited,
+          save_to: opts[:save_failures]
+        )
+      )
+    else
+      PropertyDamage.Integration.run(integration_opts)
+    end
+  end
+
+  # Map an Integration result to a process exit code.
+  @doc false
+  @spec result_to_code(term()) :: 0 | 1
+  def result_to_code({:ok, %{success: true}}), do: 0
+  def result_to_code({:ok, %{success: false}}), do: 1
+  def result_to_code({:ok, bugs}) when is_list(bugs), do: if(bugs == [], do: 0, else: 1)
+  def result_to_code({:error, _}), do: 1
+
+  defp check_no_invalid([]), do: :ok
+
+  defp check_no_invalid(invalid) do
+    IO.puts("Unknown options: #{inspect(invalid)}")
+    print_usage()
+    {:error, 2}
+  end
+
+  defp fetch_required(opts, key) do
     case Keyword.get(opts, key) do
       nil ->
         IO.puts("Error: --#{key} is required")
         print_usage()
-        System.halt(2)
+        {:error, 2}
 
       value ->
-        value
+        {:ok, value}
     end
   end
 
-  defp get_opt_with_env(opts, key, env_var, _name) do
-    case Keyword.get(opts, key) || System.get_env(env_var) do
+  defp fetch_url(opts) do
+    case Keyword.get(opts, :url) || System.get_env("PROPERTYDAMAGE_BASE_URL") do
       nil ->
-        IO.puts("Error: --#{key} is required (or set #{env_var})")
+        IO.puts("Error: --url is required (or set PROPERTYDAMAGE_BASE_URL)")
         print_usage()
-        System.halt(2)
+        {:error, 2}
 
       value ->
-        value
+        {:ok, value}
     end
   end
 
@@ -241,11 +248,13 @@ defmodule Mix.Tasks.Pd.Integration do
     |> String.to_atom()
   end
 
-  defp validate_module(module, type) do
-    unless Code.ensure_loaded?(module) do
+  defp check_module(module, type) do
+    if Code.ensure_loaded?(module) do
+      :ok
+    else
       IO.puts("Error: #{type} module #{inspect(module)} not found")
       IO.puts("Make sure the module is compiled and available")
-      System.halt(2)
+      {:error, 2}
     end
   end
 
