@@ -157,7 +157,11 @@ defmodule PropertyDamage.Stutter do
   @doc """
   Determine if a command should be stuttered based on configuration.
 
-  Uses the seeded PRNG for deterministic behavior.
+  The probabilistic check reads the process RNG (`:rand`). Determinism comes
+  from the executor seeding that RNG once per run (`:rand.seed(:exsss, seed)`
+  before the run loop), not from any per-call seeding here: re-running with the
+  same seed reproduces the same stutter decisions. The same applies to
+  `retry_count/1` and `retry_delay_ms/1`.
   """
   @spec should_stutter?(struct(), Config.t()) :: boolean()
   def should_stutter?(_command, nil), do: false
