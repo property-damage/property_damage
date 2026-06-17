@@ -66,12 +66,14 @@ defmodule PropertyDamage.MixProject do
         "guides/static_regression_tests.md",
         "guides/performance_tuning.md",
         "guides/load_testing.md",
+        "guides/mutation_testing.md",
         "CHANGELOG.md"
       ],
       groups_for_extras: [
-        # Matched first: keep the deferred load-testing guide out of the main
-        # Guides group so it is not advertised alongside the validated surface.
-        "Advanced (deferred)": ~r/guides\/load_testing/,
+        # Matched first: keep the deferred load-testing and mutation-testing
+        # guides out of the main Guides group so they are not advertised
+        # alongside the validated surface.
+        "Advanced (deferred)": ~r/guides\/(load_testing|mutation_testing)/,
         Guides: ~r/guides\/.*/
       ],
       groups_for_modules: [
