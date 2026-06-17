@@ -13,10 +13,20 @@ defmodule PropertyDamage.Shrinker do
   This ensures the minimal reproduction demonstrates the same bug, not
   a different one.
 
-  Failure equivalence is determined by:
+  The accepted candidate's failure must match the original on two dimensions,
+  compared by `check_failure_equivalence/2` (via its failure *signature*):
   - Same failure type (`:check_failed`, `:idempotency_violation`, etc.)
   - Same check name (for invariant violations)
-  - Failure at the same or earlier command index
+
+  A third property also holds: the failure occurs at the **same or an earlier
+  command index** than in the original. This one is guaranteed *structurally*
+  rather than asserted by the signature comparison. Phase 1 first truncates the
+  sequence at the failure point (`Enum.take(commands, failed_at_index + 1)`), so
+  every subsequent candidate is a subset of that prefix and can only fail at the
+  same index or earlier. (This holds for linear sequences; the index is not
+  separately enforced for branching sequences, where `failed_at_index` is a
+  branch-relative coordinate that is not directly comparable across the
+  branching/linear boundary.)
 
   ## Determinism
 
