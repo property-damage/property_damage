@@ -34,7 +34,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
 
     [
       generate_shebang(),
-      generate_header(metadata),
+      generate_header(metadata, report),
       generate_setup(env_var, base_url),
       generate_steps(commands, report, adapter, verbose),
       generate_footer(metadata)
@@ -50,7 +50,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
     "#!/usr/bin/env elixir"
   end
 
-  defp generate_header(metadata) do
+  defp generate_header(metadata, report) do
     failure_desc =
       case metadata.check_name do
         nil -> to_string(metadata.failure_type)
@@ -69,7 +69,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
     # Failure: #{failure_desc}
     # Seed: #{metadata.seed}
     #
-    # Run with: elixir #{Common.generate_filename(%FailureReport{seed: metadata.seed}, :elixir)}
+    # Run with: elixir #{Common.generate_filename(report, :elixir)}
     """
   end
 

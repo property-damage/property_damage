@@ -34,7 +34,7 @@ defmodule PropertyDamage.Export.Script.Python do
 
     [
       generate_shebang(),
-      generate_docstring(metadata),
+      generate_docstring(metadata, report),
       generate_imports(),
       generate_setup(env_var, base_url),
       generate_steps(commands, report, adapter, verbose),
@@ -51,7 +51,7 @@ defmodule PropertyDamage.Export.Script.Python do
     "#!/usr/bin/env python3"
   end
 
-  defp generate_docstring(metadata) do
+  defp generate_docstring(metadata, report) do
     failure_desc =
       case metadata.check_name do
         nil -> to_string(metadata.failure_type)
@@ -71,7 +71,7 @@ Failure: #{failure_desc}
 Seed: #{metadata.seed}
 
 Prerequisites: pip install requests
-Run with: python #{Common.generate_filename(%FailureReport{seed: metadata.seed}, :python)}
+Run with: python #{Common.generate_filename(report, :python)}
 """)
   end
 

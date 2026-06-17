@@ -34,7 +34,7 @@ defmodule PropertyDamage.Export.Script.Curl do
 
     [
       generate_shebang(),
-      generate_header(metadata),
+      generate_header(metadata, report),
       generate_setup(env_var, base_url),
       generate_steps(commands, report, adapter, env_var, verbose),
       generate_footer(metadata)
@@ -50,7 +50,7 @@ defmodule PropertyDamage.Export.Script.Curl do
     "#!/bin/bash"
   end
 
-  defp generate_header(metadata) do
+  defp generate_header(metadata, report) do
     failure_desc =
       case metadata.check_name do
         nil -> to_string(metadata.failure_type)
@@ -70,7 +70,7 @@ defmodule PropertyDamage.Export.Script.Curl do
     # Seed: #{metadata.seed}
     #
     # Prerequisites: curl, jq
-    # Run with: bash #{Common.generate_filename(%FailureReport{seed: metadata.seed}, :curl)}
+    # Run with: bash #{Common.generate_filename(report, :curl)}
     """
   end
 

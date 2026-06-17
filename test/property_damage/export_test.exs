@@ -241,6 +241,25 @@ defmodule PropertyDamage.ExportTest do
     end
   end
 
+  describe "to_script/3 - reproduce filename header" do
+    test "the 'Run with:' line names the file Export.save actually writes" do
+      failure = create_test_failure_report()
+
+      for {format, runner} <- [{:curl, "bash"}, {:python, "python"}, {:elixir, "elixir"}] do
+        script =
+          Export.to_script(failure, format,
+            base_url: "http://localhost:4000",
+            adapter: TestHTTPAdapter
+          )
+
+        expected = PropertyDamage.Export.Common.generate_filename(failure, format)
+
+        assert script =~ "Run with: #{runner} #{expected}",
+               "#{format} header should name the real filename (#{expected})"
+      end
+    end
+  end
+
   # ============================================================================
   # ExUnit Export Tests
   # ============================================================================
