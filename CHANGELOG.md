@@ -33,6 +33,7 @@ end, and trimmed the documented surface to what has been validated.
 - Documentation of the command sequence generation loop in the
   `PropertyDamage.Model` moduledoc.
 - New guide: "Building Reusable Components" (`guides/reusable_components.md`).
+- New guide: "Mutation Testing" (`guides/mutation_testing.md`).
 
 ### Changed
 
@@ -94,6 +95,11 @@ end, and trimmed the documented surface to what has been validated.
   rejects and the executor cannot dispatch on. It now passes `MutatingAdapter` as
   the adapter module with the struct threaded through `adapter_config`, matching
   the adapter's design.
+- `PropertyDamage.Integration.health_check/1` crashed instead of returning
+  `{:error, _}` when no usable HTTP client was available: the `httpc` fallback
+  called `:inets.start()`/`:ssl.start()` unconditionally and `:ssl.start/0` raises
+  when `:ssl` is not loadable. The fallback is now guarded and degrades to an
+  error result, honouring the documented `:ok | {:error, term()}` contract.
 - `Coverage.new/1` mis-parsed command specs: it read the raw command list with a
   weight-first `{_weight, cmd}` pattern, so the documented `{Module, weight: n}`
   keyword form bound the options list as the "command". It now routes through
