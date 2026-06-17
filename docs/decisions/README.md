@@ -10,6 +10,8 @@ All 20 referenced DRs had sufficient evidence to reconstruct; none were left unr
 
 Records numbered DR-021 and above are **not** reconstructions: they are forward-looking decisions recorded at the time they were made, and each carries a plain `Accepted` status with a decision date.
 
+Every record is **self-contained**: it carries enough context and rationale to stand on its own from this repository. Records reference only material that ships with the repo (other DRs, `openspec/specs/`, source) and never point to external or private documents — a reader with only the published code must find all relevant context here.
+
 ## Index
 
 | DR | Title | Summary |
@@ -35,6 +37,7 @@ Records numbered DR-021 and above are **not** reconstructions: they are forward-
 | [DR-019](DR-019-command-spec-pattern.md) | Command Spec Pattern | `command_spec/1` (modeled on `child_spec/1`) with three-tier override priority. |
 | [DR-020](DR-020-composable-version-aware-libraries.md) | Composable, Version-Aware Libraries | Versioned `.pd` files and seed libraries with mismatch warnings; composable regression handlers. |
 | [DR-021](DR-021-placeholder-resolution-identity.md) | Placeholder Resolution Identity | Consumer resolution by id; producer capture by structured position rebuilt per run. Recorded at decision time (not reconstructed). |
+| [DR-022](DR-022-unified-progress-projection.md) | Unified Progress Projection | One `%Progress{}` projection across run/mutation/differential/load-test; consumers (callback, printer, telemetry) subscribe; metrics derive from authoritative state, not from progress. Recorded at decision time. |
 
 ## Which specs cite which DRs
 

@@ -51,8 +51,7 @@ space. Positions are not stable:
 - **Shrinking:** removing commands shifts indices, so a placeholder minted at
   generation index N no longer matches the producing command's run-time index.
 
-Two designs were considered (see the R3 design note,
-`r3_external_design_20260614.md`, in the project's planning notes):
+Two designs were considered:
 
 - **Option A (rejected):** make everything id-based, carrying a stable per-command
   generation id in an out-of-band `command_ids` list on `Sequence`. An adversarial
@@ -95,10 +94,6 @@ design isolates position to capture and makes it a derived, per-run quantity.
 
 ## References
 
-- R3 design note `r3_external_design_20260614.md` (problem analysis, adversarial
-  review, Option A vs B) in the project planning notes.
 - `openspec/specs/execution-engine/spec.md` (External Field Markers requirement).
 - Related: DR-010 (Symbolic References), DR-011 (External Field Markers),
   DR-017 (Hierarchical Delta Debugging).
-</content>
-</invoke>
