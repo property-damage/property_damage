@@ -5,7 +5,10 @@ All notable changes to PropertyDamage will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - TBD
+
+This cycle made the headline features that 0.1.0 advertised actually work end to
+end, and trimmed the documented surface to what has been validated.
 
 ### Added
 
@@ -20,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consumers attached (verbose off, no `on_progress:`, no telemetry handler), no
   `%Progress{}` is built (zero cost on the hot path). `Differential.run/1` gained
   an `on_progress:` option.
+- `external()` server-generated field markers now work end to end (DR-021):
+  placeholders are created during generation, transported to execution via the
+  `Sequence` registry, captured by the producing command's structured position,
+  and remapped through shrinking. New consumer-routing helpers
+  `PropertyDamage.Generator.available_externals/2` and `external_from/2`.
+- Decision Records under `docs/decisions/` (DR-001–DR-021).
+- `credo` as a dev/test lint (non-blocking in CI); `PlaceholderRegistry.resolve/3`.
+- Documentation of the command sequence generation loop in the
+  `PropertyDamage.Model` moduledoc.
+- New guide: "Building Reusable Components" (`guides/reusable_components.md`).
 
 ### Changed
 
@@ -38,35 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field(s), instead of an opaque `KeyError` deep inside generation. Such an
   override never took effect (the generated map is built into the command struct,
   which rejects unknown keys), so this surfaces a silent misconfiguration early.
-
-### Fixed
-
-- `PropertyDamage.Mutation.run/1` could not execute end to end: the runner passed
-  the `MutatingAdapter` struct as the `:adapter` option, which option validation
-  rejects and the executor cannot dispatch on. It now passes `MutatingAdapter` as
-  the adapter module with the struct threaded through `adapter_config`, matching
-  the adapter's design.
-
-## [0.2.0] - TBD
-
-This cycle made the headline features that 0.1.0 advertised actually work end to
-end, and trimmed the documented surface to what has been validated.
-
-### Added
-
-- `external()` server-generated field markers now work end to end (DR-021):
-  placeholders are created during generation, transported to execution via the
-  `Sequence` registry, captured by the producing command's structured position,
-  and remapped through shrinking. New consumer-routing helpers
-  `PropertyDamage.Generator.available_externals/2` and `external_from/2`.
-- Decision Records under `docs/decisions/` (DR-001–DR-021).
-- `credo` as a dev/test lint (non-blocking in CI); `PlaceholderRegistry.resolve/3`.
-- Documentation of the command sequence generation loop in the
-  `PropertyDamage.Model` moduledoc.
-- New guide: "Building Reusable Components" (`guides/reusable_components.md`).
-
-### Changed
-
 - **BREAKING**: Renamed `state_projection/0` to `command_sequence_projection/0`
   (clearer name: returns the projection used for command sequence generation).
 - **BREAKING**: Renamed `extra_projections/0` to `assertion_projections/0`
@@ -105,6 +89,11 @@ end, and trimmed the documented surface to what has been validated.
 
 ### Fixed
 
+- `PropertyDamage.Mutation.run/1` could not execute end to end: the runner passed
+  the `MutatingAdapter` struct as the `:adapter` option, which option validation
+  rejects and the executor cannot dispatch on. It now passes `MutatingAdapter` as
+  the adapter module with the struct threaded through `adapter_config`, matching
+  the adapter's design.
 - `Coverage.new/1` mis-parsed command specs: it read the raw command list with a
   weight-first `{_weight, cmd}` pattern, so the documented `{Module, weight: n}`
   keyword form bound the options list as the "command". It now routes through
