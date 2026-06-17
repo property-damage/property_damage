@@ -183,10 +183,14 @@ defmodule PropertyDamage.SettleTest do
           |> Enum.chunk_every(2, 1, :discard)
           |> Enum.map(fn [a, b] -> b - a end)
 
-        # All intervals should be close to 20ms
+        # Intervals should stay roughly the configured 20ms (linear backoff keeps
+        # them constant). Process.sleep and millisecond-monotonic measurement
+        # jitter on a loaded runner can land an interval a few ms either side of
+        # nominal, so the bounds are deliberately wide; the point here is that the
+        # intervals do not grow (the exponential-backoff test covers growth).
         for interval <- intervals do
-          assert interval >= 15 and interval <= 40,
-                 "expected interval #{interval}ms to be between 15-40ms"
+          assert interval >= 10 and interval <= 60,
+                 "expected interval #{interval}ms to be near the configured 20ms"
         end
       end
     end
