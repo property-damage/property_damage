@@ -90,6 +90,12 @@ end, and trimmed the documented surface to what has been validated.
 
 ### Fixed
 
+- Standalone reproduction scripts (curl/python/elixir/livebook) now wire
+  server-generated `external()` values (DR-021): the producing command's response
+  field is extracted (by the `%Placeholder{}`'s path) and referenced by downstream
+  consumers, instead of being rendered as an inert `<Placeholder:...>` literal. The
+  deprecated name-guessing ref extraction (which never matched what consumers
+  referenced) is removed from the script generators.
 - `PropertyDamage.Mutation.run/1` could not execute end to end: the runner passed
   the `MutatingAdapter` struct as the `:adapter` option, which option validation
   rejects and the executor cannot dispatch on. It now passes `MutatingAdapter` as
