@@ -17,13 +17,25 @@ defmodule PropertyDamage.Progress do
   `*Result` payload carries a copy of that result for consumers.
   """
 
-  alias PropertyDamage.Progress.{LoadResult, LoadUpdate, RunResult, RunUpdate}
+  alias PropertyDamage.Progress.{
+    LoadResult,
+    LoadUpdate,
+    MutationResult,
+    MutationUpdate,
+    RunResult,
+    RunUpdate
+  }
 
-  @type operation :: :test_run | :load_test
+  @type operation :: :test_run | :load_test | :mutation
   @type kind :: :progress | :result
 
   @type payload ::
-          RunUpdate.t() | RunResult.t() | LoadUpdate.t() | LoadResult.t()
+          RunUpdate.t()
+          | RunResult.t()
+          | LoadUpdate.t()
+          | LoadResult.t()
+          | MutationUpdate.t()
+          | MutationResult.t()
 
   @type t :: %__MODULE__{
           data: payload(),
@@ -75,4 +87,6 @@ defmodule PropertyDamage.Progress do
   defp classify(%RunResult{}), do: {:test_run, :result}
   defp classify(%LoadUpdate{}), do: {:load_test, :progress}
   defp classify(%LoadResult{}), do: {:load_test, :result}
+  defp classify(%MutationUpdate{}), do: {:mutation, :progress}
+  defp classify(%MutationResult{}), do: {:mutation, :result}
 end

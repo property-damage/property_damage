@@ -1,9 +1,17 @@
 defmodule PropertyDamage.MutationTest do
   use ExUnit.Case, async: true
 
+  # Module-function telemetry handler (avoids the local-function performance
+  # warning telemetry logs for anonymous handlers).
+  def forward_telemetry(event, measurements, metadata, parent) do
+    send(parent, {:telemetry, event, measurements, metadata})
+  end
+
   alias PropertyDamage.Mutation
   alias PropertyDamage.Mutation.{Analysis, Formatter, Operator, Report}
   alias PropertyDamage.Mutation.Operators.{Boundary, Event, Omission, Status, Value}
+  alias PropertyDamage.Progress
+  alias PropertyDamage.Progress.{MutationResult, MutationUpdate}
 
   # ============================================================================
   # Test Fixtures
@@ -634,6 +642,75 @@ defmodule PropertyDamage.MutationTest do
 
       assert %Report{} = report
       assert report.total > 0
+    end
+  end
+
+  # ============================================================================
+  # Progress projection (DR-022)
+  # ============================================================================
+
+  describe "run/1 progress (DR-022)" do
+    test "on_progress receives MutationUpdate values then a terminal MutationResult" do
+      test_pid = self()
+
+      {:ok, report} =
+        Mutation.run(
+          model: FixtureModel,
+          adapter: PropertyDamage.Test.TestAdapter,
+          operators: [:value],
+          mutations_per_command: 1,
+          max_runs: 1,
+          on_progress: fn progress -> send(test_pid, {:progress, progress}) end
+        )
+
+      progresses = drain_progress([])
+
+      assert progresses != [], "expected at least one progress value"
+
+      # Every intermediate value is a per-mutation update.
+      updates = Enum.drop(progresses, -1)
+
+      assert Enum.all?(updates, &match?(%Progress{data: %MutationUpdate{}}, &1)),
+             "expected all intermediate values to be MutationUpdate progress"
+
+      # The terminal value carries a copy of the authoritative report.
+      assert %Progress{data: %MutationResult{report: ^report}} = List.last(progresses)
+    end
+
+    test "emits coarse mutation progress and result telemetry events" do
+      parent = self()
+      handler_id = "pd-mutation-progress-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [[:property_damage, :mutation, :progress], [:property_damage, :mutation, :result]],
+        &__MODULE__.forward_telemetry/4,
+        parent
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      Mutation.run(
+        model: FixtureModel,
+        adapter: PropertyDamage.Test.TestAdapter,
+        operators: [:value],
+        mutations_per_command: 1,
+        max_runs: 1
+      )
+
+      assert_received {:telemetry, [:property_damage, :mutation, :progress], _m,
+                       %{data: %MutationUpdate{}}}
+
+      assert_received {:telemetry, [:property_damage, :mutation, :result], _m,
+                       %{data: %MutationResult{}}}
+    end
+  end
+
+  defp drain_progress(acc) do
+    receive do
+      {:progress, progress} -> drain_progress([progress | acc])
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 end

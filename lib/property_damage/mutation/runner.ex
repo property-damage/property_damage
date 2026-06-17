@@ -10,7 +10,9 @@ defmodule PropertyDamage.Mutation.Runner do
   """
 
   alias PropertyDamage.Mutation.{MutatingAdapter, Operator, Report}
-  alias PropertyDamage.Options
+  alias PropertyDamage.{Options, Telemetry}
+  alias PropertyDamage.Progress
+  alias PropertyDamage.Progress.{MutationResult, MutationUpdate, Reporter}
 
   @doc """
   Runs mutation testing against a model.
@@ -26,11 +28,24 @@ defmodule PropertyDamage.Mutation.Runner do
   - `:target_score` - Target mutation score (default: 0.80)
   - `:timeout_ms` - Timeout per mutation test (default: 30000)
   - `:verbose` - Print progress (default: false)
-  - `:on_progress` - Callback for progress updates
+  - `:on_progress` - Progress consumer (DR-022). A 1-arity function called with a
+    `%PropertyDamage.Progress{}` per mutation (`data: %MutationUpdate{}`) and once
+    at the end with the terminal report (`data: %MutationResult{}`).
   """
   @spec run(keyword()) :: {:ok, Report.t()} | {:error, term()}
   def run(opts) do
     opts = Options.validate_mutation!(opts)
+
+    # Unified progress projection (DR-022): one reporter fans out to the verbose
+    # printer (if any), the user `on_progress:` callback (if any), and telemetry
+    # (only when a handler is attached). With no consumers it is inert and no
+    # %Progress{} is built.
+    reporter =
+      Reporter.new([
+        if(opts[:verbose], do: verbose_consumer()),
+        opts[:on_progress],
+        Telemetry.progress_consumer([:mutation])
+      ])
 
     config = %{
       model: opts[:model],
@@ -41,8 +56,7 @@ defmodule PropertyDamage.Mutation.Runner do
       max_runs: opts[:max_runs],
       target_score: opts[:target_score],
       timeout_ms: opts[:timeout_ms],
-      verbose: opts[:verbose],
-      on_progress: opts[:on_progress]
+      reporter: reporter
     }
 
     started_at = DateTime.utc_now()
@@ -68,6 +82,10 @@ defmodule PropertyDamage.Mutation.Runner do
 
     completed_at = DateTime.utc_now()
     report = Report.finalize(report, started_at, completed_at)
+
+    # Terminal notification (DR-022): a copy of the authoritative report for
+    # consumers. The returned `{:ok, report}` remains the source of truth.
+    Reporter.emit(config.reporter, fn -> %MutationResult{report: report} end)
 
     {:ok, report}
   end
@@ -100,7 +118,7 @@ defmodule PropertyDamage.Mutation.Runner do
     # Test each mutation
     Enum.reduce(mutations, report, fn {operator, mutation}, acc_report ->
       result = test_single_mutation(command, operator, mutation, config)
-      maybe_report_progress(result, config)
+      emit_progress(config.reporter, result)
       Report.record_result(acc_report, result)
     end)
   end
@@ -263,20 +281,37 @@ defmodule PropertyDamage.Mutation.Runner do
   defp failure_message(%{failure_type: type}), do: to_string(type)
   defp failure_message(_), do: "Unknown failure"
 
-  defp maybe_report_progress(result, config) do
-    if config.verbose do
-      status =
-        case result.result do
-          :killed -> "✓ KILLED"
-          :survived -> "✗ SURVIVED"
-          :timeout -> "⏱ TIMEOUT"
-        end
+  # Emit a per-mutation update (DR-022). `result` is the raw result map recorded
+  # in the report; the projection wraps the relevant fields in a MutationUpdate.
+  defp emit_progress(reporter, result) do
+    Reporter.emit(reporter, fn ->
+      %MutationUpdate{
+        command: result.command,
+        operator: result.operator,
+        mutation: result.mutation,
+        result: result.result,
+        failure_message: result.failure_message,
+        duration_ms: result.duration_ms
+      }
+    end)
+  end
 
-      IO.puts("  #{status}: #{inspect(result.command)} - #{inspect(result.mutation)}")
-    end
+  # The `verbose:` consumer: one status line per mutation, matching the prior
+  # inline output exactly. The terminal MutationResult has no verbose rendering.
+  defp verbose_consumer do
+    fn
+      %Progress{data: %MutationUpdate{} = update} ->
+        status =
+          case update.result do
+            :killed -> "✓ KILLED"
+            :survived -> "✗ SURVIVED"
+            :timeout -> "⏱ TIMEOUT"
+          end
 
-    if config.on_progress do
-      config.on_progress.(result)
+        IO.puts("  #{status}: #{inspect(update.command)} - #{inspect(update.mutation)}")
+
+      %Progress{} ->
+        :ok
     end
   end
 end
