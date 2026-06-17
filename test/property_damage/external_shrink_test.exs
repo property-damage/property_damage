@@ -25,6 +25,15 @@ defmodule PropertyDamage.ExternalShrinkTest do
     def generator(_overrides), do: StreamData.constant(%{})
   end
 
+  defmodule AsyncCreate do
+    @behaviour PropertyDamage.Command
+    defstruct []
+    @impl true
+    def generator(_overrides), do: StreamData.constant(%{})
+    @impl true
+    def semantics, do: :async
+  end
+
   defmodule Noise do
     @behaviour PropertyDamage.Command
     defstruct []
@@ -50,7 +59,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
   defmodule Model do
     @behaviour PropertyDamage.Model
     @impl true
-    def commands, do: [Create, Noise, Use]
+    def commands, do: [Create, AsyncCreate, Noise, Use]
     @impl true
     def command_sequence_projection, do: Projection
   end
@@ -66,6 +75,10 @@ defmodule PropertyDamage.ExternalShrinkTest do
 
     @impl true
     def execute(%Create{}, _ctx) do
+      {:ok, [%Created{id: "real_#{System.unique_integer([:positive])}"}]}
+    end
+
+    def execute(%AsyncCreate{}, _ctx) do
       {:ok, [%Created{id: "real_#{System.unique_integer([:positive])}"}]}
     end
 
@@ -148,6 +161,42 @@ defmodule PropertyDamage.ExternalShrinkTest do
 
     commands = Sequence.to_list(shrunk.sequence)
     assert [%Create{}, %Use{}] = commands
+
+    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
+    assert match?({:adapter_error, :consumer_saw_real_id}, replay.failure_reason)
+  end
+
+  test "an async producer whose external is consumed downstream is retained when shrinking" do
+    # Exercises protected_async?/4: the producer is :async and the surviving
+    # consumer embeds its placeholder, so linear shrinking must not drop it.
+    # (Correctness is also guaranteed by failure equivalence; this locks the
+    # async-protection optimization onto the placeholder identity/position.)
+    ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+    reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
+
+    full =
+      [%AsyncCreate{}, %Use{target: ph}]
+      |> Sequence.linear()
+      |> Sequence.with_registry(reg)
+
+    {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
+    assert result.failed_at_index == 1
+    assert match?({:adapter_error, :consumer_saw_real_id}, result.failure_reason)
+
+    shrunk =
+      Shrinker.shrink(full,
+        failed_at_index: result.failed_at_index,
+        failure_reason: result.failure_reason,
+        model: Model,
+        adapter: Adapter,
+        adapter_config: %{}
+      )
+
+    commands = Sequence.to_list(shrunk.sequence)
+
+    # The async producer and its consumer both survive, and the shrunk sequence
+    # still reproduces the failure (only possible if the external resolved).
+    assert [%AsyncCreate{}, %Use{}] = commands
 
     {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
     assert match?({:adapter_error, :consumer_saw_real_id}, replay.failure_reason)

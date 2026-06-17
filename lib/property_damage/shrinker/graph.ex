@@ -3,49 +3,58 @@ defmodule PropertyDamage.Shrinker.Graph do
   Dependency graph for command sequences.
 
   Builds and analyzes a directed acyclic graph (DAG) representing dependencies
-  between commands in a sequence. Commands that produce refs are connected to
-  commands that consume those refs.
+  between commands in a sequence. Commands that produce an external value
+  (DR-021) are connected to the commands that consume it via `%Placeholder{}`.
 
   Used by the shrinker to identify independent subgraphs that can be safely
-  removed without breaking ref resolution.
+  removed without breaking placeholder resolution.
 
   ## Graph Structure
 
   - **Nodes**: Each command in the sequence is a node, identified by its index
   - **Edges**: An edge from node A to node B means B depends on A (B consumes
-    a ref that A produces)
-  - **Producers**: Map from ref identity to producing node index
-  - **Consumers**: Map from node index to list of ref identities it consumes
+    a placeholder that A produces)
+  - **Producers**: Map from placeholder identity to producing node index
+  - **Consumers**: Map from node index to list of placeholder identities it
+    consumes
+
+  A placeholder's producer is identified by its structured `position`
+  (DR-021); for the linear command list the graph operates on, `{:prefix, i}`
+  maps directly to index `i`. The placeholder itself is embedded in the
+  *consuming* command, not the producer.
 
   ## Example
 
   Given a sequence:
   ```
-  0: CreateOrder (produces order_ref)
-  1: AddItem (consumes order_ref, produces item_ref)
-  2: ViewOrder (consumes order_ref)
-  3: ProcessItem (consumes item_ref)
+  0: CreateOrder (produces order id)
+  1: AddItem (consumes order id, produces item id)
+  2: ViewOrder (consumes order id)
+  3: ProcessItem (consumes item id)
   ```
 
   The graph has edges:
-  - 0 → 1 (order_ref)
-  - 0 → 2 (order_ref)
-  - 1 → 3 (item_ref)
+  - 0 → 1 (order id)
+  - 0 → 2 (order id)
+  - 1 → 3 (item id)
 
   Node 3 cannot be kept without nodes 1 and 0.
   Node 2 can be removed independently of nodes 1 and 3.
   """
 
-  alias PropertyDamage.{Placeholder, Ref}
+  alias PropertyDamage.Placeholder
 
   @typedoc """
   Dependency graph structure.
+
+  Producer/consumer keys are `{:placeholder, reference()}` dependency
+  identities.
   """
   @type t :: %__MODULE__{
           nodes: MapSet.t(non_neg_integer()),
           edges: %{non_neg_integer() => MapSet.t(non_neg_integer())},
-          producers: %{reference() => non_neg_integer()},
-          consumers: %{non_neg_integer() => [reference()]}
+          producers: %{{:placeholder, reference()} => non_neg_integer()},
+          consumers: %{non_neg_integer() => [{:placeholder, reference()}]}
         }
 
   defstruct nodes: MapSet.new(),
@@ -56,8 +65,9 @@ defmodule PropertyDamage.Shrinker.Graph do
   @doc """
   Build a dependency graph from a command sequence.
 
-  Analyzes each command to find refs it produces (via creates_ref/0) and
-  refs it consumes (any Ref structs in its fields).
+  Analyzes each command to find the placeholders it consumes (any
+  `%Placeholder{}` structs in its fields, DR-021). A placeholder's producer is
+  identified by its structured `position`, not by which command embeds it.
 
   ## Parameters
 
@@ -69,50 +79,29 @@ defmodule PropertyDamage.Shrinker.Graph do
 
   ## Example
 
-      commands = [%CreateOrder{ref: ref1}, %AddItem{order: ref1, ref: ref2}]
-      graph = Graph.build(commands)
+      consumer = %AddItem{order: placeholder_for_index_0}
+      graph = Graph.build([%CreateOrder{}, consumer])
   """
   @spec build([struct()]) :: t()
   def build(commands) do
-    # First pass: identify producers (refs from creates_ref/0)
-    {producers, _} =
-      commands
-      |> Enum.with_index()
-      |> Enum.reduce({%{}, %{}}, fn {command, index}, {prods, _consumers} ->
-        case find_produced_ref(command) do
-          nil -> {prods, %{}}
-          ref_id -> {Map.put(prods, {:ref, ref_id}, index), %{}}
-        end
-      end)
-
-    # Also track placeholder producers. A placeholder's producer is identified
-    # by its structured position (DR-021); for the linear command list the graph
+    # Identify producers. A placeholder's producer is identified by its
+    # structured position (DR-021); for the linear command list the graph
     # operates on, {:prefix, i} maps directly to index i.
-    producers = add_placeholder_producers(commands, producers)
+    producers = add_placeholder_producers(commands, %{})
 
-    # Second pass: identify consumers and build edges
+    # Identify consumers and build edges
     {nodes, edges, consumers} =
       commands
       |> Enum.with_index()
       |> Enum.reduce({MapSet.new(), %{}, %{}}, fn {command, index}, {nodes, edges, consumers} ->
-        # Get refs/placeholders consumed, excluding the ref this command produces
-        produced_ref_field = get_produced_ref_field(command)
-        deps_consumed = find_consumed_refs(command, produced_ref_field)
+        deps_consumed = find_consumed_deps(command)
         nodes = MapSet.put(nodes, index)
         consumers = Map.put(consumers, index, deps_consumed)
 
         # Create edges from producer to consumer
         edges =
           Enum.reduce(deps_consumed, edges, fn dep_key, acc ->
-            producer_index =
-              case dep_key do
-                {:ref, _} ->
-                  Map.get(producers, dep_key)
-
-                {:placeholder, id} ->
-                  # For placeholders, look up the producer from the producers map
-                  Map.get(producers, {:placeholder, id})
-              end
+            producer_index = Map.get(producers, dep_key)
 
             case producer_index do
               nil ->
@@ -163,7 +152,6 @@ defmodule PropertyDamage.Shrinker.Graph do
   defp collect_placeholders(data), do: do_collect_placeholders(data, [])
 
   defp do_collect_placeholders(%Placeholder{} = p, acc), do: [p | acc]
-  defp do_collect_placeholders(%Ref{}, acc), do: acc
 
   defp do_collect_placeholders(%{__struct__: _} = struct, acc) do
     struct
@@ -299,69 +287,35 @@ defmodule PropertyDamage.Shrinker.Graph do
     |> Enum.sort()
   end
 
-  # Find the ref produced by a command (if any)
-  defp find_produced_ref(command) do
-    command_module = command.__struct__
-
-    if function_exported?(command_module, :creates_ref, 0) do
-      case command_module.creates_ref() do
-        nil ->
-          nil
-
-        ref_field ->
-          case Map.get(command, ref_field) do
-            %Ref{ref: ref_id} -> ref_id
-            _ -> nil
-          end
-      end
-    else
-      nil
-    end
-  end
-
-  # Get the field name that holds the produced ref (if any)
-  defp get_produced_ref_field(command) do
-    command_module = command.__struct__
-
-    if function_exported?(command_module, :creates_ref, 0) do
-      command_module.creates_ref()
-    else
-      nil
-    end
-  end
-
-  # Find all refs consumed by a command, excluding the produced ref field
-  defp find_consumed_refs(command, exclude_field) do
+  # Find all placeholder dependencies consumed by a command
+  defp find_consumed_deps(command) do
     command
     |> Map.from_struct()
-    |> Map.delete(exclude_field)
-    |> collect_refs([])
+    |> collect_deps([])
     |> Enum.uniq()
   end
 
-  defp collect_refs(%Ref{ref: ref_id}, acc), do: [{:ref, ref_id} | acc]
-
   # Collect placeholder dependencies - use the placeholder's id as the dependency key
-  defp collect_refs(%Placeholder{id: id}, acc), do: [{:placeholder, id} | acc]
+  defp collect_deps(%Placeholder{id: id}, acc), do: [{:placeholder, id} | acc]
 
-  # Skip other structs (like DateTime) - they don't contain refs/placeholders
-  defp collect_refs(%{__struct__: _}, acc), do: acc
+  # Skip other structs (like DateTime) - they don't contain placeholders
+  defp collect_deps(%{__struct__: _}, acc), do: acc
 
-  defp collect_refs(map, acc) when is_map(map) do
-    Enum.reduce(map, acc, fn {_k, v}, a -> collect_refs(v, a) end)
+  defp collect_deps(map, acc) when is_map(map) do
+    Enum.reduce(map, acc, fn {_k, v}, a -> collect_deps(v, a) end)
   end
 
-  defp collect_refs(list, acc) when is_list(list) do
-    Enum.reduce(list, acc, fn v, a -> collect_refs(v, a) end)
+  defp collect_deps(list, acc) when is_list(list) do
+    Enum.reduce(list, acc, fn v, a -> collect_deps(v, a) end)
   end
 
-  defp collect_refs(tuple, acc) when is_tuple(tuple) do
+  defp collect_deps(tuple, acc) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list()
-    |> collect_refs(acc)
+    |> collect_deps(acc)
   end
 
-  defp collect_refs(_other, acc), do: acc
+  defp collect_deps(_other, acc), do: acc
 
   # Compute depth for each node (distance from roots)
   defp compute_depths(graph) do

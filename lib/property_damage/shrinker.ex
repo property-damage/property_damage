@@ -97,7 +97,7 @@ defmodule PropertyDamage.Shrinker do
   ```
   """
 
-  alias PropertyDamage.{Executor, Placeholder, Ref, Sequence, Settle, Validator}
+  alias PropertyDamage.{Executor, Placeholder, PlaceholderRegistry, Sequence, Settle, Validator}
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """
@@ -772,9 +772,11 @@ defmodule PropertyDamage.Shrinker do
     else
       command = Enum.at(state.commands, index)
       remaining = Enum.drop(state.commands, index + 1)
+      position = Enum.at(state.positions, index)
 
-      # Skip if this is a protected async command
-      if protected_async?(command, remaining) do
+      # Skip if this is a protected async command (its external is still
+      # consumed downstream)
+      if protected_async?(command, position, state.registry, remaining) do
         do_linear_shrink(state, rest_indices)
       else
         candidate = List.delete_at(state.commands, index)
@@ -830,8 +832,7 @@ defmodule PropertyDamage.Shrinker do
     |> then(&struct(command.__struct__, &1))
   end
 
-  # Don't shrink refs or placeholders - they represent dependencies
-  defp shrink_value(%Ref{} = ref), do: ref
+  # Don't shrink placeholders - they represent dependencies
   defp shrink_value(%Placeholder{} = p), do: p
   defp shrink_value(n) when is_integer(n) and n > 0, do: div(n, 2)
   defp shrink_value(n) when is_integer(n) and n < 0, do: div(n, 2)
@@ -1009,71 +1010,30 @@ defmodule PropertyDamage.Shrinker do
     %{state | iterations: state.iterations + 1}
   end
 
-  # Check if command is async with refs used by downstream commands
-  defp protected_async?(command, downstream_commands) do
-    # Only protect async commands
-    if is_struct(command) and Settle.get_semantics(command) == :async do
-      # Check if this command creates a ref
-      command_module = command.__struct__
+  # An async command whose produced external is still consumed by a later
+  # command is not worth attempting to remove: the consumer would strand, the
+  # candidate would fail to reproduce, and async settling makes the wasted
+  # re-execution especially costly. Correctness does not depend on this (the
+  # failure-equivalence check rejects such a candidate regardless); it is a
+  # shrink-cost optimization. The produced placeholders are identified by the
+  # command's structured position (DR-021), and a downstream consumer embeds a
+  # placeholder carrying the same id.
+  defp protected_async?(command, position, registry, downstream_commands) do
+    with true <- is_struct(command),
+         true <- Settle.get_semantics(command) == :async,
+         %PlaceholderRegistry{} <- registry,
+         produced_ids = PlaceholderRegistry.ids_at_position(registry, position),
+         false <- produced_ids == [] do
+      downstream_ids =
+        downstream_commands
+        |> Enum.flat_map(&PlaceholderRegistry.collect_placeholder_ids/1)
+        |> MapSet.new()
 
-      if function_exported?(command_module, :creates_ref, 0) do
-        case command_module.creates_ref() do
-          nil ->
-            false
-
-          ref_field ->
-            # Get the ref this command creates
-            case Map.get(command, ref_field) do
-              %Ref{} = ref ->
-                # Check if any downstream command uses this ref
-                ref_used_downstream?(ref, downstream_commands)
-
-              _ ->
-                false
-            end
-        end
-      else
-        false
-      end
+      Enum.any?(produced_ids, &MapSet.member?(downstream_ids, &1))
     else
-      false
+      _ -> false
     end
   end
-
-  # Check if a ref is used by any command in the list
-  defp ref_used_downstream?(ref, commands) do
-    Enum.any?(commands, fn cmd ->
-      contains_ref?(cmd, ref)
-    end)
-  end
-
-  # Recursively check if a value contains the given ref
-  defp contains_ref?(%Ref{ref: r}, %Ref{ref: target_ref}), do: r == target_ref
-
-  defp contains_ref?(%{__struct__: _} = struct, target_ref) do
-    struct
-    |> Map.from_struct()
-    |> Map.values()
-    |> Enum.any?(fn v -> contains_ref?(v, target_ref) end)
-  end
-
-  defp contains_ref?(map, target_ref) when is_map(map) do
-    map
-    |> Map.values()
-    |> Enum.any?(fn v -> contains_ref?(v, target_ref) end)
-  end
-
-  defp contains_ref?(list, target_ref) when is_list(list) do
-    Enum.any?(list, fn v -> contains_ref?(v, target_ref) end)
-  end
-
-  defp contains_ref?(tuple, target_ref) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.any?(fn v -> contains_ref?(v, target_ref) end)
-  end
-
-  defp contains_ref?(_, _), do: false
 
   # ============================================================================
   # Idempotency Key Regeneration
