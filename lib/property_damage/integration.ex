@@ -347,17 +347,41 @@ defmodule PropertyDamage.Integration do
         {:error, reason} -> {:error, reason}
       end
     else
-      # Fall back to httpc
-      :inets.start()
-      :ssl.start()
-
-      url_charlist = String.to_charlist(url)
-
-      case :httpc.request(:get, {url_charlist, []}, [timeout: 5000], []) do
-        {:ok, {{_, status, _}, _, _}} -> {:ok, status}
-        {:error, reason} -> {:error, reason}
-      end
+      httpc_get(url)
     end
+  end
+
+  # Fallback when Req is not available. The :inets/:ssl applications may be
+  # unusable in some environments (their `start/0` then raises, e.g.
+  # `UndefinedFunctionError` when :ssl is not loadable); treat any such failure as
+  # a health-check error rather than letting it crash the caller, preserving the
+  # `health_check/1` contract of `:ok | {:error, term()}`.
+  defp httpc_get(url) do
+    with :ok <- ensure_started(:inets),
+         :ok <- ensure_started(:ssl) do
+      request_via_httpc(url)
+    end
+  end
+
+  defp ensure_started(app) do
+    case app.start() do
+      :ok -> :ok
+      {:error, {:already_started, _}} -> :ok
+      {:error, reason} -> {:error, {:http_client_unavailable, app, reason}}
+    end
+  rescue
+    e -> {:error, {:http_client_unavailable, app, e}}
+  end
+
+  defp request_via_httpc(url) do
+    url_charlist = String.to_charlist(url)
+
+    case :httpc.request(:get, {url_charlist, []}, [timeout: 5000], []) do
+      {:ok, {{_, status, _}, _, _}} -> {:ok, status}
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    e -> {:error, {:http_client_error, e}}
   end
 
   defp run_tests(opts) do

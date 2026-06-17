@@ -180,6 +180,20 @@ defmodule PropertyDamage.IntegrationTest do
       assert {:error, :max_retries_exceeded} =
                Integration.health_check(url: "http://unused.invalid/health", retries: 0)
     end
+
+    test "returns an error tuple (does not crash) when the HTTP client is unavailable" do
+      # With retries: 1 the check performs a real HTTP attempt. When neither Req
+      # nor the :inets/:ssl httpc stack is usable, the fallback must degrade to an
+      # {:error, _} result, honouring the :ok | {:error, term()} contract, rather
+      # than raising (e.g. UndefinedFunctionError from :ssl.start/0).
+      assert {:error, _reason} =
+               Integration.health_check(
+                 url: "http://unused.invalid/health",
+                 retries: 1,
+                 interval_ms: 1,
+                 timeout_ms: 50
+               )
+    end
   end
 
   describe "generate_report/2" do
