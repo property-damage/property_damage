@@ -161,6 +161,7 @@ defmodule PropertyDamage.Stutter do
   """
   @spec should_stutter?(struct(), Config.t()) :: boolean()
   def should_stutter?(_command, nil), do: false
+  def should_stutter?(_command, %Config{enabled: false}), do: false
 
   def should_stutter?(command, %Config{} = config) do
     command_module = command.__struct__
@@ -201,8 +202,12 @@ defmodule PropertyDamage.Stutter do
   Get the delay in milliseconds before a retry attempt.
   """
   @spec retry_delay_ms(Config.t()) :: non_neg_integer()
-  def retry_delay_ms(%Config{delay_ms: {min, max}}) do
-    min + :rand.uniform(max - min + 1) - 1
+  def retry_delay_ms(%Config{delay_ms: {a, b}}) do
+    # Tolerate an inverted {max, min} tuple: :rand.uniform/1 raises on a
+    # non-positive argument, so normalize the bounds before drawing.
+    lo = min(a, b)
+    hi = max(a, b)
+    lo + :rand.uniform(hi - lo + 1) - 1
   end
 
   def retry_delay_ms(%Config{delay_ms: fixed}) when is_integer(fixed) do
