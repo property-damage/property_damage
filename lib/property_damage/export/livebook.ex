@@ -19,7 +19,7 @@ defmodule PropertyDamage.Export.LiveBook do
   """
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Ref}
+  alias PropertyDamage.{FailureReport, Placeholder, Ref}
 
   @doc """
   Generates a LiveBook notebook from a failure report.
@@ -43,10 +43,13 @@ defmodule PropertyDamage.Export.LiveBook do
     commands = Common.extract_commands(report)
     title = Keyword.get(opts, :title, generate_title(metadata))
 
+    var_map = Common.placeholder_var_map(commands)
+    extractions = Common.producer_extractions(commands)
+
     sections = [
       generate_header(title, metadata),
       generate_setup_section(base_url, include_state),
-      generate_command_sections(commands, report, adapter, include_state)
+      generate_command_sections(commands, report, adapter, include_state, var_map, extractions)
     ]
 
     sections =
@@ -117,7 +120,7 @@ defmodule PropertyDamage.Export.LiveBook do
   # Command Sections
   # ============================================================================
 
-  defp generate_command_sections(commands, report, adapter, include_state) do
+  defp generate_command_sections(commands, report, adapter, include_state, var_map, extractions) do
     header = "\n## Command Sequence\n"
 
     sections =
@@ -125,13 +128,30 @@ defmodule PropertyDamage.Export.LiveBook do
       |> Enum.with_index()
       |> Enum.map(fn {cmd, idx} ->
         is_failure_point = idx == report.failed_at_index
-        generate_command_section(cmd, idx, adapter, is_failure_point, include_state)
+
+        generate_command_section(
+          cmd,
+          idx,
+          adapter,
+          is_failure_point,
+          include_state,
+          var_map,
+          extractions
+        )
       end)
 
     [header | sections]
   end
 
-  defp generate_command_section(command, index, adapter, is_failure_point, include_state) do
+  defp generate_command_section(
+         command,
+         index,
+         adapter,
+         is_failure_point,
+         include_state,
+         var_map,
+         extractions
+       ) do
     step_num = index + 1
     cmd_name = Common.command_name(command)
     http_spec = Common.get_http_spec(command, adapter, %{})
@@ -139,7 +159,16 @@ defmodule PropertyDamage.Export.LiveBook do
     failure_marker = if is_failure_point, do: " (FAILURE)", else: ""
     warning = if is_failure_point, do: "\n> ⚠️ **This command caused the failure**\n", else: ""
 
-    code = generate_livebook_code(command, http_spec, index, include_state, is_failure_point)
+    code =
+      generate_livebook_code(
+        command,
+        http_spec,
+        index,
+        include_state,
+        is_failure_point,
+        var_map,
+        extractions
+      )
 
     """
     ### Step #{step_num}: #{cmd_name}#{failure_marker}
@@ -151,7 +180,15 @@ defmodule PropertyDamage.Export.LiveBook do
     """
   end
 
-  defp generate_livebook_code(command, nil, _index, _include_state, _is_failure) do
+  defp generate_livebook_code(
+         command,
+         nil,
+         _index,
+         _include_state,
+         _is_failure,
+         _var_map,
+         _extractions
+       ) do
     cmd_name = Common.command_name(command)
 
     """
@@ -160,10 +197,18 @@ defmodule PropertyDamage.Export.LiveBook do
     """
   end
 
-  defp generate_livebook_code(command, %HTTPSpec{} = spec, index, include_state, is_failure) do
+  defp generate_livebook_code(
+         command,
+         %HTTPSpec{} = spec,
+         index,
+         include_state,
+         is_failure,
+         var_map,
+         extractions
+       ) do
     method = spec.method
-    path = generate_path_code(spec, index)
-    req_opts = build_req_opts(spec, command, index)
+    path = generate_path_code(spec, index, var_map)
+    req_opts = build_req_opts(spec, command, index, var_map)
 
     req_call =
       case method do
@@ -177,7 +222,7 @@ defmodule PropertyDamage.Export.LiveBook do
 
     state_update =
       if include_state do
-        generate_state_update(command, index)
+        generate_state_update(index, extractions)
       else
         ""
       end
@@ -205,13 +250,13 @@ defmodule PropertyDamage.Export.LiveBook do
   # Path and Body Generation
   # ============================================================================
 
-  defp generate_path_code(%HTTPSpec{path: path, path_params: params}, index) do
+  defp generate_path_code(%HTTPSpec{path: path, path_params: params}, _index, var_map) do
     if map_size(params) == 0 do
       inspect(path)
     else
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
-          replacement = generate_value_interpolation(value, index)
+          replacement = generate_value_interpolation(value, var_map)
           String.replace(acc, ":#{key}", "\#{#{replacement}}")
         end)
 
@@ -219,20 +264,24 @@ defmodule PropertyDamage.Export.LiveBook do
     end
   end
 
-  defp generate_value_interpolation(%Ref{label: label}, _cmd_index) do
+  defp generate_value_interpolation(%Placeholder{} = ph, var_map) do
+    "state.refs[#{inspect(Map.fetch!(var_map, ph.id))}]"
+  end
+
+  defp generate_value_interpolation(%Ref{label: label}, _var_map) do
     "state.refs[#{inspect(sanitize_label(label))}]"
   end
 
-  defp generate_value_interpolation(value, _cmd_index) do
+  defp generate_value_interpolation(value, _var_map) do
     inspect(value)
   end
 
-  defp build_req_opts(spec, command, index) do
+  defp build_req_opts(spec, command, index, var_map) do
     opts = []
 
     opts =
       if HTTPSpec.has_body?(spec) do
-        body = generate_body_map(spec.body, command, index)
+        body = generate_body_map(spec.body, command, index, var_map)
         opts ++ ["json: #{body}"]
       else
         opts
@@ -253,64 +302,68 @@ defmodule PropertyDamage.Export.LiveBook do
     end
   end
 
-  defp generate_body_map(body, command, index) do
+  defp generate_body_map(body, command, index, var_map) do
     fields =
       body
       |> Enum.map_join(", ", fn {key, _default} ->
         value = Map.get(command, key)
-        formatted = format_body_value(value, index)
+        formatted = format_body_value(value, index, var_map)
         "#{key}: #{formatted}"
       end)
 
     "%{#{fields}}"
   end
 
-  defp format_body_value(%Ref{label: label}, _cmd_index) do
+  defp format_body_value(%Placeholder{} = ph, _cmd_index, var_map) do
+    "state.refs[#{inspect(Map.fetch!(var_map, ph.id))}]"
+  end
+
+  defp format_body_value(%Ref{label: label}, _cmd_index, _var_map) do
     "state.refs[#{inspect(sanitize_label(label))}]"
   end
 
-  defp format_body_value(value, _cmd_index) when is_atom(value), do: inspect(value)
-  defp format_body_value(value, _cmd_index), do: inspect(value)
+  defp format_body_value(value, _cmd_index, _var_map) when is_atom(value), do: inspect(value)
+  defp format_body_value(value, _cmd_index, _var_map), do: inspect(value)
 
   # ============================================================================
-  # State Tracking
+  # State Tracking (DR-021 placeholder extraction)
   # ============================================================================
 
-  defp generate_state_update(command, index) do
-    cmd_name = Common.command_name(command)
-    label = generate_ref_label(cmd_name, index)
-    label_str = inspect(label)
+  defp generate_state_update(index, extractions) do
+    bindings = Map.get(extractions, index, [])
 
-    if String.starts_with?(cmd_name, "Create") or String.contains?(cmd_name, "Register") do
+    puts =
+      bindings
+      |> Enum.map_join("\n", fn {ph, var} ->
+        key = inspect(var)
+
+        "state = put_in(state, [:refs, #{key}], get_in(resp.body, #{ex_access(ph.path)}))"
+      end)
+
+    if puts == "" do
       """
 
-      # Update state with new ref
-      state = case resp.body do
-        %{"data" => %{"id" => id}} ->
-          put_in(state, [:refs, #{label_str}], id)
-        %{"id" => id} ->
-          put_in(state, [:refs, #{label_str}], id)
-        _ ->
-          state
-      end
       IO.inspect(state, label: "State")
       """
     else
       """
 
+      # Bind external values produced by this command (DR-021)
+      #{puts}
       IO.inspect(state, label: "State")
       """
     end
   end
 
-  defp generate_ref_label(cmd_name, index) do
-    base =
-      cmd_name
-      |> String.replace(~r/^(Create|Register)/, "")
-      |> Macro.underscore()
-      |> String.trim("_")
+  # Access path for get_in/2 over a JSON-decoded (string-keyed) body.
+  defp ex_access(path) do
+    inner =
+      Enum.map_join(path, ", ", fn
+        i when is_integer(i) -> "Access.at(#{i})"
+        key -> inspect(to_string(key))
+      end)
 
-    if base == "", do: "ref_#{index}", else: "#{base}_#{index}"
+    "[#{inner}]"
   end
 
   defp sanitize_label(nil), do: "unknown"

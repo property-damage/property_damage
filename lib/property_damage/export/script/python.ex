@@ -10,7 +10,7 @@ defmodule PropertyDamage.Export.Script.Python do
   """
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Ref}
+  alias PropertyDamage.{FailureReport, Placeholder, Ref}
 
   @doc """
   Generates a Python script from a failure report.
@@ -32,12 +32,16 @@ defmodule PropertyDamage.Export.Script.Python do
     metadata = Common.extract_metadata(report)
     commands = Common.extract_commands(report)
 
+    # DR-021 placeholder wiring (see Export.Common).
+    var_map = Common.placeholder_var_map(commands)
+    extractions = Common.producer_extractions(commands)
+
     [
       generate_shebang(),
       generate_docstring(metadata, report),
       generate_imports(),
       generate_setup(env_var, base_url),
-      generate_steps(commands, report, adapter, verbose),
+      generate_steps(commands, report, adapter, verbose, var_map, extractions),
       generate_footer(metadata)
     ]
     |> Enum.join("\n")
@@ -90,16 +94,16 @@ Run with: python #{Common.generate_filename(report, :python)}
     """
   end
 
-  defp generate_steps(commands, report, adapter, verbose) do
+  defp generate_steps(commands, report, adapter, verbose, var_map, extractions) do
     commands
     |> Enum.with_index()
     |> Enum.map_join("\n", fn {cmd, idx} ->
       is_failure_point = idx == report.failed_at_index
-      generate_step(cmd, idx, adapter, is_failure_point, verbose)
+      generate_step(cmd, idx, adapter, is_failure_point, verbose, var_map, extractions)
     end)
   end
 
-  defp generate_step(command, index, adapter, is_failure_point, verbose) do
+  defp generate_step(command, index, adapter, is_failure_point, verbose, var_map, extractions) do
     step_num = index + 1
     cmd_name = Common.command_name(command)
     http_spec = Common.get_http_spec(command, adapter, %{})
@@ -124,12 +128,12 @@ Run with: python #{Common.generate_filename(report, :python)}
         ""
       end
 
-    req_code = generate_requests_code(command, http_spec, index)
+    req_code = generate_requests_code(command, http_spec, index, var_map, extractions)
 
     header <> comment <> req_code
   end
 
-  defp generate_requests_code(command, nil, _index) do
+  defp generate_requests_code(command, nil, _index, _var_map, _extractions) do
     # No HTTPSpec available, generate placeholder
     cmd_name = Common.command_name(command)
 
@@ -139,16 +143,16 @@ Run with: python #{Common.generate_filename(report, :python)}
     """
   end
 
-  defp generate_requests_code(command, %HTTPSpec{} = spec, index) do
+  defp generate_requests_code(command, %HTTPSpec{} = spec, index, var_map, extractions) do
     var_name = "resp#{index + 1}"
     method = spec.method
-    path = generate_path_code(spec, index)
+    path = generate_path_code(spec, index, var_map)
 
     # Build the requests call
-    req_call = build_requests_call(method, path, spec, command, index)
+    req_call = build_requests_call(method, path, spec, command, index, var_map)
 
-    # Generate ref extraction if this command likely produces refs
-    ref_extraction = generate_ref_extraction(command, index, var_name)
+    # Extract any external values this command produces (DR-021).
+    ref_extraction = generate_placeholder_extraction(index, extractions, var_name)
 
     """
     #{var_name} = #{req_call}
@@ -160,14 +164,14 @@ Run with: python #{Common.generate_filename(report, :python)}
   # Path and Body Generation
   # ============================================================================
 
-  defp generate_path_code(%HTTPSpec{path: path, path_params: params}, index) do
+  defp generate_path_code(%HTTPSpec{path: path, path_params: params}, _index, var_map) do
     if map_size(params) == 0 do
       inspect(path)
     else
       # Build path with f-string interpolation for refs
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
-          replacement = generate_value_interpolation(value, index)
+          replacement = generate_value_interpolation(value, var_map)
           String.replace(acc, ":#{key}", "{#{replacement}}")
         end)
 
@@ -175,19 +179,24 @@ Run with: python #{Common.generate_filename(report, :python)}
     end
   end
 
-  defp generate_value_interpolation(%Ref{label: label}, _cmd_index) do
-    "refs[#{inspect(sanitize_label(label))}]"
+  # Single-quoted dict key so it nests safely inside an f-string.
+  defp generate_value_interpolation(%Placeholder{} = ph, var_map) do
+    "refs['#{Map.fetch!(var_map, ph.id)}']"
   end
 
-  defp generate_value_interpolation(value, _cmd_index) when is_binary(value) do
+  defp generate_value_interpolation(%Ref{label: label}, _var_map) do
+    "refs['#{sanitize_label(label)}']"
+  end
+
+  defp generate_value_interpolation(value, _var_map) when is_binary(value) do
     inspect(value)
   end
 
-  defp generate_value_interpolation(value, _cmd_index) do
+  defp generate_value_interpolation(value, _var_map) do
     to_string(value)
   end
 
-  defp build_requests_call(method, path, spec, command, index) do
+  defp build_requests_call(method, path, spec, command, index, var_map) do
     method_str = to_string(method)
 
     args = ["f\"{base_url}\" + #{path}"]
@@ -195,7 +204,7 @@ Run with: python #{Common.generate_filename(report, :python)}
     # Add json body if present
     args =
       if HTTPSpec.has_body?(spec) do
-        body = generate_body_dict(spec.body, command, index)
+        body = generate_body_dict(spec.body, command, index, var_map)
         args ++ ["json=#{body}"]
       else
         args
@@ -213,59 +222,63 @@ Run with: python #{Common.generate_filename(report, :python)}
     "requests.#{method_str}(#{Enum.join(args, ", ")})"
   end
 
-  defp generate_body_dict(body, command, index) do
+  defp generate_body_dict(body, command, index, var_map) do
     fields =
       body
       |> Enum.map_join(", ", fn {key, _default} ->
         value = Map.get(command, key)
-        formatted = format_body_value(value, index)
+        formatted = format_body_value(value, index, var_map)
         ~s("#{key}": #{formatted})
       end)
 
     "{#{fields}}"
   end
 
-  defp format_body_value(%Ref{label: label}, _cmd_index) do
-    "refs[#{inspect(sanitize_label(label))}]"
+  defp format_body_value(%Placeholder{} = ph, _cmd_index, var_map) do
+    ~s(refs["#{Map.fetch!(var_map, ph.id)}"])
+  end
+
+  defp format_body_value(%Ref{label: label}, _cmd_index, _var_map) do
+    ~s(refs["#{sanitize_label(label)}"])
   end
 
   # Booleans and nil must precede the is_atom clause: they are atoms in
   # Elixir but must render as Python literals, not strings
-  defp format_body_value(value, _cmd_index) when is_boolean(value) do
+  defp format_body_value(value, _cmd_index, _var_map) when is_boolean(value) do
     if value, do: "True", else: "False"
   end
 
-  defp format_body_value(nil, _cmd_index), do: "None"
+  defp format_body_value(nil, _cmd_index, _var_map), do: "None"
 
-  defp format_body_value(value, _cmd_index) when is_atom(value) do
+  defp format_body_value(value, _cmd_index, _var_map) when is_atom(value) do
     inspect(to_string(value))
   end
 
-  defp format_body_value(value, _cmd_index) when is_binary(value) do
+  defp format_body_value(value, _cmd_index, _var_map) when is_binary(value) do
     inspect(value)
   end
 
-  defp format_body_value(value, _cmd_index) when is_number(value) do
+  defp format_body_value(value, _cmd_index, _var_map) when is_number(value) do
     to_string(value)
   end
 
-  # Recurse into collections so a Ref nested in a list/map is rendered as a
-  # refs[...] lookup (Jason.encode!/1 would raise on a %Ref{} struct).
-  defp format_body_value(value, cmd_index) when is_list(value) do
-    items = Enum.map_join(value, ", ", &format_body_value(&1, cmd_index))
+  # Recurse into collections so a Ref/Placeholder nested in a list/map is
+  # rendered as a refs[...] lookup (Jason.encode!/1 would raise on the struct).
+  defp format_body_value(value, cmd_index, var_map) when is_list(value) do
+    items = Enum.map_join(value, ", ", &format_body_value(&1, cmd_index, var_map))
     "[#{items}]"
   end
 
-  defp format_body_value(value, cmd_index) when is_map(value) do
+  defp format_body_value(value, cmd_index, var_map) when is_map(value) do
     items =
       Enum.map_join(value, ", ", fn {k, v} ->
-        ~s(#{inspect(to_string(k))}: #{format_body_value(v, cmd_index)})
+        ~s(#{inspect(to_string(k))}: #{format_body_value(v, cmd_index, var_map)})
       end)
 
     "{#{items}}"
   end
 
-  defp format_body_value(value, _cmd_index) do
+  defp format_body_value(value, _cmd_index, _var_map) do
     inspect(value)
   end
 
@@ -278,38 +291,32 @@ Run with: python #{Common.generate_filename(report, :python)}
   end
 
   # ============================================================================
-  # Ref Extraction
+  # Placeholder Extraction (DR-021)
   # ============================================================================
 
-  defp generate_ref_extraction(command, index, resp_var) do
-    cmd_name = Common.command_name(command)
-    label = generate_ref_label(cmd_name, index)
+  # Bind each external value this command produces from its JSON response.
+  defp generate_placeholder_extraction(index, extractions, resp_var) do
+    case Map.get(extractions, index, []) do
+      [] ->
+        ""
 
-    if String.starts_with?(cmd_name, "Create") or String.contains?(cmd_name, "Register") do
-      """
+      bindings ->
+        lines =
+          Enum.map_join(bindings, "\n", fn {ph, var} ->
+            ~s|refs["#{var}"] = #{resp_var}.json()#{py_path(ph.path)}| <>
+              "\n" <>
+              ~s|print(f"  -> bound #{var}: {refs['#{var}']}")|
+          end)
 
-      # Extract ref from response
-      data = #{resp_var}.json()
-      if "data" in data and "id" in data["data"]:
-          refs["#{label}"] = data["data"]["id"]
-          print(f"  -> Bound ref #{label}: {refs['#{label}']}")
-      elif "id" in data:
-          refs["#{label}"] = data["id"]
-          print(f"  -> Bound ref #{label}: {refs['#{label}']}")
-      """
-    else
-      ""
+        "\n" <> lines
     end
   end
 
-  defp generate_ref_label(cmd_name, index) do
-    base =
-      cmd_name
-      |> String.replace(~r/^(Create|Register)/, "")
-      |> Macro.underscore()
-      |> String.trim("_")
-
-    if base == "", do: "ref_#{index}", else: "#{base}_#{index}"
+  defp py_path(path) do
+    Enum.map_join(path, "", fn
+      i when is_integer(i) -> "[#{i}]"
+      key -> ~s(["#{key}"])
+    end)
   end
 
   defp sanitize_label(nil), do: "unknown"

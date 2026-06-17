@@ -245,7 +245,7 @@ defmodule PropertyDamage.ExportTest do
       assert script =~ "FAILURE POINT"
     end
 
-    test "extracts refs from create commands" do
+    test "references ref variables in consuming commands" do
       failure = create_test_failure_report()
 
       script =
@@ -254,8 +254,10 @@ defmodule PropertyDamage.ExportTest do
           adapter: TestHTTPAdapter
         )
 
-      assert script =~ "Map.put(refs"
-      assert script =~ "Bound ref"
+      # Consumers reference the ref variable. Binding server-generated values is
+      # driven by the modern external() path (see the placeholder wiring tests);
+      # the deprecated %Ref{} bind heuristic was removed.
+      assert script =~ ~s|refs["account"]|
     end
   end
 
@@ -309,6 +311,42 @@ defmodule PropertyDamage.ExportTest do
       # Consumer (step 2) references the same variable, not a literal placeholder.
       assert script =~ "/api/things/$#{var}"
       refute script =~ "Placeholder"
+    end
+
+    test "python extracts the producer's response field and the consumer references it",
+         %{report: report, var: var} do
+      script =
+        Export.to_script(report, :python,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ ~s|refs["#{var}"] = resp1.json()["id"]|
+      assert script =~ "refs['#{var}']"
+      refute script =~ "Placeholder"
+    end
+
+    test "elixir extracts the producer's response field and the consumer references it",
+         %{report: report, var: var} do
+      script =
+        Export.to_script(report, :elixir,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ ~s|refs = Map.put(refs, "#{var}", get_in(resp1.body, ["id"]))|
+      assert script =~ ~s|refs["#{var}"]|
+      refute script =~ "Placeholder"
+    end
+
+    test "livebook extracts the producer's response field and the consumer references it",
+         %{report: report, var: var} do
+      notebook =
+        Export.to_livebook(report, base_url: "http://localhost:4000", adapter: TestHTTPAdapter)
+
+      assert notebook =~ ~s|state = put_in(state, [:refs, "#{var}"], get_in(resp.body, ["id"]))|
+      assert notebook =~ ~s|state.refs["#{var}"]|
+      refute notebook =~ "Placeholder"
     end
   end
 
