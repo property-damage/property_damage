@@ -336,13 +336,26 @@ defmodule PropertyDamage.Telemetry do
       result
     rescue
       e ->
-        run_exception(start_time, :error, e, __STACKTRACE__, metadata)
+        emit_exception(event_type, start_time, :error, e, __STACKTRACE__, metadata)
         reraise e, __STACKTRACE__
     catch
       kind, reason ->
-        run_exception(start_time, kind, reason, __STACKTRACE__, metadata)
+        emit_exception(event_type, start_time, kind, reason, __STACKTRACE__, metadata)
         :erlang.raise(kind, reason, __STACKTRACE__)
     end
+  end
+
+  # Emit a `[:property_damage, event_type, :exception]` event. The exception
+  # event must match the span's own event_type (e.g. a failing :command span
+  # emits a :command exception, not a :run one).
+  defp emit_exception(event_type, start_time, kind, reason, stacktrace, metadata) do
+    duration = System.system_time() - start_time
+
+    :telemetry.execute(
+      [:property_damage, event_type, :exception],
+      %{duration: duration},
+      Map.merge(metadata, %{kind: kind, reason: reason, stacktrace: stacktrace})
+    )
   end
 
   defp start_function(:run), do: &run_start/1

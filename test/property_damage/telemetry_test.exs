@@ -284,4 +284,29 @@ defmodule PropertyDamage.TelemetryTest do
       assert_receive {:telemetry_update, :sequence_start, _, _}, 1000
     end
   end
+
+  describe "span/1 exception routing" do
+    test "emits an exception event matching the span's event_type, not :run" do
+      handler_id = "span_exc_handler_#{inspect(self())}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [
+          [:property_damage, :command, :exception],
+          [:property_damage, :run, :exception]
+        ],
+        &TestHandler.handle_event/4,
+        %{pid: self()}
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert_raise RuntimeError, fn ->
+        Telemetry.span(:command, %{command: :Foo}, fn -> raise "boom" end)
+      end
+
+      assert_receive {:telemetry_event, [:property_damage, :command, :exception], _m, _meta}
+      refute_received {:telemetry_event, [:property_damage, :run, :exception], _m2, _meta2}
+    end
+  end
 end
