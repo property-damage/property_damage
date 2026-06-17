@@ -1,7 +1,6 @@
 defmodule PropertyDamage.ValidatorTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Ref
   alias PropertyDamage.Validator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
@@ -29,9 +28,8 @@ defmodule PropertyDamage.ValidatorTest do
     end
 
     test "returns false when precondition fails" do
-      # ViewItem requires items to exist
-      ref = Ref.symbolic(label: "missing")
-      commands = [%ViewItem{item_ref: ref}]
+      # ViewItem requires items to exist; the item_ref value is irrelevant here.
+      commands = [%ViewItem{item_ref: nil}]
 
       refute Validator.valid_sequence?(commands, ExecutorModel)
     end
@@ -52,13 +50,11 @@ defmodule PropertyDamage.ValidatorTest do
       # 1. CreateItem.simulate returns ItemCreated event
       # 2. ModelState.apply handles ItemCreated by adding to items map
       # 3. ViewItem.precondition checks if items map is non-empty
-      # Even though ref is unresolved (nil), the item still gets added
-
-      ref = Ref.symbolic(label: "item")
+      # The item_ref value is irrelevant to the precondition.
 
       commands = [
         %CreateItem{name: "Test", quantity: 5},
-        %ViewItem{item_ref: ref}
+        %ViewItem{item_ref: nil}
       ]
 
       # This should pass because CreateItem.simulate populates state

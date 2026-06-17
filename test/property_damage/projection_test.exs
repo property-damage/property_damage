@@ -2,7 +2,6 @@ defmodule PropertyDamage.Model.ProjectionTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Model.Projection
-  alias PropertyDamage.Ref
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
   alias PropertyDamage.Test.Projections.ModelState
 
@@ -15,12 +14,12 @@ defmodule PropertyDamage.Model.ProjectionTest do
 
     test "apply/2 handles ItemCreated event" do
       state = ModelState.init()
-      ref = Ref.symbolic(label: "item")
-      event = %ItemCreated{item_ref: ref, name: "Widget", quantity: 5}
+      item_ref = "item_0"
+      event = %ItemCreated{item_ref: item_ref, name: "Widget", quantity: 5}
 
       new_state = ModelState.apply(state, event)
 
-      assert new_state.items[ref] == %{name: "Widget", quantity: 5}
+      assert new_state.items[item_ref] == %{name: "Widget", quantity: 5}
     end
 
     test "apply/2 handles ItemViewed event" do
@@ -41,15 +40,15 @@ defmodule PropertyDamage.Model.ProjectionTest do
     end
 
     test "multiple events accumulate state" do
-      ref1 = Ref.symbolic(label: "item1")
-      ref2 = Ref.symbolic(label: "item2")
+      item_ref1 = "item_1"
+      item_ref2 = "item_2"
 
       state =
         ModelState.init()
-        |> ModelState.apply(%ItemCreated{item_ref: ref1, name: "Widget", quantity: 5})
-        |> ModelState.apply(%ItemCreated{item_ref: ref2, name: "Gadget", quantity: 3})
-        |> ModelState.apply(%ItemViewed{item_ref: ref1})
-        |> ModelState.apply(%ItemViewed{item_ref: ref2})
+        |> ModelState.apply(%ItemCreated{item_ref: item_ref1, name: "Widget", quantity: 5})
+        |> ModelState.apply(%ItemCreated{item_ref: item_ref2, name: "Gadget", quantity: 3})
+        |> ModelState.apply(%ItemViewed{item_ref: item_ref1})
+        |> ModelState.apply(%ItemViewed{item_ref: item_ref2})
 
       assert map_size(state.items) == 2
       assert state.view_count == 2

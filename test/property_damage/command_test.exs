@@ -2,7 +2,6 @@ defmodule PropertyDamage.CommandTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias PropertyDamage.Ref
   alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
 
@@ -69,17 +68,17 @@ defmodule PropertyDamage.CommandTest do
     end
 
     test "generator/1 respects overrides" do
-      ref = Ref.symbolic(label: "item")
+      item_ref = "item_0"
 
-      check all(map <- ViewItem.generator(%{item_ref: ref})) do
-        assert map.item_ref == ref
+      check all(map <- ViewItem.generator(%{item_ref: item_ref})) do
+        assert map.item_ref == item_ref
       end
     end
 
     test "label/2 returns formatted string" do
-      ref = Ref.symbolic(label: "item")
-      state = %{items: %{ref => %{name: "Widget"}}}
-      cmd = %ViewItem{item_ref: ref}
+      item_ref = "item_0"
+      state = %{items: %{item_ref => %{name: "Widget"}}}
+      cmd = %ViewItem{item_ref: item_ref}
 
       label = ViewItem.label(state, cmd)
 

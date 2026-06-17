@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ExecutorTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{EventQueue, Executor, Ref}
+  alias PropertyDamage.{EventQueue, Executor, Placeholder}
 
   alias PropertyDamage.Test.{
     ErrorAdapter,
@@ -82,9 +82,11 @@ defmodule PropertyDamage.ExecutorTest do
       assert entry.event.quantity == 5
     end
 
-    test "unresolved refs cause failure" do
-      ref = Ref.symbolic(label: "missing_item")
-      command = %ViewItem{item_ref: ref}
+    test "unresolved externals cause failure" do
+      # A placeholder that was never registered cannot resolve, so the command
+      # fails resolution (surfaced as :ref_resolution_error).
+      ph = Placeholder.new_at(ItemCreated, [:item_ref], {:prefix, 0}, 0)
+      command = %ViewItem{item_ref: ph}
 
       {:ok, result} = Executor.run([command], ExecutorModel, SimpleAdapter)
 
