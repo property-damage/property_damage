@@ -82,7 +82,9 @@ defmodule PropertyDamage.Differential do
   """
 
   alias PropertyDamage.Differential.{Baseline, Equivalence, Result, Target}
-  alias PropertyDamage.{Generator, Options, Placeholder, Sequence}
+  alias PropertyDamage.{Generator, Options, Placeholder, Sequence, Telemetry}
+  alias PropertyDamage.Progress
+  alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate, Reporter}
 
   @type compare_mode :: :correctness | :performance | :both
 
@@ -128,6 +130,9 @@ defmodule PropertyDamage.Differential do
   - `:percentiles` - Latency percentiles (default: `[50, 95, 99]`)
   - `:warmup_runs` - Runs to discard before measuring (default: 0)
   - `:verbose` - Print progress (default: false)
+  - `:on_progress` - Progress consumer (DR-022). A 1-arity function called with a
+    `%PropertyDamage.Progress{}` per run/target (`data: %DifferentialUpdate{}`)
+    and once at the end with the terminal result (`data: %DifferentialResult{}`).
 
   ## Returns
 
@@ -161,6 +166,11 @@ defmodule PropertyDamage.Differential do
             :ok = Baseline.export(result, config, config.export_to)
           end
 
+          # Terminal notification (DR-022): a copy of the authoritative result
+          # for consumers, emitted once for both execution modes. The returned
+          # `{:ok, result}` remains the source of truth.
+          Reporter.emit(config.reporter, fn -> %DifferentialResult{result: result} end)
+
           {:ok, result}
 
         error ->
@@ -174,6 +184,17 @@ defmodule PropertyDamage.Differential do
   # ============================================================================
 
   defp build_config(opts) do
+    # Unified progress projection (DR-022): one reporter fans out to the verbose
+    # printer (if any), the user `on_progress:` callback (if any), and telemetry
+    # (only when a handler is attached). With no consumers it is inert and no
+    # %Progress{} is built.
+    reporter =
+      Reporter.new([
+        if(opts[:verbose], do: verbose_consumer()),
+        opts[:on_progress],
+        Telemetry.progress_consumer([:differential])
+      ])
+
     config = %{
       model: opts[:model],
       targets: opts[:targets],
@@ -188,11 +209,26 @@ defmodule PropertyDamage.Differential do
       metrics: opts[:metrics],
       percentiles: opts[:percentiles],
       warmup_runs: opts[:warmup_runs],
-      verbose: opts[:verbose],
+      reporter: reporter,
       adapter_config: opts[:adapter_config]
     }
 
     {:ok, config}
+  end
+
+  # The `verbose:` consumer: one line per heartbeat, matching the prior inline
+  # output exactly. The terminal DifferentialResult has no verbose rendering.
+  defp verbose_consumer do
+    fn
+      %Progress{data: %DifferentialUpdate{phase: :run} = update} ->
+        IO.puts("Run #{update.run_number}/#{update.total_runs}: #{update.command_count} commands")
+
+      %Progress{data: %DifferentialUpdate{phase: :target} = update} ->
+        IO.puts("Running target: #{update.target_name}")
+
+      %Progress{} ->
+        :ok
+    end
   end
 
   defp parse_targets(target_specs) do
@@ -274,9 +310,15 @@ defmodule PropertyDamage.Differential do
     sequence = generate_one(generator, Generator.run_seed(config.seed, run_number))
     commands = Sequence.to_list(sequence)
 
-    if config.verbose do
-      IO.puts("Run #{run_number + 1}/#{config.max_runs}: #{length(commands)} commands")
-    end
+    # Per-run heartbeat (DR-022). run_number is reported 1-based for consumers.
+    Reporter.emit(config.reporter, fn ->
+      %DifferentialUpdate{
+        phase: :run,
+        run_number: run_number + 1,
+        total_runs: config.max_runs,
+        command_count: length(commands)
+      }
+    end)
 
     # Execute interleaved
     case execute_interleaved(config, targets, target_contexts, commands) do
@@ -451,9 +493,10 @@ defmodule PropertyDamage.Differential do
     # Run each target sequentially
     target_results =
       for target <- targets do
-        if config.verbose do
-          IO.puts("Running target: #{target.name}")
-        end
+        # Per-target heartbeat (DR-022).
+        Reporter.emit(config.reporter, fn ->
+          %DifferentialUpdate{phase: :target, target_name: target.name}
+        end)
 
         run_data = run_target_sequential(config, target, sequences)
         {target.name, run_data}

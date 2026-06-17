@@ -597,6 +597,10 @@ defmodule PropertyDamage.Options do
       default: false,
       doc: "Print progress."
     ],
+    on_progress: [
+      type: {:fun, 1},
+      doc: "Progress consumer (DR-022); called with a `%PropertyDamage.Progress{}`."
+    ],
     adapter_config: [
       type: :map,
       default: %{},

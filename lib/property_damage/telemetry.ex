@@ -100,6 +100,14 @@ defmodule PropertyDamage.Telemetry do
     - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
     - Metadata: `%{data: PropertyDamage.Progress.MutationResult.t(), run_id: term()}`
 
+  - `[:property_damage, :differential, :progress]` - A differential run update
+    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
+    - Metadata: `%{data: PropertyDamage.Progress.DifferentialUpdate.t(), run_id: term()}`
+
+  - `[:property_damage, :differential, :result]` - The terminal differential result
+    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
+    - Metadata: `%{data: PropertyDamage.Progress.DifferentialResult.t(), run_id: term()}`
+
   These events fire only when a handler is attached for them, preserving the
   zero-cost-when-unobserved guarantee on the hot loop.
 

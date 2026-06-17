@@ -1,8 +1,16 @@
 defmodule PropertyDamage.DifferentialTest do
   use ExUnit.Case, async: true
 
+  # Module-function telemetry handler (avoids the local-function performance
+  # warning telemetry logs for anonymous handlers).
+  def forward_telemetry(event, measurements, metadata, parent) do
+    send(parent, {:telemetry, event, measurements, metadata})
+  end
+
   alias PropertyDamage.Differential
   alias PropertyDamage.Differential.{Baseline, Equivalence, Result, Target}
+  alias PropertyDamage.Progress
+  alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate}
 
   # ============================================================================
   # Test Support - Adapters
@@ -657,6 +665,115 @@ defmodule PropertyDamage.DifferentialTest do
         )
 
       assert result.execution == :sequential
+    end
+  end
+
+  # ============================================================================
+  # Progress projection (DR-022)
+  # ============================================================================
+
+  describe "run/1 progress (DR-022)" do
+    test "interleaved on_progress receives :run updates then a terminal result" do
+      test_pid = self()
+
+      {:ok, result} =
+        Differential.run(
+          model: TestModel,
+          targets: [
+            {ReferenceAdapter, role: :reference},
+            {IdenticalAdapter, name: "identical"}
+          ],
+          compare: :correctness,
+          execution: :interleaved,
+          max_runs: 3,
+          max_commands: 2,
+          seed: 12_345,
+          on_progress: fn progress -> send(test_pid, {:progress, progress}) end
+        )
+
+      progresses = drain_progress([])
+
+      run_updates =
+        Enum.filter(progresses, &match?(%Progress{data: %DifferentialUpdate{phase: :run}}, &1))
+
+      assert length(run_updates) == 3
+
+      assert %Progress{data: %DifferentialUpdate{phase: :run, run_number: 1, total_runs: 3}} =
+               hd(run_updates)
+
+      assert %Progress{data: %DifferentialResult{result: ^result}} = List.last(progresses)
+    end
+
+    test "sequential on_progress receives :target updates then a terminal result" do
+      test_pid = self()
+
+      {:ok, result} =
+        Differential.run(
+          model: TestModel,
+          targets: [
+            {ReferenceAdapter},
+            {IdenticalAdapter, name: "identical"}
+          ],
+          compare: :performance,
+          max_runs: 2,
+          max_commands: 2,
+          seed: 12_345,
+          on_progress: fn progress -> send(test_pid, {:progress, progress}) end
+        )
+
+      progresses = drain_progress([])
+
+      target_names =
+        for %Progress{data: %DifferentialUpdate{phase: :target, target_name: name}} <- progresses,
+            do: name
+
+      assert "reference_0" in target_names
+      assert "identical" in target_names
+
+      assert %Progress{data: %DifferentialResult{result: ^result}} = List.last(progresses)
+    end
+
+    test "emits coarse differential progress and result telemetry events" do
+      parent = self()
+      handler_id = "pd-differential-progress-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [
+          [:property_damage, :differential, :progress],
+          [:property_damage, :differential, :result]
+        ],
+        &__MODULE__.forward_telemetry/4,
+        parent
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      Differential.run(
+        model: TestModel,
+        targets: [
+          {ReferenceAdapter, role: :reference},
+          {IdenticalAdapter, name: "identical"}
+        ],
+        compare: :correctness,
+        max_runs: 2,
+        max_commands: 2,
+        seed: 12_345
+      )
+
+      assert_received {:telemetry, [:property_damage, :differential, :progress], _m,
+                       %{data: %DifferentialUpdate{}}}
+
+      assert_received {:telemetry, [:property_damage, :differential, :result], _m,
+                       %{data: %DifferentialResult{}}}
+    end
+  end
+
+  defp drain_progress(acc) do
+    receive do
+      {:progress, progress} -> drain_progress([progress | acc])
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 end

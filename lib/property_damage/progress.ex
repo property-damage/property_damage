@@ -18,6 +18,8 @@ defmodule PropertyDamage.Progress do
   """
 
   alias PropertyDamage.Progress.{
+    DifferentialResult,
+    DifferentialUpdate,
     LoadResult,
     LoadUpdate,
     MutationResult,
@@ -26,7 +28,7 @@ defmodule PropertyDamage.Progress do
     RunUpdate
   }
 
-  @type operation :: :test_run | :load_test | :mutation
+  @type operation :: :test_run | :load_test | :mutation | :differential
   @type kind :: :progress | :result
 
   @type payload ::
@@ -36,6 +38,8 @@ defmodule PropertyDamage.Progress do
           | LoadResult.t()
           | MutationUpdate.t()
           | MutationResult.t()
+          | DifferentialUpdate.t()
+          | DifferentialResult.t()
 
   @type t :: %__MODULE__{
           data: payload(),
@@ -89,4 +93,6 @@ defmodule PropertyDamage.Progress do
   defp classify(%LoadResult{}), do: {:load_test, :result}
   defp classify(%MutationUpdate{}), do: {:mutation, :progress}
   defp classify(%MutationResult{}), do: {:mutation, :result}
+  defp classify(%DifferentialUpdate{}), do: {:differential, :progress}
+  defp classify(%DifferentialResult{}), do: {:differential, :result}
 end
