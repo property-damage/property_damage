@@ -42,6 +42,14 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 - **AND** for each shrink iteration, it SHALL emit `[:property_damage, :shrink, :iteration]` with iteration number, current_length, and success flag
 - **AND** when shrinking completes, it SHALL emit `[:property_damage, :shrink, :stop]` with duration, iterations count, original_length, and shrunk_length
 
+#### Scenario: Coarse progress and result events
+
+- **WHEN** a long-running operation reports progress through the unified projection (DR-022) and a telemetry handler is attached
+- **THEN** the system SHALL emit a coarse `[:property_damage, <operation>, :progress]` event for each intermediate update and `[:property_damage, <operation>, :result]` at completion, where `<operation>` is one of `:test_run`, `:load_test`, `:mutation`, or `:differential`
+- **AND** measurements SHALL be `%{at: integer(), elapsed_ms: non_neg_integer()}` and metadata SHALL be `%{data: <payload struct>, run_id: term()}`
+- **AND** for `run/1` these events SHALL be distinct from and additional to the fine-grained `sequence`/`command`/`check`/`shrink` events, which remain unchanged
+- **AND** these events SHALL fire only when a handler is attached, preserving the zero-cost-when-unobserved guarantee
+
 #### Scenario: Handler attachment
 
 - **WHEN** a telemetry handler is attached via `:telemetry.attach/4`
@@ -86,28 +94,47 @@ The system SHALL track and report coverage metrics for property-based test execu
 
 ### Requirement: Progress Reporting
 
-The system SHALL provide real-time progress output during long-running test executions.
+The system SHALL report progress for long-running operations (`PropertyDamage.run/1`, `PropertyDamage.Mutation.run/1`, `PropertyDamage.Differential.run/1`, and the load-test runner) through a single derived projection: a `%PropertyDamage.Progress{}` value fanned out to zero or more consumers. The projection SHALL be a view of authoritative state, never its source; an operation's return value remains the source of truth, and a terminal `*Result` payload carries a copy of it for consumers.
 
-#### Scenario: Run header
+#### Scenario: Progress envelope and payloads
 
-- **WHEN** a test run starts
-- **THEN** the system SHALL print a header showing the model, adapter, max_runs, max_commands, and optional seed
+- **WHEN** an operation reports progress
+- **THEN** the system SHALL build a `%PropertyDamage.Progress{}` envelope carrying common metadata (`:at`, `:elapsed_ms`, `:run_id`) and an operation-specific `:data` payload
+- **AND** the payload's struct type SHALL be the discriminator (there is no `kind`/`operation` field), with one `{Update, Result}` payload pair per operation
 
-#### Scenario: Per-run progress
+#### Scenario: Consumer fan-out
 
-- **WHEN** each sequence run executes
-- **THEN** the system SHALL display the current run number out of total, command count, and branch info if applicable
-- **AND** progress SHALL update in-place using carriage return for clean terminal output
+- **WHEN** an operation has one or more progress consumers
+- **THEN** each consumer (a `(PropertyDamage.Progress.t -> any())` function) SHALL receive every progress value
+- **AND** a consumer that raises or exits SHALL be caught and logged without aborting the operation
 
-#### Scenario: Failure summary
+#### Scenario: Zero cost when unobserved
 
-- **WHEN** a test run encounters a failure
-- **THEN** the system SHALL print a failure summary
+- **WHEN** an operation has no progress consumers (verbose off, no `on_progress:`, and no telemetry handler attached)
+- **THEN** the system SHALL NOT build any `%PropertyDamage.Progress{}` value
 
-#### Scenario: Success summary
+#### Scenario: Synchronous fan-out for batch operations
 
-- **WHEN** a test run completes without failures
-- **THEN** the system SHALL print a success summary with execution statistics
+- **WHEN** a batch operation (`run/1`, `Mutation.run/1`, `Differential.run/1`) reports progress
+- **THEN** consumers SHALL be invoked synchronously, in order, in the calling process, completing before the operation returns (a slow consumer only lengthens the run)
+
+#### Scenario: Non-blocking dispatch for load tests
+
+- **WHEN** a load test reports progress
+- **THEN** the system SHALL dispatch through an isolated notifier process so that a slow consumer cannot stall arrival scheduling
+- **AND** it SHALL guarantee delivery of the terminal `*Result` once load generation has stopped
+- **AND** when its bounded buffer overflows it SHALL deterministically decimate buffered intermediate updates (exempting the first update and the terminal result) without reordering the survivors
+
+#### Scenario: Verbose output is a consumer
+
+- **WHEN** `verbose: true` is set
+- **THEN** the system SHALL install a built-in printing consumer that renders the progress stream to stdout: for `run/1` the run header (model, adapter, max_runs, max_commands, optional seed), per-run progress (current run number out of total, command count, and branch info if applicable, updated in-place with a carriage return), and the success or failure summary; for mutation and differential a status line per item
+- **AND** the printed output SHALL be identical to the prior `verbose:` output
+
+#### Scenario: User callback is a consumer
+
+- **WHEN** an `on_progress:` function is provided
+- **THEN** the system SHALL install it as an additional consumer, receiving each intermediate `%PropertyDamage.Progress{}` (`data: *Update{}`) and finally the terminal result (`data: *Result{}`)
 
 ### Requirement: Sequence Diagram Generation
 

@@ -74,9 +74,8 @@ Report.save(report, "load_test_report.md", :markdown)
 | `ramp_down` | How to ramp down at end | `:immediate` |
 | `think_time` | `{min_ms, max_ms}` between commands | `{0, 0}` |
 | `arrival_jitter` | `{min_ms, max_ms}` jitter per arrival | `{0, 0}` |
-| `metrics_interval` | How often to sample metrics | `{1, :seconds}` |
-| `on_metrics` | Callback for periodic metrics | `nil` |
-| `on_complete` | Callback when test finishes | `nil` |
+| `metrics_interval` | How often to sample metrics (snapshot cadence) | `{1, :seconds}` |
+| `on_progress` | Progress consumer: `LoadUpdate` snapshots + a terminal `LoadResult` | `nil` |
 | `assertion_mode` | `:disabled`, `:log`, or `:fail` | `:disabled` |
 
 ### Arrival Rate Formats
@@ -245,15 +244,26 @@ overall throughput efficiency.
 
 ## Real-Time Monitoring
 
-Use callbacks to monitor progress:
+Use the `on_progress` consumer to monitor progress. It receives a
+`%PropertyDamage.Progress{}` projection (DR-022): periodic snapshots arrive as a
+`LoadUpdate`, and a terminal `LoadResult` carries a copy of the final report. The
+consumer runs in an isolated notifier process, so a slow callback never stalls
+arrival scheduling.
 
 ```elixir
+alias PropertyDamage.Progress
+alias PropertyDamage.Progress.{LoadResult, LoadUpdate}
+
 Runner.start_link(
   # ...
-  on_metrics: fn snapshot ->
-    IO.puts("RPS: #{snapshot.requests_per_second}, " <>
-            "p95: #{snapshot.latency_p95}ms, " <>
-            "errors: #{snapshot.total_errors}")
+  on_progress: fn
+    %Progress{data: %LoadUpdate{snapshot: snapshot}} ->
+      IO.puts("RPS: #{snapshot.requests_per_second}, " <>
+              "p95: #{snapshot.latency_p95}ms, " <>
+              "errors: #{snapshot.total_errors}")
+
+    %Progress{data: %LoadResult{report: _report}} ->
+      IO.puts("load test complete")
   end,
   metrics_interval: {5, :seconds}
 )
@@ -325,9 +335,13 @@ config = [
   ramp_up: {:linear, {30, :seconds}},
   ramp_down: {:linear, {15, :seconds}},
   think_time: {10, 50},
-  on_metrics: fn m ->
-    IO.puts("[#{m.duration_ms}ms] #{m.requests_per_second} cmd/s, " <>
-            "p95=#{m.latency_p95}ms, completed=#{m.arrivals_completed}")
+  on_progress: fn
+    %PropertyDamage.Progress{data: %PropertyDamage.Progress.LoadUpdate{snapshot: m}} ->
+      IO.puts("[#{m.duration_ms}ms] #{m.requests_per_second} cmd/s, " <>
+              "p95=#{m.latency_p95}ms, completed=#{m.arrivals_completed}")
+
+    _ ->
+      :ok
   end
 ]
 

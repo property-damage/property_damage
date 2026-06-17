@@ -5,6 +5,43 @@ All notable changes to PropertyDamage will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Unified progress reporting (DR-022): all long-running operations
+  (`PropertyDamage.run/1`, `PropertyDamage.Mutation.run/1`,
+  `PropertyDamage.Differential.run/1`, and load tests) now report through a single
+  derived projection, a `%PropertyDamage.Progress{}` value fanned out to zero or
+  more consumers. Each operation accepts an `on_progress:` consumer and emits
+  coarse `[:property_damage, <operation>, :progress | :result]` telemetry events
+  (`<operation>` is `:test_run`, `:load_test`, `:mutation`, or `:differential`),
+  additional to and distinct from the existing fine-grained `run/1` spans. With no
+  consumers attached (verbose off, no `on_progress:`, no telemetry handler), no
+  `%Progress{}` is built (zero cost on the hot path). `Differential.run/1` gained
+  an `on_progress:` option.
+
+### Changed
+
+- **BREAKING**: The load test's `on_metrics:` and `on_complete:` options are
+  removed in favor of `on_progress:`, which receives `%PropertyDamage.Progress{}`
+  values (periodic `LoadUpdate` snapshots and a terminal `LoadResult`).
+  `metrics_interval:` is retained as the snapshot cadence.
+- **BREAKING**: `PropertyDamage.Mutation.run/1`'s `on_progress:` now receives a
+  `%PropertyDamage.Progress{}` (a `MutationUpdate` per mutation, then a terminal
+  `MutationResult`) instead of a raw result map.
+- `verbose:` output for `run/1`, `Mutation.run/1`, and `Differential.run/1` is now
+  produced by a built-in progress consumer rather than inline printing; the
+  printed output is unchanged.
+
+### Fixed
+
+- `PropertyDamage.Mutation.run/1` could not execute end to end: the runner passed
+  the `MutatingAdapter` struct as the `:adapter` option, which option validation
+  rejects and the executor cannot dispatch on. It now passes `MutatingAdapter` as
+  the adapter module with the struct threaded through `adapter_config`, matching
+  the adapter's design.
+
 ## [0.2.0] - TBD
 
 This cycle made the headline features that 0.1.0 advertised actually work end to

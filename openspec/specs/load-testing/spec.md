@@ -199,14 +199,21 @@ The framework SHALL generate a summary report containing metrics, failures, and 
 - **WHEN** a report is formatted for output
 - **THEN** the framework SHALL support terminal and markdown output formats
 
-### Requirement: Live Metrics Callback
+### Requirement: Live Progress Callback
 
-The framework SHOULD support a periodic callback for real-time metrics observation during the test.
+The framework SHOULD support a periodic progress callback for real-time observation during the test, delivered through the unified progress projection (DR-022).
 
-#### Scenario: On-metrics callback
+#### Scenario: On-progress callback
 
-- **WHEN** `on_metrics` is configured with a callback function
-- **THEN** the framework SHALL invoke the callback periodically (e.g., every second) with a current metrics snapshot
+- **WHEN** `on_progress` is configured with a 1-arity function
+- **THEN** the framework SHALL invoke it periodically (cadence set by `metrics_interval`) with a `%PropertyDamage.Progress{}` whose `:data` is a `PropertyDamage.Progress.LoadUpdate` carrying a current metrics snapshot
+- **AND** at completion it SHALL invoke the callback once with a terminal `%PropertyDamage.Progress{}` whose `:data` is a `PropertyDamage.Progress.LoadResult` carrying a copy of the final report
+- **AND** the callback SHALL be dispatched through an isolated notifier process so a slow callback cannot stall arrival scheduling
+
+#### Scenario: Removed legacy callbacks
+
+- **WHEN** configuring live observation
+- **THEN** the framework SHALL NOT support the former `on_metrics`/`on_complete` options (removed in favor of `on_progress`); `metrics_interval` is retained as the snapshot cadence
 
 ### Requirement: Think Time
 
