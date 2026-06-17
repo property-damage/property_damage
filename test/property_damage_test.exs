@@ -1,6 +1,15 @@
 defmodule PropertyDamageTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Progress
+  alias PropertyDamage.Progress.{RunResult, RunUpdate}
+
+  # Module-function telemetry handler (avoids the local-function performance
+  # warning telemetry logs for anonymous handlers).
+  def forward_telemetry(event, measurements, metadata, parent) do
+    send(parent, {:telemetry, event, measurements, metadata})
+  end
+
   alias PropertyDamage.Test.{
     ExecutorModel,
     FailingModel,
@@ -230,6 +239,80 @@ defmodule PropertyDamageTest do
       assert output =~ "PropertyDamage Configuration Summary"
       assert output =~ "Run 1/2"
       assert output =~ "Run 2/2"
+    end
+  end
+
+  describe "run/1 progress reporting" do
+    test "on_progress receives ordered start/run updates and a terminal result" do
+      parent = self()
+
+      assert {:ok, _stats} =
+               PropertyDamage.run(
+                 model: ExecutorModel,
+                 adapter: SimpleAdapter,
+                 max_runs: 2,
+                 max_commands: 3,
+                 validate: false,
+                 on_progress: fn p -> send(parent, {:progress, p}) end
+               )
+
+      # Inline, ordered fan-out: messages arrive in emission order.
+      assert_receive {:progress, %Progress{data: %RunUpdate{phase: :start, total_runs: 2}}}
+
+      assert_receive {:progress,
+                      %Progress{data: %RunUpdate{phase: :run, run_number: 1, total_runs: 2}}}
+
+      assert_receive {:progress,
+                      %Progress{data: %RunUpdate{phase: :run, run_number: 2, total_runs: 2}}}
+
+      assert_receive {:progress, %Progress{data: %RunResult{outcome: :ok, runs_completed: 2}}}
+    end
+
+    test "on_progress delivers a terminal error result on failure" do
+      parent = self()
+
+      assert {:error, _report} =
+               PropertyDamage.run(
+                 model: FailingModel,
+                 adapter: SimpleAdapter,
+                 seed: 42,
+                 max_runs: 100,
+                 max_commands: 50,
+                 validate: false,
+                 shrink: false,
+                 on_progress: fn p -> send(parent, {:progress, p}) end
+               )
+
+      assert_receive {:progress, %Progress{data: %RunResult{outcome: :error, failure: report}}}
+      assert match?(%PropertyDamage.FailureReport{}, report)
+    end
+
+    test "emits coarse test_run progress and result telemetry events" do
+      parent = self()
+      handler_id = "pd-progress-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [[:property_damage, :test_run, :progress], [:property_damage, :test_run, :result]],
+        &__MODULE__.forward_telemetry/4,
+        parent
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      PropertyDamage.run(
+        model: ExecutorModel,
+        adapter: SimpleAdapter,
+        max_runs: 1,
+        max_commands: 2,
+        validate: false
+      )
+
+      assert_receive {:telemetry, [:property_damage, :test_run, :progress], _m,
+                      %{data: %RunUpdate{}}}
+
+      assert_receive {:telemetry, [:property_damage, :test_run, :result], _m,
+                      %{data: %RunResult{outcome: :ok}}}
     end
   end
 end

@@ -13,6 +13,45 @@ defmodule PropertyDamage.Progress.Printer do
   """
 
   alias PropertyDamage.{Error, FailureReport, Sequence}
+  alias PropertyDamage.Progress
+  alias PropertyDamage.Progress.{RunResult, RunUpdate}
+
+  @doc """
+  Build the `verbose:` consumer for `PropertyDamage.run/1` (DR-022).
+
+  Returns a `(PropertyDamage.Progress.t -> :ok)` that renders the progress
+  stream to stdout: the `:start` update prints the configuration header (closing
+  over `model`/`adapter`/`opts`), `:run` updates print per-run progress, and the
+  terminal `RunResult` prints the success or failure summary. This is the single
+  printing path; `run/1` no longer prints progress inline.
+  """
+  @spec consumer(module(), module(), keyword()) :: (Progress.t() -> :ok)
+  def consumer(model, adapter, opts) do
+    fn %Progress{data: data} -> render(data, model, adapter, opts) end
+  end
+
+  defp render(%RunUpdate{phase: :start}, model, adapter, opts) do
+    print_header(model, adapter, opts)
+  end
+
+  defp render(%RunUpdate{phase: :run} = update, _model, _adapter, _opts) do
+    print_run(update.run_number, update.total_runs, update.command_count, update.branch_count)
+  end
+
+  defp render(%RunResult{outcome: :ok} = result, _model, _adapter, _opts) do
+    print_success(%{
+      runs: result.runs_completed,
+      total_commands: result.total_commands,
+      seed: result.seed
+    })
+  end
+
+  defp render(%RunResult{outcome: :error, failure: report}, _model, _adapter, _opts) do
+    print_failure(report)
+  end
+
+  # Phases without dedicated output (e.g. :shrink) are silently ignored.
+  defp render(_data, _model, _adapter, _opts), do: :ok
 
   @doc """
   Print the test run header showing what's being tested.
@@ -44,19 +83,15 @@ defmodule PropertyDamage.Progress.Printer do
   @doc """
   Print progress for the current run.
 
-  Shows run number, command count, and optional branch info.
+  Shows the (1-based) run number, command count, and optional branch info.
+  `branch_count` is `0` for a linear sequence.
   """
-  @spec print_run(non_neg_integer(), non_neg_integer(), Sequence.t()) :: :ok
-  def print_run(run_number, max_runs, sequence) do
-    command_count = Sequence.command_count(sequence)
-
-    branch_info =
-      if Sequence.branching?(sequence),
-        do: " (#{Sequence.branch_count(sequence)} branches)",
-        else: ""
+  @spec print_run(pos_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: :ok
+  def print_run(run_number, total_runs, command_count, branch_count) do
+    branch_info = if branch_count > 0, do: " (#{branch_count} branches)", else: ""
 
     # Use carriage return to update in place for cleaner output
-    IO.write("\r  Run #{run_number + 1}/#{max_runs}: #{command_count} commands#{branch_info}    ")
+    IO.write("\r  Run #{run_number}/#{total_runs}: #{command_count} commands#{branch_info}    ")
     :ok
   end
 

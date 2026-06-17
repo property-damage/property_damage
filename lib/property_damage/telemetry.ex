@@ -67,6 +67,26 @@ defmodule PropertyDamage.Telemetry do
     - Measurements: `%{duration: integer(), iterations: integer()}`
     - Metadata: `%{original_length: integer(), shrunk_length: integer()}`
 
+  ### Progress (DR-022)
+
+  In addition to the fine-grained spans above, every long-running operation emits
+  a *coarse* progress/result heartbeat derived from the unified
+  `PropertyDamage.Progress` projection. For `run/1` these are **distinct from and
+  additional to** the per-unit `sequence`/`command`/`check`/`shrink` spans: the
+  spans instrument each unit of work, the progress events are a campaign-level
+  heartbeat.
+
+  - `[:property_damage, :test_run, :progress]` - An intermediate run update
+    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
+    - Metadata: `%{data: PropertyDamage.Progress.RunUpdate.t(), run_id: term()}`
+
+  - `[:property_damage, :test_run, :result]` - The terminal run result
+    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
+    - Metadata: `%{data: PropertyDamage.Progress.RunResult.t(), run_id: term()}`
+
+  These events fire only when a handler is attached for them, preserving the
+  zero-cost-when-unobserved guarantee on the hot loop.
+
   ## Usage
 
   Attach handlers using `:telemetry.attach/4`:
@@ -80,6 +100,35 @@ defmodule PropertyDamage.Telemetry do
 
   Or use `PropertyDamage.Telemetry.Dashboard` for a pre-built LiveView dashboard.
   """
+
+  alias PropertyDamage.Progress
+
+  @doc """
+  Build a telemetry consumer for the unified progress projection (DR-022), or
+  `nil` when nothing is listening.
+
+  Given the operations to cover (e.g. `[:test_run]`), it checks whether a handler
+  is attached for any of their `:progress`/`:result` events. If so it returns a
+  `(PropertyDamage.Progress.t -> :ok)` that emits the corresponding coarse event;
+  otherwise it returns `nil` so the reporter stays inert and the hot loop builds
+  no `%Progress{}` (the zero-cost guarantee).
+  """
+  @spec progress_consumer([atom()]) :: (Progress.t() -> :ok) | nil
+  def progress_consumer(operations) when is_list(operations) do
+    events = for op <- operations, kind <- [:progress, :result], do: [:property_damage, op, kind]
+
+    if Enum.any?(events, fn event -> :telemetry.list_handlers(event) != [] end) do
+      &emit_progress/1
+    end
+  end
+
+  defp emit_progress(%Progress{} = progress) do
+    :telemetry.execute(
+      Progress.telemetry_event(progress),
+      %{at: progress.at || 0, elapsed_ms: progress.elapsed_ms || 0},
+      %{data: progress.data, run_id: progress.run_id}
+    )
+  end
 
   @doc """
   Emit a run start event.

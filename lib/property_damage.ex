@@ -134,6 +134,9 @@ defmodule PropertyDamage do
     Generator,
     Options,
     Progress.Printer,
+    Progress.Reporter,
+    Progress.RunResult,
+    Progress.RunUpdate,
     Sequence,
     Shrinker,
     Stutter,
@@ -300,6 +303,17 @@ defmodule PropertyDamage do
     branching = opts[:branching]
     stutter_config = Stutter.parse_config(opts[:stutter])
 
+    # Unified progress projection (DR-022): one reporter fans out to the verbose
+    # printer (if any), the user `on_progress:` callback (if any), and telemetry
+    # (only when a handler is attached). With no consumers it is inert and the
+    # run loop builds no %Progress{}.
+    reporter =
+      Reporter.new([
+        if(verbose, do: Printer.consumer(model, adapter, opts)),
+        opts[:on_progress],
+        Telemetry.progress_consumer([:test_run])
+      ])
+
     # Validate configuration
     if validate do
       {:ok, warnings} = Validation.validate!(model, adapter, injector_adapters: injector_adapters)
@@ -322,9 +336,6 @@ defmodule PropertyDamage do
 
         IO.puts("")
       end
-
-      # Print test run header
-      Printer.print_header(model, adapter, opts)
     end
 
     # Setup once (if model implements it)
@@ -362,7 +373,7 @@ defmodule PropertyDamage do
               shrink,
               shrinker_config,
               on_failure,
-              verbose,
+              reporter,
               branching,
               stutter_config
             )
@@ -411,7 +422,7 @@ defmodule PropertyDamage do
          shrink,
          shrinker_config,
          on_failure,
-         verbose,
+         reporter,
          branching,
          stutter_config
        ) do
@@ -419,6 +430,11 @@ defmodule PropertyDamage do
     # stutter decisions; sequence generation is seeded explicitly per run
     # via Generator.generate_value/2, NOT through the process RNG)
     :rand.seed(:exsss, seed)
+
+    # Campaign start (DR-022): the verbose consumer renders this as the header.
+    Reporter.emit(reporter, fn ->
+      %RunUpdate{phase: :start, run_number: 0, total_runs: max_runs}
+    end)
 
     # Generate sequences and run
     generator_opts = [max_commands: max_commands]
@@ -439,7 +455,7 @@ defmodule PropertyDamage do
       shrink,
       shrinker_config,
       on_failure,
-      verbose,
+      reporter,
       stutter_config,
       0,
       0
@@ -457,7 +473,7 @@ defmodule PropertyDamage do
          _shrink,
          _shrinker_config,
          _on_failure,
-         verbose,
+         reporter,
          _stutter_config,
          run_number,
          total_commands
@@ -465,9 +481,14 @@ defmodule PropertyDamage do
        when run_number >= max_runs do
     stats = %{runs: max_runs, total_commands: total_commands, seed: seed}
 
-    if verbose do
-      Printer.print_success(stats)
-    end
+    Reporter.emit(reporter, fn ->
+      %RunResult{
+        outcome: :ok,
+        runs_completed: max_runs,
+        total_commands: total_commands,
+        seed: seed
+      }
+    end)
 
     {:ok, stats}
   end
@@ -483,7 +504,7 @@ defmodule PropertyDamage do
          shrink,
          shrinker_config,
          on_failure,
-         verbose,
+         reporter,
          stutter_config,
          run_number,
          total_commands
@@ -495,9 +516,16 @@ defmodule PropertyDamage do
     sequence = generate_one(generator, run_seed)
     command_count = Sequence.command_count(sequence)
 
-    if verbose do
-      Printer.print_run(run_number, max_runs, sequence)
-    end
+    # Per-run heartbeat (DR-022). run_number is reported 1-based for consumers.
+    Reporter.emit(reporter, fn ->
+      %RunUpdate{
+        phase: :run,
+        run_number: run_number + 1,
+        total_runs: max_runs,
+        command_count: command_count,
+        branch_count: Sequence.branch_count(sequence)
+      }
+    end)
 
     # Emit telemetry for sequence start
     seq_start_time = System.system_time()
@@ -553,7 +581,7 @@ defmodule PropertyDamage do
               shrink,
               shrinker_config,
               on_failure,
-              verbose,
+              reporter,
               stutter_config,
               run_number + 1,
               total_commands + command_count
@@ -572,7 +600,7 @@ defmodule PropertyDamage do
               shrink,
               shrinker_config,
               on_failure,
-              verbose,
+              reporter,
               run_seed,
               run_number
             )
@@ -623,7 +651,7 @@ defmodule PropertyDamage do
          shrink,
          shrinker_config,
          on_failure,
-         verbose,
+         reporter,
          seed,
          run_number
        ) do
@@ -679,10 +707,11 @@ defmodule PropertyDamage do
         stacktrace: Map.get(fresh_result, :stacktrace)
       )
 
-    # Print failure summary when verbose
-    if verbose do
-      Printer.print_failure(failure_report)
-    end
+    # Terminal failure notification (DR-022): the verbose consumer renders this
+    # as the failure summary. The authoritative result is the returned report.
+    Reporter.emit(reporter, fn ->
+      %RunResult{outcome: :error, failure: failure_report}
+    end)
 
     # A raising on_failure handler must not destroy the failure we just found:
     # catch it, warn, and still return the report.

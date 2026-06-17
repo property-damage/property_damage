@@ -104,6 +104,14 @@ defmodule PropertyDamage.Options do
       type: {:fun, 1},
       doc: "Callback `fn failure_report -> any` called on test failure."
     ],
+    on_progress: [
+      type: {:fun, 1},
+      doc: """
+      Callback `fn %PropertyDamage.Progress{} -> any` receiving the unified
+      progress projection: ordered `RunUpdate`s during the run and a terminal
+      `RunResult`. See `PropertyDamage.Progress` (DR-022).
+      """
+    ],
     assertion_mode: [
       type: {:in, [:disabled, :halt, :record, :log]},
       default: :halt,

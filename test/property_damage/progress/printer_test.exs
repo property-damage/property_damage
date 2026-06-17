@@ -1,7 +1,10 @@
 defmodule PropertyDamage.Progress.PrinterTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{FailureReport, Progress.Printer, Sequence}
+  alias PropertyDamage.{FailureReport, Progress, Sequence}
+  alias PropertyDamage.Progress.{Printer, RunResult, RunUpdate}
+
+  import ExUnit.CaptureIO
 
   # Simple command struct for testing
   defmodule TestCommand do
@@ -37,30 +40,112 @@ defmodule PropertyDamage.Progress.PrinterTest do
     end
   end
 
-  describe "print_run/3" do
-    test "prints run progress" do
-      sequence = Sequence.linear([%TestCommand{id: 1}])
-
+  describe "print_run/4" do
+    test "prints run progress (run_number is 1-based)" do
       output =
-        ExUnit.CaptureIO.capture_io(fn ->
-          Printer.print_run(0, 10, sequence)
+        capture_io(fn ->
+          Printer.print_run(1, 10, 1, 0)
         end)
 
       assert output =~ "Run 1/10"
       assert output =~ "1 commands"
     end
 
-    test "shows branch info for branching sequences" do
-      prefix = [%TestCommand{id: 1}]
-      branches = [[%TestCommand{id: 2}], [%TestCommand{id: 3}]]
-      sequence = Sequence.branching(prefix, branches)
-
+    test "shows branch info when branch_count > 0" do
       output =
-        ExUnit.CaptureIO.capture_io(fn ->
-          Printer.print_run(0, 10, sequence)
+        capture_io(fn ->
+          Printer.print_run(1, 10, 4, 2)
         end)
 
-      assert output =~ "branches"
+      assert output =~ "2 branches"
+    end
+
+    test "omits branch info when branch_count is 0" do
+      output =
+        capture_io(fn ->
+          Printer.print_run(3, 10, 5, 0)
+        end)
+
+      refute output =~ "branches"
+    end
+  end
+
+  describe "consumer/3" do
+    test "RunUpdate{phase: :start} prints the configuration header" do
+      consumer = Printer.consumer(TestModel, TestAdapter, max_runs: 5, max_commands: 7)
+
+      output =
+        capture_io(fn ->
+          consumer.(Progress.new(%RunUpdate{phase: :start, run_number: 0, total_runs: 5}))
+        end)
+
+      assert output =~ "PropertyDamage Test Run"
+      assert output =~ "Max Runs:     5"
+      assert output =~ "Max Commands: 7"
+    end
+
+    test "RunUpdate{phase: :run} prints per-run progress" do
+      consumer = Printer.consumer(TestModel, TestAdapter, [])
+
+      output =
+        capture_io(fn ->
+          consumer.(
+            Progress.new(%RunUpdate{
+              phase: :run,
+              run_number: 2,
+              total_runs: 10,
+              command_count: 4,
+              branch_count: 0
+            })
+          )
+        end)
+
+      assert output =~ "Run 2/10"
+      assert output =~ "4 commands"
+    end
+
+    test "RunResult{outcome: :ok} prints the success summary" do
+      consumer = Printer.consumer(TestModel, TestAdapter, [])
+
+      output =
+        capture_io(fn ->
+          consumer.(
+            Progress.new(%RunResult{
+              outcome: :ok,
+              runs_completed: 100,
+              total_commands: 500,
+              seed: 42
+            })
+          )
+        end)
+
+      assert output =~ "TEST PASSED"
+      assert output =~ "Runs:           100"
+      assert output =~ "Total Commands: 500"
+      assert output =~ "Seed:           42"
+    end
+
+    test "RunResult{outcome: :error} prints the failure summary" do
+      report = %FailureReport{
+        seed: 12_345,
+        run_number: 5,
+        failed_at_index: 2,
+        failure_reason: {:check_failed, :test_check, "Test failed"},
+        original_sequence: Sequence.linear([%TestCommand{id: 1}, %TestCommand{id: 2}]),
+        shrunk_sequence: Sequence.linear([%TestCommand{id: 1}]),
+        shrink_iterations: 10,
+        shrink_time_ms: 100
+      }
+
+      consumer = Printer.consumer(TestModel, TestAdapter, [])
+
+      output =
+        capture_io(fn ->
+          consumer.(Progress.new(%RunResult{outcome: :error, failure: report}))
+        end)
+
+      assert output =~ "TEST FAILURE DETECTED"
+      assert output =~ "Run:          6"
     end
   end
 
