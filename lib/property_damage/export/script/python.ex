@@ -249,12 +249,20 @@ Run with: python #{Common.generate_filename(report, :python)}
     to_string(value)
   end
 
-  defp format_body_value(value, _cmd_index) when is_list(value) do
-    Jason.encode!(value)
+  # Recurse into collections so a Ref nested in a list/map is rendered as a
+  # refs[...] lookup (Jason.encode!/1 would raise on a %Ref{} struct).
+  defp format_body_value(value, cmd_index) when is_list(value) do
+    items = Enum.map_join(value, ", ", &format_body_value(&1, cmd_index))
+    "[#{items}]"
   end
 
-  defp format_body_value(value, _cmd_index) when is_map(value) do
-    Jason.encode!(value)
+  defp format_body_value(value, cmd_index) when is_map(value) do
+    items =
+      Enum.map_join(value, ", ", fn {k, v} ->
+        ~s(#{inspect(to_string(k))}: #{format_body_value(v, cmd_index)})
+      end)
+
+    "{#{items}}"
   end
 
   defp format_body_value(value, _cmd_index) do

@@ -20,6 +20,10 @@ defmodule PropertyDamage.ExportTest do
     defstruct [:account_ref, :amount]
   end
 
+  defmodule BatchCredit do
+    defstruct [:items]
+  end
+
   defmodule AccountCreated do
     defstruct [:account_id, :currency]
   end
@@ -62,6 +66,14 @@ defmodule PropertyDamage.ExportTest do
         path: "/api/accounts/:account_id/debit",
         path_params: %{account_id: ref},
         body: %{amount: amount}
+      }
+    end
+
+    def http_spec(%BatchCredit{items: items}, _ctx) do
+      %HTTPSpec{
+        method: :post,
+        path: "/api/batch",
+        body: %{items: items}
       }
     end
   end
@@ -238,6 +250,33 @@ defmodule PropertyDamage.ExportTest do
       assert script =~ "base_url = os.environ.get"
       assert script =~ "refs = {}"
       assert script =~ "FAILURE POINT"
+    end
+  end
+
+  describe "to_script/3 - python refs in collections" do
+    test "renders a Ref nested in a list body field instead of raising" do
+      ref = Ref.symbolic(label: "account")
+      commands = [%BatchCredit{items: [ref]}]
+
+      report = %FailureReport{
+        seed: 1,
+        failed_at_index: 0,
+        failure_type: :check_failed,
+        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+
+      script =
+        Export.to_script(report, :python,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      # The nested ref is rendered as a refs[...] lookup inside a list literal,
+      # not crashed on by Jason.encode!.
+      assert script =~ ~s(refs["account"])
     end
   end
 
