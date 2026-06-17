@@ -1,7 +1,7 @@
-defmodule PropertyDamage.ProgressTest do
+defmodule PropertyDamage.Progress.PrinterTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{FailureReport, Progress, Sequence}
+  alias PropertyDamage.{FailureReport, Progress.Printer, Sequence}
 
   # Simple command struct for testing
   defmodule TestCommand do
@@ -12,7 +12,7 @@ defmodule PropertyDamage.ProgressTest do
     test "prints configuration summary" do
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_header(TestModel, TestAdapter,
+          Printer.print_header(TestModel, TestAdapter,
             max_runs: 50,
             max_commands: 25
           )
@@ -30,7 +30,7 @@ defmodule PropertyDamage.ProgressTest do
     test "prints seed when provided" do
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_header(TestModel, TestAdapter, seed: 12_345)
+          Printer.print_header(TestModel, TestAdapter, seed: 12_345)
         end)
 
       assert output =~ "Seed:         12345"
@@ -43,7 +43,7 @@ defmodule PropertyDamage.ProgressTest do
 
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_run(0, 10, sequence)
+          Printer.print_run(0, 10, sequence)
         end)
 
       assert output =~ "Run 1/10"
@@ -57,7 +57,7 @@ defmodule PropertyDamage.ProgressTest do
 
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_run(0, 10, sequence)
+          Printer.print_run(0, 10, sequence)
         end)
 
       assert output =~ "branches"
@@ -82,7 +82,7 @@ defmodule PropertyDamage.ProgressTest do
 
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_failure(report)
+          Printer.print_failure(report)
         end)
 
       assert output =~ "TEST FAILURE DETECTED"
@@ -106,7 +106,7 @@ defmodule PropertyDamage.ProgressTest do
 
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_success(stats)
+          Printer.print_success(stats)
         end)
 
       assert output =~ "TEST PASSED"
@@ -125,7 +125,7 @@ defmodule PropertyDamage.ProgressTest do
 
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_success(stats)
+          Printer.print_success(stats)
         end)
 
       assert output =~ "Duration:"
@@ -137,7 +137,7 @@ defmodule PropertyDamage.ProgressTest do
     test "prints a dot" do
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_dot()
+          Printer.print_dot()
         end)
 
       assert output == "."
@@ -148,7 +148,7 @@ defmodule PropertyDamage.ProgressTest do
     test "prints an X" do
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Progress.print_x()
+          Printer.print_x()
         end)
 
       assert output == "X"

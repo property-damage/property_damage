@@ -133,7 +133,7 @@ defmodule PropertyDamage do
     FailureReport,
     Generator,
     Options,
-    Progress,
+    Progress.Printer,
     Sequence,
     Shrinker,
     Stutter,
@@ -324,7 +324,7 @@ defmodule PropertyDamage do
       end
 
       # Print test run header
-      Progress.print_header(model, adapter, opts)
+      Printer.print_header(model, adapter, opts)
     end
 
     # Setup once (if model implements it)
@@ -466,7 +466,7 @@ defmodule PropertyDamage do
     stats = %{runs: max_runs, total_commands: total_commands, seed: seed}
 
     if verbose do
-      Progress.print_success(stats)
+      Printer.print_success(stats)
     end
 
     {:ok, stats}
@@ -496,7 +496,7 @@ defmodule PropertyDamage do
     command_count = Sequence.command_count(sequence)
 
     if verbose do
-      Progress.print_run(run_number, max_runs, sequence)
+      Printer.print_run(run_number, max_runs, sequence)
     end
 
     # Emit telemetry for sequence start
@@ -681,7 +681,7 @@ defmodule PropertyDamage do
 
     # Print failure summary when verbose
     if verbose do
-      Progress.print_failure(failure_report)
+      Printer.print_failure(failure_report)
     end
 
     # A raising on_failure handler must not destroy the failure we just found:
