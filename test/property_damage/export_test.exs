@@ -281,6 +281,8 @@ defmodule PropertyDamage.ExportTest do
   end
 
   describe "to_script/3 - reproduce filename header" do
+    alias PropertyDamage.Export.Common
+
     test "the 'Run with:' line names the file Export.save actually writes" do
       failure = create_test_failure_report()
 
@@ -291,7 +293,7 @@ defmodule PropertyDamage.ExportTest do
             adapter: TestHTTPAdapter
           )
 
-        expected = PropertyDamage.Export.Common.generate_filename(failure, format)
+        expected = Common.generate_filename(failure, format)
 
         assert script =~ "Run with: #{runner} #{expected}",
                "#{format} header should name the real filename (#{expected})"
