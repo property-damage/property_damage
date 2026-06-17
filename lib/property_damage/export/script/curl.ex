@@ -10,7 +10,7 @@ defmodule PropertyDamage.Export.Script.Curl do
   """
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Ref}
+  alias PropertyDamage.{FailureReport, Placeholder, Ref}
 
   @doc """
   Generates a Bash/curl script from a failure report.
@@ -32,11 +32,16 @@ defmodule PropertyDamage.Export.Script.Curl do
     metadata = Common.extract_metadata(report)
     commands = Common.extract_commands(report)
 
+    # DR-021 placeholder wiring: var name per consumed external value, and the
+    # values each producer command must extract from its response.
+    var_map = Common.placeholder_var_map(commands)
+    extractions = Common.producer_extractions(commands)
+
     [
       generate_shebang(),
       generate_header(metadata, report),
       generate_setup(env_var, base_url),
-      generate_steps(commands, report, adapter, env_var, verbose),
+      generate_steps(commands, report, adapter, env_var, verbose, var_map, extractions),
       generate_footer(metadata)
     ]
     |> Enum.join("\n")
@@ -82,16 +87,25 @@ defmodule PropertyDamage.Export.Script.Curl do
     """
   end
 
-  defp generate_steps(commands, report, adapter, env_var, verbose) do
+  defp generate_steps(commands, report, adapter, env_var, verbose, var_map, extractions) do
     commands
     |> Enum.with_index()
     |> Enum.map_join("\n", fn {cmd, idx} ->
       is_failure_point = idx == report.failed_at_index
-      generate_step(cmd, idx, adapter, env_var, is_failure_point, verbose)
+      generate_step(cmd, idx, adapter, env_var, is_failure_point, verbose, var_map, extractions)
     end)
   end
 
-  defp generate_step(command, index, adapter, env_var, is_failure_point, verbose) do
+  defp generate_step(
+         command,
+         index,
+         adapter,
+         env_var,
+         is_failure_point,
+         verbose,
+         var_map,
+         extractions
+       ) do
     step_num = index + 1
     cmd_name = Common.command_name(command)
     http_spec = Common.get_http_spec(command, adapter, %{})
@@ -116,12 +130,12 @@ defmodule PropertyDamage.Export.Script.Curl do
         ""
       end
 
-    curl_cmd = generate_curl_command(command, http_spec, env_var, index)
+    curl_cmd = generate_curl_command(command, http_spec, env_var, index, var_map, extractions)
 
     header <> comment <> curl_cmd
   end
 
-  defp generate_curl_command(command, nil, _env_var, index) do
+  defp generate_curl_command(command, nil, _env_var, index, _var_map, _extractions) do
     # No HTTPSpec available, generate placeholder
     cmd_name = Common.command_name(command)
     var_name = "RESP#{index + 1}"
@@ -133,10 +147,10 @@ defmodule PropertyDamage.Export.Script.Curl do
     """
   end
 
-  defp generate_curl_command(command, %HTTPSpec{} = spec, env_var, index) do
+  defp generate_curl_command(command, %HTTPSpec{} = spec, env_var, index, var_map, extractions) do
     var_name = "RESP#{index + 1}"
     method = HTTPSpec.method_string(spec)
-    path = resolve_path_with_refs(spec, index)
+    path = resolve_path_with_refs(spec, var_map)
 
     curl_parts = [
       "curl -s",
@@ -155,7 +169,7 @@ defmodule PropertyDamage.Export.Script.Curl do
     # Add body if present
     curl_parts =
       if HTTPSpec.has_body?(spec) do
-        body = resolve_body_with_refs(spec.body, command, index)
+        body = resolve_body_with_refs(spec.body, command, var_map)
         curl_parts ++ ["-d '#{body}'"]
       else
         curl_parts
@@ -163,12 +177,12 @@ defmodule PropertyDamage.Export.Script.Curl do
 
     curl_line = Enum.join(curl_parts, " \\\n  ")
 
-    # Generate ref extraction if this command produces refs
-    ref_extraction = generate_ref_extraction(command, index)
+    # Extract any external values this command produces (DR-021).
+    extraction = generate_placeholder_extraction(index, extractions)
 
     """
     #{var_name}=$(#{curl_line})
-    echo "$#{var_name}"#{ref_extraction}
+    echo "$#{var_name}"#{extraction}
     """
   end
 
@@ -176,70 +190,68 @@ defmodule PropertyDamage.Export.Script.Curl do
   # Ref Handling
   # ============================================================================
 
-  defp resolve_path_with_refs(%HTTPSpec{path: path, path_params: params}, _index) do
+  defp resolve_path_with_refs(%HTTPSpec{path: path, path_params: params}, var_map) do
     Enum.reduce(params, path, fn {key, value}, acc ->
-      resolved = resolve_value_for_bash(value)
+      resolved = resolve_value_for_bash(value, var_map)
       String.replace(acc, ":#{key}", resolved)
     end)
   end
 
-  defp resolve_value_for_bash(%Ref{label: label}), do: "$REF_#{sanitize_label(label)}"
-  defp resolve_value_for_bash(value), do: to_string(value)
+  defp resolve_value_for_bash(%Placeholder{} = ph, var_map) do
+    "$" <> Map.fetch!(var_map, ph.id)
+  end
 
-  defp resolve_body_with_refs(body, command, _index) do
-    # Resolve refs in the body
+  defp resolve_value_for_bash(%Ref{label: label}, _var_map), do: "$REF_#{sanitize_label(label)}"
+  defp resolve_value_for_bash(value, _var_map), do: to_string(value)
+
+  defp resolve_body_with_refs(body, command, var_map) do
     resolved =
       body
       |> Enum.map(fn {key, value} ->
-        resolved_value = get_command_field_value(command, key, value)
-        {key, format_json_value(resolved_value)}
+        resolved_value = Map.get(command, key, value)
+        {key, format_json_value(resolved_value, var_map)}
       end)
       |> Enum.into(%{})
 
-    # Convert to JSON, handling ref placeholders
     json = Jason.encode!(resolved)
 
-    # Replace ref placeholders with bash variable references
-    Regex.replace(~r/"__REF_(\d+)__"/, json, fn _, idx ->
-      "$REF_#{idx}"
-    end)
+    # Replace placeholder/ref markers with bash variable references. Markers use
+    # the variable name (alphanumeric + underscore), so match that, not digits.
+    json
+    |> then(&Regex.replace(~r/"__PH_([a-z0-9_]+)__"/, &1, fn _, var -> "$#{var}" end))
+    |> then(&Regex.replace(~r/"__REF_([a-z0-9_]+)__"/, &1, fn _, label -> "$REF_#{label}" end))
   end
 
-  defp get_command_field_value(command, key, default) do
-    Map.get(command, key, default)
-  end
+  defp format_json_value(%Placeholder{} = ph, var_map), do: "__PH_#{Map.fetch!(var_map, ph.id)}__"
+  defp format_json_value(%Ref{label: label}, _var_map), do: "__REF_#{sanitize_label(label)}__"
+  defp format_json_value(value, _var_map) when is_atom(value), do: to_string(value)
+  defp format_json_value(value, _var_map), do: value
 
-  defp format_json_value(%Ref{label: label}), do: "__REF_#{sanitize_label(label)}__"
-  defp format_json_value(value) when is_atom(value), do: to_string(value)
-  defp format_json_value(value), do: value
+  # Emit shell that binds each external value this command produces (DR-021),
+  # extracting the placeholder's path from the JSON response with jq.
+  defp generate_placeholder_extraction(index, extractions) do
+    case Map.get(extractions, index, []) do
+      [] ->
+        ""
 
-  defp generate_ref_extraction(command, index) do
-    # Check if this command likely produces a ref (by looking for id/ref fields)
-    cmd_name = Common.command_name(command)
-    label = generate_ref_label(cmd_name, index)
+      bindings ->
+        Enum.map_join(bindings, "", fn {ph, var} ->
+          """
 
-    if String.starts_with?(cmd_name, "Create") or String.contains?(cmd_name, "Register") do
-      """
-
-      REF_#{label}=$(echo "$RESP#{index + 1}" | jq -r '.data.id // .id // empty')
-      if [ -n "$REF_#{label}" ]; then
-        echo "  -> Bound ref #{label}: $REF_#{label}"
-      fi
-      """
-    else
-      ""
+          #{var}=$(echo "$RESP#{index + 1}" | jq -r '#{jq_path(ph.path)} // empty')
+          if [ -n "$#{var}" ]; then
+            echo "  -> bound #{var}: $#{var}"
+          fi
+          """
+        end)
     end
   end
 
-  defp generate_ref_label(cmd_name, index) do
-    # Generate a label like "account_0", "booking_1" based on command name
-    base =
-      cmd_name
-      |> String.replace(~r/^(Create|Register)/, "")
-      |> Macro.underscore()
-      |> String.trim("_")
-
-    if base == "", do: "ref_#{index}", else: "#{base}_#{index}"
+  defp jq_path(path) do
+    Enum.map_join(path, "", fn
+      i when is_integer(i) -> "[#{i}]"
+      key -> ".#{key}"
+    end)
   end
 
   defp sanitize_label(nil), do: "unknown"

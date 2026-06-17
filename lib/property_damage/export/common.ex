@@ -10,7 +10,7 @@ defmodule PropertyDamage.Export.Common do
   """
 
   alias PropertyDamage.Export.HTTPSpec
-  alias PropertyDamage.{FailureReport, Ref, Sequence}
+  alias PropertyDamage.{FailureReport, Placeholder, Ref, Sequence}
 
   # ============================================================================
   # Command Extraction
@@ -125,6 +125,91 @@ defmodule PropertyDamage.Export.Common do
   defp bindable_value?(value) when is_binary(value), do: true
   defp bindable_value?(value) when is_integer(value), do: true
   defp bindable_value?(_), do: false
+
+  # ============================================================================
+  # Placeholder Wiring (DR-021)
+  # ============================================================================
+  #
+  # A consumer command field can hold a `%Placeholder{}`: a server-generated
+  # value produced by an upstream command. The placeholder carries everything a
+  # standalone reproduction script needs to wire it: `position` (the producing
+  # command's structured index), `path` (the field within that command's
+  # response), and `id` (a stable identity shared by all consumers of the same
+  # produced value). These helpers let each script generator extract the value at
+  # the producer's step and reference it from consumers, without guessing.
+
+  @doc """
+  All placeholders consumed anywhere in `commands`, de-duplicated by identity and
+  paired with a stable script variable name. First-appearance order.
+  """
+  @spec placeholder_bindings([struct()]) :: [{Placeholder.t(), String.t()}]
+  def placeholder_bindings(commands) do
+    commands
+    |> Enum.flat_map(&collect_placeholders/1)
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.map(&{&1, placeholder_var(&1)})
+  end
+
+  @doc """
+  Map from placeholder identity (`id`) to its script variable name, for resolving
+  a consumed `%Placeholder{}` to the variable a producer step binds.
+  """
+  @spec placeholder_var_map([struct()]) :: %{reference() => String.t()}
+  def placeholder_var_map(commands) do
+    commands
+    |> placeholder_bindings()
+    |> Map.new(fn {ph, name} -> {ph.id, name} end)
+  end
+
+  @doc """
+  Map from a producing command's linear index to the `[{placeholder, var_name}]`
+  it must extract from its response.
+
+  Only linear (`:prefix`) producers are wired: in a linear sequence the prefix
+  index equals the flattened command index a script iterates. Branch/suffix
+  producers are omitted (standalone scripts are best-effort linear).
+  """
+  @spec producer_extractions([struct()]) :: %{
+          non_neg_integer() => [{Placeholder.t(), String.t()}]
+        }
+  def producer_extractions(commands) do
+    commands
+    |> placeholder_bindings()
+    |> Enum.filter(fn {ph, _name} -> match?({:prefix, _}, ph.position) end)
+    |> Enum.group_by(fn {ph, _name} -> elem(ph.position, 1) end)
+  end
+
+  defp placeholder_var(%Placeholder{event_module: mod, path: path, position: position}) do
+    module_part = mod |> Module.split() |> List.last() |> to_string()
+    path_part = Enum.map_join(path, "_", &to_string/1)
+    idx_part = position_suffix(position)
+    sanitize_label("#{module_part}_#{path_part}#{idx_part}")
+  end
+
+  defp position_suffix({:prefix, i}), do: "_#{i}"
+  defp position_suffix({:branch, b, i}), do: "_b#{b}_#{i}"
+  defp position_suffix({:suffix, i}), do: "_s#{i}"
+  defp position_suffix(_), do: ""
+
+  defp collect_placeholders(%Placeholder{} = ph), do: [ph]
+
+  defp collect_placeholders(%_{} = struct) do
+    struct |> Map.from_struct() |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
+  end
+
+  defp collect_placeholders(value) when is_map(value) do
+    value |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
+  end
+
+  defp collect_placeholders(value) when is_list(value) do
+    Enum.flat_map(value, &collect_placeholders/1)
+  end
+
+  defp collect_placeholders(value) when is_tuple(value) do
+    value |> Tuple.to_list() |> Enum.flat_map(&collect_placeholders/1)
+  end
+
+  defp collect_placeholders(_other), do: []
 
   # ============================================================================
   # Value Serialization
@@ -279,6 +364,10 @@ defmodule PropertyDamage.Export.Common do
 
       "%#{name}{#{field_strs}}"
     end
+  end
+
+  defp format_comment_value(%Placeholder{event_module: mod, path: path}) do
+    "external(#{mod |> Module.split() |> List.last()}.#{Enum.join(path, ".")})"
   end
 
   defp format_comment_value(%Ref{label: label}), do: "ref(#{label || "?"})"

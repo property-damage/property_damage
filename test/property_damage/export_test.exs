@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ExportTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Export, FailureReport, Ref, Sequence}
+  alias PropertyDamage.{Export, FailureReport, Placeholder, Ref, Sequence}
   alias PropertyDamage.Export.HTTPSpec
 
   # ============================================================================
@@ -22,6 +22,19 @@ defmodule PropertyDamage.ExportTest do
 
   defmodule BatchCredit do
     defstruct [:items]
+  end
+
+  # Producer/consumer pair for DR-021 external() placeholder wiring.
+  defmodule Provision do
+    defstruct [:spec]
+  end
+
+  defmodule Provisioned do
+    defstruct [:id]
+  end
+
+  defmodule Consume do
+    defstruct [:target]
   end
 
   defmodule AccountCreated do
@@ -74,6 +87,18 @@ defmodule PropertyDamage.ExportTest do
         method: :post,
         path: "/api/batch",
         body: %{items: items}
+      }
+    end
+
+    def http_spec(%Provision{}, _ctx) do
+      %HTTPSpec{method: :post, path: "/api/provision"}
+    end
+
+    def http_spec(%Consume{target: target}, _ctx) do
+      %HTTPSpec{
+        method: :get,
+        path: "/api/things/:id",
+        path_params: %{id: target}
       }
     end
   end
@@ -188,7 +213,7 @@ defmodule PropertyDamage.ExportTest do
       assert script =~ "FAILURE POINT"
     end
 
-    test "includes jq for JSON parsing" do
+    test "declares jq as a prerequisite (used to parse responses)" do
       failure = create_test_failure_report()
 
       script =
@@ -197,7 +222,7 @@ defmodule PropertyDamage.ExportTest do
           adapter: TestHTTPAdapter
         )
 
-      assert script =~ "jq -r"
+      assert script =~ "Prerequisites: curl, jq"
     end
   end
 
@@ -250,6 +275,40 @@ defmodule PropertyDamage.ExportTest do
       assert script =~ "base_url = os.environ.get"
       assert script =~ "refs = {}"
       assert script =~ "FAILURE POINT"
+    end
+  end
+
+  describe "to_script/3 - placeholder wiring (DR-021)" do
+    setup do
+      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      commands = [%Provision{spec: nil}, %Consume{target: ph}]
+
+      report = %FailureReport{
+        seed: 1,
+        failed_at_index: 1,
+        failure_type: :check_failed,
+        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+
+      %{report: report, var: "provisioned_id_0"}
+    end
+
+    test "curl extracts the producer's response field and the consumer references it",
+         %{report: report, var: var} do
+      script =
+        Export.to_script(report, :curl,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      # Producer (step 1) extracts the placeholder's path from its response.
+      assert script =~ "#{var}=$(echo \"$RESP1\" | jq -r '.id // empty')"
+      # Consumer (step 2) references the same variable, not a literal placeholder.
+      assert script =~ "/api/things/$#{var}"
+      refute script =~ "Placeholder"
     end
   end
 
