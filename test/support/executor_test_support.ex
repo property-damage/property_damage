@@ -337,21 +337,20 @@ end
 
 defmodule PropertyDamage.Test.Events.LinkAdded do
   @moduledoc false
-  defstruct [:ref, :weight]
+  import PropertyDamage, only: [external: 0]
+  defstruct [:weight, ref: external()]
 end
 
 defmodule PropertyDamage.Test.Commands.Link do
   @moduledoc """
-  A command that both produces a ref (`:ref`) and optionally consumes one
-  (`:parent`), so chains of Links form a multi-level dependency graph. The
-  `:weight` field feeds a cumulative-sum assertion.
+  A command that optionally consumes a prior Link's external id (`:parent`), so
+  chains of Links form a multi-level dependency graph. Each Link produces an
+  external id via its `LinkAdded` event (DR-021); the `:weight` field feeds a
+  cumulative-sum assertion.
   """
   @behaviour PropertyDamage.Command
 
-  defstruct [:ref, :parent, :weight]
-
-  @impl true
-  def creates_ref, do: :ref
+  defstruct [:parent, :weight]
 
   @impl true
   def generator(_overrides \\ %{}), do: StreamData.constant(%{})
@@ -424,7 +423,7 @@ defmodule PropertyDamage.Test.LinkModel do
 
   @impl PropertyDamage.Model.Simulator
   def simulate(%Link{weight: weight}, _state) do
-    [%LinkAdded{ref: nil, weight: weight}]
+    [%LinkAdded{weight: weight}]
   end
 end
 

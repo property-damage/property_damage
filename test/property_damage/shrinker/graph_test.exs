@@ -1,48 +1,33 @@
 defmodule PropertyDamage.Shrinker.GraphTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Ref
+  alias PropertyDamage.Placeholder
   alias PropertyDamage.Shrinker.Graph
 
-  # Test command that creates a ref
-  defmodule CreateCommand do
-    @behaviour PropertyDamage.Command
-
-    defstruct [:ref, :name, :depends_on]
-
-    @impl true
-    def creates_ref, do: :ref
-
-    @impl true
-    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+  # In the external()/placeholder model (DR-021) a producing command holds
+  # nothing special: the producer is identified by each *consumed* placeholder's
+  # structured `position`. A consuming command embeds %Placeholder{} structs
+  # whose `position` points at the producing command's index and whose `id` is
+  # the dependency identity. These fixtures build that shape directly.
+  defmodule Event do
+    @moduledoc false
+    defstruct [:id]
   end
 
-  # Test command that consumes a ref
-  defmodule ConsumeCommand do
-    @behaviour PropertyDamage.Command
-
-    defstruct [:target_ref, :extra_ref]
-
-    @impl true
-    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+  defmodule Command do
+    @moduledoc false
+    defstruct [:name, :data, :a, :b]
   end
 
-  # Test command with no refs
-  defmodule IndependentCommand do
-    @behaviour PropertyDamage.Command
-
-    defstruct [:data]
-
-    @impl true
-    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
-  end
+  # A placeholder produced by the command at prefix index `i`.
+  defp produced_at(i), do: Placeholder.new_at(Event, [:id], {:prefix, i}, 0)
 
   describe "build/1" do
     test "creates nodes for each command" do
       commands = [
-        %IndependentCommand{data: 1},
-        %IndependentCommand{data: 2},
-        %IndependentCommand{data: 3}
+        %Command{data: 1},
+        %Command{data: 2},
+        %Command{data: 3}
       ]
 
       graph = Graph.build(commands)
@@ -53,28 +38,32 @@ defmodule PropertyDamage.Shrinker.GraphTest do
       assert MapSet.member?(graph.nodes, 2)
     end
 
-    test "tracks ref producers" do
-      ref1 = Ref.symbolic(label: "item1")
-      ref2 = Ref.symbolic(label: "item2")
+    test "tracks placeholder producers" do
+      # Two producers (indices 0 and 1), both consumed by a later command so
+      # their placeholders appear in the sequence and get indexed by position.
+      p0 = produced_at(0)
+      p1 = produced_at(1)
 
       commands = [
-        %CreateCommand{ref: ref1, name: "first"},
-        %CreateCommand{ref: ref2, name: "second"}
+        %Command{name: "first"},
+        %Command{name: "second"},
+        %Command{name: "consumer", a: p0, b: p1}
       ]
 
       graph = Graph.build(commands)
 
-      # Producers are keyed by {:ref, ref_id} tuples
-      assert Map.get(graph.producers, {:ref, ref1.ref}) == 0
-      assert Map.get(graph.producers, {:ref, ref2.ref}) == 1
+      # Producers are keyed by {:placeholder, id}; the value is the producing
+      # command's index, derived from the placeholder's position.
+      assert Map.get(graph.producers, {:placeholder, p0.id}) == 0
+      assert Map.get(graph.producers, {:placeholder, p1.id}) == 1
     end
 
     test "creates edges for consumers" do
-      ref = Ref.symbolic(label: "item")
+      p = produced_at(0)
 
       commands = [
-        %CreateCommand{ref: ref, name: "producer"},
-        %ConsumeCommand{target_ref: ref}
+        %Command{name: "producer"},
+        %Command{name: "consumer", a: p}
       ]
 
       graph = Graph.build(commands)
@@ -84,34 +73,34 @@ defmodule PropertyDamage.Shrinker.GraphTest do
       assert MapSet.member?(edges_from_0, 1)
     end
 
-    test "tracks consumed refs per node" do
-      ref = Ref.symbolic(label: "item")
+    test "tracks consumed placeholders per node" do
+      p = produced_at(0)
 
       commands = [
-        %CreateCommand{ref: ref, name: "producer"},
-        %ConsumeCommand{target_ref: ref}
+        %Command{name: "producer"},
+        %Command{name: "consumer", a: p}
       ]
 
       graph = Graph.build(commands)
 
-      # Node 1 consumes the ref (consumers stores {:ref, ref_id} tuples)
-      assert {:ref, ref.ref} in Map.get(graph.consumers, 1, [])
+      # Node 1 consumes the placeholder (consumers stores {:placeholder, id})
+      assert {:placeholder, p.id} in Map.get(graph.consumers, 1, [])
     end
 
     test "handles complex dependency graph" do
       # Create: 0 → 1 → 2, 0 → 3
-      ref_a = Ref.symbolic(label: "a")
-      ref_b = Ref.symbolic(label: "b")
+      p_a = produced_at(0)
+      p_b = produced_at(1)
 
       commands = [
-        # index 0
-        %CreateCommand{ref: ref_a, name: "a"},
-        # index 1, consumes ref_a
-        %CreateCommand{ref: ref_b, name: "b", depends_on: ref_a},
-        # index 2
-        %ConsumeCommand{target_ref: ref_b},
-        # index 3
-        %ConsumeCommand{target_ref: ref_a}
+        # index 0, produces p_a
+        %Command{name: "a"},
+        # index 1, consumes p_a, produces p_b
+        %Command{name: "b", a: p_a},
+        # index 2, consumes p_b
+        %Command{name: "c", a: p_b},
+        # index 3, consumes p_a
+        %Command{name: "d", a: p_a}
       ]
 
       graph = Graph.build(commands)
@@ -126,8 +115,8 @@ defmodule PropertyDamage.Shrinker.GraphTest do
   describe "ancestors/2" do
     test "returns empty set for root nodes" do
       commands = [
-        %IndependentCommand{data: 1},
-        %IndependentCommand{data: 2}
+        %Command{data: 1},
+        %Command{data: 2}
       ]
 
       graph = Graph.build(commands)
@@ -137,11 +126,11 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     end
 
     test "returns direct dependencies" do
-      ref = Ref.symbolic(label: "item")
+      p = produced_at(0)
 
       commands = [
-        %CreateCommand{ref: ref, name: "producer"},
-        %ConsumeCommand{target_ref: ref}
+        %Command{name: "producer"},
+        %Command{name: "consumer", a: p}
       ]
 
       graph = Graph.build(commands)
@@ -151,16 +140,16 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     end
 
     test "returns transitive dependencies" do
-      ref_a = Ref.symbolic(label: "a")
-      ref_b = Ref.symbolic(label: "b")
+      p_a = produced_at(0)
+      p_b = produced_at(1)
 
-      # 0 creates ref_a
-      # 1 consumes ref_a, creates ref_b
-      # 2 consumes ref_b
+      # 0 produces p_a
+      # 1 consumes p_a, produces p_b
+      # 2 consumes p_b
       commands = [
-        %CreateCommand{ref: ref_a, name: "a"},
-        %CreateCommand{ref: ref_b, name: "b", depends_on: ref_a},
-        %ConsumeCommand{target_ref: ref_b}
+        %Command{name: "a"},
+        %Command{name: "b", a: p_a},
+        %Command{name: "c", a: p_b}
       ]
 
       graph = Graph.build(commands)
@@ -174,15 +163,15 @@ defmodule PropertyDamage.Shrinker.GraphTest do
 
   describe "compress/1" do
     test "groups nodes by depth" do
-      ref = Ref.symbolic(label: "item")
+      p = produced_at(0)
 
       commands = [
         # depth 0
-        %CreateCommand{ref: ref, name: "root"},
+        %Command{name: "root"},
         # depth 1
-        %ConsumeCommand{target_ref: ref},
+        %Command{name: "consumer", a: p},
         # depth 0 (no deps)
-        %IndependentCommand{data: "also_root"}
+        %Command{data: "also_root"}
       ]
 
       graph = Graph.build(commands)
@@ -201,15 +190,15 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     end
 
     test "handles deep chains" do
-      ref_a = Ref.symbolic(label: "a")
-      ref_b = Ref.symbolic(label: "b")
-      ref_c = Ref.symbolic(label: "c")
+      p_a = produced_at(0)
+      p_b = produced_at(1)
+      p_c = produced_at(2)
 
       commands = [
-        %CreateCommand{ref: ref_a, name: "a"},
-        %CreateCommand{ref: ref_b, name: "b", depends_on: ref_a},
-        %CreateCommand{ref: ref_c, name: "c", depends_on: ref_b},
-        %ConsumeCommand{target_ref: ref_c}
+        %Command{name: "a"},
+        %Command{name: "b", a: p_a},
+        %Command{name: "c", a: p_b},
+        %Command{name: "d", a: p_c}
       ]
 
       graph = Graph.build(commands)
@@ -225,13 +214,13 @@ defmodule PropertyDamage.Shrinker.GraphTest do
 
   describe "topo_sort_by_distance/1" do
     test "returns nodes in dependency order" do
-      ref = Ref.symbolic(label: "item")
+      p = produced_at(0)
 
       commands = [
         # index 0
-        %CreateCommand{ref: ref, name: "a"},
+        %Command{name: "a"},
         # index 1
-        %ConsumeCommand{target_ref: ref}
+        %Command{name: "b", a: p}
       ]
 
       graph = Graph.build(commands)
@@ -246,9 +235,9 @@ defmodule PropertyDamage.Shrinker.GraphTest do
 
     test "handles independent nodes" do
       commands = [
-        %IndependentCommand{data: 1},
-        %IndependentCommand{data: 2},
-        %IndependentCommand{data: 3}
+        %Command{data: 1},
+        %Command{data: 2},
+        %Command{data: 3}
       ]
 
       graph = Graph.build(commands)
@@ -261,11 +250,11 @@ defmodule PropertyDamage.Shrinker.GraphTest do
 
   describe "expand_super_node/2" do
     test "includes node and its ancestors" do
-      ref = Ref.symbolic(label: "item")
+      p = produced_at(0)
 
       commands = [
-        %CreateCommand{ref: ref, name: "producer"},
-        %ConsumeCommand{target_ref: ref}
+        %Command{name: "producer"},
+        %Command{name: "consumer", a: p}
       ]
 
       graph = Graph.build(commands)
@@ -278,18 +267,18 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     end
 
     test "handles multiple nodes" do
-      ref_a = Ref.symbolic(label: "a")
-      ref_b = Ref.symbolic(label: "b")
+      p_a = produced_at(0)
+      p_b = produced_at(1)
 
       commands = [
         # 0
-        %CreateCommand{ref: ref_a, name: "a"},
+        %Command{name: "a"},
         # 1
-        %CreateCommand{ref: ref_b, name: "b"},
-        # 2
-        %ConsumeCommand{target_ref: ref_a},
-        # 3
-        %ConsumeCommand{target_ref: ref_b}
+        %Command{name: "b"},
+        # 2 consumes p_a
+        %Command{name: "c", a: p_a},
+        # 3 consumes p_b
+        %Command{name: "d", a: p_b}
       ]
 
       graph = Graph.build(commands)
@@ -305,11 +294,11 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     end
 
     test "returns sorted list" do
-      ref = Ref.symbolic(label: "item")
+      p = produced_at(0)
 
       commands = [
-        %CreateCommand{ref: ref, name: "producer"},
-        %ConsumeCommand{target_ref: ref}
+        %Command{name: "producer"},
+        %Command{name: "consumer", a: p}
       ]
 
       graph = Graph.build(commands)
@@ -326,19 +315,19 @@ defmodule PropertyDamage.Shrinker.GraphTest do
       #          1     2
       #           \   /
       #             3
-      ref_root = Ref.symbolic(label: "root")
-      ref_left = Ref.symbolic(label: "left")
-      ref_right = Ref.symbolic(label: "right")
+      p_root = produced_at(0)
+      p_left = produced_at(1)
+      p_right = produced_at(2)
 
       commands = [
         # 0
-        %CreateCommand{ref: ref_root, name: "root"},
-        # 1
-        %CreateCommand{ref: ref_left, name: "left", depends_on: ref_root},
-        # 2
-        %CreateCommand{ref: ref_right, name: "right", depends_on: ref_root},
-        # 3
-        %ConsumeCommand{target_ref: ref_left, extra_ref: ref_right}
+        %Command{name: "root"},
+        # 1 consumes root, produces left
+        %Command{name: "left", a: p_root},
+        # 2 consumes root, produces right
+        %Command{name: "right", a: p_root},
+        # 3 consumes left and right
+        %Command{name: "d", a: p_left, b: p_right}
       ]
 
       graph = Graph.build(commands)
