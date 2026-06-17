@@ -360,6 +360,35 @@ if report.mutation_score < 0.80 do
 end
 ```
 
+### Watching progress
+
+A long mutation run can be slow, so pass an `on_progress` function to watch it.
+It receives a `%PropertyDamage.Progress{}` projection (DR-022): a `MutationUpdate`
+per mutation as it is killed, survived, or timed out, then a terminal
+`MutationResult` carrying a copy of the final report. The same stream drives
+`verbose:` and the `[:property_damage, :mutation, :progress | :result]` telemetry
+events.
+
+```elixir
+alias PropertyDamage.Progress
+alias PropertyDamage.Progress.{MutationResult, MutationUpdate}
+
+PropertyDamage.Mutation.run(
+  model: MyModel,
+  adapter: MyAdapter,
+  on_progress: fn
+    %Progress{data: %MutationUpdate{result: outcome, command: command}} ->
+      IO.puts("#{outcome}: #{inspect(command)}")
+
+    %Progress{data: %MutationResult{report: report}} ->
+      IO.puts("score: #{report.mutation_score}")
+  end
+)
+```
+
+The authoritative report is still the `{:ok, report}` return value;
+`MutationResult` is a copy emitted for consumers.
+
 ## Next Steps
 
 - [Debugging Failures](debugging_failures.md) - What to do when invariants catch bugs

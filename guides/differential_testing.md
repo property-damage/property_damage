@@ -302,6 +302,39 @@ IO.puts(PropertyDamage.Differential.Result.format(result, format: :divergences))
 | `:export_to` | nil | Path to export results |
 | `:warmup_runs` | 0 | Runs to discard before measuring |
 | `:verbose` | false | Print progress |
+| `:on_progress` | nil | Progress consumer (see [Monitoring Progress](#monitoring-progress)) |
+
+## Monitoring Progress
+
+Pass an `on_progress` function to observe a run as it happens. It receives a
+`%PropertyDamage.Progress{}` projection (DR-022): a `DifferentialUpdate` per run
+(interleaved) or per target (sequential), then a terminal `DifferentialResult`
+carrying a copy of the final result. The same stream also drives `verbose:` and
+the `[:property_damage, :differential, :progress | :result]` telemetry events.
+
+```elixir
+alias PropertyDamage.Progress
+alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate}
+
+PropertyDamage.Differential.run(
+  model: MyModel,
+  targets: [{OracleAdapter, role: :reference}, {SUTAdapter, name: "new-impl"}],
+  compare: :correctness,
+  on_progress: fn
+    %Progress{data: %DifferentialUpdate{phase: :run, run_number: n, total_runs: total}} ->
+      IO.puts("run #{n}/#{total}")
+
+    %Progress{data: %DifferentialUpdate{phase: :target, target_name: name}} ->
+      IO.puts("running target #{name}")
+
+    %Progress{data: %DifferentialResult{result: result}} ->
+      IO.puts("done: #{result.status}")
+  end
+)
+```
+
+The authoritative result is still the `{:ok, result}` return value;
+`DifferentialResult` is a copy emitted for consumers.
 
 ## Example: Migration Validation
 
