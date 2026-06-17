@@ -219,7 +219,10 @@ defmodule PropertyDamage.Nemesis do
   """
   @spec auto_restores?(struct()) :: boolean()
   def auto_restores?(%{__struct__: module} = _command) do
-    if function_exported?(module, :auto_restore?, 0) do
+    # Ensure the module is loaded before reflecting: function_exported?/3 returns
+    # false for a not-yet-loaded module (first-touch reflection), which would
+    # wrongly skip the callback.
+    if Code.ensure_loaded?(module) and function_exported?(module, :auto_restore?, 0) do
       module.auto_restore?()
     else
       true
@@ -250,7 +253,7 @@ defmodule PropertyDamage.Nemesis do
   @spec get_duration_ms(struct()) :: non_neg_integer() | nil
   def get_duration_ms(%{__struct__: module} = command) do
     cond do
-      function_exported?(module, :duration_ms, 1) ->
+      Code.ensure_loaded?(module) and function_exported?(module, :duration_ms, 1) ->
         module.duration_ms(command)
 
       Map.has_key?(command, :duration_ms) ->
