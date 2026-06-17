@@ -138,10 +138,12 @@ defmodule PropertyDamage.Export.Common do
   # produced value). These helpers let each script generator extract the value at
   # the producer's step and reference it from consumers, without guessing.
 
-  @doc """
-  All placeholders consumed anywhere in `commands`, de-duplicated by identity and
-  paired with a stable script variable name. First-appearance order.
-  """
+  # All placeholders consumed anywhere in `commands`, de-duplicated by identity
+  # and paired with a stable script variable name. First-appearance order.
+  #
+  # Internal export plumbing: it returns the internal `%Placeholder{}` struct,
+  # so it is not part of the documented API.
+  @doc false
   @spec placeholder_bindings([struct()]) :: [{Placeholder.t(), String.t()}]
   def placeholder_bindings(commands) do
     commands
@@ -150,10 +152,11 @@ defmodule PropertyDamage.Export.Common do
     |> Enum.map(&{&1, placeholder_var(&1)})
   end
 
-  @doc """
-  Map from placeholder identity (`id`) to its script variable name, for resolving
-  a consumed `%Placeholder{}` to the variable a producer step binds.
-  """
+  # Map from placeholder identity (`id`) to its script variable name, for
+  # resolving a consumed `%Placeholder{}` to the variable a producer step binds.
+  #
+  # Internal export plumbing, like `placeholder_bindings/1`.
+  @doc false
   @spec placeholder_var_map([struct()]) :: %{reference() => String.t()}
   def placeholder_var_map(commands) do
     commands
@@ -161,14 +164,16 @@ defmodule PropertyDamage.Export.Common do
     |> Map.new(fn {ph, name} -> {ph.id, name} end)
   end
 
-  @doc """
-  Map from a producing command's linear index to the `[{placeholder, var_name}]`
-  it must extract from its response.
-
-  Only linear (`:prefix`) producers are wired: in a linear sequence the prefix
-  index equals the flattened command index a script iterates. Branch/suffix
-  producers are omitted (standalone scripts are best-effort linear).
-  """
+  # Map from a producing command's linear index to the `[{placeholder, var_name}]`
+  # it must extract from its response.
+  #
+  # Only linear (`:prefix`) producers are wired: in a linear sequence the prefix
+  # index equals the flattened command index a script iterates. Branch/suffix
+  # producers are omitted (standalone scripts are best-effort linear).
+  #
+  # Internal export plumbing: it returns the internal `%Placeholder{}` struct,
+  # so it is not part of the documented API.
+  @doc false
   @spec producer_extractions([struct()]) :: %{
           non_neg_integer() => [{Placeholder.t(), String.t()}]
         }
