@@ -240,10 +240,14 @@ defmodule PropertyDamage.Mutation.Runner do
   defp run_with_timeout(mutating_adapter, config) do
     task =
       Task.async(fn ->
+        # The MutatingAdapter is passed as the adapter *module* with its struct
+        # threaded through adapter_config under :__mutating_adapter__; its setup/1
+        # extracts the struct from there (a struct cannot be an :adapter value,
+        # which must be a module the executor can dispatch on).
         PropertyDamage.run(
           model: config.model,
-          adapter: mutating_adapter,
-          adapter_config: config.adapter_config,
+          adapter: MutatingAdapter,
+          adapter_config: Map.put(config.adapter_config, :__mutating_adapter__, mutating_adapter),
           max_runs: config.max_runs,
           max_commands: 20
         )

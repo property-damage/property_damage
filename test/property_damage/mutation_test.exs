@@ -17,6 +17,50 @@ defmodule PropertyDamage.MutationTest do
     defstruct [:ref_id, :value]
   end
 
+  # A projection whose assertion always fails. Mutation testing harvests sample
+  # events from a baseline run, and PropertyDamage.run only carries an event_log
+  # on failure, so the fixture model below must fail to yield mutable events.
+  defmodule AlwaysFailAssertion do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{}
+
+    @impl true
+    def apply(state, _), do: state
+
+    @trigger every: PropertyDamage.Test.Commands.CreateItem
+    def assert_always_fails(_state, _cmd_or_event) do
+      PropertyDamage.fail!("mutation progress fixture: always fails")
+    end
+  end
+
+  defmodule FixtureModel do
+    @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
+
+    alias PropertyDamage.Test.Commands.CreateItem
+    alias PropertyDamage.Test.Events.ItemCreated
+    alias PropertyDamage.Test.Projections.ModelState
+
+    @impl true
+    def commands, do: [CreateItem]
+
+    @impl true
+    def command_sequence_projection, do: ModelState
+
+    @impl true
+    def assertion_projections, do: [AlwaysFailAssertion]
+
+    @impl true
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+      [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+    end
+  end
+
   defp sample_events do
     [
       %TestEvent{
@@ -574,6 +618,22 @@ defmodule PropertyDamage.MutationTest do
       assert :status in operators
       assert :event in operators
       assert :boundary in operators
+    end
+  end
+
+  describe "run/1 end-to-end" do
+    test "returns a finalized report with recorded mutation results" do
+      {:ok, report} =
+        Mutation.run(
+          model: FixtureModel,
+          adapter: PropertyDamage.Test.TestAdapter,
+          operators: [:value],
+          mutations_per_command: 1,
+          max_runs: 1
+        )
+
+      assert %Report{} = report
+      assert report.total > 0
     end
   end
 end

@@ -16,10 +16,12 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
         operator: ValueMutation
       )
 
-      # Use with PropertyDamage.run
+      # Use with PropertyDamage.run: pass this module as the adapter and thread
+      # the struct through adapter_config (a struct cannot be an :adapter value).
       PropertyDamage.run(
         model: MyModel,
-        adapter: mutating,
+        adapter: PropertyDamage.Mutation.MutatingAdapter,
+        adapter_config: %{__mutating_adapter__: mutating},
         ...
       )
   """
