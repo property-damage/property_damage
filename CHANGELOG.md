@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `verbose:` output for `run/1`, `Mutation.run/1`, and `Differential.run/1` is now
   produced by a built-in progress consumer rather than inline printing; the
   printed output is unchanged.
+- A command spec's `with:` override that targets a field the command does not
+  define now raises a clear `ArgumentError` naming the command and the offending
+  field(s), instead of an opaque `KeyError` deep inside generation. Such an
+  override never took effect (the generated map is built into the command struct,
+  which rejects unknown keys), so this surfaces a silent misconfiguration early.
 
 ### Fixed
 

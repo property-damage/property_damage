@@ -655,9 +655,35 @@ defmodule PropertyDamage.Generator do
         map when is_map(map) -> map
       end
 
+    validate_override_keys!(cmd_module, overrides)
+
     cmd_module.generator(overrides)
     |> StreamData.map(&struct!(cmd_module, &1))
   end
+
+  # A `with:` override only takes effect for fields the command defines (the
+  # generated map is built into the command struct, which rejects unknown keys).
+  # An override targeting any other key is a silent no-op; surface it with a clear
+  # error naming the command and offending field(s) rather than the opaque
+  # KeyError that `struct!/2` would otherwise raise deep inside generation.
+  defp validate_override_keys!(cmd_module, overrides) when map_size(overrides) > 0 do
+    if Code.ensure_loaded?(cmd_module) and function_exported?(cmd_module, :__struct__, 0) do
+      fields = cmd_module.__struct__() |> Map.from_struct() |> Map.keys()
+      unknown = Map.keys(overrides) -- fields
+
+      if unknown != [] do
+        raise ArgumentError,
+              "Invalid `with:` override for command #{inspect(cmd_module)}: " <>
+                "field(s) #{inspect(unknown)} are not defined by the command " <>
+                "(its fields are #{inspect(fields)}). An override for an undefined " <>
+                "field has no effect; check for a typo or a renamed field."
+      end
+    end
+
+    :ok
+  end
+
+  defp validate_override_keys!(_cmd_module, _overrides), do: :ok
 
   defp simulate_command(model, state, command) do
     # See PropertyDamage.Linearization: ensure the module is loaded before
