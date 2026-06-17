@@ -8,9 +8,9 @@ defmodule Mix.Tasks.Pd.Gen.Model do
 
   ## Options
 
-      --commands COMMANDS           Comma-separated list of command module names
-      --projection NAME             State projection module name
-      --extra-projections NAMES     Comma-separated list of extra projection names
+      --commands COMMANDS               Comma-separated list of command module names
+      --projection NAME                 State projection module name
+      --assertion-projections NAMES     Comma-separated list of assertion projection names
 
   ## Examples
 
@@ -24,7 +24,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
       mix pd.gen.model MyApp.TestModel \\
         --commands CreateUser,UpdateUser,DeleteUser \\
         --projection MyApp.Projections.ModelState \\
-        --extra-projections BalanceChecker,AuditLog
+        --assertion-projections BalanceChecker,AuditLog
 
   ## Projections
 
