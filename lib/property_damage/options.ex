@@ -345,15 +345,16 @@ defmodule PropertyDamage.Options do
       type:
         {:custom, __MODULE__, :validate_duration, [[:milliseconds, :seconds, :minutes, :hours]]},
       default: {1, :seconds},
-      doc: "Metrics callback interval."
+      doc: "Snapshot cadence: how often a `LoadUpdate` progress value is emitted."
     ],
-    on_metrics: [
+    on_progress: [
       type: {:fun, 1},
-      doc: "Callback receiving metrics snapshot each interval."
-    ],
-    on_complete: [
-      type: {:fun, 1},
-      doc: "Callback receiving final report when test completes."
+      doc: """
+      Callback `fn %PropertyDamage.Progress{} -> any` receiving the unified
+      progress projection: a `LoadUpdate` (carrying a metrics snapshot) each
+      `metrics_interval`, and a terminal `LoadResult` (carrying the final
+      report) at completion. See `PropertyDamage.Progress` (DR-022).
+      """
     ],
     assertion_mode: [
       type: {:in, [:disabled, :halt, :record, :log]},

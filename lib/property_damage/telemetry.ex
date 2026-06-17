@@ -84,6 +84,14 @@ defmodule PropertyDamage.Telemetry do
     - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
     - Metadata: `%{data: PropertyDamage.Progress.RunResult.t(), run_id: term()}`
 
+  - `[:property_damage, :load_test, :progress]` - A load-test metrics snapshot
+    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
+    - Metadata: `%{data: PropertyDamage.Progress.LoadUpdate.t(), run_id: term()}`
+
+  - `[:property_damage, :load_test, :result]` - The terminal load-test report
+    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
+    - Metadata: `%{data: PropertyDamage.Progress.LoadResult.t(), run_id: term()}`
+
   These events fire only when a handler is attached for them, preserving the
   zero-cost-when-unobserved guarantee on the hot loop.
 

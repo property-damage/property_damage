@@ -49,14 +49,14 @@ defmodule PropertyDamage.LoadTest do
         # Session behavior
         think_time: {100, 500},
 
-        # Live metrics (called every second)
-        on_metrics: fn metrics ->
-          IO.puts("RPS: \#{metrics.requests_per_second}, p95: \#{metrics.latency_p95}ms")
-        end,
+        # Unified progress projection (DR-022): periodic LoadUpdate snapshots
+        # and a terminal LoadResult carrying the final report.
+        on_progress: fn
+          %PropertyDamage.Progress{data: %PropertyDamage.Progress.LoadUpdate{snapshot: m}} ->
+            IO.puts("RPS: \#{m.requests_per_second}, p95: \#{m.latency_p95}ms")
 
-        # Called when test completes
-        on_complete: fn report ->
-          PropertyDamage.LoadTest.Report.save(report, "load_test.md", :markdown)
+          %PropertyDamage.Progress{data: %PropertyDamage.Progress.LoadResult{report: report}} ->
+            PropertyDamage.LoadTest.Report.save(report, "load_test.md", :markdown)
         end
       )
 
@@ -152,9 +152,10 @@ defmodule PropertyDamage.LoadTest do
   - `:ramp_down` - Strategy for ramping down load (default: :immediate)
   - `:commands_per_session` - {min, max} commands per sequence (default: {10, 50})
   - `:think_time` - {min, max} ms delay between commands (default: {0, 0})
-  - `:metrics_interval` - Callback interval (default: {1, :seconds})
-  - `:on_metrics` - Callback receiving metrics snapshot each interval
-  - `:on_complete` - Callback receiving final report
+  - `:metrics_interval` - Snapshot cadence for progress updates (default: {1, :seconds})
+  - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` values: a
+    `LoadUpdate` (metrics snapshot) each interval and a terminal `LoadResult`
+    (final report). See `PropertyDamage.Progress` (DR-022).
   - `:assertion_mode` - How to handle assertions (default: `:disabled`):
     - `:disabled` - Skip all assertions (maximum throughput)
     - `:record` - Run assertions and record failures in metrics
@@ -184,8 +185,12 @@ defmodule PropertyDamage.LoadTest do
         concurrent_users: 100,
         duration: {5, :minutes},
         ramp_up: {:linear, {60, :seconds}},
-        on_metrics: fn m ->
-          IO.puts("RPS: \#{m.requests_per_second}, P95: \#{m.latency_p95}ms")
+        on_progress: fn
+          %PropertyDamage.Progress{data: %PropertyDamage.Progress.LoadUpdate{snapshot: m}} ->
+            IO.puts("RPS: \#{m.requests_per_second}, P95: \#{m.latency_p95}ms")
+
+          _ ->
+            :ok
         end
       )
   """

@@ -3,8 +3,16 @@ defmodule PropertyDamage.LoadTestTest do
 
   import ExUnit.CaptureLog
 
+  # Module-function telemetry handler (avoids the local-function performance
+  # warning telemetry logs for anonymous handlers).
+  def forward_telemetry(event, measurements, metadata, parent) do
+    send(parent, {:telemetry, event, measurements, metadata})
+  end
+
   alias PropertyDamage.LoadTest
   alias PropertyDamage.LoadTest.{Metrics, RampStrategy, Report, Worker, WorkerPool}
+  alias PropertyDamage.Progress
+  alias PropertyDamage.Progress.{LoadResult, LoadUpdate}
 
   # ============================================================================
   # Metrics Tests
@@ -746,27 +754,65 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     @tag :integration
-    test "calls on_metrics callback" do
+    test "on_progress receives LoadUpdate snapshots and a terminal LoadResult" do
       test_pid = self()
 
       capture_log(fn ->
-        {:ok, _report} =
+        {:ok, report} =
           LoadTest.run(
             model: MockModel,
             adapter: MockAdapter,
             arrival_rate: 50,
             duration: {600, :milliseconds},
             metrics_interval: {100, :milliseconds},
-            on_metrics: fn metrics ->
-              send(test_pid, {:metrics, metrics})
-            end
+            # The consumer runs inside the notifier process, so it must forward
+            # to the test pid rather than receive (which would read the
+            # notifier's own mailbox).
+            on_progress: fn progress -> send(test_pid, {:progress, progress}) end
           )
 
-        # Should have received multiple metrics callbacks
-        assert_receive {:metrics, metrics}, 1000
-        assert is_map(metrics)
-        assert Map.has_key?(metrics, :requests_per_second)
+        # Periodic snapshots arrive as LoadUpdate progress values.
+        assert_receive {:progress, %Progress{data: %LoadUpdate{snapshot: snapshot}}}, 1000
+        assert is_map(snapshot)
+        assert Map.has_key?(snapshot, :requests_per_second)
+
+        # The terminal LoadResult carries a copy of the authoritative report.
+        assert_receive {:progress, %Progress{data: %LoadResult{report: result_report}}}, 1000
+        assert result_report == report
       end)
+    end
+
+    @tag :integration
+    test "emits coarse load_test progress and result telemetry events" do
+      parent = self()
+      handler_id = "pd-load-progress-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [[:property_damage, :load_test, :progress], [:property_damage, :load_test, :result]],
+        &__MODULE__.forward_telemetry/4,
+        parent
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      capture_log(fn ->
+        LoadTest.run(
+          model: MockModel,
+          adapter: MockAdapter,
+          arrival_rate: 50,
+          duration: {400, :milliseconds},
+          metrics_interval: {100, :milliseconds}
+        )
+      end)
+
+      assert_receive {:telemetry, [:property_damage, :load_test, :progress], _m,
+                      %{data: %LoadUpdate{}}},
+                     1000
+
+      assert_receive {:telemetry, [:property_damage, :load_test, :result], _m,
+                      %{data: %LoadResult{}}},
+                     1000
     end
 
     @tag :integration
@@ -782,13 +828,49 @@ defmodule PropertyDamage.LoadTestTest do
             duration: {800, :milliseconds},
             ramp_up: {:linear, {400, :milliseconds}},
             metrics_interval: {100, :milliseconds},
-            on_metrics: fn metrics ->
-              send(test_pid, {:arrivals, metrics.arrivals_spawned})
+            on_progress: fn
+              %Progress{data: %LoadUpdate{snapshot: snapshot}} ->
+                send(test_pid, {:arrivals, snapshot.arrivals_spawned})
+
+              _ ->
+                :ok
             end
           )
 
         # Should have seen ramping (not all at full rate from the start)
         assert_receive {:arrivals, _}, 1000
+      end)
+    end
+
+    @tag :integration
+    test "a slow on_progress consumer does not stall arrival scheduling" do
+      test_pid = self()
+
+      capture_log(fn ->
+        # This consumer sleeps far longer than the metrics interval. Because the
+        # load-test runner dispatches through an isolated notifier process, the
+        # delay is absorbed there and never blocks the runner's arrival loop.
+        {:ok, report} =
+          LoadTest.run(
+            model: MockModel,
+            adapter: MockAdapter,
+            arrival_rate: 100,
+            duration: {500, :milliseconds},
+            metrics_interval: {50, :milliseconds},
+            on_progress: fn _progress ->
+              Process.sleep(200)
+              send(test_pid, :consumed)
+            end
+          )
+
+        # Arrivals kept flowing despite the slow consumer (a stalled runner
+        # would produce far fewer than the ~50 expected at 100/sec for 500ms).
+        assert report.metrics.arrivals_spawned > 20,
+               "slow consumer stalled load generation: only " <>
+                 "#{report.metrics.arrivals_spawned} arrivals"
+
+        # The terminal flush still delivers, even with a slow consumer.
+        assert_receive :consumed, 2000
       end)
     end
 

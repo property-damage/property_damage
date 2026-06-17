@@ -45,6 +45,9 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   alias PropertyDamage.LoadTest.{Metrics, RampStrategy, Worker, WorkerPool}
   alias PropertyDamage.Options
+  alias PropertyDamage.Progress
+  alias PropertyDamage.Progress.{LoadResult, LoadUpdate, Notifier}
+  alias PropertyDamage.Telemetry
 
   defstruct [
     :model,
@@ -58,8 +61,8 @@ defmodule PropertyDamage.LoadTest.Runner do
     :ramp_down_plan,
     :think_time_range,
     :metrics_interval_ms,
-    :on_metrics,
-    :on_complete,
+    :notifier,
+    :run_id,
     :metrics,
     :pool,
     :start_time,
@@ -92,9 +95,9 @@ defmodule PropertyDamage.LoadTest.Runner do
   - `:ramp_up` - Ramp-up strategy (default: :immediate)
   - `:ramp_down` - Ramp-down strategy (default: :immediate)
   - `:think_time` - {min, max} ms between commands in sequence (default: {0, 0})
-  - `:metrics_interval` - Metrics callback interval (default: {1, :second})
-  - `:on_metrics` - Callback function for periodic metrics
-  - `:on_complete` - Callback function when test completes
+  - `:metrics_interval` - Snapshot cadence for progress updates (default: {1, :second})
+  - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` values: a
+    `LoadUpdate` each interval and a terminal `LoadResult` (DR-022)
   - `:assertion_mode` - How to handle assertions (default: :disabled)
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
@@ -155,8 +158,6 @@ defmodule PropertyDamage.LoadTest.Runner do
     ramp_down = opts[:ramp_down]
     think_time_range = opts[:think_time]
     metrics_interval = opts[:metrics_interval]
-    on_metrics = opts[:on_metrics]
-    on_complete = opts[:on_complete]
     assertion_mode = opts[:assertion_mode]
 
     # Start metrics collector
@@ -172,6 +173,20 @@ defmodule PropertyDamage.LoadTest.Runner do
            assertion_mode: assertion_mode
          ) do
       {:ok, pool} ->
+        # Unified progress projection (DR-022): the user `on_progress:` callback
+        # (if any) and telemetry (only when a handler is attached) are consumers.
+        # With no consumers there is no notifier, no snapshot scheduling, and no
+        # %Progress{} is ever built (zero cost). A consumer runs inside the
+        # notifier process, so a slow consumer cannot stall arrival scheduling.
+        consumers =
+          Enum.reject([opts[:on_progress], Telemetry.progress_consumer([:load_test])], &is_nil/1)
+
+        {notifier, run_id} =
+          case consumers do
+            [] -> {nil, nil}
+            consumers -> {start_notifier!(consumers), make_ref()}
+          end
+
         # Build ramp plans
         ramp_up_plan = RampStrategy.plan(ramp_up, arrival_rate)
         ramp_down_plan = RampStrategy.plan_down(ramp_down, arrival_rate)
@@ -191,8 +206,8 @@ defmodule PropertyDamage.LoadTest.Runner do
           ramp_down_plan: ramp_down_plan,
           think_time_range: think_time_range,
           metrics_interval_ms: metrics_interval_ms,
-          on_metrics: on_metrics,
-          on_complete: on_complete,
+          notifier: notifier,
+          run_id: run_id,
           metrics: metrics,
           pool: pool,
           start_time: System.monotonic_time(:millisecond),
@@ -206,8 +221,8 @@ defmodule PropertyDamage.LoadTest.Runner do
         # Schedule first ramp step
         send(self(), :execute_ramp_step)
 
-        # Schedule metrics reporting
-        if on_metrics do
+        # Schedule periodic progress snapshots (only when observed)
+        if notifier do
           schedule_metrics_report(metrics_interval_ms)
         end
 
@@ -391,9 +406,9 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   @impl true
   def handle_info(:report_metrics, state) do
-    if state.on_metrics != nil and state.phase != :finished do
+    if state.notifier != nil and state.phase != :finished do
       snapshot = Metrics.snapshot(state.metrics)
-      state.on_metrics.(snapshot)
+      emit_progress(state, %LoadUpdate{snapshot: snapshot})
       schedule_metrics_report(state.metrics_interval_ms)
     end
 
@@ -503,11 +518,32 @@ defmodule PropertyDamage.LoadTest.Runner do
       }
     }
 
-    if state.on_complete do
-      state.on_complete.(report)
+    # Emit the terminal LoadResult and flush: generation has stopped, so the
+    # notifier drains synchronously and the result is guaranteed delivered (and
+    # exempt from decimation) before this returns. The report itself is the
+    # authoritative value; the LoadResult is a copy for consumers (DR-022).
+    if state.notifier do
+      emit_progress(state, %LoadResult{report: report})
+      Notifier.stop(state.notifier)
     end
 
     report
+  end
+
+  defp start_notifier!(consumers) do
+    {:ok, notifier} = Notifier.start_link(consumers)
+    notifier
+  end
+
+  defp emit_progress(state, payload) do
+    progress =
+      Progress.new(payload,
+        at: System.system_time(:millisecond),
+        elapsed_ms: System.monotonic_time(:millisecond) - state.start_time,
+        run_id: state.run_id
+      )
+
+    Notifier.emit(state.notifier, progress)
   end
 
   defp schedule_metrics_report(interval_ms) do
