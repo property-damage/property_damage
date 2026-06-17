@@ -1411,6 +1411,17 @@ defmodule PropertyDamage.Executor do
         assertion_mode = Map.get(state, :assertion_mode, :halt)
         assertion_failures = Map.get(state, :assertion_failures, [])
 
+        # Pollers started during this command's execution must be tracked even on
+        # the failure branches below, so finalize_result/2 can stop them at run
+        # end; otherwise an adapter that starts a poller and then errors leaks it
+        # (and shrinking re-runs failures many times).
+        state_with_pollers =
+          Map.put(
+            state,
+            :active_resource_pollers,
+            Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
+          )
+
         case result do
           {:ok, events} when is_list(events) ->
             # 4. Bind new ref if command creates one (from returned events)
@@ -1679,10 +1690,10 @@ defmodule PropertyDamage.Executor do
             end
 
           {:timeout, last_reason} ->
-            {:error, {:settle_timeout, last_reason}, state}
+            {:error, {:settle_timeout, last_reason}, state_with_pollers}
 
           {:error, reason} ->
-            {:error, {:adapter_error, reason}, state}
+            {:error, {:adapter_error, reason}, state_with_pollers}
 
           {:retry, reason} ->
             # {:retry, _} is the probe/async settle protocol: only :probe/:async
@@ -1692,14 +1703,14 @@ defmodule PropertyDamage.Executor do
             command_module = if is_struct(resolved_command), do: resolved_command.__struct__
 
             {:error, {:retry_from_sync_command, %{command: command_module, reason: reason}},
-             state}
+             state_with_pollers}
 
           # Adapter returned something other than {:ok, list} / {:error, _} /
           # {:timeout, _} / {:retry, _}: report a graceful failure instead of
           # crashing the run with a CaseClauseError (this clause sits outside
           # the execute rescue).
           other ->
-            {:error, {:malformed_adapter_return, other}, state}
+            {:error, {:malformed_adapter_return, other}, state_with_pollers}
         end
 
       {:error, reason} ->
