@@ -2800,12 +2800,16 @@ defmodule PropertyDamage.Executor do
   end
 
   def execute_raw(commands, adapter, context) when is_list(commands) do
-    refs = Map.get(context, :refs, %{})
     event_queue = Map.get(context, :event_queue)
+
+    # Build a placeholder registry from the commands so external() values
+    # produced by one command resolve in later ones (DR-021). Consumers carry a
+    # %Placeholder{} keyed to its producer's linear {:prefix, index} position.
+    registry = build_placeholder_registry(commands)
 
     initial_state = %{
       events: [],
-      refs: refs
+      registry: registry
     }
 
     result =
@@ -2818,13 +2822,13 @@ defmodule PropertyDamage.Executor do
                adapter,
                context.adapter_context,
                event_queue,
-               state.refs
+               state.registry
              ) do
-          {:ok, new_events, new_refs} ->
+          {:ok, new_events, new_registry} ->
             # Accumulate event chunks newest-first and flatten once at the end,
             # rather than `++`-ing onto the growing list each step (which copies
             # the whole accumulator every command, an O(n^2) cost).
-            {:cont, %{events: [new_events | state.events], refs: new_refs}}
+            {:cont, %{events: [new_events | state.events], registry: new_registry}}
 
           {:error, reason} ->
             {:halt, {:error, {:adapter_error, reason, flatten_event_chunks(state.events)}}}
@@ -2837,18 +2841,46 @@ defmodule PropertyDamage.Executor do
     end
   end
 
+  # Collect every %Placeholder{} carried in the command list and register it, so
+  # the registry's producer_link maps each producer position to its placeholder
+  # ids for capture_externals/3.
+  defp build_placeholder_registry(commands) do
+    commands
+    |> Enum.flat_map(&collect_placeholders/1)
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.reduce(PlaceholderRegistry.new(), &PlaceholderRegistry.register(&2, &1))
+  end
+
+  defp collect_placeholders(%Placeholder{} = p), do: [p]
+
+  defp collect_placeholders(%{__struct__: _} = struct) do
+    struct |> Map.from_struct() |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
+  end
+
+  defp collect_placeholders(map) when is_map(map) do
+    map |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
+  end
+
+  defp collect_placeholders(list) when is_list(list), do: Enum.flat_map(list, &collect_placeholders/1)
+
+  defp collect_placeholders(tuple) when is_tuple(tuple) do
+    tuple |> Tuple.to_list() |> Enum.flat_map(&collect_placeholders/1)
+  end
+
+  defp collect_placeholders(_), do: []
+
   # Event chunks are prepended per command (newest-first); restore execution
   # order and concatenate in a single pass.
   defp flatten_event_chunks(chunks), do: chunks |> Enum.reverse() |> Enum.concat()
 
   # Execute a single command in raw mode (no projections/assertions)
-  defp execute_raw_command(command, index, adapter, adapter_context, event_queue, refs) do
-    # Resolve refs in command (only for structs that might have refs)
+  defp execute_raw_command(command, index, adapter, adapter_context, event_queue, registry) do
+    # Resolve placeholders in command (only for structs that might carry them)
     resolved_result =
       if is_struct(command) do
-        resolve_command_refs(command, refs)
+        resolve_command_placeholders(command, registry)
       else
-        # Plain maps don't use refs in raw mode
+        # Plain maps don't carry placeholders in raw mode
         {:ok, command}
       end
 
@@ -2865,7 +2897,9 @@ defmodule PropertyDamage.Executor do
         # Execute via adapter
         case adapter.execute(resolved_command, execute_context) do
           {:ok, events} ->
-            new_refs = refs
+            # Capture external() values this command produced, keyed by its linear
+            # position, so later commands resolve them (DR-021).
+            new_registry = capture_externals(events, {:prefix, index}, registry)
 
             # Create event log entries
             entries =
@@ -2891,7 +2925,7 @@ defmodule PropertyDamage.Executor do
                 []
               end
 
-            {:ok, entries ++ injector_entries, new_refs}
+            {:ok, entries ++ injector_entries, new_registry}
 
           {:error, reason} ->
             {:error, reason}

@@ -748,11 +748,6 @@ defmodule PropertyDamage.Options do
       type: :map,
       default: %{},
       doc: "Configuration passed to `adapter.setup/1`."
-    ],
-    refs: [
-      type: :map,
-      default: %{},
-      doc: "Initial ref resolution map."
     ]
   ]
 

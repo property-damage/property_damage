@@ -88,6 +88,40 @@ defmodule PropertyDamage.ExecuteTest do
     end
   end
 
+  # Producer/consumer fixtures for external() resolution across commands.
+  defmodule Provisioned do
+    import PropertyDamage, only: [external: 0]
+    defstruct [id: external()]
+  end
+
+  defmodule Provision do
+    defstruct []
+  end
+
+  defmodule Consume do
+    defstruct [:target]
+  end
+
+  defmodule ExternalAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(%Provision{}, _ctx) do
+      {:ok, [%Provisioned{id: "real_#{System.unique_integer([:positive])}"}]}
+    end
+
+    def execute(%Consume{target: target}, %{test_pid: pid}) do
+      send(pid, {:consumed, target})
+      {:ok, []}
+    end
+  end
+
   describe "execute/2 basic functionality" do
     test "executes a single command and returns event log" do
       commands = [%{action: :create}]
@@ -283,13 +317,38 @@ defmodule PropertyDamage.ExecuteTest do
           injector_adapters: [TestInjectorAdapter]
         )
     end
+  end
 
-    test "accepts optional refs" do
-      {:ok, _} =
-        PropertyDamage.execute([],
-          adapter: TestAdapter,
-          refs: %{some_ref: "value"}
+  describe "execute/2 external() resolution across commands" do
+    alias PropertyDamage.Placeholder
+
+    test "a consumer command receives the concrete value a producer generated" do
+      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+
+      commands = [%Provision{}, %Consume{target: ph}]
+
+      {:ok, _events} =
+        PropertyDamage.execute(commands,
+          adapter: ExternalAdapter,
+          adapter_config: %{test_pid: self()}
         )
+
+      assert_received {:consumed, target}
+      assert is_binary(target)
+      assert String.starts_with?(target, "real_")
+    end
+
+    test "an unresolved placeholder (no producer) surfaces a resolution error" do
+      # Consume references a producer at {:prefix, 0}, but no command runs there.
+      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 5}, 0)
+
+      result =
+        PropertyDamage.execute([%Consume{target: ph}],
+          adapter: ExternalAdapter,
+          adapter_config: %{test_pid: self()}
+        )
+
+      assert {:error, {:adapter_error, {:ref_resolution_error, _}, _partial}} = result
     end
   end
 end

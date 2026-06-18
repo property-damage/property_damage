@@ -1221,7 +1221,6 @@ defmodule PropertyDamage do
   - `:adapter` - Adapter module (required)
   - `:injector_adapters` - List of injector adapter modules (default: `[]`)
   - `:adapter_config` - Config passed to `adapter.setup/1` (default: `%{}`)
-  - `:refs` - Initial ref resolution map (default: `%{}`)
 
   ## Returns
 
@@ -1269,7 +1268,7 @@ defmodule PropertyDamage do
       MyAdapter.teardown(adapter_ctx)
 
   Use `execute/2` when you need the full infrastructure: injector adapters,
-  event queue, ref resolution across commands, etc.
+  event queue, external() value resolution across commands, etc.
   """
   @spec execute([struct()], keyword()) ::
           {:ok, [PropertyDamage.EventLog.Entry.t()]} | {:error, term()}
@@ -1279,7 +1278,6 @@ defmodule PropertyDamage do
     adapter = opts[:adapter]
     injector_adapters = opts[:injector_adapters]
     adapter_config = opts[:adapter_config]
-    refs = opts[:refs]
 
     # Start event queue for injectors
     {:ok, event_queue} = EventQueue.start_link()
@@ -1292,7 +1290,6 @@ defmodule PropertyDamage do
       {:ok, adapter_context} ->
         context = %{
           adapter_context: adapter_context,
-          refs: refs,
           event_queue: event_queue
         }
 
