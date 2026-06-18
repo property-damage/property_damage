@@ -124,8 +124,13 @@ end, and trimmed the documented surface to what has been validated.
 - Removed the interactive Livebook visualization (`PropertyDamage.Livebook` and
   `PropertyDamage.Livebook.Charts`). The widgets read a run-result shape the
   engine does not emit, so they could not work as shipped. Failure-to-notebook
-  export (`PropertyDamage.Export` Livebook output) is unaffected. Planned for a
-  future release built on a real result/telemetry source.
+  export (`PropertyDamage.Export` Livebook output) is unaffected. This is not
+  planned for re-implementation: it was packaging over capability that already
+  exists or never did. Failure exploration is covered by the `FailureReport`
+  formatter, its `Inspect` impl, and `Export.LiveBook.generate/1` (a real,
+  executable per-step notebook); live monitoring is a few cells over the live
+  `Telemetry.Collector`; and the run-history charts depended on per-command
+  trace data the engine has never captured.
 - **BREAKING**: Removed the deprecated symbolic-reference mechanism, fully
   superseded by `external()` markers (DR-011/DR-021): the `PropertyDamage.Ref`
   module, the `%Ref{}` struct and `Ref.symbolic/1`, the `creates_ref/0` command
