@@ -237,6 +237,51 @@ defmodule PropertyDamage.ExternalE2ETest do
     end
   end
 
+  # Producer that emits its external()-bearing event via ctx.inject mid-execution
+  # rather than returning it, then returns no events. Mirrors the
+  # async_and_eventual_consistency guide's "emit Created now, settle later" shape.
+  defmodule InjectingAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def execute(%Create{label: label}, ctx) do
+      n = System.unique_integer([:positive])
+      ctx.inject.(%Created{label: label, id: "real_#{n}"})
+      {:ok, []}
+    end
+
+    def execute(%Use{target: target}, %{test_pid: pid}) do
+      send(pid, {:used, target})
+      {:ok, []}
+    end
+
+    @impl true
+    def teardown(_ctx), do: :ok
+  end
+
+  describe "capture from injected events (DR-021)" do
+    test "an external() carried on an injected event reaches a downstream consumer" do
+      ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+      reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
+
+      seq =
+        [%Create{label: "x"}, %Use{target: ph}]
+        |> Sequence.linear()
+        |> Sequence.with_registry(reg)
+
+      {:ok, result} =
+        Executor.run(seq, PlainModel, InjectingAdapter, adapter_config: %{test_pid: self()})
+
+      assert result.failed_at_index == nil
+      assert_received {:used, target}
+      assert is_binary(target)
+      assert String.starts_with?(target, "real_")
+    end
+  end
+
   defp drain_used(acc) do
     receive do
       {:used, target} -> drain_used([target | acc])

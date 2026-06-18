@@ -1337,6 +1337,7 @@ defmodule PropertyDamage.Executor do
           projections: state.projections,
           refs: state.refs,
           event_log: state.event_log,
+          injected_events: [],
           command_index: index,
           branch_id: state.branch_id,
           command: command
@@ -1407,6 +1408,7 @@ defmodule PropertyDamage.Executor do
         base_projections = final_injection_ctx.projections
         base_refs = final_injection_ctx.refs
         base_event_log = final_injection_ctx.event_log
+        injected_events = final_injection_ctx.injected_events
 
         assertion_mode = Map.get(state, :assertion_mode, :halt)
         assertion_failures = Map.get(state, :assertion_failures, [])
@@ -1429,8 +1431,13 @@ defmodule PropertyDamage.Executor do
 
             # 4b. Capture external values from real events (DR-021): resolve the
             # placeholders this command produces, found by its structured position.
+            # Injected events come first so externals they carry resolve too.
             updated_registry =
-              capture_externals(events, state.current_position, placeholder_registry)
+              capture_externals(
+                injected_events ++ events,
+                state.current_position,
+                placeholder_registry
+              )
 
             # 5. Update projections with command
             projections = update_projections(base_projections, resolved_command)
@@ -1563,9 +1570,14 @@ defmodule PropertyDamage.Executor do
             refs = maybe_bind_ref(command, events, base_refs)
 
             # Capture external values from real events (DR-021), keyed by the
-            # command's structured position.
+            # command's structured position. Injected events come first so
+            # externals they carry resolve too.
             updated_registry =
-              capture_externals(events, state.current_position, placeholder_registry)
+              capture_externals(
+                injected_events ++ events,
+                state.current_position,
+                placeholder_registry
+              )
 
             projections = update_projections(base_projections, resolved_command)
 
@@ -1909,11 +1921,16 @@ defmodule PropertyDamage.Executor do
         # 3. Create entry with source :injected
         entry = Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
 
-        # 4. Update process dictionary with accumulated state
+        # 4. Update process dictionary with accumulated state. Injected events are
+        # accumulated in injection order so external() values they carry can be
+        # captured (DR-021): the producer's logical event list is the injected
+        # events followed by the events returned from execute/2, matching the
+        # order used to assign each placeholder's event_index during generation.
         Process.put(@injection_ctx_key, %{
           ctx
           | projections: projections,
             refs: refs,
+            injected_events: ctx.injected_events ++ [event],
             event_log: [entry | ctx.event_log]
         })
 
