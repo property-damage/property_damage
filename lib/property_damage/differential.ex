@@ -394,13 +394,11 @@ defmodule PropertyDamage.Differential do
             new_state =
               case result do
                 {:ok, events} ->
-                  # Update refs and projections
-                  refs = maybe_bind_ref(command, events, state.refs)
                   projections = apply_events(state.projections, events)
 
                   %{
                     state
-                    | refs: refs,
+                    | refs: state.refs,
                       projections: projections,
                       event_log: state.event_log ++ events,
                       results: state.results ++ [result]
@@ -571,12 +569,11 @@ defmodule PropertyDamage.Differential do
 
         case result do
           {:ok, events} ->
-            refs = maybe_bind_ref(command, events, state.refs)
             projections = apply_events(state.projections, events)
 
             %{
               state
-              | refs: refs,
+              | refs: state.refs,
                 projections: projections,
                 event_log: state.event_log ++ events,
                 results: state.results ++ [result],
@@ -849,15 +846,7 @@ defmodule PropertyDamage.Differential do
     do_resolve_refs(command, refs)
   end
 
-  defp do_resolve_refs(%PropertyDamage.Ref{ref: ref_key} = ref, refs) do
-    case Map.get(refs, ref_key) do
-      # Leave unresolved
-      nil -> ref
-      value -> value
-    end
-  end
-
-  # Handle new Placeholder structs - if resolved, use value; otherwise leave as-is
+  # Handle Placeholder structs - if resolved, use value; otherwise leave as-is
   defp do_resolve_refs(%Placeholder{resolved: nil} = p, _refs), do: p
   defp do_resolve_refs(%Placeholder{resolved: value}, _refs), do: value
 
@@ -887,36 +876,6 @@ defmodule PropertyDamage.Differential do
   end
 
   defp do_resolve_refs(other, _refs), do: other
-
-  defp maybe_bind_ref(command, events, refs) do
-    command_module = command.__struct__
-
-    if function_exported?(command_module, :creates_ref, 0) do
-      case command_module.creates_ref() do
-        nil ->
-          refs
-
-        ref_field ->
-          case events do
-            [first_event | _] ->
-              value = Map.get(first_event, ref_field)
-
-              case Map.get(command, ref_field) do
-                %PropertyDamage.Ref{ref: ref_key} ->
-                  Map.put(refs, ref_key, value)
-
-                _ ->
-                  refs
-              end
-
-            [] ->
-              refs
-          end
-      end
-    else
-      refs
-    end
-  end
 
   defp apply_events(projections, events) do
     Enum.reduce(events, projections, fn event, projs ->

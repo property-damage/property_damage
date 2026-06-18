@@ -33,7 +33,7 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   use GenServer
 
-  alias PropertyDamage.{Generator, Placeholder, Ref, Sequence}
+  alias PropertyDamage.{Generator, Placeholder, Sequence}
   alias PropertyDamage.LoadTest.Metrics
   alias PropertyDamage.Model.Projection
 
@@ -383,15 +383,10 @@ defmodule PropertyDamage.LoadTest.Worker do
           {:ok, returned_events} ->
             # Combine injected events (first) with returned events
             all_events = injected_events ++ returned_events
-
-            # Bind refs from all events
-            new_refs = bind_refs_from_events(command, all_events, refs)
-            {:ok, all_events, new_refs}
+            {:ok, all_events, refs}
 
           {:error, reason} ->
-            # Still bind refs from injected events
-            new_refs = bind_refs_from_events(command, injected_events, refs)
-            {:error, reason, new_refs}
+            {:error, reason, refs}
         end
 
       {:error, reason} ->
@@ -405,42 +400,17 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp normalize_timeout({value, :minutes}), do: value * 60 * 1000
 
   # ============================================================================
-  # Ref Resolution
+  # Placeholder Resolution
   # ============================================================================
 
   defp resolve_command_refs(command, refs) do
-    skip_field = get_creates_ref_field(command)
-    resolved = deep_resolve_refs(command, refs, skip_field)
+    resolved = deep_resolve_refs(command, refs, nil)
     {:ok, resolved}
   rescue
     e -> {:error, Exception.message(e)}
   end
 
-  defp get_creates_ref_field(command) do
-    case command do
-      %{__struct__: command_module} ->
-        if function_exported?(command_module, :creates_ref, 0) do
-          command_module.creates_ref()
-        else
-          nil
-        end
-
-      _ ->
-        nil
-    end
-  end
-
-  defp deep_resolve_refs(%Ref{} = ref, refs, _skip_field) do
-    case Map.get(refs, ref.ref) do
-      nil ->
-        raise "Unresolved ref: #{inspect(ref)}"
-
-      value ->
-        value
-    end
-  end
-
-  # Handle new Placeholder structs - if resolved, use value; otherwise raise
+  # Handle Placeholder structs - if resolved, use value; otherwise raise
   defp deep_resolve_refs(%Placeholder{resolved: nil} = p, _refs, _skip_field) do
     raise "Unresolved placeholder at #{inspect(p.path)} (position #{inspect(p.position)}, event #{p.event_index})"
   end
@@ -479,38 +449,6 @@ defmodule PropertyDamage.LoadTest.Worker do
   end
 
   defp deep_resolve_refs(other, _refs, _skip_field), do: other
-
-  defp bind_refs_from_events(command, events, refs) do
-    command_module = command.__struct__
-
-    if function_exported?(command_module, :creates_ref, 0) do
-      case command_module.creates_ref() do
-        nil ->
-          refs
-
-        ref_field ->
-          case Map.get(command, ref_field) do
-            %Ref{} = ref ->
-              value = find_ref_value_in_events(events, ref_field)
-              if value, do: Map.put(refs, ref.ref, value), else: refs
-
-            _ ->
-              refs
-          end
-      end
-    else
-      refs
-    end
-  end
-
-  defp find_ref_value_in_events(events, ref_field) do
-    Enum.find_value(events, fn event ->
-      case Map.get(event, ref_field) do
-        nil -> nil
-        value -> value
-      end
-    end)
-  end
 
   # ============================================================================
   # Helpers
