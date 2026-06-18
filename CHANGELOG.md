@@ -116,8 +116,11 @@ end, and trimmed the documented surface to what has been validated.
 
 - Removed the unvalidated genetic-algorithm guided generation (`GuidedRunner`
   and the `TargetedGeneration` behaviour). The search was never shown to
-  outperform random generation and had no test coverage. Planned for a future
-  release with a proper validation harness.
+  outperform random generation and had no test coverage. This is not planned for
+  re-implementation: command weighting (`weight:`), `when:`/`with:` shaping, and
+  longer sequences already cover reaching deep states, and the narrow target
+  class where an evolutionary search would add value did not justify the
+  machinery.
 - Removed the interactive Livebook visualization (`PropertyDamage.Livebook` and
   `PropertyDamage.Livebook.Charts`). The widgets read a run-result shape the
   engine does not emit, so they could not work as shipped. Failure-to-notebook
