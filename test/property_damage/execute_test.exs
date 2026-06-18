@@ -91,7 +91,7 @@ defmodule PropertyDamage.ExecuteTest do
   # Producer/consumer fixtures for external() resolution across commands.
   defmodule Provisioned do
     import PropertyDamage, only: [external: 0]
-    defstruct [id: external()]
+    defstruct id: external()
   end
 
   defmodule Provision do

@@ -242,7 +242,6 @@ defmodule PropertyDamage.ExportTest do
       assert script =~ "refs = %{}"
       assert script =~ "FAILURE POINT"
     end
-
   end
 
   describe "to_script/3 - python" do

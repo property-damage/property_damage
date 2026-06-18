@@ -2777,7 +2777,8 @@ defmodule PropertyDamage.Executor do
     map |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
   end
 
-  defp collect_placeholders(list) when is_list(list), do: Enum.flat_map(list, &collect_placeholders/1)
+  defp collect_placeholders(list) when is_list(list),
+    do: Enum.flat_map(list, &collect_placeholders/1)
 
   defp collect_placeholders(tuple) when is_tuple(tuple) do
     tuple |> Tuple.to_list() |> Enum.flat_map(&collect_placeholders/1)

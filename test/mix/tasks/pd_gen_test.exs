@@ -124,7 +124,6 @@ defmodule Mix.Tasks.PdGenTest do
 
       assert_compiles_without_warnings(content)
     end
-
   end
 
   describe "Mix.Tasks.Pd.Gen.Adapter" do
