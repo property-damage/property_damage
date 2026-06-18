@@ -548,11 +548,28 @@ mix pd.integration --runs 500
 mix pd.integration --save-failures bugs/
 ```
 
-Replay a saved failure programmatically:
+Replay a saved `.pd` failure with the mix task:
+
+```bash
+# Re-run the failing sequence against the SUT and print a verdict.
+# Exit code answers "does the bug still reproduce?": non-zero = yes, zero = fixed.
+mix pd.replay bugs/2025-12-26T14-30-00-check_failed-NonNegativeBalance-seed512902757.pd
+
+# Show per-step events and projection state
+mix pd.replay bugs/currency-bug.pd --verbose
+```
+
+The failure file already records its model and adapter, so no `--model` /
+`--adapter` flags are needed; those modules just have to be compiled in the
+current project. Because the exit code is a regression signal (non-zero while the
+bug reproduces), `mix pd.replay` drops straight into a CI gate or a `git bisect`.
+
+For custom adapter config or stutter (not exposed on the CLI), replay
+programmatically instead:
 
 ```elixir
-{:ok, failure} = PropertyDamage.load_failure("bugs/failure_20260615120000_run42.json")
-PropertyDamage.replay(failure)
+{:ok, failure} = PropertyDamage.load_failure("bugs/currency-bug.pd")
+PropertyDamage.replay(failure, adapter_config: %{base_url: "http://localhost:4555"})
 ```
 
 ### 4. Use Appropriate Models

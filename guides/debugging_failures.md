@@ -109,6 +109,16 @@ Enum.each(steps, fn step ->
 end)
 ```
 
+If the failure was saved to a `.pd` file, you can replay it from the shell
+without writing any code:
+
+```bash
+mix pd.replay failures/the-failure.pd --verbose
+```
+
+It prints each step and exits non-zero while the bug still reproduces (zero once
+it is fixed), so the same command doubles as a regression check.
+
 ## Step 5: Isolate the Trigger
 
 Find the specific field/value that causes the failure:

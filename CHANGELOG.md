@@ -12,6 +12,14 @@ end, and trimmed the documented surface to what has been validated.
 
 ### Added
 
+- `mix pd.replay <failure-file> [--verbose]` replays a saved `.pd` failure
+  against the SUT. It loads the failing run (model and adapter are read from the
+  file itself, so no flags are needed), re-executes the shrunk sequence through
+  the real engine, prints each step and a verdict, and exits non-zero while the
+  failure still reproduces (zero once it is fixed). The exit code is a regression
+  signal, so the task drops into a CI gate or `git bisect` directly. A thin shell
+  over `PropertyDamage.load_failure/1` and `PropertyDamage.replay/2`; use those
+  for custom adapter config or stutter.
 - Unified progress reporting (DR-022): all long-running operations
   (`PropertyDamage.run/1`, `PropertyDamage.Mutation.run/1`,
   `PropertyDamage.Differential.run/1`, and load tests) now report through a single

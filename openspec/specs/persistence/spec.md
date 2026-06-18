@@ -158,3 +158,10 @@ The system SHALL support step-by-step re-execution of a saved command sequence f
 
 - **WHEN** a replay step is returned
 - **THEN** the step SHALL include `projections_before` (state before command) and `projections` (state after command) for comparison
+
+#### Scenario: CLI replay as a regression check
+
+- **WHEN** `mix pd.replay <failure-file>` is run on a saved `.pd` file
+- **THEN** the system SHALL load the failure (reading its recorded model and adapter from the file, requiring no model/adapter flags), re-execute the shrunk sequence through the engine, and print each step with its result
+- **AND** the task SHALL exit non-zero when the failure still reproduces (any step fails its check or errors, or the replay cannot run) and zero only when every step passes
+- **AND** a branching (parallel) failure, a load error, or a missing model/adapter SHALL produce a clear message and a non-zero exit rather than a crash
