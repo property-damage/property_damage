@@ -125,24 +125,6 @@ defmodule Mix.Tasks.PdGenTest do
       assert_compiles_without_warnings(content)
     end
 
-    test "--creates-ref emits a deprecation warning and creates_ref/0" do
-      output =
-        capture_io(fn ->
-          GenCommand.run([
-            "GenCmdRef.Commands.OpenThing",
-            "--creates-ref",
-            "thing_id"
-          ])
-        end)
-
-      assert output =~ "--creates-ref is deprecated"
-
-      path = "lib/gen_cmd_ref/commands/open_thing.ex"
-      content = File.read!(path)
-      assert content =~ "def creates_ref, do: :thing_id"
-
-      assert_compiles_without_warnings(content)
-    end
   end
 
   describe "Mix.Tasks.Pd.Gen.Adapter" do

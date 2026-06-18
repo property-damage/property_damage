@@ -2,7 +2,7 @@ defmodule PropertyDamage.InjectionTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{Executor, Ref}
+  alias PropertyDamage.Executor
 
   # Test events
   defmodule ResourceCreated do
@@ -17,12 +17,12 @@ defmodule PropertyDamage.InjectionTest do
     defstruct [:data]
   end
 
-  # Test command that creates a ref
+  # Test command that creates a resource (its server-generated id arrives on the
+  # injected/returned events, not on the command).
   defmodule CreateResource do
-    defstruct [:resource_id, :name]
+    defstruct [:name]
 
     def generator(_overrides \\ %{}), do: StreamData.constant(%{name: "resource"})
-    def creates_ref, do: :resource_id
   end
 
   # Test command that doesn't create a ref
@@ -75,7 +75,7 @@ defmodule PropertyDamage.InjectionTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%CreateResource{resource_id: _ref, name: name}, ctx) do
+    def execute(%CreateResource{name: name}, ctx) do
       # Generate a real ID
       real_id = "resource_#{:erlang.unique_integer([:positive])}"
 
@@ -147,8 +147,7 @@ defmodule PropertyDamage.InjectionTest do
 
   describe "mid-execution event injection" do
     test "injected events update projections immediately" do
-      ref = Ref.symbolic(label: "resource")
-      command = %CreateResource{resource_id: ref, name: "test"}
+      command = %CreateResource{name: "test"}
 
       {:ok, result} = Executor.run([command], TestModel, InjectingAdapter)
 
@@ -167,8 +166,7 @@ defmodule PropertyDamage.InjectionTest do
     end
 
     test "injected events are recorded with source :injected" do
-      ref = Ref.symbolic(label: "resource")
-      command = %CreateResource{resource_id: ref, name: "test"}
+      command = %CreateResource{name: "test"}
 
       {:ok, result} = Executor.run([command], TestModel, InjectingAdapter)
 
@@ -193,21 +191,8 @@ defmodule PropertyDamage.InjectionTest do
       assert match?(%ResourceSettled{}, cmd_entry.event)
     end
 
-    test "refs are bound from injected events" do
-      ref = Ref.symbolic(label: "resource")
-      command = %CreateResource{resource_id: ref, name: "test"}
-
-      {:ok, result} = Executor.run([command], TestModel, InjectingAdapter)
-
-      # The ref should be bound to the actual resource ID from the injected event
-      assert Map.has_key?(result.refs, ref.ref)
-      bound_value = result.refs[ref.ref]
-      assert String.starts_with?(bound_value, "resource_")
-    end
-
     test "multiple injections work correctly" do
-      ref = Ref.symbolic(label: "resource")
-      command = %CreateResource{resource_id: ref, name: "test"}
+      command = %CreateResource{name: "test"}
 
       {:ok, result} = Executor.run([command], TestModel, MultiInjectAdapter)
 
@@ -222,8 +207,7 @@ defmodule PropertyDamage.InjectionTest do
     end
 
     test "backward compatibility - adapters not using inject work unchanged" do
-      ref = Ref.symbolic(label: "resource")
-      command = %CreateResource{resource_id: ref, name: "test"}
+      command = %CreateResource{name: "test"}
 
       {:ok, result} = Executor.run([command], TestModel, NonInjectingAdapter)
 
@@ -237,14 +221,10 @@ defmodule PropertyDamage.InjectionTest do
 
       injected_entries = Enum.filter(result.event_log, &Entry.injected?/1)
       assert injected_entries == []
-
-      # Refs should still be bound from returned events
-      assert Map.has_key?(result.refs, ref.ref)
     end
 
     test "injected events appear before returned events in log" do
-      ref = Ref.symbolic(label: "resource")
-      command = %CreateResource{resource_id: ref, name: "test"}
+      command = %CreateResource{name: "test"}
 
       {:ok, result} = Executor.run([command], TestModel, InjectingAdapter)
 

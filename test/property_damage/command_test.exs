@@ -12,12 +12,7 @@ defmodule PropertyDamage.CommandTest do
       # Verify generator is implemented
       assert function_exported?(CreateItem, :generator, 1)
       # Verify metadata callbacks
-      assert function_exported?(CreateItem, :creates_ref, 0)
       assert function_exported?(CreateItem, :downstream_observables, 0)
-    end
-
-    test "creates_ref returns :item_ref" do
-      assert CreateItem.creates_ref() == :item_ref
     end
 
     test "downstream_observables returns expected events" do
@@ -96,7 +91,6 @@ defmodule PropertyDamage.CommandTest do
     test "optional callbacks are not exported" do
       Code.ensure_loaded!(MinimalCommand)
       refute function_exported?(MinimalCommand, :label, 2)
-      refute function_exported?(MinimalCommand, :creates_ref, 0)
       refute function_exported?(MinimalCommand, :downstream_observables, 0)
       refute function_exported?(MinimalCommand, :read_only?, 0)
     end
@@ -119,7 +113,6 @@ defmodule PropertyDamage.CommandTest do
       optional = PropertyDamage.Command.behaviour_info(:optional_callbacks)
 
       assert {:label, 2} in optional
-      assert {:creates_ref, 0} in optional
       assert {:downstream_observables, 0} in optional
       assert {:read_only?, 0} in optional
     end

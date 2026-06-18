@@ -172,7 +172,6 @@ defmodule PropertyDamage.Command do
   Commands can implement optional callbacks to provide metadata used by
   the framework for shrinking, validation, and debugging:
 
-  - `creates_ref/0` - Field name for entity ref this command creates
   - `downstream_observables/0` - Event modules this command can produce
   - `read_only?/0` - Whether command only reads state (prioritized for removal during shrinking)
   - `label/2` - Human-readable label for debugging
@@ -216,50 +215,6 @@ defmodule PropertyDamage.Command do
       def label(_state, %__MODULE__{}), do: nil
   """
   @callback label(state :: map(), command :: struct()) :: String.t() | nil
-
-  @doc """
-  (Optional, **Deprecated**) Returns the field name for the Ref this command creates.
-
-  **DEPRECATED**: Use `external()` in event struct definitions instead.
-  The `creates_ref/0` callback is superseded by the external() marker system,
-  which provides:
-  - Multiple external fields per event
-  - Nested externals in maps and fixed-length lists
-  - Automatic detection without command-level configuration
-  - Cleaner separation of concerns (externals declared on events, not commands)
-
-  ## Migration
-
-  Instead of:
-
-      # Old approach (deprecated)
-      defmodule CreateOrder do
-        defstruct [:order_ref, :amount]
-        def creates_ref, do: :order_ref
-      end
-
-  Use:
-
-      # New approach
-      defmodule OrderCreated do
-        import PropertyDamage, only: [external: 0]
-        defstruct [:amount, id: external()]  # id is server-generated
-      end
-
-  See `PropertyDamage.external/0` for full documentation.
-
-  ## Legacy Behavior
-
-  When a command creates a new entity (e.g., CreateOrder creates an order),
-  return the atom field name where the Ref should be stored (e.g., `:order_ref`).
-
-  The framework uses this to:
-  1. Generate a symbolic Ref during command sequence generation
-  2. Resolve the Ref to a concrete value from the resulting event
-
-  Return `nil` (or don't implement) if this command doesn't create a new entity.
-  """
-  @callback creates_ref() :: atom() | nil
 
   @doc """
   (Optional) Returns the list of event modules this command can produce.
@@ -435,7 +390,6 @@ defmodule PropertyDamage.Command do
 
   @optional_callbacks [
     label: 2,
-    creates_ref: 0,
     downstream_observables: 0,
     read_only?: 0,
     semantics: 0,

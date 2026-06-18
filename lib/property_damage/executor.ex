@@ -42,7 +42,7 @@ defmodule PropertyDamage.Executor do
 
   1. Resolve symbolic refs to concrete values
   2. Execute via adapter (command → events)
-  3. If creates_ref/0 defined and events produced, bind new ref
+  3. Capture external() values produced by this command from its events
   4. Update projections (command first, then events)
   5. Drain injector events and process them
   6. Run triggered checks
@@ -1426,8 +1426,7 @@ defmodule PropertyDamage.Executor do
 
         case result do
           {:ok, events} when is_list(events) ->
-            # 4. Bind new ref if command creates one (from returned events)
-            refs = maybe_bind_ref(command, events, base_refs)
+            refs = base_refs
 
             # 4b. Capture external values from real events (DR-021): resolve the
             # placeholders this command produces, found by its structured position.
@@ -1567,7 +1566,7 @@ defmodule PropertyDamage.Executor do
 
           {:settled, events} ->
             # Probe/async settled successfully - treat same as {:ok, events}
-            refs = maybe_bind_ref(command, events, base_refs)
+            refs = base_refs
 
             # Capture external values from real events (DR-021), keyed by the
             # command's structured position. Injected events come first so
@@ -1768,11 +1767,9 @@ defmodule PropertyDamage.Executor do
   defp settle_config(_command, %{settle: settle}) when is_map(settle), do: settle
   defp settle_config(command, _spec), do: Settle.get_config(command)
 
-  # Resolve all refs in a command struct, skipping the creates_ref field
+  # Resolve all refs in a command struct.
   defp resolve_command_refs(command, refs) do
-    # Get the field to skip (the one this command creates)
-    skip_field = get_creates_ref_field(command)
-    resolved = deep_resolve_refs(command, refs, skip_field)
+    resolved = deep_resolve_refs(command, refs, nil)
     {:ok, resolved}
   rescue
     e ->
@@ -1784,21 +1781,6 @@ defmodule PropertyDamage.Executor do
   defp resolve_refs_and_placeholders(command, refs, placeholder_registry) do
     with {:ok, refs_resolved} <- resolve_command_refs(command, refs) do
       resolve_command_placeholders(refs_resolved, placeholder_registry)
-    end
-  end
-
-  defp get_creates_ref_field(command) do
-    case command do
-      %{__struct__: command_module} ->
-        if function_exported?(command_module, :creates_ref, 0) do
-          command_module.creates_ref()
-        else
-          nil
-        end
-
-      _ ->
-        # Plain map or non-struct - no creates_ref
-        nil
     end
   end
 
@@ -1817,7 +1799,8 @@ defmodule PropertyDamage.Executor do
     |> Map.from_struct()
     |> Enum.map(fn {k, v} ->
       if k == skip_field do
-        # Don't resolve the creates_ref field - keep the Ref as-is
+        # Leave this field untouched (skip_field is unused now that commands
+        # declare server-generated values via external() rather than a ref field).
         {k, v}
       else
         {k, deep_resolve_refs(v, refs, nil)}
@@ -1846,63 +1829,6 @@ defmodule PropertyDamage.Executor do
 
   defp deep_resolve_refs(other, _refs, _skip_field), do: other
 
-  # Bind a new ref if the command creates one
-  defp maybe_bind_ref(command, events, refs) do
-    command_module = command.__struct__
-
-    if function_exported?(command_module, :creates_ref, 0) do
-      case command_module.creates_ref() do
-        nil ->
-          refs
-
-        ref_field ->
-          # Find the value in the first event
-          case events do
-            [first_event | _] ->
-              value = Map.get(first_event, ref_field)
-
-              # Find the ref in the command
-              case Map.get(command, ref_field) do
-                %Ref{} = ref -> Map.put(refs, ref.ref, value)
-                _ -> refs
-              end
-
-            [] ->
-              refs
-          end
-      end
-    else
-      refs
-    end
-  end
-
-  # Bind a ref from a single event (used during injection)
-  defp maybe_bind_ref_from_event(command, event, refs) do
-    command_module = command.__struct__
-
-    if function_exported?(command_module, :creates_ref, 0) do
-      case command_module.creates_ref() do
-        nil ->
-          refs
-
-        ref_field ->
-          value = Map.get(event, ref_field)
-
-          if value do
-            # Find the ref in the command
-            case Map.get(command, ref_field) do
-              %Ref{} = ref -> Map.put(refs, ref.ref, value)
-              _ -> refs
-            end
-          else
-            refs
-          end
-      end
-    else
-      refs
-    end
-  end
-
   # Inject an event mid-execution from an adapter.
   # Called via ctx.inject.(event) from adapter execute/2.
   # Updates projections immediately and records in event log.
@@ -1915,13 +1841,10 @@ defmodule PropertyDamage.Executor do
         # 1. Update projections immediately
         projections = update_projections(ctx.projections, event)
 
-        # 2. Bind ref if event has the creates_ref field
-        refs = maybe_bind_ref_from_event(ctx.command, event, ctx.refs)
-
-        # 3. Create entry with source :injected
+        # 2. Create entry with source :injected
         entry = Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
 
-        # 4. Update process dictionary with accumulated state. Injected events are
+        # 3. Update process dictionary with accumulated state. Injected events are
         # accumulated in injection order so external() values they carry can be
         # captured (DR-021): the producer's logical event list is the injected
         # events followed by the events returned from execute/2, matching the
@@ -1929,7 +1852,6 @@ defmodule PropertyDamage.Executor do
         Process.put(@injection_ctx_key, %{
           ctx
           | projections: projections,
-            refs: refs,
             injected_events: ctx.injected_events ++ [event],
             event_log: [entry | ctx.event_log]
         })
@@ -2953,13 +2875,7 @@ defmodule PropertyDamage.Executor do
         # Execute via adapter
         case adapter.execute(resolved_command, execute_context) do
           {:ok, events} ->
-            # Bind new ref if command creates one (only for structs)
-            new_refs =
-              if is_struct(command) do
-                maybe_bind_ref(command, events, refs)
-              else
-                refs
-              end
+            new_refs = refs
 
             # Create event log entries
             entries =

@@ -19,7 +19,6 @@ defmodule PropertyDamage.Test.Commands.CreateItem do
 
   Demonstrates:
   - Pure generator/1 pattern (state-independent)
-  - creates_ref/0 for entity creation
   - downstream_observables/0 for validation
 
   Note: preconditions, overrides, and simulate are defined in the Model.
@@ -29,9 +28,6 @@ defmodule PropertyDamage.Test.Commands.CreateItem do
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:name, :quantity]
-
-  @impl true
-  def creates_ref, do: :item_ref
 
   @impl true
   def downstream_observables, do: [PropertyDamage.Test.Events.ItemCreated]

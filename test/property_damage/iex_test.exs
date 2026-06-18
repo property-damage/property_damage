@@ -53,9 +53,6 @@ defmodule PropertyDamage.IExTest do
       assert output =~ "CreateItem"
       assert output =~ "ViewItem"
 
-      # CreateItem advertises creates_ref/0 => :item_ref.
-      assert output =~ ":item_ref"
-
       # Projections section lists the command-sequence projection and extras.
       assert output =~ "PROJECTIONS"
       assert output =~ "ModelState"

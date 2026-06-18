@@ -8,15 +8,13 @@ defmodule Mix.Tasks.Pd.Gen.Command do
 
   ## Options
 
-      --creates-ref NAME    (DEPRECATED) Field name for ref this command creates.
-                            Use `external()` in event structs instead.
       --semantics SEM       Command semantics (sync, probe, async)
       --fields FIELDS       Comma-separated field names
 
-  ## Note on creates_ref Deprecation
+  ## Server-generated values
 
-  The `--creates-ref` option is deprecated. Instead of declaring refs on commands,
-  use `external()` markers in your event struct definitions:
+  Commands no longer declare the refs they create. Instead, mark
+  server-generated fields with `external()` in your event struct definitions:
 
       defmodule MyApp.Events.UserCreated do
         import PropertyDamage, only: [external: 0]
@@ -45,7 +43,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
   def run(args) do
     {opts, argv, _} =
       OptionParser.parse(args,
-        strict: [creates_ref: :string, semantics: :string, fields: :string]
+        strict: [semantics: :string, fields: :string]
       )
 
     case argv do
@@ -62,24 +60,8 @@ defmodule Mix.Tasks.Pd.Gen.Command do
   end
 
   defp generate_command(module_name, opts) do
-    creates_ref = Keyword.get(opts, :creates_ref)
     semantics = Keyword.get(opts, :semantics, "sync")
     fields = parse_fields(Keyword.get(opts, :fields, ""))
-
-    # Warn about deprecated --creates-ref option
-    if creates_ref do
-      Mix.shell().info("""
-      WARNING: --creates-ref is deprecated.
-      Use external() in event struct definitions instead:
-
-          defmodule MyApp.Events.YourEvent do
-            import PropertyDamage, only: [external: 0]
-            defstruct [:other_field, #{creates_ref}: external()]
-          end
-
-      See `PropertyDamage.external/0` for documentation.
-      """)
-    end
 
     # Parse module name to get path
     path = module_to_path(module_name)
@@ -89,7 +71,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     File.mkdir_p!(dir)
 
     # Generate content
-    content = generate_content(module_name, fields, creates_ref, semantics)
+    content = generate_content(module_name, fields, semantics)
 
     # Write file
     File.write!(path, content)
@@ -99,10 +81,6 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     Mix.shell().info("Next steps:")
     Mix.shell().info("  1. Fill in the field generators in generator/1")
     Mix.shell().info("  2. Add to your model's commands/0 (use when: for preconditions)")
-
-    if creates_ref do
-      Mix.shell().info("  3. Create a corresponding event module")
-    end
   end
 
   defp parse_fields(""), do: []
@@ -117,7 +95,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     "lib/#{path}.ex"
   end
 
-  defp generate_content(module_name, fields, creates_ref, semantics) do
+  defp generate_content(module_name, fields, semantics) do
     fields_atoms = Enum.map(fields, &String.to_atom/1)
     defstruct_line = if fields == [], do: "[]", else: inspect(fields_atoms)
 
@@ -125,13 +103,6 @@ defmodule Mix.Tasks.Pd.Gen.Command do
       case semantics do
         "sync" -> ""
         other -> "\n  @impl true\n  def semantics, do: :#{other}\n"
-      end
-
-    creates_ref_function =
-      if creates_ref do
-        "\n  @impl true\n  def creates_ref, do: :#{creates_ref}\n"
-      else
-        ""
       end
 
     generator_body = generate_generator_body(fields)
@@ -157,7 +128,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
         # to a %#{module_name}{} struct.
         #{generator_body}
       end
-    #{semantics_function}#{creates_ref_function}end
+    #{semantics_function}end
     """
   end
 

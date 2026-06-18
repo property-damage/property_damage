@@ -27,9 +27,6 @@ defmodule PropertyDamage.DifferentialTest do
     defstruct [:value, :item_ref]
 
     @impl true
-    def creates_ref, do: :item_ref
-
-    @impl true
     def downstream_observables, do: [TestEvent]
 
     @impl true

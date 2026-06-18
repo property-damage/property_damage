@@ -42,14 +42,14 @@ defmodule PropertyDamage.IEx do
 
       COMMANDS (6 total)
       ─────────────────────────────────────────────────────────────────
-        Weight │ Command                    │ Role     │ Creates Ref
+        Weight │ Command                    │ Semantics
       ─────────────────────────────────────────────────────────────────
-           5   │ CreateAccount              │ action   │ :account
-           3   │ Credit                     │ action   │ -
-           3   │ Debit                      │ action   │ -
-           2   │ CreateAuthorization        │ action   │ :authorization
-           2   │ CreateCapture              │ action   │ -
-           1   │ CloseAccount               │ action   │ -
+           5   │ CreateAccount              │ sync
+           3   │ Credit                     │ sync
+           3   │ Debit                      │ sync
+           2   │ CreateAuthorization        │ probe
+           2   │ CreateCapture              │ sync
+           1   │ CloseAccount               │ sync
       ...
 
   """
@@ -81,20 +81,18 @@ defmodule PropertyDamage.IEx do
 
     IO.puts("COMMANDS (#{length(commands)} total)")
     IO.puts(String.duplicate("─", 65))
-    IO.puts("  Weight │ Command                    │ Semantics│ Creates Ref")
+    IO.puts("  Weight │ Command                    │ Semantics")
     IO.puts(String.duplicate("─", 65))
 
     for {weight, cmd_module, _spec} <- commands do
       name = cmd_module |> Module.split() |> List.last()
       semantics = get_semantics(cmd_module)
-      creates_ref = get_creates_ref(cmd_module)
 
       weight_str = String.pad_leading("#{weight}", 5)
       name_str = String.pad_trailing(name, 26)
       semantics_str = String.pad_trailing("#{semantics}", 8)
-      ref_str = if creates_ref, do: ":#{creates_ref}", else: "-"
 
-      IO.puts("  #{weight_str}   │ #{name_str} │ #{semantics_str} │ #{ref_str}")
+      IO.puts("  #{weight_str}   │ #{name_str} │ #{semantics_str}")
     end
 
     IO.puts("")
@@ -228,14 +226,6 @@ defmodule PropertyDamage.IEx do
     end
   end
 
-  defp get_creates_ref(cmd_module) do
-    if function_exported?(cmd_module, :creates_ref, 0) do
-      cmd_module.creates_ref()
-    else
-      nil
-    end
-  end
-
   # ============================================================================
   # dry_run/2 - Sequence Generation Preview
   # ============================================================================
@@ -265,8 +255,6 @@ defmodule PropertyDamage.IEx do
       [3] Debit{account_ref: :ref0, amount: 100}
       [4] GetBalance{account_ref: :ref0}
 
-      Refs created: [:ref0] → CreateAccount
-
       Seed: 12345 (use this to reproduce)
 
       iex> PropertyDamage.IEx.dry_run(MyModel, seed: 12345)
@@ -293,7 +281,6 @@ defmodule PropertyDamage.IEx do
     # Print sequence
     IO.puts("")
     print_sequence(sequence, verbose)
-    print_refs_summary(sequence)
     IO.puts("Seed: #{seed} (use this to reproduce)")
     IO.puts("")
 
@@ -386,39 +373,6 @@ defmodule PropertyDamage.IEx do
     |> then(fn s ->
       if String.length(s) == 50, do: s <> "...", else: s
     end)
-  end
-
-  defp print_refs_summary(sequence) do
-    commands = Sequence.to_list(sequence)
-
-    refs_created =
-      commands
-      |> Enum.with_index()
-      |> Enum.filter(fn {cmd, _idx} ->
-        mod = cmd.__struct__
-
-        if function_exported?(mod, :creates_ref, 0) do
-          mod.creates_ref() != nil
-        else
-          false
-        end
-      end)
-      |> Enum.map(fn {cmd, idx} ->
-        mod = cmd.__struct__
-        ref = mod.creates_ref()
-        cmd_name = mod |> Module.split() |> List.last()
-        ":ref#{idx} → #{cmd_name} (#{ref})"
-      end)
-
-    if refs_created != [] do
-      IO.puts("Refs created:")
-
-      for ref_info <- refs_created do
-        IO.puts("  #{ref_info}")
-      end
-
-      IO.puts("")
-    end
   end
 
   # ============================================================================
