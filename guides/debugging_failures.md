@@ -203,18 +203,16 @@ File.write!("debug/failure_analysis.livemd", notebook)
 # => "failures/capture_overflow_20240115_143022.failure"
 ```
 
-### Add to Seed Library
+### Replay the failing seed first while you fix it
 
-Track for regression testing:
+Enable the seed library: the failing seed is replayed before random exploration
+on the next run, and new failures are appended automatically. It is an ephemeral,
+self-pruning working set (the entry ages out once it passes a few times in a
+row), not a durable corpus — for a durable regression, export the failure to an
+ExUnit test, which freezes the concrete sequence.
 
 ```elixir
-{:ok, library} = PropertyDamage.load_seed_library("seeds.json")
-{:ok, library} = PropertyDamage.add_to_seed_library(
-  library,
-  failure,
-  tags: [:bug, :capture, :overflow]
-)
-PropertyDamage.save_seed_library(library, "seeds.json")
+PropertyDamage.run(model: M, adapter: A, seed_library: "seeds.json")
 ```
 
 ## Step 9: Verify the Fix

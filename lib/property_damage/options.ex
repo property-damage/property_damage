@@ -65,6 +65,30 @@ defmodule PropertyDamage.Options do
       default: true,
       doc: "Shrink failing sequences to minimal reproduction."
     ],
+    seed_library: [
+      type: {:or, [:boolean, :string]},
+      default: false,
+      doc: """
+      Ephemeral replay working set of recently-failing seeds (DR-023), replayed
+      before random exploration:
+      - `false` (default) - disabled; no file is read or written.
+      - `true` - use the default file `property_damage_seeds.json`.
+      - `"path"` - use an explicit file.
+
+      When enabled, library seeds are replayed first; if any still fail,
+      exploration is skipped and the run halts with a summary. A new failure
+      found during exploration is appended (deduplicated by seed). See
+      `PropertyDamage.SeedLibrary`.
+      """
+    ],
+    seed_library_prune_after: [
+      type: :pos_integer,
+      default: 3,
+      doc: """
+      Number of consecutive passing replays (`K`) after which a seed is dropped
+      from the library. Only meaningful when `seed_library:` is enabled.
+      """
+    ],
 
     # Optional - Advanced
     injector_adapters: [

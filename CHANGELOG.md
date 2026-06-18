@@ -47,6 +47,17 @@ end, and trimmed the documented surface to what has been validated.
   `PropertyDamage.Model` moduledoc.
 - New guide: "Building Reusable Components" (`guides/reusable_components.md`).
 - New guide: "Mutation Testing" (`guides/mutation_testing.md`).
+- Seed library replay (DR-023): `PropertyDamage.run/1` gained a top-level
+  `seed_library:` option (`false` (default) / `true` / path) and
+  `seed_library_prune_after:` (default 3). When enabled, previously-failing seeds
+  are replayed before random exploration; a still-failing replay halts the run
+  with a shrunk report and a summary, all-passing replays proceed to exploration,
+  and a new exploration failure's seed is appended (deduplicated). The library is
+  an ephemeral, self-pruning working set (a `consecutive_passes` streak per
+  entry, pruned after `K` passes), not a durable corpus — export to ExUnit for
+  durable regressions. The replay phase reports through the unified progress
+  projection via a new `ReplayUpdate` payload and prints an unconditional banner
+  (and a halt summary) to stdout.
 
 ### Changed
 
@@ -88,6 +99,18 @@ end, and trimmed the documented surface to what has been validated.
   surfaced.
 - Guides use seeded selection (`StreamData.member_of`) instead of `Enum.random`,
   and valid `external()` struct syntax.
+- **BREAKING**: `PropertyDamage.SeedLibrary` is reframed as an ephemeral replay
+  working set (DR-023). The per-entry `run_count`/`fail_count`/`status`
+  (`:failing`/`:fixed`/`:flaky`) tri-state is replaced by a single
+  `consecutive_passes` streak, and `record_run/3` now uses streak semantics plus
+  a `prune/2` step. The library file version is bumped to 2; `load/1` tolerates
+  older files. `save/2` is now atomic (temp file + rename). `stats/1`/`format/1`
+  reflect the new schema. `get_seeds/2` and `seed_values/2` are removed (they
+  filtered on the now-gone status field).
+- **BREAKING**: `PropertyDamage.Regression`'s `dedup_source` collapses to
+  `:failures` only (default `:failures`); the `:library` and `:both` values are
+  removed. The library branch always returned no comparable failures, so dedup
+  behavior is unchanged.
 
 ### Removed
 
@@ -106,6 +129,11 @@ end, and trimmed the documented surface to what has been validated.
   callback (and its `--creates-ref` generator option), and the now-dead `:refs`
   option on `PropertyDamage.execute/2`. Declare server-generated values with
   `external()` on event structs instead. DR-010 is marked superseded.
+- **BREAKING**: Removed `PropertyDamage.SeedLibrary`'s `export`/`import` functions
+  and all "share across a team / build a regression suite" framing (DR-023). The seed
+  library is a local, ephemeral working set; `save`/`load` are the only
+  persistence. Durable, shareable regressions belong to the Export subsystem
+  (ExUnit), which freezes the concrete shrunk sequence.
 
 ### Fixed
 

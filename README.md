@@ -19,7 +19,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Rich Failure Reports**: Comprehensive diagnostics when tests fail
 - **Failure Persistence**: Save failures for later analysis and regression testing
 - **Step-by-Step Replay**: Debug failures by executing commands one at a time
-- **Seed Library**: Track and share interesting seeds across your team
+- **Seed Library**: Replay recently-failing seeds first; a self-pruning working set
 - **Coverage Metrics**: Know how thoroughly your model is being exercised
 - **Visual Diagrams**: Sequence diagrams in Mermaid, PlantUML, WebSequence formats
 - **Diff Debugging**: Compare passing vs failing runs to find divergence
@@ -330,31 +330,25 @@ PropertyDamage.delete_failure(path)
 
 ## Seed Library
 
-Track seeds that have found bugs for regression testing:
+An ephemeral, self-pruning working set of recently-failing seeds that `run/1`
+replays before random exploration, so a known-failing path is re-checked first
+while you fix the bug. It is **not** a durable regression corpus: a seed only
+reproduces while the model's generators are byte-stable, so for durable
+regressions export to an ExUnit test instead. Each entry tracks a
+consecutive-pass streak and is pruned automatically once it passes `K` times in
+a row (default 3); flaky seeds keep failing and self-retain.
 
 ```elixir
-# Create or load a seed library
-{:ok, library} = PropertyDamage.load_seed_library("seeds.json")
+# Enable the working set (default file). Previously-failing seeds replay first;
+# if any still fail, exploration is skipped and the run halts with a summary.
+# A new failure found during exploration is appended automatically.
+PropertyDamage.run(model: M, adapter: A, seed_library: true)
 
-# Add a failure to the library
-{:error, failure} = PropertyDamage.run(model: M, adapter: A)
-{:ok, library} = PropertyDamage.add_to_seed_library(library, failure,
-  tags: [:currency, :capture],
-  description: "Currency mismatch in capture"
+# Or point at an explicit file, and tune the prune threshold:
+PropertyDamage.run(model: M, adapter: A,
+  seed_library: "seeds.json",
+  seed_library_prune_after: 5
 )
-
-# Save the library
-PropertyDamage.save_seed_library(library, "seeds.json")
-
-# Get seeds to run in CI
-alias PropertyDamage.SeedLibrary
-failing_seeds = SeedLibrary.seed_values(library, status: :failing)
-
-# Update status after running
-library = SeedLibrary.record_run(library, seed, failed: false)
-
-# View statistics
-IO.puts(SeedLibrary.format(library))
 ```
 
 ## Coverage Metrics

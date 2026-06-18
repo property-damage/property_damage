@@ -1,7 +1,13 @@
 # DR-020: Composable, Version-Aware Libraries
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed); seed-library portions partially superseded by DR-023
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
+
+> **Partial supersession (DR-023).** The seed-library claims below — export/import
+> for sharing across machines/CI, the `:failing`/`:fixed`/`:flaky` status machine,
+> and the "`seed_library:` runs failing seeds first" integration — are reframed by
+> DR-023, which makes the seed library an ephemeral, self-pruning replay working
+> set. The `.pd` failure-file version-aware format described here is unaffected.
 
 ## Decision
 

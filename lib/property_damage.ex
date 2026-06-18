@@ -88,11 +88,12 @@ defmodule PropertyDamage do
 
   ## Seed Library
 
-  Track interesting seeds for regression testing:
+  Replay recently-failing seeds before random exploration (DR-023). This is an
+  ephemeral, self-pruning working set for the fix cycle, not a durable corpus
+  (for durable regressions, export to an ExUnit test):
 
-      {:ok, library} = PropertyDamage.load_seed_library("seeds.json")
-      {:ok, library} = PropertyDamage.add_to_seed_library(library, failure, tags: [:bug])
-      PropertyDamage.save_seed_library(library, "seeds.json")
+      # Replay failing seeds first; append any new failure's seed automatically
+      PropertyDamage.run(model: M, adapter: A, seed_library: true)
 
   See `PropertyDamage.SeedLibrary` for details.
 
@@ -134,9 +135,11 @@ defmodule PropertyDamage do
     Generator,
     Options,
     Progress.Printer,
+    Progress.ReplayUpdate,
     Progress.Reporter,
     Progress.RunResult,
     Progress.RunUpdate,
+    SeedLibrary,
     Sequence,
     Shrinker,
     Stutter,
@@ -193,6 +196,11 @@ defmodule PropertyDamage do
   - `:injector_adapters` - List of InjectorAdapter modules (default: [])
   - `:adapter_config` - Config passed to adapter.setup/1 (default: %{})
   - `:shrink` - Whether to shrink failing sequences (default: true)
+  - `:seed_library` - Ephemeral replay working set (DR-023): `false` (default,
+    disabled), `true` (default file), or a path. Previously-failing seeds are
+    replayed before exploration; a still-failing replay halts the run.
+  - `:seed_library_prune_after` - Consecutive passing replays after which a seed
+    is dropped from the library (default: 3)
   - `:shrinker_config` - ShrinkerConfig struct for tuning shrinking
   - `:on_failure` - Callback function receiving failure_report (default: nil)
   - `:regression` - Keyword list for automatic regression test management (see below)
@@ -303,6 +311,11 @@ defmodule PropertyDamage do
     branching = opts[:branching]
     stutter_config = Stutter.parse_config(opts[:stutter])
 
+    # Seed-library replay working set (DR-023). `nil` when disabled; otherwise a
+    # small config map driving the pre-exploration replay phase.
+    seed_library = build_seed_library_config(opts, verbose)
+    seed_library_path = seed_library && seed_library.path
+
     # Unified progress projection (DR-022): one reporter fans out to the verbose
     # printer (if any), the user `on_progress:` callback (if any), and telemetry
     # (only when a handler is attached). With no consumers it is inert and the
@@ -375,8 +388,13 @@ defmodule PropertyDamage do
               on_failure,
               reporter,
               branching,
-              stutter_config
+              stutter_config,
+              seed_library
             )
+
+          # Auto-append a new exploration failure's seed to the working set
+          # (DR-023); deduplicated by seed, so a replayed halt is a no-op.
+          maybe_append_failure_seed(result, seed_library_path)
 
           # Emit telemetry for run stop
           {result_type, result_data} =
@@ -424,7 +442,8 @@ defmodule PropertyDamage do
          on_failure,
          reporter,
          branching,
-         stutter_config
+         stutter_config,
+         seed_library
        ) do
     # Seed the process RNG (consumed by execution-time randomness such as
     # stutter decisions; sequence generation is seeded explicitly per run
@@ -444,22 +463,44 @@ defmodule PropertyDamage do
 
     generator = Generator.generate_sequence(model, generator_opts)
 
-    run_loop(
-      generator,
-      model,
-      adapter,
-      max_runs,
-      seed,
-      injector_adapters,
-      adapter_config,
-      shrink,
-      shrinker_config,
-      on_failure,
-      reporter,
-      stutter_config,
-      0,
-      0
-    )
+    # Seed-library replay phase (DR-023): replay previously-failing seeds before
+    # random exploration, reusing the per-sequence machinery below. On a
+    # still-failing replay the run halts here; otherwise exploration proceeds.
+    replay_ctx = %{
+      generator: generator,
+      model: model,
+      adapter: adapter,
+      adapter_config: adapter_config,
+      injector_adapters: injector_adapters,
+      shrink: shrink,
+      shrinker_config: shrinker_config,
+      on_failure: on_failure,
+      reporter: reporter,
+      stutter_config: stutter_config
+    }
+
+    case replay_phase(seed_library, replay_ctx) do
+      {:halt, failure} ->
+        {:error, failure}
+
+      :proceed ->
+        run_loop(
+          generator,
+          model,
+          adapter,
+          max_runs,
+          seed,
+          injector_adapters,
+          adapter_config,
+          shrink,
+          shrinker_config,
+          on_failure,
+          reporter,
+          stutter_config,
+          0,
+          0
+        )
+    end
   end
 
   defp run_loop(
@@ -639,6 +680,315 @@ defmodule PropertyDamage do
         adapter.teardown(%{})
       end
     end
+  end
+
+  # ============================================================================
+  # Seed Library Replay Phase (DR-023)
+  # ============================================================================
+
+  # Resolve the `seed_library:` option into the replay config map (or nil when
+  # disabled). Default-off: only an explicit `true`/path enables it.
+  defp build_seed_library_config(opts, verbose) do
+    case resolve_seed_library_path(opts[:seed_library]) do
+      nil -> nil
+      path -> %{path: path, prune_after: opts[:seed_library_prune_after], verbose: verbose}
+    end
+  end
+
+  defp resolve_seed_library_path(false), do: nil
+  defp resolve_seed_library_path(nil), do: nil
+  defp resolve_seed_library_path(true), do: SeedLibrary.default_file()
+  defp resolve_seed_library_path(path) when is_binary(path), do: path
+
+  # Replay previously-failing seeds before random exploration. Returns
+  # `:proceed` to run exploration, or `{:halt, failure}` to stop with that
+  # failure (a shrunk `FailureReport` for a still-failing seed, or a setup-error
+  # map mirroring `run_loop`'s contract).
+  defp replay_phase(nil, _ctx), do: :proceed
+
+  defp replay_phase(%{path: path, prune_after: k, verbose: verbose}, ctx) do
+    library = load_for_replay(path)
+
+    case library.entries do
+      [] ->
+        :proceed
+
+      entries ->
+        print_replay_banner(path, length(entries), k)
+
+        Reporter.emit(ctx.reporter, fn ->
+          %ReplayUpdate{phase: :start, file: path, seed_count: length(entries), prune_after: k}
+        end)
+
+        finish_replay(replay_entries(entries, library, ctx, k, verbose), path, k, ctx.reporter)
+    end
+  end
+
+  defp finish_replay({:setup_each_failed, reason}, _path, _k, _reporter) do
+    {:halt, %{setup_each_failed: reason, phase: :seed_library_replay}}
+  end
+
+  defp finish_replay({:ok, library, results, rep_report}, path, k, reporter) do
+    {pruned_library, pruned_count} = SeedLibrary.prune(library, k)
+    save_replay_library(pruned_library, path)
+
+    passed = Enum.count(results, fn {_seed, outcome} -> outcome in [:pass, :prune] end)
+    still_failing = Enum.count(results, fn {_seed, outcome} -> outcome == :fail end)
+    replayed = length(results)
+    halted? = rep_report != nil
+
+    Reporter.emit(reporter, fn ->
+      %ReplayUpdate{
+        phase: :summary,
+        file: path,
+        replayed: replayed,
+        passed: passed,
+        pruned: pruned_count,
+        still_failing: still_failing,
+        halted?: halted?
+      }
+    end)
+
+    if halted? do
+      print_replay_halt_summary(path, replayed, passed, pruned_count, still_failing)
+      {:halt, rep_report}
+    else
+      :proceed
+    end
+  end
+
+  # Replay every entry once (most-recently-discovered first). The first failing
+  # seed is shrunk into a representative report (one shrink on a red run);
+  # subsequent failing seeds get a verdict only. Streaks are updated as we go.
+  defp replay_entries(entries, library, ctx, k, verbose) do
+    init = {library, [], nil}
+
+    outcome =
+      Enum.reduce_while(entries, init, fn entry, {lib, results, rep} ->
+        replay_entry(entry.seed, lib, results, rep, ctx, k, verbose)
+      end)
+
+    case outcome do
+      {:setup_each_failed, _reason} = err -> err
+      {lib, results, rep} -> {:ok, lib, Enum.reverse(results), rep}
+    end
+  end
+
+  defp replay_entry(seed, lib, results, rep, ctx, k, verbose) do
+    build_rep? = is_nil(rep)
+
+    execution =
+      with_sequence_execution(seed, ctx, fn sequence, exec_result, event_queue ->
+        replay_outcome(sequence, exec_result, event_queue, seed, ctx, build_rep?)
+      end)
+
+    case execution do
+      {:setup_each_failed, _reason} = err ->
+        {:halt, err}
+
+      {:pass} ->
+        lib2 = SeedLibrary.record_run(lib, seed, failed: false)
+        outcome = pass_outcome(lib2, seed, k)
+        emit_and_print_seed(ctx.reporter, seed, outcome, verbose)
+        {:cont, {lib2, [{seed, outcome} | results], rep}}
+
+      {:fail, refresh, maybe_report} ->
+        lib2 = SeedLibrary.record_run(lib, seed, [failed: true] ++ refresh)
+        emit_and_print_seed(ctx.reporter, seed, :fail, verbose)
+        {:cont, {lib2, [{seed, :fail} | results], rep || maybe_report}}
+    end
+  end
+
+  # Classify one replay execution. On failure (and when this is the
+  # representative), shrink into a full report via the shared `handle_failure`
+  # while the event queue is still alive.
+  defp replay_outcome(_sequence, %{success: true}, _event_queue, _seed, _ctx, _build_rep?) do
+    {:pass}
+  end
+
+  defp replay_outcome(sequence, exec_result, event_queue, seed, ctx, build_rep?) do
+    {failure_type, check_name} = FailureReport.classify_reason(exec_result.failure_reason)
+
+    # Refresh descriptive metadata from the new failure. Keep the prior
+    # failure_type if the reason did not classify (nil); check_name is
+    # legitimately nil for many failure types, so it is refreshed as-is.
+    refresh =
+      [check_name: check_name] ++
+        if(failure_type, do: [failure_type: failure_type], else: [])
+
+    report =
+      if build_rep? do
+        {:error, report} =
+          handle_failure(
+            sequence,
+            exec_result,
+            ctx.model,
+            ctx.adapter,
+            ctx.adapter_config,
+            event_queue,
+            ctx.shrink,
+            ctx.shrinker_config,
+            ctx.on_failure,
+            ctx.reporter,
+            seed,
+            0
+          )
+
+        report
+      end
+
+    {:fail, refresh, report}
+  end
+
+  defp pass_outcome(library, seed, k) do
+    entry = Enum.find(library.entries, &(&1.seed == seed))
+    if entry && entry.consecutive_passes >= k, do: :prune, else: :pass
+  end
+
+  # Drive one sequence through the standard per-sequence lifecycle (setup_each →
+  # event queue + injectors → Executor.run → teardown), invoking `fun` with the
+  # live event queue. Mirrors `run_loop`'s body for a single run-0 derivation.
+  defp with_sequence_execution(seed, ctx, fun) do
+    sequence = generate_one(ctx.generator, seed)
+
+    setup_each_result =
+      if function_exported?(ctx.model, :setup_each, 1) do
+        ctx.model.setup_each(%{adapter_config: ctx.adapter_config, run_number: 0})
+      else
+        :ok
+      end
+
+    case setup_each_result do
+      :ok ->
+        {:ok, event_queue} = EventQueue.start_link()
+        setup_injectors(ctx.injector_adapters, event_queue)
+
+        try do
+          {:ok, result} =
+            Executor.run(sequence, ctx.model, ctx.adapter,
+              adapter_config: ctx.adapter_config,
+              event_queue: event_queue,
+              stutter_config: ctx.stutter_config
+            )
+
+          fun.(sequence, result, event_queue)
+        after
+          teardown_injectors(ctx.injector_adapters)
+          EventQueue.stop(event_queue)
+
+          if function_exported?(ctx.model, :teardown_each, 1) do
+            ctx.model.teardown_each(%{})
+          end
+        end
+
+      {:error, reason} ->
+        {:setup_each_failed, reason}
+    end
+  end
+
+  # Load tolerantly: the working set is non-authoritative, so a missing or
+  # unreadable file simply means "replay nothing this time".
+  defp load_for_replay(path) do
+    case SeedLibrary.load(path) do
+      {:ok, library} ->
+        library
+
+      {:error, :enoent} ->
+        SeedLibrary.new()
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "PropertyDamage seed_library at #{path} could not be read " <>
+            "(#{inspect(reason)}); starting from an empty working set."
+        )
+
+        SeedLibrary.new()
+    end
+  end
+
+  defp save_replay_library(library, path) do
+    case SeedLibrary.save(library, path) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "PropertyDamage seed_library could not be saved to #{path}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  end
+
+  # Auto-append a new exploration failure's seed to the working set. The halt
+  # path returns a seed already present, so its add is a deduplicated no-op.
+  defp maybe_append_failure_seed(_result, nil), do: :ok
+
+  defp maybe_append_failure_seed({:error, %FailureReport{} = report}, path)
+       when is_binary(path) do
+    library = load_for_replay(path)
+
+    case SeedLibrary.add(library, report, tags: [:auto_detected]) do
+      {:ok, updated} -> save_replay_library(updated, path)
+      {:error, {:duplicate_seed, _}} -> :ok
+    end
+  end
+
+  defp maybe_append_failure_seed(_result, _path), do: :ok
+
+  defp emit_and_print_seed(reporter, seed, outcome, verbose) do
+    Reporter.emit(reporter, fn -> %ReplayUpdate{phase: :seed, seed: seed, outcome: outcome} end)
+    if verbose, do: print_replay_seed_line(seed, outcome)
+    :ok
+  end
+
+  # Console output. The banner and halt summary print unconditionally when the
+  # library is enabled (DR-023); per-seed lines print only under `verbose:`.
+  defp print_replay_banner(path, count, k) do
+    IO.puts("")
+    IO.puts(String.duplicate("=", 60))
+    IO.puts("  Seed Library Replay (DR-023)")
+    IO.puts(String.duplicate("=", 60))
+    IO.puts("")
+    IO.puts("  Replaying #{count} previously-failing seed(s) from #{path}")
+    IO.puts("  before random exploration, because they failed before.")
+    IO.puts("  A seed is dropped after #{k} consecutive passing replays.")
+    IO.puts("  Disable with: seed_library: false")
+    IO.puts("")
+    IO.puts(String.duplicate("-", 60))
+    :ok
+  end
+
+  defp print_replay_seed_line(seed, outcome) do
+    label =
+      case outcome do
+        :pass -> "pass"
+        :prune -> "pass (pruned after reaching the prune threshold)"
+        :fail -> "FAIL"
+      end
+
+    IO.puts("  [replay] seed #{seed}: #{label}")
+    :ok
+  end
+
+  defp print_replay_halt_summary(path, replayed, passed, pruned, still_failing) do
+    IO.puts("")
+    IO.puts(String.duplicate("-", 60))
+    IO.puts("  Seed Library Replay halted exploration")
+    IO.puts("")
+    IO.puts("  Replayed:      #{replayed}")
+    IO.puts("  Passed:        #{passed}")
+    IO.puts("  Pruned:        #{pruned}")
+    IO.puts("  Still failing: #{still_failing}")
+    IO.puts("")
+    IO.puts("  Random exploration was skipped because seeds still fail.")
+    IO.puts("  Fix them (or remove them from #{path}) and re-run.")
+    IO.puts(String.duplicate("-", 60))
+    :ok
   end
 
   defp handle_failure(

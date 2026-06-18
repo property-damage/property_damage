@@ -64,38 +64,51 @@ The system SHALL include version metadata in persisted files and warn when loadi
 
 ### Requirement: Seed Library
 
-The system SHALL maintain a collection of interesting seeds with metadata for regression testing and sharing.
+The system SHALL maintain an ephemeral, self-pruning working set of recently-failing seeds that `PropertyDamage.run/1` replays before random exploration (DR-023). The library is not a durable regression corpus: a seed reproduces its sequence only while the model's generators are byte-stable, so durable regressions are the Export subsystem's responsibility. Persistence is a plain JSON file via `save`/`load`; there is no export/import sharing format.
 
 #### Scenario: Add a seed to the library
 
 - **WHEN** a failure is added to the seed library
-- **THEN** an entry SHALL be created with the seed value, model module name, failure type, check name, user-provided tags, discovery timestamp, status `:failing`, and initial run/fail counts
+- **THEN** an entry SHALL be created with the seed value, model module name, failure type, check name, user-provided tags, discovery timestamp, and an initial `consecutive_passes` streak of 0
+- **AND** the `failure_type`, `check_name`, and captured `dependency_versions` SHALL be inert descriptive metadata that participate in no verdict logic
 
 #### Scenario: Seed tagging
 
 - **WHEN** a seed is added with tags (e.g., `:race_condition`, `:edge_case`, `:currency`)
-- **THEN** those tags SHALL be stored with the entry and be available for filtering
+- **THEN** those tags SHALL be stored with the entry
 
-#### Scenario: Seed filtering
+#### Scenario: Streak tracking on replay
 
-- **WHEN** the library is queried with tag filters
-- **THEN** only entries matching the specified tags SHALL be returned
+- **WHEN** a library seed is replayed with a binary pass/fail verdict (signatures are not compared)
+- **THEN** a passing replay SHALL increment the entry's `consecutive_passes` streak and update `last_run`
+- **AND** a failing replay SHALL reset the streak to 0, refresh the entry's descriptive `failure_type`/`check_name` from the new report, and update `last_run`
 
-#### Scenario: Seed status tracking
+#### Scenario: Self-pruning after consecutive passes
 
-- **WHEN** a library seed is re-run
-- **THEN** the system SHALL update the entry's `last_run` timestamp, `run_count`, `fail_count`, and `status` (`:failing`, `:fixed`, or `:flaky`)
+- **WHEN** an entry's `consecutive_passes` streak reaches the prune threshold `K` (default 3, configurable via the `seed_library_prune_after` run option)
+- **THEN** the entry SHALL be removed from the library after the replay pass
+- **AND** a flaky seed (whose streak keeps resetting) SHALL self-retain, while a fixed or no-longer-reproducing seed SHALL age out
 
-#### Scenario: Library export and import
+#### Scenario: Atomic persistence
 
-- **WHEN** a seed library is exported
-- **THEN** the system SHALL write a JSON file containing the library version and all entries
-- **AND** the file SHALL be importable on another machine
+- **WHEN** the library is saved
+- **THEN** the system SHALL write to a temporary file in the same directory and rename it over the destination, so a concurrent reader never observes a partially-written file
+- **AND** the working set SHALL be best-effort and non-authoritative (concurrent writers are last-writer-wins; a lost append is harmless)
+
+#### Scenario: Tolerant loading
+
+- **WHEN** a library file written by an older version is loaded
+- **THEN** the system SHALL tolerate missing fields, dropping the obsolete `status`/`run_count`/`fail_count` and assuming a fresh `consecutive_passes` streak of 0
 
 #### Scenario: Integration with PropertyDamage.run
 
-- **WHEN** a seed library path is provided to `PropertyDamage.run`
-- **THEN** the system SHALL run all `:failing` seeds from the library first, update seed statuses based on results, and then continue with random seed exploration
+- **WHEN** `seed_library:` is enabled on `PropertyDamage.run/1` (`true` for the default file, or a path) and the library is non-empty
+- **THEN** the system SHALL replay every library seed (most-recently-discovered first) before random exploration, updating streaks and pruning as above, without consuming `max_runs`
+- **AND** if any replay still fails, the system SHALL skip random exploration and halt, returning a shrunk `FailureReport` for a representative still-failing seed
+- **AND** if all replays pass, random exploration SHALL proceed
+- **AND** a new failure discovered during exploration SHALL be appended to the same file, deduplicated by seed
+- **WHEN** `seed_library:` is `false` (default)
+- **THEN** the system SHALL neither read nor write any seed library file
 
 ### Requirement: Regression Test Management
 

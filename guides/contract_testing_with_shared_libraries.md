@@ -448,4 +448,4 @@ end
 
 5. **Use load! in CI**: Strict loading catches version mismatches early in the CI pipeline.
 
-6. **Keep seed libraries in version control**: Track `seeds.json` to share known-interesting test cases with the team.
+6. **Export durable regressions, don't commit seed libraries**: The seed library is an ephemeral, self-pruning replay working set (seeds only reproduce while generators are byte-stable). To keep a regression, export the failure to an ExUnit test, which freezes the concrete shrunk sequence and survives generator changes.

@@ -76,7 +76,7 @@ defmodule PropertyDamage.Regression do
           description: String.t() | nil,
           dedup: boolean(),
           dedup_threshold: float(),
-          dedup_source: :failures | :library | :both,
+          dedup_source: :failures,
           verbose: boolean(),
           adapter: module() | nil,
           base_url: String.t() | nil
@@ -103,7 +103,8 @@ defmodule PropertyDamage.Regression do
   - `:description` - Optional description for seed library entries
   - `:dedup` - Enable deduplication (default: false)
   - `:dedup_threshold` - Similarity threshold for dedup (default: 0.90)
-  - `:dedup_source` - Where to check for duplicates: `:failures`, `:library`, or `:both`
+  - `:dedup_source` - Where to check for duplicates. Only `:failures` (saved
+    failure files) is supported.
   - `:verbose` - Print actions taken (default: false)
   - `:adapter` - Adapter module for script generation (required for generate_tests with scripts)
   - `:base_url` - Base URL for script generation
@@ -303,16 +304,13 @@ defmodule PropertyDamage.Regression do
   ## Options
 
   - `:dedup_threshold` - Similarity threshold (default: 0.90)
-  - `:dedup_source` - Where to check: `:failures`, `:library`, or `:both`
-  - `:save_failures` - Directory containing saved failures (for `:failures` source)
-  - `:seed_library` - Path to seed library (for `:library` source)
+  - `:save_failures` - Directory containing saved failures to compare against
   """
   @spec check_duplicate(FailureReport.t(), keyword()) :: {boolean(), term()}
   def check_duplicate(%FailureReport{} = failure, opts) do
     threshold = Keyword.get(opts, :dedup_threshold, @default_dedup_threshold)
-    source = Keyword.get(opts, :dedup_source, :both)
 
-    existing_failures = load_existing_failures(opts, source)
+    existing_failures = load_existing_failures(opts)
 
     case find_duplicate(failure, existing_failures, threshold) do
       nil ->
@@ -532,28 +530,14 @@ defmodule PropertyDamage.Regression do
     end
   end
 
-  defp load_existing_failures(opts, source) do
-    failures_from_dir =
-      if source in [:failures, :both] do
-        case Keyword.get(opts, :save_failures) do
-          nil -> []
-          dir -> load_failures_from_directory(dir)
-        end
-      else
-        []
-      end
-
-    failures_from_library =
-      if source in [:library, :both] do
-        case Keyword.get(opts, :seed_library) do
-          nil -> []
-          path -> load_failures_from_library(path, opts)
-        end
-      else
-        []
-      end
-
-    failures_from_dir ++ failures_from_library
+  # Dedup compares against saved failure files only. A seed library entry stores
+  # just a seed, not a comparable failure signature, so it is not a dedup source
+  # (DR-023); durable comparison material lives in saved `.pd` files / exports.
+  defp load_existing_failures(opts) do
+    case Keyword.get(opts, :save_failures) do
+      nil -> []
+      dir -> load_failures_from_directory(dir)
+    end
   end
 
   defp load_failures_from_directory(directory) do
@@ -565,43 +549,6 @@ defmodule PropertyDamage.Regression do
     |> Enum.map(&Persistence.load/1)
     |> Enum.filter(&match?({:ok, _}, &1))
     |> Enum.map(fn {:ok, f} -> f end)
-  end
-
-  defp load_failures_from_library(path, opts) do
-    # For library-based dedup, we need to run the seeds to get failure reports
-    # This is expensive, so we only check seeds, not full similarity
-    # For full similarity, use :failures source
-    case SeedLibrary.load(path) do
-      {:ok, library} ->
-        model = Keyword.get(opts, :model)
-        adapter = Keyword.get(opts, :adapter)
-
-        if model && adapter do
-          # Try to replay seeds to get failure reports
-          library
-          |> SeedLibrary.seed_values(status: :failing)
-          |> Enum.take(20)
-          |> Enum.map(fn seed ->
-            case PropertyDamage.run(
-                   model: model,
-                   adapter: adapter,
-                   seed: seed,
-                   max_runs: 1,
-                   shrink: false
-                 ) do
-              {:error, failure} -> failure
-              _ -> nil
-            end
-          end)
-          |> Enum.reject(&is_nil/1)
-        else
-          # Without model/adapter, we can't replay - return empty
-          []
-        end
-
-      {:error, _} ->
-        []
-    end
   end
 
   defp print_summary(results, failure) do

@@ -269,6 +269,23 @@ defmodule PropertyDamage.RegressionTest do
     end
 
     @tag :tmp_dir
+    test "dedup_source: :failures compares against saved failure files", %{tmp_dir: tmp_dir} do
+      failure1 = make_failure(12_345)
+      {:ok, _path} = PropertyDamage.Persistence.save(failure1, tmp_dir)
+
+      failure2 = make_failure(12_346)
+
+      {is_dup, _reason} =
+        Regression.check_duplicate(failure2,
+          save_failures: tmp_dir,
+          dedup_source: :failures,
+          dedup_threshold: 0.5
+        )
+
+      assert is_dup == true
+    end
+
+    @tag :tmp_dir
     test "respects dedup_threshold", %{tmp_dir: tmp_dir} do
       failure1 = make_failure(12_345, failure_type: :check_failed, check_name: :check_a)
       {:ok, _path} = PropertyDamage.Persistence.save(failure1, tmp_dir)

@@ -24,6 +24,7 @@ defmodule PropertyDamage.Progress do
     LoadUpdate,
     MutationResult,
     MutationUpdate,
+    ReplayUpdate,
     RunResult,
     RunUpdate
   }
@@ -34,6 +35,7 @@ defmodule PropertyDamage.Progress do
   @type payload ::
           RunUpdate.t()
           | RunResult.t()
+          | ReplayUpdate.t()
           | LoadUpdate.t()
           | LoadResult.t()
           | MutationUpdate.t()
@@ -88,6 +90,7 @@ defmodule PropertyDamage.Progress do
   # The single discriminator-derivation site. New operations add a clause here.
   @spec classify(payload()) :: {operation(), kind()}
   defp classify(%RunUpdate{}), do: {:test_run, :progress}
+  defp classify(%ReplayUpdate{}), do: {:test_run, :progress}
   defp classify(%RunResult{}), do: {:test_run, :result}
   defp classify(%LoadUpdate{}), do: {:load_test, :progress}
   defp classify(%LoadResult{}), do: {:load_test, :result}

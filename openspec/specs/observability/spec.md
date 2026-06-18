@@ -136,6 +136,13 @@ The system SHALL report progress for long-running operations (`PropertyDamage.ru
 - **WHEN** an `on_progress:` function is provided
 - **THEN** the system SHALL install it as an additional consumer, receiving each intermediate `%PropertyDamage.Progress{}` (`data: *Update{}`) and finally the terminal result (`data: *Result{}`)
 
+#### Scenario: Seed library replay reporting
+
+- **WHEN** the seed-library replay phase runs (`seed_library:` enabled, non-empty library)
+- **THEN** the system SHALL print a start banner and, on halt, a summary to stdout unconditionally (not gated on `verbose:`), each stating what is happening, why, the prune threshold, and how to disable the library
+- **AND** per-seed pass/fail/prune lines SHALL print only under `verbose:`
+- **AND** the banner, per-seed updates, and summary SHALL also be emitted as `ReplayUpdate` progress payloads through the unified reporter (classified under the `:test_run` operation), so `on_progress:` and telemetry consumers observe them too
+
 ### Requirement: Sequence Diagram Generation
 
 The system SHALL generate visual sequence diagrams from test executions in Mermaid, PlantUML, and WebSequence formats.

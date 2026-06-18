@@ -271,6 +271,21 @@ defmodule PropertyDamage.FailureReport do
   end
 
   @doc """
+  Classify a raw `failure_reason` into its `{failure_type, check_name}`.
+
+  Exposes the same parsing `new/1` uses, for callers (e.g. the seed-library
+  replay phase) that hold a raw executor `failure_reason` and only need the
+  descriptive type/check, without building a full report.
+  """
+  @spec classify_reason(term()) :: {failure_type() | nil, atom() | nil}
+  def classify_reason(failure_reason) do
+    {failure_type, check_name, _msg, _idem, _poll, _branch} =
+      parse_failure_reason(failure_reason)
+
+    {failure_type, check_name}
+  end
+
+  @doc """
   Get a summary string for the failure type.
   """
   @spec failure_type_summary(t()) :: String.t()

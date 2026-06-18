@@ -1,52 +1,66 @@
 defmodule PropertyDamage.SeedLibrary do
   @moduledoc """
-  Manage a collection of interesting seeds for regression testing and sharing.
+  An **ephemeral, self-pruning working set of recently-failing seeds** that
+  `PropertyDamage.run/1` replays before random exploration (DR-023).
 
-  The Seed Library tracks seeds that have found bugs, allowing you to:
+  Its sole job is to address the probabilistic nature of property-based testing:
+  a path that already produced a failure is replayed deterministically at the
+  start of a run, so while you fix the bug you do not have to wait for random
+  generation to rediscover it.
 
-  - Run known-interesting seeds first before random exploration
-  - Share discovered seeds across team members
-  - Build a regression suite that catches known bug patterns
-  - Track which seeds have been fixed vs still failing
+  This is **not** a durable regression corpus. A seed reproduces its command
+  sequence only while the model's generators are byte-stable: changing a
+  generator, weight, `when:` predicate, or the command set makes a stored seed
+  replay a *different* sequence. A seed is therefore a fragile, version-local
+  pointer, not a durable test of a behavior.
+
+  - **Durable regressions belong to the Export subsystem.** Exporting a failure
+    to an ExUnit test (`PropertyDamage.Export`) freezes the concrete shrunk
+    sequence, which survives generator changes. Use that for anything you want
+    to keep.
+  - **The library self-cleans.** Each entry tracks a `consecutive_passes`
+    streak; an entry is pruned once it reaches the configured threshold
+    (default 3). Genuinely-fixed seeds pass repeatedly and age out; flaky seeds
+    keep failing intermittently, reset their streak, and self-retain; seeds that
+    no longer reproduce anything (generator drift) also simply age out.
 
   ## Usage
 
-      # Add a seed when you find a bug
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
-      SeedLibrary.add(failure, tags: [:currency, :capture])
+  The library is wired entirely through `PropertyDamage.run/1`; you rarely touch
+  this module directly.
 
-      # Run all library seeds first, then continue with random
+      # Enable the working set (default file) — failing seeds are replayed first
+      # on the next run, and any new failure's seed is appended.
+      PropertyDamage.run(model: M, adapter: A, seed_library: true)
+
+      # Or an explicit file
       PropertyDamage.run(model: M, adapter: A, seed_library: "seeds.json")
 
-      # Export for CI/sharing
-      SeedLibrary.export("seeds.json")
+  See DR-023 for the full design.
 
   ## Seed Entry Structure
 
   Each entry contains:
   - `seed` - The random seed value
-  - `model` - Model module name (for filtering)
-  - `failure_type` - What kind of failure it found
-  - `check_name` - Which check failed (if applicable)
+  - `model` - Model module name (descriptive)
+  - `failure_type` - What kind of failure it last produced (descriptive)
+  - `check_name` - Which check last failed, if applicable (descriptive)
   - `tags` - User-provided categorization tags
   - `description` - Human-readable description
   - `discovered_at` - When the seed was added
-  - `last_run` - When the seed was last tested
-  - `status` - `:failing`, `:fixed`, `:flaky`
-  - `run_count` - How many times this seed has been run
-  - `fail_count` - How many times it has failed
+  - `last_run` - When the seed was last replayed
+  - `consecutive_passes` - Replays in a row without a failure; reset to 0 on any
+    failure, and the entry is pruned once it reaches the prune threshold
+  - `dependency_versions` - Dependency versions captured at discovery (descriptive)
 
-  ## Integration with PropertyDamage.run
-
-  When a seed library is provided, `PropertyDamage.run` will:
-
-  1. Run all `:failing` seeds from the library first
-  2. Update seed status based on results
-  3. Continue with random seed exploration
+  `failure_type`, `check_name`, and `dependency_versions` are inert descriptive
+  metadata: they appear in the console banner and in `stats/1`/`format/1` but
+  participate in no verdict logic.
   """
 
-  @library_version 1
+  @library_version 2
   @default_file "property_damage_seeds.json"
+  @default_prune_threshold 3
 
   @type seed_entry :: %{
           seed: integer(),
@@ -57,9 +71,7 @@ defmodule PropertyDamage.SeedLibrary do
           description: String.t() | nil,
           discovered_at: String.t(),
           last_run: String.t() | nil,
-          status: :failing | :fixed | :flaky | :unknown,
-          run_count: non_neg_integer(),
-          fail_count: non_neg_integer(),
+          consecutive_passes: non_neg_integer(),
           dependency_versions: %{atom() => String.t()}
         }
 
@@ -67,6 +79,19 @@ defmodule PropertyDamage.SeedLibrary do
           version: integer(),
           entries: [seed_entry()]
         }
+
+  @doc """
+  The default prune threshold (`K`): an entry is removed after this many
+  consecutive passing replays.
+  """
+  @spec default_prune_threshold() :: pos_integer()
+  def default_prune_threshold, do: @default_prune_threshold
+
+  @doc """
+  The default seed library filename.
+  """
+  @spec default_file() :: Path.t()
+  def default_file, do: @default_file
 
   @doc """
   Create a new empty seed library.
@@ -82,48 +107,38 @@ defmodule PropertyDamage.SeedLibrary do
   @doc """
   Add a seed from a failure report to the library.
 
+  Entries are prepended, so the library is ordered most-recently-discovered
+  first (the order in which `run/1` replays them).
+
   ## Options
 
   - `:tags` - List of categorization tags (e.g., `[:currency, :race_condition]`)
   - `:description` - Human-readable description of what this seed tests
 
-  ## Example
-
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
-      {:ok, library} = SeedLibrary.add(library, failure, tags: [:currency])
+  Duplicate seeds are rejected with `{:error, {:duplicate_seed, seed}}`.
   """
   @spec add(t(), PropertyDamage.FailureReport.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def add(library, %PropertyDamage.FailureReport{} = failure, opts \\ []) do
-    tags = Keyword.get(opts, :tags, [])
-    description = Keyword.get(opts, :description)
-
     entry = %{
       seed: failure.seed,
       model: inspect(failure.model),
       failure_type: failure.failure_type,
       check_name: failure.check_name,
-      tags: tags,
-      description: description,
-      discovered_at: DateTime.to_iso8601(DateTime.utc_now()),
+      tags: Keyword.get(opts, :tags, []),
+      description: Keyword.get(opts, :description),
+      discovered_at: now_iso8601(),
       last_run: nil,
-      status: :failing,
-      run_count: 0,
-      fail_count: 0,
+      consecutive_passes: 0,
       dependency_versions: PropertyDamage.Persistence.capture_dependency_versions(failure)
     }
 
-    # Check for duplicate seed
-    if Enum.any?(library.entries, &(&1.seed == failure.seed)) do
-      {:error, {:duplicate_seed, failure.seed}}
-    else
-      {:ok, %{library | entries: [entry | library.entries]}}
-    end
+    insert_unique(library, entry)
   end
 
   @doc """
   Add a seed directly (without a failure report).
 
-  Useful for importing seeds from external sources or manual entry.
+  Useful for manual entry. Duplicate seeds are rejected.
 
   ## Example
 
@@ -142,16 +157,18 @@ defmodule PropertyDamage.SeedLibrary do
       check_name: Keyword.get(opts, :check_name),
       tags: Keyword.get(opts, :tags, []),
       description: Keyword.get(opts, :description),
-      discovered_at: DateTime.to_iso8601(DateTime.utc_now()),
+      discovered_at: now_iso8601(),
       last_run: nil,
-      status: Keyword.get(opts, :status, :unknown),
-      run_count: 0,
-      fail_count: 0,
+      consecutive_passes: 0,
       dependency_versions: Keyword.get(opts, :dependency_versions, %{})
     }
 
-    if Enum.any?(library.entries, &(&1.seed == seed)) do
-      {:error, {:duplicate_seed, seed}}
+    insert_unique(library, entry)
+  end
+
+  defp insert_unique(library, entry) do
+    if Enum.any?(library.entries, &(&1.seed == entry.seed)) do
+      {:error, {:duplicate_seed, entry.seed}}
     else
       {:ok, %{library | entries: [entry | library.entries]}}
     end
@@ -169,39 +186,32 @@ defmodule PropertyDamage.SeedLibrary do
   end
 
   @doc """
-  Update a seed's status after a test run.
+  Record the result of replaying a seed, updating its `consecutive_passes`
+  streak (DR-023). The verdict is binary:
 
-  ## Example
+  - a **passing** replay increments the streak;
+  - a **failing** replay resets the streak to 0 and refreshes the entry's
+    descriptive `failure_type`/`check_name` from the new report (via the
+    `:failure_type`/`:check_name` options) so the description never goes stale.
 
-      # After running a seed
-      library = SeedLibrary.record_run(library, seed, failed: true)
+  Pruning of streaks that have reached the threshold is a separate step
+  (`prune/2`), applied after a full replay pass.
+
+  ## Options
+
+  - `:failed` - Whether the replay failed (default `false`)
+  - `:failure_type` - Refreshed failure type (used only when `failed: true`)
+  - `:check_name` - Refreshed check name (used only when `failed: true`)
   """
   @spec record_run(t(), integer(), keyword()) :: t()
   def record_run(library, seed, opts \\ []) do
     failed = Keyword.get(opts, :failed, false)
+    now = now_iso8601()
 
     entries =
       Enum.map(library.entries, fn entry ->
         if entry.seed == seed do
-          new_run_count = entry.run_count + 1
-          new_fail_count = if failed, do: entry.fail_count + 1, else: entry.fail_count
-
-          # Update status based on recent runs
-          new_status =
-            cond do
-              new_run_count < 3 -> entry.status
-              new_fail_count == 0 -> :fixed
-              new_fail_count == new_run_count -> :failing
-              true -> :flaky
-            end
-
-          %{
-            entry
-            | run_count: new_run_count,
-              fail_count: new_fail_count,
-              status: new_status,
-              last_run: DateTime.to_iso8601(DateTime.utc_now())
-          }
+          record_entry(entry, failed, opts, now)
         else
           entry
         end
@@ -210,73 +220,44 @@ defmodule PropertyDamage.SeedLibrary do
     %{library | entries: entries}
   end
 
-  @doc """
-  Get all seeds matching certain criteria.
+  defp record_entry(entry, false, _opts, now) do
+    %{entry | consecutive_passes: entry.consecutive_passes + 1, last_run: now}
+  end
 
-  ## Options
-
-  - `:status` - Filter by status (`:failing`, `:fixed`, `:flaky`)
-  - `:tags` - Filter by tags (entries must have ALL specified tags)
-  - `:model` - Filter by model name (string match)
-
-  ## Example
-
-      # Get all failing seeds
-      failing = SeedLibrary.get_seeds(library, status: :failing)
-
-      # Get currency-related seeds
-      currency_seeds = SeedLibrary.get_seeds(library, tags: [:currency])
-  """
-  @spec get_seeds(t(), keyword()) :: [seed_entry()]
-  def get_seeds(library, opts \\ []) do
-    status = Keyword.get(opts, :status)
-    tags = Keyword.get(opts, :tags, [])
-    model = Keyword.get(opts, :model)
-
-    library.entries
-    |> maybe_filter_status(status)
-    |> maybe_filter_tags(tags)
-    |> maybe_filter_model(model)
+  defp record_entry(entry, true, opts, now) do
+    %{
+      entry
+      | consecutive_passes: 0,
+        failure_type: Keyword.get(opts, :failure_type, entry.failure_type),
+        check_name: Keyword.get(opts, :check_name, entry.check_name),
+        last_run: now
+    }
   end
 
   @doc """
-  Get just the seed values (for passing to PropertyDamage.run).
+  Remove entries whose `consecutive_passes` streak has reached `k` (DR-023).
 
-  ## Example
-
-      seeds = SeedLibrary.seed_values(library, status: :failing)
-      # => [512902757, 123456789, ...]
+  Returns `{pruned_library, removed_count}`.
   """
-  @spec seed_values(t(), keyword()) :: [integer()]
-  def seed_values(library, opts \\ []) do
-    library
-    |> get_seeds(opts)
-    |> Enum.map(& &1.seed)
+  @spec prune(t(), pos_integer()) :: {t(), non_neg_integer()}
+  def prune(library, k \\ @default_prune_threshold) do
+    {kept, removed} = Enum.split_with(library.entries, &(&1.consecutive_passes < k))
+    {%{library | entries: kept}, length(removed)}
   end
 
   @doc """
   Load a seed library from a JSON file.
+
+  Tolerates libraries written by older versions: missing fields (including the
+  pre-DR-023 `status`/`run_count`/`fail_count` tri-state) are dropped and a
+  fresh `consecutive_passes` streak of 0 is assumed.
   """
   @spec load(Path.t()) :: {:ok, t()} | {:error, term()}
   def load(path \\ @default_file) do
     with {:ok, content} <- File.read(path),
          {:ok, data} <- Jason.decode(content, keys: :atoms) do
-      # Convert string status to atoms and handle dependency_versions
-      entries =
-        Enum.map(data.entries, fn entry ->
-          base = %{
-            entry
-            | status: to_status_atom(entry.status),
-              failure_type: to_atom_safe(entry.failure_type),
-              check_name: to_atom_safe(entry.check_name),
-              tags: Enum.map(entry.tags, &to_atom_safe/1)
-          }
-
-          # Handle dependency_versions field (may be missing in old libraries)
-          Map.put(base, :dependency_versions, atomize_dep_versions(entry[:dependency_versions]))
-        end)
-
-      {:ok, %{data | entries: entries}}
+      entries = Enum.map(data.entries, &load_entry/1)
+      {:ok, %{version: @library_version, entries: entries}}
     else
       # A missing default file just means no library has been created yet, so
       # start fresh. A missing *explicit* path is almost always a typo, so
@@ -286,77 +267,40 @@ defmodule PropertyDamage.SeedLibrary do
     end
   end
 
+  defp load_entry(entry) do
+    %{
+      seed: entry.seed,
+      model: entry[:model] || "unknown",
+      failure_type: to_atom_safe(entry[:failure_type]) || :unknown,
+      check_name: to_atom_safe(entry[:check_name]),
+      tags: Enum.map(entry[:tags] || [], &to_atom_safe/1),
+      description: entry[:description],
+      discovered_at: entry[:discovered_at],
+      last_run: entry[:last_run],
+      consecutive_passes: entry[:consecutive_passes] || 0,
+      dependency_versions: atomize_dep_versions(entry[:dependency_versions])
+    }
+  end
+
   @doc """
   Save a seed library to a JSON file.
+
+  The write is **atomic**: the JSON is written to a temporary file in the same
+  directory and then renamed over the destination, so a concurrent reader never
+  observes a partially-written file.
   """
   @spec save(t(), Path.t()) :: :ok | {:error, term()}
   def save(library, path \\ @default_file) do
     json = Jason.encode!(library, pretty: true)
-    File.write(path, json)
-  end
+    tmp = path <> ".tmp.#{System.unique_integer([:positive])}"
 
-  @doc """
-  Export library to a portable format (for sharing).
-
-  Unlike save/2, this includes only essential fields and uses strings
-  for module names to avoid atom table issues across systems.
-  """
-  @spec export(t(), Path.t()) :: :ok | {:error, term()}
-  def export(library, path) do
-    portable =
-      %{
-        version: @library_version,
-        exported_at: DateTime.to_iso8601(DateTime.utc_now()),
-        entries:
-          Enum.map(library.entries, fn e ->
-            %{
-              seed: e.seed,
-              model: e.model,
-              failure_type: to_string(e.failure_type),
-              check_name: e.check_name && to_string(e.check_name),
-              tags: Enum.map(e.tags, &to_string/1),
-              description: e.description,
-              status: to_string(e.status)
-            }
-          end)
-      }
-
-    json = Jason.encode!(portable, pretty: true)
-    File.write(path, json)
-  end
-
-  @doc """
-  Import seeds from an exported file.
-
-  Merges with existing library, skipping duplicates.
-  """
-  @spec import(t(), Path.t()) :: {:ok, t(), non_neg_integer()} | {:error, term()}
-  def import(library, path) do
-    with {:ok, content} <- File.read(path),
-         {:ok, data} <- Jason.decode(content, keys: :atoms) do
-      existing_seeds = MapSet.new(library.entries, & &1.seed)
-
-      new_entries =
-        data.entries
-        |> Enum.reject(&MapSet.member?(existing_seeds, &1.seed))
-        |> Enum.map(fn e ->
-          %{
-            seed: e.seed,
-            model: e.model,
-            failure_type: to_atom_safe(e.failure_type),
-            check_name: to_atom_safe(e.check_name),
-            tags: Enum.map(e.tags || [], &to_atom_safe/1),
-            description: e.description,
-            discovered_at: DateTime.to_iso8601(DateTime.utc_now()),
-            last_run: nil,
-            status: to_status_atom(e.status),
-            run_count: 0,
-            fail_count: 0,
-            dependency_versions: atomize_dep_versions(e[:dependency_versions] || %{})
-          }
-        end)
-
-      {:ok, %{library | entries: library.entries ++ new_entries}, length(new_entries)}
+    with :ok <- File.write(tmp, json),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
+      {:error, _reason} = error ->
+        _ = File.rm(tmp)
+        error
     end
   end
 
@@ -369,10 +313,6 @@ defmodule PropertyDamage.SeedLibrary do
 
     %{
       total: length(entries),
-      failing: Enum.count(entries, &(&1.status == :failing)),
-      fixed: Enum.count(entries, &(&1.status == :fixed)),
-      flaky: Enum.count(entries, &(&1.status == :flaky)),
-      unknown: Enum.count(entries, &(&1.status == :unknown)),
       by_failure_type: Enum.frequencies_by(entries, & &1.failure_type),
       by_model: Enum.frequencies_by(entries, & &1.model),
       tags: entries |> Enum.flat_map(& &1.tags) |> Enum.frequencies()
@@ -386,22 +326,14 @@ defmodule PropertyDamage.SeedLibrary do
   def format(library) do
     stats = stats(library)
 
-    header = """
-    Seed Library: #{stats.total} seeds
-    ├── Failing: #{stats.failing}
-    ├── Fixed: #{stats.fixed}
-    ├── Flaky: #{stats.flaky}
-    └── Unknown: #{stats.unknown}
-    """
+    header = "Seed Library: #{stats.total} seed(s) (ephemeral replay working set)\n"
 
     entries_str =
       library.entries
-      |> Enum.sort_by(& &1.discovered_at, :desc)
       |> Enum.take(10)
       |> Enum.map_join("\n", fn e ->
         tags_str = if e.tags != [], do: " [#{Enum.join(e.tags, ", ")}]", else: ""
-        status_icon = status_icon(e.status)
-        "  #{status_icon} #{e.seed} - #{e.failure_type}#{tags_str}"
+        "  #{e.seed} - #{e.failure_type}#{tags_str} (passes: #{e.consecutive_passes})"
       end)
 
     header <> "\nRecent entries:\n" <> entries_str
@@ -411,28 +343,7 @@ defmodule PropertyDamage.SeedLibrary do
   # Private Helpers
   # ============================================================================
 
-  defp maybe_filter_status(entries, nil), do: entries
-  defp maybe_filter_status(entries, status), do: Enum.filter(entries, &(&1.status == status))
-
-  defp maybe_filter_tags(entries, []), do: entries
-
-  defp maybe_filter_tags(entries, tags) do
-    tag_set = MapSet.new(tags)
-    Enum.filter(entries, fn e -> MapSet.subset?(tag_set, MapSet.new(e.tags)) end)
-  end
-
-  defp maybe_filter_model(entries, nil), do: entries
-
-  defp maybe_filter_model(entries, model) do
-    Enum.filter(entries, &String.contains?(&1.model, model))
-  end
-
-  defp to_status_atom("failing"), do: :failing
-  defp to_status_atom("fixed"), do: :fixed
-  defp to_status_atom("flaky"), do: :flaky
-  defp to_status_atom("unknown"), do: :unknown
-  defp to_status_atom(atom) when is_atom(atom), do: atom
-  defp to_status_atom(_), do: :unknown
+  defp now_iso8601, do: DateTime.to_iso8601(DateTime.utc_now())
 
   defp to_atom_safe(nil), do: nil
   defp to_atom_safe(atom) when is_atom(atom), do: atom
@@ -443,9 +354,4 @@ defmodule PropertyDamage.SeedLibrary do
   defp atomize_dep_versions(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {to_atom_safe(k), v} end)
   end
-
-  defp status_icon(:failing), do: "x"
-  defp status_icon(:fixed), do: "o"
-  defp status_icon(:flaky), do: "~"
-  defp status_icon(_), do: "?"
 end
