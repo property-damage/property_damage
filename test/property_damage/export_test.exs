@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ExportTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Export, FailureReport, Placeholder, Ref, Sequence}
+  alias PropertyDamage.{Export, FailureReport, Placeholder, Sequence}
   alias PropertyDamage.Export.HTTPSpec
 
   # ============================================================================
@@ -117,12 +117,10 @@ defmodule PropertyDamage.ExportTest do
   end
 
   defp create_test_failure_report do
-    account_ref = Ref.symbolic(label: "account")
-
     commands = [
       %CreateAccount{currency: :USD},
-      %CreditAccount{account_ref: account_ref, amount: 100},
-      %DebitAccount{account_ref: account_ref, amount: 200}
+      %CreditAccount{account_ref: "acc_0", amount: 100},
+      %DebitAccount{account_ref: "acc_0", amount: 200}
     ]
 
     %FailureReport{
@@ -245,20 +243,6 @@ defmodule PropertyDamage.ExportTest do
       assert script =~ "FAILURE POINT"
     end
 
-    test "references ref variables in consuming commands" do
-      failure = create_test_failure_report()
-
-      script =
-        Export.to_script(failure, :elixir,
-          base_url: "http://localhost:4000",
-          adapter: TestHTTPAdapter
-        )
-
-      # Consumers reference the ref variable. Binding server-generated values is
-      # driven by the modern external() path (see the placeholder wiring tests);
-      # the deprecated %Ref{} bind heuristic was removed.
-      assert script =~ ~s|refs["account"]|
-    end
   end
 
   describe "to_script/3 - python" do
@@ -350,14 +334,14 @@ defmodule PropertyDamage.ExportTest do
     end
   end
 
-  describe "to_script/3 - python refs in collections" do
-    test "renders a Ref nested in a list body field instead of raising" do
-      ref = Ref.symbolic(label: "account")
-      commands = [%BatchCredit{items: [ref]}]
+  describe "to_script/3 - python placeholders in collections" do
+    test "renders a placeholder nested in a list body field instead of raising" do
+      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
 
       report = %FailureReport{
         seed: 1,
-        failed_at_index: 0,
+        failed_at_index: 1,
         failure_type: :check_failed,
         shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
         model: TestModelStub,
@@ -371,9 +355,9 @@ defmodule PropertyDamage.ExportTest do
           adapter: TestHTTPAdapter
         )
 
-      # The nested ref is rendered as a refs[...] lookup inside a list literal,
-      # not crashed on by Jason.encode!.
-      assert script =~ ~s(refs["account"])
+      # The nested placeholder is rendered as a refs lookup inside the list
+      # literal (in the request body), not crashed on by Jason.encode!.
+      assert script =~ ~s(refs["provisioned_id_0"])
     end
   end
 
@@ -436,8 +420,6 @@ defmodule PropertyDamage.ExportTest do
     end
 
     test "a command with a non-literal field (PID) does not emit invalid #PID<> source" do
-      account_ref = Ref.symbolic(label: "account")
-
       commands = [%PidCommand{pid: self(), name: "worker"}]
 
       failure = %FailureReport{
@@ -451,7 +433,6 @@ defmodule PropertyDamage.ExportTest do
         adapter: TestHTTPAdapter
       }
 
-      _ = account_ref
       code = Export.to_exunit(failure, module_name: PDExportPidCheck)
 
       refute code =~ "#PID"

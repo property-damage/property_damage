@@ -10,7 +10,7 @@ defmodule PropertyDamage.Export.Common do
   """
 
   alias PropertyDamage.Export.HTTPSpec
-  alias PropertyDamage.{FailureReport, Placeholder, Ref, Sequence}
+  alias PropertyDamage.{FailureReport, Placeholder, Sequence}
 
   # ============================================================================
   # Command Extraction
@@ -65,7 +65,7 @@ defmodule PropertyDamage.Export.Common do
   end
 
   # ============================================================================
-  # Ref Extraction
+  # Command Extraction
   # ============================================================================
 
   @doc """
@@ -223,16 +223,10 @@ defmodule PropertyDamage.Export.Common do
   @doc """
   Serializes a value for use in scripts.
 
-  Handles refs, atoms, strings, numbers, lists, and maps.
+  Handles atoms, strings, numbers, lists, and maps.
   """
   @spec serialize_value(term(), keyword()) :: String.t()
   def serialize_value(value, opts \\ [])
-
-  def serialize_value(%Ref{} = ref, opts) do
-    format = Keyword.get(opts, :format, :elixir)
-    ref_var = Keyword.get(opts, :ref_var, "refs")
-    serialize_ref(ref, format, ref_var)
-  end
 
   def serialize_value(value, opts) when is_atom(value) do
     format = Keyword.get(opts, :format, :elixir)
@@ -299,25 +293,6 @@ defmodule PropertyDamage.Export.Common do
   defp serialize_map_key(key) when is_atom(key), do: to_string(key)
   defp serialize_map_key(key), do: inspect(key)
 
-  defp serialize_ref(%Ref{label: label}, :elixir, ref_var) do
-    "#{ref_var}[#{inspect(sanitize_label(label))}]"
-  end
-
-  defp serialize_ref(%Ref{label: label}, :python, ref_var) do
-    "#{ref_var}[#{inspect(sanitize_label(label))}]"
-  end
-
-  defp serialize_ref(%Ref{label: label}, :bash, ref_var) do
-    # Bash uses uppercase var names typically
-    var_name = String.upcase(ref_var)
-    "${#{var_name}_#{sanitize_label(label)}}"
-  end
-
-  defp serialize_ref(%Ref{label: label}, :json, _ref_var) do
-    # For JSON, we just use a placeholder that will be substituted
-    "{{REF_#{sanitize_label(label)}}}"
-  end
-
   defp sanitize_label(nil), do: "unknown"
 
   defp sanitize_label(label) when is_binary(label) do
@@ -375,7 +350,6 @@ defmodule PropertyDamage.Export.Common do
     "external(#{mod |> Module.split() |> List.last()}.#{Enum.join(path, ".")})"
   end
 
-  defp format_comment_value(%Ref{label: label}), do: "ref(#{label || "?"})"
   defp format_comment_value(value) when is_binary(value), do: inspect(value)
   defp format_comment_value(value) when is_atom(value), do: ":#{value}"
   defp format_comment_value(value), do: inspect(value, limit: 3)

@@ -163,13 +163,6 @@ defmodule PropertyDamage.Export.ExUnit do
     end
   end
 
-  defp format_field_value(%PropertyDamage.Ref{} = ref) do
-    # Serialize the ref - use inspect to get a valid Elixir representation
-    # The ref field is an Erlang reference which can be represented but not recreated
-    # For regression tests, we'll rely on the seed to regenerate the same refs
-    "%PropertyDamage.Ref{ref: make_ref(), label: #{inspect(ref.label)}, resolved: PropertyDamage.Ref.Unresolved}"
-  end
-
   # Note: is_atom also covers booleans and nil, which inspect correctly
   defp format_field_value(value) when is_atom(value), do: inspect(value)
   defp format_field_value(value) when is_binary(value), do: inspect(value)

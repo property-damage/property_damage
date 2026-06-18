@@ -10,7 +10,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
   """
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Placeholder, Ref}
+  alias PropertyDamage.{FailureReport, Placeholder}
 
   @doc """
   Generates an Elixir script from a failure report.
@@ -185,10 +185,6 @@ defmodule PropertyDamage.Export.Script.Elixir do
     "refs[#{inspect(Map.fetch!(var_map, ph.id))}]"
   end
 
-  defp generate_value_interpolation(%Ref{label: label}, _var_map) do
-    "refs[#{inspect(sanitize_label(label))}]"
-  end
-
   defp generate_value_interpolation(value, _var_map) do
     inspect(value)
   end
@@ -237,10 +233,6 @@ defmodule PropertyDamage.Export.Script.Elixir do
     "refs[#{inspect(Map.fetch!(var_map, ph.id))}]"
   end
 
-  defp format_body_value(%Ref{label: label}, _cmd_index, _var_map) do
-    "refs[#{inspect(sanitize_label(label))}]"
-  end
-
   defp format_body_value(value, _cmd_index, _var_map) do
     inspect(value)
   end
@@ -278,16 +270,6 @@ defmodule PropertyDamage.Export.Script.Elixir do
 
     "[#{inner}]"
   end
-
-  defp sanitize_label(nil), do: "unknown"
-
-  defp sanitize_label(label) when is_binary(label) do
-    label
-    |> String.replace(~r/[^a-zA-Z0-9_]/, "_")
-    |> String.downcase()
-  end
-
-  defp sanitize_label(label), do: sanitize_label(to_string(label))
 
   defp generate_footer(metadata) do
     """

@@ -10,7 +10,7 @@ defmodule PropertyDamage.Export.Script.Curl do
   """
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Placeholder, Ref}
+  alias PropertyDamage.{FailureReport, Placeholder}
 
   @doc """
   Generates a Bash/curl script from a failure report.
@@ -187,7 +187,7 @@ defmodule PropertyDamage.Export.Script.Curl do
   end
 
   # ============================================================================
-  # Ref Handling
+  # Placeholder Handling
   # ============================================================================
 
   defp resolve_path_with_refs(%HTTPSpec{path: path, path_params: params}, var_map) do
@@ -201,7 +201,6 @@ defmodule PropertyDamage.Export.Script.Curl do
     "$" <> Map.fetch!(var_map, ph.id)
   end
 
-  defp resolve_value_for_bash(%Ref{label: label}, _var_map), do: "$REF_#{sanitize_label(label)}"
   defp resolve_value_for_bash(value, _var_map), do: to_string(value)
 
   defp resolve_body_with_refs(body, command, var_map) do
@@ -215,15 +214,13 @@ defmodule PropertyDamage.Export.Script.Curl do
 
     json = Jason.encode!(resolved)
 
-    # Replace placeholder/ref markers with bash variable references. Markers use
-    # the variable name (alphanumeric + underscore), so match that, not digits.
+    # Replace placeholder markers with bash variable references. Markers use the
+    # variable name (alphanumeric + underscore), so match that, not digits.
     json
     |> then(&Regex.replace(~r/"__PH_([a-z0-9_]+)__"/, &1, fn _, var -> "$#{var}" end))
-    |> then(&Regex.replace(~r/"__REF_([a-z0-9_]+)__"/, &1, fn _, label -> "$REF_#{label}" end))
   end
 
   defp format_json_value(%Placeholder{} = ph, var_map), do: "__PH_#{Map.fetch!(var_map, ph.id)}__"
-  defp format_json_value(%Ref{label: label}, _var_map), do: "__REF_#{sanitize_label(label)}__"
   defp format_json_value(value, _var_map) when is_atom(value), do: to_string(value)
   defp format_json_value(value, _var_map), do: value
 
@@ -253,16 +250,6 @@ defmodule PropertyDamage.Export.Script.Curl do
       key -> ".#{key}"
     end)
   end
-
-  defp sanitize_label(nil), do: "unknown"
-
-  defp sanitize_label(label) when is_binary(label) do
-    label
-    |> String.replace(~r/[^a-zA-Z0-9_]/, "_")
-    |> String.downcase()
-  end
-
-  defp sanitize_label(label), do: sanitize_label(to_string(label))
 
   defp generate_footer(metadata) do
     """

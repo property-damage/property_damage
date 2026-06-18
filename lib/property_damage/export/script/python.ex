@@ -10,7 +10,7 @@ defmodule PropertyDamage.Export.Script.Python do
   """
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Placeholder, Ref}
+  alias PropertyDamage.{FailureReport, Placeholder}
 
   @doc """
   Generates a Python script from a failure report.
@@ -184,10 +184,6 @@ Run with: python #{Common.generate_filename(report, :python)}
     "refs['#{Map.fetch!(var_map, ph.id)}']"
   end
 
-  defp generate_value_interpolation(%Ref{label: label}, _var_map) do
-    "refs['#{sanitize_label(label)}']"
-  end
-
   defp generate_value_interpolation(value, _var_map) when is_binary(value) do
     inspect(value)
   end
@@ -238,10 +234,6 @@ Run with: python #{Common.generate_filename(report, :python)}
     ~s(refs["#{Map.fetch!(var_map, ph.id)}"])
   end
 
-  defp format_body_value(%Ref{label: label}, _cmd_index, _var_map) do
-    ~s(refs["#{sanitize_label(label)}"])
-  end
-
   # Booleans and nil must precede the is_atom clause: they are atoms in
   # Elixir but must render as Python literals, not strings
   defp format_body_value(value, _cmd_index, _var_map) when is_boolean(value) do
@@ -262,7 +254,7 @@ Run with: python #{Common.generate_filename(report, :python)}
     to_string(value)
   end
 
-  # Recurse into collections so a Ref/Placeholder nested in a list/map is
+  # Recurse into collections so a Placeholder nested in a list/map is
   # rendered as a refs[...] lookup (Jason.encode!/1 would raise on the struct).
   defp format_body_value(value, cmd_index, var_map) when is_list(value) do
     items = Enum.map_join(value, ", ", &format_body_value(&1, cmd_index, var_map))
@@ -318,16 +310,6 @@ Run with: python #{Common.generate_filename(report, :python)}
       key -> ~s(["#{key}"])
     end)
   end
-
-  defp sanitize_label(nil), do: "unknown"
-
-  defp sanitize_label(label) when is_binary(label) do
-    label
-    |> String.replace(~r/[^a-zA-Z0-9_]/, "_")
-    |> String.downcase()
-  end
-
-  defp sanitize_label(label), do: sanitize_label(to_string(label))
 
   defp generate_footer(metadata) do
     """
