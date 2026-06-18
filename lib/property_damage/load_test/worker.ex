@@ -234,7 +234,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp execute_sequence_commands(sequence, state) do
     commands = Sequence.to_list(sequence)
 
-    # Initialize refs map and projections for this sequence
+    # Initialize projections for this sequence
     initial_projections =
       if state.assertion_mode != :disabled do
         init_projections(state.model)
@@ -252,7 +252,6 @@ defmodule PropertyDamage.LoadTest.Worker do
     execute_commands(
       commands,
       state,
-      _refs = %{},
       initial_projections,
       initial_counters,
       0,
@@ -264,7 +263,6 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp execute_commands(
          [],
          _state,
-         _refs,
          _projections,
          _counters,
          commands_run,
@@ -277,7 +275,6 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp execute_commands(
          [command | rest],
          state,
-         refs,
          projections,
          counters,
          commands_run,
@@ -291,18 +288,13 @@ defmodule PropertyDamage.LoadTest.Worker do
     command_module = command.__struct__
     start_time = System.monotonic_time(:microsecond)
 
-    {result, error_delta, new_refs, events} =
-      case execute_single_command(command, state, refs) do
-        {:ok, returned_events, updated_refs} ->
-          {:ok, 0, updated_refs, returned_events}
-
-        {:error, reason, updated_refs} ->
-          # Preserve refs from injected events even on error
-          {{:error, categorize_error(reason)}, 1, updated_refs, []}
+    {result, error_delta, events} =
+      case execute_single_command(command, state) do
+        {:ok, returned_events} ->
+          {:ok, 0, returned_events}
 
         {:error, reason} ->
-          # No ref updates (e.g., ref resolution failed)
-          {{:error, categorize_error(reason)}, 1, refs, []}
+          {{:error, categorize_error(reason)}, 1, []}
       end
 
     end_time = System.monotonic_time(:microsecond)
@@ -330,7 +322,6 @@ defmodule PropertyDamage.LoadTest.Worker do
     execute_commands(
       rest,
       state,
-      new_refs,
       new_projections,
       new_counters,
       commands_run + 1,
@@ -339,15 +330,14 @@ defmodule PropertyDamage.LoadTest.Worker do
     )
   end
 
-  defp execute_single_command(command, state, refs) do
-    # Resolve refs using proper lookup
-    case resolve_command_refs(command, refs) do
+  defp execute_single_command(command, state) do
+    case resolve_placeholders(command) do
       {:ok, resolved_command} ->
         # Get timeout from adapter
         timeout_ms = normalize_timeout(state.adapter.timeout(resolved_command))
 
         # Set up injection context in process dictionary
-        Process.put(@injection_ctx_key, %{events: [], command: command, refs: refs})
+        Process.put(@injection_ctx_key, %{events: [], command: command})
 
         # Add inject function to adapter context
         adapter_context_with_inject = Map.put(state.adapter_context, :inject, &inject_event/1)
@@ -383,10 +373,10 @@ defmodule PropertyDamage.LoadTest.Worker do
           {:ok, returned_events} ->
             # Combine injected events (first) with returned events
             all_events = injected_events ++ returned_events
-            {:ok, all_events, refs}
+            {:ok, all_events}
 
           {:error, reason} ->
-            {:error, reason, refs}
+            {:error, reason}
         end
 
       {:error, reason} ->
@@ -403,52 +393,39 @@ defmodule PropertyDamage.LoadTest.Worker do
   # Placeholder Resolution
   # ============================================================================
 
-  defp resolve_command_refs(command, refs) do
-    resolved = deep_resolve_refs(command, refs, nil)
-    {:ok, resolved}
+  defp resolve_placeholders(command) do
+    {:ok, do_resolve_placeholders(command)}
   rescue
     e -> {:error, Exception.message(e)}
   end
 
   # Handle Placeholder structs - if resolved, use value; otherwise raise
-  defp deep_resolve_refs(%Placeholder{resolved: nil} = p, _refs, _skip_field) do
+  defp do_resolve_placeholders(%Placeholder{resolved: nil} = p) do
     raise "Unresolved placeholder at #{inspect(p.path)} (position #{inspect(p.position)}, event #{p.event_index})"
   end
 
-  defp deep_resolve_refs(%Placeholder{resolved: value}, _refs, _skip_field), do: value
+  defp do_resolve_placeholders(%Placeholder{resolved: value}), do: value
 
-  defp deep_resolve_refs(%{__struct__: _} = struct, refs, skip_field) do
+  defp do_resolve_placeholders(%{__struct__: _} = struct) do
     struct
     |> Map.from_struct()
-    |> Enum.map(fn {k, v} ->
-      if k == skip_field do
-        {k, v}
-      else
-        {k, deep_resolve_refs(v, refs, nil)}
-      end
-    end)
-    |> Map.new()
+    |> Map.new(fn {k, v} -> {k, do_resolve_placeholders(v)} end)
     |> then(&struct(struct.__struct__, &1))
   end
 
-  defp deep_resolve_refs(map, refs, skip_field) when is_map(map) do
-    for {k, v} <- map, into: %{} do
-      {deep_resolve_refs(k, refs, skip_field), deep_resolve_refs(v, refs, skip_field)}
-    end
+  defp do_resolve_placeholders(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {do_resolve_placeholders(k), do_resolve_placeholders(v)} end)
   end
 
-  defp deep_resolve_refs(list, refs, skip_field) when is_list(list) do
-    Enum.map(list, &deep_resolve_refs(&1, refs, skip_field))
+  defp do_resolve_placeholders(list) when is_list(list) do
+    Enum.map(list, &do_resolve_placeholders/1)
   end
 
-  defp deep_resolve_refs(tuple, refs, skip_field) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> deep_resolve_refs(refs, skip_field)
-    |> List.to_tuple()
+  defp do_resolve_placeholders(tuple) when is_tuple(tuple) do
+    tuple |> Tuple.to_list() |> Enum.map(&do_resolve_placeholders/1) |> List.to_tuple()
   end
 
-  defp deep_resolve_refs(other, _refs, _skip_field), do: other
+  defp do_resolve_placeholders(other), do: other
 
   # ============================================================================
   # Helpers

@@ -343,7 +343,6 @@ defmodule PropertyDamage.Differential do
         {target.name,
          %{
            projections: init_projections(config.model),
-           refs: %{},
            event_log: [],
            results: []
          }}
@@ -369,10 +368,9 @@ defmodule PropertyDamage.Differential do
     target_results =
       for target <- targets do
         context = Map.get(target_contexts, target.name)
-        state = Map.get(states, target.name)
 
-        # Resolve refs
-        resolved_command = resolve_refs(command, state.refs)
+        # Resolve placeholders
+        resolved_command = resolve_placeholders(command)
 
         # Execute
         start_time = System.monotonic_time(:microsecond)
@@ -398,8 +396,7 @@ defmodule PropertyDamage.Differential do
 
                   %{
                     state
-                    | refs: state.refs,
-                      projections: projections,
+                    | projections: projections,
                       event_log: state.event_log ++ events,
                       results: state.results ++ [result]
                   }
@@ -552,7 +549,6 @@ defmodule PropertyDamage.Differential do
   defp run_single_sequence(config, target, context, commands) do
     initial_state = %{
       projections: init_projections(config.model),
-      refs: %{},
       event_log: [],
       results: [],
       timings: []
@@ -560,7 +556,7 @@ defmodule PropertyDamage.Differential do
 
     final_state =
       Enum.reduce(commands, initial_state, fn command, state ->
-        resolved_command = resolve_refs(command, state.refs)
+        resolved_command = resolve_placeholders(command)
 
         start_time = System.monotonic_time(:microsecond)
         result = target.adapter.execute(resolved_command, context)
@@ -573,8 +569,7 @@ defmodule PropertyDamage.Differential do
 
             %{
               state
-              | refs: state.refs,
-                projections: projections,
+              | projections: projections,
                 event_log: state.event_log ++ events,
                 results: state.results ++ [result],
                 timings: state.timings ++ [latency_us]
@@ -841,41 +836,37 @@ defmodule PropertyDamage.Differential do
     end
   end
 
-  defp resolve_refs(command, refs) do
-    # Deep resolve refs in command
-    do_resolve_refs(command, refs)
-  end
+  # Resolve placeholders in a command before execution. Resolved placeholders
+  # become their concrete value; unresolved ones pass through unchanged.
+  defp resolve_placeholders(%Placeholder{resolved: nil} = p), do: p
+  defp resolve_placeholders(%Placeholder{resolved: value}), do: value
 
-  # Handle Placeholder structs - if resolved, use value; otherwise leave as-is
-  defp do_resolve_refs(%Placeholder{resolved: nil} = p, _refs), do: p
-  defp do_resolve_refs(%Placeholder{resolved: value}, _refs), do: value
-
-  defp do_resolve_refs(%{__struct__: _} = struct, refs) do
+  defp resolve_placeholders(%{__struct__: _} = struct) do
     struct
     |> Map.from_struct()
-    |> Enum.map(fn {k, v} -> {k, do_resolve_refs(v, refs)} end)
+    |> Enum.map(fn {k, v} -> {k, resolve_placeholders(v)} end)
     |> Map.new()
     |> then(&struct(struct.__struct__, &1))
   end
 
-  defp do_resolve_refs(map, refs) when is_map(map) do
+  defp resolve_placeholders(map) when is_map(map) do
     for {k, v} <- map, into: %{} do
-      {do_resolve_refs(k, refs), do_resolve_refs(v, refs)}
+      {resolve_placeholders(k), resolve_placeholders(v)}
     end
   end
 
-  defp do_resolve_refs(list, refs) when is_list(list) do
-    Enum.map(list, &do_resolve_refs(&1, refs))
+  defp resolve_placeholders(list) when is_list(list) do
+    Enum.map(list, &resolve_placeholders/1)
   end
 
-  defp do_resolve_refs(tuple, refs) when is_tuple(tuple) do
+  defp resolve_placeholders(tuple) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list()
-    |> do_resolve_refs(refs)
+    |> Enum.map(&resolve_placeholders/1)
     |> List.to_tuple()
   end
 
-  defp do_resolve_refs(other, _refs), do: other
+  defp resolve_placeholders(other), do: other
 
   defp apply_events(projections, events) do
     Enum.reduce(events, projections, fn event, projs ->
