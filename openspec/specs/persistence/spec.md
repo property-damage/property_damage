@@ -163,5 +163,14 @@ The system SHALL support step-by-step re-execution of a saved command sequence f
 
 - **WHEN** `mix pd.replay <failure-file>` is run on a saved `.pd` file
 - **THEN** the system SHALL load the failure (reading its recorded model and adapter from the file, requiring no model/adapter flags), re-execute the shrunk sequence through the engine, and print each step with its result
-- **AND** the task SHALL exit non-zero when the failure still reproduces (any step fails its check or errors, or the replay cannot run) and zero only when every step passes
-- **AND** a branching (parallel) failure, a load error, or a missing model/adapter SHALL produce a clear message and a non-zero exit rather than a crash
+- **AND** the task SHALL exit `0` only when every step passes (the failure no longer reproduces), `1` when the failure reproduces (any step fails its check or errors during execution), and `125` when the replay cannot run at all (the project does not compile, the file fails to load, it records no model/adapter, or the sequence is branching)
+- **AND** the `125` exit SHALL distinguish a replay that could not run (indeterminate) from one where the failure reproduces, so `git bisect run` skips such commits rather than marking them bad
+- **AND** a branching (parallel) failure, a load error, or a missing model/adapter SHALL produce a clear message and the `125` exit rather than a crash
+
+#### Scenario: CLI bisect to find the regressing commit
+
+- **WHEN** `mix pd.bisect <failure-file> --good <ref> [--bad <ref>]` is run on a saved `.pd` file
+- **THEN** the system SHALL drive `git bisect` between the good and bad refs, replaying the failure at each candidate commit and classifying it from `mix pd.replay`'s exit code (`0` good, `1` bad, `125` skip), and report the first commit where the failure reproduces
+- **AND** the system SHALL refuse to start when the working tree has uncommitted changes, and SHALL error cleanly on an invalid `--good`/`--bad` ref, in both cases without leaving a bisect in progress
+- **AND** the system SHALL copy the failure file outside the working tree before bisecting (so it survives checkouts of commits where it is not tracked) and SHALL always run `git bisect reset` afterward, restoring the original branch on success, error, and exception
+- **AND** the system SHALL replay the saved concrete shrunk sequence rather than re-generating from the seed, so the search remains valid across commits that changed generators, command weights, or `when:` predicates

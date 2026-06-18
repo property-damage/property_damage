@@ -9,9 +9,12 @@ defmodule Mix.Tasks.Pd.ReplayTest do
   alias PropertyDamage.{Executor, FailureReport, Persistence, Sequence}
 
   # Success paths and decision logic are exercised through `exec/1`, the
-  # halt-free seam: `run/1` only translates `exec/1`'s `:error` status into
-  # `System.halt/1` at the boundary, so the verdict logic is testable in-process
-  # without killing the test runner.
+  # halt-free seam: `run/1` only translates `exec/1`'s status into a
+  # `System.halt/1` exit code at the boundary, so the verdict logic is testable
+  # in-process without killing the test runner. The statuses map to exit codes:
+  # `:ok` -> 0, `:reproduces` -> 1, `:indeterminate` -> 125, `:usage_error` -> 2.
+  # The `:indeterminate`/125 split is what makes `git bisect run mix pd.replay`
+  # skip un-runnable commits instead of marking them bad.
 
   # ----------------------------------------------------------------------------
   # Fixtures. A counter that fails its invariant on the 3rd bump (the failing
@@ -143,12 +146,12 @@ defmodule Mix.Tasks.Pd.ReplayTest do
   end
 
   describe "happy path: the bug still reproduces" do
-    test "returns :error and prints the steps and reproduce verdict", %{dir: dir} do
+    test "returns :reproduces and prints the steps and reproduce verdict", %{dir: dir} do
       path = save_failure(dir, FailingModel, FailingAdapter)
 
       {status, output} = with_output(fn -> Replay.exec([path]) end)
 
-      assert status == :error
+      assert status == :reproduces
       assert output =~ "PropertyDamage Replay"
       assert output =~ "Model:    Mix.Tasks.Pd.ReplayTest.FailingModel"
       assert output =~ "[0] Bump -> OK"
@@ -161,7 +164,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
       {status, output} = with_output(fn -> Replay.exec([path, "--verbose"]) end)
 
-      assert status == :error
+      assert status == :reproduces
       assert output =~ "events: Counted"
       assert output =~ "state:"
       assert output =~ "count: "
@@ -181,28 +184,30 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     end
   end
 
-  describe "load errors" do
-    test "missing file returns :error with a clean message" do
+  # The "could-not-run" set (load error, branching, missing model/adapter) is
+  # indeterminate: the bug's presence cannot be decided, so these map to
+  # `:indeterminate` (exit 125 -> `git bisect` skip), NOT to `:reproduces`.
+  # Marking an un-runnable ancestor "bad" would corrupt a bisect.
+  describe "indeterminate: the replay could not run (exit 125 -> bisect skip)" do
+    test "missing file returns :indeterminate with a clean message" do
       {status, output} = with_output(fn -> Replay.exec(["does/not/exist.pd"]) end)
 
-      assert status == :error
+      assert status == :indeterminate
       assert output =~ "could not load failure file"
       assert output =~ "file_not_found"
     end
 
-    test "a non-.pd file returns :error", %{dir: dir} do
+    test "a non-.pd file returns :indeterminate", %{dir: dir} do
       bogus = Path.join(dir, "bogus.pd")
       File.write!(bogus, "not a real failure file")
 
       {status, output} = with_output(fn -> Replay.exec([bogus]) end)
 
-      assert status == :error
+      assert status == :indeterminate
       assert output =~ "could not load failure file"
     end
-  end
 
-  describe "branching replay" do
-    test "returns :error with the branching message", %{dir: dir} do
+    test "a branching (parallel) failure returns :indeterminate", %{dir: dir} do
       branching = %Sequence{prefix: [%Bump{}], branches: [[%Bump{}], [%Bump{}]], suffix: []}
 
       failure =
@@ -221,25 +226,55 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
       {status, output} = with_output(fn -> Replay.exec([path]) end)
 
-      assert status == :error
+      assert status == :indeterminate
       assert output =~ "parallel/branching execution"
+    end
+
+    test "a failure that records no model returns :indeterminate", %{dir: dir} do
+      sequence = Sequence.linear([%Bump{}, %Bump{}, %Bump{}])
+
+      failure =
+        FailureReport.new(
+          seed: 0,
+          run_number: 1,
+          original_sequence: sequence,
+          shrunk_sequence: sequence,
+          failed_at_index: 2,
+          failure_reason: {:assertion_failed, :count_bounded, %RuntimeError{message: "x"}},
+          model: nil,
+          adapter: FailingAdapter
+        )
+
+      {:ok, path} = Persistence.save(failure, dir)
+
+      {status, output} = with_output(fn -> Replay.exec([path]) end)
+
+      assert status == :indeterminate
+      assert output =~ "does not record a model"
     end
   end
 
-  describe "argument handling" do
-    test "no arguments returns :error and prints usage" do
+  describe "argument handling (usage errors exit 2)" do
+    test "no arguments returns :usage_error and prints usage" do
       {status, output} = with_output(fn -> Replay.exec([]) end)
 
-      assert status == :error
+      assert status == :usage_error
       assert output =~ "a failure file path is required"
       assert output =~ "Usage: mix pd.replay"
     end
 
-    test "too many arguments returns :error" do
+    test "too many arguments returns :usage_error" do
       {status, output} = with_output(fn -> Replay.exec(["a.pd", "b.pd"]) end)
 
-      assert status == :error
+      assert status == :usage_error
       assert output =~ "expected exactly one failure file path"
+    end
+
+    test "an unknown option returns :usage_error" do
+      {status, output} = with_output(fn -> Replay.exec(["a.pd", "--nope"]) end)
+
+      assert status == :usage_error
+      assert output =~ "invalid option"
     end
   end
 end

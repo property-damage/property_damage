@@ -117,7 +117,35 @@ mix pd.replay failures/the-failure.pd --verbose
 ```
 
 It prints each step and exits non-zero while the bug still reproduces (zero once
-it is fixed), so the same command doubles as a regression check.
+it is fixed), so the same command doubles as a regression check. Concretely it
+exits `0` when the bug is fixed, `1` when it reproduces, and `125` when the
+replay could not run at all (the project does not compile, the file fails to
+load, it records no model/adapter, or the sequence is branching). That third
+case is *indeterminate*, not a reproduction, which is exactly what `git bisect`
+needs to treat as "skip".
+
+### Finding the commit that introduced the bug
+
+When you know a failure is new but not where it crept in, `mix pd.bisect` drives
+`git bisect` for you, replaying the saved failure at each candidate commit:
+
+```bash
+mix pd.bisect failures/the-failure.pd --good v0.1.0 [--bad HEAD]
+```
+
+It validates a clean working tree, copies the `.pd` file outside the tree (so it
+survives checkouts of commits where it is not tracked), bisects between `--good`
+and `--bad`, and always restores your branch with `git bisect reset` at the end.
+Each commit is classified from `mix pd.replay`'s exit code (the `0`/`1`/`125`
+split above), so commits that predate the model/adapter or do not compile are
+skipped rather than wrongly blamed.
+
+Note `mix pd.bisect` replays the saved **concrete shrunk sequence**, not a
+re-generation from the seed. This is deliberate (DR-023): the recorded command
+structs are replayed verbatim, so the search stays correct even across commits
+that changed generators, command weights, or `when:` predicates. Bisecting by
+seed would silently produce a different sequence after any such drift, so it is
+not offered.
 
 ## Step 5: Isolate the Trigger
 

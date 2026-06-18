@@ -18,16 +18,29 @@ defmodule Mix.Tasks.Pd.Replay do
 
   ## Exit code
 
-  The exit code answers a single question: **does the bug still reproduce?**
+  The exit code answers a single question: **does the bug still reproduce?**, but
+  splits "no" into two cases so the task composes with `git bisect run` (which
+  reads 0 = good, 1 = bad, 125 = skip):
 
-  - **Non-zero** when the failure reproduces (any command failed its check or
-    errored, or the replay could not run). This is the success case for a
-    regression check: the bug is still present.
-  - **Zero** only when every command passes, meaning the failure no longer
-    reproduces and the bug appears fixed.
+  - **0** when every command passes: the failure no longer reproduces and the bug
+    appears fixed (*good*).
+  - **1** when the failure reproduces: a command failed its check or errored
+    during execution (*bad*).
+  - **125** when the replay could not run at all: the project does not compile,
+    the file fails to load, it records no model/adapter, or the sequence is
+    branching. The outcome is *indeterminate*, not a reproduction, so `git bisect`
+    treats it as *skip* rather than wrongly blaming the commit (*skip*). 125 is
+    still non-zero, so the headline "non-zero means not-confirmed-fixed" contract
+    holds.
 
-  This makes `mix pd.replay` usable as a regression gate and is the contract
-  `mix pd.bisect` consumes per commit.
+  A usage error (missing or surplus path, unknown option) exits **2** and is not
+  part of the reproduction question.
+
+  Note the asymmetry: a per-command `{:error, reason}` *during* execution is a
+  reproduction (exit 1, it can be the regression). Only *pre-execution* failures,
+  which leave the bug's presence undetermined, are 125. This makes `mix pd.replay`
+  usable as a regression gate and is the contract `mix pd.bisect` consumes per
+  commit.
 
   ## Options
 
@@ -50,47 +63,81 @@ defmodule Mix.Tasks.Pd.Replay do
 
   @impl true
   def run(args) do
-    args |> exec() |> halt_on_error()
+    args |> exec() |> halt_on_status()
   end
 
-  # Run the replay and return its status (`:ok` or `:error`) without halting.
-  # This is the testable seam: `run/1` is the thin wrapper that calls `exec/1`
-  # and translates an `:error` status into a non-zero `System.halt`, so the
-  # decision logic can be exercised in-process without killing the test VM.
+  # Run the replay and return its status without halting. This is the testable
+  # seam: `run/1` is the thin wrapper that calls `exec/1` and translates the
+  # status into a `System.halt` exit code at the boundary, so the decision logic
+  # can be exercised in-process without killing the test VM.
   #
-  # Status semantics mirror the exit code: `:error` (non-zero) means the failure
-  # reproduced or the replay could not run; `:ok` (zero) means it no longer
-  # reproduces.
+  # The status mirrors the exit code one-for-one:
+  #
+  #   * `:ok`            -> 0   the failure no longer reproduces (good)
+  #   * `:reproduces`    -> 1   a command failed its check or errored (bad)
+  #   * `:indeterminate` -> 125 the replay could not run at all (skip)
+  #   * `:usage_error`   -> 2   bad CLI invocation, unrelated to reproduction
+  #
+  # The `:indeterminate`/125 split is what lets `git bisect run mix pd.replay`
+  # skip commits that do not compile or predate the model/adapter, instead of
+  # wrongly marking them bad.
   @doc false
-  @spec exec([String.t()]) :: :ok | :error
+  @spec exec([String.t()]) :: :ok | :reproduces | :indeterminate | :usage_error
   def exec(args) do
-    {opts, argv, _} = OptionParser.parse(args, strict: [verbose: :boolean])
-    verbose = Keyword.get(opts, :verbose, false)
+    {opts, argv, invalid} = OptionParser.parse(args, strict: [verbose: :boolean])
 
-    dispatch(argv, verbose)
+    if invalid != [] do
+      print_color(:red, "Error: invalid option #{inspect(hd(invalid))}\n")
+      print_usage()
+      :usage_error
+    else
+      verbose = Keyword.get(opts, :verbose, false)
+      dispatch(argv, verbose)
+    end
   end
 
   defp dispatch([path], verbose) do
     # Ensure the project (and the model/adapter the file references) is compiled
-    # before we try to decode terms that name those modules.
-    Mix.Task.run("compile", [])
-    replay_file(path, verbose)
+    # before we try to decode terms that name those modules. A commit that does
+    # not compile is indeterminate (125 -> bisect skip), never a reproduction.
+    case compile_project() do
+      :ok ->
+        replay_file(path, verbose)
+
+      :error ->
+        print_color(:red, "ERROR: the project failed to compile\n")
+        print_hint("Cannot replay at a commit that does not build. (exit 125)")
+        :indeterminate
+    end
   end
 
   defp dispatch([], _verbose) do
     print_color(:red, "Error: a failure file path is required\n")
     print_usage()
-    :error
+    :usage_error
   end
 
   defp dispatch(_argv, _verbose) do
     print_color(:red, "Error: expected exactly one failure file path\n")
     print_usage()
-    :error
+    :usage_error
   end
 
-  defp halt_on_error(:error), do: System.halt(1)
-  defp halt_on_error(_), do: :ok
+  # Compile the project, mapping a compile failure to `:error` instead of letting
+  # it raise (which would exit 1 and read as "bad" under `git bisect run`).
+  defp compile_project do
+    case Mix.Task.run("compile", ["--return-errors"]) do
+      {:error, _diagnostics} -> :error
+      _ -> :ok
+    end
+  rescue
+    _ -> :error
+  end
+
+  defp halt_on_status(:ok), do: :ok
+  defp halt_on_status(:reproduces), do: System.halt(1)
+  defp halt_on_status(:indeterminate), do: System.halt(125)
+  defp halt_on_status(:usage_error), do: System.halt(2)
 
   defp replay_file(path, verbose) do
     case PropertyDamage.load_failure(path) do
@@ -103,7 +150,7 @@ defmodule Mix.Tasks.Pd.Replay do
 
       {:error, reason} ->
         print_load_error(path, reason)
-        :error
+        :indeterminate
     end
   end
 
@@ -122,7 +169,7 @@ defmodule Mix.Tasks.Pd.Replay do
 
       {:error, reason} ->
         print_replay_error(reason)
-        :error
+        :indeterminate
     end
   end
 
@@ -143,8 +190,8 @@ defmodule Mix.Tasks.Pd.Replay do
       end
 
       IO.puts("")
-      print_hint("Non-zero exit means the replay worked as intended: the bug is still present.")
-      :error
+      print_hint("Exit 1 means the replay worked as intended: the bug is still present.")
+      :reproduces
     end
   end
 

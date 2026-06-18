@@ -15,11 +15,23 @@ end, and trimmed the documented surface to what has been validated.
 - `mix pd.replay <failure-file> [--verbose]` replays a saved `.pd` failure
   against the SUT. It loads the failing run (model and adapter are read from the
   file itself, so no flags are needed), re-executes the shrunk sequence through
-  the real engine, prints each step and a verdict, and exits non-zero while the
-  failure still reproduces (zero once it is fixed). The exit code is a regression
-  signal, so the task drops into a CI gate or `git bisect` directly. A thin shell
-  over `PropertyDamage.load_failure/1` and `PropertyDamage.replay/2`; use those
-  for custom adapter config or stutter.
+  the real engine, prints each step and a verdict, and reports the outcome as an
+  exit code: `0` when the bug is fixed (good), `1` when it reproduces (bad), and
+  `125` when the replay could not run at all (the project does not compile, the
+  file fails to load, it records no model/adapter, or the sequence is branching).
+  The `125` case is indeterminate rather than a reproduction, which is exactly
+  the "skip" signal `git bisect run` needs, so the task drops into a CI gate or
+  `git bisect` directly. A thin shell over `PropertyDamage.load_failure/1` and
+  `PropertyDamage.replay/2`; use those for custom adapter config or stutter.
+- `mix pd.bisect <failure-file> --good <ref> [--bad <ref>] [--verbose]` finds the
+  first commit where a saved failure starts reproducing, by driving `git bisect`
+  and replaying the failure at each candidate commit (classified via
+  `mix pd.replay`'s `0`/`1`/`125` exit code, so un-runnable commits are skipped,
+  not blamed). It validates a clean working tree up front, copies the `.pd` file
+  outside the tree so it survives checkouts, and always runs `git bisect reset`
+  at the end. It replays the saved concrete shrunk sequence (not a re-generation
+  from the seed), so the search is robust across commits that changed generators,
+  weights, or `when:` predicates (DR-023).
 - `mix pd.reshrink <failure-file> [--strategy quick|thorough|exhaustive]
   [--max-iterations N] [--max-time-ms N] [--output PATH | --overwrite]` re-runs
   the shrinker over a saved `.pd` failure with a larger budget, to squeeze out
