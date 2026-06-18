@@ -479,14 +479,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
     |> then(&"{#{&1}}")
   end
 
-  defp inspect_with_ref(%PropertyDamage.Ref{ref: erlang_ref, label: label}, refs) do
-    # It's a Ref struct - show label and resolved value
-    case Map.get(refs, erlang_ref) do
-      nil -> "<#{label}>"
-      resolved -> "<#{label}> → #{inspect_short(resolved)}"
-    end
-  end
-
   defp inspect_with_ref(ref, refs) when is_reference(ref) do
     case Map.get(refs, ref) do
       nil -> inspect_short(ref)

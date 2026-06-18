@@ -471,7 +471,6 @@ defmodule PropertyDamage.Diagram do
     |> truncate(max_len)
   end
 
-  defp format_value(%PropertyDamage.Ref{label: label}), do: "ref(#{label})"
   defp format_value(value) when is_binary(value), do: "\"#{value}\""
   defp format_value(value) when is_atom(value), do: ":#{value}"
   defp format_value(value) when is_number(value), do: to_string(value)

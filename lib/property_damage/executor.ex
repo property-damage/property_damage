@@ -40,7 +40,7 @@ defmodule PropertyDamage.Executor do
 
   For each command in the sequence:
 
-  1. Resolve symbolic refs to concrete values
+  1. Resolve placeholders to concrete values
   2. Execute via adapter (command → events)
   3. Capture external() values produced by this command from its events
   4. Update projections (command first, then events)
@@ -48,11 +48,12 @@ defmodule PropertyDamage.Executor do
   6. Run triggered checks
   7. Record events in event log
 
-  ## Ref Resolution
+  ## Placeholder Resolution
 
-  Commands may contain symbolic refs (created via `Ref.symbolic/1`). Before
-  execution, these are replaced with their concrete values. If a ref hasn't
-  been resolved yet (its producer hasn't run), execution fails.
+  Commands may contain placeholders for server-generated values (declared via
+  `external/0` on producer events). Before execution, these are replaced with
+  the concrete values captured from the producer's events. If a placeholder
+  hasn't been resolved yet (its producer hasn't run), execution fails.
 
   ## Event Log
 
@@ -69,7 +70,7 @@ defmodule PropertyDamage.Executor do
   - `:success` - Boolean indicating if all checks passed
   - `:event_log` - Complete event log
   - `:projections` - Final projection states
-  - `:refs` - Ref resolution map
+  - `:refs` - Legacy ref resolution map (retained for compatibility)
   - `:failed_at_index` - Index where check failed (nil if success)
   - `:failure_reason` - Check failure reason (nil if success)
   - `:linearization` - Selected linearization (for branching sequences)
@@ -83,7 +84,6 @@ defmodule PropertyDamage.Executor do
     Nemesis,
     Placeholder,
     PlaceholderRegistry,
-    Ref,
     ResourcePoller,
     Sequence,
     Settle,
@@ -1781,16 +1781,6 @@ defmodule PropertyDamage.Executor do
   defp resolve_refs_and_placeholders(command, refs, placeholder_registry) do
     with {:ok, refs_resolved} <- resolve_command_refs(command, refs) do
       resolve_command_placeholders(refs_resolved, placeholder_registry)
-    end
-  end
-
-  defp deep_resolve_refs(%Ref{} = ref, refs, _skip_field) do
-    case Map.get(refs, ref.ref) do
-      nil ->
-        raise "Unresolved ref: #{inspect(ref)}"
-
-      value ->
-        value
     end
   end
 

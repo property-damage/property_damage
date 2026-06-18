@@ -84,8 +84,7 @@ defmodule PropertyDamage.Linearization do
       end
   """
 
-  alias PropertyDamage.{External, Placeholder, Ref, Sequence}
-  alias PropertyDamage.Ref.Unresolved
+  alias PropertyDamage.{External, Placeholder, Sequence}
 
   @default_max_candidates 1000
 
@@ -495,9 +494,7 @@ defmodule PropertyDamage.Linearization do
   defp event_matches?(_expected, _observed), do: false
 
   defp wildcard?(nil), do: true
-  defp wildcard?(%Ref{}), do: true
   defp wildcard?(%Placeholder{}), do: true
-  defp wildcard?(Unresolved), do: true
   defp wildcard?(value), do: External.external?(value)
 
   # Advance every projection's state with the command and its observed events
