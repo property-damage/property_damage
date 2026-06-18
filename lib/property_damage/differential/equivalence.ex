@@ -1,16 +1,5 @@
 defmodule PropertyDamage.Differential.Equivalence do
-  @moduledoc """
-  Equivalence strategies for comparing results between targets.
-
-  Provides different comparison modes for handling non-deterministic values
-  (IDs, timestamps) that may legitimately differ between implementations.
-
-  ## Strategies
-
-  - `:exact` - Results must be identical
-  - `:structural` - Ignore common non-deterministic fields
-  - Custom function - User-provided comparison logic
-  """
+  @moduledoc false
 
   @type strategy :: :exact | :structural | (term(), term() -> boolean())
 

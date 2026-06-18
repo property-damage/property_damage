@@ -46,6 +46,7 @@ defmodule PropertyDamage.Telemetry.Collector do
   @doc """
   Start the collector.
   """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
@@ -449,6 +450,8 @@ defmodule PropertyDamage.Telemetry.Collector do
   end
 
   @doc false
+  @spec dispatch_telemetry_event([atom()], map(), map(), %{pid: pid()}) ::
+          {:telemetry_event, [atom()], map(), map()}
   def dispatch_telemetry_event(event_name, measurements, metadata, %{pid: pid}) do
     send(pid, {:telemetry_event, event_name, measurements, metadata})
   end

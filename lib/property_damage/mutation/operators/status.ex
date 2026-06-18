@@ -1,16 +1,5 @@
 defmodule PropertyDamage.Mutation.Operators.Status do
-  @moduledoc """
-  Mutation operator that changes success/error outcomes.
-
-  Tests whether checks properly handle error cases and validate
-  expected success patterns.
-
-  ## Mutation Types
-
-  - `:success_to_error` - Change {:ok, events} to {:error, reason}
-  - `:empty_events` - Change {:ok, events} to {:ok, []}
-  - `:error_to_success` - Change {:error, reason} to {:ok, []}
-  """
+  @moduledoc false
 
   @behaviour PropertyDamage.Mutation.Operator
 

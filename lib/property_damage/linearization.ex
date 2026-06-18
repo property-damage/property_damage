@@ -403,6 +403,8 @@ defmodule PropertyDamage.Linearization do
   # Build %{ {branch_id, position} => [event] } from chronological entries.
   # Entries carry the executor command index, which starts at start_index
   # for every branch. Public for the Executor's merge replay.
+  @spec observed_events_by_position(branch_events(), integer()) ::
+          %{{non_neg_integer(), non_neg_integer()} => [struct()]}
   def observed_events_by_position(branch_events, start_index) do
     for {branch_id, entries} <- branch_events,
         entry <- entries,

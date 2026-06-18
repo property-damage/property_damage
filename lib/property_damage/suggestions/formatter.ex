@@ -1,7 +1,5 @@
 defmodule PropertyDamage.Suggestions.Formatter do
-  @moduledoc """
-  Formats suggestion analysis results for various output formats.
-  """
+  @moduledoc false
 
   @box_width 72
 

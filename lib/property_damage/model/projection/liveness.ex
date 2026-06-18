@@ -85,6 +85,7 @@ defmodule PropertyDamage.Model.Projection.Liveness do
   @default_check_interval 10
 
   @impl PropertyDamage.Model.Projection
+  @spec init(keyword()) :: t()
   def init(opts \\ []) do
     %__MODULE__{
       pending_operations: %{},
@@ -164,6 +165,7 @@ defmodule PropertyDamage.Model.Projection.Liveness do
   Returns `:ok` if no operations have been pending too long.
   Returns `{:error, reason}` if operations appear stuck.
   """
+  @spec check_liveness(t(), map()) :: :ok | {:error, String.t()}
   def check_liveness(state, _ctx \\ %{}) do
     now = System.monotonic_time(:millisecond)
 
@@ -218,6 +220,7 @@ defmodule PropertyDamage.Model.Projection.Liveness do
   end
 
   @doc false
+  @spec check(:no_stuck_operations, t(), map()) :: :ok | {:error, String.t()}
   def check(:no_stuck_operations, state, ctx) do
     # Only check every check_interval steps to avoid performance overhead
     if rem(ctx.step_count, state.check_interval) == 0 do

@@ -1,36 +1,5 @@
 defmodule PropertyDamage.Validator do
-  @moduledoc """
-  Validates command sequences against model preconditions.
-
-  The Validator checks whether a command sequence is structurally valid
-  by simulating state transitions without actually executing commands.
-  This is used during shrinking to quickly filter out invalid candidates.
-
-  ## Validation Process
-
-  For each command in the sequence:
-
-  1. Check Model's `when:` option for the command - returns false if invalid
-  2. Apply Model's `simulator().simulate/2` to get simulated events
-  3. Update state projection with command and events
-
-  ## Usage
-
-  ```elixir
-  # Check if a shrunk sequence is still valid
-  if Validator.valid_sequence?(commands, model) do
-    # Try executing it
-  else
-    # Skip this shrink candidate
-  end
-  ```
-
-  ## Notes
-
-  - Simulation uses Model's `simulator().simulate/2` if defined, otherwise produces no events
-  - State projection is updated but assertion projections are not
-  - This is fast because no actual execution or check evaluation happens
-  """
+  @moduledoc false
 
   alias PropertyDamage.Model
 

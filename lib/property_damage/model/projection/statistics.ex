@@ -100,6 +100,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   @default_window_size 100
 
   @impl PropertyDamage.Model.Projection
+  @spec init(keyword()) :: t()
   def init(opts \\ []) do
     %__MODULE__{
       latency_samples: :queue.new(),
@@ -238,6 +239,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   @doc """
   Check all configured assertions against current metrics.
   """
+  @spec check_assertions(t()) :: :ok | {:error, String.t()}
   def check_assertions(state) do
     metrics = compute_metrics(state)
 
@@ -286,6 +288,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   end
 
   @doc false
+  @spec check(:statistical_assertions, t(), map()) :: :ok | {:error, String.t()}
   def check(:statistical_assertions, state, _ctx) do
     # Only check if we have enough samples
     metrics = compute_metrics(state)

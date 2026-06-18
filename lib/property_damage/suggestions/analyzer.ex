@@ -1,9 +1,5 @@
 defmodule PropertyDamage.Suggestions.Analyzer do
-  @moduledoc """
-  Core analyzer for property and invariant suggestions.
-
-  Examines a model's structure and generates suggestions for missing checks.
-  """
+  @moduledoc false
 
   alias PropertyDamage.Model
   alias PropertyDamage.Suggestions.Patterns

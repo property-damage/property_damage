@@ -1,44 +1,5 @@
 defmodule PropertyDamage.Validation do
-  @moduledoc """
-  Validates test configuration before running.
-
-  Validation catches configuration errors early, before spending time on
-  property test execution. It checks that all modules exist, implement
-  required callbacks, and that event coverage is complete.
-
-  ## Validation Levels
-
-  - **Errors**: Fatal problems that prevent execution (raise exceptions)
-  - **Warnings**: Potential issues that may indicate bugs (logged)
-
-  ## What Gets Validated
-
-  ### Errors (cause validation to fail)
-
-  - Model module must exist and export required callbacks
-  - Adapter module must exist and export required callbacks
-  - All command modules referenced by model must exist
-  - All projection modules must exist
-  - Command weights must be positive integers
-  - Commands must have at least one entry
-  - Injectable events must be covered by InjectorAdapter @emits
-
-  ### Warnings (logged but don't fail)
-
-  - Commands missing `downstream_observables/0` (hard to verify coverage)
-  - Events produced but not handled by any assertion projection
-  - Injectable events not covered by model's assertion projections
-
-  ## Usage
-
-  ```elixir
-  # In test setup or run initialization
-  Validation.validate!(model, adapter, injector_adapters: adapters)
-
-  # After validation
-  Validation.print_summary(model, adapter, result)
-  ```
-  """
+  @moduledoc false
 
   alias PropertyDamage.Error
 

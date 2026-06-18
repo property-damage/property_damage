@@ -1,43 +1,5 @@
 defmodule PropertyDamage.LoadTest.Runner do
-  @moduledoc """
-  Orchestrates a load test run using arrival rate scheduling.
-
-  The Runner manages:
-  - Worker pool with persistent adapter contexts
-  - Arrival scheduling at the configured rate
-  - Rate ramping up and down
-  - Metrics collection and periodic reporting
-  - Duration-based termination
-
-  ## Architecture
-
-  ```
-  Runner (GenServer)
-    ├── Metrics (GenServer) - Collects metrics from all workers
-    ├── WorkerPool (GenServer) - Manages workers with persistent contexts
-    │   ├── Worker 1 - Holds adapter context
-    │   ├── Worker 2
-    │   └── Worker N
-    └── Arrivals (Tasks) - Spawned at configured rate
-  ```
-
-  ## Usage
-
-      {:ok, runner} = Runner.start_link(
-        model: MyModel,
-        adapter: HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
-        arrival_rate: 100,  # 100 arrivals per second
-        duration: {5, :minutes},
-        ramp_up: {:linear, {30, :seconds}}
-      )
-
-      # Wait for completion
-      {:ok, report} = Runner.await(runner)
-
-      # Or stop early
-      {:ok, report} = Runner.stop(runner)
-  """
+  @moduledoc false
 
   use GenServer
 

@@ -1,26 +1,5 @@
 defmodule PropertyDamage.Mutation.Operators.Value do
-  @moduledoc """
-  Mutation operator that mutates numeric and string values in events.
-
-  ## Mutation Types
-
-  For numbers:
-  - `:zero` - Replace with 0
-  - `:negate` - Negate the value
-  - `:increment` - Add 1
-  - `:decrement` - Subtract 1
-  - `:double` - Multiply by 2
-  - `:halve` - Divide by 2
-
-  For strings:
-  - `:empty` - Replace with empty string
-  - `:swap_case` - Swap case of first character
-  - `:truncate` - Remove last character
-  - `:append` - Append extra character
-
-  For atoms:
-  - `:swap` - Replace with a different common atom
-  """
+  @moduledoc false
 
   @behaviour PropertyDamage.Mutation.Operator
 

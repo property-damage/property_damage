@@ -1,20 +1,5 @@
 defmodule PropertyDamage.Differential.Baseline do
-  @moduledoc """
-  Baseline file handling for time-separated differential testing.
-
-  Baselines store the results of a test run (command sequences and their results)
-  for later comparison against other implementations.
-
-  ## File Format
-
-  Baselines are stored as JSON files containing:
-
-  - Metadata (creation time, model, target info)
-  - Command sequences (as serialized structs)
-  - Results per command
-  - Timing data
-  - Aggregate metrics
-  """
+  @moduledoc false
 
   @type run_data :: %{
           commands: [struct()],

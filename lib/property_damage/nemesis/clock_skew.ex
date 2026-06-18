@@ -157,6 +157,7 @@ defmodule PropertyDamage.Nemesis.ClockSkew do
     {:ok, [event]}
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -188,11 +189,11 @@ end
 
 # Event structs
 defmodule ClockSkewInjected do
-  @moduledoc "Event emitted when clock skew is injected"
+  @moduledoc false
   defstruct [:skew_ms, :drift_rate, :mode, :injected_at]
 end
 
 defmodule ClockSkewRestored do
-  @moduledoc "Event emitted when clock skew is restored"
+  @moduledoc false
   defstruct [:skew_ms, :restored_at, :duration_ms]
 end

@@ -1,20 +1,5 @@
 defmodule PropertyDamage.Mutation.Operators.Boundary do
-  @moduledoc """
-  Mutation operator that pushes values to boundary cases.
-
-  Tests whether checks handle edge cases properly.
-
-  ## Mutation Types
-
-  - `:zero` - Set numeric value to 0
-  - `:negative` - Set numeric value to -1
-  - `:max_int` - Set to very large positive integer
-  - `:min_int` - Set to very large negative integer
-  - `:empty_string` - Set string to ""
-  - `:whitespace` - Set string to whitespace only
-  - `:very_long` - Set string to very long value
-  - `:null` - Set value to nil
-  """
+  @moduledoc false
 
   @behaviour PropertyDamage.Mutation.Operator
 

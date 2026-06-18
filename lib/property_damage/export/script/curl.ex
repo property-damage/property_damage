@@ -1,13 +1,5 @@
 defmodule PropertyDamage.Export.Script.Curl do
-  @moduledoc """
-  Generates Bash scripts with curl commands for failure reproduction.
-
-  The generated scripts:
-  - Use curl for HTTP requests
-  - Use jq for JSON parsing
-  - Support environment variable for base URL
-  - Track refs using shell variables
-  """
+  @moduledoc false
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
   alias PropertyDamage.{FailureReport, Placeholder}

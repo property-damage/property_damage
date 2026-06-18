@@ -110,6 +110,7 @@ defmodule PropertyDamage.Nemesis.ProcessKill do
     {:ok, [event]}
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -187,11 +188,11 @@ end
 
 # Event structs
 defmodule ProcessKilled do
-  @moduledoc "Event emitted when processes are killed"
+  @moduledoc false
   defstruct [:target, :signal, :killed_count, :injected_at]
 end
 
 defmodule ProcessKillCompleted do
-  @moduledoc "Event emitted when process kill operation completes"
+  @moduledoc false
   defstruct [:target, :restored_at, :duration_ms]
 end

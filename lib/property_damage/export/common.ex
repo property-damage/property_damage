@@ -1,13 +1,5 @@
 defmodule PropertyDamage.Export.Common do
-  @moduledoc """
-  Shared utilities for export functionality.
-
-  Provides common functions for:
-  - Extracting commands from failure reports
-  - Serializing commands and values to various formats
-  - Extracting ref bindings from events
-  - Generating metadata (timestamps, headers, etc.)
-  """
+  @moduledoc false
 
   alias PropertyDamage.Export.HTTPSpec
   alias PropertyDamage.{FailureReport, Placeholder, Sequence}

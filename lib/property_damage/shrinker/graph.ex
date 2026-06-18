@@ -1,46 +1,5 @@
 defmodule PropertyDamage.Shrinker.Graph do
-  @moduledoc """
-  Dependency graph for command sequences.
-
-  Builds and analyzes a directed acyclic graph (DAG) representing dependencies
-  between commands in a sequence. Commands that produce an external value
-  (DR-021) are connected to the commands that consume it via `%Placeholder{}`.
-
-  Used by the shrinker to identify independent subgraphs that can be safely
-  removed without breaking placeholder resolution.
-
-  ## Graph Structure
-
-  - **Nodes**: Each command in the sequence is a node, identified by its index
-  - **Edges**: An edge from node A to node B means B depends on A (B consumes
-    a placeholder that A produces)
-  - **Producers**: Map from placeholder identity to producing node index
-  - **Consumers**: Map from node index to list of placeholder identities it
-    consumes
-
-  A placeholder's producer is identified by its structured `position`
-  (DR-021); for the linear command list the graph operates on, `{:prefix, i}`
-  maps directly to index `i`. The placeholder itself is embedded in the
-  *consuming* command, not the producer.
-
-  ## Example
-
-  Given a sequence:
-  ```
-  0: CreateOrder (produces order id)
-  1: AddItem (consumes order id, produces item id)
-  2: ViewOrder (consumes order id)
-  3: ProcessItem (consumes item id)
-  ```
-
-  The graph has edges:
-  - 0 → 1 (order id)
-  - 0 → 2 (order id)
-  - 1 → 3 (item id)
-
-  Node 3 cannot be kept without nodes 1 and 0.
-  Node 2 can be removed independently of nodes 1 and 3.
-  """
+  @moduledoc false
 
   alias PropertyDamage.Placeholder
 

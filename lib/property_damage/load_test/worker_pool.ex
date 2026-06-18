@@ -1,36 +1,5 @@
 defmodule PropertyDamage.LoadTest.WorkerPool do
-  @moduledoc """
-  Dynamic pool of workers with persistent adapter contexts for load testing.
-
-  The WorkerPool manages Worker processes, each holding a persistent adapter
-  context. Workers are created on demand and reused across arrivals. The pool
-  grows automatically to meet arrival rate demand.
-
-  ## Features
-
-  - **Dynamic sizing**: Workers created on demand, no pre-allocation
-  - **Persistent contexts**: Workers call `adapter.setup/1` once at creation
-  - **Worker reuse**: Completed arrivals return workers for reuse
-  - **Stats tracking**: Peak workers, total created, utilization
-
-  ## Usage
-
-      {:ok, pool} = WorkerPool.start_link(
-        model: MyModel,
-        adapter: HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
-        metrics: metrics_pid,
-        think_time_range: {50, 200},
-        assertion_mode: :disabled
-      )
-
-      # Check out a worker (creates one if none available)
-      {:ok, worker} = WorkerPool.checkout(pool)
-      Worker.execute_sequence(worker)
-      WorkerPool.checkin(pool, worker)
-
-      WorkerPool.stop(pool)
-  """
+  @moduledoc false
 
   use GenServer
 

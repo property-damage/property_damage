@@ -1,20 +1,5 @@
 defmodule PropertyDamage.Export.ExUnit do
-  @moduledoc """
-  Generates ExUnit regression tests from failure reports.
-
-  The generated tests use PropertyDamage to reproduce the failure,
-  making them suitable for CI regression testing.
-
-  ## Usage
-
-      test_code = PropertyDamage.Export.ExUnit.generate(failure,
-        module_name: MyApp.Regressions.Test,
-        model: MyModel,
-        adapter: MyAdapter
-      )
-
-      File.write!("test/regressions/seed_123_test.exs", test_code)
-  """
+  @moduledoc false
 
   alias PropertyDamage.Export.Common
   alias PropertyDamage.FailureReport

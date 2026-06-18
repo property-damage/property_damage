@@ -1,22 +1,5 @@
 defmodule PropertyDamage.Export.LiveBook do
-  @moduledoc """
-  Generates LiveBook notebooks for interactive failure exploration.
-
-  The generated notebooks:
-  - Use Req for HTTP calls
-  - Track state alongside execution
-  - Allow step-by-step execution
-  - Include an exploration section for "what-if" scenarios
-
-  ## Usage
-
-      notebook = PropertyDamage.Export.LiveBook.generate(failure,
-        base_url: "http://localhost:4000",
-        adapter: MyHTTPAdapter
-      )
-
-      File.write!("failure_investigation.livemd", notebook)
-  """
+  @moduledoc false
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
   alias PropertyDamage.{FailureReport, Placeholder}

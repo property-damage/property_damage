@@ -183,6 +183,7 @@ defmodule PropertyDamage.Nemesis.CertificateExpiry do
     {:ok, [event]}
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -237,11 +238,11 @@ end
 
 # Event structs
 defmodule CertificateFailureInjected do
-  @moduledoc "Event emitted when certificate failure is injected"
+  @moduledoc false
   defstruct [:failure_type, :target, :description, :injected_at]
 end
 
 defmodule CertificateFailureRestored do
-  @moduledoc "Event emitted when certificate failure is restored"
+  @moduledoc false
   defstruct [:failure_type, :target, :restored_at, :duration_ms]
 end

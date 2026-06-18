@@ -1,16 +1,5 @@
 defmodule PropertyDamage.Progress.Printer do
-  @moduledoc """
-  Human-readable progress output for PropertyDamage test runs.
-
-  Provides user-friendly output during test execution including:
-  - Run start headers
-  - Per-run progress updates
-  - Failure summaries
-  - Success summaries with statistics
-
-  This is the built-in `verbose:` consumer of the progress stream. The progress
-  data vocabulary itself lives in `PropertyDamage.Progress`.
-  """
+  @moduledoc false
 
   alias PropertyDamage.{Error, FailureReport, Sequence}
   alias PropertyDamage.Progress

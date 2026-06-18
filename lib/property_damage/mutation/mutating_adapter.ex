@@ -1,30 +1,5 @@
 defmodule PropertyDamage.Mutation.MutatingAdapter do
-  @moduledoc """
-  An adapter wrapper that injects mutations into adapter responses.
-
-  The MutatingAdapter wraps a real adapter and intercepts its execute calls.
-  When the target command is executed, it applies a mutation to the response
-  to simulate a bug in the SUT.
-
-  ## Usage
-
-      # Create a mutating adapter
-      mutating = MutatingAdapter.new(
-        inner_adapter: MyAdapter,
-        target_command: CreateAccount,
-        mutation: %{type: :value, target: :balance, mutated: -100},
-        operator: ValueMutation
-      )
-
-      # Use with PropertyDamage.run: pass this module as the adapter and thread
-      # the struct through adapter_config (a struct cannot be an :adapter value).
-      PropertyDamage.run(
-        model: MyModel,
-        adapter: PropertyDamage.Mutation.MutatingAdapter,
-        adapter_config: %{__mutating_adapter__: mutating},
-        ...
-      )
-  """
+  @moduledoc false
 
   @behaviour PropertyDamage.Adapter
 

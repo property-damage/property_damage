@@ -1,13 +1,5 @@
 defmodule PropertyDamage.Export.Script.Python do
-  @moduledoc """
-  Generates Python scripts with requests for failure reproduction.
-
-  The generated scripts:
-  - Use the requests library for HTTP calls
-  - Support environment variable for base URL
-  - Track refs using a dictionary
-  - Are self-contained and runnable with `python script.py`
-  """
+  @moduledoc false
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
   alias PropertyDamage.{FailureReport, Placeholder}

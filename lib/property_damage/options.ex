@@ -1,22 +1,5 @@
 defmodule PropertyDamage.Options do
-  @moduledoc """
-  NimbleOptions schemas for PropertyDamage configuration.
-
-  This module provides compile-time validated schemas for all public APIs.
-  It enables better error messages, auto-generated documentation, and
-  consistent option handling across the framework.
-
-  ## Usage
-
-  The schemas are used internally by `PropertyDamage.run/1` and
-  `PropertyDamage.LoadTest.run/1`. Users don't need to interact with
-  this module directly.
-
-  ## Generated Documentation
-
-  Use `run_docs/0` and `load_test_docs/0` to get NimbleOptions-generated
-  documentation suitable for embedding in moduledocs.
-  """
+  @moduledoc false
 
   # ============================================================================
   # PropertyDamage.run/1 Schema

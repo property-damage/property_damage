@@ -1,16 +1,5 @@
 defmodule PropertyDamage.Mutation.Operators.Event do
-  @moduledoc """
-  Mutation operator that modifies event contents.
-
-  Tests whether checks properly validate event data and relationships.
-
-  ## Mutation Types
-
-  - `:wrong_ref` - Replace a ref/id with a different value
-  - `:duplicate_event` - Duplicate an event
-  - `:reorder_events` - Swap order of two events
-  - `:wrong_type` - Change event type (if possible)
-  """
+  @moduledoc false
 
   @behaviour PropertyDamage.Mutation.Operator
 

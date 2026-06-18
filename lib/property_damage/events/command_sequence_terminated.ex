@@ -1,46 +1,5 @@
 defmodule PropertyDamage.Events.CommandSequenceTerminated do
-  @moduledoc """
-  System event marking the end of command generation.
-
-  This event is injected by the framework when command sequence generation
-  stops. It appears in the event log for debugging and visualization but
-  is NOT passed to projections.
-
-  ## Termination Reasons
-
-  - `:model_terminated` - Model's `terminate?/3` returned true
-  - `:max_commands` - Reached the configured maximum commands limit
-  - `:timeout` - Execution timed out
-  - `:injector_signal` - Injector adapter signaled termination (future)
-
-  ## Important Semantics
-
-  1. **Not a shutdown signal**: This event means "we stopped generating
-     new commands," NOT "shut everything down." Async events may still
-     arrive after termination and should be recorded.
-
-  2. **Metadata-only**: Projections do not receive this event. It exists
-     purely for observability.
-
-  3. **Stripped during shrinking**: The shrinker removes this event from
-     sequences. If termination still occurs after shrinking, a fresh
-     event is injected.
-
-  ## Example
-
-      %CommandSequenceTerminated{
-        reason: :model_terminated,
-        triggered_by: {5, CompletePayment},  # command index and module
-        total_commands: 6,
-        timestamp: ~U[2025-01-15 10:30:00Z]
-      }
-
-  ## Visualization
-
-  In failure reports, this is shown as a distinct marker:
-
-      ╰─ ◆ TERMINATED (model) ─────│
-  """
+  @moduledoc false
 
   @typedoc """
   Termination reason.

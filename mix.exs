@@ -81,19 +81,33 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Command,
           PropertyDamage.Model,
           PropertyDamage.Model.Projection,
+          PropertyDamage.Model.Projection.Liveness,
+          PropertyDamage.Model.Projection.Statistics,
           PropertyDamage.Model.Simulator,
           PropertyDamage.Adapter,
           PropertyDamage.Adapter.Injector,
           PropertyDamage.Nemesis
         ],
+        Generation: [
+          PropertyDamage.External,
+          PropertyDamage.ExternalMarker,
+          PropertyDamage.Generator,
+          PropertyDamage.Sequence
+        ],
         Execution: [
           PropertyDamage.Executor,
           PropertyDamage.Linearization,
           PropertyDamage.Settle,
-          PropertyDamage.EventQueue
+          PropertyDamage.EventQueue,
+          PropertyDamage.EventLog.Entry,
+          PropertyDamage.ResourcePoller,
+          PropertyDamage.Stutter,
+          PropertyDamage.Stutter.Config,
+          PropertyDamage.Stutter.Violation
         ],
         Shrinking: [
-          PropertyDamage.Shrinker
+          PropertyDamage.Shrinker,
+          PropertyDamage.Shrinker.Config
         ],
         "Fault Injection": [
           PropertyDamage.Nemesis.NetworkLatency,
@@ -113,18 +127,46 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Coverage,
           PropertyDamage.Diagram,
           PropertyDamage.Diff,
-          PropertyDamage.Telemetry
+          PropertyDamage.Telemetry,
+          PropertyDamage.Progress,
+          PropertyDamage.Progress.RunUpdate,
+          PropertyDamage.Progress.RunResult,
+          PropertyDamage.Progress.ReplayUpdate,
+          PropertyDamage.Progress.LoadUpdate,
+          PropertyDamage.Progress.LoadResult,
+          PropertyDamage.Progress.MutationUpdate,
+          PropertyDamage.Progress.MutationResult,
+          PropertyDamage.Progress.DifferentialUpdate,
+          PropertyDamage.Progress.DifferentialResult
         ],
         Export: [
-          PropertyDamage.Export
+          PropertyDamage.Export,
+          PropertyDamage.Export.HTTPSpec,
+          PropertyDamage.Export.Script
         ],
         Differential: [
-          PropertyDamage.Differential
+          PropertyDamage.Differential,
+          PropertyDamage.Differential.Result
         ],
         "Persistence & Regression": [
           PropertyDamage.Persistence,
           PropertyDamage.SeedLibrary,
           PropertyDamage.Regression
+        ],
+        "Test Integration": [
+          PropertyDamage.ExUnit,
+          PropertyDamage.IEx
+        ],
+        Mocking: [
+          PropertyDamage.MockServiceAdapter,
+          PropertyDamage.MockServiceRegistry
+        ],
+        Exceptions: [
+          PropertyDamage.Error,
+          PropertyDamage.ErrorOrigin,
+          PropertyDamage.AssertionFailed,
+          PropertyDamage.CommandTimeoutError,
+          PropertyDamage.ProjectionError
         ],
         # Modules that ship but are work in progress and not fully supported at
         # this time (see the README note). Grouped last and clearly labelled so
@@ -133,8 +175,15 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Analysis,
           PropertyDamage.Flakiness,
           PropertyDamage.Mutation,
+          PropertyDamage.Mutation.Report,
+          PropertyDamage.Mutation.Analysis,
           PropertyDamage.Suggestions,
+          PropertyDamage.Suggestions.Patterns,
           PropertyDamage.FailureIntelligence,
+          PropertyDamage.FailureIntelligence.Fingerprint,
+          PropertyDamage.FailureIntelligence.Patterns,
+          PropertyDamage.FailureIntelligence.Similarity,
+          PropertyDamage.FailureIntelligence.Verification,
           PropertyDamage.LoadTest,
           PropertyDamage.Forensics,
           PropertyDamage.Integration,

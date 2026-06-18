@@ -1,57 +1,5 @@
 defmodule PropertyDamage.StatePoller do
-  @moduledoc """
-  Manages time-based polling of state predicates for temporal assertions.
-
-  StatePoller handles the `@poll_state` assertion mechanism, which spawns a
-  background process to periodically check if a predicate becomes true within
-  a specified timeout.
-
-  ## Polling Lifecycle
-
-  1. **Start**: When a trigger event matches, the executor calls `start/1` to
-     spawn a polling process
-  2. **Poll**: The process repeatedly evaluates the predicate against the current
-     projection state at the configured interval
-  3. **Success**: If the predicate returns `true`, the poller notifies success
-  4. **Timeout**: If the timeout expires before the predicate becomes true,
-     the poller notifies failure with diagnostic information
-
-  ## Predicate Evaluation
-
-  The predicate function receives the current projection state and returns a
-  boolean. Predicates can check:
-
-  - State conditions: `fn s -> s.payments[id] == :confirmed end`
-  - BEAM messages: `fn _s -> receive do {:msg, _} -> true after 0 -> false end end`
-  - External conditions: `fn _s -> check_external_api() end`
-
-  ## Timeout Behavior
-
-  When a poll times out, the error report includes:
-
-  - The trigger event that started polling
-  - The predicate source code (captured at compile time)
-  - The final projection state when timeout occurred
-  - Elapsed time and number of poll attempts
-
-  ## Example
-
-      # In a projection:
-      @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
-      def payment_confirmed(_state, %PaymentInitiated{id: id}) do
-        fn s -> s.payments[id] == :confirmed end
-      end
-
-      # In the executor, when PaymentInitiated is processed:
-      poller = StatePoller.start(
-        predicate: fn s -> s.payments["pay_123"] == :confirmed end,
-        predicate_source: "fn s -> s.payments[id] == :confirmed end",
-        projection: PaymentProjection,
-        interval_ms: 100,
-        timeout_ms: 5000,
-        triggered_by: %{event: %PaymentInitiated{id: "pay_123"}, assertion_name: :payment_confirmed}
-      )
-  """
+  @moduledoc false
 
   use GenServer
 

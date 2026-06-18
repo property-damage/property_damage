@@ -1,42 +1,5 @@
 defmodule PropertyDamage.Mutation.Operator do
-  @moduledoc """
-  Behaviour for mutation operators.
-
-  Mutation operators define how to transform adapter responses to simulate bugs.
-  Each operator generates a set of mutations that can be applied to test if
-  the property-based checks would catch such bugs.
-
-  ## Implementing an Operator
-
-      defmodule MyOperator do
-        @behaviour PropertyDamage.Mutation.Operator
-
-        @impl true
-        def name, do: :my_operator
-
-        @impl true
-        def description, do: "Applies custom mutations"
-
-        @impl true
-        def generate_mutations(events, _opts) do
-          # Return list of mutations to try
-          [
-            %{type: :my_mutation, target: :some_field, ...}
-          ]
-        end
-
-        @impl true
-        def apply_mutation(events, mutation) do
-          # Apply the mutation to events and return modified events
-          mutated_events
-        end
-
-        @impl true
-        def describe_mutation(mutation) do
-          "Changed something"
-        end
-      end
-  """
+  @moduledoc false
 
   @typedoc "A mutation specification"
   @type mutation :: %{

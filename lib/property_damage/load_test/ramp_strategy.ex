@@ -1,41 +1,5 @@
 defmodule PropertyDamage.LoadTest.RampStrategy do
-  @moduledoc """
-  Controls how arrival rate is ramped up and down during a load test.
-
-  ## Strategies
-
-  - `:immediate` - Start at full rate immediately
-  - `{:linear, duration}` - Gradually increase rate over duration
-  - `{:step, count, interval}` - Increase rate in steps
-  - `{:exponential, duration}` - Exponential growth to target rate
-
-  ## Usage
-
-      # Immediate - start at 100 arrivals/sec immediately
-      plan = RampStrategy.plan(:immediate, {100, {1, :seconds}})
-
-      # Linear - ramp to 100/sec over 60 seconds
-      plan = RampStrategy.plan({:linear, {60, :seconds}}, {100, {1, :seconds}})
-
-      # Step - increase rate every 15 seconds in 4 steps
-      plan = RampStrategy.plan({:step, 4, {15, :seconds}}, {100, {1, :seconds}})
-
-      # Exponential - exponential growth to 100/sec over 2 minutes
-      plan = RampStrategy.plan({:exponential, {2, :minutes}}, {100, {1, :seconds}})
-
-  ## Plan Format
-
-  A plan is a list of `{time_ms, rate_spec}` tuples:
-
-      [
-        {0, {25, {1, :seconds}}},
-        {15000, {50, {1, :seconds}}},
-        {30000, {75, {1, :seconds}}},
-        {45000, {100, {1, :seconds}}}
-      ]
-
-  The rate_spec is in the normalized form `{count, {time, unit}}`.
-  """
+  @moduledoc false
 
   alias PropertyDamage.Options
 

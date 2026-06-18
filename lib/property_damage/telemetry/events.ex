@@ -1,42 +1,8 @@
 defmodule PropertyDamage.Telemetry.Events do
-  @moduledoc """
-  Common telemetry-derived events.
-
-  These event structs represent common patterns observed in telemetry data.
-  TelemetryReceiver implementations can convert spans to these events,
-  and projections can track them for performance assertions.
-
-  ## Example Usage
-
-      defmodule MyReceiver do
-        @behaviour PropertyDamage.TelemetryReceiver
-
-        alias PropertyDamage.Telemetry.Events
-
-        def to_event(%{name: "db.query", duration_ns: dur, attributes: attrs}) do
-          {:ok, %Events.DatabaseQuery{
-            duration_ms: dur / 1_000_000,
-            operation: attrs["db.operation"],
-            table: attrs["db.sql.table"]
-          }}
-        end
-
-        def to_event(%{name: "http.client", attributes: %{"http.status_code" => code}})
-            when code >= 500 do
-          {:ok, %Events.ServiceError{
-            status_code: code,
-            service: attrs["http.host"]
-          }}
-        end
-
-        def to_event(_), do: :skip
-      end
-  """
+  @moduledoc false
 
   defmodule DatabaseQuery do
-    @moduledoc """
-    Event representing a database query observed via telemetry.
-    """
+    @moduledoc false
     defstruct [
       :duration_ms,
       :operation,
@@ -57,9 +23,7 @@ defmodule PropertyDamage.Telemetry.Events do
   end
 
   defmodule HTTPRequest do
-    @moduledoc """
-    Event representing an HTTP request observed via telemetry.
-    """
+    @moduledoc false
     defstruct [
       :duration_ms,
       :method,
@@ -84,9 +48,7 @@ defmodule PropertyDamage.Telemetry.Events do
   end
 
   defmodule ServiceError do
-    @moduledoc """
-    Event representing an error response from an external service.
-    """
+    @moduledoc false
     defstruct [
       :service,
       :status_code,
@@ -107,11 +69,7 @@ defmodule PropertyDamage.Telemetry.Events do
   end
 
   defmodule RetryAttempt do
-    @moduledoc """
-    Event representing a retry attempt observed via telemetry.
-
-    Useful for detecting retry storms that wouldn't be visible in business events.
-    """
+    @moduledoc false
     defstruct [
       :operation,
       :attempt_number,
@@ -134,9 +92,7 @@ defmodule PropertyDamage.Telemetry.Events do
   end
 
   defmodule QueueOperation do
-    @moduledoc """
-    Event representing a message queue operation observed via telemetry.
-    """
+    @moduledoc false
     defstruct [
       :operation,
       :queue_name,
@@ -157,9 +113,7 @@ defmodule PropertyDamage.Telemetry.Events do
   end
 
   defmodule CacheOperation do
-    @moduledoc """
-    Event representing a cache operation observed via telemetry.
-    """
+    @moduledoc false
     defstruct [
       :operation,
       :cache_name,
@@ -182,12 +136,7 @@ defmodule PropertyDamage.Telemetry.Events do
   end
 
   defmodule ConnectionPoolExhausted do
-    @moduledoc """
-    Event indicating connection pool exhaustion.
-
-    This often manifests as increased latency rather than explicit errors,
-    making it invisible in business events.
-    """
+    @moduledoc false
     defstruct [
       :pool_name,
       :wait_time_ms,
@@ -208,9 +157,7 @@ defmodule PropertyDamage.Telemetry.Events do
   end
 
   defmodule SlowOperation do
-    @moduledoc """
-    Generic event for operations exceeding a latency threshold.
-    """
+    @moduledoc false
     defstruct [
       :operation_name,
       :duration_ms,

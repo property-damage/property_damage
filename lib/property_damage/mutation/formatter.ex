@@ -1,12 +1,5 @@
 defmodule PropertyDamage.Mutation.Formatter do
-  @moduledoc """
-  Formats mutation testing reports for various outputs.
-
-  Supports:
-  - `:terminal` - ASCII boxes for console output
-  - `:markdown` - Markdown tables for documentation
-  - `:json` - JSON for programmatic analysis
-  """
+  @moduledoc false
 
   alias PropertyDamage.Mutation.Report
 

@@ -1,44 +1,5 @@
 defmodule PropertyDamage.FailureReport.Timeline do
-  @moduledoc """
-  Timeline visualization for parallel execution failures.
-
-  Renders branching command sequences as ASCII timeline diagrams,
-  showing how commands executed across different branches.
-
-  ## Example Output
-
-      Timeline for Parallel Execution
-      ════════════════════════════════════════════════════
-
-      PREFIX (sequential)
-      ├─[0] CreateAccount {account_ref: #Ref<...>}
-      └─[1] CreditAccount {account_ref: #Ref<...>, amount: 1000}
-
-      BRANCHES (parallel)
-      ┌─────────────────┬─────────────────┬─────────────────┐
-      │ Branch 0        │ Branch 1        │ Branch 2        │
-      ├─────────────────┼─────────────────┼─────────────────┤
-      │ [2] CreateAuth  │ [2] DebitAcct   │ [2] CreateAuth  │
-      │ [3] Capture     │                 │ [3] Release     │
-      │ [4] Capture ►   │                 │                 │
-      └─────────────────┴─────────────────┴─────────────────┘
-
-      SUFFIX (sequential)
-      └─[5] GetAccount {account_ref: #Ref<...>}
-
-      ► = Failure point
-
-  ## Usage
-
-      alias PropertyDamage.FailureReport.Timeline
-
-      # From a FailureReport
-      timeline = Timeline.format(report)
-      IO.puts(timeline)
-
-      # With options
-      timeline = Timeline.format(report, color: true, column_width: 25)
-  """
+  @moduledoc false
 
   alias PropertyDamage.{FailureReport, Sequence}
 

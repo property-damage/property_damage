@@ -112,6 +112,7 @@ defmodule PropertyDamage.Nemesis.MemoryPressure do
     {:ok, [event]}
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -138,11 +139,11 @@ end
 
 # Event structs
 defmodule MemoryPressureInjected do
-  @moduledoc "Event emitted when memory pressure is created"
+  @moduledoc false
   defstruct [:megabytes, :allocation_pattern, :injected_at]
 end
 
 defmodule MemoryPressureReleased do
-  @moduledoc "Event emitted when memory pressure is released"
+  @moduledoc false
   defstruct [:megabytes, :restored_at, :duration_ms]
 end

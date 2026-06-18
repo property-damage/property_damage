@@ -106,6 +106,7 @@ defmodule PropertyDamage.Nemesis.CPUStress do
     {:ok, [event]}
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -157,11 +158,11 @@ end
 
 # Event structs
 defmodule CPUStressInjected do
-  @moduledoc "Event emitted when CPU stress is injected"
+  @moduledoc false
   defstruct [:intensity, :schedulers, :injected_at]
 end
 
 defmodule CPUStressReleased do
-  @moduledoc "Event emitted when CPU stress is released"
+  @moduledoc false
   defstruct [:intensity, :restored_at, :duration_ms]
 end

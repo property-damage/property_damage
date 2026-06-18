@@ -120,6 +120,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
     end
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -241,17 +242,11 @@ end
 
 # Event structs
 defmodule NetworkLatencyInjected do
-  @moduledoc """
-  Event emitted when network latency is injected.
-
-  `simulated: true` means no real latency was injected (no Toxiproxy was
-  configured); the fault is a no-op recorded honestly so it can never
-  masquerade as a real one.
-  """
+  @moduledoc false
   defstruct [:latency_ms, :jitter_ms, :target, :injected_at, simulated: false]
 end
 
 defmodule NetworkLatencyRestored do
-  @moduledoc "Event emitted when network latency is restored"
+  @moduledoc false
   defstruct [:latency_ms, :target, :restored_at, :duration_ms, simulated: false]
 end

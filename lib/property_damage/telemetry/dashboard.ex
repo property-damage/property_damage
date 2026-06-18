@@ -91,6 +91,7 @@ defmodule PropertyDamage.Telemetry.Dashboard do
   Returns a Phoenix.LiveView.Rendered struct if Phoenix is available,
   otherwise returns an HTML string.
   """
+  @spec render(map() | keyword()) :: String.t()
   def render(assigns) do
     if Code.ensure_loaded?(Phoenix.LiveView.Engine) do
       render_heex(assigns)
@@ -444,6 +445,7 @@ defmodule PropertyDamage.Telemetry.Dashboard do
   @doc """
   Returns the CSS styles for the dashboard.
   """
+  @spec css() :: String.t()
   def css do
     """
     .pd-dashboard {

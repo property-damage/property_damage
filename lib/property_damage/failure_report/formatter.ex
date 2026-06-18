@@ -1,39 +1,5 @@
 defmodule PropertyDamage.FailureReport.Formatter do
-  @moduledoc """
-  Format failure reports for different output targets.
-
-  Supports multiple output formats:
-
-  - `:terminal` - ANSI-colored output for terminal display
-  - `:markdown` - GitHub-flavored markdown for documentation
-  - `:json` - Structured JSON for CI integration
-  - `:compact` - Single-line summary for logs
-
-  ## Usage
-
-      # Terminal output (default)
-      output = Formatter.format(report)
-      IO.puts(output)
-
-      # Markdown for GitHub issues
-      markdown = Formatter.format(report, :markdown)
-      File.write!("failure_report.md", markdown)
-
-      # JSON for CI
-      json = Formatter.format(report, :json)
-      File.write!("failure_report.json", json)
-
-  ## Customization
-
-  You can customize formatting with options:
-
-      Formatter.format(report, :terminal,
-        show_event_log: true,
-        show_state: true,
-        max_events: 20,
-        color: true
-      )
-  """
+  @moduledoc false
 
   alias PropertyDamage.{FailureReport, Sequence}
 

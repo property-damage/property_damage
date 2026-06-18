@@ -130,6 +130,72 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   use Mix.Task
 
+  @typedoc "A parsed OpenAPI specification document."
+  @type spec :: map()
+
+  @typedoc "Extracted metadata about the API."
+  @type api_info :: %{
+          title: String.t(),
+          version: String.t(),
+          description: String.t(),
+          base_url: String.t()
+        }
+
+  @typedoc "A normalized security scheme extracted from the spec."
+  @type auth_scheme :: %{
+          name: String.t(),
+          type: String.t() | nil,
+          scheme: String.t() | nil,
+          bearer_format: String.t() | nil,
+          in: String.t() | nil,
+          param_name: String.t() | nil,
+          description: String.t()
+        }
+
+  @typedoc "A normalized operation extracted from the spec."
+  @type operation :: %{
+          operation_id: String.t() | nil,
+          module_name: String.t(),
+          method: String.t(),
+          method_atom: atom(),
+          path: String.t(),
+          summary: String.t(),
+          description: String.t(),
+          parameters: [map()],
+          request_body: map() | nil,
+          responses: %{optional(String.t()) => map()},
+          tags: [String.t()],
+          security: [map()]
+        }
+
+  @typedoc "A normalized event derived from a response schema."
+  @type event :: %{
+          name: String.t(),
+          fields: [map()],
+          description: String.t(),
+          operation: String.t() | nil
+        }
+
+  @typedoc "An inferred field type from a JSON schema."
+  @type field_type ::
+          :uuid
+          | :datetime
+          | :date
+          | :email
+          | :uri
+          | :string
+          | :integer
+          | :number
+          | :boolean
+          | :map
+          | :any
+          | {:enum, [term()]}
+          | {:string, integer(), integer()}
+          | {:integer, integer(), integer()}
+          | {:number, number(), number()}
+          | {:array, field_type()}
+          | {:pattern, String.t()}
+
   # Suppress warnings for optional Req/YamlElixir dependencies (guarded at runtime)
   @compile {:no_warn_undefined, [Req, YamlElixir]}
 
@@ -266,6 +332,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   # API Info Extraction (public for testing)
   # ============================================================================
 
+  @spec extract_api_info(spec(), String.t() | nil) :: api_info()
   @doc false
   def extract_api_info(spec, base_url_override) do
     info = Map.get(spec, "info", %{})
@@ -286,6 +353,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     }
   end
 
+  @spec extract_auth_schemes(spec()) :: [auth_scheme()]
   @doc false
   def extract_auth_schemes(spec) do
     security_schemes = get_in(spec, ["components", "securitySchemes"]) || %{}
@@ -307,6 +375,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   # Operation Extraction (public for testing)
   # ============================================================================
 
+  @spec extract_operations(spec(), MapSet.t() | nil) :: [operation()]
   @doc false
   def extract_operations(spec, filter) do
     paths = Map.get(spec, "paths", %{})
@@ -335,6 +404,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     |> Enum.sort_by(& &1.operation_id)
   end
 
+  @spec to_module_name(String.t() | nil) :: String.t()
   @doc false
   def to_module_name(nil), do: "UnnamedOperation"
 
@@ -523,6 +593,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   # Command Generation
   # ============================================================================
 
+  @spec generate_command(operation(), String.t()) :: String.t()
   @doc false
   def generate_command(op, namespace) do
     fields = collect_fields(op)
@@ -642,6 +713,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     param_fields ++ body_fields
   end
 
+  @spec to_field_name(String.t()) :: String.t()
   @doc false
   def to_field_name(name) do
     name
@@ -649,6 +721,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     |> Macro.underscore()
   end
 
+  @spec schema_to_type(map()) :: field_type()
   @doc false
   def schema_to_type(%{"type" => "string", "format" => "uuid"}), do: :uuid
   def schema_to_type(%{"type" => "string", "format" => "date-time"}), do: :datetime
@@ -720,6 +793,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     |> then(&(&1 <> "\n"))
   end
 
+  @spec streamdata_generator_for_type(field_type(), String.t(), String.t()) :: String.t()
   @doc false
   def streamdata_generator_for_type(:uuid, _name, _source) do
     # Seeded (not constant) so repeated draws within a run are distinct, as a
@@ -876,6 +950,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   defp extract_schema_fields(_), do: []
 
+  @spec generate_event(event(), String.t()) :: String.t()
   @doc false
   def generate_event(event, namespace) do
     field_atoms = Enum.map(event.fields, fn f -> String.to_atom(f.name) end)
@@ -935,6 +1010,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   # Adapter Generation
   # ============================================================================
 
+  @spec generate_adapter([operation()], String.t(), api_info(), [auth_scheme()]) :: String.t()
   @doc false
   def generate_adapter(operations, namespace, api_info, auth_schemes) do
     """
@@ -1201,6 +1277,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
   # Model Generation
   # ============================================================================
 
+  @spec generate_model([operation()], String.t()) :: String.t()
   @doc false
   def generate_model(operations, namespace) do
     # Group operations by tag or HTTP method for weighting
@@ -1268,6 +1345,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     |> format_code()
   end
 
+  @spec infer_weight(operation()) :: pos_integer()
   @doc false
   def infer_weight(op) do
     cond do
@@ -1284,6 +1362,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     end
   end
 
+  @spec infer_namespace(Path.t()) :: String.t()
   @doc false
   def infer_namespace(output) do
     output

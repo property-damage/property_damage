@@ -1,13 +1,5 @@
 defmodule PropertyDamage.Export.Script.Elixir do
-  @moduledoc """
-  Generates Elixir scripts with Req for failure reproduction.
-
-  The generated scripts:
-  - Use Mix.install for dependencies (Req, Jason)
-  - Support environment variable for base URL
-  - Track refs using a map
-  - Are self-contained and runnable with `elixir script.exs`
-  """
+  @moduledoc false
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
   alias PropertyDamage.{FailureReport, Placeholder}

@@ -1,26 +1,5 @@
 defmodule PropertyDamage.Progress.Notifier do
-  @moduledoc """
-  Isolated, non-blocking progress dispatch for load tests (DR-022).
-
-  A load test runs in a `Runner` GenServer that also schedules arrivals, so a
-  slow consumer must never run in that process. The runner `emit/2`s progress to
-  this dedicated GenServer instead (a fire-and-forget cast); consumers are
-  invoked here, so a slow consumer cannot stall load generation.
-
-  Under backpressure (a consumer slower than the snapshot cadence) the internal
-  buffer is bounded. On overflow it is **deterministically decimated** — every
-  other intermediate update is dropped (`decimate/1`), halving the buffered
-  updates while preserving temporal spread across the whole run — rather than
-  tail-dropping (which would keep only the early updates) or randomly sampling.
-  Terminal `:result` updates are **never** decimated.
-
-  At completion the runner calls `flush/1` (and `stop/1`): there is no more load
-  to protect, so the remaining buffer is drained synchronously, guaranteeing the
-  terminal `*Result` is delivered.
-
-  Consumers are invoked via `PropertyDamage.Progress.Reporter.dispatch/2`, so a
-  raising consumer is caught and logged here too.
-  """
+  @moduledoc false
 
   use GenServer
 

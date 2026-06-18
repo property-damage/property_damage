@@ -1,35 +1,5 @@
 defmodule PropertyDamage.LoadTest.Worker do
-  @moduledoc """
-  A load test worker with persistent adapter context.
-
-  Workers maintain a long-lived adapter context (connection pool, HTTP client, etc.)
-  and execute command sequences on behalf of arrivals. This eliminates the
-  setup/teardown bottleneck of the previous session-per-sequence model.
-
-  ## Architecture
-
-  Workers are managed by `WorkerPool` and are checked out for each arrival.
-  Once an arrival completes its sequence, the worker is returned to the pool
-  for reuse.
-
-  ## Usage
-
-      {:ok, worker} = Worker.start_link(
-        model: MyModel,
-        adapter: HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
-        metrics: metrics_pid,
-        worker_id: 1,
-        think_time_range: {100, 500},
-        assertion_mode: :disabled
-      )
-
-      # Execute a sequence (blocking)
-      {:ok, stats} = Worker.execute_sequence(worker)
-
-      # Shutdown worker (calls adapter.teardown)
-      Worker.stop(worker)
-  """
+  @moduledoc false
 
   use GenServer
 

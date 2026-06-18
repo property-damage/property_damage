@@ -1,19 +1,5 @@
 defmodule PropertyDamage.Progress.Reporter do
-  @moduledoc """
-  Synchronous, ordered fan-out of progress to consumers (DR-022), for the batch
-  operations (`run`/`mutation`/`differential`).
-
-  A reporter holds a list of consumer functions plus per-operation metadata.
-  When there are no consumers it is *inert*: `emit/2` never invokes the build
-  function, so an unobserved run allocates no `%Progress{}` on its hot loop.
-  Consumers run in order, in the calling process; a raising/exiting consumer is
-  caught and logged so it can never crash the operation (a slow consumer only
-  lengthens the run, which is acceptable for batch operations).
-
-  Load tests do not use this module — they dispatch through
-  `PropertyDamage.Progress.Notifier`, an isolated process, so a slow consumer
-  cannot stall load generation.
-  """
+  @moduledoc false
 
   require Logger
 

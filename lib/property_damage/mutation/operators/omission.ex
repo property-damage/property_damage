@@ -1,14 +1,5 @@
 defmodule PropertyDamage.Mutation.Operators.Omission do
-  @moduledoc """
-  Mutation operator that removes fields from events.
-
-  Tests whether checks validate that required fields are present.
-
-  ## Mutation Types
-
-  - `:remove_field` - Remove a single field from an event
-  - `:remove_event` - Remove an entire event from the list
-  """
+  @moduledoc false
 
   @behaviour PropertyDamage.Mutation.Operator
 

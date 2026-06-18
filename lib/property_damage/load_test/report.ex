@@ -1,22 +1,5 @@
 defmodule PropertyDamage.LoadTest.Report do
-  @moduledoc """
-  Generates load test reports in various formats.
-
-  ## Supported Formats
-
-  - `:terminal` - Colored terminal output with ASCII charts
-  - `:markdown` - Markdown formatted report
-  - `:json` - JSON format for programmatic processing
-
-  ## Usage
-
-      {:ok, report} = Runner.await(runner)
-      formatted = Report.format(report, :terminal)
-      IO.puts(formatted)
-
-      # Or save to file
-      Report.save(report, "load_test_report.md", :markdown)
-  """
+  @moduledoc false
 
   @type report :: %{metrics: map(), config: map()}
   @type format :: :terminal | :markdown | :json

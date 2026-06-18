@@ -168,6 +168,7 @@ defmodule PropertyDamage.Nemesis.SlowIO do
     {:ok, [event]}
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -197,11 +198,11 @@ end
 
 # Event structs
 defmodule SlowIOInjected do
-  @moduledoc "Event emitted when slow I/O is injected"
+  @moduledoc false
   defstruct [:delay_ms, :jitter_ms, :target, :injected_at]
 end
 
 defmodule SlowIORestored do
-  @moduledoc "Event emitted when slow I/O is restored"
+  @moduledoc false
   defstruct [:delay_ms, :target, :restored_at, :duration_ms]
 end

@@ -121,6 +121,7 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
     end
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -255,17 +256,11 @@ end
 
 # Event structs
 defmodule NetworkPartitioned do
-  @moduledoc """
-  Event emitted when network partition is created.
-
-  `simulated: true` means no real partition was injected (no Toxiproxy was
-  configured); the fault is a no-op recorded honestly so it can never
-  masquerade as a real one.
-  """
+  @moduledoc false
   defstruct [:partition_type, :target, :injected_at, simulated: false]
 end
 
 defmodule NetworkPartitionHealed do
-  @moduledoc "Event emitted when network partition is healed"
+  @moduledoc false
   defstruct [:partition_type, :target, :restored_at, :duration_ms, simulated: false]
 end

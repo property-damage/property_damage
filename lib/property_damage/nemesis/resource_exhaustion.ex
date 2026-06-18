@@ -102,6 +102,7 @@ defmodule PropertyDamage.Nemesis.ResourceExhaustion do
     {:ok, [event]}
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -253,11 +254,11 @@ end
 
 # Event structs
 defmodule ResourceExhausted do
-  @moduledoc "Event emitted when resources are exhausted"
+  @moduledoc false
   defstruct [:resource, :requested_count, :actual_count, :injected_at]
 end
 
 defmodule ResourceReleased do
-  @moduledoc "Event emitted when resources are released"
+  @moduledoc false
   defstruct [:resource, :restored_at, :duration_ms]
 end

@@ -1,9 +1,5 @@
 defmodule PropertyDamage.Differential.Target do
-  @moduledoc """
-  Represents a target for differential testing.
-
-  A target wraps an adapter module with metadata for comparison.
-  """
+  @moduledoc false
 
   @type t :: %__MODULE__{
           adapter: module(),

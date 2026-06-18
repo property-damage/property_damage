@@ -1,13 +1,5 @@
 defmodule PropertyDamage.Mutation.Runner do
-  @moduledoc """
-  Orchestrates mutation testing runs.
-
-  The runner:
-  1. Generates mutations for each command type
-  2. Runs PropertyDamage tests with each mutation
-  3. Records whether tests catch (kill) or miss (survive) each mutation
-  4. Aggregates results into a report
-  """
+  @moduledoc false
 
   alias PropertyDamage.Mutation.{MutatingAdapter, Operator, Report}
   alias PropertyDamage.{Options, Telemetry}

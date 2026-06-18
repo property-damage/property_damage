@@ -110,6 +110,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
     end
   end
 
+  @spec new!(map(), map()) :: StreamData.t(struct())
   @impl true
   def new!(_state, overrides \\ %{}) do
     import StreamData
@@ -209,17 +210,11 @@ end
 
 # Event structs
 defmodule PacketLossInjected do
-  @moduledoc """
-  Event emitted when packet loss is injected.
-
-  `simulated: true` means no real packet loss was injected (no Toxiproxy was
-  configured); the fault is a no-op recorded honestly so it can never
-  masquerade as a real one.
-  """
+  @moduledoc false
   defstruct [:loss_percent, :target, :injected_at, simulated: false]
 end
 
 defmodule PacketLossRestored do
-  @moduledoc "Event emitted when packet loss is restored"
+  @moduledoc false
   defstruct [:loss_percent, :target, :restored_at, :duration_ms, simulated: false]
 end
