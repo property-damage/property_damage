@@ -63,6 +63,21 @@ The framework SHALL support interleaved and sequential execution modes.
 - **WHEN** a `baseline:` file is provided for comparison
 - **THEN** execution SHALL be implicitly sequential since the baseline was recorded in a prior run
 
+### Requirement: External Value Capture Per Target
+
+The framework SHALL capture `external()` server-generated values and resolve them into downstream commands during differential execution (DR-021), maintaining a separate placeholder registry per target so that the same consumer placeholder resolves to the value each target actually produced.
+
+#### Scenario: Consumer resolved to its target's captured value
+
+- **WHEN** a command produces a value marked `external()` and a later command in the sequence consumes it
+- **THEN** the framework SHALL resolve the consumer to the concrete value captured from that target's events before executing it, on both interleaved and sequential modes
+- **AND** each target SHALL resolve the consumer to its own captured value, independent of the other targets
+
+#### Scenario: Producer that failed before capture
+
+- **WHEN** a target's producer command errors before its external value is captured, and a later command consumes that value
+- **THEN** the framework SHALL record the consumer as a failed command for that target rather than aborting the differential run
+
 ### Requirement: Equivalence Strategies
 
 The framework SHALL support multiple strategies for comparing results between targets: exact, structural, and custom function.

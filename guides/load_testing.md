@@ -54,6 +54,16 @@ IO.puts(Report.format(report, :terminal))
 Report.save(report, "load_test_report.md", :markdown)
 ```
 
+## Server-Generated Values (`external()`)
+
+Realistic load uses the same models as correctness testing, including commands
+that chain a server-generated id. When a command produces a value its event marks
+with `external()` (see the "External Field Markers" section of the
+[Writing Commands](writing_commands.md) guide), each worker captures that
+concrete value and resolves it into the later commands in the same sequence,
+exactly as in `PropertyDamage.run/1`. Capture is per worker, so concurrent
+arrivals never share or clobber each other's ids.
+
 ## Configuration Options
 
 ### Required Options

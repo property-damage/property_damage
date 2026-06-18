@@ -82,7 +82,7 @@ defmodule PropertyDamage.Differential do
   """
 
   alias PropertyDamage.Differential.{Baseline, Equivalence, Result, Target}
-  alias PropertyDamage.{Generator, Options, Placeholder, Sequence, Telemetry}
+  alias PropertyDamage.{Generator, Options, PlaceholderRegistry, Sequence, Telemetry}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate, Reporter}
 
@@ -337,6 +337,12 @@ defmodule PropertyDamage.Differential do
   end
 
   defp execute_interleaved(config, targets, target_contexts, commands) do
+    # Each target produces its own external() values, so each carries its own
+    # placeholder registry (DR-021): the same consumer placeholder resolves to a
+    # different concrete value per adapter. The registries share immutable
+    # initial content; per-target captures fork independent copies.
+    registry = PlaceholderRegistry.build(commands)
+
     # Initialize state for each target
     initial_states =
       for target <- targets, into: %{} do
@@ -344,7 +350,8 @@ defmodule PropertyDamage.Differential do
          %{
            projections: init_projections(config.model),
            event_log: [],
-           results: []
+           results: [],
+           registry: registry
          }}
       end
 
@@ -364,21 +371,29 @@ defmodule PropertyDamage.Differential do
          states,
          index
        ) do
-    # Execute command on each target and collect results
+    # Execute command on each target and collect results. Resolution is against
+    # the target's own registry, so a consumer placeholder picks up the value
+    # that target produced earlier (DR-021).
     target_results =
       for target <- targets do
         context = Map.get(target_contexts, target.name)
+        registry = Map.get(states, target.name).registry
 
-        # Resolve placeholders
-        resolved_command = resolve_placeholders(command)
+        case PlaceholderRegistry.resolve_data(registry, command) do
+          {:ok, resolved_command} ->
+            start_time = System.monotonic_time(:microsecond)
+            result = target.adapter.execute(resolved_command, context)
+            end_time = System.monotonic_time(:microsecond)
+            latency_us = end_time - start_time
 
-        # Execute
-        start_time = System.monotonic_time(:microsecond)
-        result = target.adapter.execute(resolved_command, context)
-        end_time = System.monotonic_time(:microsecond)
-        latency_us = end_time - start_time
+            {target.name, result, latency_us, resolved_command}
 
-        {target.name, result, latency_us, resolved_command}
+          {:error, reason} ->
+            # An unresolved consumer (its producer errored before capturing the
+            # external) is a real per-target failure; surface it as an error
+            # result so divergence checks see it rather than crashing the run.
+            {target.name, {:error, {:placeholder_resolution_failed, reason}}, 0, command}
+        end
       end
 
     # Check for divergences
@@ -392,13 +407,17 @@ defmodule PropertyDamage.Differential do
             new_state =
               case result do
                 {:ok, events} ->
+                  # Capture this target's external() values, keyed by the
+                  # command's linear position, so later commands resolve them.
+                  registry = PlaceholderRegistry.capture(state.registry, {:prefix, index}, events)
                   projections = apply_events(state.projections, events)
 
                   %{
                     state
                     | projections: projections,
                       event_log: state.event_log ++ events,
-                      results: state.results ++ [result]
+                      results: state.results ++ [result],
+                      registry: registry
                   }
 
                 {:error, _reason} ->
@@ -551,32 +570,50 @@ defmodule PropertyDamage.Differential do
       projections: init_projections(config.model),
       event_log: [],
       results: [],
-      timings: []
+      timings: [],
+      # external() values this target produces resolve into later commands (DR-021)
+      registry: PlaceholderRegistry.build(commands)
     }
 
     final_state =
-      Enum.reduce(commands, initial_state, fn command, state ->
-        resolved_command = resolve_placeholders(command)
+      commands
+      |> Enum.with_index()
+      |> Enum.reduce(initial_state, fn {command, index}, state ->
+        case PlaceholderRegistry.resolve_data(state.registry, command) do
+          {:ok, resolved_command} ->
+            start_time = System.monotonic_time(:microsecond)
+            result = target.adapter.execute(resolved_command, context)
+            end_time = System.monotonic_time(:microsecond)
+            latency_us = end_time - start_time
 
-        start_time = System.monotonic_time(:microsecond)
-        result = target.adapter.execute(resolved_command, context)
-        end_time = System.monotonic_time(:microsecond)
-        latency_us = end_time - start_time
+            case result do
+              {:ok, events} ->
+                registry = PlaceholderRegistry.capture(state.registry, {:prefix, index}, events)
+                projections = apply_events(state.projections, events)
 
-        case result do
-          {:ok, events} ->
-            projections = apply_events(state.projections, events)
+                %{
+                  state
+                  | projections: projections,
+                    event_log: state.event_log ++ events,
+                    results: state.results ++ [result],
+                    timings: state.timings ++ [latency_us],
+                    registry: registry
+                }
 
-            %{
-              state
-              | projections: projections,
-                event_log: state.event_log ++ events,
-                results: state.results ++ [result],
-                timings: state.timings ++ [latency_us]
-            }
+              {:error, _reason} ->
+                %{
+                  state
+                  | results: state.results ++ [result],
+                    timings: state.timings ++ [latency_us]
+                }
+            end
 
-          {:error, _reason} ->
-            %{state | results: state.results ++ [result], timings: state.timings ++ [latency_us]}
+          {:error, reason} ->
+            # Unresolved consumer (producer errored before capture): record a
+            # failed command for this target rather than crashing the run. No
+            # adapter call happened, so attribute zero latency.
+            result = {:error, {:placeholder_resolution_failed, reason}}
+            %{state | results: state.results ++ [result], timings: state.timings ++ [0]}
         end
       end)
 
@@ -835,38 +872,6 @@ defmodule PropertyDamage.Differential do
       {projection, projection.init()}
     end
   end
-
-  # Resolve placeholders in a command before execution. Resolved placeholders
-  # become their concrete value; unresolved ones pass through unchanged.
-  defp resolve_placeholders(%Placeholder{resolved: nil} = p), do: p
-  defp resolve_placeholders(%Placeholder{resolved: value}), do: value
-
-  defp resolve_placeholders(%{__struct__: _} = struct) do
-    struct
-    |> Map.from_struct()
-    |> Enum.map(fn {k, v} -> {k, resolve_placeholders(v)} end)
-    |> Map.new()
-    |> then(&struct(struct.__struct__, &1))
-  end
-
-  defp resolve_placeholders(map) when is_map(map) do
-    for {k, v} <- map, into: %{} do
-      {resolve_placeholders(k), resolve_placeholders(v)}
-    end
-  end
-
-  defp resolve_placeholders(list) when is_list(list) do
-    Enum.map(list, &resolve_placeholders/1)
-  end
-
-  defp resolve_placeholders(tuple) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.map(&resolve_placeholders/1)
-    |> List.to_tuple()
-  end
-
-  defp resolve_placeholders(other), do: other
 
   defp apply_events(projections, events) do
     Enum.reduce(events, projections, fn event, projs ->

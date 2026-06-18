@@ -34,6 +34,13 @@ end, and trimmed the documented surface to what has been validated.
 - The model-free `PropertyDamage.execute/2` path now resolves `external()` values
   across commands: a consumer carrying a `%Placeholder{}` for an earlier
   producer's field receives the captured concrete value.
+- `PropertyDamage.Differential.run/1` and load tests now capture and resolve
+  `external()` values across commands too (DR-021), so command sequences that
+  chain a server-generated id work on every execution path. Differential keeps a
+  per-target registry, so the same consumer resolves to each adapter's own value;
+  the load test worker resolves per worker. Previously differential passed
+  unresolved placeholders straight through and the load test worker raised on the
+  first one.
 - Decision Records under `docs/decisions/` (DR-001–DR-021).
 - `credo` as a dev/test lint (non-blocking in CI); `PlaceholderRegistry.resolve/3`.
 - Documentation of the command sequence generation loop in the

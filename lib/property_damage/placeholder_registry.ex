@@ -10,6 +10,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
   #   is keyed by position, but the position index is rebuilt per run (and
   #   remapped through shrinking), never resolved against a stale generation key.
 
+  alias PropertyDamage.External
   alias PropertyDamage.Placeholder
 
   @typedoc """
@@ -27,6 +28,22 @@ defmodule PropertyDamage.PlaceholderRegistry do
   """
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc """
+  Build a registry from a list of items (commands) carrying placeholders.
+
+  Collects every `%Placeholder{}` reachable in the items, de-duplicates by id,
+  and registers each. Linear sequences carry `{:prefix, index}` positions, so the
+  registry's `producer_link` maps each producer position to the ids it produces
+  for `capture/3`.
+  """
+  @spec build([term()]) :: t()
+  def build(items) when is_list(items) do
+    items
+    |> Enum.flat_map(&collect_placeholders/1)
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.reduce(new(), &register(&2, &1))
+  end
 
   @doc """
   Register a placeholder in the registry.
@@ -69,6 +86,40 @@ defmodule PropertyDamage.PlaceholderRegistry do
       nil -> reg
       p -> %{reg | placeholders: Map.put(reg.placeholders, id, Placeholder.resolve(p, value))}
     end
+  end
+
+  @doc """
+  Capture real external values produced at a structured `position` (DR-021).
+
+  For each placeholder the producer at `position` mints (looked up via
+  `ids_at_position/2`), reads the value at its recorded `path`/`event_index` in
+  the command's real (adapter-returned) `events` and resolves it by id. This is
+  position-driven, so it is correct under branching (distinct branch positions)
+  and shrinking (the position is rebuilt per run, never a stale generation key).
+
+  Returns the registry unchanged when `position` is `nil`.
+  """
+  @spec capture(t(), Placeholder.position() | nil, [struct()]) :: t()
+  def capture(%__MODULE__{} = reg, nil, _events), do: reg
+
+  def capture(%__MODULE__{} = reg, position, events) do
+    reg
+    |> ids_at_position(position)
+    |> Enum.reduce(reg, fn id, acc ->
+      case get(acc, id) do
+        %Placeholder{path: path, event_index: event_index} ->
+          case Enum.at(events, event_index) do
+            event when is_struct(event) ->
+              resolve(acc, id, External.get_at_path(event, path))
+
+            _ ->
+              acc
+          end
+
+        _ ->
+          acc
+      end
+    end)
   end
 
   @doc """
@@ -135,6 +186,21 @@ defmodule PropertyDamage.PlaceholderRegistry do
   end
 
   defp do_deep_resolve(_reg, value), do: value
+
+  @doc """
+  Deep-resolve like `deep_resolve/2`, but return `{:ok, resolved}` or
+  `{:error, message}` instead of raising when a placeholder is unresolved.
+
+  Used by execution paths that must turn an unresolved consumer (for example, a
+  producer command that errored before capturing its external) into a graceful
+  error result rather than crashing the run.
+  """
+  @spec resolve_data(t(), term()) :: {:ok, term()} | {:error, String.t()}
+  def resolve_data(%__MODULE__{} = reg, data) do
+    {:ok, deep_resolve(reg, data)}
+  rescue
+    e in ArgumentError -> {:error, Exception.message(e)}
+  end
 
   @doc """
   Check if a data structure contains any placeholders.

@@ -172,6 +172,21 @@ PropertyDamage.Differential.run(
 )
 ```
 
+## Server-Generated Values (`external()`)
+
+Sequences that chain a server-generated id work under differential testing. When
+a command produces a value its event marks with `external()` (see the "External
+Field Markers" section of the [Writing Commands](writing_commands.md) guide), the
+captured concrete value is resolved into any later command that consumes it,
+exactly as in `PropertyDamage.run/1`.
+
+Each target captures its own values: the same consumer placeholder resolves to
+whatever *that* adapter produced. This is the point under differential testing,
+since two implementations legitimately hand out different ids for the same
+operation. The id fields then surface as ordinary divergences under exact
+equivalence; ignore them with a [structural or custom](#equivalence-strategies)
+strategy if only the rest of the payload matters.
+
 ## Equivalence Strategies
 
 For correctness comparison, results must be "equivalent". Configure this:

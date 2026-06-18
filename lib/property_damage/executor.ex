@@ -77,7 +77,6 @@ defmodule PropertyDamage.Executor do
 
   alias PropertyDamage.{
     EventQueue,
-    External,
     Linearization,
     MockServiceRegistry,
     Nemesis,
@@ -2760,31 +2759,7 @@ defmodule PropertyDamage.Executor do
   # Collect every %Placeholder{} carried in the command list and register it, so
   # the registry's producer_link maps each producer position to its placeholder
   # ids for capture_externals/3.
-  defp build_placeholder_registry(commands) do
-    commands
-    |> Enum.flat_map(&collect_placeholders/1)
-    |> Enum.uniq_by(& &1.id)
-    |> Enum.reduce(PlaceholderRegistry.new(), &PlaceholderRegistry.register(&2, &1))
-  end
-
-  defp collect_placeholders(%Placeholder{} = p), do: [p]
-
-  defp collect_placeholders(%{__struct__: _} = struct) do
-    struct |> Map.from_struct() |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
-  end
-
-  defp collect_placeholders(map) when is_map(map) do
-    map |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
-  end
-
-  defp collect_placeholders(list) when is_list(list),
-    do: Enum.flat_map(list, &collect_placeholders/1)
-
-  defp collect_placeholders(tuple) when is_tuple(tuple) do
-    tuple |> Tuple.to_list() |> Enum.flat_map(&collect_placeholders/1)
-  end
-
-  defp collect_placeholders(_), do: []
+  defp build_placeholder_registry(commands), do: PlaceholderRegistry.build(commands)
 
   # Event chunks are prepended per command (newest-first); restore execution
   # order and concatenate in a single pass.
@@ -2915,25 +2890,7 @@ defmodule PropertyDamage.Executor do
   # value found at its recorded path/event_index in the real events. This is
   # position-driven, so it is correct under branching (distinct branch positions)
   # and shrinking (the position is rebuilt per run, never a stale generation key).
-  defp capture_externals(_events, nil, registry), do: registry
-
   defp capture_externals(events, position, registry) do
-    registry
-    |> PlaceholderRegistry.ids_at_position(position)
-    |> Enum.reduce(registry, fn id, reg ->
-      case PlaceholderRegistry.get(reg, id) do
-        %Placeholder{path: path, event_index: event_index} ->
-          case Enum.at(events, event_index) do
-            event when is_struct(event) ->
-              PlaceholderRegistry.resolve(reg, id, External.get_at_path(event, path))
-
-            _ ->
-              reg
-          end
-
-        _ ->
-          reg
-      end
-    end)
+    PlaceholderRegistry.capture(registry, position, events)
   end
 end

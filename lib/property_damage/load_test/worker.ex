@@ -33,7 +33,7 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   use GenServer
 
-  alias PropertyDamage.{Generator, Placeholder, Sequence}
+  alias PropertyDamage.{Generator, PlaceholderRegistry, Sequence}
   alias PropertyDamage.LoadTest.Metrics
   alias PropertyDamage.Model.Projection
 
@@ -234,6 +234,9 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp execute_sequence_commands(sequence, state) do
     commands = Sequence.to_list(sequence)
 
+    # external() values a command produces resolve into later commands (DR-021).
+    registry = PlaceholderRegistry.build(commands)
+
     # Initialize projections for this sequence
     initial_projections =
       if state.assertion_mode != :disabled do
@@ -254,6 +257,7 @@ defmodule PropertyDamage.LoadTest.Worker do
       state,
       initial_projections,
       initial_counters,
+      registry,
       0,
       0,
       0
@@ -265,6 +269,7 @@ defmodule PropertyDamage.LoadTest.Worker do
          _state,
          _projections,
          _counters,
+         _registry,
          commands_run,
          errors,
          assertion_failures
@@ -277,6 +282,7 @@ defmodule PropertyDamage.LoadTest.Worker do
          state,
          projections,
          counters,
+         registry,
          commands_run,
          errors,
          assertion_failures
@@ -288,13 +294,15 @@ defmodule PropertyDamage.LoadTest.Worker do
     command_module = command.__struct__
     start_time = System.monotonic_time(:microsecond)
 
-    {result, error_delta, events} =
-      case execute_single_command(command, state) do
-        {:ok, returned_events} ->
-          {:ok, 0, returned_events}
+    # `commands_run` is this command's 0-based position, so capture keys its
+    # produced externals at {:prefix, commands_run} (DR-021).
+    {result, error_delta, events, registry} =
+      case execute_single_command(command, state, registry, commands_run) do
+        {:ok, returned_events, new_registry} ->
+          {:ok, 0, returned_events, new_registry}
 
         {:error, reason} ->
-          {{:error, categorize_error(reason)}, 1, []}
+          {{:error, categorize_error(reason)}, 1, [], registry}
       end
 
     end_time = System.monotonic_time(:microsecond)
@@ -324,14 +332,15 @@ defmodule PropertyDamage.LoadTest.Worker do
       state,
       new_projections,
       new_counters,
+      registry,
       commands_run + 1,
       errors + error_delta,
       assertion_failures + assertion_failure_delta
     )
   end
 
-  defp execute_single_command(command, state) do
-    case resolve_placeholders(command) do
+  defp execute_single_command(command, state, registry, index) do
+    case PlaceholderRegistry.resolve_data(registry, command) do
       {:ok, resolved_command} ->
         # Get timeout from adapter
         timeout_ms = normalize_timeout(state.adapter.timeout(resolved_command))
@@ -371,16 +380,22 @@ defmodule PropertyDamage.LoadTest.Worker do
 
         case result do
           {:ok, returned_events} ->
+            # Capture external() values from the command's real (adapter-returned)
+            # events, keyed by its linear position, so later commands resolve
+            # them (DR-021). Injected events are out-of-band and not captured.
+            new_registry =
+              PlaceholderRegistry.capture(registry, {:prefix, index}, returned_events)
+
             # Combine injected events (first) with returned events
             all_events = injected_events ++ returned_events
-            {:ok, all_events}
+            {:ok, all_events, new_registry}
 
           {:error, reason} ->
             {:error, reason}
         end
 
       {:error, reason} ->
-        {:error, {:ref_resolution_failed, reason}}
+        {:error, {:unresolved_placeholder, reason}}
     end
   end
 
@@ -388,44 +403,6 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp normalize_timeout({value, :milliseconds}), do: value
   defp normalize_timeout({value, :seconds}), do: value * 1000
   defp normalize_timeout({value, :minutes}), do: value * 60 * 1000
-
-  # ============================================================================
-  # Placeholder Resolution
-  # ============================================================================
-
-  defp resolve_placeholders(command) do
-    {:ok, do_resolve_placeholders(command)}
-  rescue
-    e -> {:error, Exception.message(e)}
-  end
-
-  # Handle Placeholder structs - if resolved, use value; otherwise raise
-  defp do_resolve_placeholders(%Placeholder{resolved: nil} = p) do
-    raise "Unresolved placeholder at #{inspect(p.path)} (position #{inspect(p.position)}, event #{p.event_index})"
-  end
-
-  defp do_resolve_placeholders(%Placeholder{resolved: value}), do: value
-
-  defp do_resolve_placeholders(%{__struct__: _} = struct) do
-    struct
-    |> Map.from_struct()
-    |> Map.new(fn {k, v} -> {k, do_resolve_placeholders(v)} end)
-    |> then(&struct(struct.__struct__, &1))
-  end
-
-  defp do_resolve_placeholders(map) when is_map(map) do
-    Map.new(map, fn {k, v} -> {do_resolve_placeholders(k), do_resolve_placeholders(v)} end)
-  end
-
-  defp do_resolve_placeholders(list) when is_list(list) do
-    Enum.map(list, &do_resolve_placeholders/1)
-  end
-
-  defp do_resolve_placeholders(tuple) when is_tuple(tuple) do
-    tuple |> Tuple.to_list() |> Enum.map(&do_resolve_placeholders/1) |> List.to_tuple()
-  end
-
-  defp do_resolve_placeholders(other), do: other
 
   # ============================================================================
   # Helpers

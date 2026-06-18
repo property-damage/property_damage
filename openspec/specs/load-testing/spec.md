@@ -185,6 +185,20 @@ The load test SHALL use the same Model, Adapter, and Projection stack as propert
 - **WHEN** a load test is configured with a model module
 - **THEN** the framework SHALL use the same `commands/0`, weights, preconditions, and projections as property-based testing
 
+### Requirement: External Value Capture Per Worker
+
+The load test SHALL capture `external()` server-generated values and resolve them into downstream commands within a worker's sequence (DR-021), maintaining a separate placeholder registry per worker so concurrent arrivals do not share captured values.
+
+#### Scenario: Consumer resolved within a worker's sequence
+
+- **WHEN** a worker executes a sequence in which a command produces a value marked `external()` and a later command consumes it
+- **THEN** the worker SHALL resolve the consumer to the concrete value captured from its own events before executing it
+
+#### Scenario: Unresolved consumer
+
+- **WHEN** a consumer's external value cannot be resolved (its producer errored before capture)
+- **THEN** the worker SHALL record the command as an error rather than raising and aborting the worker
+
 ### Requirement: Load Test Reporting
 
 The framework SHALL generate a summary report containing metrics, failures, and timing information.
