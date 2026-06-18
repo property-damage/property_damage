@@ -90,8 +90,7 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Executor,
           PropertyDamage.Linearization,
           PropertyDamage.Settle,
-          PropertyDamage.EventQueue,
-          PropertyDamage.Ref
+          PropertyDamage.EventQueue
         ],
         Shrinking: [
           PropertyDamage.Shrinker
