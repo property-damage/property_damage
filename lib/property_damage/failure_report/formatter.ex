@@ -364,7 +364,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
     color = Keyword.get(opts, :color, true)
     max_commands = Keyword.get(opts, :max_commands, 30)
     commands = Sequence.to_list(report.shrunk_sequence)
-    refs = report.refs_at_failure || %{}
 
     # Branch-aware flattened marker position; nil (no marker) when the
     # index is absent or out of range, rather than mismarking the last
@@ -381,7 +380,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         idx_color = if is_failure, do: red(color), else: dim(color)
         failure_label = if is_failure, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
 
-        "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command_with_refs(cmd, refs, color)}#{failure_label}"
+        "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command(cmd, color)}#{failure_label}"
       end)
 
     truncated =
@@ -430,7 +429,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
     color = Keyword.get(opts, :color, true)
     max_commands = Keyword.get(opts, :max_commands, 30)
     commands = Sequence.to_list(report.original_sequence)
-    refs = report.refs_at_failure || %{}
 
     # Only show if different from shrunk
     shrunk_count = Sequence.command_count(report.shrunk_sequence)
@@ -448,7 +446,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
           idx_color = if is_failure, do: red(color), else: dim(color)
           failure_label = if is_failure, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
 
-          "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command_with_refs(cmd, refs, color)}#{failure_label}"
+          "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command(cmd, color)}#{failure_label}"
         end)
 
       truncated =
@@ -467,26 +465,17 @@ defmodule PropertyDamage.FailureReport.Formatter do
     end
   end
 
-  defp format_command_with_refs(cmd, refs, color) do
+  defp format_command(cmd, color) do
     name = module_name(cmd.__struct__)
-    fields = cmd |> Map.from_struct() |> format_fields_with_refs(refs)
+    fields = cmd |> Map.from_struct() |> format_fields()
     "#{cyan(color)}#{name}#{reset()} #{dim(color)}#{fields}#{reset()}"
   end
 
-  defp format_fields_with_refs(fields, refs) do
+  defp format_fields(fields) do
     fields
-    |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{inspect_with_ref(v, refs)}" end)
+    |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{inspect_short(v)}" end)
     |> then(&"{#{&1}}")
   end
-
-  defp inspect_with_ref(ref, refs) when is_reference(ref) do
-    case Map.get(refs, ref) do
-      nil -> inspect_short(ref)
-      resolved -> "#{inspect_short(ref)} → #{inspect_short(resolved)}"
-    end
-  end
-
-  defp inspect_with_ref(value, _refs), do: inspect_short(value)
 
   defp terminal_state_transition(report, color) do
     has_after = report.state_at_failure != nil and map_size(report.state_at_failure) > 0

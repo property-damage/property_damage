@@ -87,7 +87,6 @@ defmodule PropertyDamage.ReplayTest do
         event_log: result.event_log,
         projections: result.projections,
         projections_before: result.projections_before,
-        refs: result.refs,
         model: CounterModel,
         adapter: CounterAdapter
       )

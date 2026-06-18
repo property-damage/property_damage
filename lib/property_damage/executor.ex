@@ -2,7 +2,7 @@ defmodule PropertyDamage.Executor do
   @moduledoc """
   Executes command sequences against the System Under Test.
 
-  The Executor is the core engine that runs command sequences, manages refs,
+  The Executor is the core engine that runs command sequences, resolves placeholders,
   updates projections, runs checks, and collects events from both the adapter
   and injector adapters.
 
@@ -70,7 +70,6 @@ defmodule PropertyDamage.Executor do
   - `:success` - Boolean indicating if all checks passed
   - `:event_log` - Complete event log
   - `:projections` - Final projection states
-  - `:refs` - Legacy ref resolution map (retained for compatibility)
   - `:failed_at_index` - Index where check failed (nil if success)
   - `:failure_reason` - Check failure reason (nil if success)
   - `:linearization` - Selected linearization (for branching sequences)
@@ -120,7 +119,6 @@ defmodule PropertyDamage.Executor do
           success: boolean(),
           event_log: [Entry.t()],
           projections: %{module() => any()},
-          refs: %{reference() => any()},
           failed_at_index: non_neg_integer() | nil,
           failure_reason: term() | nil,
           linearization: [struct()] | nil,
@@ -635,16 +633,13 @@ defmodule PropertyDamage.Executor do
             {branch_id, Enum.reverse(state.event_log)}
           end)
 
-        # Resolve each branch's commands against that branch's final refs so
-        # the linearization checker (and the merge replay) sees the concrete
-        # values the projections saw during execution
-        resolved_branch_commands =
-          Enum.map(successful_results, fn {_, state, commands} ->
-            Enum.map(commands, &deep_resolve_refs(&1, state.refs, nil))
-          end)
+        # Unresolved placeholders in branch commands are treated as wildcards by
+        # the linearization checker, so the commands are passed through as-is.
+        branch_commands =
+          Enum.map(successful_results, fn {_, _state, commands} -> commands end)
 
         case Linearization.check(
-               resolved_branch_commands,
+               branch_commands,
                Map.new(branch_event_logs),
                prefix_state.projections,
                model,
@@ -676,12 +671,6 @@ defmodule PropertyDamage.Executor do
          linearization,
          start_index
        ) do
-    # Merge refs from all branches
-    merged_refs =
-      Enum.reduce(branch_results, prefix_state.refs, fn {_, state, _}, acc ->
-        Map.merge(acc, state.refs)
-      end)
-
     observed = Linearization.observed_events_by_position(Map.new(branch_event_logs), start_index)
 
     # Replay every branch's (command, observed events) over the prefix
@@ -696,9 +685,9 @@ defmodule PropertyDamage.Executor do
           end)
 
         _ ->
-          for {branch_id, state, commands} <- branch_results,
+          for {branch_id, _state, commands} <- branch_results,
               {command, pos} <- Enum.with_index(commands) do
-            {deep_resolve_refs(command, state.refs, nil), Map.get(observed, {branch_id, pos}, [])}
+            {command, Map.get(observed, {branch_id, pos}, [])}
           end
       end
 
@@ -764,7 +753,6 @@ defmodule PropertyDamage.Executor do
       | event_log: merged_event_log,
         projections: merged_projections,
         projections_before: merged_projections,
-        refs: merged_refs,
         placeholder_registry: merged_registry,
         step_count: total_steps,
         assertion_counters: merged_counters,
@@ -825,7 +813,6 @@ defmodule PropertyDamage.Executor do
       event_log: Enum.reverse(state.event_log),
       projections: state.projections,
       projections_before: state.projections_before,
-      refs: state.refs,
       failed_at_index: index,
       failure_reason: normalized_reason,
       stacktrace: stacktrace,
@@ -879,7 +866,6 @@ defmodule PropertyDamage.Executor do
               event_log: Enum.reverse(state.event_log),
               projections: state.projections,
               projections_before: Map.get(state, :projections_before),
-              refs: state.refs,
               failed_at_index: nil,
               failure_reason: nil,
               stacktrace: nil,
@@ -899,7 +885,6 @@ defmodule PropertyDamage.Executor do
       event_log: Enum.reverse(state.event_log),
       projections: state.projections,
       projections_before: Map.get(state, :projections_before),
-      refs: state.refs,
       failed_at_index: nil,
       failure_reason: failure_reason,
       stacktrace: nil,
@@ -974,7 +959,6 @@ defmodule PropertyDamage.Executor do
       event_log: [],
       projections: init_projections(model),
       projections_before: nil,
-      refs: %{},
       # Seed the placeholder registry from the generated sequence (DR-021); the
       # id-indexed registry + producer_link transport from generation to here.
       placeholder_registry: registry || PlaceholderRegistry.new(),
@@ -1094,11 +1078,11 @@ defmodule PropertyDamage.Executor do
 
   # Execute a nemesis (fault injection) command
   defp execute_nemesis_command(command, index, state, model, adapter_context, event_queue) do
-    # Resolve refs/placeholders so a nemesis parameterized by a prior
+    # Resolve placeholders so a nemesis parameterized by a prior
     # command's output injects against the real value, not a sentinel
     placeholder_registry = Map.get(state, :placeholder_registry, PlaceholderRegistry.new())
 
-    case resolve_refs_and_placeholders(command, state.refs, placeholder_registry) do
+    case resolve_command_placeholders(command, placeholder_registry) do
       {:ok, resolved_command} ->
         do_execute_nemesis_command(
           command,
@@ -1329,13 +1313,12 @@ defmodule PropertyDamage.Executor do
     # Get placeholder_registry from state (may not exist in older tests)
     placeholder_registry = Map.get(state, :placeholder_registry, PlaceholderRegistry.new())
 
-    # 1. Resolve refs and placeholders in command
-    case resolve_refs_and_placeholders(command, state.refs, placeholder_registry) do
+    # 1. Resolve placeholders in command
+    case resolve_command_placeholders(command, placeholder_registry) do
       {:ok, resolved_command} ->
         # 2. Set up injection context for mid-execution event injection
         injection_ctx = %{
           projections: state.projections,
-          refs: state.refs,
           event_log: state.event_log,
           injected_events: [],
           command_index: index,
@@ -1406,7 +1389,6 @@ defmodule PropertyDamage.Executor do
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections
-        base_refs = final_injection_ctx.refs
         base_event_log = final_injection_ctx.event_log
         injected_events = final_injection_ctx.injected_events
 
@@ -1426,8 +1408,6 @@ defmodule PropertyDamage.Executor do
 
         case result do
           {:ok, events} when is_list(events) ->
-            refs = base_refs
-
             # 4b. Capture external values from real events (DR-021): resolve the
             # placeholders this command produces, found by its structured position.
             # Injected events come first so externals they carry resolve too.
@@ -1500,7 +1480,6 @@ defmodule PropertyDamage.Executor do
                       put_state(state, %{
                         event_log: final_event_log,
                         projections: projections,
-                        refs: refs,
                         placeholder_registry: updated_registry,
                         step_count: state.step_count + 1,
                         assertion_counters: assertion_counters,
@@ -1520,7 +1499,6 @@ defmodule PropertyDamage.Executor do
                       put_state(state, %{
                         event_log: event_log,
                         projections: projections,
-                        refs: refs,
                         placeholder_registry: updated_registry,
                         step_count: state.step_count + 1,
                         assertion_counters: assertion_counters,
@@ -1536,7 +1514,6 @@ defmodule PropertyDamage.Executor do
                       put_state(state, %{
                         event_log: event_log,
                         projections: projections,
-                        refs: refs,
                         placeholder_registry: updated_registry,
                         step_count: state.step_count + 1,
                         assertion_counters: assertion_counters,
@@ -1553,7 +1530,6 @@ defmodule PropertyDamage.Executor do
                   put_state(state, %{
                     event_log: event_log,
                     projections: projections,
-                    refs: refs,
                     placeholder_registry: updated_registry,
                     step_count: state.step_count + 1,
                     assertion_counters: assertion_counters,
@@ -1566,8 +1542,6 @@ defmodule PropertyDamage.Executor do
 
           {:settled, events} ->
             # Probe/async settled successfully - treat same as {:ok, events}
-            refs = base_refs
-
             # Capture external values from real events (DR-021), keyed by the
             # command's structured position. Injected events come first so
             # externals they carry resolve too.
@@ -1636,7 +1610,6 @@ defmodule PropertyDamage.Executor do
                       put_state(state, %{
                         event_log: final_event_log,
                         projections: projections,
-                        refs: refs,
                         placeholder_registry: updated_registry,
                         step_count: state.step_count + 1,
                         assertion_counters: assertion_counters,
@@ -1656,7 +1629,6 @@ defmodule PropertyDamage.Executor do
                       put_state(state, %{
                         event_log: event_log,
                         projections: projections,
-                        refs: refs,
                         placeholder_registry: updated_registry,
                         step_count: state.step_count + 1,
                         assertion_counters: assertion_counters,
@@ -1672,7 +1644,6 @@ defmodule PropertyDamage.Executor do
                       put_state(state, %{
                         event_log: event_log,
                         projections: projections,
-                        refs: refs,
                         placeholder_registry: updated_registry,
                         step_count: state.step_count + 1,
                         assertion_counters: assertion_counters,
@@ -1689,7 +1660,6 @@ defmodule PropertyDamage.Executor do
                   put_state(state, %{
                     event_log: event_log,
                     projections: projections,
-                    refs: refs,
                     placeholder_registry: updated_registry,
                     step_count: state.step_count + 1,
                     assertion_counters: assertion_counters,
@@ -1766,58 +1736,6 @@ defmodule PropertyDamage.Executor do
   defp settle_config(command, nil), do: Settle.get_config(command)
   defp settle_config(_command, %{settle: settle}) when is_map(settle), do: settle
   defp settle_config(command, _spec), do: Settle.get_config(command)
-
-  # Resolve all refs in a command struct.
-  defp resolve_command_refs(command, refs) do
-    resolved = deep_resolve_refs(command, refs, nil)
-    {:ok, resolved}
-  rescue
-    e ->
-      stacktrace = __STACKTRACE__
-      {:error, {Exception.message(e), stacktrace}}
-  end
-
-  # Combined resolution: resolve both refs (legacy) and placeholders (new system)
-  defp resolve_refs_and_placeholders(command, refs, placeholder_registry) do
-    with {:ok, refs_resolved} <- resolve_command_refs(command, refs) do
-      resolve_command_placeholders(refs_resolved, placeholder_registry)
-    end
-  end
-
-  defp deep_resolve_refs(%{__struct__: _} = struct, refs, skip_field) do
-    struct
-    |> Map.from_struct()
-    |> Enum.map(fn {k, v} ->
-      if k == skip_field do
-        # Leave this field untouched (skip_field is unused now that commands
-        # declare server-generated values via external() rather than a ref field).
-        {k, v}
-      else
-        {k, deep_resolve_refs(v, refs, nil)}
-      end
-    end)
-    |> Map.new()
-    |> then(&struct(struct.__struct__, &1))
-  end
-
-  defp deep_resolve_refs(map, refs, skip_field) when is_map(map) do
-    for {k, v} <- map, into: %{} do
-      {deep_resolve_refs(k, refs, skip_field), deep_resolve_refs(v, refs, skip_field)}
-    end
-  end
-
-  defp deep_resolve_refs(list, refs, skip_field) when is_list(list) do
-    Enum.map(list, &deep_resolve_refs(&1, refs, skip_field))
-  end
-
-  defp deep_resolve_refs(tuple, refs, skip_field) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> deep_resolve_refs(refs, skip_field)
-    |> List.to_tuple()
-  end
-
-  defp deep_resolve_refs(other, _refs, _skip_field), do: other
 
   # Inject an event mid-execution from an adapter.
   # Called via ctx.inject.(event) from adapter execute/2.
@@ -2769,7 +2687,6 @@ defmodule PropertyDamage.Executor do
   - `adapter` - Adapter module for SUT interaction
   - `context` - Execution context map containing:
     - `:adapter_context` - Pre-established adapter context from adapter.setup/1
-    - `:refs` - Initial ref resolution map (default: %{})
     - `:event_queue` - EventQueue pid for injector events (optional)
 
   ## Returns
@@ -2784,7 +2701,6 @@ defmodule PropertyDamage.Executor do
 
       context = %{
         adapter_context: adapter_ctx,
-        refs: %{},
         event_queue: event_queue
       }
 
@@ -2941,7 +2857,6 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
 
   # Resolve placeholders in a command before execution.
-  # Similar to resolve_command_refs but for the new placeholder system.
   defp resolve_command_placeholders(command, registry) do
     resolved = deep_resolve_placeholders(command, registry)
     {:ok, resolved}

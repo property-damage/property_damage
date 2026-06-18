@@ -57,7 +57,6 @@ defmodule PropertyDamage.RegressionTest do
       event_log: [],
       state_before_failure: %{TestProjection => %{}},
       state_at_failure: %{TestProjection => %{}},
-      refs_at_failure: %{},
       model: TestModel,
       adapter: nil,
       linearization: nil,

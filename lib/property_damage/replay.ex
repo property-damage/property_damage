@@ -96,7 +96,6 @@ defmodule PropertyDamage.Replay do
           events: [struct()],
           projections: map(),
           projections_before: map(),
-          refs: map(),
           result: :ok | {:check_failed, atom(), Exception.t()} | {:error, term()}
         }
 
@@ -322,7 +321,6 @@ defmodule PropertyDamage.Replay do
       events: events,
       projections: exec_state.projections,
       projections_before: projections_before,
-      refs: exec_state.refs,
       result: result
     }
 
