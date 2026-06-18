@@ -153,6 +153,25 @@ The shrinker SHALL support configuration of: `granularity_threshold` (default 8)
 - **WHEN** the elapsed shrinking time exceeds `max_time_ms`
 - **THEN** shrinking SHALL stop and return the best result found so far
 
+### Requirement: Re-shrinking with a Larger Budget
+
+The system SHALL support re-running the shrinker over an already-shrunk failure with a fresh budget, to recover reductions the original run missed. `PropertyDamage.shrink_further/2` SHALL accept a `:strategy` (`:quick` | `:thorough` | `:exhaustive`, default `:thorough`) that derives the iteration and time budgets (overridable via `:max_iterations` and `:max_time_ms`), re-shrink the report's `shrunk_sequence`, and return an updated report whose `original_sequence` is preserved and whose `shrink_iterations`/`shrink_time_ms` accumulate onto the prior values. It SHALL return `{:error, :missing_model_or_adapter}` when the report records no model or adapter.
+
+#### Scenario: Re-shrink reduces a non-minimal sequence
+- **WHEN** `shrink_further/2` is run on a report whose shrunk sequence is not yet minimal
+- **THEN** it SHALL return `{:ok, report}` with a smaller (or equal) shrunk sequence that still reproduces the same failure
+- **AND** the returned report SHALL preserve `original_sequence` and accumulate the shrink effort onto the prior `shrink_iterations`/`shrink_time_ms`
+
+#### Scenario: Re-shrink requires a model and adapter
+- **WHEN** `shrink_further/2` is run on a report that records no model or adapter
+- **THEN** it SHALL return `{:error, :missing_model_or_adapter}` rather than crashing
+
+#### Scenario: CLI re-shrink with a larger budget
+- **WHEN** `mix pd.reshrink <failure-file>` is run on a saved `.pd` file
+- **THEN** the system SHALL load the failure (reading its recorded model and adapter from the file), re-shrink the sequence with the selected strategy/budget, and print the before/after command counts
+- **AND** the task SHALL write nothing by default, write the smaller report to `--output PATH`, or replace the input file with `--overwrite`
+- **AND** the task SHALL exit zero on any successful re-shrink (whether or not the sequence got smaller) and non-zero only on a real error (load failure, missing model/adapter, or a requested write failure), since re-shrink is not a pass/fail regression gate
+
 ### Requirement: Failure Signature
 
 The failure signature SHALL be a tuple of `{type, check_name}` where type identifies the category of failure and check_name identifies the specific check (or nil for non-check failures).

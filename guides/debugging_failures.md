@@ -342,6 +342,18 @@ If the shrunk sequence is still large:
 )
 ```
 
+If the failure was saved to a `.pd` file, re-shrink it from the shell without
+writing any code:
+
+```bash
+mix pd.reshrink failures/the-failure.pd --strategy exhaustive
+```
+
+It prints the before/after command counts and, by default, writes nothing. Pass
+`--output PATH` to save the smaller report, or `--overwrite` to replace the input
+file in place. Re-shrinking re-runs the engine, so against a live SUT it exercises
+the service repeatedly.
+
 ### Understanding Shrink Stats
 
 The report carries the shrink effort directly; sequence lengths come from the

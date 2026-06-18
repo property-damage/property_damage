@@ -1130,12 +1130,17 @@ defmodule PropertyDamage do
 
   ## Options
 
-  - `:max_iterations` - Maximum shrink attempts (default: 5000)
-  - `:max_time_ms` - Maximum time for shrinking in ms (default: 60000)
-  - `:strategy` - Shrinking strategy (default: :thorough)
-    - `:quick` - Fast shrinking, may miss some reductions
-    - `:thorough` - Balanced approach (default)
-    - `:exhaustive` - Try all possible reductions (slow)
+  - `:strategy` - Shrinking strategy (default: `:thorough`). Each strategy sets a
+    default budget that the explicit options below override:
+
+    | strategy       | max_iterations | max_time_ms |
+    |----------------|----------------|-------------|
+    | `:quick`       | 500            | 10_000      |
+    | `:thorough`    | 2000           | 60_000      |
+    | `:exhaustive`  | 10_000         | 300_000     |
+
+  - `:max_iterations` - Maximum shrink attempts (default: from `:strategy`)
+  - `:max_time_ms` - Maximum time for shrinking in ms (default: from `:strategy`)
   - `:shrink_arguments` - Whether to shrink argument values (default: true)
   - `:adapter_config` - Adapter configuration (uses report's adapter if not specified)
 

@@ -20,6 +20,15 @@ end, and trimmed the documented surface to what has been validated.
   signal, so the task drops into a CI gate or `git bisect` directly. A thin shell
   over `PropertyDamage.load_failure/1` and `PropertyDamage.replay/2`; use those
   for custom adapter config or stutter.
+- `mix pd.reshrink <failure-file> [--strategy quick|thorough|exhaustive]
+  [--max-iterations N] [--max-time-ms N] [--output PATH | --overwrite]` re-runs
+  the shrinker over a saved `.pd` failure with a larger budget, to squeeze out
+  reductions the original run missed. It prints the before/after command counts
+  and, by default, writes nothing; `--output`/`--overwrite` persist the smaller
+  report to an explicit location. Re-shrink is not a pass/fail gate, so it exits
+  zero on any successful run (reduced or already minimal) and non-zero only on a
+  real error. A thin shell over `PropertyDamage.load_failure/1` and
+  `PropertyDamage.shrink_further/2`; use the latter for a custom adapter config.
 - Unified progress reporting (DR-022): all long-running operations
   (`PropertyDamage.run/1`, `PropertyDamage.Mutation.run/1`,
   `PropertyDamage.Differential.run/1`, and load tests) now report through a single
@@ -153,6 +162,10 @@ end, and trimmed the documented surface to what has been validated.
 
 ### Fixed
 
+- `PropertyDamage.shrink_further/2`'s documented option defaults no longer drift
+  from the code: it listed a phantom `:max_iterations` default of 5000, but the
+  defaults are strategy-derived (`:thorough` is 2000 iterations / 60_000 ms). The
+  docs now describe the per-strategy budget table.
 - Standalone reproduction scripts (curl/python/elixir/livebook) now wire
   server-generated `external()` values (DR-021): the producing command's response
   field is extracted (by the `%Placeholder{}`'s path) and referenced by downstream
