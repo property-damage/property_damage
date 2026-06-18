@@ -25,7 +25,7 @@ defmodule PropertyDamage.Analysis do
       PropertyDamage.Analysis.generate_test(failure, format: :exunit)
   """
 
-  alias PropertyDamage.{Executor, FailureReport, Placeholder, Ref, Sequence, Validator}
+  alias PropertyDamage.{Executor, FailureReport, Placeholder, Sequence, Validator}
   alias PropertyDamage.Shrinker.Graph
 
   # ============================================================================
@@ -141,7 +141,7 @@ defmodule PropertyDamage.Analysis do
     Enum.join(lines ++ command_lines ++ chain_lines, "\n")
   end
 
-  defp analyze_command(cmd, idx, failed_at, ancestors, _graph, commands, report) do
+  defp analyze_command(cmd, idx, failed_at, ancestors, _graph, _commands, report) do
     cmd_name = cmd.__struct__ |> Module.split() |> List.last()
 
     {role, reason} =
@@ -150,9 +150,9 @@ defmodule PropertyDamage.Analysis do
           {:trigger, "Triggers #{report.check_name || report.failure_type} failure"}
 
         MapSet.member?(ancestors, idx) ->
-          # This command is an ancestor - find what ref it provides
-          ref_info = find_provided_ref(cmd, idx, commands, failed_at)
-          {:dependency, ref_info}
+          # Ancestor in the dependency graph: produces state or values the
+          # failing command depends on.
+          {:dependency, "Provides state or values required by the failing command"}
 
         true ->
           # Not an ancestor and not the trigger - shouldn't be in shrunk sequence
@@ -171,73 +171,13 @@ defmodule PropertyDamage.Analysis do
     }
   end
 
-  defp find_provided_ref(cmd, idx, commands, failed_at) do
-    cmd_module = cmd.__struct__
-
-    if function_exported?(cmd_module, :creates_ref, 0) do
-      case cmd_module.creates_ref() do
-        nil ->
-          "Required for state setup"
-
-        ref_field ->
-          ref = Map.get(cmd, ref_field)
-
-          # Find who uses this ref
-          users =
-            commands
-            |> Enum.with_index()
-            |> Enum.filter(fn {other_cmd, other_idx} ->
-              other_idx > idx and other_idx <= failed_at and uses_ref?(other_cmd, ref)
-            end)
-            |> Enum.map(fn {_, other_idx} -> other_idx end)
-
-          if users == [] do
-            "Creates ref used in failure context"
-          else
-            user_list = Enum.join(users, ", ")
-            "Creates ref used by command(s) [#{user_list}]"
-          end
-      end
-    else
-      "Required for state setup"
-    end
-  end
-
-  defp uses_ref?(cmd, %Ref{ref: ref_id}) do
-    cmd
-    |> Map.from_struct()
-    |> Map.values()
-    |> Enum.any?(fn
-      %Ref{ref: id} -> id == ref_id
-      _ -> false
-    end)
-  end
-
-  defp uses_ref?(cmd, %Placeholder{id: placeholder_id}) do
-    cmd
-    |> Map.from_struct()
-    |> Map.values()
-    |> Enum.any?(fn
-      %Placeholder{id: id} -> id == placeholder_id
-      _ -> false
-    end)
-  end
-
-  defp uses_ref?(_, _), do: false
-
   defp extract_refs(cmd) do
     cmd
     |> Map.from_struct()
-    |> Enum.filter(fn {_k, v} -> match?(%Ref{}, v) or match?(%Placeholder{}, v) end)
-    |> Enum.map(fn
-      {k, %Ref{} = ref} -> {k, ref_label(ref)}
-      {k, %Placeholder{} = p} -> {k, placeholder_label(p)}
-    end)
+    |> Enum.filter(fn {_k, v} -> match?(%Placeholder{}, v) end)
+    |> Enum.map(fn {k, %Placeholder{} = p} -> {k, placeholder_label(p)} end)
     |> Map.new()
   end
-
-  defp ref_label(%Ref{label: label}) when is_binary(label), do: label
-  defp ref_label(%Ref{ref: ref}), do: "##{:erlang.phash2(ref)}"
 
   defp placeholder_label(%Placeholder{path: path, position: position}) do
     path_str = Enum.map_join(path, ".", &to_string/1)
@@ -383,8 +323,8 @@ defmodule PropertyDamage.Analysis do
          adapter,
          adapter_config
        ) do
-    # Skip ref and placeholder fields - can't change those without breaking dependencies
-    if match?(%Ref{}, original) or match?(%Placeholder{}, original) do
+    # Skip placeholder fields - can't change those without breaking dependencies
+    if match?(%Placeholder{}, original) do
       []
     else
       variations = generate_variations(field, original, commands, failed_at)
@@ -690,7 +630,7 @@ defmodule PropertyDamage.Analysis do
     |> Map.drop([:__struct__, :idempotency_key])
     |> Enum.map_join(", ", fn {k, v} ->
       case v do
-        %Ref{} -> "#{k}: <ref>"
+        %Placeholder{} -> "#{k}: <placeholder>"
         _ -> "#{k}: #{inspect(v)}"
       end
     end)
