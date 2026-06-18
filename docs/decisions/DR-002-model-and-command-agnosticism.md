@@ -17,7 +17,7 @@ Evidence level: the separation is directly evidenced in code and docs; the histo
 
 ## Context
 
-(Inferred.) Early versions coupled commands to state: commands carried `new!(state, _)` constructors, `creates_ref/0`, and preconditions (visible in the legacy examples inside `lib/property_damage/ref.ex` and the legacy-callback table in `lib/property_damage/command.ex`). That coupling prevented reusing a command across models with different state structures. Commit `c6bddca` ("feat!: decouple commands from state via model-level wiring") is the breaking change that established agnosticism, moving state-dependent logic into the model (DR-007) and leaving commands pure (DR-006). Commit `b01de90` ("feat: add model-free execute/2 API for static regression tests") shows the inverse benefit: sequences can execute without any model at all.
+(Inferred.) Early versions coupled commands to state: commands carried `new!(state, _)` constructors, `creates_ref/0`, and preconditions (visible in pre-0.2 git history, e.g. the then-existing `lib/property_damage/ref.ex` and the legacy-callback table in `lib/property_damage/command.ex`). That coupling prevented reusing a command across models with different state structures. Commit `c6bddca` ("feat!: decouple commands from state via model-level wiring") is the breaking change that established agnosticism, moving state-dependent logic into the model (DR-007) and leaving commands pure (DR-006). Commit `b01de90` ("feat: add model-free execute/2 API for static regression tests") shows the inverse benefit: sequences can execute without any model at all.
 
 ## Consequences
 

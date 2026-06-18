@@ -122,11 +122,6 @@ Commands with `:probe` or `:async` execution semantics SHALL support a settle co
 
 Commands MAY implement optional callbacks that provide metadata for shrinking, validation, and debugging. The framework SHALL detect these via `function_exported?/3` and use sensible defaults when they are not implemented.
 
-#### Scenario: Creates ref callback
-- **WHEN** a command implements `creates_ref/0` returning an atom field name
-- **THEN** the framework generates a symbolic ref during sequence generation for that field
-- **AND** the ref is resolved to a concrete value from the resulting event during execution
-
 #### Scenario: Downstream observables callback
 - **WHEN** a command implements `downstream_observables/0`
 - **THEN** it returns a list of event modules that this command can produce

@@ -25,8 +25,8 @@ Every record is **self-contained**: it carries enough context and rationale to s
 | [DR-007](DR-007-model-level-command-wiring.md) | Model-Level Command Wiring | State-dependent config (`weight:`, `when:`, `with:`) declared in the model's command list. |
 | [DR-008](DR-008-command-semantics.md) | Command Semantics | Exactly three execution semantics: `:sync`, `:probe`, `:async`; `:mock_config` was removed. |
 | [DR-009](DR-009-projections-see-commands-and-events.md) | Projections See Commands and Events | `apply/2` receives both; a deliberate deviation from pure event sourcing. |
-| [DR-010](DR-010-symbolic-references.md) | Symbolic References | `make_ref/0`-based placeholders link command outputs to future inputs across two phases. |
-| [DR-011](DR-011-external-field-markers.md) | External Field Markers | `external()` on event struct fields marks server-generated values; supersedes `creates_ref/0`. |
+| [DR-010](DR-010-symbolic-references.md) | Symbolic References | **Superseded** by DR-011/DR-021. `make_ref/0`-based refs (since removed) linked command outputs to future inputs across two phases. |
+| [DR-011](DR-011-external-field-markers.md) | External Field Markers | `external()` on event struct fields marks server-generated values; replaces `creates_ref/0` (now removed). |
 | [DR-012](DR-012-trigger-based-assertions.md) | Trigger-Based Assertions | Assertions are functions decorated with `@trigger` / `@poll_state` attributes; pass-by-not-raising. |
 | [DR-013](DR-013-terminal-states.md) | Terminal States | Optional `terminate?/3` lets models stop sequence generation at natural workflow endpoints. |
 | [DR-014](DR-014-assertion-modes.md) | Assertion Modes | Single `assertion_mode:` option: `:halt` (default), `:disabled`, `:record`, `:log`. |

@@ -258,7 +258,7 @@ Enable verbose output to see what PropertyDamage generates and executes:
     )
 
 Verbose mode shows:
-- Each generated command with field values and symbolic refs
+- Each generated command with field values and placeholders
 - Execution results (events returned by the adapter)
 - Assertion checks (which triggers fired, pass/fail)
 - Projection state updates

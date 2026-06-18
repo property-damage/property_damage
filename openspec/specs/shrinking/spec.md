@@ -107,9 +107,9 @@ In Phase 2, the system SHALL simplify argument values in remaining commands: int
 - **WHEN** a command contains a list argument
 - **THEN** the shrinker SHALL attempt to remove list elements
 
-#### Scenario: References never shrunk
-- **WHEN** a command contains a symbolic reference
-- **THEN** that reference SHALL NOT be modified during argument shrinking
+#### Scenario: Placeholders never shrunk
+- **WHEN** a command contains a placeholder for a server-generated value
+- **THEN** that placeholder SHALL NOT be modified during argument shrinking
 
 ### Requirement: Branching Sequence Shrinking
 

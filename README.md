@@ -12,7 +12,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 
 - **Stateful Testing**: Generate sequences of commands, not just individual inputs
 - **Automatic Shrinking**: Failed sequences are minimized to the smallest reproduction
-- **Symbolic References**: Commands can reference results from earlier commands
+- **Server-Generated Values**: Commands can reference `external()` results from earlier commands
 - **Parallel Execution**: Branching sequences for race condition detection
 - **Linearization Checking**: Verify parallel results are sequentially explainable
 - **Idempotency Testing**: Built-in stutter testing for retry safety

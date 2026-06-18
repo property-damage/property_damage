@@ -79,6 +79,7 @@ defmodule MyApp.RegressionTest do
   use ExUnit.Case
 
   alias PropertyDamage
+  alias PropertyDamage.Placeholder
   alias MyApp.TestAdapter
   alias MyApp.WebhookInjectorAdapter
   alias MyApp.Commands.{CreatePayment, ConfirmPayment}
@@ -86,12 +87,15 @@ defmodule MyApp.RegressionTest do
 
   describe "payment webhook regression" do
     test "payment confirmation triggers webhook" do
-      # CreatePayment declares `creates_ref/0`; bind a symbolic ref and reuse it
-      payment_ref = PropertyDamage.Ref.symbolic(label: "payment")
+      # CreatePayment produces a PaymentCreated event whose `payment_id` is
+      # `external()` (server-generated). Build a placeholder for that producer
+      # (command 0, its first event) and reuse it downstream; execute/2 captures
+      # the real value and resolves it.
+      payment_id = Placeholder.new_at(PaymentCreated, [:payment_id], {:prefix, 0}, 0)
 
       commands = [
         %CreatePayment{amount: 1000, currency: "USD"},
-        %ConfirmPayment{payment_id: payment_ref}  # resolved to CreatePayment's id
+        %ConfirmPayment{payment_id: payment_id}  # resolved to CreatePayment's id
       ]
 
       {:ok, events} = PropertyDamage.execute(commands,
@@ -118,7 +122,7 @@ end
 
 **Advantages:**
 - Captures all events including injector events
-- Automatic ref resolution across commands
+- Automatic `external()` value resolution across commands
 - Full infrastructure setup (event queue, injector adapters)
 - Works with existing adapters without modification
 

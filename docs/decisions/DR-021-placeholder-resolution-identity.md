@@ -89,8 +89,8 @@ design isolates position to capture and makes it a derived, per-run quantity.
 - The **linear** shrinker tracks an original→candidate position mapping so capture
   during a shrunk re-run forms the correct position key (the hierarchical path
   already tracks survivors via its `kept` MapSet).
-- `Ref` (DR-010) remains functional and is not removed; both mechanisms resolve by
-  id and coexist via the executor's combined resolution path.
+- `Ref` (DR-010) coexisted with placeholders during the transition but has since
+  been removed entirely (v0.2): placeholders are now the sole identity mechanism.
 
 ## References
 

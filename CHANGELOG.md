@@ -28,6 +28,12 @@ end, and trimmed the documented surface to what has been validated.
   `Sequence` registry, captured by the producing command's structured position,
   and remapped through shrinking. New consumer-routing helpers
   `PropertyDamage.Generator.available_externals/2` and `external_from/2`.
+- `external()` values are now captured from events emitted mid-execution via
+  `ctx.inject` (not just events returned from `execute/2`), so a producer can
+  inject its server-generated id and downstream commands resolve it.
+- The model-free `PropertyDamage.execute/2` path now resolves `external()` values
+  across commands: a consumer carrying a `%Placeholder{}` for an earlier
+  producer's field receives the captured concrete value.
 - Decision Records under `docs/decisions/` (DR-001–DR-021).
 - `credo` as a dev/test lint (non-blocking in CI); `PlaceholderRegistry.resolve/3`.
 - Documentation of the command sequence generation loop in the
@@ -87,6 +93,12 @@ end, and trimmed the documented surface to what has been validated.
   engine does not emit, so they could not work as shipped. Failure-to-notebook
   export (`PropertyDamage.Export` Livebook output) is unaffected. Planned for a
   future release built on a real result/telemetry source.
+- **BREAKING**: Removed the deprecated symbolic-reference mechanism, fully
+  superseded by `external()` markers (DR-011/DR-021): the `PropertyDamage.Ref`
+  module, the `%Ref{}` struct and `Ref.symbolic/1`, the `creates_ref/0` command
+  callback (and its `--creates-ref` generator option), and the now-dead `:refs`
+  option on `PropertyDamage.execute/2`. Declare server-generated values with
+  `external()` on event structs instead. DR-010 is marked superseded.
 
 ### Fixed
 

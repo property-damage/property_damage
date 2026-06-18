@@ -29,7 +29,7 @@ defmodule MyApp.Commands.CreateOrder do
   # end
 
   # Metadata used by framework for shrinking/validation/debugging
-  # def creates_ref, do: :order_ref           # DEPRECATED: use external() on events
+  # (server-generated values: mark them external() on the event struct)
   # def downstream_observables, do: [OrderCreated, OrderRejected]
   # def read_only?, do: false
   # def label(_state, %__MODULE__{amount: 0}), do: "zero amount"

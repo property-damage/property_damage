@@ -104,34 +104,17 @@ defmodule MyTest.OrderModel do
 end
 ```
 
-## Symbolic References
+## Server-Generated Values
 
 When a command creates a new entity (e.g., CreateOrder produces an order with a
-server-generated ID), the framework needs to pass that ID to future commands. Symbolic
-references solve this "chicken-and-egg" problem.
+server-generated ID), the framework needs to pass that ID to future commands. The
+`external()` marker solves this "chicken-and-egg" problem.
 
-### Why Refs Exist
+### Why Placeholders Exist
 
 During sequence generation, the SUT hasn't been contacted yet — there are no real IDs.
-The framework creates symbolic placeholders that are resolved to real values during
-execution.
-
-### Lifecycle
-
-    Generation phase:
-      CreateOrder{amount: 100}       →  OrderCreated{id: #Ref<0.123>}
-      GetOrder{order_ref: #Ref<0.123>}
-
-    Execution phase:
-      CreateOrder{amount: 100}       →  OrderCreated{id: "ord_abc123"}
-      GetOrder{order_ref: "ord_abc123"}  ← ref resolved from event
-
-1. **Generation**: The framework wraps `make_ref/0` in a `PropertyDamage.Ref` struct
-2. **Simulation**: The simulator predicts events containing the ref
-3. **State tracking**: Projections store the symbolic ref as a key
-4. **Execution**: After the adapter returns real events, the framework extracts concrete
-   values from fields marked with `external()` and binds them to the ref
-5. **Resolution**: Subsequent commands have their ref fields replaced with concrete values
+The framework mints placeholders for server-generated fields and resolves them to real
+values during execution.
 
 ### External Field Markers
 
@@ -145,10 +128,28 @@ Mark server-generated fields in event structs with `external()`:
 The framework detects external fields automatically and captures their values during
 execution.
 
-### Ref-Aware Shrinking
+### Lifecycle
 
-The shrinker respects ref dependencies: if command A creates a ref consumed by command B,
-command A cannot be removed while B remains in the sequence.
+    Generation phase:
+      CreateOrder{amount: 100}       →  OrderCreated{id: <placeholder>}
+      GetOrder{order_ref: <placeholder>}
+
+    Execution phase:
+      CreateOrder{amount: 100}       →  OrderCreated{id: "ord_abc123"}
+      GetOrder{order_ref: "ord_abc123"}  ← placeholder resolved from event
+
+1. **Generation**: each `external()` field in a simulated event becomes a `%Placeholder{}`
+2. **Simulation**: the simulator predicts events carrying those placeholders
+3. **State tracking**: projections store the placeholder as a value
+4. **Execution**: after the adapter returns (or injects) real events, the framework
+   captures the concrete value from each `external()` field by the producer's position
+5. **Resolution**: subsequent commands have their placeholder fields replaced with the
+   concrete values
+
+### Dependency-Aware Shrinking
+
+The shrinker respects placeholder dependencies: if command A produces a value consumed by
+command B, command A cannot be removed while B remains in the sequence.
 
 ## Model-Level Wiring
 

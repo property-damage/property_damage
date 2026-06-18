@@ -1,7 +1,12 @@
 # DR-010: Symbolic References
 
-**Status:** Accepted (reconstructed); core mechanism retained, command-level API superseded by DR-011
+**Status:** Superseded by DR-021 (placeholder resolution identity) and DR-011 (external field markers). As of 2026-06-18 the `%Ref{}` / `make_ref/0` mechanism, the `creates_ref/0` command callback, and the `PropertyDamage.Ref` module have been removed from the codebase. This record is retained for historical context.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
+
+> **Superseded.** Server-generated identities are now declared with `external()` on
+> event structs (DR-011) and resolved through position-keyed `%Placeholder{}`
+> values captured at execution time (DR-021). The symbolic-ref lifecycle below
+> describes the original, now-removed design.
 
 ## Decision
 
@@ -13,18 +18,20 @@ Server-generated entity identities are represented during generation by symbolic
 
 Ref identity is the underlying `make_ref/0` value; labels are debugging metadata only.
 
-Evidence level: high; the mechanism is documented in `lib/property_damage/ref.ex` and specified in the execution-engine spec. Note: the original command-level API (`creates_ref/0`, `Ref.symbolic/1` in generators) is deprecated in favor of `external()` markers (DR-011), but symbolic linking of outputs to inputs remains the execution model.
+Evidence level: high (historical); the mechanism was implemented in the since-removed `lib/property_damage/ref.ex`. The command-level API (`creates_ref/0`, `Ref.symbolic/1` in generators), the `%Ref{}` struct, and downstream resolution by `make_ref/0` identity have all been replaced by `external()` markers (DR-011) and position-keyed placeholders (DR-021).
 
 ## Context
 
 (Inferred.) Two-phase execution requires generating full command sequences before any SUT contact, yet later commands must reference entities created by earlier ones (cancel the order you created). Symbolic refs solve this without guessing IDs. `make_ref/0` gives globally unique, cheap identities with no registry. This mirrors the symbolic/dynamic state split in established SPBT tools (the two-phase design in `openspec/specs/execution-engine/spec.md` "Two-Phase Execution").
 
-## Consequences
+## Consequences (historical)
 
-- `lib/property_damage/ref.ex` implements `symbolic/1`, `resolve/2`, `value!/1` and documents the lifecycle (marked DEPRECATED in favor of `external()`; see DR-011).
-- `openspec/specs/execution-engine/spec.md` requirement "Symbolic Reference Resolution": creation in the symbolic phase, substitution before execution, failure on unresolved refs, identity by `make_ref/0`.
-- The shrinker never shrinks ref values ("Refs are never shrunk (would break dependencies)", `lib/property_damage/shrinker.ex`) and uses ref production/consumption to build the dependency DAG (DR-017).
-- Branching/parallel execution and replay rely on the ref resolution map (`openspec/specs/persistence/spec.md`, replay steps include the "ref resolution map").
+These described the original design; the listed code and spec requirement have since been removed or replaced.
+
+- `lib/property_damage/ref.ex` implemented `symbolic/1`, `resolve/2`, `value!/1` and documented the lifecycle (deleted in v0.2).
+- The execution-engine spec's "Symbolic Reference Resolution" requirement (creation in the symbolic phase, substitution before execution, failure on unresolved refs, identity by `make_ref/0`) is folded into the "External Field Markers" requirement.
+- The shrinker never shrank ref values and used ref production/consumption to build the dependency DAG (DR-017); it now does the same for placeholders (DR-021).
+- Branching/parallel execution and replay relied on the ref resolution map; placeholders carry the equivalent identity by position and id.
 
 ## References
 
