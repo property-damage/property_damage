@@ -65,6 +65,24 @@ defmodule ObanBench.Uniqueness.Projection do
   end
 
   def apply(state, _event), do: state
+
+  # Safety: each DISTINCT {counter, key} must increment the counter at most once,
+  # so the observed maximum must never exceed the number of distinct keys
+  # enqueued for that counter. Evaluated on the settled state (DR-024).
+  @trigger at: :teardown
+  def assert_exactly_once(state, _phase) do
+    for {counter, observed} <- state.observed do
+      expected = state.keys |> Map.get(counter, MapSet.new()) |> MapSet.size()
+
+      if observed > expected do
+        PropertyDamage.fail!("exactly-once violated (uniqueness)",
+          counter: counter,
+          observed: observed,
+          expected: expected
+        )
+      end
+    end
+  end
 end
 
 defmodule ObanBench.Uniqueness.Simulator do
@@ -94,8 +112,11 @@ defmodule ObanBench.Uniqueness.Model do
   @impl true
   def command_sequence_projection, do: ObanBench.Uniqueness.Projection
 
+  # The command-sequence projection already carries the @trigger at: :teardown
+  # safety check and receives every command/event, so it need not be listed
+  # again here (doing so would evaluate the check twice).
   @impl true
-  def assertion_projections, do: [ObanBench.Uniqueness.Projection]
+  def assertion_projections, do: []
 
   @impl true
   def simulator, do: ObanBench.Uniqueness.Simulator
@@ -147,6 +168,6 @@ defmodule ObanBench.Uniqueness.Adapter do
 
   @impl true
   def execute(%UniqueIncrement{counter: base, key: key}, ctx) do
-    ExactlyOnce.enqueue(base, key, UniqueWorker, ctx, dedup: true)
+    ExactlyOnce.enqueue(base, key, UniqueWorker, ctx)
   end
 end

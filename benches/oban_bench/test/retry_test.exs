@@ -44,7 +44,7 @@ defmodule ObanBench.RetryTest do
 
     @impl true
     def execute(%Increment{counter: base}, ctx) do
-      ExactlyOnce.enqueue(base, nil, DoubleApplyWorker, ctx, dedup: false)
+      ExactlyOnce.enqueue(base, nil, DoubleApplyWorker, ctx)
     end
   end
 
@@ -78,7 +78,10 @@ defmodule ObanBench.RetryTest do
                  verbose: false
                )
 
-      assert {:resource_poller_error, %ExactlyOnce.Violation{observed: 2, expected: 1}} =
+      # A clean exactly-once safety violation: the @trigger at: :teardown check
+      # on the settled state saw the counter overshoot its expected value.
+      assert {:assertion_failed, :exactly_once,
+              %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}} =
                report.failure_reason
 
       commands = PropertyDamage.Sequence.to_list(report.shrunk_sequence)

@@ -18,7 +18,14 @@ defmodule ObanBench.Retry do
 end
 
 defmodule ObanBench.Retry.Projection do
-  @moduledoc "Descriptive only: the exactly-once oracle is the resource poller."
+  @moduledoc """
+  The exactly-once oracle for the retry bench. It accumulates the expected final
+  value (one per `Enqueued`, since the retry bench does not deduplicate) and the
+  maximum value any poller ever observed (from `Incremented`). The safety bound
+  is a settled-state `@trigger at: :teardown` check: tracking the maximum (not a
+  snapshot) is what lets it catch the retry overshoot, which is still visible on
+  the settled state.
+  """
   use PropertyDamage.Model.Projection
 
   alias ObanBench.Events.{Enqueued, Incremented}
@@ -36,6 +43,23 @@ defmodule ObanBench.Retry.Projection do
   end
 
   def apply(state, _event), do: state
+
+  # Safety: a retried job must apply its effect at most once, so the observed
+  # maximum must never exceed the number of increments enqueued for that counter.
+  @trigger at: :teardown
+  def assert_exactly_once(state, _phase) do
+    for {counter, observed} <- state.observed do
+      expected = Map.get(state.enqueued, counter, 0)
+
+      if observed > expected do
+        PropertyDamage.fail!("exactly-once violated (retry)",
+          counter: counter,
+          observed: observed,
+          expected: expected
+        )
+      end
+    end
+  end
 end
 
 defmodule ObanBench.Retry.Model do
@@ -91,6 +115,6 @@ defmodule ObanBench.Retry.Adapter do
 
   @impl true
   def execute(%Increment{counter: base}, ctx) do
-    ExactlyOnce.enqueue(base, nil, IdempotentWorker, ctx, dedup: false)
+    ExactlyOnce.enqueue(base, nil, IdempotentWorker, ctx)
   end
 end

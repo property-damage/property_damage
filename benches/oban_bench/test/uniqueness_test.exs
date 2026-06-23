@@ -38,9 +38,9 @@ defmodule ObanBench.UniquenessTest do
 
     @impl true
     def execute(%UniqueIncrement{counter: base, key: key}, ctx) do
-      # Same expected-tracking (dedup) as the correct path, but a worker that
-      # never deduplicates: the counter will overshoot when a key repeats.
-      ExactlyOnce.enqueue(base, key, NonUniqueWorker, ctx, dedup: true)
+      # Same path as the correct adapter, but a worker that never deduplicates:
+      # the counter will overshoot when a key repeats.
+      ExactlyOnce.enqueue(base, key, NonUniqueWorker, ctx)
     end
   end
 
@@ -74,9 +74,11 @@ defmodule ObanBench.UniquenessTest do
                  verbose: false
                )
 
-      # A clean exactly-once safety violation: the counter overshot its
-      # deduplicated expected value (the duplicate job ran a second time).
-      assert {:resource_poller_error, %ExactlyOnce.Violation{observed: 2, expected: 1}} =
+      # A clean exactly-once safety violation: the @trigger at: :teardown check
+      # saw the counter overshoot its deduplicated expected value (the duplicate
+      # job ran a second time).
+      assert {:assertion_failed, :exactly_once,
+              %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}} =
                report.failure_reason
 
       commands = PropertyDamage.Sequence.to_list(report.shrunk_sequence)
