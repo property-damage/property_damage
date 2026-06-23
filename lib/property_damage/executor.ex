@@ -887,6 +887,13 @@ defmodule PropertyDamage.Executor do
         # Finalize resource pollers
         {state, resource_failures, resource_halt} = finalize_resource_pollers(state)
 
+        # Fold any remaining queued events into the projections so the settled
+        # state is complete (DR-024). When @poll_state pollers ran,
+        # drain_await_loop already folded events as they arrived; this final
+        # drain catches the last resource-poller emissions and also covers runs
+        # that have resource pollers but no @poll_state poller to drive a drain.
+        state = settle_event_queue(state)
+
         # assertion_failures accumulate newest-first (prepended in :record mode);
         # reverse so they read in chronological order, like the event log.
         combined_failures = Enum.reverse(assertion_failures) ++ resource_failures
@@ -1924,6 +1931,23 @@ defmodule PropertyDamage.Executor do
   end
 
   # Drain and process events from injector adapters and resource pollers
+  # Drain any events still queued (typically late resource-poller emissions
+  # that arrived after the last command) into the projections and event log, so
+  # the settled state used by the @trigger at: :teardown checkpoint and the
+  # reported result reflects every observed event (DR-024). A no-op when the
+  # queue is absent or empty.
+  defp settle_event_queue(state) do
+    {projections, event_log} =
+      process_injector_events(
+        Map.get(state, :event_queue),
+        state.event_log,
+        state.projections,
+        Map.get(state, :branch_id)
+      )
+
+    %{state | projections: projections, event_log: event_log}
+  end
+
   defp process_injector_events(nil, event_log, projections, _branch_id),
     do: {projections, event_log}
 
