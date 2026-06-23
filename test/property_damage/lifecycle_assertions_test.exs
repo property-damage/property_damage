@@ -418,4 +418,143 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     refute result.success
     assert {:assertion_failed, :count_at_most_one, _} = result.failure_reason
   end
+
+  # ===========================================================================
+  # Cluster 6 — assertion_mode for at: checks
+  # ===========================================================================
+
+  defp run_seq_mode(seq, model, adapter, mode) do
+    {:ok, queue} = PropertyDamage.EventQueue.start_link()
+
+    try do
+      Executor.run(seq, model, adapter, event_queue: queue, assertion_mode: mode)
+    after
+      PropertyDamage.EventQueue.stop(queue)
+    end
+  end
+
+  test ":halt mode reports a teardown violation as the failure reason" do
+    {:ok, result} =
+      run_seq_mode(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter, :halt)
+
+    refute result.success
+    assert {:assertion_failed, :count_at_most_one, _} = result.failure_reason
+  end
+
+  test ":record mode accumulates a teardown violation into assertion_failures" do
+    {:ok, result} =
+      run_seq_mode(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter, :record)
+
+    refute result.success
+    assert result.failure_reason == nil
+
+    assert Enum.any?(result.assertion_failures, fn f ->
+             f.assertion_name == :count_at_most_one and f.step_type == :teardown
+           end)
+  end
+
+  test ":log mode warns and continues; the run still succeeds" do
+    import ExUnit.CaptureLog
+
+    log =
+      capture_log(fn ->
+        {:ok, result} =
+          run_seq_mode(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter, :log)
+
+        assert result.success
+        assert result.assertion_failures == []
+      end)
+
+    assert log =~ "count_at_most_one"
+    assert log =~ "teardown"
+  end
+
+  test ":disabled mode skips the teardown check entirely" do
+    {:ok, result} =
+      run_seq_mode(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter, :disabled)
+
+    assert result.success
+  end
+
+  # ===========================================================================
+  # Cluster 8 — the accumulator contract (doc-as-test, DR-024 §11.4)
+  # ===========================================================================
+
+  defmodule Unbumped, do: defstruct([])
+
+  # A command overshoots to 2, then self-heals back to 1 before settling.
+  defmodule SelfHealingAdapter do
+    use PropertyDamage.Adapter
+    @impl true
+    def setup(config), do: {:ok, config}
+    @impl true
+    def teardown(_ctx), do: :ok
+    @impl true
+    def execute(%Bump{}, _ctx), do: {:ok, [%Bumped{}, %Bumped{}, %Unbumped{}]}
+  end
+
+  # ACCUMULATOR: retains the maximum ever observed, so the healed transient
+  # leaves a permanent trace.
+  defmodule AccumulatorProjection do
+    use PropertyDamage.Model.Projection
+    @impl true
+    def init, do: %{count: 0, max: 0}
+    @impl true
+    def apply(%{count: c, max: m} = s, %Bumped{}), do: %{s | count: c + 1, max: max(m, c + 1)}
+    def apply(%{count: c} = s, %Unbumped{}), do: %{s | count: c - 1}
+    def apply(s, _), do: s
+
+    @trigger at: :teardown
+    def assert_never_exceeded_one(state, _phase) do
+      if state.max > 1, do: PropertyDamage.fail!("max exceeded 1", max: state.max)
+    end
+  end
+
+  defmodule AccumulatorModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Bump]
+    @impl true
+    def command_sequence_projection, do: AccumulatorProjection
+  end
+
+  # SNAPSHOT: tracks only the latest value, so the healed transient is invisible
+  # by the time the settled check runs (the footgun the contract warns against).
+  defmodule SnapshotProjection do
+    use PropertyDamage.Model.Projection
+    @impl true
+    def init, do: %{count: 0}
+    @impl true
+    def apply(%{count: c} = s, %Bumped{}), do: %{s | count: c + 1}
+    def apply(%{count: c} = s, %Unbumped{}), do: %{s | count: c - 1}
+    def apply(s, _), do: s
+
+    @trigger at: :teardown
+    def assert_never_exceeds_one(state, _phase) do
+      if state.count > 1, do: PropertyDamage.fail!("count exceeded 1", count: state.count)
+    end
+  end
+
+  defmodule SnapshotModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Bump]
+    @impl true
+    def command_sequence_projection, do: SnapshotProjection
+  end
+
+  test "an accumulating projection catches a self-healed transient overshoot at :teardown" do
+    {:ok, result} = run_seq(Sequence.linear([%Bump{}]), AccumulatorModel, SelfHealingAdapter)
+
+    refute result.success
+    assert {:assertion_failed, :never_exceeded_one, _} = result.failure_reason
+    assert result.projections[AccumulatorProjection].max == 2
+  end
+
+  test "a snapshot projection provably misses a self-healed transient (the contract footgun)" do
+    {:ok, result} = run_seq(Sequence.linear([%Bump{}]), SnapshotModel, SelfHealingAdapter)
+
+    assert result.success, "a snapshot projection cannot see the healed transient at settle"
+    assert result.projections[SnapshotProjection].count == 1
+  end
 end
