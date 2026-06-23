@@ -12,6 +12,24 @@ end, and trimmed the documented surface to what has been validated.
 
 ### Added
 
+- Lifecycle-boundary assertions via a new `at:` timing on `@trigger` (DR-024).
+  `@trigger at: :teardown` evaluates a synchronous assertion exactly once on the
+  fully-settled final projection state (after both `@poll_state` and resource
+  pollers have finalized, before `Adapter.teardown/1`); `@trigger at: :startup`
+  evaluates it once on the initial `init/0` state before the first command. This
+  gives a declarative *safety* primitive ("never exceeds N", "applied at most
+  once") to complement `@poll_state`'s *liveness*: a `@poll_state` predicate
+  resolves on the transient pass through the expected value and stops watching,
+  so it cannot express a bound that is only violated later, whereas the settled
+  checkpoint sees the persistent overshoot. Detection rests on the projection
+  *accumulating* evidence (a maximum, a sticky flag, a count) rather than
+  snapshotting the latest value (the "accumulator contract", documented in the
+  projection moduledoc and the eventual-consistency guide). An assertion carries
+  exactly one timing (`every:` xor `at:`, enforced at compile time); a failing
+  `:startup` check halts before command 1; a `@poll_state` liveness timeout
+  preempts the `:teardown` checkpoint; and `Adapter.teardown/1` always runs so a
+  failing safety check never leaks SUT resources. Violations report as the
+  assertion's named synchronous failure, distinct from a poll timeout.
 - `mix pd.replay <failure-file> [--verbose]` replays a saved `.pd` failure
   against the SUT. It loads the failing run (model and adapter are read from the
   file itself, so no flags are needed), re-executes the shrunk sequence through
@@ -174,6 +192,13 @@ end, and trimmed the documented surface to what has been validated.
 
 ### Fixed
 
+- The settled final state now folds in late resource-poller events even when no
+  `@poll_state` poller is active. Previously the finalize-time drain only ran to
+  feed `@poll_state` predicates, so a run with resource pollers but no
+  `@poll_state` left events that arrived after the last command unfolded. A final
+  event-queue drain in result finalization makes the settled state (used by
+  `@trigger at: :teardown` and the reported projections) reflect every observed
+  event.
 - `PropertyDamage.shrink_further/2`'s documented option defaults no longer drift
   from the code: it listed a phantom `:max_iterations` default of 5000, but the
   defaults are strategy-derived (`:thorough` is 2000 iterations / 60_000 ms). The
