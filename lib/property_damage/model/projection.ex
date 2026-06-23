@@ -54,6 +54,11 @@ defmodule PropertyDamage.Model.Projection do
         end
       end
 
+  `@trigger` also supports an `at:` timing for one-shot checks at a lifecycle
+  boundary (`at: :startup` / `at: :teardown`); see "Lifecycle-Boundary
+  Assertions" below. Use `at: :teardown` for safety properties on the settled
+  final state.
+
   ### Temporal Assertions (`@poll_state`)
 
   Spawn a background poller when a trigger event occurs. The poller periodically
@@ -113,6 +118,59 @@ defmodule PropertyDamage.Model.Projection do
   every event increments the step counter. So `every: 1` runs after each command
   and after each of its events, while `every: {5, :command}` counts commands only.
   The count in `{N, target}` must be a positive integer.
+
+  ## Lifecycle-Boundary Assertions (`@trigger at:`)
+
+  `@trigger` has a second, orthogonal timing axis: `at:`. Where `every:` *samples*
+  an assertion during the command loop, `at:` fires it exactly **once** at a
+  lifecycle phase boundary. An assertion carries exactly one timing: `every:` xor
+  `at:` (declaring both is a compile error).
+
+  | Syntax | Runs... |
+  |--------|---------|
+  | `@trigger at: :startup` | once on the initial `init/0` state, after `setup/1`, before command 1 |
+  | `@trigger at: :teardown` | once on the fully-**settled** final state, after all pollers finalize, before `teardown/1` |
+
+  Because no command or event triggers a lifecycle-boundary assertion, the
+  second argument is the phase atom (`:startup` or `:teardown`); a state-only
+  check ignores it:
+
+      @trigger at: :teardown
+      def assert_balance_reconciles(state, _phase) do
+        if state.debits != state.credits do
+          PropertyDamage.fail!("ledger did not reconcile", state: state)
+        end
+      end
+
+  `at: :teardown` is the natural home for a **safety** property ("this never
+  happens too much"), the temporal dual of `@poll_state`'s **liveness** ("this
+  eventually happens"). "Settled" means after both the state pollers
+  (`@poll_state`) and the resource pollers have finalized: the one point in a run
+  where no poller is live and every observed event has been folded into
+  projection state. A `@poll_state` liveness timeout preempts the `:teardown`
+  checkpoint (a timeout is itself a not-settled outcome). A failing `:startup`
+  check halts the run before the first command.
+
+  ### The accumulator contract
+
+  A `:teardown` check runs on the **final folded state**, so detection depends on
+  the projection *retaining evidence* of a violation. Write a safety projection
+  to **accumulate** (track a maximum observed value, a sticky `violated?` flag, an
+  application count) rather than snapshot the latest value. A snapshot projection
+  that heals back to a legal value before settling silently misses a transient
+  over-application:
+
+      # GOOD — accumulates: the overshoot leaves a permanent trace.
+      def apply(%{count: c, max: m} = s, %Applied{}), do: %{s | count: c + 1, max: max(m, c + 1)}
+
+      @trigger at: :teardown
+      def assert_at_most_once(state, _phase) do
+        if state.max > 1, do: PropertyDamage.fail!("applied more than once", max: state.max)
+      end
+
+      # BAD — snapshots: a 0 -> 2 -> 1 transient is invisible at settle.
+      def apply(%{count: c} = s, %Applied{}), do: %{s | count: c + 1}
+      def apply(%{count: c} = s, %Reverted{}), do: %{s | count: c - 1}
 
   ## @poll_state Syntax
 

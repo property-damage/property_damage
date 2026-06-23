@@ -668,6 +668,75 @@ defmodule MyTest.AuthorizationPoller do
 end
 ```
 
+## Safety vs Liveness: `@trigger at: :teardown`
+
+Verifying an eventually-consistent effect has two halves, and they need
+different tools:
+
+- **Liveness** ("the effect *eventually* happens") is what `@poll_state`
+  expresses: its poller resolves the instant its predicate is first true, then
+  stops. This is a reachability check.
+- **Safety** ("the effect *never* happens too much": at most once, never
+  exceeds N) is the dual. A `@poll_state` predicate *cannot* express it: a value
+  can pass *through* the correct number on its way to overshooting, and the
+  poller resolves on that transient pass and stops watching. Its natural
+  evaluation point is the moment the system has **settled**, on the final state.
+
+That settled checkpoint is `@trigger at: :teardown`. It runs once, on the merged
+final projection state, after both the state pollers (`@poll_state`) and the
+resource pollers have finalized, and before `Adapter.teardown/1`. A persistent
+over-application (a counter left above its expected value, a job applied twice)
+is still visible there and reports as a clear, named assertion failure rather
+than as a generic poll timeout. A genuine `@poll_state` liveness timeout
+preempts the checkpoint (a timeout is itself a not-settled outcome).
+
+```elixir
+defmodule JobProjection do
+  use PropertyDamage.Model.Projection
+
+  def init, do: %{expected: 0, applied: 0, max_applied: 0}
+
+  # Count what SHOULD happen from the commands...
+  def apply(%{expected: e} = s, %Enqueue{}), do: %{s | expected: e + 1}
+  # ...and accumulate what DID happen from the async effects.
+  def apply(%{applied: a, max_applied: m} = s, %Applied{}) do
+    %{s | applied: a + 1, max_applied: max(m, a + 1)}
+  end
+  def apply(s, _), do: s
+
+  # Liveness: the effect eventually reaches the expected count.
+  @poll_state after: Enqueue, timeout: {5, :seconds}, interval: {50, :milliseconds}
+  def eventually_applied(_s, %Enqueue{}), do: fn s -> s.applied >= s.expected end
+
+  # Safety: it never over-applies. Evaluated on the settled state.
+  @trigger at: :teardown
+  def assert_effectively_once(state, _phase) do
+    if state.max_applied > state.expected do
+      PropertyDamage.fail!("over-applied",
+        applied: state.max_applied, expected: state.expected)
+    end
+  end
+end
+```
+
+### The accumulator contract
+
+A `:teardown` check runs on the **final folded state**, so it can only detect a
+violation the projection still *remembers*. Accumulate evidence (a maximum, a
+sticky `violated?` flag, an application count) rather than snapshotting the
+latest value. The `max_applied` field above is the pattern: an overshoot to 2
+leaves `max_applied == 2` even if the value later heals back to 1. A snapshot
+projection (`applied` alone) that heals before settling would silently miss the
+transient. This is the single biggest footgun of `at: :teardown`; design the
+projection to keep the evidence.
+
+PropertyDamage verifies **effectively-once** (at-least-once delivery plus an
+idempotent or deduplicated effect, observed at the value level), not distributed
+exactly-once. Detection is also observation-granular: a transient overshoot that
+*no event ever observes* (it exists only between polls and self-heals) is
+invisible to the framework. The settled checkpoint covers every *persistent*
+overshoot fully.
+
 ## Summary
 
 | Pattern | Use When | Implementation |

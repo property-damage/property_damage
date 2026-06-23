@@ -211,8 +211,31 @@ end
 
 Supported `every:` forms: `1` (every step), `N` (every Nth step),
 `:command`/`:event` (after any command/event), `Module`/`[Modules]` (after a
-specific module), and `{N, target}` variants. There is no "end of sequence"
-trigger; sample with `every: N` for expensive checks.
+specific module), and `{N, target}` variants. Sample with `every: N` for
+expensive checks.
+
+### Lifecycle-boundary checks (`at:`)
+
+`@trigger` has a second timing axis, `at:`, for a one-shot check at a lifecycle
+boundary instead of during the command loop. An assertion uses `every:` or
+`at:`, never both.
+
+```elixir
+# Once on the initial init/0 state, before the first command.
+@trigger at: :startup
+def assert_clean_start(state, _phase), do: # ...
+
+# Once on the fully-settled final state, after all pollers finalize.
+@trigger at: :teardown
+def assert_no_overshoot(state, _phase), do: # ...
+```
+
+`at: :teardown` is the home for **safety** properties over async effects ("never
+applied more than once"), the dual of `@poll_state`'s liveness. Because it runs
+on the final folded state, the projection must **accumulate** evidence (a
+maximum, a sticky flag) rather than snapshot, or a self-healed transient slips
+past. See the [Async and Eventual Consistency](async_and_eventual_consistency.md)
+guide for the safety/liveness pairing and the accumulator contract.
 
 ## Tracking State for Invariants
 
