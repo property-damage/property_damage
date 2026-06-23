@@ -36,25 +36,29 @@ defmodule PropertyDamage.ProjectionMacroTest do
   end
 
   test "a multi-clause assert_ function compiles and registers exactly one assertion" do
+    # Exercise both clauses inside the eval'd source so the assertions on a
+    # module that only exists at runtime carry no compile-time reference (which
+    # would warn as undefined).
     {result, _} =
       eval("""
       defmodule PDMT.MultiClause do
         use PropertyDamage.Model.Projection
         def init, do: %{}
         @trigger every: 1
-        def assert_x(_s,%{a: _}), do: :ok
-        def assert_x(_s,_), do: :ok
+        def assert_x(_s, %{a: _}), do: :ok
+        def assert_x(_s, _), do: :ok
       end
-      PDMT.MultiClause.__assertions__()
+
+      {PDMT.MultiClause.__assertions__(), PDMT.MultiClause.assert_x(%{}, %{a: 1}),
+       PDMT.MultiClause.assert_x(%{}, %{})}
       """)
 
-    assert [%{function_name: :assert_x, type: :synchronous}] = result
-    # both clauses are live. Call via a runtime-resolved module + apply/3 so the
-    # compiler does not warn about a static reference to this eval'd-at-runtime
-    # module (which does not exist at compile time).
-    mod = Module.concat([:PDMT, :MultiClause])
-    assert apply(mod, :assert_x, [%{}, %{a: 1}]) == :ok
-    assert apply(mod, :assert_x, [%{}, %{}]) == :ok
+    {assertions, clause_with_map, clause_catchall} = result
+
+    assert [%{function_name: :assert_x, type: :synchronous}] = assertions
+    # both clauses are live
+    assert clause_with_map == :ok
+    assert clause_catchall == :ok
   end
 
   test "a mistyped atom trigger value raises instead of silently never firing" do
