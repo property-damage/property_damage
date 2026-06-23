@@ -341,39 +341,53 @@ defmodule PropertyDamage.Executor do
         registry
       )
 
-    result =
-      commands
-      |> Enum.with_index()
-      |> Enum.reduce_while(initial_state, fn {command, index}, state ->
-        # Capture projections before this command executes
-        state_with_before = %{
-          state
-          | projections_before: state.projections,
-            current_position: {:prefix, index}
+    # DR-024: @trigger at: :startup checks run on the initial init/0 state,
+    # after setup/1 and before command 1. A :halt failure aborts before any
+    # command runs.
+    case run_phase_assertions(initial_state, :startup) do
+      {:halt, name, reason} ->
+        finalize_result({:failed, nil, {:assertion_failed, name, reason}, initial_state})
+
+      {:ok, startup_recorded} ->
+        initial_state = %{
+          initial_state
+          | assertion_failures: startup_recorded ++ initial_state.assertion_failures
         }
 
-        case execute_command(
-               command,
-               index,
-               state_with_before,
-               model,
-               adapter,
-               adapter_context,
-               event_queue
-             ) do
-          {:ok, new_state} ->
-            # Lift any auto-restoring fault whose duration has elapsed, so a
-            # time-bounded fault stops affecting later commands.
-            {:cont, restore_elapsed_faults(new_state, adapter_context, event_queue)}
+        result =
+          commands
+          |> Enum.with_index()
+          |> Enum.reduce_while(initial_state, fn {command, index}, state ->
+            # Capture projections before this command executes
+            state_with_before = %{
+              state
+              | projections_before: state.projections,
+                current_position: {:prefix, index}
+            }
 
-          {:error, reason, failed_state} ->
-            {:halt, {:failed, index, reason, failed_state}}
-        end
-      end)
+            case execute_command(
+                   command,
+                   index,
+                   state_with_before,
+                   model,
+                   adapter,
+                   adapter_context,
+                   event_queue
+                 ) do
+              {:ok, new_state} ->
+                # Lift any auto-restoring fault whose duration has elapsed, so a
+                # time-bounded fault stops affecting later commands.
+                {:cont, restore_elapsed_faults(new_state, adapter_context, event_queue)}
 
-    result
-    |> restore_remaining_faults(adapter_context, event_queue)
-    |> finalize_result()
+              {:error, reason, failed_state} ->
+                {:halt, {:failed, index, reason, failed_state}}
+            end
+          end)
+
+        result
+        |> restore_remaining_faults(adapter_context, event_queue)
+        |> finalize_result()
+    end
   end
 
   # Restore any still-active faults at sequence end so none leak past the run.
@@ -407,8 +421,6 @@ defmodule PropertyDamage.Executor do
          assertion_mode,
          external_markers
        ) do
-    %Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence
-
     initial_state =
       build_initial_state(
         model,
@@ -419,6 +431,39 @@ defmodule PropertyDamage.Executor do
         external_markers,
         sequence.registry
       )
+
+    # DR-024: @trigger at: :startup runs once on the shared initial state,
+    # before any branch. A :halt failure aborts before any command runs.
+    case run_phase_assertions(initial_state, :startup) do
+      {:halt, name, reason} ->
+        finalize_result({:failed, nil, {:assertion_failed, name, reason}, initial_state})
+
+      {:ok, startup_recorded} ->
+        initial_state = %{
+          initial_state
+          | assertion_failures: startup_recorded ++ initial_state.assertion_failures
+        }
+
+        execute_branching_phases(
+          sequence,
+          initial_state,
+          model,
+          adapter,
+          adapter_context,
+          event_queue
+        )
+    end
+  end
+
+  defp execute_branching_phases(
+         sequence,
+         initial_state,
+         model,
+         adapter,
+         adapter_context,
+         event_queue
+       ) do
+    %Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence
 
     # Phase 1: Execute prefix
     prefix_result =
@@ -857,20 +902,45 @@ defmodule PropertyDamage.Executor do
             )
 
           _ ->
-            # In :record mode, success is false if there were any failures recorded
-            success = Enum.empty?(combined_failures)
+            # DR-024: the @trigger at: :teardown checkpoint runs here, on the
+            # fully-settled state (after both poller-finalize steps), on the
+            # clean-completion path only and before Adapter.teardown/1. A genuine
+            # @poll_state liveness timeout has already preempted it above (no
+            # hoist): a liveness timeout is itself a not-settled outcome, so
+            # there is no settled state to check.
+            case run_phase_assertions(state, :teardown) do
+              {:halt, name, reason} ->
+                {normalized, stacktrace} =
+                  extract_stacktrace({:assertion_failed, name, reason})
 
-            %{
-              success: success,
-              event_log: Enum.reverse(state.event_log),
-              projections: state.projections,
-              projections_before: Map.get(state, :projections_before),
-              failed_at_index: nil,
-              failure_reason: nil,
-              stacktrace: nil,
-              linearization: linearization,
-              assertion_failures: combined_failures
-            }
+                teardown_failure_result(
+                  state,
+                  normalized,
+                  stacktrace,
+                  linearization,
+                  combined_failures
+                )
+
+              {:ok, teardown_recorded} ->
+                # teardown_recorded is newest-first and chronologically last;
+                # reverse to chronological order and append after everything else.
+                all_failures = combined_failures ++ Enum.reverse(teardown_recorded)
+
+                # In :record mode, success is false if any failures were recorded.
+                success = Enum.empty?(all_failures)
+
+                %{
+                  success: success,
+                  event_log: Enum.reverse(state.event_log),
+                  projections: state.projections,
+                  projections_before: Map.get(state, :projections_before),
+                  failed_at_index: nil,
+                  failure_reason: nil,
+                  stacktrace: nil,
+                  linearization: linearization,
+                  assertion_failures: all_failures
+                }
+            end
         end
     end
   end
@@ -887,6 +957,26 @@ defmodule PropertyDamage.Executor do
       failed_at_index: nil,
       failure_reason: failure_reason,
       stacktrace: nil,
+      linearization: linearization,
+      assertion_failures: failures
+    }
+  end
+
+  # Result shape for a failing @trigger at: :teardown safety check (DR-024).
+  # Like poller_failure_result but carries the assertion's named failure reason
+  # and its stacktrace, so it reports as a synchronous assertion failure on the
+  # settled state (failed_at_index nil — no command failed), distinct from a
+  # poll timeout. Adapter.teardown/1 still runs afterward (it is owned by run/4's
+  # `after` block), so a failing safety check never leaks SUT resources.
+  defp teardown_failure_result(state, failure_reason, stacktrace, linearization, failures) do
+    %{
+      success: false,
+      event_log: Enum.reverse(state.event_log),
+      projections: state.projections,
+      projections_before: Map.get(state, :projections_before),
+      failed_at_index: nil,
+      failure_reason: failure_reason,
+      stacktrace: stacktrace,
       linearization: linearization,
       assertion_failures: failures
     }
@@ -1996,8 +2086,14 @@ defmodule PropertyDamage.Executor do
     # Only synchronous (@trigger) assertions run here; polling (@poll_state)
     # assertions have no :trigger key and are handled by the pollers. Without
     # this filter, accessing assertion.trigger on a polling assertion raised
-    # a KeyError that crashed the run on the first command.
-    sync_assertions = Enum.filter(assertions, &(&1.type == :synchronous))
+    # a KeyError that crashed the run on the first command. Lifecycle-boundary
+    # assertions (@trigger at:, DR-024) are also synchronous but fire only at a
+    # phase boundary, not during the command loop, so they are excluded here and
+    # dispatched separately by run_phase_assertions/2.
+    sync_assertions =
+      Enum.filter(assertions, fn assertion ->
+        assertion.type == :synchronous and not match?(%{type: :at}, assertion.trigger)
+      end)
 
     Enum.reduce_while(sync_assertions, {:ok, counters}, fn assertion, {:ok, acc_counters} ->
       if Projection.should_run?(
@@ -2022,6 +2118,119 @@ defmodule PropertyDamage.Executor do
         {:cont, {:ok, acc_counters}}
       end
     end)
+  end
+
+  # ============================================================================
+  # Lifecycle-Boundary Assertions (@trigger at:, DR-024)
+  # ============================================================================
+
+  # Run every @trigger at: <phase> assertion once on the given projection state.
+  # Unlike during-run (every:) assertions there is no step counter and no
+  # should_run?/4 sampling: the timing IS the phase boundary. The triggering
+  # command/event slot carries the phase atom (:startup | :teardown) so a
+  # state-only check ignores it.
+  #
+  # Returns one of:
+  #   {:ok, recorded_failures}  -- recorded_failures are the :record-mode
+  #                                failures from this phase, newest-first; empty
+  #                                on a clean pass and under :log/:disabled.
+  #   {:halt, name, {exception, stacktrace}} -- first failure under :halt mode.
+  defp run_phase_assertions(state, phase) do
+    assertion_mode = Map.get(state, :assertion_mode, :halt)
+
+    if assertion_mode == :disabled do
+      {:ok, []}
+    else
+      model = Map.fetch!(state, :model)
+      projections = state.projections
+
+      Enum.reduce_while(projection_modules(model), {:ok, []}, fn projection, {:ok, recorded} ->
+        projection_state = Map.get(projections, projection)
+        assertions = phase_assertions(projection, phase)
+
+        case run_phase_projection_assertions(
+               projection,
+               projection_state,
+               assertions,
+               phase,
+               assertion_mode,
+               recorded
+             ) do
+          {:ok, new_recorded} -> {:cont, {:ok, new_recorded}}
+          {:halt, name, reason} -> {:halt, {:halt, name, reason}}
+        end
+      end)
+    end
+  end
+
+  defp run_phase_projection_assertions(
+         projection,
+         projection_state,
+         assertions,
+         phase,
+         assertion_mode,
+         recorded
+       ) do
+    require Logger
+
+    Enum.reduce_while(assertions, {:ok, recorded}, fn assertion, {:ok, acc_recorded} ->
+      try do
+        apply(projection, assertion.function_name, [projection_state, phase])
+        {:cont, {:ok, acc_recorded}}
+      rescue
+        e ->
+          stacktrace = __STACKTRACE__
+
+          case assertion_mode do
+            :halt ->
+              {:halt, {:halt, assertion.name, {e, stacktrace}}}
+
+            :record ->
+              failure = %{
+                assertion_name: assertion.name,
+                reason: {e, stacktrace},
+                command: nil,
+                command_index: nil,
+                step_type: phase,
+                module: nil,
+                timestamp: System.monotonic_time(:millisecond)
+              }
+
+              {:cont, {:ok, [failure | acc_recorded]}}
+
+            :log ->
+              Logger.warning("Assertion failed at #{phase}: #{assertion.name} - #{inspect(e)}")
+
+              {:cont, {:ok, acc_recorded}}
+          end
+      end
+    end)
+  end
+
+  # The @trigger at: <phase> assertions declared on a projection. Lifecycle
+  # assertions stay type: :synchronous; the at: phase lives in the trigger spec.
+  defp phase_assertions(projection, phase) do
+    if function_exported?(projection, :__assertions__, 0) do
+      Enum.filter(projection.__assertions__(), fn assertion ->
+        assertion.type == :synchronous and
+          match?(%{type: :at, phase: ^phase}, Map.get(assertion, :trigger))
+      end)
+    else
+      []
+    end
+  end
+
+  # The full projection list a model exposes: the command-sequence projection
+  # plus any assertion projections.
+  defp projection_modules(model) do
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
+      else
+        []
+      end
+
+    [model.command_sequence_projection() | assertion_projections]
   end
 
   # Legacy wrapper for backward compatibility
