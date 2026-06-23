@@ -117,7 +117,12 @@ changes of this kind before.
   settled-state drain) inherit this because they route through the injector processor; a
   violation found while draining surfaces as a run failure rather than being folded
   silently. The incremental-versus-batch distinction is load-bearing for shrink
-  convergence and is documented at the call sites.
+  convergence and is documented at the call sites. One nemesis sub-path is out of
+  scope: the auto-restore re-injection (a fault lifting on its own) folds its events
+  into projection state but does not evaluate them against `@trigger every:`
+  assertions, because it represents fault *clearing* rather than a SUT effect under
+  test; the nemesis command-injection path is where injected-fault events are
+  asserted.
 - `lib/property_damage/model/projection.ex`: unchanged. The trigger surface, normalizer,
   and `should_run?/4` are untouched; only the set of call sites that invoke the dispatch
   grows.

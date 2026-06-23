@@ -30,6 +30,23 @@ end, and trimmed the documented surface to what has been validated.
   preempts the `:teardown` checkpoint; and `Adapter.teardown/1` always runs so a
   failing safety check never leaks SUT resources. Violations report as the
   assertion's named synchronous failure, distinct from a poll timeout.
+- Continuous async-observation checking (DR-025). A `@trigger every:` assertion
+  now fires on **every observed event**, including events observed
+  asynchronously rather than returned by a command: resource-poller and
+  injector-adapter events, mock-service events, and nemesis (command-injected)
+  events, plus events folded during the finalize-time drains. This makes the
+  documented `@trigger every: :event` ("after any event") contract true; until
+  now those asynchronous observations were silently skipped. A violation is
+  reported **at the offending event**, carrying that event's `command_index`, so
+  the shrinker converges to a tight reproduction instead of only surfacing the
+  failure at the `at: :teardown` settled checkpoint. There is no new trigger
+  surface and no opt-in flag; `@trigger every: :command` remains the opt-out for
+  assertions that should fire only after commands. **Behavior change:** a
+  `@trigger every:` assertion that previously ran only on a command's own events
+  now also runs on asynchronously-observed events of a matching kind. The
+  shrinker's failure signature now distinguishes assertion failures by name, so
+  distinct assertions are no longer conflated during shrinking (an async-observed
+  failure stays equivalent to a `:teardown` failure of the same assertion).
 - `mix pd.replay <failure-file> [--verbose]` replays a saved `.pd` failure
   against the SUT. It loads the failing run (model and adapter are read from the
   file itself, so no flags are needed), re-executes the shrunk sequence through

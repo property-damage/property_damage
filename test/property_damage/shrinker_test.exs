@@ -90,6 +90,15 @@ defmodule PropertyDamage.ShrinkerTest do
       assert Shrinker.failure_signature("string") == %{type: :unknown, check_name: nil}
       assert Shrinker.failure_signature(123) == %{type: :unknown, check_name: nil}
     end
+
+    test "named assertion failures carry the assertion name as the check name (DR-025)" do
+      reason = {:assertion_failed, :counter_never_exceeds, {%RuntimeError{}, []}}
+
+      assert Shrinker.failure_signature(reason) == %{
+               type: :assertion_failed,
+               check_name: :counter_never_exceeds
+             }
+    end
   end
 
   describe "equivalent_failures?/2" do
@@ -105,6 +114,18 @@ defmodule PropertyDamage.ShrinkerTest do
       reason2 = {:check_failed, :consistency, "Error"}
 
       refute Shrinker.equivalent_failures?(reason1, reason2)
+    end
+
+    test "distinct assertion failures are not equivalent, same one is (DR-025)" do
+      a = {:assertion_failed, :counter_never_exceeds, {%RuntimeError{}, []}}
+      b = {:assertion_failed, :other_invariant, {%RuntimeError{}, []}}
+      # An async-observed failure and a teardown failure of the SAME assertion
+      # carry the same name, so they remain equivalent for shrinking.
+      a_again =
+        {:assertion_failed, :counter_never_exceeds, {%ArgumentError{}, [{:mod, :f, 1, []}]}}
+
+      refute Shrinker.equivalent_failures?(a, b)
+      assert Shrinker.equivalent_failures?(a, a_again)
     end
 
     test "different failure types are not equivalent" do

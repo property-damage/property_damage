@@ -866,9 +866,36 @@ defmodule PropertyDamage.Executor do
   end
 
   defp finalize_result(state, linearization) do
-    # Finalize all active state pollers - wait for them to complete
+    # Finalize all active state pollers - wait for them to complete. The drain
+    # also evaluates async @trigger every: assertions on events that arrive
+    # during the @poll_state await window (DR-025); a :halt violation there is
+    # surfaced as state.async_halt.
     {state, assertion_failures, halt_failure} = finalize_pollers(state)
 
+    case Map.get(state, :async_halt) do
+      # DR-025: an async every: assertion tripped during the @poll_state await
+      # drain under :halt mode. Report it at the observing event's command_index,
+      # ahead of any poll timeout (a more proximate, more actionable failure).
+      {name, reason, command_index} ->
+        resource_pollers = Map.get(state, :active_resource_pollers, [])
+        Enum.each(resource_pollers, &ResourcePoller.stop/1)
+        {normalized, stacktrace} = extract_stacktrace({:assertion_failed, name, reason})
+
+        async_failure_result(
+          state,
+          normalized,
+          stacktrace,
+          command_index,
+          linearization,
+          Enum.reverse(assertion_failures)
+        )
+
+      nil ->
+        finalize_after_pollers(state, assertion_failures, halt_failure, linearization)
+    end
+  end
+
+  defp finalize_after_pollers(state, assertion_failures, halt_failure, linearization) do
     # Check if any state poller halted the run in :halt mode. Both timeouts
     # and errors are halt-worthy; the error case previously fell through and
     # was reported as success.
@@ -888,66 +915,97 @@ defmodule PropertyDamage.Executor do
         {state, resource_failures, resource_halt} = finalize_resource_pollers(state)
 
         # Fold any remaining queued events into the projections so the settled
-        # state is complete (DR-024). When @poll_state pollers ran,
-        # drain_await_loop already folded events as they arrived; this final
+        # state is complete (DR-024), evaluating async `@trigger every:`
+        # assertions on each as it is folded (DR-025). When @poll_state pollers
+        # ran, drain_await_loop already folded events as they arrived; this final
         # drain catches the last resource-poller emissions and also covers runs
         # that have resource pollers but no @poll_state poller to drive a drain.
-        state = settle_event_queue(state)
+        # `assertion_failures` carries the run's :record failures so far (newest
+        # first); the async check prepends any it records.
+        case settle_event_queue(state, assertion_failures) do
+          # DR-025: an async every: assertion tripped on a drained event under
+          # :halt mode — report it at the observing event's command_index.
+          {:halt, name, reason, command_index, state, failures} ->
+            {normalized, stacktrace} = extract_stacktrace({:assertion_failed, name, reason})
+            combined_failures = Enum.reverse(failures) ++ resource_failures
 
-        # assertion_failures accumulate newest-first (prepended in :record mode);
-        # reverse so they read in chronological order, like the event log.
-        combined_failures = Enum.reverse(assertion_failures) ++ resource_failures
-
-        # Check if any resource poller failed in :halt mode
-        case resource_halt do
-          {:error, _id, reason} ->
-            poller_failure_result(
+            async_failure_result(
               state,
-              {:resource_poller_error, reason},
+              normalized,
+              stacktrace,
+              command_index,
               linearization,
               combined_failures
             )
 
-          _ ->
-            # DR-024: the @trigger at: :teardown checkpoint runs here, on the
-            # fully-settled state (after both poller-finalize steps), on the
-            # clean-completion path only and before Adapter.teardown/1. A genuine
-            # @poll_state liveness timeout has already preempted it above (no
-            # hoist): a liveness timeout is itself a not-settled outcome, so
-            # there is no settled state to check.
-            case run_phase_assertions(state, :teardown) do
-              {:halt, name, reason} ->
-                {normalized, stacktrace} =
-                  extract_stacktrace({:assertion_failed, name, reason})
+          {:ok, state, failures} ->
+            finalize_after_settle(
+              state,
+              failures,
+              resource_failures,
+              resource_halt,
+              linearization
+            )
+        end
+    end
+  end
 
-                teardown_failure_result(
-                  state,
-                  normalized,
-                  stacktrace,
-                  linearization,
-                  combined_failures
-                )
+  # The clean-completion tail after the settle drain (DR-024 teardown checkpoint
+  # path). Split out so the DR-025 async-halt branch in settle can short-circuit.
+  # `failures` is the run's accumulated :record failures (newest first).
+  defp finalize_after_settle(state, failures, resource_failures, resource_halt, linearization) do
+    # Reverse so they read in chronological order, like the event log.
+    combined_failures = Enum.reverse(failures) ++ resource_failures
 
-              {:ok, teardown_recorded} ->
-                # teardown_recorded is newest-first and chronologically last;
-                # reverse to chronological order and append after everything else.
-                all_failures = combined_failures ++ Enum.reverse(teardown_recorded)
+    # Check if any resource poller failed in :halt mode
+    case resource_halt do
+      {:error, _id, reason} ->
+        poller_failure_result(
+          state,
+          {:resource_poller_error, reason},
+          linearization,
+          combined_failures
+        )
 
-                # In :record mode, success is false if any failures were recorded.
-                success = Enum.empty?(all_failures)
+      _ ->
+        # DR-024: the @trigger at: :teardown checkpoint runs here, on the
+        # fully-settled state (after both poller-finalize steps), on the
+        # clean-completion path only and before Adapter.teardown/1. A genuine
+        # @poll_state liveness timeout has already preempted it above (no
+        # hoist): a liveness timeout is itself a not-settled outcome, so
+        # there is no settled state to check.
+        case run_phase_assertions(state, :teardown) do
+          {:halt, name, reason} ->
+            {normalized, stacktrace} =
+              extract_stacktrace({:assertion_failed, name, reason})
 
-                %{
-                  success: success,
-                  event_log: Enum.reverse(state.event_log),
-                  projections: state.projections,
-                  projections_before: Map.get(state, :projections_before),
-                  failed_at_index: nil,
-                  failure_reason: nil,
-                  stacktrace: nil,
-                  linearization: linearization,
-                  assertion_failures: all_failures
-                }
-            end
+            teardown_failure_result(
+              state,
+              normalized,
+              stacktrace,
+              linearization,
+              combined_failures
+            )
+
+          {:ok, teardown_recorded} ->
+            # teardown_recorded is newest-first and chronologically last;
+            # reverse to chronological order and append after everything else.
+            all_failures = combined_failures ++ Enum.reverse(teardown_recorded)
+
+            # In :record mode, success is false if any failures were recorded.
+            success = Enum.empty?(all_failures)
+
+            %{
+              success: success,
+              event_log: Enum.reverse(state.event_log),
+              projections: state.projections,
+              projections_before: Map.get(state, :projections_before),
+              failed_at_index: nil,
+              failure_reason: nil,
+              stacktrace: nil,
+              linearization: linearization,
+              assertion_failures: all_failures
+            }
         end
     end
   end
@@ -982,6 +1040,32 @@ defmodule PropertyDamage.Executor do
       projections: state.projections,
       projections_before: Map.get(state, :projections_before),
       failed_at_index: nil,
+      failure_reason: failure_reason,
+      stacktrace: stacktrace,
+      linearization: linearization,
+      assertion_failures: failures
+    }
+  end
+
+  # Result for a failing `@trigger every:` assertion observed asynchronously
+  # during a finalize-time drain (DR-025). Like teardown_failure_result, but
+  # carries the observing event's `command_index` as `failed_at_index` so the
+  # shrinker can truncate to the command that caused it (nil for a pure injector
+  # event, which the shrinker tolerates by falling back to its sequence search).
+  defp async_failure_result(
+         state,
+         failure_reason,
+         stacktrace,
+         command_index,
+         linearization,
+         failures
+       ) do
+    %{
+      success: false,
+      event_log: Enum.reverse(state.event_log),
+      projections: state.projections,
+      projections_before: Map.get(state, :projections_before),
+      failed_at_index: command_index,
       failure_reason: failure_reason,
       stacktrace: stacktrace,
       linearization: linearization,
@@ -1221,6 +1305,11 @@ defmodule PropertyDamage.Executor do
         # Update projections with nemesis command
         projections = update_projections(state.projections, resolved_command)
 
+        # DR-025: capture pre-drain state so check_async can locate an async
+        # violation at the observing event's command_index.
+        projs_before_async = projections
+        log_before_async = state.event_log
+
         # Process nemesis events with source: :nemesis
         {projections, event_log} =
           process_nemesis_events(
@@ -1250,49 +1339,74 @@ defmodule PropertyDamage.Executor do
             active_faults
           end
 
-        # Run checks
-        check_ctx = %{
-          command: resolved_command,
-          events: events,
-          command_index: index,
-          step_count: state.step_count + 1,
-          projections: projections,
-          branch_id: state.branch_id,
-          active_faults: active_faults
-        }
-
-        case run_checks(
+        # DR-025: assert @trigger every: on the nemesis + injector events folded
+        # above, incrementally, before the command's own checks.
+        case check_async(
                model,
-               projections,
-               check_ctx,
+               projs_before_async,
+               log_before_async,
+               event_log,
                state.assertion_counters,
                assertion_mode,
                assertion_failures
              ) do
-          {:ok, assertion_counters, updated_failures} ->
-            new_state =
-              put_state(state, %{
-                event_log: event_log,
-                projections: projections,
-                step_count: state.step_count + 1,
-                assertion_counters: assertion_counters,
-                assertion_failures: updated_failures,
-                active_faults: active_faults
-              })
-
-            {:ok, new_state}
-
-          {:error, assertion_name, reason, assertion_counters} ->
+          {:halt, async_name, async_reason, _idx, async_counters} ->
             failed_state =
               put_state(state, %{
                 event_log: event_log,
                 projections: projections,
                 step_count: state.step_count + 1,
-                assertion_counters: assertion_counters,
+                assertion_counters: async_counters,
                 active_faults: active_faults
               })
 
-            {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+            {:error, {:assertion_failed, async_name, async_reason}, failed_state}
+
+          {:ok, async_counters, async_failures} ->
+            # Run checks
+            check_ctx = %{
+              command: resolved_command,
+              events: events,
+              command_index: index,
+              step_count: state.step_count + 1,
+              projections: projections,
+              branch_id: state.branch_id,
+              active_faults: active_faults
+            }
+
+            case run_checks(
+                   model,
+                   projections,
+                   check_ctx,
+                   async_counters,
+                   assertion_mode,
+                   async_failures
+                 ) do
+              {:ok, assertion_counters, updated_failures} ->
+                new_state =
+                  put_state(state, %{
+                    event_log: event_log,
+                    projections: projections,
+                    step_count: state.step_count + 1,
+                    assertion_counters: assertion_counters,
+                    assertion_failures: updated_failures,
+                    active_faults: active_faults
+                  })
+
+                {:ok, new_state}
+
+              {:error, assertion_name, reason, assertion_counters} ->
+                failed_state =
+                  put_state(state, %{
+                    event_log: event_log,
+                    projections: projections,
+                    step_count: state.step_count + 1,
+                    assertion_counters: assertion_counters,
+                    active_faults: active_faults
+                  })
+
+                {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+            end
         end
 
       {:error, reason} ->
@@ -1363,6 +1477,12 @@ defmodule PropertyDamage.Executor do
 
       case result do
         {:ok, events} ->
+          # DR-025 boundary: auto-restore re-injection is fault CLEARING (the
+          # fault lifting on its own), not a SUT effect under test, so these
+          # events are folded into projection state but not separately evaluated
+          # against @trigger every: assertions. The nemesis command-injection
+          # path (execute_nemesis_command) is where injected-fault events are
+          # asserted. This reduce is best-effort cleanup with no failure channel.
           {projections, event_log} =
             process_nemesis_events(
               events,
@@ -1528,7 +1648,13 @@ defmodule PropertyDamage.Executor do
                 state.branch_id
               )
 
-            # 7. Drain and process injector events
+            # 7. Drain and process injector events. DR-025: capture the
+            #    pre-drain projections/log so check_async can assert each async
+            #    event on the state it produced and locate a violation at the
+            #    observing event's command_index.
+            projs_before_async = projections
+            log_before_async = event_log
+
             {projections, event_log} =
               process_injector_events(event_queue, event_log, projections, state.branch_id)
 
@@ -1541,99 +1667,129 @@ defmodule PropertyDamage.Executor do
               MockServiceRegistry.update_projections(mock_registry, projections)
             end
 
-            # 8. Run checks
-            check_ctx = %{
-              command: resolved_command,
-              events: events,
-              command_index: index,
-              step_count: state.step_count + 1,
-              projections: projections,
-              branch_id: state.branch_id
-            }
-
-            case run_checks(
+            # 7.7. DR-025: evaluate @trigger every: assertions on the async
+            #      events just folded (injector + mock), incrementally.
+            case check_async(
                    model,
-                   projections,
-                   check_ctx,
+                   projs_before_async,
+                   log_before_async,
+                   event_log,
                    state.assertion_counters,
                    assertion_mode,
                    assertion_failures
                  ) do
-              {:ok, assertion_counters, updated_failures} ->
-                # 9. Execute stutter retries if configured
-                case maybe_execute_stutter_retries(
-                       command,
-                       resolved_command,
-                       events,
-                       index,
-                       event_log,
-                       state,
-                       adapter,
-                       adapter_context
-                     ) do
-                  {:ok, final_event_log} ->
-                    new_state =
-                      put_state(state, %{
-                        event_log: final_event_log,
-                        projections: projections,
-                        placeholder_registry: updated_registry,
-                        step_count: state.step_count + 1,
-                        assertion_counters: assertion_counters,
-                        assertion_failures: updated_failures,
-                        active_resource_pollers:
-                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                      })
-
-                    # Spawn pollers for any @poll_state assertions triggered by these events
-                    new_state = maybe_spawn_pollers(new_state, events, model)
-                    new_state = update_poller_state_getters(new_state)
-
-                    {:ok, new_state}
-
-                  {:error, :idempotency_violation, violation} ->
-                    failed_state =
-                      put_state(state, %{
-                        event_log: event_log,
-                        projections: projections,
-                        placeholder_registry: updated_registry,
-                        step_count: state.step_count + 1,
-                        assertion_counters: assertion_counters,
-                        assertion_failures: updated_failures,
-                        active_resource_pollers:
-                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                      })
-
-                    {:error, {:idempotency_violation, violation}, failed_state}
-
-                  {:error, :stutter_execution_failed, details} ->
-                    failed_state =
-                      put_state(state, %{
-                        event_log: event_log,
-                        projections: projections,
-                        placeholder_registry: updated_registry,
-                        step_count: state.step_count + 1,
-                        assertion_counters: assertion_counters,
-                        assertion_failures: updated_failures,
-                        active_resource_pollers:
-                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                      })
-
-                    {:error, {:stutter_execution_failed, details}, failed_state}
-                end
-
-              {:error, assertion_name, reason, assertion_counters} ->
+              {:halt, async_name, async_reason, _idx, async_counters} ->
                 failed_state =
                   put_state(state, %{
                     event_log: event_log,
                     projections: projections,
                     placeholder_registry: updated_registry,
                     step_count: state.step_count + 1,
-                    assertion_counters: assertion_counters,
+                    assertion_counters: async_counters,
                     active_resource_pollers:
                       Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
                   })
 
-                {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+                {:error, {:assertion_failed, async_name, async_reason}, failed_state}
+
+              {:ok, async_counters, async_failures} ->
+                # 8. Run checks
+                check_ctx = %{
+                  command: resolved_command,
+                  events: events,
+                  command_index: index,
+                  step_count: state.step_count + 1,
+                  projections: projections,
+                  branch_id: state.branch_id
+                }
+
+                case run_checks(
+                       model,
+                       projections,
+                       check_ctx,
+                       async_counters,
+                       assertion_mode,
+                       async_failures
+                     ) do
+                  {:ok, assertion_counters, updated_failures} ->
+                    # 9. Execute stutter retries if configured
+                    case maybe_execute_stutter_retries(
+                           command,
+                           resolved_command,
+                           events,
+                           index,
+                           event_log,
+                           state,
+                           adapter,
+                           adapter_context
+                         ) do
+                      {:ok, final_event_log} ->
+                        new_state =
+                          put_state(state, %{
+                            event_log: final_event_log,
+                            projections: projections,
+                            placeholder_registry: updated_registry,
+                            step_count: state.step_count + 1,
+                            assertion_counters: assertion_counters,
+                            assertion_failures: updated_failures,
+                            active_resource_pollers:
+                              Map.get(state, :active_resource_pollers, []) ++
+                                started_resource_pollers
+                          })
+
+                        # Spawn pollers for any @poll_state assertions triggered by these events
+                        new_state = maybe_spawn_pollers(new_state, events, model)
+                        new_state = update_poller_state_getters(new_state)
+
+                        {:ok, new_state}
+
+                      {:error, :idempotency_violation, violation} ->
+                        failed_state =
+                          put_state(state, %{
+                            event_log: event_log,
+                            projections: projections,
+                            placeholder_registry: updated_registry,
+                            step_count: state.step_count + 1,
+                            assertion_counters: assertion_counters,
+                            assertion_failures: updated_failures,
+                            active_resource_pollers:
+                              Map.get(state, :active_resource_pollers, []) ++
+                                started_resource_pollers
+                          })
+
+                        {:error, {:idempotency_violation, violation}, failed_state}
+
+                      {:error, :stutter_execution_failed, details} ->
+                        failed_state =
+                          put_state(state, %{
+                            event_log: event_log,
+                            projections: projections,
+                            placeholder_registry: updated_registry,
+                            step_count: state.step_count + 1,
+                            assertion_counters: assertion_counters,
+                            assertion_failures: updated_failures,
+                            active_resource_pollers:
+                              Map.get(state, :active_resource_pollers, []) ++
+                                started_resource_pollers
+                          })
+
+                        {:error, {:stutter_execution_failed, details}, failed_state}
+                    end
+
+                  {:error, assertion_name, reason, assertion_counters} ->
+                    failed_state =
+                      put_state(state, %{
+                        event_log: event_log,
+                        projections: projections,
+                        placeholder_registry: updated_registry,
+                        step_count: state.step_count + 1,
+                        assertion_counters: assertion_counters,
+                        active_resource_pollers:
+                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
+                      })
+
+                    {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+                end
             end
 
           {:settled, events} ->
@@ -1660,6 +1816,9 @@ defmodule PropertyDamage.Executor do
                 state.branch_id
               )
 
+            projs_before_async = projections
+            log_before_async = event_log
+
             {projections, event_log} =
               process_injector_events(event_queue, event_log, projections, state.branch_id)
 
@@ -1672,98 +1831,128 @@ defmodule PropertyDamage.Executor do
               MockServiceRegistry.update_projections(mock_registry, projections)
             end
 
-            check_ctx = %{
-              command: resolved_command,
-              events: events,
-              command_index: index,
-              step_count: state.step_count + 1,
-              projections: projections,
-              branch_id: state.branch_id
-            }
-
-            case run_checks(
+            # DR-025: assert @trigger every: assertions on the async events folded
+            # above, incrementally, before the command's own checks.
+            case check_async(
                    model,
-                   projections,
-                   check_ctx,
+                   projs_before_async,
+                   log_before_async,
+                   event_log,
                    state.assertion_counters,
                    assertion_mode,
                    assertion_failures
                  ) do
-              {:ok, assertion_counters, updated_failures} ->
-                # Execute stutter retries if configured (same as {:ok, events} path)
-                case maybe_execute_stutter_retries(
-                       command,
-                       resolved_command,
-                       events,
-                       index,
-                       event_log,
-                       state,
-                       adapter,
-                       adapter_context
-                     ) do
-                  {:ok, final_event_log} ->
-                    new_state =
-                      put_state(state, %{
-                        event_log: final_event_log,
-                        projections: projections,
-                        placeholder_registry: updated_registry,
-                        step_count: state.step_count + 1,
-                        assertion_counters: assertion_counters,
-                        assertion_failures: updated_failures,
-                        active_resource_pollers:
-                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                      })
-
-                    # Spawn pollers for any @poll_state assertions triggered by these events
-                    new_state = maybe_spawn_pollers(new_state, events, model)
-                    new_state = update_poller_state_getters(new_state)
-
-                    {:ok, new_state}
-
-                  {:error, :idempotency_violation, violation} ->
-                    failed_state =
-                      put_state(state, %{
-                        event_log: event_log,
-                        projections: projections,
-                        placeholder_registry: updated_registry,
-                        step_count: state.step_count + 1,
-                        assertion_counters: assertion_counters,
-                        assertion_failures: updated_failures,
-                        active_resource_pollers:
-                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                      })
-
-                    {:error, {:idempotency_violation, violation}, failed_state}
-
-                  {:error, :stutter_execution_failed, details} ->
-                    failed_state =
-                      put_state(state, %{
-                        event_log: event_log,
-                        projections: projections,
-                        placeholder_registry: updated_registry,
-                        step_count: state.step_count + 1,
-                        assertion_counters: assertion_counters,
-                        assertion_failures: updated_failures,
-                        active_resource_pollers:
-                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                      })
-
-                    {:error, {:stutter_execution_failed, details}, failed_state}
-                end
-
-              {:error, assertion_name, reason, assertion_counters} ->
+              {:halt, async_name, async_reason, _idx, async_counters} ->
                 failed_state =
                   put_state(state, %{
                     event_log: event_log,
                     projections: projections,
                     placeholder_registry: updated_registry,
                     step_count: state.step_count + 1,
-                    assertion_counters: assertion_counters,
+                    assertion_counters: async_counters,
                     active_resource_pollers:
                       Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
                   })
 
-                {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+                {:error, {:assertion_failed, async_name, async_reason}, failed_state}
+
+              {:ok, async_counters, async_failures} ->
+                check_ctx = %{
+                  command: resolved_command,
+                  events: events,
+                  command_index: index,
+                  step_count: state.step_count + 1,
+                  projections: projections,
+                  branch_id: state.branch_id
+                }
+
+                case run_checks(
+                       model,
+                       projections,
+                       check_ctx,
+                       async_counters,
+                       assertion_mode,
+                       async_failures
+                     ) do
+                  {:ok, assertion_counters, updated_failures} ->
+                    # Execute stutter retries if configured (same as {:ok, events} path)
+                    case maybe_execute_stutter_retries(
+                           command,
+                           resolved_command,
+                           events,
+                           index,
+                           event_log,
+                           state,
+                           adapter,
+                           adapter_context
+                         ) do
+                      {:ok, final_event_log} ->
+                        new_state =
+                          put_state(state, %{
+                            event_log: final_event_log,
+                            projections: projections,
+                            placeholder_registry: updated_registry,
+                            step_count: state.step_count + 1,
+                            assertion_counters: assertion_counters,
+                            assertion_failures: updated_failures,
+                            active_resource_pollers:
+                              Map.get(state, :active_resource_pollers, []) ++
+                                started_resource_pollers
+                          })
+
+                        # Spawn pollers for any @poll_state assertions triggered by these events
+                        new_state = maybe_spawn_pollers(new_state, events, model)
+                        new_state = update_poller_state_getters(new_state)
+
+                        {:ok, new_state}
+
+                      {:error, :idempotency_violation, violation} ->
+                        failed_state =
+                          put_state(state, %{
+                            event_log: event_log,
+                            projections: projections,
+                            placeholder_registry: updated_registry,
+                            step_count: state.step_count + 1,
+                            assertion_counters: assertion_counters,
+                            assertion_failures: updated_failures,
+                            active_resource_pollers:
+                              Map.get(state, :active_resource_pollers, []) ++
+                                started_resource_pollers
+                          })
+
+                        {:error, {:idempotency_violation, violation}, failed_state}
+
+                      {:error, :stutter_execution_failed, details} ->
+                        failed_state =
+                          put_state(state, %{
+                            event_log: event_log,
+                            projections: projections,
+                            placeholder_registry: updated_registry,
+                            step_count: state.step_count + 1,
+                            assertion_counters: assertion_counters,
+                            assertion_failures: updated_failures,
+                            active_resource_pollers:
+                              Map.get(state, :active_resource_pollers, []) ++
+                                started_resource_pollers
+                          })
+
+                        {:error, {:stutter_execution_failed, details}, failed_state}
+                    end
+
+                  {:error, assertion_name, reason, assertion_counters} ->
+                    failed_state =
+                      put_state(state, %{
+                        event_log: event_log,
+                        projections: projections,
+                        placeholder_registry: updated_registry,
+                        step_count: state.step_count + 1,
+                        assertion_counters: assertion_counters,
+                        active_resource_pollers:
+                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
+                      })
+
+                    {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+                end
             end
 
           {:timeout, last_reason} ->
@@ -1936,16 +2125,42 @@ defmodule PropertyDamage.Executor do
   # the settled state used by the @trigger at: :teardown checkpoint and the
   # reported result reflects every observed event (DR-024). A no-op when the
   # queue is absent or empty.
-  defp settle_event_queue(state) do
+  # Threads the run's accumulated :record `failures` (newest-first) through the
+  # async check. Returns {:ok, state, failures} on a clean drain, or
+  # {:halt, name, reason, command_index, state, failures} when an async
+  # `@trigger every:` assertion fails under :halt mode on a drained event
+  # (DR-025). In :record/:log/:disabled modes it never halts; any :record
+  # failures are prepended onto `failures`.
+  defp settle_event_queue(state, failures) do
+    projs_before = state.projections
+    log_before = state.event_log
+    mode = Map.get(state, :assertion_mode, :halt)
+
     {projections, event_log} =
       process_injector_events(
         Map.get(state, :event_queue),
-        state.event_log,
-        state.projections,
+        log_before,
+        projs_before,
         Map.get(state, :branch_id)
       )
 
-    %{state | projections: projections, event_log: event_log}
+    state = %{state | projections: projections, event_log: event_log}
+
+    case check_async(
+           Map.fetch!(state, :model),
+           projs_before,
+           log_before,
+           event_log,
+           state.assertion_counters,
+           mode,
+           failures
+         ) do
+      {:ok, counters, failures} ->
+        {:ok, %{state | assertion_counters: counters}, failures}
+
+      {:halt, name, reason, command_index, counters} ->
+        {:halt, name, reason, command_index, %{state | assertion_counters: counters}, failures}
+    end
   end
 
   defp process_injector_events(nil, event_log, projections, _branch_id),
@@ -2384,6 +2599,83 @@ defmodule PropertyDamage.Executor do
   end
 
   # ============================================================================
+  # Continuous async-observation checking (DR-025)
+  # ============================================================================
+  #
+  # The asynchronous event paths (resource-poller / injector-adapter events,
+  # mock-service events, nemesis events, and the finalize-time drains) fold
+  # events into projection state. DR-025 additionally evaluates `@trigger every:`
+  # assertions on those events, so a violation is reported AT the offending event
+  # (with that event's `command_index`) rather than only at the
+  # `@trigger at: :teardown` settled checkpoint, giving the shrinker a tight
+  # truncation target.
+  #
+  # Evaluation is INCREMENTAL: each event is asserted on the state produced by
+  # folding *that* event, not the final drained state. `check_async/7` recovers
+  # each event's state by re-folding from `projs_before` over the entries the
+  # processor just prepended to the event log (one event at a time), and leaves
+  # the already-folded `projections` untouched. The distinction is load-bearing
+  # for shrink convergence: asserting against the final drained state would report
+  # at the *first* matching event in a batch rather than the causal one, so the
+  # reported `command_index` would not reproduce on truncation. Command-own events
+  # keep their existing batch-against-final timing (run_checks); only the async
+  # paths are incremental (the documented asymmetry, DR-025).
+
+  # Run `@trigger every:` assertions on the events folded since `log_before`
+  # (newest-first prepended to `event_log`), incrementally on each event's
+  # post-fold state. Returns `{:ok, counters, failures}`, or under `:halt`
+  # `{:halt, name, reason, command_index, counters}` where `command_index`
+  # locates the offending event for the shrinker (nil for a pure injector event).
+  defp check_async(_model, _projs_before, _log_before, _event_log, counters, :disabled, failures),
+    do: {:ok, counters, failures}
+
+  defp check_async(model, projs_before, log_before, event_log, counters, mode, failures) do
+    new_count = length(event_log) - length(log_before)
+
+    new_entries = event_log |> Enum.take(new_count) |> Enum.reverse()
+
+    folded =
+      Enum.reduce_while(new_entries, {projs_before, counters, failures}, fn entry,
+                                                                            {projs, c, f} ->
+        projs = update_projections(projs, entry.event)
+
+        case check_async_event(model, projs, entry.event, entry.command_index, c, mode, f) do
+          {:ok, c, f} -> {:cont, {projs, c, f}}
+          {:halt, name, reason, c} -> {:halt, {:halt, name, reason, entry.command_index, c}}
+        end
+      end)
+
+    case folded do
+      {_projs, c, f} -> {:ok, c, f}
+      {:halt, name, reason, idx, c} -> {:halt, name, reason, idx, c}
+    end
+  end
+
+  # Evaluate the synchronous (`@trigger every:`) dispatch for a single
+  # asynchronously-observed event, on its post-fold `projections`. Mirrors
+  # `run_event_assertions`' counter bumps (`:step` / `:event` / module) so
+  # `every: N` sampling counts async observations. `step_type` is `:event`, so
+  # `every: :command` assertions do NOT fire (the opt-out) while `every: :event`
+  # / `every: 1` / `every: Module` do.
+  defp check_async_event(model, projections, event, command_index, counters, mode, failures) do
+    module = event.__struct__
+
+    counters =
+      counters
+      |> Map.update(:step, 1, &(&1 + 1))
+      |> Map.update(:event, 1, &(&1 + 1))
+      |> Map.update(module, 1, &(&1 + 1))
+
+    assertion_ctx = %{step_type: :event, module: module, command_or_event: event}
+    check_ctx = %{command: nil, command_index: command_index}
+
+    case run_assertions(model, projections, assertion_ctx, counters, mode, failures, check_ctx) do
+      {:ok, counters, failures} -> {:ok, counters, failures}
+      {:error, name, reason, counters} -> {:halt, name, reason, counters}
+    end
+  end
+
+  # ============================================================================
   # Stutter (Idempotency Testing) Support
   # ============================================================================
 
@@ -2706,7 +2998,11 @@ defmodule PropertyDamage.Executor do
         end
 
       updated_state = %{state | active_pollers: []}
-      {updated_state, assertion_failures ++ new_failures, halt_failure}
+      # Use the post-drain failures so async @trigger every: violations recorded
+      # during the await drain (DR-025, :record mode) are not dropped. Equal to
+      # the pre-drain `assertion_failures` when the drain recorded nothing.
+      {updated_state, Map.get(updated_state, :assertion_failures, []) ++ new_failures,
+       halt_failure}
     end
   end
 
@@ -2729,45 +3025,70 @@ defmodule PropertyDamage.Executor do
 
   defp drain_await_loop(pollers, results, state, deadline) do
     # 1. Drain queue into projections / event log so predicates can observe
-    #    events that arrived since the last command
+    #    events that arrived since the last command, asserting @trigger every:
+    #    assertions on each event as it folds (DR-025).
+    projs_before = state.projections
+    log_before = state.event_log
+    mode = Map.get(state, :assertion_mode, :halt)
+
     {projections, event_log} =
-      process_injector_events(
-        Map.get(state, :event_queue),
-        state.event_log,
-        state.projections,
-        nil
-      )
+      process_injector_events(Map.get(state, :event_queue), log_before, projs_before, nil)
 
-    state = %{state | projections: projections, event_log: event_log}
+    case check_async(
+           Map.fetch!(state, :model),
+           projs_before,
+           log_before,
+           event_log,
+           state.assertion_counters,
+           mode,
+           Map.get(state, :assertion_failures, [])
+         ) do
+      # DR-025: an async every: assertion tripped during the await window under
+      # :halt mode. Stop pollers and surface via :async_halt (checked in
+      # finalize_result, ahead of any poll timeout).
+      {:halt, name, reason, idx, counters} ->
+        Enum.each(pollers, &StatePoller.stop/1)
 
-    # 2. Refresh each poller's getter to read the freshly-updated projections
-    update_poller_state_getters(%{state | active_pollers: pollers})
+        halted_state =
+          %{state | projections: projections, event_log: event_log, assertion_counters: counters}
+          |> Map.put(:async_halt, {name, reason, idx})
 
-    # 3. Collect a result if one is ready, bounded by the tick (so we drain
-    #    again soon) and the overall deadline
-    remaining = deadline - System.monotonic_time(:millisecond)
+        {results, halted_state}
 
-    if remaining <= 0 do
-      Enum.each(pollers, &StatePoller.stop/1)
-      timeout_results = Enum.map(pollers, fn p -> {p.id, {:error, :await_timeout}} end)
-      {results ++ timeout_results, state}
-    else
-      wait = min(@poller_drain_tick_ms, remaining)
+      {:ok, counters, failures} ->
+        state =
+          %{state | projections: projections, event_log: event_log, assertion_counters: counters}
+          |> Map.put(:assertion_failures, failures)
 
-      receive do
-        {:poller_result, id, result} ->
-          case Enum.find(pollers, &(&1.id == id)) do
-            nil ->
+        # 2. Refresh each poller's getter to read the freshly-updated projections
+        update_poller_state_getters(%{state | active_pollers: pollers})
+
+        # 3. Collect a result if one is ready, bounded by the tick (so we drain
+        #    again soon) and the overall deadline
+        remaining = deadline - System.monotonic_time(:millisecond)
+
+        if remaining <= 0 do
+          Enum.each(pollers, &StatePoller.stop/1)
+          timeout_results = Enum.map(pollers, fn p -> {p.id, {:error, :await_timeout}} end)
+          {results ++ timeout_results, state}
+        else
+          wait = min(@poller_drain_tick_ms, remaining)
+
+          receive do
+            {:poller_result, id, result} ->
+              case Enum.find(pollers, &(&1.id == id)) do
+                nil ->
+                  drain_await_loop(pollers, results, state, deadline)
+
+                _poller ->
+                  remaining_pollers = Enum.reject(pollers, &(&1.id == id))
+                  drain_await_loop(remaining_pollers, [{id, result} | results], state, deadline)
+              end
+          after
+            wait ->
               drain_await_loop(pollers, results, state, deadline)
-
-            _poller ->
-              remaining_pollers = Enum.reject(pollers, &(&1.id == id))
-              drain_await_loop(remaining_pollers, [{id, result} | results], state, deadline)
           end
-      after
-        wait ->
-          drain_await_loop(pollers, results, state, deadline)
-      end
+        end
     end
   end
 

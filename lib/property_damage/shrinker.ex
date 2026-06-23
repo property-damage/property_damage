@@ -155,6 +155,15 @@ defmodule PropertyDamage.Shrinker do
     %{type: :stutter_execution_failed, check_name: nil}
   end
 
+  # A named assertion failure (@trigger / @trigger at:, including async ones
+  # observed via DR-025). Record the assertion name as the check name so the
+  # shrinker does not conflate distinct assertions as the same bug, and so an
+  # async-observed failure stays equivalent to a teardown failure of the same
+  # assertion. Must precede the generic tuple clause below.
+  def failure_signature({:assertion_failed, name, _}) do
+    %{type: :assertion_failed, check_name: name}
+  end
+
   def failure_signature(other) when is_tuple(other) do
     # Extract first element as type for unknown tuple formats
     %{type: elem(other, 0), check_name: nil}
