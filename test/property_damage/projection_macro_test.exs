@@ -66,13 +66,75 @@ defmodule PropertyDamage.ProjectionMacroTest do
     end
   end
 
-  test "an unsupported trigger key (no :every) raises instead of normalizing to a never-firing trigger" do
-    assert_raise ArgumentError, fn ->
+  test "an unrecognized at: phase raises instead of normalizing to a never-firing trigger" do
+    assert_raise ArgumentError, ~r/:startup or :teardown/, fn ->
       eval("""
-      defmodule PDMT.NoEvery do
+      defmodule PDMT.BadAtPhase do
         use PropertyDamage.Model.Projection
         @trigger at: :end_of_sequence
         def assert_x(s, _), do: :ok
+      end
+      """)
+    end
+  end
+
+  test "@trigger at: :teardown compiles and records the phase, type stays :synchronous" do
+    {result, _} =
+      eval("""
+      defmodule PDMT.TeardownTrigger do
+        use PropertyDamage.Model.Projection
+        def init, do: %{}
+        @trigger at: :teardown
+        def assert_settled_ok(s, _), do: :ok
+      end
+      PDMT.TeardownTrigger.__assertions__()
+      """)
+
+    assert [
+             %{
+               name: :settled_ok,
+               function_name: :assert_settled_ok,
+               type: :synchronous,
+               trigger: %{type: :at, phase: :teardown}
+             }
+           ] = result
+  end
+
+  test "@trigger at: :startup compiles and records the phase" do
+    {result, _} =
+      eval("""
+      defmodule PDMT.StartupTrigger do
+        use PropertyDamage.Model.Projection
+        def init, do: %{}
+        @trigger at: :startup
+        def assert_initial_ok(s, _), do: :ok
+      end
+      PDMT.StartupTrigger.__assertions__()
+      """)
+
+    assert [%{trigger: %{type: :at, phase: :startup}, type: :synchronous}] = result
+  end
+
+  test "declaring both every: and at: on one @trigger raises (one timing per assertion)" do
+    assert_raise CompileError, ~r/only.*one timing|both every: and at:/, fn ->
+      eval("""
+      defmodule PDMT.TwoTimings do
+        use PropertyDamage.Model.Projection
+        @trigger every: 1, at: :teardown
+        def assert_x(s, _), do: :ok
+      end
+      """)
+    end
+  end
+
+  test "a trailing @trigger at: with no following assertion function raises" do
+    assert_raise CompileError, ~r/dangling @trigger/, fn ->
+      eval("""
+      defmodule PDMT.TrailingAt do
+        use PropertyDamage.Model.Projection
+        def init, do: %{}
+        def apply(s, _), do: s
+        @trigger at: :teardown
       end
       """)
     end

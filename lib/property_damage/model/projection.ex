@@ -318,6 +318,16 @@ defmodule PropertyDamage.Model.Projection do
           description:
             "multiple @poll_state attributes on #{name}/2; an assertion may have only one."
 
+      # An assertion carries exactly one timing: a during-run sample (every:) or
+      # a lifecycle boundary (at:), never both (DR-024).
+      has_trigger? and trigger_timing_conflict?(hd(trigger_opts)) ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "@trigger on #{name}/2 declares both every: and at:; an assertion may carry only " <>
+              "one timing. Split it into two assertions."
+
       # @poll_state decorated function - temporal assertion
       has_poll? ->
         assertion_name = extract_assertion_name_from_function(name) || name
@@ -399,9 +409,38 @@ defmodule PropertyDamage.Model.Projection do
     end
   end
 
-  # Normalize all trigger formats to a consistent internal representation
+  # A @trigger carries exactly one timing axis. `at:` (lifecycle boundary) and
+  # `every:` (during-run sampling) are mutually exclusive; declaring both is a
+  # compile error (DR-024).
+  defp trigger_timing_conflict?(opts) when is_list(opts) do
+    Keyword.has_key?(opts, :every) and Keyword.has_key?(opts, :at)
+  end
+
+  # Normalize all trigger formats to a consistent internal representation. The
+  # `at:` axis (a one-shot lifecycle-boundary check) takes precedence; otherwise
+  # the trigger is an `every:` during-run sample.
   defp normalize_trigger(opts) when is_list(opts) do
-    case Keyword.get(opts, :every) do
+    if Keyword.has_key?(opts, :at) do
+      normalize_at(Keyword.fetch!(opts, :at))
+    else
+      normalize_every(Keyword.get(opts, :every))
+    end
+  end
+
+  # at: :startup -> on the initial init/0 state, before command 1
+  # at: :teardown -> on the fully-settled final state, before Adapter.teardown/1
+  defp normalize_at(phase) when phase in [:startup, :teardown] do
+    %{type: :at, phase: phase}
+  end
+
+  defp normalize_at(other) do
+    raise ArgumentError,
+          "Invalid trigger: at: #{inspect(other)} -- expected :startup or :teardown"
+  end
+
+  # Normalize the `every:` (during-run sampling) axis to its internal form.
+  defp normalize_every(value) do
+    case value do
       # every: 1 - every step
       1 ->
         %{type: :every_step}
