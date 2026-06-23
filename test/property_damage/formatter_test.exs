@@ -52,7 +52,9 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
 
     test ":compact renders a single concise line/string" do
       out = Formatter.format(sut_failure(), :compact)
-      assert is_binary(out) and out != ""
+      # Formatter.format/2 is typed binary(), so an is_binary/1 guard here is
+      # statically always-true; assert the meaningful property (non-empty).
+      assert out != ""
     end
 
     test "every format tolerates a minimal report without crashing" do

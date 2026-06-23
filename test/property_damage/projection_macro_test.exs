@@ -16,7 +16,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         @trigger every: 1
         def init, do: %{}
         def apply(s, _), do: s
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       """)
     end
@@ -42,16 +42,19 @@ defmodule PropertyDamage.ProjectionMacroTest do
         use PropertyDamage.Model.Projection
         def init, do: %{}
         @trigger every: 1
-        def assert_x(s, %{a: _}), do: :ok
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,%{a: _}), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       PDMT.MultiClause.__assertions__()
       """)
 
     assert [%{function_name: :assert_x, type: :synchronous}] = result
-    # both clauses are live
-    assert PDMT.MultiClause.assert_x(%{}, %{a: 1}) == :ok
-    assert PDMT.MultiClause.assert_x(%{}, %{}) == :ok
+    # both clauses are live. Call via a runtime-resolved module + apply/3 so the
+    # compiler does not warn about a static reference to this eval'd-at-runtime
+    # module (which does not exist at compile time).
+    mod = Module.concat([:PDMT, :MultiClause])
+    assert apply(mod, :assert_x, [%{}, %{a: 1}]) == :ok
+    assert apply(mod, :assert_x, [%{}, %{}]) == :ok
   end
 
   test "a mistyped atom trigger value raises instead of silently never firing" do
@@ -60,7 +63,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
       defmodule PDMT.MistypedValue do
         use PropertyDamage.Model.Projection
         @trigger every: :commnd
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       """)
     end
@@ -72,7 +75,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
       defmodule PDMT.BadAtPhase do
         use PropertyDamage.Model.Projection
         @trigger at: :end_of_sequence
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       """)
     end
@@ -85,7 +88,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         use PropertyDamage.Model.Projection
         def init, do: %{}
         @trigger at: :teardown
-        def assert_settled_ok(s, _), do: :ok
+        def assert_settled_ok(_s,_), do: :ok
       end
       PDMT.TeardownTrigger.__assertions__()
       """)
@@ -107,7 +110,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         use PropertyDamage.Model.Projection
         def init, do: %{}
         @trigger at: :startup
-        def assert_initial_ok(s, _), do: :ok
+        def assert_initial_ok(_s,_), do: :ok
       end
       PDMT.StartupTrigger.__assertions__()
       """)
@@ -121,7 +124,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
       defmodule PDMT.TwoTimings do
         use PropertyDamage.Model.Projection
         @trigger every: 1, at: :teardown
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       """)
     end
@@ -146,7 +149,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
       defmodule PDMT.ZeroCount do
         use PropertyDamage.Model.Projection
         @trigger every: {0, :command}
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       """)
     end
@@ -158,7 +161,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
       defmodule PDMT.NegCount do
         use PropertyDamage.Model.Projection
         @trigger every: {-2, :event}
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       """)
     end
@@ -171,7 +174,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         use PropertyDamage.Model.Projection
         @trigger every: 1
         @trigger every: 2
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       """)
     end
@@ -187,7 +190,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         use PropertyDamage.Model.Projection
         @trigger every: 1
         @poll_state after: Ev, timeout: 1, interval: 1
-        def assert_x(s, _), do: fn _ -> true end
+        def assert_x(_s,_), do: fn _ -> true end
       end
       """)
     end
@@ -221,7 +224,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         use PropertyDamage.Model.Projection
         def init, do: %{}
         @trigger every: PDMT.RealModuleEvent
-        def assert_x(s, _), do: :ok
+        def assert_x(_s,_), do: :ok
       end
       PDMT.RealModuleTrigger.__assertions__()
       """)

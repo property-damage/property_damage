@@ -22,7 +22,10 @@ defmodule PropertyDamage.ProgressTest do
     end
 
     test "rejects a non-struct payload" do
-      assert_raise FunctionClauseError, fn -> Progress.new(%{not: :a_struct}) end
+      # Map.new/1 is typed map(), so the is_struct/1 guard mismatch is not
+      # provable at compile time; at runtime this is still a plain map and raises.
+      not_a_struct = Map.new(not: :a_struct)
+      assert_raise FunctionClauseError, fn -> Progress.new(not_a_struct) end
     end
   end
 
