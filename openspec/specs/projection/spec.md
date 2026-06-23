@@ -4,7 +4,7 @@
 
 Projections are the state management and invariant verification mechanism for stateful property-based tests. They serve a dual purpose: reducing commands and events into tracked state, and defining assertions that verify invariants hold throughout test execution. A single behaviour supports both roles, from state-only projections that drive command generation to assertion-only projections that validate system correctness.
 
-Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions)
+Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking)
 
 ## Requirements
 
@@ -51,6 +51,8 @@ Projections SHALL receive both commands and events through their `apply/2` callb
 
 Projections SHALL support synchronous assertions decorated with the `@trigger` module attribute. Triggered assertions run immediately when their condition is met. Assertion functions take two arguments: the current projection state and the command or event that triggered the assertion.
 
+A `@trigger every:` assertion fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously — a resource-poller or injector-adapter event, a mock-service event, or a nemesis event — is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for assertions that should fire only after commands.
+
 #### Scenario: Trigger every step
 - **WHEN** an assertion is decorated with `@trigger every: 1`
 - **THEN** it runs after every command and event processing step
@@ -62,6 +64,16 @@ Projections SHALL support synchronous assertions decorated with the `@trigger` m
 #### Scenario: Trigger every event
 - **WHEN** an assertion is decorated with `@trigger every: :event`
 - **THEN** it runs after any event is processed but not after commands
+- **AND** "any event" includes asynchronously-observed events (resource-poller, injector-adapter, mock-service, and nemesis events), not only a command's own returned events
+
+#### Scenario: Trigger fires on an asynchronously-observed event
+- **WHEN** a projection declares `@trigger every: :event` (or `every: 1`, or `every: SomeEvent`)
+- **AND** an event matching the trigger is observed asynchronously (for example injected by a resource poller, an injector adapter, a mock service, or a nemesis)
+- **THEN** the assertion SHALL be evaluated on the projection state after that event is folded in
+
+#### Scenario: every: :command does not fire on events
+- **WHEN** a projection declares `@trigger every: :command`
+- **THEN** the assertion SHALL NOT be evaluated on any event, whether a command's own returned event or an asynchronously-observed one
 
 #### Scenario: Trigger on specific module
 - **WHEN** an assertion is decorated with `@trigger every: CreateOrder`

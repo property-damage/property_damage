@@ -4,7 +4,7 @@
 
 Defines the two-phase shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
 
-Reference DR: DR-017 (Hierarchical Delta Debugging)
+Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking)
 
 ## Requirements
 
@@ -21,6 +21,15 @@ A shrunk sequence SHALL only be accepted if it reproduces the same failure as th
 - **WHEN** a candidate shrunk sequence produces a failure with a different type than the original
 - **THEN** the candidate SHALL be rejected
 - **AND** the shrinker SHALL continue trying other candidates
+
+#### Scenario: Different assertion rejected
+- **WHEN** the original failure is a named assertion failure
+- **AND** a candidate shrunk sequence fails via a *different* assertion
+- **THEN** the candidate SHALL be rejected (assertion failures are distinguished by name, not conflated) (DR-025)
+
+#### Scenario: Same assertion observed synchronously or asynchronously is equivalent
+- **WHEN** the original failure and a candidate failure are the same named assertion
+- **THEN** they SHALL be equivalent regardless of whether the assertion fired on a command's own event, an asynchronously-observed event, or the `at: :teardown` settled checkpoint
 
 #### Scenario: Failure at same or earlier index
 - **WHEN** a candidate shrunk sequence produces the equivalent failure
@@ -183,3 +192,11 @@ The failure signature SHALL be a tuple of `{type, check_name}` where type identi
 #### Scenario: Non-check failure signature
 - **WHEN** a failure is caused by a non-check condition (e.g., adapter error, linearization failure)
 - **THEN** the signature SHALL contain the failure type and nil for the check name
+
+#### Scenario: Assertion failure signature includes the assertion name
+- **WHEN** a failure is a named assertion failure (`@trigger` / `@trigger at:` assertion)
+- **THEN** the signature SHALL record the assertion name as the check name, so failures of distinct assertions are not treated as equivalent (DR-025)
+
+#### Scenario: Asynchronously-observed assertion failure carries a location
+- **WHEN** an `@trigger every:` assertion fails on an asynchronously-observed event
+- **THEN** the failure SHALL carry the observing event's `command_index` as `failed_at_index`, so the shrinker's truncation can target it (the truncation is still verified to reproduce the failure before being accepted)

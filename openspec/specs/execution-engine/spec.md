@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -140,6 +140,7 @@ The system SHALL provide a shared event queue where injector adapters push incom
 - **WHEN** a command finishes executing
 - **THEN** the executor SHALL drain all pending events from the queue
 - **AND** drained events SHALL be processed through projections
+- **AND** drained events SHALL be evaluated against `@trigger every:` assertions (DR-025)
 - **AND** each entry SHALL record the source adapter module and timestamp
 
 ### Requirement: Mock Service Adapter
@@ -159,6 +160,29 @@ The system SHALL support mock service adapters that start controlled mock server
 #### Scenario: Mock injects events
 - **WHEN** the SUT calls the mock and the mock handler returns events
 - **THEN** those events SHALL be injected into the framework's event processing pipeline
+
+### Requirement: Assertions on Asynchronously-Observed Events
+
+The executor SHALL evaluate `@trigger every:` assertions on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, mock-service events, and nemesis events, as well as events folded during the finalize-time drains (the `@poll_state` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-assertion dispatch **incrementally** — one event at a time, on the state produced by folding that event — with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Assertion mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.
+
+#### Scenario: Assertion fires on a poller-observed event
+- **WHEN** a resource poller injects an event that matches an `@trigger every:` assertion
+- **THEN** the executor SHALL evaluate that assertion on the projection state after the event is folded in
+- **AND** the per-event counters SHALL advance as for a command's own event
+
+#### Scenario: Violation reported at the observing event
+- **WHEN** an `@trigger every:` assertion fails on an asynchronously-observed event
+- **THEN** the failure SHALL be reported as a named assertion failure located at that event's `command_index`
+- **AND** it SHALL be distinct from an `@trigger at: :teardown` settled-state failure (which has no position) and from a `@poll_state` poll timeout
+
+#### Scenario: Halt mode stops mid-drain
+- **WHEN** assertion mode is `:halt` and an `@trigger every:` assertion fails while draining asynchronously-observed events
+- **THEN** the executor SHALL stop draining and fail the run at the offending event
+- **AND** subsequent queued events SHALL NOT be folded or asserted
+
+#### Scenario: Finalize-time drains are checked
+- **WHEN** events are folded during the finalize-time drains (the `@poll_state` await drain or the settled-state drain)
+- **THEN** those events SHALL be evaluated against `@trigger every:` assertions, and a violation SHALL surface as a run failure rather than being folded silently
 
 ### Requirement: Pre-Run Validation
 
