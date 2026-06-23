@@ -2255,6 +2255,7 @@ defmodule PropertyDamage.Executor do
       end
 
     [model.command_sequence_projection() | assertion_projections]
+    |> Enum.uniq()
   end
 
   # Legacy wrapper for backward compatibility

@@ -476,6 +476,32 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     assert result.success
   end
 
+  # A projection listed as BOTH the command-sequence projection and an assertion
+  # projection must have its teardown check evaluated only once.
+  defmodule DoubleListedModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Bump]
+    @impl true
+    def command_sequence_projection, do: MaxCountProjection
+    @impl true
+    def assertion_projections, do: [MaxCountProjection]
+  end
+
+  test "a projection listed twice evaluates its teardown check only once" do
+    {:ok, result} =
+      run_seq_mode(Sequence.linear([%Bump{}]), DoubleListedModel, DoubleBumpAdapter, :record)
+
+    refute result.success
+
+    teardown_failures =
+      Enum.filter(result.assertion_failures, fn f ->
+        f.assertion_name == :count_at_most_one and f.step_type == :teardown
+      end)
+
+    assert length(teardown_failures) == 1
+  end
+
   # ===========================================================================
   # Cluster 8 — the accumulator contract (doc-as-test, DR-024 §11.4)
   # ===========================================================================
