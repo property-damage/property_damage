@@ -38,15 +38,17 @@ Every record is **self-contained**: it carries enough context and rationale to s
 | [DR-020](DR-020-composable-version-aware-libraries.md) | Composable, Version-Aware Libraries | Versioned `.pd` files and seed libraries with mismatch warnings; composable regression handlers. |
 | [DR-021](DR-021-placeholder-resolution-identity.md) | Placeholder Resolution Identity | Consumer resolution by id; producer capture by structured position rebuilt per run. Recorded at decision time (not reconstructed). |
 | [DR-022](DR-022-unified-progress-projection.md) | Unified Progress Projection | One `%Progress{}` projection across run/mutation/differential/load-test; consumers (callback, printer, telemetry) subscribe; metrics derive from authoritative state, not from progress. Recorded at decision time. |
+| [DR-023](DR-023-seed-library-ephemeral-replay.md) | Seed Library as an Ephemeral Replay Working Set | Seed library is an ephemeral, self-pruning working set of recently-failing seeds, replayed before random exploration; supersedes DR-020's seed-library status machine. Recorded at decision time. |
+| [DR-024](DR-024-lifecycle-boundary-assertions.md) | Lifecycle-Boundary Assertions (`@trigger at:`) | A second trigger axis `at:` fires a synchronous assertion once at a lifecycle boundary: `:teardown` (settled final state, the safety check) and `:startup` (initial state). Recorded at decision time. |
 
 ## Which specs cite which DRs
 
 - `openspec/specs/model/spec.md`: DR-001, DR-002, DR-003, DR-007, DR-013
 - `openspec/specs/command/spec.md`: DR-006, DR-008, DR-019
-- `openspec/specs/projection/spec.md`: DR-004, DR-005, DR-009, DR-012, DR-014
-- `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-015, DR-016, DR-018
+- `openspec/specs/projection/spec.md`: DR-004, DR-005, DR-009, DR-012, DR-014, DR-024
+- `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-015, DR-016, DR-018, DR-024
 - `openspec/specs/shrinking/spec.md`: DR-017
-- `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018
+- `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024
 - `openspec/specs/persistence/spec.md`: DR-020
 
 DR-008 is additionally cited in `test/property_damage/shrinker_test.exs`, `test/support/test_commands.ex`, and `test/support/executor_test_support.ex`.

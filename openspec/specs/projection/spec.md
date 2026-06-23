@@ -4,7 +4,7 @@
 
 Projections are the state management and invariant verification mechanism for stateful property-based tests. They serve a dual purpose: reducing commands and events into tracked state, and defining assertions that verify invariants hold throughout test execution. A single behaviour supports both roles, from state-only projections that drive command generation to assertion-only projections that validate system correctness.
 
-Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes)
+Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions)
 
 ## Requirements
 
@@ -123,6 +123,34 @@ Projections SHALL support temporal assertions decorated with the `@poll_state` m
 - **AND** supported units are `:millisecond(s)`, `:second(s)`, and `:minute(s)` (singular and plural forms are both accepted)
 - **AND** an unrecognized unit raises an ArgumentError
 
+### Requirement: Lifecycle-Boundary Assertions via @trigger at:
+
+Projections SHALL support synchronous assertions whose timing is a lifecycle phase boundary, declared with the `at:` option on `@trigger`. Where `every:` samples an assertion during the command loop, `at:` fires it exactly once at a phase boundary. Supported phases are `:startup` (the initial `init/0` state, after `setup/1` and before the first command) and `:teardown` (the fully-settled final state, after all pollers have finalized and before `teardown/1`). Lifecycle-boundary assertions take the same two arguments as other synchronous assertions; because no command or event triggers them, the second argument is the phase atom.
+
+#### Scenario: Trigger at teardown evaluates the settled final state
+- **WHEN** an assertion is decorated with `@trigger at: :teardown`
+- **THEN** it runs exactly once, on the merged final projection state after every observed event has been folded in
+- **AND** the second argument passed to the assertion is `:teardown`
+
+#### Scenario: Trigger at startup evaluates the initial state
+- **WHEN** an assertion is decorated with `@trigger at: :startup`
+- **THEN** it runs exactly once, on the initial `init/0` projection state before any command is processed
+- **AND** the second argument passed to the assertion is `:startup`
+
+#### Scenario: A safety bound is expressed as an at: :teardown assertion
+- **WHEN** a projection accumulates evidence of a safety property (for example a maximum observed value or a sticky violation flag)
+- **AND** an assertion decorated with `@trigger at: :teardown` checks that property
+- **THEN** a violation that persists to the settled state is detected and reported as that named assertion failure
+
+#### Scenario: Unrecognized at: phase is rejected
+- **WHEN** an assertion is decorated with `@trigger at:` and a phase other than `:startup` or `:teardown`
+- **THEN** the framework raises an ArgumentError at compile time
+
+#### Scenario: Lifecycle-boundary assertion metadata
+- **WHEN** a lifecycle-boundary assertion is detected
+- **THEN** its metadata includes the assertion name, type `:synchronous`, function name, and the normalized trigger spec recording the `at:` phase
+- **AND** the metadata shape is consistent with other synchronous assertions (the `assert_` prefix is stripped from `name`)
+
 ### Requirement: Assertion Detection and Metadata
 
 The framework SHALL detect assertions at compile time using an `@on_definition` hook. Assertion metadata SHALL be stored and accessible via the `__assertions__/0` function on the projection module.
@@ -144,6 +172,10 @@ The framework SHALL detect assertions at compile time using an `@on_definition` 
 #### Scenario: At most one trigger attribute per assertion
 - **WHEN** an assertion function is decorated with more than one `@trigger` (or more than one `@poll_state`), or with both `@trigger` and `@poll_state`
 - **THEN** the compiler raises a CompileError rather than silently using one of them
+
+#### Scenario: At most one timing per @trigger assertion
+- **WHEN** a single `@trigger` declares both a `during-run` timing (`every:`) and a `lifecycle-boundary` timing (`at:`)
+- **THEN** the compiler raises a CompileError, because an assertion SHALL carry exactly one timing
 
 ### Requirement: assert_* Prefix Convention and Enforcement
 

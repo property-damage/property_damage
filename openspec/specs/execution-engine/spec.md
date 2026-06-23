@@ -24,7 +24,7 @@ The system SHALL execute command sequences in two distinct phases: a symbolic ge
 
 ### Requirement: Adapter Lifecycle
 
-The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is called once to establish context, `execute/2` is called for each command in the sequence, and `teardown/1` is called once for cleanup.
+The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is called once to establish context, `execute/2` is called for each command in the sequence, and `teardown/1` is called once for cleanup. Lifecycle-boundary assertions (DR-024) are evaluated at the edges of this lifecycle: `@trigger at: :startup` assertions after `setup/1` and before the first command, and `@trigger at: :teardown` assertions on the settled state before `teardown/1`.
 
 #### Scenario: Normal adapter lifecycle
 - **WHEN** a command sequence is executed
@@ -40,6 +40,22 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 #### Scenario: Shrink attempts repeat the full lifecycle
 - **WHEN** the shrinker re-executes a candidate sequence
 - **THEN** the framework SHALL run the full setup/execute/teardown lifecycle for each shrink attempt
+
+#### Scenario: Startup assertions gate the initial state
+- **WHEN** a projection declares an `@trigger at: :startup` assertion
+- **THEN** the framework SHALL evaluate it on the initial `init/0` state after `setup/1` and before the first `execute/2`
+- **AND** a failing startup assertion SHALL halt the run before any command is executed
+
+#### Scenario: Teardown assertions evaluate the settled state
+- **WHEN** a run completes cleanly and a projection declares an `@trigger at: :teardown` assertion
+- **THEN** the framework SHALL evaluate it once on the merged final projection state after both state pollers and resource pollers have finalized
+- **AND** it SHALL be evaluated before `teardown/1` is called
+- **AND** `teardown/1` SHALL still be called regardless of the assertion's verdict
+
+#### Scenario: Teardown assertions do not run on early abort
+- **WHEN** a run aborts before reaching the settled state (for example an adapter error, a synchronous `@trigger` failure, or a reference-resolution error)
+- **THEN** `@trigger at: :teardown` assertions SHALL NOT be evaluated
+- **AND** the framework SHALL report the proximate failure rather than a settled-state assertion result
 
 ### Requirement: Adapter Execute Context
 

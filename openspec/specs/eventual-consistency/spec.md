@@ -125,6 +125,24 @@ The system SHALL support `@poll_state` temporal assertions that spawn a backgrou
 - **WHEN** a `@poll_state` assertion specifies timeout and interval
 - **THEN** the poller SHALL use those values for its polling cycle
 
+### Requirement: Settled State and Safety Assertions
+
+The system SHALL define a run's **settled state** as the projection state after both the state pollers (`@poll_state`) and the resource pollers have finalized: the point at which no poller is live and every observed event has been folded into projection state. The framework SHALL evaluate `@trigger at: :teardown` safety assertions (DR-024) on this settled state. Whereas `@poll_state` expresses liveness (a predicate that SHALL eventually become true), an `at: :teardown` assertion expresses safety (a property that SHALL hold on the settled state); the two are complementary.
+
+#### Scenario: Settled state reflects late asynchronous observations
+- **WHEN** a resource poller injects events after the last command, before the run finalizes
+- **THEN** those events SHALL be folded into projection state before the settled state is evaluated
+
+#### Scenario: Safety assertion catches a persistent over-application
+- **WHEN** an asynchronous effect over-applies and the over-application persists to the settled state
+- **AND** a projection accumulates evidence of it (for example a maximum observed value)
+- **THEN** an `@trigger at: :teardown` assertion SHALL detect it and report a named safety failure, distinct from a poll timeout
+
+#### Scenario: Liveness timeout preempts the settled checkpoint
+- **WHEN** a `@poll_state` assertion times out in a mode that halts the run
+- **THEN** the run SHALL report the poll timeout
+- **AND** `@trigger at: :teardown` assertions SHALL NOT be evaluated, because a liveness timeout is itself a not-settled outcome
+
 ### Requirement: Probe Command Semantics
 
 Probe commands SHALL represent read-only queries with settle semantics. During shrinking, probe commands SHALL be prioritized for removal since they do not affect system state.
