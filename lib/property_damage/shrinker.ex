@@ -20,13 +20,28 @@ defmodule PropertyDamage.Shrinker do
 
   A third property also holds: the failure occurs at the **same or an earlier
   command index** than in the original. This one is guaranteed *structurally*
-  rather than asserted by the signature comparison. Phase 1 first truncates the
+  rather than asserted by the signature comparison, and it holds on both the
+  linear and the branching path for the same underlying reason: every shrink
+  candidate is a subset or simplification of a fixed base sequence, so a
+  candidate can only reproduce the failure at the same position or earlier,
+  never later.
+
+  On the linear path this is most visible in Phase 1, which first truncates the
   sequence at the failure point (`Enum.take(commands, failed_at_index + 1)`), so
-  every subsequent candidate is a subset of that prefix and can only fail at the
-  same index or earlier. (This holds for linear sequences; the index is not
-  separately enforced for branching sequences, where `failed_at_index` is a
-  branch-relative coordinate that is not directly comparable across the
-  branching/linear boundary.)
+  every subsequent candidate is a subset of that prefix.
+
+  On the branching path the index is likewise not asserted, and `failed_at_index`
+  is a branch-relative coordinate (`branch_start_index + position`) that is not
+  directly comparable to the linear index obtained when a branching sequence is
+  flattened. That mismatch is intentionally harmless: its only consumer is the
+  convert-to-linear truncation, which re-verifies that the truncated base still
+  reproduces the failure before adopting it (see `shrink_linear/2`, where the
+  truncation is guarded by `still_fails?`). A mismatched coordinate therefore
+  degrades to a missed truncation *optimization*, never an accepted
+  later-failing candidate. Combined with the subset/simplification property of
+  every branching strategy (branch removal, branch-content shrinking,
+  prefix/suffix shrinking, and argument shrinking), the same-or-earlier-index
+  guarantee holds structurally here as well.
 
   ## Determinism
 
