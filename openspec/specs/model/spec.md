@@ -92,7 +92,7 @@ The framework SHALL generate command sequences through an iterative loop: check 
 
 ### Requirement: Simulator Integration
 
-Models MAY define a simulator module that predicts expected events for each command during symbolic sequence generation. The simulator enables the generation loop to maintain realistic state without executing against the system under test.
+Models MAY define a simulator module that predicts expected events for each command during symbolic sequence generation. The simulator enables the generation loop to maintain realistic state without executing against the system under test. When a model defines a simulator, the generation loop SHALL advance symbolic state from the events it predicts for each generated command.
 
 #### Scenario: External simulator module
 - **WHEN** a model implements `simulator/0` returning a separate module
@@ -150,7 +150,7 @@ Models SHALL support a four-phase lifecycle: `setup_once` runs once at the start
 
 ### Requirement: Terminal States
 
-Models MAY implement `terminate?/3` to control when command generation stops. The callback receives the current state, the command that just executed, and the events it produced.
+Models MAY implement `terminate?/3` to control when command generation stops. The callback receives the current state, the command that just executed, and the events it produced. When `terminate?/3` returns `true`, the generation loop SHALL stop appending commands to the sequence.
 
 #### Scenario: Terminate on specific command
 - **WHEN** `terminate?/3` pattern-matches a specific command type and returns `true`
@@ -170,7 +170,7 @@ Models MAY implement `terminate?/3` to control when command generation stops. Th
 
 ### Requirement: Optional Projection and Event Callbacks
 
-Models MAY implement `assertion_projections/0` returning a list of invariant-checking projections, and `injectable_events/0` returning a list of event modules that can arrive from outside command execution.
+Models MAY implement `assertion_projections/0` returning a list of invariant-checking projections, and `injectable_events/0` returning a list of event modules that can arrive from outside command execution. When provided, `assertion_projections/0` projections SHALL be evaluated alongside the command-sequence projection, and `injectable_events/0` modules SHALL be recognized as valid externally-arriving events.
 
 #### Scenario: Assertion projections declared
 - **WHEN** a model implements `assertion_projections/0`
