@@ -4,7 +4,7 @@
 
 Projections are the state management and invariant verification mechanism for stateful property-based tests. They serve a dual purpose: reducing commands and events into tracked state, and defining assertions that verify invariants hold throughout test execution. A single behaviour supports both roles, from state-only projections that drive command generation to assertion-only projections that validate system correctness.
 
-Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking)
+Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage)
 
 ## Requirements
 
@@ -174,12 +174,16 @@ The framework SHALL detect assertions at compile time using an `@on_definition` 
 
 #### Scenario: Synchronous assertion metadata
 - **WHEN** a synchronous assertion is detected
-- **THEN** its metadata includes the assertion name, type `:synchronous`, normalized trigger spec, and function name
+- **THEN** its metadata includes the assertion name, type `:synchronous`, normalized trigger spec, function name, and the `invariant_id` it validates (DR-026)
 
 #### Scenario: Polling assertion metadata
 - **WHEN** a polling assertion is detected
-- **THEN** its metadata includes the assertion name, type `:polling`, the function name, normalized poll_state spec, and captured predicate source
-- **AND** the metadata shape is consistent with synchronous assertions (both carry `name`, `type`, and `function_name`, with the `assert_` prefix stripped from `name`)
+- **THEN** its metadata includes the assertion name, type `:polling`, the function name, normalized poll_state spec, captured predicate source, and the `invariant_id` it validates (DR-026)
+- **AND** the metadata shape is consistent with synchronous assertions (both carry `name`, `type`, `function_name`, and `invariant_id`, with the `assert_` prefix stripped from `name`)
+
+#### Scenario: Default invariant id (DR-026)
+- **WHEN** an assertion is decorated with neither `validates:` nor an inline `id:`
+- **THEN** its `invariant_id` SHALL default to the assertion's `assert_`-stripped logical name, so every assertion validates a same-named invariant by default
 
 #### Scenario: At most one trigger attribute per assertion
 - **WHEN** an assertion function is decorated with more than one `@trigger` (or more than one `@poll_state`), or with both `@trigger` and `@poll_state`
@@ -188,6 +192,46 @@ The framework SHALL detect assertions at compile time using an `@on_definition` 
 #### Scenario: At most one timing per @trigger assertion
 - **WHEN** a single `@trigger` declares both a `during-run` timing (`every:`) and a `lifecycle-boundary` timing (`at:`)
 - **THEN** the compiler raises a CompileError, because an assertion SHALL carry exactly one timing
+
+### Requirement: Invariant Declaration and Linking via @invariant and validates: (DR-026)
+
+An assertion validates a named **invariant** — a first-class entity with a stable `id`, a human-readable `name` defaulting to `id`, and an optional `description`, represented by `%PropertyDamage.Invariants.Invariant{}` and built by `Invariant.new!/1`. A projection MAY declare invariants centrally with an accumulating `@invariant` module attribute whose value is the `new!/1` keyword list, and an assertion links to one with `validates: :id` on `@trigger`/`@poll_state` or declares one inline with `id:` (plus optional `description:`). Invariant identity is scoped per projection: `id`s SHALL be unique within a projection and `validates:` SHALL resolve within the same projection. Invariant metadata SHALL be accessible via `__invariants__/0` returning a map of `id` to `%Invariant{}`. There is no `:kind` field on the struct; safety-versus-liveness is a property of a check, surfaced in the catalog.
+
+#### Scenario: Central declaration
+- **WHEN** a projection declares `@invariant id: :balance_nonneg, description: "Balance never drops below zero"`
+- **THEN** `__invariants__/0` includes `%Invariant{id: :balance_nonneg, name: :balance_nonneg, description: "Balance never drops below zero"}`
+- **AND** the `name` defaults to the `id` when not given
+
+#### Scenario: Linking a check to an invariant
+- **WHEN** an assertion is decorated with `@trigger every: 5, validates: :balance_nonneg`
+- **THEN** its metadata records `invariant_id: :balance_nonneg`
+- **AND** the invariant is exercised by that assertion
+
+#### Scenario: Inline declaration and check in one
+- **WHEN** an assertion is decorated with `@trigger every: 5, id: :balance_nonneg, description: "…"`
+- **THEN** the invariant `:balance_nonneg` is declared and that assertion is registered as a check of it
+
+#### Scenario: Duplicate invariant id is rejected
+- **WHEN** an `id` is declared more than once (across `@invariant` and inline `id:`, including byte-identical redeclaration)
+- **THEN** the compiler raises a CompileError
+
+#### Scenario: Dangling validates: is rejected
+- **WHEN** an assertion declares `validates: :typo` referencing an `id` no invariant declares in that projection
+- **THEN** the compiler raises a CompileError identifying the unresolved reference
+- **AND** this check is a pure compile-time set-membership test, independent of any description resolver
+
+#### Scenario: Declared-but-unchecked invariant warns (static vacuity)
+- **WHEN** an invariant is declared with no assertion validating it
+- **THEN** the compiler emits a warning, and `mix pd.validate` reports it as static vacuity
+
+#### Scenario: Invariant well-formedness
+- **WHEN** `@invariant` omits `:id`, or `description` is not a binary
+- **THEN** `Invariant.new!/1` raises, surfaced as a CompileError
+
+#### Scenario: Description lookup is lazy and fallback-tolerant
+- **WHEN** `Invariant.fetch!(id, ctx)` resolves an invariant for reporting
+- **THEN** it returns the local `%Invariant{}`, raising only on an unknown `id`
+- **AND** a configured description resolver MAY override only the `description`, best-effort with fallback to the local description, at report time only
 
 ### Requirement: assert_* Prefix Convention and Enforcement
 

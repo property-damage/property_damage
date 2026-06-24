@@ -41,15 +41,18 @@ Every record is **self-contained**: it carries enough context and rationale to s
 | [DR-023](DR-023-seed-library-ephemeral-replay.md) | Seed Library as an Ephemeral Replay Working Set | Seed library is an ephemeral, self-pruning working set of recently-failing seeds, replayed before random exploration; supersedes DR-020's seed-library status machine. Recorded at decision time. |
 | [DR-024](DR-024-lifecycle-boundary-assertions.md) | Lifecycle-Boundary Assertions (`@trigger at:`) | A second trigger axis `at:` fires a synchronous assertion once at a lifecycle boundary: `:teardown` (settled final state, the safety check) and `:startup` (initial state). Recorded at decision time. |
 | [DR-025](DR-025-continuous-async-observation-checking.md) | Continuous Async-Observation Checking | `@trigger every:` assertions fire on every observed event, including asynchronous poller/injector/mock/nemesis observations (a P2 bug fix, no new trigger surface); a violation is reported at the offending event for tight shrink convergence; the shrinker distinguishes assertion failures by name. Recorded at decision time. |
+| [DR-026](DR-026-invariant-catalog-and-coverage.md) | Invariant Catalog and Anti-Vacuity Coverage | Assertions validate first-class named invariants (`%Invariant{id, name, description}`, declared with `@invariant`, linked with `validates:`); the engine records per-assertion firing at every site (`every:`/`at:`/async/poll-spawn) and reports invariants that were never exercised (anti-vacuity). Completes and corrects the previously-stubbed coverage subsystem (real `check_hits`, real whole-run `coverage: true`). Recorded at decision time. |
 
 ## Which specs cite which DRs
 
-- `openspec/specs/model/spec.md`: DR-001, DR-002, DR-003, DR-007, DR-013
+- `openspec/specs/model/spec.md`: DR-001, DR-002, DR-003, DR-007, DR-013, DR-026
 - `openspec/specs/command/spec.md`: DR-006, DR-008, DR-019
-- `openspec/specs/projection/spec.md`: DR-004, DR-005, DR-009, DR-012, DR-014, DR-024, DR-025
-- `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-015, DR-016, DR-018, DR-024, DR-025
+- `openspec/specs/projection/spec.md`: DR-004, DR-005, DR-009, DR-012, DR-014, DR-024, DR-025, DR-026
+- `openspec/specs/observability/spec.md`: DR-022, DR-026
+- `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-015, DR-016, DR-018, DR-024, DR-025, DR-026
 - `openspec/specs/shrinking/spec.md`: DR-017, DR-025
-- `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024
+- `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024, DR-026
+- `openspec/specs/failure-analysis/spec.md`: DR-026
 - `openspec/specs/persistence/spec.md`: DR-020
 
 DR-008 is additionally cited in `test/property_damage/shrinker_test.exs`, `test/support/test_commands.ex`, and `test/support/executor_test_support.ex`.

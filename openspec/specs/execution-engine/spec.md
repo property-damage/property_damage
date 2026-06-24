@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -183,6 +183,26 @@ The executor SHALL evaluate `@trigger every:` assertions on every observed event
 #### Scenario: Finalize-time drains are checked
 - **WHEN** events are folded during the finalize-time drains (the `@poll_state` await drain or the settled-state drain)
 - **THEN** those events SHALL be evaluated against `@trigger every:` assertions, and a violation SHALL surface as a run failure rather than being folded silently
+
+### Requirement: Per-Assertion Firing and Whole-Run Coverage Accumulation (DR-026)
+
+The executor SHALL record how many times each assertion actually fired during a run, keyed by its owning projection and name. An assertion counts as fired whenever its function is invoked, regardless of whether it passes or fails, at every evaluation site: synchronous dispatch on commands and observed events (including the asynchronous paths of DR-025), lifecycle `at:` boundaries (DR-024), and `@poll_state` poller spawn. Per-assertion firing counts SHALL merge across parallel branches the same way the existing assertion counters do. Firing counts SHALL be accumulated across all generated sequences of the run and attached to the result as `result.assertion_fires`.
+
+#### Scenario: Firing recorded at every evaluation site
+- **WHEN** an assertion is evaluated via `every:`, an `at:` boundary, an asynchronously-observed event, or a spawned `@poll_state` poller
+- **THEN** the executor SHALL increment that assertion's firing count, regardless of pass or fail
+
+#### Scenario: Poller spawn counts as firing
+- **WHEN** a `@poll_state` poller is spawned because a matching `after:` event was observed
+- **THEN** the executor SHALL count the assertion as having fired, even if the poller later times out or remains pending at shutdown
+
+#### Scenario: Firing accumulates across the whole run
+- **WHEN** a run executes multiple generated sequences
+- **THEN** `result.assertion_fires` SHALL reflect firing counts summed across all sequences, not a single representative sequence
+
+#### Scenario: Per-assertion firing merges across branches
+- **WHEN** execution branches in parallel and assertions fire in different branches
+- **THEN** the per-assertion firing counts SHALL merge by the same delta-from-prefix rule as the existing assertion counters
 
 ### Requirement: Pre-Run Validation
 

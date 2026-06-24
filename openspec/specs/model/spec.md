@@ -4,7 +4,7 @@
 
 Models orchestrate stateful property-based tests by defining which commands run, when they are valid, how they are parameterized, and the test lifecycle. A model ties together commands, projections, and optional simulators without knowing transport details or command internals.
 
-Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States)
+Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage)
 
 ## Requirements
 
@@ -185,6 +185,19 @@ Models MAY implement `assertion_projections/0` returning a list of invariant-che
 - **WHEN** a model implements `injectable_events/0`
 - **THEN** the returned event modules are recognized as valid events from external sources
 - **AND** this is used for validation against adapter injector declarations
+
+### Requirement: Invariant Catalog Enumeration (DR-026)
+
+The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.assertion_catalog(model)` SHALL walk the model's projections — the command-sequence projection plus any assertion projections, deduplicated — union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
+
+#### Scenario: Catalog unions across projections
+- **WHEN** `assertion_catalog/1` is called on a model whose projections declare invariants
+- **THEN** the result SHALL include every invariant from every projection
+- **AND** a projection listed both as the command-sequence projection and as an assertion projection SHALL be visited once (deduplicated)
+
+#### Scenario: Same id in two projections stays distinct
+- **WHEN** two different projections each declare an invariant with the same `id`
+- **THEN** the catalog SHALL keep them as distinct entries keyed by `{projection, id}`
 
 ### Requirement: Model-Command Agnosticism
 

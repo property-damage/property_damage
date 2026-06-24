@@ -4,7 +4,7 @@
 
 Defines the settle retry logic, resource polling, state polling, and probe command semantics that enable the PropertyDamage framework to test eventually consistent systems where operations may not produce immediate results.
 
-Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling)
+Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage)
 
 ## Requirements
 
@@ -124,6 +124,11 @@ The system SHALL support `@poll_state` temporal assertions that spawn a backgrou
 #### Scenario: Configurable polling parameters
 - **WHEN** a `@poll_state` assertion specifies timeout and interval
 - **THEN** the poller SHALL use those values for its polling cycle
+
+#### Scenario: Poller spawn counts as invariant firing (DR-026)
+- **WHEN** a matching `after:` event is observed and a `@poll_state` poller is spawned
+- **THEN** the assertion SHALL be counted as having fired for invariant-coverage purposes, regardless of whether the poller later succeeds, times out, or remains pending at shutdown
+- **AND** an invariant whose `@poll_state` poller is never spawned (its `after:` event never occurred) SHALL be reported as uncovered
 
 ### Requirement: Settled State and Safety Assertions
 

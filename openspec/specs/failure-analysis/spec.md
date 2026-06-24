@@ -175,6 +175,12 @@ The system SHALL produce structured failure reports containing location (run num
 - **WHEN** a failure report is created
 - **THEN** it SHALL include the error origin classification from `ErrorOrigin.classify/2`
 
+#### Scenario: Report names the violated invariant (DR-026)
+
+- **WHEN** an assertion failure is reported and the assertion validates an invariant with a description
+- **THEN** the report SHALL headline the invariant's `name` and `description`, with the specific failing assertion shown as secondary detail
+- **AND** when the invariant has no description, the report SHALL fall back to the assertion name as today
+
 ### Requirement: Diff-Based Debugging
 
 The system SHALL compare passing and failing execution traces to identify the divergence point and display actionable differences.
