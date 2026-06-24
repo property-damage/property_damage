@@ -129,6 +129,7 @@ defmodule PropertyDamage do
   """
 
   alias PropertyDamage.{
+    Coverage,
     EventQueue,
     Executor,
     FailureReport,
@@ -309,6 +310,7 @@ defmodule PropertyDamage do
     verbose = opts[:verbose]
     validate = opts[:validate]
     branching = opts[:branching]
+    coverage = opts[:coverage]
     stutter_config = Stutter.parse_config(opts[:stutter])
 
     # Seed-library replay working set (DR-023). `nil` when disabled; otherwise a
@@ -389,7 +391,8 @@ defmodule PropertyDamage do
               reporter,
               branching,
               stutter_config,
-              seed_library
+              seed_library,
+              coverage
             )
 
           # Auto-append a new exploration failure's seed to the working set
@@ -443,7 +446,8 @@ defmodule PropertyDamage do
          reporter,
          branching,
          stutter_config,
-         seed_library
+         seed_library,
+         coverage
        ) do
     # Seed the process RNG (consumed by execution-time randomness such as
     # stutter decisions; sequence generation is seeded explicitly per run
@@ -484,6 +488,15 @@ defmodule PropertyDamage do
         {:error, failure}
 
       :proceed ->
+        # Whole-run coverage accumulator (DR-026). `fires` aggregates
+        # per-assertion firings across every generated sequence (always-on);
+        # `tracker` accumulates the heavier command/transition/state dimensions
+        # only when `coverage: true` was requested.
+        coverage_acc = %{
+          fires: %{},
+          tracker: if(coverage, do: Coverage.new(model), else: nil)
+        }
+
         run_loop(
           generator,
           model,
@@ -498,14 +511,15 @@ defmodule PropertyDamage do
           reporter,
           stutter_config,
           0,
-          0
+          0,
+          coverage_acc
         )
     end
   end
 
   defp run_loop(
          _generator,
-         _model,
+         model,
          _adapter,
          max_runs,
          seed,
@@ -517,17 +531,21 @@ defmodule PropertyDamage do
          reporter,
          _stutter_config,
          run_number,
-         total_commands
+         total_commands,
+         coverage_acc
        )
        when run_number >= max_runs do
-    stats = %{runs: max_runs, total_commands: total_commands, seed: seed}
+    stats =
+      %{runs: max_runs, total_commands: total_commands, seed: seed}
+      |> put_coverage_stats(coverage_acc)
 
     Reporter.emit(reporter, fn ->
       %RunResult{
         outcome: :ok,
         runs_completed: max_runs,
         total_commands: total_commands,
-        seed: seed
+        seed: seed,
+        invariants: invariant_summary(coverage_acc.fires, model)
       }
     end)
 
@@ -548,7 +566,8 @@ defmodule PropertyDamage do
          reporter,
          stutter_config,
          run_number,
-         total_commands
+         total_commands,
+         coverage_acc
        ) do
     # Generate a command sequence, deterministically derived from the seed.
     # Run 0 uses the base seed itself so a reported seed reproduces exactly
@@ -609,6 +628,11 @@ defmodule PropertyDamage do
             commands_executed: command_count
           })
 
+          # Accumulate this sequence's per-assertion firings into the whole-run
+          # total (DR-026), and (only under coverage: true) fold its
+          # command/transition/state dimensions into the tracker.
+          coverage_acc = accumulate_coverage(coverage_acc, result, sequence)
+
           if result.success do
             # Success - continue to next run
             run_loop(
@@ -625,7 +649,8 @@ defmodule PropertyDamage do
               reporter,
               stutter_config,
               run_number + 1,
-              total_commands + command_count
+              total_commands + command_count,
+              coverage_acc
             )
           else
             # Failure - shrink and report. Pass the run's EFFECTIVE seed so
@@ -643,7 +668,8 @@ defmodule PropertyDamage do
               on_failure,
               reporter,
               run_seed,
-              run_number
+              run_number,
+              coverage_acc.fires
             )
           end
         after
@@ -664,6 +690,73 @@ defmodule PropertyDamage do
 
   defp generate_one(generator, run_seed) do
     Generator.generate_value(generator, run_seed)
+  end
+
+  # ============================================================================
+  # Whole-run coverage accumulation (DR-026)
+  # ============================================================================
+
+  # Fold one sequence's result into the running coverage accumulator. Per-assertion
+  # firings (always-on) are projected out of the executor's colocated counters
+  # and summed; the heavier command/transition/state tracker (coverage: true
+  # only) records the sequence via the existing Coverage path.
+  defp accumulate_coverage(acc, result, sequence) do
+    run_fires = project_fires(Map.get(result, :assertion_counters, %{}))
+    fires = merge_fires(acc.fires, run_fires)
+
+    tracker =
+      if acc.tracker do
+        # Feed the tracker a result carrying the sequence (for command/transition
+        # coverage) and this sequence's firings (lifted into check_hits).
+        record = result |> Map.put(:sequence, sequence) |> Map.put(:assertion_fires, run_fires)
+        Coverage.record(acc.tracker, {:ok, record})
+      else
+        nil
+      end
+
+    %{acc | fires: fires, tracker: tracker}
+  end
+
+  # Project the colocated {:fired, projection, name} keys out of the assertion
+  # counters into the public %{{projection, name} => count} fire map, dropping
+  # the sampling counters (:step/:command/:event/per-module) that share the map.
+  defp project_fires(counters) do
+    for {{:fired, projection, name}, count} <- counters, into: %{} do
+      {{projection, name}, count}
+    end
+  end
+
+  defp merge_fires(acc, new) do
+    Map.merge(acc, new, fn _key, a, b -> a + b end)
+  end
+
+  # Attach the whole-run coverage data to the success stats map: always the
+  # per-assertion fire totals, plus the command/transition/state tracker when
+  # coverage: true was requested.
+  defp put_coverage_stats(stats, %{fires: fires, tracker: tracker}) do
+    stats = Map.put(stats, :assertion_fires, fires)
+    if tracker, do: Map.put(stats, :coverage, tracker), else: stats
+  end
+
+  # Anti-vacuity summary {covered, total} for the terse verbose footer (DR-026),
+  # or nil when the model declares no invariants (nothing to report).
+  defp invariant_summary(fires, model) do
+    catalog = PropertyDamage.Model.assertion_catalog(model)
+
+    case length(catalog) do
+      0 ->
+        nil
+
+      total ->
+        covered =
+          Enum.count(catalog, fn %{projection: projection, checks: checks} ->
+            Enum.any?(checks, fn check -> Map.get(fires, {projection, check.name}, 0) > 0 end)
+          end)
+
+        {covered, total}
+    end
+  rescue
+    _ -> nil
   end
 
   defp setup_injectors(injector_adapters, event_queue) do
@@ -831,7 +924,10 @@ defmodule PropertyDamage do
             ctx.on_failure,
             ctx.reporter,
             seed,
-            0
+            0,
+            # Replay is a pre-exploration phase; whole-run anti-vacuity coverage
+            # is an exploration concern, so no firings are accumulated here.
+            %{}
           )
 
         report
@@ -1003,7 +1099,8 @@ defmodule PropertyDamage do
          on_failure,
          reporter,
          seed,
-         run_number
+         run_number,
+         assertion_fires
        ) do
     # Skip shrinking for stutter-related failures since:
     # 1. The failure is about SUT idempotency, not the command sequence
@@ -1053,7 +1150,8 @@ defmodule PropertyDamage do
         model: model,
         adapter: adapter,
         linearization: fresh_result.linearization,
-        stacktrace: Map.get(fresh_result, :stacktrace)
+        stacktrace: Map.get(fresh_result, :stacktrace),
+        assertion_fires: assertion_fires
       )
 
     # Terminal failure notification (DR-022): the verbose consumer renders this
@@ -1443,6 +1541,84 @@ defmodule PropertyDamage do
   @spec coverage({:ok, map()} | {:error, FailureReport.t()}, module()) ::
           PropertyDamage.Coverage.t()
   defdelegate coverage(result, model), to: PropertyDamage.Coverage, as: :from_result
+
+  @doc """
+  Per-invariant anti-vacuity coverage for a run result (DR-026).
+
+  Joins the run's per-assertion firings (`result.assertion_fires`, accumulated
+  across every generated sequence) against the model's `assertion_catalog/1`,
+  with no re-execution. Each entry reports whether the invariant was exercised:
+
+      result = PropertyDamage.run(model: M, adapter: A)
+      for inv <- PropertyDamage.assertion_coverage(result, M), not inv.covered? do
+        IO.puts("never exercised: \#{inv.id}")
+      end
+
+  Each entry is a map with `:projection`, `:id`, `:name`, `:description`,
+  `:kinds` (the distinct check kinds), `:fire_count` (summed over the invariant's
+  checks), and `:covered?` (`fire_count > 0`). Ordered like the catalog. Works on
+  a passing `{:ok, stats}` or a failing `{:error, report}` result, though on a
+  failed run the fire map is partial by nature (anti-vacuity is a passing-run
+  concern).
+  """
+  @spec assertion_coverage({:ok, map()} | {:error, FailureReport.t()} | map(), module()) :: [
+          %{
+            projection: module(),
+            id: atom(),
+            name: atom(),
+            description: String.t() | nil,
+            kinds: [atom()],
+            fire_count: non_neg_integer(),
+            covered?: boolean()
+          }
+        ]
+  def assertion_coverage(result, model) do
+    fires = extract_assertion_fires(result)
+
+    model
+    |> PropertyDamage.Model.assertion_catalog()
+    |> Enum.map(fn %{projection: projection, id: id, invariant: invariant, checks: checks} ->
+      fire_count =
+        Enum.reduce(checks, 0, fn check, acc ->
+          acc + Map.get(fires, {projection, check.name}, 0)
+        end)
+
+      %{
+        projection: projection,
+        id: id,
+        name: invariant.name,
+        description: invariant.description,
+        kinds: checks |> Enum.map(& &1.kind) |> Enum.uniq(),
+        fire_count: fire_count,
+        covered?: fire_count > 0
+      }
+    end)
+  end
+
+  defp extract_assertion_fires({:ok, stats}), do: Map.get(stats, :assertion_fires, %{})
+
+  defp extract_assertion_fires({:error, %FailureReport{assertion_fires: fires}}),
+    do: fires || %{}
+
+  defp extract_assertion_fires(%{assertion_fires: fires}), do: fires || %{}
+  defp extract_assertion_fires(_), do: %{}
+
+  @doc """
+  The model's invariant catalog (DR-026).
+
+  The union of every projection's declared invariants, keyed `{projection, id}`,
+  each entry carrying the `%PropertyDamage.Invariants.Invariant{}` and the checks
+  (with their kinds) that validate it. See `PropertyDamage.Model.assertion_catalog/1`.
+  """
+  @spec assertion_catalog(module()) :: [
+          %{
+            projection: module(),
+            id: atom(),
+            invariant: PropertyDamage.Invariants.Invariant.t(),
+            checks: [%{name: atom(), kind: :synchronous | :lifecycle | :polling}]
+          }
+        ]
+  defdelegate assertion_catalog(model), to: PropertyDamage.Model
 
   # ============================================================================
   # Flakiness Detection API

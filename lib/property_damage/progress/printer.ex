@@ -31,7 +31,8 @@ defmodule PropertyDamage.Progress.Printer do
     print_success(%{
       runs: result.runs_completed,
       total_commands: result.total_commands,
-      seed: result.seed
+      seed: result.seed,
+      invariants: result.invariants
     })
   end
 
@@ -156,6 +157,15 @@ defmodule PropertyDamage.Progress.Printer do
     IO.puts("  Runs:           #{stats.runs}")
     IO.puts("  Total Commands: #{stats.total_commands}")
     IO.puts("  Seed:           #{stats.seed}")
+
+    # Anti-vacuity footer (DR-026): which invariants the run actually exercised.
+    case Map.get(stats, :invariants) do
+      {covered, total} ->
+        IO.puts("  Invariants:     #{covered}/#{total} exercised")
+
+      _ ->
+        :ok
+    end
 
     if Map.has_key?(stats, :duration_ms) and stats.duration_ms > 0 do
       IO.puts("  Duration:       #{format_duration(stats.duration_ms)}")

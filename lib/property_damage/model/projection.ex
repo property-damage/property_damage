@@ -273,6 +273,10 @@ defmodule PropertyDamage.Model.Projection do
       # Names of functions already registered as assertions, so subsequent
       # clauses of a multi-clause assertion aren't re-flagged as missing @trigger.
       Module.register_attribute(__MODULE__, :__pd_assertion_fns__, accumulate: true)
+      # Centralized invariant declarations (DR-026). Each value is the
+      # keyword-list argument to PropertyDamage.Invariants.Invariant.new!/1, e.g.
+      # `@invariant id: :balance_nonneg, description: "..."`.
+      Module.register_attribute(__MODULE__, :invariant, accumulate: true)
 
       # Register on_definition callback to capture assertion definitions
       @on_definition PropertyDamage.Model.Projection
@@ -291,6 +295,11 @@ defmodule PropertyDamage.Model.Projection do
     end
 
     assertions = Module.get_attribute(env.module, :assertions) |> Enum.reverse()
+
+    # Build the invariant registry (DR-026): %{id => %Invariant{}}, enforcing
+    # id-uniqueness and validates: resolution, warning on declared-but-unchecked.
+    invariant_attrs = Module.get_attribute(env.module, :invariant) |> Enum.reverse()
+    invariants = build_invariants(env, assertions, invariant_attrs)
 
     # Check if init/0 is defined
     has_init = Module.defines?(env.module, {:init, 0})
@@ -326,7 +335,96 @@ defmodule PropertyDamage.Model.Projection do
       - `:trigger` - Normalized trigger specification
       """
       def __assertions__, do: unquote(Macro.escape(assertions))
+
+      @doc """
+      Returns the invariant registry for this projection (DR-026).
+
+      A map of `%{id => %PropertyDamage.Invariants.Invariant{}}` covering every
+      invariant declared in this projection: centrally via `@invariant`, inline
+      via `@trigger ... id:`, and the same-named invariant each bare assertion
+      owns by default.
+      """
+      def __invariants__, do: unquote(Macro.escape(invariants))
     end
+  end
+
+  # Build the %{id => %Invariant{}} registry for a projection and run the
+  # compile-time structural validations (DR-026), all at @before_compile so the
+  # checks are order-independent: accumulate every declaration and reference,
+  # then resolve.
+  defp build_invariants(env, assertions, invariant_attrs) do
+    alias PropertyDamage.Invariants.Invariant
+
+    # Explicit declarations: @invariant attributes plus inline id: on assertions.
+    explicit_from_attrs =
+      Enum.map(invariant_attrs, fn opts ->
+        inv = Invariant.new!(opts)
+        {inv.id, inv}
+      end)
+
+    explicit_from_inline =
+      for a <- assertions, a.invariant_inline? do
+        {a.invariant_id, Invariant.new!(id: a.invariant_id, description: a.invariant_description)}
+      end
+
+    explicit = explicit_from_attrs ++ explicit_from_inline
+    explicit_ids = Enum.map(explicit, fn {id, _} -> id end)
+    dups = explicit_ids -- Enum.uniq(explicit_ids)
+
+    unless dups == [] do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "duplicate invariant id(s) #{inspect(Enum.uniq(dups))} in #{inspect(env.module)}; " <>
+            "each invariant id must be declared exactly once (across @invariant and inline id:)."
+    end
+
+    explicit_map = Map.new(explicit)
+    explicit_id_set = MapSet.new(explicit_ids)
+
+    # Implicit declarations: a bare assertion's default-named invariant, unless
+    # that id is already explicitly declared (then the default links to it).
+    default_ids =
+      for a <- assertions, not a.invariant_inline?, not a.invariant_validates?, do: a.invariant_id
+
+    implicit_map =
+      for id <- Enum.uniq(default_ids), not MapSet.member?(explicit_id_set, id), into: %{} do
+        {id, Invariant.new!(id: id)}
+      end
+
+    all = Map.merge(implicit_map, explicit_map)
+
+    # Dangling validates:: a reference to an id no declaration provides. Pure
+    # local set-membership; never calls fetch!/2.
+    declared_ids = MapSet.union(explicit_id_set, MapSet.new(default_ids))
+
+    for a <- assertions,
+        a.invariant_validates?,
+        not MapSet.member?(declared_ids, a.invariant_id) do
+      raise CompileError,
+        file: env.file,
+        line: a.invariant_def_line,
+        description:
+          "assertion #{a.name}/2 has validates: #{inspect(a.invariant_id)}, but no invariant " <>
+            "with that id is declared in #{inspect(env.module)}."
+    end
+
+    # Static vacuity: an @invariant-declared id with zero checks (inline and
+    # default declarations always carry their own check, so only @invariant
+    # attributes can be statically vacuous).
+    checked_ids = MapSet.new(assertions, & &1.invariant_id)
+    attr_ids = Enum.map(explicit_from_attrs, fn {id, _} -> id end)
+
+    for id <- Enum.uniq(attr_ids), not MapSet.member?(checked_ids, id) do
+      IO.warn(
+        "invariant #{inspect(id)} declared in #{inspect(env.module)} has no checks; it is " <>
+          "statically vacuous (no assertion validates it).",
+        Macro.Env.stacktrace(env)
+      )
+    end
+
+    all
   end
 
   @doc false
@@ -390,14 +488,16 @@ defmodule PropertyDamage.Model.Projection do
       has_poll? ->
         assertion_name = extract_assertion_name_from_function(name) || name
         predicate_source = capture_predicate_source(body)
+        {inv, opts} = extract_invariant_meta(hd(poll_state_opts), assertion_name, env)
 
-        assertion_def = %{
-          name: assertion_name,
-          type: :polling,
-          function_name: name,
-          poll_state: normalize_poll_state(hd(poll_state_opts)),
-          predicate_source: predicate_source
-        }
+        assertion_def =
+          Map.merge(inv, %{
+            name: assertion_name,
+            type: :polling,
+            function_name: name,
+            poll_state: normalize_poll_state(opts),
+            predicate_source: predicate_source
+          })
 
         Module.put_attribute(env.module, :assertions, assertion_def)
         Module.put_attribute(env.module, :__pd_assertion_fns__, name)
@@ -406,13 +506,15 @@ defmodule PropertyDamage.Model.Projection do
       # @trigger decorated function - synchronous assertion
       has_trigger? ->
         assertion_name = extract_assertion_name_from_function(name) || name
+        {inv, opts} = extract_invariant_meta(hd(trigger_opts), assertion_name, env)
 
-        assertion_def = %{
-          name: assertion_name,
-          type: :synchronous,
-          function_name: name,
-          trigger: normalize_trigger(hd(trigger_opts))
-        }
+        assertion_def =
+          Map.merge(inv, %{
+            name: assertion_name,
+            type: :synchronous,
+            function_name: name,
+            trigger: normalize_trigger(opts)
+          })
 
         Module.put_attribute(env.module, :assertions, assertion_def)
         Module.put_attribute(env.module, :__pd_assertion_fns__, name)
@@ -452,6 +554,49 @@ defmodule PropertyDamage.Model.Projection do
     end
 
     :ok
+  end
+
+  # Split the invariant-linking keys (DR-026) out of a @trigger/@poll_state
+  # keyword list, returning the assertion's invariant metadata plus the remaining
+  # opts (the timing keys the existing trigger/poll normalizers consume).
+  #
+  # - `id:`        declares an invariant inline (optionally with `description:`)
+  #                and registers this assertion as a check of it.
+  # - `validates:` links this assertion to an invariant declared elsewhere.
+  # - neither      defaults the invariant id to the assertion's (stripped) name,
+  #                implicitly declaring a same-named invariant (full backward
+  #                compatibility).
+  defp extract_invariant_meta(opts, assertion_name, env) do
+    {id, opts} = Keyword.pop(opts, :id)
+    {validates, opts} = Keyword.pop(opts, :validates)
+    {description, opts} = Keyword.pop(opts, :description)
+
+    if id != nil and validates != nil do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "assertion #{assertion_name}/2 declares both id: and validates:; use id: to " <>
+            "declare an invariant inline or validates: to link to one declared elsewhere, " <>
+            "not both."
+    end
+
+    {invariant_id, inline?, validates?} =
+      cond do
+        id != nil -> {id, true, false}
+        validates != nil -> {validates, false, true}
+        true -> {assertion_name, false, false}
+      end
+
+    meta = %{
+      invariant_id: invariant_id,
+      invariant_inline?: inline?,
+      invariant_validates?: validates?,
+      invariant_description: if(inline?, do: description, else: nil),
+      invariant_def_line: env.line
+    }
+
+    {meta, opts}
   end
 
   # Check if function name starts with "assert_" and extract the assertion name

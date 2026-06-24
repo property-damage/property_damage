@@ -7,14 +7,19 @@ defmodule PropertyDamage.Coverage do
   - **Command coverage**: Which commands have been tested?
   - **Transition coverage**: Which command sequences have been tested?
   - **State coverage**: Which projection states have been reached?
+  - **Assertion (invariant) coverage**: Which invariants were actually
+    exercised? (anti-vacuity, DR-026)
 
   ## Usage
 
-      # Enable coverage tracking
-      {:ok, result} = PropertyDamage.run(model: M, adapter: A, coverage: true)
+      # Enable the heavier whole-run command/transition/state accumulation. The
+      # tracker is attached to the success stats as `:coverage`.
+      {:ok, stats} = PropertyDamage.run(model: M, adapter: A, coverage: true)
+      IO.puts(PropertyDamage.Coverage.format(stats.coverage))
 
-      # Get coverage report
-      coverage = PropertyDamage.Coverage.from_result(result)
+      # Or derive a tracker from any single result (no `coverage: true` needed)
+      result = PropertyDamage.run(model: M, adapter: A)
+      coverage = PropertyDamage.Coverage.from_result(result, M)
       IO.puts(PropertyDamage.Coverage.format(coverage))
 
       # Or track across multiple runs
@@ -29,7 +34,8 @@ defmodule PropertyDamage.Coverage do
   - **Command frequency**: How often each command was executed
   - **Transition coverage**: Which command pairs (A → B) have been tested
   - **State coverage**: Unique projection states reached (by hash)
-  - **Check coverage**: Which checks have been exercised
+  - **Assertion coverage**: Per-assertion firing counts, keyed `{projection,
+    assertion}`, rolled up per invariant for anti-vacuity reporting (DR-026)
 
   ## CI Integration
 
@@ -41,7 +47,7 @@ defmodule PropertyDamage.Coverage do
       end
   """
 
-  alias PropertyDamage.{EventLog.Entry, Sequence}
+  alias PropertyDamage.Sequence
 
   defstruct [
     :model,
@@ -68,7 +74,7 @@ defmodule PropertyDamage.Coverage do
           command_counts: %{module() => non_neg_integer()},
           transition_counts: %{{module(), module()} => non_neg_integer()},
           state_hashes: MapSet.t(integer()),
-          check_hits: %{module() => non_neg_integer()},
+          check_hits: %{{module(), atom()} => non_neg_integer()},
           total_commands: non_neg_integer(),
           total_runs: non_neg_integer(),
           failures_found: non_neg_integer(),
@@ -133,7 +139,14 @@ defmodule PropertyDamage.Coverage do
   """
   @spec record(t(), {:ok, map()} | {:error, PropertyDamage.FailureReport.t()}) :: t()
   def record(tracker, {:ok, result}) do
-    record_from_data(tracker, result.sequence, result.event_log, result.projections, false)
+    record_from_data(
+      tracker,
+      result.sequence,
+      result.event_log,
+      result.projections,
+      Map.get(result, :assertion_fires, %{}),
+      false
+    )
   end
 
   def record(tracker, {:error, failure}) do
@@ -142,6 +155,7 @@ defmodule PropertyDamage.Coverage do
       failure.shrunk_sequence,
       failure.event_log,
       failure.state_at_failure || %{},
+      Map.get(failure, :assertion_fires, %{}),
       true
     )
   end
@@ -221,20 +235,72 @@ defmodule PropertyDamage.Coverage do
   - `:command` - Minimum command coverage percentage (default: 0)
   - `:transition` - Minimum transition coverage percentage (default: 0)
   - `:min_commands` - Minimum total commands executed (default: 0)
+  - `:assertion_coverage` - Minimum invariant coverage percentage (default: 0).
+    `assertion_coverage: 100` fails unless every catalog invariant was exercised
+    (strict anti-vacuity, DR-026).
 
   ## Example
 
       Coverage.meets_threshold?(coverage, command: 80, transition: 50)
+      Coverage.meets_threshold?(coverage, assertion_coverage: 100)
   """
   @spec meets_threshold?(t(), keyword()) :: boolean()
   def meets_threshold?(tracker, opts \\ []) do
     command_threshold = Keyword.get(opts, :command, 0)
     transition_threshold = Keyword.get(opts, :transition, 0)
     min_commands = Keyword.get(opts, :min_commands, 0)
+    assertion_threshold = Keyword.get(opts, :assertion_coverage, 0)
 
     command_coverage(tracker) >= command_threshold and
       transition_coverage(tracker) >= transition_threshold and
+      assertion_coverage(tracker) >= assertion_threshold and
       tracker.total_commands >= min_commands
+  end
+
+  @doc """
+  Get invariant (anti-vacuity) coverage percentage (DR-026).
+
+  The percentage of the model's catalog invariants that were exercised (any of
+  the invariant's checks fired at least once). Returns 100.0 when the model
+  declares no invariants.
+  """
+  @spec assertion_coverage(t()) :: float()
+  def assertion_coverage(%__MODULE__{check_hits: hits} = tracker) do
+    catalog = invariant_catalog(tracker)
+    total = length(catalog)
+    if total == 0, do: 100.0, else: count_covered_invariants(catalog, hits) / total * 100
+  end
+
+  @doc """
+  List the catalog invariants that were never exercised (DR-026).
+
+  Returns `{projection, id}` tuples for each invariant whose every check has zero
+  firings.
+  """
+  @spec uncovered_invariants(t()) :: [{module(), atom()}]
+  def uncovered_invariants(%__MODULE__{check_hits: hits} = tracker) do
+    for %{projection: projection, id: id, checks: checks} <- invariant_catalog(tracker),
+        not invariant_covered?(projection, checks, hits) do
+      {projection, id}
+    end
+  end
+
+  defp invariant_catalog(%__MODULE__{model: model}) when is_atom(model) and model != nil do
+    PropertyDamage.Model.assertion_catalog(model)
+  rescue
+    _ -> []
+  end
+
+  defp invariant_catalog(_), do: []
+
+  defp count_covered_invariants(catalog, hits) do
+    Enum.count(catalog, fn %{projection: projection, checks: checks} ->
+      invariant_covered?(projection, checks, hits)
+    end)
+  end
+
+  defp invariant_covered?(projection, checks, hits) do
+    Enum.any?(checks, fn check -> Map.get(hits, {projection, check.name}, 0) > 0 end)
   end
 
   @doc """
@@ -452,6 +518,9 @@ defmodule PropertyDamage.Coverage do
 
     Untested commands:
     #{untested_str}
+
+    Invariant coverage:
+    #{format_assertion_coverage(tracker)}
     """
   end
 
@@ -673,7 +742,14 @@ defmodule PropertyDamage.Coverage do
   # Private Helpers
   # ============================================================================
 
-  defp record_from_data(tracker, sequence, event_log, projections, is_failure) do
+  defp record_from_data(
+         tracker,
+         sequence,
+         _event_log,
+         projections,
+         assertion_fires,
+         is_failure
+       ) do
     commands = Sequence.to_list(sequence)
 
     # Count commands
@@ -698,8 +774,10 @@ defmodule PropertyDamage.Coverage do
       |> Enum.map(fn {_proj, state} -> :erlang.phash2(state) end)
       |> Enum.reduce(tracker.state_hashes, &MapSet.put(&2, &1))
 
-    # Count check hits from event log
-    check_hits = count_check_hits(event_log, tracker.check_hits)
+    # Lift the per-assertion firings (DR-026) into check_hits. The fire counts
+    # are already whole-run-aggregated by the run loop (or per-sequence when a
+    # single result is recorded directly), keyed {projection, assertion}.
+    check_hits = merge_counts(tracker.check_hits, assertion_fires)
 
     # Track state class transitions if classifier is provided
     {state_class_counts, state_class_transitions, last_class} =
@@ -761,26 +839,36 @@ defmodule PropertyDamage.Coverage do
     {new_counts, new_transitions, current_class}
   end
 
-  defp count_check_hits(event_log, check_hits) when is_list(event_log) do
-    # Extract checks that were run from event log entries
-    event_log
-    |> Enum.filter(fn
-      %Entry{event: %{__struct__: _}} -> true
-      _ -> false
-    end)
-    |> Enum.reduce(check_hits, fn _entry, acc ->
-      # This is a simplified version - ideally we'd track which checks ran
-      acc
-    end)
-  end
-
-  defp count_check_hits(_, check_hits), do: check_hits
-
   defp merge_counts(counts1, counts2) do
     Map.merge(counts1, counts2, fn _k, v1, v2 -> v1 + v2 end)
   end
 
   defp short_name(module) do
     module |> Module.split() |> List.last()
+  end
+
+  defp format_assertion_coverage(tracker) do
+    catalog = invariant_catalog(tracker)
+
+    if catalog == [] do
+      "  (no invariants declared)"
+    else
+      total = length(catalog)
+      covered = count_covered_invariants(catalog, tracker.check_hits)
+      header = "  Invariants exercised: #{covered}/#{total}"
+
+      case uncovered_invariants(tracker) do
+        [] ->
+          header <> "\n  (all invariants exercised)"
+
+        uncovered ->
+          lines =
+            Enum.map_join(uncovered, "\n", fn {projection, id} ->
+              "    - #{short_name(projection)}.#{id}"
+            end)
+
+          header <> "\n  Never exercised:\n" <> lines
+      end
+    end
   end
 end

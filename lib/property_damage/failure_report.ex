@@ -110,7 +110,12 @@ defmodule PropertyDamage.FailureReport do
           # Error origin classification
           error_origin: ErrorOrigin.origin() | nil,
           error_origin_details: ErrorOrigin.details() | nil,
-          stacktrace: list() | nil
+          stacktrace: list() | nil,
+
+          # Invariant identity + coverage (DR-026)
+          invariant_name: atom() | nil,
+          invariant_description: String.t() | nil,
+          assertion_fires: %{{module(), atom()} => non_neg_integer()}
         }
 
   defstruct seed: nil,
@@ -139,7 +144,10 @@ defmodule PropertyDamage.FailureReport do
             timestamp: nil,
             error_origin: nil,
             error_origin_details: nil,
-            stacktrace: nil
+            stacktrace: nil,
+            invariant_name: nil,
+            invariant_description: nil,
+            assertion_fires: %{}
 
   @doc """
   Create a new failure report from execution results.
@@ -194,6 +202,11 @@ defmodule PropertyDamage.FailureReport do
     # Classify error origin
     classification = ErrorOrigin.classify(failure_reason, stacktrace)
 
+    # Resolve the invariant the failing assertion checks (DR-026), so the report
+    # can headline the named property and the formatter stays pure.
+    {invariant_name, invariant_description} =
+      resolve_invariant(Keyword.get(opts, :model), check_name)
+
     %__MODULE__{
       seed: seed,
       run_number: run_number,
@@ -221,8 +234,38 @@ defmodule PropertyDamage.FailureReport do
       timestamp: DateTime.utc_now(),
       error_origin: classification.origin,
       error_origin_details: classification.details,
-      stacktrace: stacktrace
+      stacktrace: stacktrace,
+      invariant_name: invariant_name,
+      invariant_description: invariant_description,
+      assertion_fires: Keyword.get(opts, :assertion_fires, %{})
     }
+  end
+
+  # Resolve the invariant a failing assertion (by its logical check name) checks,
+  # returning {name, description}. Best-effort: a non-assertion failure (nil
+  # check_name), a model without a catalog, or an unmatched name yields
+  # {nil, nil}, so the formatter falls back to the bare assertion name.
+  defp resolve_invariant(nil, _check_name), do: {nil, nil}
+  defp resolve_invariant(_model, nil), do: {nil, nil}
+
+  defp resolve_invariant(model, check_name) when is_atom(model) do
+    if function_exported?(PropertyDamage.Model, :assertion_catalog, 1) do
+      entry =
+        model
+        |> PropertyDamage.Model.assertion_catalog()
+        |> Enum.find(fn %{checks: checks} ->
+          Enum.any?(checks, &(&1.name == check_name))
+        end)
+
+      case entry do
+        %{invariant: invariant} -> {invariant.name, invariant.description}
+        nil -> {nil, nil}
+      end
+    else
+      {nil, nil}
+    end
+  rescue
+    _ -> {nil, nil}
   end
 
   @doc """

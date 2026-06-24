@@ -526,4 +526,63 @@ defmodule PropertyDamage.Model do
       |> Map.merge(Map.new(opts))
     end
   end
+
+  @doc """
+  The full projection list a model exposes.
+
+  The command-sequence projection plus any `assertion_projections/0`,
+  deduplicated (a projection listed in both appears once).
+  """
+  @spec projection_modules(module()) :: [module()]
+  def projection_modules(model) do
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0) do
+        model.assertion_projections()
+      else
+        []
+      end
+
+    [model.command_sequence_projection() | assertion_projections]
+    |> Enum.uniq()
+  end
+
+  @doc """
+  The model's invariant catalog (DR-026).
+
+  The union of every projection's invariant registry (`__invariants__/0`), keyed
+  by `{projection, id}` so two projections may reuse an `id` for distinct
+  invariants. Each entry carries the `%PropertyDamage.Invariants.Invariant{}` and
+  the assertions that check it, with a per-check kind:
+
+  - `:synchronous` - a during-run `@trigger every:` check
+  - `:lifecycle` - a `@trigger at:` lifecycle-boundary check
+  - `:polling` - a temporal `@poll_state` check
+
+  Returns a list deterministically ordered by `{inspect(projection), id}`.
+  """
+  @spec assertion_catalog(module()) :: [
+          %{
+            projection: module(),
+            id: atom(),
+            invariant: PropertyDamage.Invariants.Invariant.t(),
+            checks: [%{name: atom(), kind: :synchronous | :lifecycle | :polling}]
+          }
+        ]
+  def assertion_catalog(model) do
+    for projection <- projection_modules(model),
+        function_exported?(projection, :__invariants__, 0),
+        {id, invariant} <- projection.__invariants__() do
+      checks =
+        projection.__assertions__()
+        |> Enum.filter(&(&1.invariant_id == id))
+        |> Enum.map(fn a -> %{name: a.name, kind: check_kind(a)} end)
+
+      %{projection: projection, id: id, invariant: invariant, checks: checks}
+    end
+    |> Enum.sort_by(fn entry -> {inspect(entry.projection), entry.id} end)
+  end
+
+  defp check_kind(%{type: :polling}), do: :polling
+  defp check_kind(%{type: :synchronous, trigger: %{type: :at}}), do: :lifecycle
+  defp check_kind(%{type: :synchronous}), do: :synchronous
 end

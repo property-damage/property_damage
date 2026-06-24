@@ -47,6 +47,38 @@ end, and trimmed the documented surface to what has been validated.
   shrinker's failure signature now distinguishes assertion failures by name, so
   distinct assertions are no longer conflated during shrinking (an async-observed
   failure stays equivalent to a `:teardown` failure of the same assertion).
+- Invariant catalog and anti-vacuity coverage (DR-026). Assertions now validate
+  first-class **invariants** with a stable identity
+  (`%PropertyDamage.Invariants.Invariant{id, name, description}`). A projection
+  declares invariants centrally with an accumulating `@invariant id: …,
+  description: …` attribute, or inline on an assertion with `id:`; other
+  assertions link to one with `validates: :id`. An assertion with neither owns a
+  same-named invariant by default, so existing models gain a populated catalog
+  with no changes. Identity is per projection: ids are unique within a
+  projection and `validates:` resolves locally, checked at compile time
+  (duplicate id and dangling `validates:` are `CompileError`s; an invariant with
+  no check warns as statically vacuous). `PropertyDamage.Model.assertion_catalog/1`
+  returns the model-wide catalog keyed `{projection, id}` with each invariant's
+  checks and per-check kind (`:synchronous` / `:lifecycle` / `:polling`). The
+  engine records **per-assertion firing** across the whole run at every
+  evaluation site (synchronous `every:`, lifecycle `at:`, async observations,
+  and `@poll_state` spawn, where spawning counts as firing), exposed on the
+  result as `assertion_fires`. `PropertyDamage.assertion_coverage(result, model)`
+  joins those firings against the catalog with no re-execution, reporting which
+  invariants were actually exercised: an `@trigger every: RareEvent` that never
+  triggers was a silent vacuous pass and is now visibly uncovered. A verbose run
+  prints a terse `Invariants: N/M exercised` footer;
+  `Coverage.meets_threshold?(tracker, assertion_coverage: 100)` fails CI on any
+  uncovered invariant; failure reports headline the invariant's name and
+  description with the failing check as secondary detail. This also completes the
+  previously-stubbed `Coverage` "check coverage" (per-assertion fire counts now
+  populate `check_hits`) and makes the long-documented `coverage: true` run
+  option real: it accumulates the heavier command/transition/state dimensions
+  across **all** generated sequences (attached to the success stats as
+  `:coverage`), where before they silently reflected a single representative
+  sequence. The additive surface (`@invariant`, `validates:`, inline
+  `id:`/`description:`, `assertion_fires`, `coverage: true`) is backward
+  compatible.
 - `mix pd.replay <failure-file> [--verbose]` replays a saved `.pd` failure
   against the SUT. It loads the failing run (model and adapter are read from the
   file itself, so no flags are needed), re-executes the shrunk sequence through

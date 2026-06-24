@@ -154,16 +154,38 @@ defmodule PropertyDamage.FailureReport.Formatter do
     """
   end
 
+  # Headline the invariant the failing check validates (DR-026), with the check
+  # itself rendered as secondary detail just below. Empty when the failure has no
+  # resolved invariant (e.g. a non-assertion failure).
+  defp invariant_section(report, color) do
+    case report.invariant_name do
+      nil ->
+        ""
+
+      name ->
+        description =
+          if report.invariant_description do
+            "\n#{label("Property", color)}     #{report.invariant_description}"
+          else
+            ""
+          end
+
+        "#{label("Invariant", color)}   #{cyan(color)}#{name}#{reset()}#{description}\n"
+    end
+  end
+
   defp terminal_failure_explanation(report, color) do
     # Build the "Why It Failed" explanation
     {reason_text, why_text} =
       case report.failure_type do
         :check_failed ->
-          reason = """
-          #{label("Check", color)}         #{cyan(color)}#{report.check_name}#{reset()}
-          #{label("Message", color)}
-          #{indent_text(report.failure_message, "    ")}
-          """
+          reason =
+            invariant_section(report, color) <>
+              """
+              #{label("Check", color)}         #{cyan(color)}#{report.check_name}#{reset()}
+              #{label("Message", color)}
+              #{indent_text(report.failure_message, "    ")}
+              """
 
           why = build_check_explanation(report, color)
           {reason, why}
@@ -632,18 +654,32 @@ defmodule PropertyDamage.FailureReport.Formatter do
     """
   end
 
+  defp markdown_invariant_section(report) do
+    case report.invariant_name do
+      nil ->
+        ""
+
+      name ->
+        description =
+          if report.invariant_description, do: " — #{report.invariant_description}", else: ""
+
+        "**Invariant:** `#{name}`#{description}\n\n"
+    end
+  end
+
   defp markdown_failure_reason(report) do
     reason_text =
       case report.failure_type do
         :check_failed ->
-          """
-          **Check:** `#{report.check_name}`
+          markdown_invariant_section(report) <>
+            """
+            **Check:** `#{report.check_name}`
 
-          **Message:**
-          ```
-          #{report.failure_message}
-          ```
-          """
+            **Message:**
+            ```
+            #{report.failure_message}
+            ```
+            """
 
         :idempotency_violation ->
           format_idempotency_markdown(report)

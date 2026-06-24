@@ -128,9 +128,14 @@ defmodule Mix.Tasks.Pd.Validate do
       true ->
         # Run validation
         case PropertyDamage.Validation.validate!(model, adapter) do
-          {:ok, warnings} ->
+          {:ok, base_warnings} ->
+            # Surface declared-but-unchecked invariants (static vacuity, DR-026)
+            # so they fail under --strict alongside the other warnings.
+            warnings = base_warnings ++ invariant_warnings(model)
+
             if verbose do
-              PropertyDamage.Validation.print_summary(model, adapter, warnings)
+              PropertyDamage.Validation.print_summary(model, adapter, base_warnings)
+              print_invariant_catalog(model)
             end
 
             print_validation_results(model, adapter, warnings, verbose)
@@ -230,8 +235,11 @@ defmodule Mix.Tasks.Pd.Validate do
         "Command #{cmd |> Module.split() |> List.last()} missing downstream_observables/0"
       end
 
+    warnings = warnings ++ invariant_warnings(model)
+
     if verbose do
       print_model_summary(model, commands)
+      print_invariant_catalog(model)
     end
 
     cond do
@@ -251,6 +259,46 @@ defmodule Mix.Tasks.Pd.Validate do
         :ok
     end
   end
+
+  # Declared-but-unchecked invariants (static vacuity, DR-026): a guarantee the
+  # model claims but no assertion verifies.
+  defp invariant_warnings(model) do
+    for %{projection: projection, id: id, checks: []} <- safe_catalog(model) do
+      "Invariant #{short_module(projection)}.#{id} declared but never checked (statically vacuous)"
+    end
+  end
+
+  defp safe_catalog(model) do
+    PropertyDamage.Model.assertion_catalog(model)
+  rescue
+    _ -> []
+  end
+
+  defp print_invariant_catalog(model) do
+    catalog = safe_catalog(model)
+
+    IO.puts("")
+    IO.puts("Invariants (#{length(catalog)}):")
+
+    if catalog == [] do
+      IO.puts("  (none declared)")
+    else
+      for %{projection: projection, id: id, invariant: invariant, checks: checks} <- catalog do
+        description = if invariant.description, do: " — #{invariant.description}", else: ""
+
+        check_str =
+          case checks do
+            [] -> "no checks (vacuous)"
+            cs -> Enum.map_join(cs, ", ", fn c -> "#{c.name} (#{c.kind})" end)
+          end
+
+        IO.puts("  #{short_module(projection)}.#{id}#{description}")
+        IO.puts("      checks: #{check_str}")
+      end
+    end
+  end
+
+  defp short_module(module), do: module |> Module.split() |> List.last()
 
   defp print_warnings([]), do: :ok
 

@@ -48,6 +48,17 @@ defmodule PropertyDamage.Options do
       default: true,
       doc: "Shrink failing sequences to minimal reproduction."
     ],
+    coverage: [
+      type: :boolean,
+      default: false,
+      doc: """
+      Accumulate the heavier whole-run coverage dimensions
+      (command/transition/state) across all generated sequences, attached to the
+      success stats as `:coverage` (a `PropertyDamage.Coverage` tracker).
+      Per-assertion/invariant coverage (anti-vacuity) is always collected
+      regardless of this flag; see `PropertyDamage.assertion_coverage/2`.
+      """
+    ],
     seed_library: [
       type: {:or, [:boolean, :string]},
       default: false,

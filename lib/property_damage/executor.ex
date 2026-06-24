@@ -345,13 +345,14 @@ defmodule PropertyDamage.Executor do
     # after setup/1 and before command 1. A :halt failure aborts before any
     # command runs.
     case run_phase_assertions(initial_state, :startup) do
-      {:halt, name, reason} ->
+      {:halt, name, reason, _counters} ->
         finalize_result({:failed, nil, {:assertion_failed, name, reason}, initial_state})
 
-      {:ok, startup_recorded} ->
+      {:ok, startup_recorded, startup_counters} ->
         initial_state = %{
           initial_state
-          | assertion_failures: startup_recorded ++ initial_state.assertion_failures
+          | assertion_failures: startup_recorded ++ initial_state.assertion_failures,
+            assertion_counters: startup_counters
         }
 
         result =
@@ -435,13 +436,14 @@ defmodule PropertyDamage.Executor do
     # DR-024: @trigger at: :startup runs once on the shared initial state,
     # before any branch. A :halt failure aborts before any command runs.
     case run_phase_assertions(initial_state, :startup) do
-      {:halt, name, reason} ->
+      {:halt, name, reason, _counters} ->
         finalize_result({:failed, nil, {:assertion_failed, name, reason}, initial_state})
 
-      {:ok, startup_recorded} ->
+      {:ok, startup_recorded, startup_counters} ->
         initial_state = %{
           initial_state
-          | assertion_failures: startup_recorded ++ initial_state.assertion_failures
+          | assertion_failures: startup_recorded ++ initial_state.assertion_failures,
+            assertion_counters: startup_counters
         }
 
         execute_branching_phases(
@@ -861,7 +863,8 @@ defmodule PropertyDamage.Executor do
       failure_reason: normalized_reason,
       stacktrace: stacktrace,
       linearization: linearization,
-      assertion_failures: assertion_failures
+      assertion_failures: assertion_failures,
+      assertion_counters: Map.get(state, :assertion_counters, %{})
     }
   end
 
@@ -975,19 +978,19 @@ defmodule PropertyDamage.Executor do
         # hoist): a liveness timeout is itself a not-settled outcome, so
         # there is no settled state to check.
         case run_phase_assertions(state, :teardown) do
-          {:halt, name, reason} ->
+          {:halt, name, reason, teardown_counters} ->
             {normalized, stacktrace} =
               extract_stacktrace({:assertion_failed, name, reason})
 
             teardown_failure_result(
-              state,
+              %{state | assertion_counters: teardown_counters},
               normalized,
               stacktrace,
               linearization,
               combined_failures
             )
 
-          {:ok, teardown_recorded} ->
+          {:ok, teardown_recorded, teardown_counters} ->
             # teardown_recorded is newest-first and chronologically last;
             # reverse to chronological order and append after everything else.
             all_failures = combined_failures ++ Enum.reverse(teardown_recorded)
@@ -1004,7 +1007,8 @@ defmodule PropertyDamage.Executor do
               failure_reason: nil,
               stacktrace: nil,
               linearization: linearization,
-              assertion_failures: all_failures
+              assertion_failures: all_failures,
+              assertion_counters: teardown_counters
             }
         end
     end
@@ -1023,7 +1027,8 @@ defmodule PropertyDamage.Executor do
       failure_reason: failure_reason,
       stacktrace: nil,
       linearization: linearization,
-      assertion_failures: failures
+      assertion_failures: failures,
+      assertion_counters: Map.get(state, :assertion_counters, %{})
     }
   end
 
@@ -1043,7 +1048,8 @@ defmodule PropertyDamage.Executor do
       failure_reason: failure_reason,
       stacktrace: stacktrace,
       linearization: linearization,
-      assertion_failures: failures
+      assertion_failures: failures,
+      assertion_counters: Map.get(state, :assertion_counters, %{})
     }
   end
 
@@ -1069,7 +1075,8 @@ defmodule PropertyDamage.Executor do
       failure_reason: failure_reason,
       stacktrace: stacktrace,
       linearization: linearization,
-      assertion_failures: failures
+      assertion_failures: failures,
+      assertion_counters: Map.get(state, :assertion_counters, %{})
     }
   end
 
@@ -2341,22 +2348,37 @@ defmodule PropertyDamage.Executor do
            assertion_ctx.module,
            acc_counters
          ) do
+        # The assertion runs: record the firing (DR-026) before invoking it, so
+        # a failing assertion still counts as exercised. This single site covers
+        # both the synchronous command/event path and the asynchronous
+        # observation path (DR-025), which dispatches through run_assertions/7.
+        fired = bump_fired(acc_counters, projection, assertion.name)
+
         # Execute assertion - assertions raise on failure
         try do
           assertion_fn = assertion.function_name
           apply(projection, assertion_fn, [projection_state, assertion_ctx.command_or_event])
           # Success: no exception raised
-          {:cont, {:ok, acc_counters}}
+          {:cont, {:ok, fired}}
         rescue
           e ->
             # Assertion failed by raising exception - capture stacktrace
             stacktrace = __STACKTRACE__
-            {:halt, {:error, assertion.name, {e, stacktrace}, acc_counters}}
+            {:halt, {:error, assertion.name, {e, stacktrace}, fired}}
         end
       else
         {:cont, {:ok, acc_counters}}
       end
     end)
+  end
+
+  # Record one firing of an assertion (DR-026). Per-assertion fire counts are
+  # colocated as {:fired, projection, name} keys inside the existing
+  # assertion_counters map: inert to should_run?/4 (which does only point
+  # lookups, never iterates) and carried for free by the additive branch merge
+  # in merge_branch_states/5.
+  defp bump_fired(counters, projection, name) do
+    Map.update(counters, {:fired, projection, name}, 1, &(&1 + 1))
   end
 
   # ============================================================================
@@ -2374,16 +2396,25 @@ defmodule PropertyDamage.Executor do
   #                                failures from this phase, newest-first; empty
   #                                on a clean pass and under :log/:disabled.
   #   {:halt, name, {exception, stacktrace}} -- first failure under :halt mode.
+  #
+  # Returns one of (DR-026 threads the fire counters through so lifecycle
+  # firings are recorded, since these assertions never pass through the
+  # during-run counter path):
+  #   {:ok, recorded_failures, counters}
+  #   {:halt, name, {exception, stacktrace}, counters}
   defp run_phase_assertions(state, phase) do
     assertion_mode = Map.get(state, :assertion_mode, :halt)
+    counters = Map.get(state, :assertion_counters, %{})
 
     if assertion_mode == :disabled do
-      {:ok, []}
+      {:ok, [], counters}
     else
       model = Map.fetch!(state, :model)
       projections = state.projections
 
-      Enum.reduce_while(projection_modules(model), {:ok, []}, fn projection, {:ok, recorded} ->
+      Enum.reduce_while(projection_modules(model), {:ok, [], counters}, fn projection,
+                                                                           {:ok, recorded,
+                                                                            acc_counters} ->
         projection_state = Map.get(projections, projection)
         assertions = phase_assertions(projection, phase)
 
@@ -2393,10 +2424,11 @@ defmodule PropertyDamage.Executor do
                assertions,
                phase,
                assertion_mode,
-               recorded
+               recorded,
+               acc_counters
              ) do
-          {:ok, new_recorded} -> {:cont, {:ok, new_recorded}}
-          {:halt, name, reason} -> {:halt, {:halt, name, reason}}
+          {:ok, new_recorded, new_counters} -> {:cont, {:ok, new_recorded, new_counters}}
+          {:halt, name, reason, halt_counters} -> {:halt, {:halt, name, reason, halt_counters}}
         end
       end)
     end
@@ -2408,21 +2440,27 @@ defmodule PropertyDamage.Executor do
          assertions,
          phase,
          assertion_mode,
-         recorded
+         recorded,
+         counters
        ) do
     require Logger
 
-    Enum.reduce_while(assertions, {:ok, recorded}, fn assertion, {:ok, acc_recorded} ->
+    Enum.reduce_while(assertions, {:ok, recorded, counters}, fn assertion,
+                                                                {:ok, acc_recorded, acc_counters} ->
+      # Record the firing (DR-026) before invoking, so a failing lifecycle check
+      # still counts as exercised.
+      fired = bump_fired(acc_counters, projection, assertion.name)
+
       try do
         apply(projection, assertion.function_name, [projection_state, phase])
-        {:cont, {:ok, acc_recorded}}
+        {:cont, {:ok, acc_recorded, fired}}
       rescue
         e ->
           stacktrace = __STACKTRACE__
 
           case assertion_mode do
             :halt ->
-              {:halt, {:halt, assertion.name, {e, stacktrace}}}
+              {:halt, {:halt, assertion.name, {e, stacktrace}, fired}}
 
             :record ->
               failure = %{
@@ -2435,12 +2473,12 @@ defmodule PropertyDamage.Executor do
                 timestamp: System.monotonic_time(:millisecond)
               }
 
-              {:cont, {:ok, [failure | acc_recorded]}}
+              {:cont, {:ok, [failure | acc_recorded], fired}}
 
             :log ->
               Logger.warning("Assertion failed at #{phase}: #{assertion.name} - #{inspect(e)}")
 
-              {:cont, {:ok, acc_recorded}}
+              {:cont, {:ok, acc_recorded, fired}}
           end
       end
     end)
@@ -2867,8 +2905,12 @@ defmodule PropertyDamage.Executor do
 
       all_projections = [cmd_seq_projection | assertion_projections]
 
-      # For each event, check if any @poll_state assertions should be spawned
-      new_pollers =
+      # For each event, check if any @poll_state assertions should be spawned.
+      # Each spawned poller is paired with its (projection, assertion name) so
+      # the spawn can be recorded as a firing (DR-026): spawning IS firing for a
+      # liveness check (the after: event arrived and verification began), so a
+      # timed-out or still-pending poller still counts as exercised.
+      spawned =
         for event <- events,
             event_module = event.__struct__,
             projection <- all_projections,
@@ -2891,22 +2933,33 @@ defmodule PropertyDamage.Executor do
           end
 
           # Spawn the poller
-          StatePoller.start(
-            predicate: predicate,
-            predicate_source: assertion.predicate_source,
-            projection: projection,
-            interval_ms: assertion.poll_state.interval_ms,
-            timeout_ms: assertion.poll_state.timeout_ms,
-            triggered_by: %{event: event, assertion_name: assertion.name},
-            get_state_fn: get_state_fn
-          )
+          poller =
+            StatePoller.start(
+              predicate: predicate,
+              predicate_source: assertion.predicate_source,
+              projection: projection,
+              interval_ms: assertion.poll_state.interval_ms,
+              timeout_ms: assertion.poll_state.timeout_ms,
+              triggered_by: %{event: event, assertion_name: assertion.name},
+              get_state_fn: get_state_fn
+            )
+
+          {projection, assertion.name, poller}
         end
 
-      if Enum.empty?(new_pollers) do
+      if Enum.empty?(spawned) do
         state
       else
+        new_pollers = Enum.map(spawned, fn {_proj, _name, poller} -> poller end)
+
+        counters =
+          Enum.reduce(spawned, Map.get(state, :assertion_counters, %{}), fn {proj, name, _poller},
+                                                                            acc ->
+            bump_fired(acc, proj, name)
+          end)
+
         existing_pollers = Map.get(state, :active_pollers, [])
-        %{state | active_pollers: existing_pollers ++ new_pollers}
+        %{state | active_pollers: existing_pollers ++ new_pollers, assertion_counters: counters}
       end
     end
   end
