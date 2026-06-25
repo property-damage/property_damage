@@ -1508,4 +1508,4 @@ PropertyDamage
 
 ## License
 
-MIT License. See LICENSE for details.
+Apache License 2.0. See LICENSE for details.
