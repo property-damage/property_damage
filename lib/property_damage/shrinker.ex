@@ -30,18 +30,20 @@ defmodule PropertyDamage.Shrinker do
   sequence at the failure point (`Enum.take(commands, failed_at_index + 1)`), so
   every subsequent candidate is a subset of that prefix.
 
-  On the branching path the index is likewise not asserted, and `failed_at_index`
-  is a branch-relative coordinate (`branch_start_index + position`) that is not
-  directly comparable to the linear index obtained when a branching sequence is
-  flattened. That mismatch is intentionally harmless: its only consumer is the
-  convert-to-linear truncation, which re-verifies that the truncated base still
-  reproduces the failure before adopting it (see `shrink_linear/2`, where the
-  truncation is guarded by `still_fails?`). A mismatched coordinate therefore
-  degrades to a missed truncation *optimization*, never an accepted
-  later-failing candidate. Combined with the subset/simplification property of
-  every branching strategy (branch removal, branch-content shrinking,
-  prefix/suffix shrinking, and argument shrinking), the same-or-earlier-index
-  guarantee holds structurally here as well.
+  On the branching path the index is likewise not asserted. The original
+  `failed_at_index` is a branch-relative coordinate (`branch_start_index +
+  position`) that is not directly comparable to the linear index obtained when a
+  branching sequence is flattened, so it is **not** reused for truncation: when
+  `try_convert_to_linear` decides a race is not required, it takes the failure
+  index from its own linear re-run of the flattened sequence (which is
+  self-consistent with that sequence) and hands *that* to `shrink_linear`, so
+  Phase-1 truncation targets the real failure point. The truncation stays
+  `still_fails?`-guarded regardless, so even a stale or nil index can only fall
+  back to leaving the full flattened sequence, never accept a later-failing
+  candidate. Combined with the subset/simplification property of every branching
+  strategy (branch removal, branch-content shrinking, prefix/suffix shrinking,
+  and argument shrinking), the same-or-earlier-index guarantee holds structurally
+  here as well.
 
   ## Determinism
 
@@ -432,27 +434,36 @@ defmodule PropertyDamage.Shrinker do
       linear_seq = Sequence.linear(Sequence.to_list(state.sequence))
       state = increment_iterations_branch(state)
 
-      if still_fails_branch?(linear_seq, state) do
-        # Race not required - convert to linear and continue with linear shrinking
-        # Reconstruct failure_reason from original_signature for passing to shrink_linear
-        linear_result =
-          shrink_linear(linear_seq,
-            failed_at_index: state.failed_at_index,
-            model: state.model,
-            adapter: state.adapter,
-            adapter_config: state.adapter_config,
-            config: state.config,
-            event_queue: state.event_queue,
-            failure_reason: reconstruct_failure_reason(state.original_signature)
-          )
+      case linear_run_result(linear_seq, state) do
+        {:reproduces, linear_failed_at_index} ->
+          # Race not required - convert to linear and continue with linear
+          # shrinking. Hand shrink_linear the failure index from THIS linear
+          # re-run, not the original `state.failed_at_index`: the latter is a
+          # branch-relative coordinate (`branch_start_index + position`) that is
+          # smaller than the failing command's position in the flattened
+          # sequence, so it would truncate too short, drop the failing command,
+          # and leave the full flatten to the (budget-bounded) one-by-one
+          # fixpoint. The linear index is self-consistent with `linear_seq`, so
+          # Phase-1 truncation targets the real failure point.
+          linear_result =
+            shrink_linear(linear_seq,
+              failed_at_index: linear_failed_at_index,
+              model: state.model,
+              adapter: state.adapter,
+              adapter_config: state.adapter_config,
+              config: state.config,
+              event_queue: state.event_queue,
+              failure_reason: reconstruct_failure_reason(state.original_signature)
+            )
 
-        %{
+          %{
+            state
+            | sequence: linear_result.sequence,
+              iterations: state.iterations + linear_result.iterations
+          }
+
+        :no_reproduce ->
           state
-          | sequence: linear_result.sequence,
-            iterations: state.iterations + linear_result.iterations
-        }
-      else
-        state
       end
     end
   end
@@ -924,6 +935,55 @@ defmodule PropertyDamage.Shrinker do
       {:error, _reason} ->
         # If setup_each fails, treat as if shrink candidate passed (don't remove)
         false
+    end
+  end
+
+  # Like still_fails_branch?/2, but also surfaces the LINEAR failure index from
+  # the re-run so the caller can hand shrink_linear a truncation coordinate that
+  # is consistent with the (flattened) candidate sequence. Returns
+  # `{:reproduces, linear_failed_at_index}` when the candidate reproduces the
+  # equivalent failure (the index may be nil for poll/record-mode or
+  # execution-level failures, which shrink_linear tolerates by skipping
+  # truncation), or `:no_reproduce` otherwise. Used only at the
+  # convert-to-linear seam; the other branch strategies need only the boolean.
+  defp linear_run_result(sequence, state) do
+    case call_setup_each(state.model, state.adapter_config) do
+      :ok ->
+        # Regenerate idempotency keys to ensure fresh SUT state
+        sequence = regenerate_sequence_idempotency_keys(sequence)
+
+        case Executor.run(sequence, state.model, state.adapter,
+               adapter_config: state.adapter_config,
+               event_queue: state.event_queue
+             ) do
+          {:ok, result} ->
+            cond do
+              result.success ->
+                :no_reproduce
+
+              check_failure_equivalence(result.failure_reason, state.original_signature) ->
+                {:reproduces, result.failed_at_index}
+
+              true ->
+                :no_reproduce
+            end
+
+          {:error, _} ->
+            # Execution errors are only equivalent if the original was also an
+            # error. There is no reliable linear index for such a failure, so
+            # signal reproduction with a nil index (shrink_linear skips the
+            # truncation when the index is not an integer).
+            if state.original_signature == nil or
+                 state.original_signature.type == :adapter_error do
+              {:reproduces, nil}
+            else
+              :no_reproduce
+            end
+        end
+
+      {:error, _reason} ->
+        # If setup_each fails, treat as if the candidate passed (don't convert)
+        :no_reproduce
     end
   end
 

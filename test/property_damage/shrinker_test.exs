@@ -501,6 +501,51 @@ defmodule PropertyDamage.ShrinkerTest do
       assert Sequence.linear?(result.sequence) or Sequence.command_count(result.sequence) == 2
     end
 
+    test "converted-linear shrink truncates at the linear failure index, not the branch-relative one" do
+      # The failure lives in the SECOND branch, after a non-empty first branch.
+      # When flattened to prefix ++ branch0 ++ branch1, the failing command "B"
+      # sits at linear index 2, but its branch-relative coordinate
+      # (branch_start_index + position = 0 + 0) is 0. Passing the branch-relative
+      # index to the linear shrink truncates to [A1] (which does not fail), so the
+      # truncation is rejected and the full flattened sequence is left to the
+      # one-by-one fixpoint. Under a tight iteration budget that fixpoint cannot
+      # clear the long filler tail, so the reproduction stays non-minimal.
+      #
+      # Cumulative-quantity check fails at > 100: A1(10) + A2(10) + B(85) = 105.
+      # The only 3-command subset that exceeds 100 is [A1, A2, B], so a correct
+      # truncation at linear index 2 reaches the minimum in a single iteration.
+      tail = for n <- 1..8, do: %CreateItem{name: "T#{n}", quantity: 1}
+
+      seq =
+        Sequence.branching(
+          [],
+          [
+            [%CreateItem{name: "A1", quantity: 10}, %CreateItem{name: "A2", quantity: 10}],
+            [%CreateItem{name: "B", quantity: 85} | tail]
+          ],
+          []
+        )
+
+      result =
+        Shrinker.shrink(seq,
+          # Branch-relative index the executor would mint for B (branch1, pos 0).
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config:
+            Config.new(
+              shrink_arguments: false,
+              # Force the one-by-one linear path (no hierarchical batch removal).
+              granularity_threshold: 100,
+              # Enough for a single truncation + verifying the 3 survivors, but
+              # far too few to delete an 8-command tail one command at a time.
+              max_iterations: 8
+            )
+        )
+
+      assert Sequence.command_count(result.sequence) == 3
+    end
+
     test "preserves branching when needed for failure" do
       # This is a simpler test - the shrinker should not break the failure
       seq =
