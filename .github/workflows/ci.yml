@@ -212,3 +212,47 @@ jobs:
       - run: mix deps.get
 
       - run: mix test
+
+  # Gitea bench drives the SAME model against two transports (REST API and a
+  # Playwright-driven UI) and compares them with PropertyDamage.Differential.
+  # Unlike the other benches it is not run against service containers: it needs
+  # two coordinated Gitea instances each with a bootstrapped admin, which its own
+  # docker-compose + bench.db.up already provision (GitHub runners ship Docker
+  # Compose v2). So the job just runs the bench as-is; the only extra setup is
+  # Node and the Chromium browser (with OS deps) the UI adapter drives.
+  bench_gitea:
+    name: Bench (gitea_bench)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: benches/gitea_bench
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            benches/gitea_bench/deps
+            benches/gitea_bench/_build
+          key: bench-gitea_bench-${{ hashFiles('benches/gitea_bench/mix.lock') }}
+          restore-keys: bench-gitea_bench-
+
+      - run: mix deps.get
+
+      # Install the Chromium the UI adapter drives, with its OS dependencies
+      # (the runner has passwordless sudo). Uses the driver bundled with the
+      # `playwright` hex package, so the browser revision matches. This makes the
+      # `playwright.install` step in the bench's `test` alias a no-op.
+      - name: Install Playwright Chromium (with OS deps)
+        run: node deps/playwright/priv/static/driver.js install --with-deps chromium
+
+      - run: mix test
