@@ -1,0 +1,53 @@
+name: pd_gitea_bench
+
+# Two dedicated, ephemeral Gitea instances, independent of anything on the host.
+# The API adapter drives `gitea-api`; the Playwright UI adapter drives
+# `gitea-ui`. They are identical except for the host port and ROOT_URL, so the
+# differential oracle compares the same intent over two transports against two
+# clean, equivalent forges. State lives only in each container's writable layer
+# (no volume), so `docker compose down -v` is a full reset; per-run isolation is
+# handled at the application layer (each adapter purges non-admin users in
+# setup/1). SQLite keeps the lifecycle to a single small container each.
+#
+# Host ports (overridable):
+#   PD_GITEA_API_PORT (default 3101) -> gitea-api
+#   PD_GITEA_UI_PORT  (default 3102) -> gitea-ui
+
+x-gitea-common: &gitea-common
+  image: gitea/gitea:1.22
+  environment: &gitea-env
+    USER_UID: "1000"
+    USER_GID: "1000"
+    GITEA__database__DB_TYPE: sqlite3
+    GITEA__security__INSTALL_LOCK: "true"
+    GITEA__service__DISABLE_REGISTRATION: "true"
+    GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
+    GITEA__mailer__ENABLED: "false"
+    GITEA__server__DISABLE_SSH: "true"
+    GITEA__server__OFFLINE_MODE: "true"
+    GITEA__server__HTTP_PORT: "3000"
+    GITEA__log__LEVEL: "warn"
+    GITEA__repository__DEFAULT_PRIVATE: "public"
+  healthcheck:
+    test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/healthz"]
+    interval: 3s
+    timeout: 3s
+    retries: 40
+    start_period: 10s
+
+services:
+  gitea-api:
+    <<: *gitea-common
+    environment:
+      <<: *gitea-env
+      GITEA__server__ROOT_URL: "http://localhost:${PD_GITEA_API_PORT:-3101}/"
+    ports:
+      - "${PD_GITEA_API_PORT:-3101}:3000"
+
+  gitea-ui:
+    <<: *gitea-common
+    environment:
+      <<: *gitea-env
+      GITEA__server__ROOT_URL: "http://localhost:${PD_GITEA_UI_PORT:-3102}/"
+    ports:
+      - "${PD_GITEA_UI_PORT:-3102}:3000"
