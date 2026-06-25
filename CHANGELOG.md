@@ -5,7 +5,7 @@ All notable changes to PropertyDamage will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - TBD
+## [0.2.0] - 2026-06-25
 
 This cycle made the headline features that 0.1.0 advertised actually work end to
 end, and trimmed the documented surface to what has been validated.
@@ -137,7 +137,7 @@ end, and trimmed the documented surface to what has been validated.
   the load test worker resolves per worker. Previously differential passed
   unresolved placeholders straight through and the load test worker raised on the
   first one.
-- Decision Records under `docs/decisions/` (DR-001–DR-021).
+- Decision Records under `docs/decisions/` (DR-001–DR-026).
 - `credo` as a dev/test lint (non-blocking in CI); `PlaceholderRegistry.resolve/3`.
 - Documentation of the command sequence generation loop in the
   `PropertyDamage.Model` moduledoc.
@@ -241,6 +241,15 @@ end, and trimmed the documented surface to what has been validated.
 
 ### Fixed
 
+- Converted-branching shrinks now truncate at the linear failure index. When a
+  branching sequence converted to linear during shrinking, the linear phase
+  received the original *branch-relative* failure index, which for a failure in
+  the second or later branch is smaller than the command's position in the
+  flattened sequence; truncation cut too short, was rejected by the still-fails
+  guard, and left the full sequence to the budget-bounded one-by-one fixpoint,
+  which on long sequences could exhaust its budget and return a non-minimal
+  reproduction. The convert step now derives the failure index from its own
+  linear re-run, so truncation targets the real failure point.
 - The settled final state now folds in late resource-poller events even when no
   `@poll_state` poller is active. Previously the finalize-time drain only ran to
   feed `@poll_state` predicates, so a run with resource pollers but no
@@ -464,5 +473,5 @@ end, and trimmed the documented surface to what has been validated.
 - Interactive Livebook demo notebook
 - ExDoc configuration with module groups
 
-[0.2.0]: https://github.com/property-damage/property_damage/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/property-damage/property_damage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/property-damage/property_damage/releases/tag/v0.1.0
