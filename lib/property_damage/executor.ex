@@ -84,7 +84,6 @@ defmodule PropertyDamage.Executor do
     PlaceholderRegistry,
     ResourcePoller,
     Sequence,
-    Settle,
     StatePoller,
     Stutter
   }
@@ -1109,7 +1108,7 @@ defmodule PropertyDamage.Executor do
 
         result =
           try do
-            execute_with_settle(
+            PropertyDamage.Executor.Settle.execute_with_settle(
               resolved_command,
               adapter,
               adapter_context,
@@ -1532,31 +1531,6 @@ defmodule PropertyDamage.Executor do
   rescue
     _ -> %{}
   end
-
-  # Execute command with settle logic for probes/async, sourced from the spec
-  defp execute_with_settle(command, adapter, user_context, runtime, spec) do
-    execution = settle_execution(command, spec)
-
-    if execution in [:probe, :async] do
-      config = settle_config(command, spec)
-
-      Settle.settle(
-        fn -> adapter.execute(command, user_context, runtime) end,
-        timeout_ms: config.timeout_ms,
-        interval_ms: config.interval_ms,
-        backoff: config.backoff
-      )
-    else
-      adapter.execute(command, user_context, runtime)
-    end
-  end
-
-  defp settle_execution(command, nil), do: Settle.get_semantics(command)
-  defp settle_execution(_command, spec), do: Map.get(spec, :execution, :sync)
-
-  defp settle_config(command, nil), do: Settle.get_config(command)
-  defp settle_config(_command, %{settle: settle}) when is_map(settle), do: settle
-  defp settle_config(command, _spec), do: Settle.get_config(command)
 
   # Inject an event mid-execution from an adapter.
   # Called via runtime.inject.(event) from adapter execute; `sink` is the per-command
