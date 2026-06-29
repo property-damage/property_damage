@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -56,6 +56,18 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 - **WHEN** a run aborts before reaching the settled state (for example an adapter error, a synchronous `@trigger` failure, or a reference-resolution error)
 - **THEN** `@trigger at: :teardown` assertions SHALL NOT be evaluated
 - **AND** the framework SHALL report the proximate failure rather than a settled-state assertion result
+
+### Requirement: Finalize-Chain Ordering and Precedence (DR-029)
+
+After the last command of a run (linear or merged-branch), the framework SHALL finalize the run through a fixed chain of stages in this order: finalize `@poll_state` pollers (draining the event queue and evaluating async checks during the await window), finalize resource pollers, drain the settled-state event queue (evaluating async checks on the folded events), then evaluate the `@trigger at: :teardown` checkpoint on the settled state. When more than one failure is live at finalize time, the framework SHALL report exactly one, by this precedence (highest first): an async `@trigger every:` violation observed during the `@poll_state` await drain, then a `@poll_state` poll timeout/error, then an async `@trigger every:` violation observed during the settled-state drain, then a resource-poller error, then a failing `@trigger at: :teardown` checkpoint. The two async violations SHALL carry the observing event's `command_index` as the reported failure index. This ordering is an internal invariant (no observable-behavior change); it is owned by `PropertyDamage.Executor.Finalization` and locked by dedicated ordering-guard tests so the chain cannot be silently reordered.
+
+#### Scenario: An async drain violation preempts a concurrent poll timeout
+- **WHEN** an async `@trigger every:` assertion trips on an event folded during the `@poll_state` await drain while a `@poll_state` poller is also timing out
+- **THEN** the framework SHALL report the async assertion violation, at the observing event's `command_index`, rather than the poll timeout
+
+#### Scenario: A settled-state drain violation preempts a resource-poller error
+- **WHEN** an async `@trigger every:` assertion trips on an event folded during the settled-state drain while a resource poller has also errored
+- **THEN** the framework SHALL report the async assertion violation, at the observing event's `command_index`, rather than the resource-poller error
 
 ### Requirement: Adapter Execute Arguments (user_context and runtime)
 
