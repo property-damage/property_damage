@@ -85,14 +85,14 @@ read of the system:
 
 ```elixir
 # ApiAdapter: mutate via REST, then observe via the read API
-def execute(%CreateRepo{owner: owner, name: name}, %{client: client}) do
+def execute(%CreateRepo{owner: owner, name: name}, %{client: client}, _runtime) do
   with :ok <- Gitea.create_repo(client, owner, name) do
     {:ok, [Gitea.repo_event(client, owner, name)]}   # neutral observation
   end
 end
 
 # UiAdapter: mutate via the browser, then observe the SAME way
-def execute(%CreateRepo{owner: owner, name: name}, ctx) do
+def execute(%CreateRepo{owner: owner, name: name}, ctx, _runtime) do
   ui_create_repo(ctx.page, owner, name)
   {:ok, [Gitea.repo_event(ctx.client, owner, name)]} # same observer
 end

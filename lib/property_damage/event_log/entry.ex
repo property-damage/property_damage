@@ -35,13 +35,13 @@ defmodule PropertyDamage.EventLog.Entry do
      which command triggered the mock call.
 
   7. **Injected events** (`:injected` source) - Events emitted mid-execution
-     by adapters with `:async` semantics using `ctx.inject.(event)`. These
+     by adapters with `:async` semantics using `runtime.inject.(event)`. These
      update projections immediately when injected, unlike command events which
      batch all events at the end. They have a `command_index` indicating
      which command's adapter injected them.
 
   8. **Resource poller events** (`:resource_poller` source) - Events injected
-     by background resource pollers started via `ctx.start_poller.(opts)`.
+     by background resource pollers started via `runtime.start_poller.(opts)`.
      These are processed between commands when the EventQueue is drained.
      They have a `command_index` indicating which command started the poller,
      and a `resource_poller_id` identifying the specific poller instance.
@@ -426,7 +426,7 @@ defmodule PropertyDamage.EventLog.Entry do
   @doc """
   Create a new entry for an injected event.
 
-  Injected events are emitted mid-execution by adapters using `ctx.inject.(event)`.
+  Injected events are emitted mid-execution by adapters using `runtime.inject.(event)`.
   Unlike command events which are batched at the end of execution, injected events
   update projections immediately when they're emitted. This is useful for adapters
   with `:async` semantics that need to emit events as they happen (e.g., emit
@@ -486,7 +486,7 @@ defmodule PropertyDamage.EventLog.Entry do
   Create a new entry for a resource poller event.
 
   Resource poller events are injected by background pollers started via
-  `ctx.start_poller.(opts)`. They are processed between commands when
+  `runtime.start_poller.(opts)`. They are processed between commands when
   the EventQueue is drained.
 
   ## Parameters

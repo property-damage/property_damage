@@ -74,17 +74,17 @@ defmodule PropertyDamage.ExternalShrinkTest do
     def setup(config), do: {:ok, config}
 
     @impl true
-    def execute(%Create{}, _ctx) do
+    def execute(%Create{}, _ctx, _runtime) do
       {:ok, [%Created{id: "real_#{System.unique_integer([:positive])}"}]}
     end
 
-    def execute(%AsyncCreate{}, _ctx) do
+    def execute(%AsyncCreate{}, _ctx, _runtime) do
       {:ok, [%Created{id: "real_#{System.unique_integer([:positive])}"}]}
     end
 
-    def execute(%Noise{}, _ctx), do: {:ok, []}
+    def execute(%Noise{}, _ctx, _runtime), do: {:ok, []}
 
-    def execute(%Use{target: target}, _ctx) do
+    def execute(%Use{target: target}, _ctx, _runtime) do
       if is_binary(target) and String.starts_with?(target, "real_") do
         {:error, :consumer_saw_real_id}
       else

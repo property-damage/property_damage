@@ -3,19 +3,19 @@ defmodule PropertyDamage.ResourcePoller do
   GenServer-based poller for external resources during command execution.
 
   ResourcePoller enables adapters to start background polling of external resources
-  during `execute/2`, injecting events as the resource status changes. This allows
+  during `execute/3`, injecting events as the resource status changes. This allows
   commands to return immediately with an initial event while a poller monitors the
   resource for subsequent state changes.
 
   ## Usage Pattern
 
-  In an adapter's `execute/2`, use `ctx.start_poller.(opts)` to spawn a poller:
+  In an adapter's `execute/3`, use `runtime.start_poller.(opts)` to spawn a poller:
 
-      def execute(%CreateAuthorization{} = cmd, ctx) do
-        {:ok, %{body: %{"id" => id}}} = Req.post(ctx.client, ...)
+      def execute(%CreateAuthorization{} = cmd, %{client: client}, runtime) do
+        {:ok, %{body: %{"id" => id}}} = Req.post(client, ...)
 
-        _poller = ctx.start_poller.(
-          poll_fn: fn -> Req.get(ctx.client, url: "/authorizations/\#{id}") end,
+        _poller = runtime.start_poller.(
+          poll_fn: fn -> Req.get(client, url: "/authorizations/\#{id}") end,
           interval_ms: 500,
           timeout_ms: 30_000,
           handler: fn response ->
@@ -86,7 +86,7 @@ defmodule PropertyDamage.ResourcePoller do
 
   ## Lifecycle
 
-  1. Adapter calls `ctx.start_poller.(opts)` during `execute/2`
+  1. Adapter calls `runtime.start_poller.(opts)` during `execute/3`
   2. Poller spawns, begins polling immediately
   3. Handler processes each poll result, may inject events
   4. At sequence end, executor awaits all active pollers

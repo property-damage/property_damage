@@ -68,7 +68,7 @@ defmodule GiteaBench.UiAdapter do
   def teardown(_), do: :ok
 
   @impl true
-  def execute(%CreateUser{login: login, email: email}, ctx) do
+  def execute(%CreateUser{login: login, email: email}, ctx, _runtime) do
     ensure_login(ctx, ctx.client.admin_user)
     page = ctx.page
 
@@ -90,7 +90,7 @@ defmodule GiteaBench.UiAdapter do
     {:ok, [event]}
   end
 
-  def execute(%CreateRepo{owner: owner, name: name}, ctx) do
+  def execute(%CreateRepo{owner: owner, name: name}, ctx, _runtime) do
     ensure_login(ctx, owner)
     page = ctx.page
 
@@ -102,7 +102,7 @@ defmodule GiteaBench.UiAdapter do
     {:ok, [event]}
   end
 
-  def execute(%CreateIssue{repo: full_name, title: title}, ctx) do
+  def execute(%CreateIssue{repo: full_name, title: title}, ctx, _runtime) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
     ensure_login(ctx, owner)
     page = ctx.page
@@ -123,7 +123,7 @@ defmodule GiteaBench.UiAdapter do
     {:ok, [event]}
   end
 
-  def execute(%CreateLabel{repo: full_name, name: name, color: color}, ctx) do
+  def execute(%CreateLabel{repo: full_name, name: name, color: color}, ctx, _runtime) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
     ensure_login(ctx, owner)
     page = ctx.page
@@ -139,7 +139,11 @@ defmodule GiteaBench.UiAdapter do
     {:ok, [event]}
   end
 
-  def execute(%AddLabelToIssue{assignment: %{repo: full_name, number: number, label: label}}, ctx) do
+  def execute(
+        %AddLabelToIssue{assignment: %{repo: full_name, number: number, label: label}},
+        ctx,
+        _runtime
+      ) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
     ensure_login(ctx, owner)
     page = ctx.page
@@ -161,7 +165,7 @@ defmodule GiteaBench.UiAdapter do
     {:ok, [event]}
   end
 
-  def execute(%CloseIssue{target: %{repo: full_name, number: number}}, ctx) do
+  def execute(%CloseIssue{target: %{repo: full_name, number: number}}, ctx, _runtime) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
     ensure_login(ctx, owner)
     page = ctx.page

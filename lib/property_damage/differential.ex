@@ -82,7 +82,7 @@ defmodule PropertyDamage.Differential do
   """
 
   alias PropertyDamage.Differential.{Baseline, Equivalence, Result, Target}
-  alias PropertyDamage.{Generator, Options, PlaceholderRegistry, Sequence, Telemetry}
+  alias PropertyDamage.{Generator, Options, PlaceholderRegistry, Runtime, Sequence, Telemetry}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate, Reporter}
 
@@ -382,7 +382,7 @@ defmodule PropertyDamage.Differential do
         case PlaceholderRegistry.resolve_data(registry, command) do
           {:ok, resolved_command} ->
             start_time = System.monotonic_time(:microsecond)
-            result = target.adapter.execute(resolved_command, context)
+            result = execute_target_command(target.adapter, context, resolved_command)
             end_time = System.monotonic_time(:microsecond)
             latency_us = end_time - start_time
 
@@ -582,7 +582,7 @@ defmodule PropertyDamage.Differential do
         case PlaceholderRegistry.resolve_data(state.registry, command) do
           {:ok, resolved_command} ->
             start_time = System.monotonic_time(:microsecond)
-            result = target.adapter.execute(resolved_command, context)
+            result = execute_target_command(target.adapter, context, resolved_command)
             end_time = System.monotonic_time(:microsecond)
             latency_us = end_time - start_time
 
@@ -870,6 +870,35 @@ defmodule PropertyDamage.Differential do
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
+    end
+  end
+
+  # Execute one command against one target through a working Runtime (DR-027).
+  # Differential never wired inject before; the sink makes it available. A target
+  # adapter that injects mid-execution has those events folded into its result
+  # ahead of the events it returns (mirroring the main executor and load-test
+  # paths), so projections, capture, and divergence all see one uniform stream.
+  # A non-injecting adapter leaves the sink empty, so its result is unchanged.
+  defp execute_target_command(adapter, context, resolved_command) do
+    {:ok, sink} = Runtime.Sink.start_link()
+    Runtime.Sink.put_ctx(sink, %{events: []})
+
+    runtime = %Runtime{
+      inject: fn event ->
+        Runtime.Sink.update_ctx(sink, fn c -> %{c | events: [event | c.events]} end)
+      end,
+      start_poller: fn _opts ->
+        raise ArgumentError, "Runtime.start_poller is not supported in Differential targets"
+      end
+    }
+
+    result = adapter.execute(resolved_command, context, runtime)
+    injected = Enum.reverse(Runtime.Sink.get_ctx(sink).events)
+    Runtime.Sink.stop(sink)
+
+    case result do
+      {:ok, events} when is_list(events) -> {:ok, injected ++ events}
+      other -> other
     end
   end
 

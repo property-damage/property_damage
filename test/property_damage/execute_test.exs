@@ -15,35 +15,35 @@ defmodule PropertyDamage.ExecuteTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%{action: :create, id: id}, _ctx) do
+    def execute(%{action: :create, id: id}, _ctx, _runtime) do
       {:ok, [%{type: :created, id: id}]}
     end
 
-    def execute(%{action: :create}, _ctx) do
+    def execute(%{action: :create}, _ctx, _runtime) do
       {:ok, [%{type: :created, id: 1}]}
     end
 
-    def execute(%{action: :update, id: id, value: value}, _ctx) do
+    def execute(%{action: :update, id: id, value: value}, _ctx, _runtime) do
       {:ok, [%{type: :updated, id: id, value: value}]}
     end
 
-    def execute(%{action: :delete, id: id}, _ctx) do
+    def execute(%{action: :delete, id: id}, _ctx, _runtime) do
       {:ok, [%{type: :deleted, id: id}]}
     end
 
-    def execute(%{action: :multi_event}, _ctx) do
+    def execute(%{action: :multi_event}, _ctx, _runtime) do
       {:ok, [%{type: :event_a}, %{type: :event_b}]}
     end
 
-    def execute(%{action: :no_events}, _ctx) do
+    def execute(%{action: :no_events}, _ctx, _runtime) do
       {:ok, []}
     end
 
-    def execute(%{action: :fail}, _ctx) do
+    def execute(%{action: :fail}, _ctx, _runtime) do
       {:error, :intentional_failure}
     end
 
-    def execute(%{action: :fail_with_reason, reason: reason}, _ctx) do
+    def execute(%{action: :fail_with_reason, reason: reason}, _ctx, _runtime) do
       {:error, reason}
     end
   end
@@ -59,7 +59,7 @@ defmodule PropertyDamage.ExecuteTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(_cmd, _ctx), do: {:ok, []}
+    def execute(_cmd, _ctx, _runtime), do: {:ok, []}
   end
 
   # Simple injector adapter for testing
@@ -112,11 +112,11 @@ defmodule PropertyDamage.ExecuteTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%Provision{}, _ctx) do
+    def execute(%Provision{}, _ctx, _runtime) do
       {:ok, [%Provisioned{id: "real_#{System.unique_integer([:positive])}"}]}
     end
 
-    def execute(%Consume{target: target}, %{test_pid: pid}) do
+    def execute(%Consume{target: target}, %{test_pid: pid}, _runtime) do
       send(pid, {:consumed, target})
       {:ok, []}
     end
@@ -235,7 +235,7 @@ defmodule PropertyDamage.ExecuteTest do
         def teardown(_ctx), do: :ok
 
         @impl true
-        def execute(_cmd, _ctx), do: {:ok, []}
+        def execute(_cmd, _ctx, _runtime), do: {:ok, []}
       end
 
       config = %{base_url: "http://example.com", api_key: "secret"}
@@ -260,17 +260,12 @@ defmodule PropertyDamage.ExecuteTest do
         def teardown(_ctx), do: :ok
 
         @impl true
-        def execute(%{action: :trigger_webhook}, ctx) do
-          # Simulate the SUT calling a webhook that our injector receives
-          # In real tests, this would happen asynchronously via actual HTTP
-          event_queue = ctx[:event_queue]
-
-          if event_queue do
-            EventQueue.push(event_queue, TestInjectorAdapter, %{
-              type: :webhook_received,
-              payload: "test_data"
-            })
-          end
+        def execute(%{action: :trigger_webhook}, _ctx, runtime) do
+          # Simulate the SUT calling a webhook that our injector receives.
+          # In real tests this would happen asynchronously via actual HTTP; here
+          # we emit it via the Runtime's inject, which in raw mode routes the
+          # out-of-band event through the same injector drain (DR-027).
+          runtime.inject.(%{type: :webhook_received, payload: "test_data"})
 
           {:ok, [%{type: :command_executed}]}
         end
@@ -293,7 +288,9 @@ defmodule PropertyDamage.ExecuteTest do
 
       assert command_event.event == %{type: :command_executed}
       assert injector_event.event == %{type: :webhook_received, payload: "test_data"}
-      assert injector_event.injector_adapter == TestInjectorAdapter
+      # In raw mode the event is emitted via runtime.inject, so it is attributed
+      # to the adapter that emitted it (DR-027), not hand-tagged to an injector.
+      assert injector_event.injector_adapter == InjectingAdapter
     end
   end
 

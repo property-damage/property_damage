@@ -251,14 +251,14 @@ defmodule PropertyDamage.Command do
     Postconditions are weak (check response codes). This is the default if not implemented.
 
   - `:probe` - Queries SUT state without mutation, for eventually consistent
-    systems. The framework runs `execute/2` through the settle loop: the adapter
+    systems. The framework runs `execute/3` through the settle loop: the adapter
     returns `{:settled, events}` once the condition holds or `{:retry, reason}`
-    to be called again (it does not poll inside `execute/2`). Should also
+    to be called again (it does not poll inside `execute/3`). Should also
     implement `read_only?/0` returning `true`.
 
   - `:async` - Asynchronous operation that creates a resource and waits for it
     to settle. Like `:probe`, it uses the framework settle loop (return
-    `{:retry, _}`/`{:settled, _}` from `execute/2`); the framework owns the
+    `{:retry, _}`/`{:settled, _}` from `execute/3`); the framework owns the
     retries per `settle_config/0`. Async commands are protected during shrinking
     if their ref is used by other commands.
 

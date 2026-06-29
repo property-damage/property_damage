@@ -320,7 +320,7 @@ defmodule PropertyDamage.Validation do
   end
 
   defp validate_adapter_callbacks(adapter) do
-    required_callbacks = [{:setup, 1}, {:teardown, 1}, {:execute, 2}]
+    required_callbacks = [{:setup, 1}, {:teardown, 1}, {:execute, 3}]
 
     for {callback, arity} <- required_callbacks,
         not function_exported?(adapter, callback, arity),

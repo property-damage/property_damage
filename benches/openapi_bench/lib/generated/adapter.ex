@@ -37,7 +37,7 @@ defmodule OpenapiBench.Generated.Adapter do
   def teardown(_config), do: :ok
 
   @impl true
-  def execute(%Commands.GetValue{} = cmd, ctx) do
+  def execute(%Commands.GetValue{} = cmd, ctx, _runtime) do
     url = build_url(ctx.base_url, cmd.__struct__.__http_path__(), cmd)
     query = build_query(cmd)
     full_url = if query != "", do: url <> "?" <> query, else: url
@@ -54,7 +54,7 @@ defmodule OpenapiBench.Generated.Adapter do
   end
 
   @impl true
-  def execute(%Commands.PutValue{} = cmd, ctx) do
+  def execute(%Commands.PutValue{} = cmd, ctx, _runtime) do
     url = build_url(ctx.base_url, cmd.__struct__.__http_path__(), cmd)
     query = build_query(cmd)
     full_url = if query != "", do: url <> "?" <> query, else: url

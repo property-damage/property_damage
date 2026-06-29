@@ -62,7 +62,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%Bump{}, _context), do: {:ok, [%Counted{amount: 1}]}
+    def execute(%Bump{}, _context, _runtime), do: {:ok, [%Counted{amount: 1}]}
   end
 
   defmodule FailingModel do

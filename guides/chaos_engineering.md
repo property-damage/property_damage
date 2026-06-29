@@ -156,7 +156,7 @@ defmodule MyApp.ChaosAdapter do
   alias PropertyDamage.Nemesis.{SlowIO, CertificateExpiry}
 
   @impl true
-  def execute(cmd, ctx) do
+  def execute(cmd, ctx, _runtime) do
     # Cooperative nemeses expose a helper your adapter consults. SlowIO and
     # CertificateExpiry are the ones with an adapter-facing API:
     if SlowIO.should_delay?() do

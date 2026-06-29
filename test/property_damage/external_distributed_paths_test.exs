@@ -64,12 +64,12 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
     def setup(config), do: {:ok, config}
 
     @impl true
-    def execute(%Create{label: label}, ctx) do
+    def execute(%Create{label: label}, ctx, _runtime) do
       prefix = Map.get(ctx, :prefix, "real")
       {:ok, [%Created{label: label, id: "#{prefix}_id"}]}
     end
 
-    def execute(%Use{target: target}, ctx) do
+    def execute(%Use{target: target}, ctx, _runtime) do
       if pid = Map.get(ctx, :test_pid) do
         send(pid, {:used, Map.get(ctx, :name), target})
       end

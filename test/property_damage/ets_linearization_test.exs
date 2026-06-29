@@ -51,13 +51,13 @@ defmodule PropertyDamage.EtsLinearizationTest do
     end
 
     @impl true
-    def execute(%Increment{}, %{table: table, snapshot: snapshot}) do
+    def execute(%Increment{}, %{table: table, snapshot: snapshot}, _runtime) do
       # Persist for real, but REPORT from the stale snapshot: a lost update.
       EtsRegister.increment(table)
       {:ok, [%Incremented{from: snapshot, to: snapshot + 1}]}
     end
 
-    def execute(%ReadValue{}, %{table: table}) do
+    def execute(%ReadValue{}, %{table: table}, _runtime) do
       {:ok, [%ValueRead{value: EtsRegister.read(table)}]}
     end
   end

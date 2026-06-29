@@ -114,7 +114,7 @@ defmodule ObanBench.Retry.Adapter do
   def teardown(ctx), do: ExactlyOnce.teardown(ctx)
 
   @impl true
-  def execute(%Increment{counter: base}, ctx) do
-    ExactlyOnce.enqueue(base, nil, IdempotentWorker, ctx)
+  def execute(%Increment{counter: base}, ctx, runtime) do
+    ExactlyOnce.enqueue(base, nil, IdempotentWorker, ctx, runtime)
   end
 end

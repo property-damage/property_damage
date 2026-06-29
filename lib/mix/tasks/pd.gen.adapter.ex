@@ -73,7 +73,7 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
     Mix.shell().info("")
     Mix.shell().info("Next steps:")
     Mix.shell().info("  1. Add command and event aliases")
-    Mix.shell().info("  2. Implement execute/2 for each command")
+    Mix.shell().info("  2. Implement execute/3 for each command")
     Mix.shell().info("  3. Update setup/1 with your connection config")
   end
 
@@ -115,9 +115,9 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       end
 
       @impl true
-      # TODO: Implement execute/2 for each command
+      # TODO: Implement execute/3 for each command
       #
-      # def execute(%CreateEntity{name: name} = _cmd, %{base_url: base_url}) do
+      # def execute(%CreateEntity{name: name} = _cmd, %{base_url: base_url}, _runtime) do
       #   case post(base_url, "/entities", %{name: name}) do
       #     {:ok, %{status: 201, body: body}} ->
       #       {:ok, %EntityCreated{id: body["id"], name: body["name"]}}
@@ -130,7 +130,7 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       #   end
       # end
 
-      def execute(command, _context) do
+      def execute(command, _context, _runtime) do
         raise "Not implemented: execute for \#{inspect(command.__struct__)}"
       end
 
@@ -205,9 +205,9 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       end
 
       @impl true
-      # TODO: Implement execute/2 for each command
+      # TODO: Implement execute/3 for each command
       #
-      # def execute(%CreateEntity{name: name}, %{channel: channel}) do
+      # def execute(%CreateEntity{name: name}, %{channel: channel}, _runtime) do
       #   request = %MyProto.CreateRequest{name: name}
       #
       #   case MyService.Stub.create(channel, request) do
@@ -222,7 +222,7 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       #   end
       # end
 
-      def execute(command, _context) do
+      def execute(command, _context, _runtime) do
         raise "Not implemented: execute for \#{inspect(command.__struct__)}"
       end
     end
@@ -265,9 +265,9 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       end
 
       @impl true
-      # TODO: Implement execute/2 for each command
+      # TODO: Implement execute/3 for each command
       #
-      # def execute(%CreateEntity{name: name}, %{pid: pid}) do
+      # def execute(%CreateEntity{name: name}, %{pid: pid}, _runtime) do
       #   case GenServer.call(pid, {:create, name}) do
       #     {:ok, entity} ->
       #       {:ok, %EntityCreated{id: entity.id, name: entity.name}}
@@ -277,7 +277,7 @@ defmodule Mix.Tasks.Pd.Gen.Adapter do
       #   end
       # end
 
-      def execute(command, _context) do
+      def execute(command, _context, _runtime) do
         raise "Not implemented: execute for \#{inspect(command.__struct__)}"
       end
     end

@@ -50,8 +50,8 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
     @impl true
     def teardown(context), do: CorrectAdapter.teardown(context)
     @impl true
-    def execute(%DelKey{key: key}, _ctx), do: {:ok, [%EntryDeleted{key: key}]}
-    def execute(command, ctx), do: CorrectAdapter.execute(command, ctx)
+    def execute(%DelKey{key: key}, _ctx, _runtime), do: {:ok, [%EntryDeleted{key: key}]}
+    def execute(command, ctx, runtime), do: CorrectAdapter.execute(command, ctx, runtime)
   end
 
   # ==========================================================================

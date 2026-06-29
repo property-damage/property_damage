@@ -5,6 +5,34 @@ All notable changes to PropertyDamage will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING (DR-027):** The `Adapter` callback `execute/2` is now `execute/3`:
+  `execute(command, user_context, runtime)`. The `user_context` (second argument)
+  is now *exactly* what your `setup/1` returned, with no framework keys merged in;
+  the framework's per-command affordances move to an explicit
+  `%PropertyDamage.Runtime{}` handle (third argument). Migration:
+  - `def execute(cmd, ctx)` becomes `def execute(cmd, user_context, runtime)`.
+  - `ctx.inject.(event)` becomes `runtime.inject.(event)`.
+  - `ctx.start_poller.(opts)` becomes `runtime.start_poller.(opts)`.
+  - A `%{stutter: s}` match on the context becomes `runtime.stutter` (prefer
+    `PropertyDamage.Runtime.stuttering?(runtime)`); `runtime.stutter` is `nil` on
+    the first execution.
+  - `delegate_execution/1` now forwards three arguments to the sub-adapter, which
+    must also implement `execute/3`.
+  This restores the served/servant layering (your data vs. framework plumbing) and
+  removes the ambient process-dictionary channels the plumbing used to ride on. As
+  a direct consequence, mid-execution `inject` now works from the load-test worker's
+  spawned task and from `Differential` targets, which the process dictionary did not
+  reach. `teardown/1` is unchanged in arity (it already received your `setup/1`
+  return) but is now best-effort: a raising teardown logs a warning instead of
+  failing the run.
+- **BREAKING (DR-027):** The optional `Adapter.register_handler/2` callback is
+  removed. Command/event correlation moves to the semantic surface (see DR-030);
+  inbound transport stays with `Adapter.Injector`.
+
 ## [0.2.0] - 2026-06-25
 
 This cycle made the headline features that 0.1.0 advertised actually work end to

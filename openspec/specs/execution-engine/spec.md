@@ -24,12 +24,12 @@ The system SHALL execute command sequences in two distinct phases: a symbolic ge
 
 ### Requirement: Adapter Lifecycle
 
-The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is called once to establish context, `execute/2` is called for each command in the sequence, and `teardown/1` is called once for cleanup. Lifecycle-boundary assertions (DR-024) are evaluated at the edges of this lifecycle: `@trigger at: :startup` assertions after `setup/1` and before the first command, and `@trigger at: :teardown` assertions on the settled state before `teardown/1`.
+The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is called once to establish context, `execute/3` is called for each command in the sequence, and `teardown/1` is called once for cleanup. `teardown/1` receives the `setup/1` return exactly (the `user_context`). Lifecycle-boundary assertions (DR-024) are evaluated at the edges of this lifecycle: `@trigger at: :startup` assertions after `setup/1` and before the first command, and `@trigger at: :teardown` assertions on the settled state before `teardown/1`.
 
 #### Scenario: Normal adapter lifecycle
 - **WHEN** a command sequence is executed
 - **THEN** the framework SHALL call `setup/1` exactly once before any command execution
-- **AND** the framework SHALL call `execute/2` once per command in sequence order
+- **AND** the framework SHALL call `execute/3` once per command in sequence order
 - **AND** the framework SHALL call `teardown/1` exactly once after all commands complete
 
 #### Scenario: Teardown on failure
@@ -43,7 +43,7 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 
 #### Scenario: Startup assertions gate the initial state
 - **WHEN** a projection declares an `@trigger at: :startup` assertion
-- **THEN** the framework SHALL evaluate it on the initial `init/0` state after `setup/1` and before the first `execute/2`
+- **THEN** the framework SHALL evaluate it on the initial `init/0` state after `setup/1` and before the first `execute/3`
 - **AND** a failing startup assertion SHALL halt the run before any command is executed
 
 #### Scenario: Teardown assertions evaluate the settled state
@@ -57,24 +57,29 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 - **THEN** `@trigger at: :teardown` assertions SHALL NOT be evaluated
 - **AND** the framework SHALL report the proximate failure rather than a settled-state assertion result
 
-### Requirement: Adapter Execute Context
+### Requirement: Adapter Execute Arguments (user_context and runtime)
 
-The adapter context passed to `execute/2` SHALL include an `:inject` function for mid-execution event injection and a `:start_poller` function for background resource polling. When stutter testing is active, retry executions SHALL additionally receive a `:stutter` key.
+`execute/3` SHALL receive three arguments: the resolved command, the `user_context`, and a `%PropertyDamage.Runtime{}` handle (DR-027). The `user_context` SHALL be exactly what the adapter's `setup/1` returned, with no framework keys merged in. The framework's per-command affordances SHALL travel on the runtime handle: an `inject` function for mid-execution event injection, a `start_poller` function for background resource polling, and a `stutter` field that is populated only on stutter/idempotency retries (and `nil` on the first execution).
 
-#### Scenario: Inject function available in context
-- **WHEN** the adapter receives the context in `execute/2`
-- **THEN** the context SHALL contain an `:inject` key with a callable function
-- **AND** calling that function with an event struct SHALL immediately update projections
+#### Scenario: user_context is exactly the setup return
+- **WHEN** the adapter receives its arguments in `execute/3`
+- **THEN** the second argument SHALL equal the value returned by `setup/1`
+- **AND** it SHALL NOT contain framework keys such as `:inject`, `:start_poller`, or `:stutter`
 
-#### Scenario: Start poller function available in context
-- **WHEN** the adapter receives the context in `execute/2`
-- **THEN** the context SHALL contain a `:start_poller` key with a callable function
-- **AND** calling that function with poller options SHALL spawn a background resource poller
+#### Scenario: Inject available on the runtime
+- **WHEN** the adapter receives the runtime in `execute/3`
+- **THEN** `runtime.inject` SHALL be a callable 1-arity function
+- **AND** calling it with an event struct SHALL immediately update projections
 
-#### Scenario: Stutter context on retries only
+#### Scenario: Start poller available on the runtime
+- **WHEN** the adapter receives the runtime in `execute/3`
+- **THEN** `runtime.start_poller` SHALL be a callable 1-arity function
+- **AND** calling it with poller options SHALL spawn a background resource poller
+
+#### Scenario: Stutter populated on retries only
 - **WHEN** stutter testing is enabled and a command is retried
-- **THEN** the context SHALL contain a `:stutter` key with attempt number, is_retry flag, and idempotency key
-- **AND** the first execution (attempt 1) SHALL NOT include stutter context
+- **THEN** `runtime.stutter` SHALL be a map with attempt number, is_retry flag, and idempotency key, and `PropertyDamage.Runtime.stuttering?/1` SHALL return `true`
+- **AND** on the first execution (attempt 1) `runtime.stutter` SHALL be `nil` and `stuttering?/1` SHALL return `false`
 
 ### Requirement: Injector Adapter for External Events
 
@@ -96,8 +101,8 @@ The system SHALL support a delegation macro that routes specific command types t
 
 #### Scenario: Delegated command execution
 - **WHEN** an adapter defines `delegate_execution for: [CommandA, CommandB], to: SubAdapter`
-- **THEN** executing `CommandA` or `CommandB` SHALL invoke `SubAdapter.execute/2`
-- **AND** the sub-adapter SHALL receive the same context as the parent adapter
+- **THEN** executing `CommandA` or `CommandB` SHALL invoke `SubAdapter.execute/3`
+- **AND** the sub-adapter SHALL receive the same `user_context` and `runtime` as the parent adapter
 
 #### Scenario: Multiple delegation targets
 - **WHEN** an adapter delegates different commands to different sub-adapters

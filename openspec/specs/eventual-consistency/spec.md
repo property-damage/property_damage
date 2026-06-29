@@ -79,10 +79,10 @@ When the backoff strategy is `:exponential`, the system SHALL double the interva
 
 ### Requirement: Resource Poller
 
-The system SHALL support command-triggered background polling of external resources via the `ctx.start_poller` function available in adapter context. The poller SHALL periodically call a poll function and pass results to a handler.
+The system SHALL support command-triggered background polling of external resources via the `runtime.start_poller` function on the `%PropertyDamage.Runtime{}` handle passed to `execute/3` (DR-027). The poller SHALL periodically call a poll function and pass results to a handler.
 
 #### Scenario: Poller started during command execution
-- **WHEN** an adapter calls `ctx.start_poller.(opts)` during `execute/2`
+- **WHEN** an adapter calls `runtime.start_poller.(opts)` during `execute/3`
 - **THEN** a background polling process SHALL be spawned
 - **AND** the poller SHALL call the configured `poll_fn` at the configured `interval_ms`
 

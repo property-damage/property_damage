@@ -294,7 +294,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert function_exported?(Module.concat(ns, "Commands.PutValue"), :events, 3)
       assert function_exported?(Module.concat(ns, "Commands.GetValue"), :read_only?, 0)
       adapter = Module.concat(ns, "Adapter")
-      assert function_exported?(adapter, :execute, 2)
+      assert function_exported?(adapter, :execute, 3)
       # timeout/1 is a required Adapter callback; `use` must inject the default.
       assert function_exported?(adapter, :timeout, 1)
     end

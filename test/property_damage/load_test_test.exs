@@ -452,7 +452,7 @@ defmodule PropertyDamage.LoadTestTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(_cmd, _ctx) do
+    def execute(_cmd, _ctx, _runtime) do
       Process.sleep(:rand.uniform(5))
       {:ok, [%{type: :executed}]}
     end
@@ -680,7 +680,7 @@ defmodule PropertyDamage.LoadTestTest do
       def teardown(_ctx), do: :ok
 
       @impl true
-      def execute(_cmd, _ctx) do
+      def execute(_cmd, _ctx, _runtime) do
         # Simulate some latency
         Process.sleep(:rand.uniform(5))
         {:ok, [%{type: :executed}]}

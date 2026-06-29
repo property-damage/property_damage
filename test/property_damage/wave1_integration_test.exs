@@ -122,10 +122,10 @@ defmodule PropertyDamage.Wave1IntegrationTest do
 
     # MOCKS (mid-execution injection) + POLLERS (out-of-band confirmation).
     @impl true
-    def execute(%InitiatePayment{id: id}, ctx) do
-      ctx.inject.(%MockArrived{id: id})
+    def execute(%InitiatePayment{id: id}, _ctx, runtime) do
+      runtime.inject.(%MockArrived{id: id})
 
-      ctx.start_poller.(
+      runtime.start_poller.(
         poll_fn: fn -> :tick end,
         handler: fn _ -> {:done, [%Confirmed{id: id}]} end,
         interval_ms: 10,
@@ -137,7 +137,7 @@ defmodule PropertyDamage.Wave1IntegrationTest do
 
     # STUTTER target: deterministically idempotent (same events every attempt).
     # Count executions so the test can prove the retry actually fired.
-    def execute(%Charge{id: id}, ctx) do
+    def execute(%Charge{id: id}, ctx, _runtime) do
       :counters.add(ctx.charge_counter, 1, 1)
       {:ok, [%Charged{id: id}]}
     end

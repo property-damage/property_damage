@@ -34,13 +34,13 @@ defmodule RedisBench.SeededBugTest do
     end
 
     @impl true
-    def execute(%Increment{}, %{conn: conn, key: key}) do
+    def execute(%Increment{}, %{conn: conn, key: key}, _runtime) do
       {:ok, to} = Redix.command(conn, ["INCR", key])
       {:ok, [%Incremented{from: to - 1, to: to}]}
     end
 
     # The lie: never actually read the register, always report the initial 0.
-    def execute(%ReadValue{}, _ctx) do
+    def execute(%ReadValue{}, _ctx, _runtime) do
       {:ok, [%ValueRead{value: 0}]}
     end
   end

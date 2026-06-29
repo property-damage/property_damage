@@ -38,8 +38,8 @@ defmodule ObanBench.Adapter do
   def teardown(_ctx), do: :ok
 
   @impl true
-  def execute(%Increment{counter: base}, ctx) do
-    enqueue_increment(base, ObanBench.IncrementWorker, ctx)
+  def execute(%Increment{counter: base}, ctx, runtime) do
+    enqueue_increment(base, ObanBench.IncrementWorker, ctx, runtime)
   end
 
   @doc """
@@ -48,11 +48,11 @@ defmodule ObanBench.Adapter do
   synchronous `Enqueued` event. Reused by the seeded-bug adapter with a buggy
   worker so the two paths differ only in the worker module.
   """
-  def enqueue_increment(base, worker_mod, ctx) do
+  def enqueue_increment(base, worker_mod, ctx, runtime) do
     name = "#{ctx.run_id}:#{base}"
     {:ok, job} = Oban.insert(worker_mod.new(%{"counter" => name}))
 
-    ctx.start_poller.(
+    runtime.start_poller.(
       poll_fn: fn -> {ObanBench.DB.job_state(job.id), ObanBench.DB.value(name)} end,
       interval_ms: 20,
       timeout_ms: 3000,

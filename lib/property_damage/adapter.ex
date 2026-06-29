@@ -11,7 +11,7 @@ defmodule PropertyDamage.Adapter do
   During each test run (including shrink attempts), the adapter lifecycle is:
 
   1. `setup/1` - Establish connections, create clients
-  2. `execute/2` × N - Execute each command in the sequence
+  2. `execute/3` × N - Execute each command in the sequence
   3. `teardown/1` - Cleanup connections
 
   The full lifecycle with model hooks:
@@ -37,6 +37,20 @@ defmodule PropertyDamage.Adapter do
       │
       └── Model.teardown_once()        # Once at end
 
+  ## Served vs servant arguments (DR-027)
+
+  `execute/3` keeps the user's *served* data and the framework's *servant*
+  plumbing in separate, explicit channels:
+
+      def execute(command, user_context, %PropertyDamage.Runtime{} = runtime)
+
+  - `user_context` is **exactly** what your `setup/1` returned. The framework
+    merges nothing into it, so a `setup/1` that returns `%{inject: ...}` is never
+    clobbered, and you can pattern-match your own keys with confidence.
+  - `runtime` is a `%PropertyDamage.Runtime{}` handle carrying the per-command
+    framework affordances (`inject`, `start_poller`, `stutter`). See
+    `PropertyDamage.Runtime`.
+
   ## Example
 
       defmodule MyTest.APIAdapter do
@@ -55,7 +69,7 @@ defmodule PropertyDamage.Adapter do
         end
 
         @impl true
-        def execute(%CreateOrder{amount: amt}, %{client: client}) do
+        def execute(%CreateOrder{amount: amt}, %{client: client}, _runtime) do
           case HTTPClient.post(client, "/orders", %{amount: amt}) do
             {:ok, %{status: 201, body: body}} ->
               {:ok, [%OrderCreated{order_id: body["id"], amount: amt}]}
@@ -82,61 +96,57 @@ defmodule PropertyDamage.Adapter do
         def setup(config), do: {:ok, config}
 
         @impl true
-        def teardown(_context), do: :ok
+        def teardown(_user_context), do: :ok
       end
+
+  The target module should implement `execute/3` with the same signature; the
+  `user_context` and `runtime` are forwarded unchanged.
 
   ## Stutter/Idempotency Testing
 
   When stutter testing is enabled, the framework may execute commands multiple
-  times to verify idempotent behavior. During retry executions, the adapter
-  context includes a `:stutter` key with information the adapter can use:
+  times to verify idempotent behavior. During retry executions, `runtime.stutter`
+  is populated (and is `nil` on the first execution). Prefer
+  `PropertyDamage.Runtime.stuttering?/1` over matching the field directly:
 
-      %{
-        stutter: %{
-          attempt: 2,           # Current attempt (2, 3, etc. for retries)
-          is_retry: true,       # Always true for retry executions
-          idempotency_key: "abc123"  # From Command.idempotency_key/1, or nil
-        }
-      }
+      def execute(%CreateOrder{} = cmd, %{client: client}, runtime) do
+        headers =
+          if PropertyDamage.Runtime.stuttering?(runtime) do
+            [{"Idempotency-Key", runtime.stutter.idempotency_key}]
+          else
+            []
+          end
 
-  Adapters can use this to include idempotency keys in HTTP headers:
-
-      def execute(%CreateOrder{} = cmd, context) do
-        headers = build_headers(context)
-        # headers will include "Idempotency-Key" if stutter context present
-        HTTPClient.post(context.client, "/orders", body, headers)
+        HTTPClient.post(client, "/orders", body, headers)
       end
 
-      defp build_headers(%{stutter: %{idempotency_key: key}}) when is_binary(key) do
-        [{"Idempotency-Key", key}]
-      end
-      defp build_headers(_context), do: []
+  The `runtime.stutter` map (when present) contains:
 
-  The first execution (attempt 1) does NOT include stutter context, only retries do.
-  This allows the adapter to behave normally for the initial execution.
+  | Key | Type | Description |
+  |-----|------|-------------|
+  | `:attempt` | integer | Current attempt number (2, 3, etc. for retries) |
+  | `:is_retry` | boolean | Always `true` for retry executions |
+  | `:idempotency_key` | string or nil | From `Command.idempotency_key/1` if implemented |
+
+  The first execution (attempt 1) has `runtime.stutter == nil`, so the adapter
+  behaves normally for the initial execution.
 
   ## Mid-Execution Event Injection
 
   For commands with `:async` semantics that poll for completion, you may want to
-  emit events as they happen rather than batching all events at the end. The
-  adapter context includes an `:inject` function for this purpose:
+  emit events as they happen rather than batching all events at the end.
+  `runtime.inject` is a 1-arity function for this purpose:
 
-      %{
-        inject: #Function<...>  # Call with event to inject it immediately
-      }
-
-  Use this to emit events at the correct time in the execution timeline:
-
-      def execute(%CreateAuthorization{} = cmd, ctx) do
+      def execute(%CreateAuthorization{} = cmd, %{client: client}, runtime) do
         # Step 1: Create the authorization (T=0)
         {:ok, %{body: %{"id" => id, "status" => "processing"}}} =
-          Req.post(ctx.client, url: "/authorizations", json: payload)
+          Req.post(client, url: "/authorizations", json: payload)
 
         # Inject immediately - projections update NOW at T=0
-        ctx.inject.(%AuthorizationCreated{authorization_id: id})
+        runtime.inject.(%AuthorizationCreated{authorization_id: id})
 
         # Step 2: Poll until settled (T=5000)
-        case poll_until_settled(ctx.client, id) do
+        case poll_until_settled(client, id) do
           :approved ->
             # Return settlement event - recorded at T=5000
             {:ok, [%AuthorizationApproved{authorization_id: id}]}
@@ -154,104 +164,35 @@ defmodule PropertyDamage.Adapter do
 
   This is particularly useful when your model needs to track intermediate states,
   or when assertions depend on events appearing at the correct point in time.
-
-  ## Execute Context
-
-  The context map passed to `execute/2` contains:
-
-  | Key | Type | Description |
-  |-----|------|-------------|
-  | *(from setup)* | any | Whatever your `setup/1` returned (e.g., `:client`, `:conn`) |
-  | `:inject` | function | Call with event to inject it immediately into projections |
-  | `:start_poller` | function | Start a background resource poller (see ResourcePoller) |
-  | `:stutter` | map | Present only during retry executions (stutter/idempotency testing) |
-
-  The `:stutter` map (when present) contains:
-
-  | Key | Type | Description |
-  |-----|------|-------------|
-  | `:attempt` | integer | Current attempt number (2, 3, etc. for retries) |
-  | `:is_retry` | boolean | Always `true` for retry executions |
-  | `:idempotency_key` | string or nil | From `Command.idempotency_key/1` if implemented |
   """
 
   @typedoc """
   Context returned by `setup/1`.
 
-  This is a map containing whatever your adapter needs for execution:
-  HTTP clients, database connections, configuration, etc.
+  This is whatever your adapter needs for execution: HTTP clients, database
+  connections, configuration, etc. It is handed back to `execute/3` (as the
+  second argument) and to `teardown/1` **exactly as returned** - the framework
+  merges no keys into it.
 
   ## Example
 
       # In setup/1:
       {:ok, %{client: http_client, base_url: "http://localhost:4000"}}
 
-      # In execute/2, pattern match on these keys:
-      def execute(%CreateOrder{} = cmd, %{client: client, base_url: url}) do
+      # In execute/3, pattern match on these keys:
+      def execute(%CreateOrder{} = cmd, %{client: client, base_url: url}, _runtime) do
         # ...
       end
   """
-  @type user_context :: map()
-
-  @typedoc """
-  Stutter context for idempotency testing.
-
-  Present in `context()` only during retry executions when stutter testing is enabled.
-  """
-  @type stutter_context :: %{
-          attempt: pos_integer(),
-          is_retry: boolean(),
-          idempotency_key: String.t() | nil
-        }
-
-  @typedoc """
-  Full context passed to `execute/2`, `teardown/1`, and `register_handler/2`.
-
-  This map contains:
-  - All keys from your `user_context()` returned by `setup/1`
-  - `:inject` - Function to inject events mid-execution (always present)
-  - `:start_poller` - Function to start background resource polling (always present)
-  - `:stutter` - Stutter context (only present during retry executions)
-
-  ## Example
-
-      def execute(%CreateOrder{} = cmd, context) do
-        # Access your setup context
-        client = context.client
-
-        # Inject events mid-execution (for async commands)
-        context.inject.(%OrderCreated{id: id})
-
-        # Start a background poller for async resources
-        context.start_poller.(
-          poll_fn: fn -> check_status(client, id) end,
-          handler: fn response -> handle_status(response) end,
-          interval_ms: 500,
-          timeout_ms: 30_000
-        )
-
-        # Check for stutter/retry context
-        case context do
-          %{stutter: %{idempotency_key: key}} when is_binary(key) ->
-            # Include idempotency header
-          _ ->
-            # Normal execution
-        end
-      end
-  """
-  @type context :: %{
-          :inject => (struct() -> :ok),
-          :start_poller => (keyword() -> PropertyDamage.ResourcePoller.t()),
-          optional(:stutter) => stutter_context(),
-          optional(atom()) => any()
-        }
+  @type user_context :: term()
 
   @doc """
   Called once per run to establish context.
 
   Use for creating HTTP clients, connecting to databases, starting processes.
-  The returned `user_context()` is merged with framework-provided keys
-  (`:inject`, `:stutter`) to form the full `context()` passed to `execute/2`.
+  The returned `user_context()` is handed back unchanged to `execute/3` (second
+  argument) and `teardown/1`; framework affordances travel separately on the
+  `%PropertyDamage.Runtime{}` handle, not merged into this value.
 
   ## Returns
 
@@ -263,59 +204,52 @@ defmodule PropertyDamage.Adapter do
   @doc """
   Called once per run after all commands have executed (or on failure).
 
-  Use for closing connections, stopping processes, cleanup.
-  This is best-effort - the framework logs warnings if teardown raises
-  but does not fail the test.
-
-  Note: The context passed here is the full `context()`, not just `user_context()`.
+  Use for closing connections, stopping processes, cleanup. Receives the
+  `user_context()` from `setup/1` exactly as returned. This is best-effort: the
+  framework logs a warning if `teardown/1` raises but does not fail the test.
 
   ## Returns
 
   Always returns `:ok`. Handle errors internally.
   """
-  @callback teardown(context()) :: :ok
+  @callback teardown(user_context()) :: :ok
 
   @doc """
   Execute a command against the SUT and return resulting events.
 
   This is called once per command in the sequence. The command struct
-  has already had its Refs/Placeholders resolved to concrete values.
+  has already had its Placeholders resolved to concrete values.
 
-  The `context()` contains your `user_context()` from `setup/1` plus
-  framework-provided keys like `:inject` and optionally `:stutter`.
+  The second argument is your `user_context()` from `setup/1` (exactly as
+  returned). The third argument is the `%PropertyDamage.Runtime{}` handle
+  carrying framework affordances (`inject`, `start_poller`, `stutter`).
 
   ## Returns
 
   - `{:ok, events}` - Command succeeded, events to record
   - `{:error, reason}` - Command failed, execution stops
 
-  For `:probe`/`:async` (settle) commands only, `execute/2` may also return:
+  For `:probe`/`:async` (settle) commands only, `execute/3` may also return:
 
   - `{:settled, events}` - The eventually-consistent condition is met; treated
     like `{:ok, events}` and stops the settle loop.
-  - `{:retry, reason}` - Not settled yet. The framework re-invokes `execute/2`
-    per the command's `settle_config/0` until `{:settled, _}` or the timeout.
+  - `{:retry, reason}` - Not settled yet. The framework re-invokes `execute/3`
+    per the command's settle config until `{:settled, _}` or the timeout.
 
   The framework owns the retry loop: an adapter returns `{:retry, _}` to ask to
-  be called again, it does not sleep/poll inside `execute/2`. Returning
+  be called again, it does not sleep/poll inside `execute/3`. Returning
   `{:retry, _}` from a `:sync` command is a contract violation and is reported
   as `{:retry_from_sync_command, _}`.
   """
-  @callback execute(command :: struct(), context()) ::
+  @callback execute(
+              command :: struct(),
+              user_context :: user_context(),
+              runtime :: PropertyDamage.Runtime.t()
+            ) ::
               {:ok, [event :: struct()]}
               | {:error, term()}
               | {:settled, [event :: struct()]}
               | {:retry, term()}
-
-  @doc """
-  Optional callback for commands that need to register injector handlers.
-
-  Some commands may need to set up listeners for async responses before
-  execution. This callback allows registering handlers that will receive
-  events from injector adapters.
-  """
-  @callback register_handler(command :: struct(), context()) ::
-              {:ok, handler_ref :: term()} | {:error, term()}
 
   @typedoc """
   Timeout value for command execution.
@@ -354,8 +288,6 @@ defmodule PropertyDamage.Adapter do
       def timeout(_command), do: {100, :milliseconds}
   """
   @callback timeout(command :: struct()) :: timeout_value()
-
-  @optional_callbacks [register_handler: 2]
 
   @doc """
   Macro to define an adapter with default behaviors.
@@ -410,7 +342,8 @@ defmodule PropertyDamage.Adapter do
       delegate_execution for: [CreateOrder, ViewOrder], to: OrdersSubAdapter
       delegate_execution for: [CreatePayment], to: PaymentsSubAdapter
 
-  The target module should implement `execute/2` with the same signature.
+  The target module should implement `execute/3` with the same signature; the
+  `user_context` and `runtime` are forwarded unchanged.
   """
   defmacro delegate_execution(opts) do
     commands = Keyword.fetch!(opts, :for)
@@ -419,8 +352,8 @@ defmodule PropertyDamage.Adapter do
     for command <- commands do
       quote do
         @impl true
-        def execute(%unquote(command){} = cmd, ctx) do
-          unquote(target).execute(cmd, ctx)
+        def execute(%unquote(command){} = cmd, user_context, runtime) do
+          unquote(target).execute(cmd, user_context, runtime)
         end
       end
     end
