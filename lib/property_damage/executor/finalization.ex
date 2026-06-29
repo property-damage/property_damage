@@ -321,7 +321,7 @@ defmodule PropertyDamage.Executor.Finalization do
     mode = Map.get(state, :assertion_mode, :halt)
 
     {projections, event_log} =
-      Executor.process_injector_events(
+      Executor.Events.process_injector_events(
         Map.get(state, :event_queue),
         log_before,
         projs_before,
@@ -457,7 +457,7 @@ defmodule PropertyDamage.Executor.Finalization do
     mode = Map.get(state, :assertion_mode, :halt)
 
     {projections, event_log} =
-      Executor.process_injector_events(
+      Executor.Events.process_injector_events(
         Map.get(state, :event_queue),
         log_before,
         projs_before,
