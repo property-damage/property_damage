@@ -93,6 +93,7 @@ defmodule PropertyDamage.Executor do
 
   alias PropertyDamage.EventLog.Entry
 
+  alias PropertyDamage.Executor.Events
   alias PropertyDamage.Executor.Finalization
   alias PropertyDamage.Executor.State
 
@@ -782,8 +783,8 @@ defmodule PropertyDamage.Executor do
 
     merged_projections =
       Enum.reduce(replay_items, prefix_state.projections, fn {command, events}, projs ->
-        projs = update_projections(projs, command)
-        Enum.reduce(events, projs, fn event, acc -> update_projections(acc, event) end)
+        projs = Events.update_projections(projs, command)
+        Enum.reduce(events, projs, fn event, acc -> Events.update_projections(acc, event) end)
       end)
 
     # The state's event_log invariant is reverse-chronological. Overall
@@ -1158,11 +1159,11 @@ defmodule PropertyDamage.Executor do
               )
 
             # 5. Update projections with command
-            projections = update_projections(base_projections, resolved_command)
+            projections = Events.update_projections(base_projections, resolved_command)
 
             # 6. Update projections with returned events and record in log
             {projections, event_log} =
-              process_events(
+              Events.process_events(
                 events,
                 :command,
                 index,
@@ -1179,11 +1180,17 @@ defmodule PropertyDamage.Executor do
             log_before_async = event_log
 
             {projections, event_log} =
-              process_injector_events(event_queue, event_log, projections, state.branch_id)
+              Events.process_injector_events(event_queue, event_log, projections, state.branch_id)
 
             # 7.5. Flush and process mock-injected events
             {projections, event_log} =
-              process_mock_events(mock_registry, index, event_log, projections, state.branch_id)
+              Events.process_mock_events(
+                mock_registry,
+                index,
+                event_log,
+                projections,
+                state.branch_id
+              )
 
             # 7.6. Update mock projections
             if mock_registry do
@@ -1327,10 +1334,10 @@ defmodule PropertyDamage.Executor do
                 placeholder_registry
               )
 
-            projections = update_projections(base_projections, resolved_command)
+            projections = Events.update_projections(base_projections, resolved_command)
 
             {projections, event_log} =
-              process_events(
+              Events.process_events(
                 events,
                 :command,
                 index,
@@ -1343,11 +1350,17 @@ defmodule PropertyDamage.Executor do
             log_before_async = event_log
 
             {projections, event_log} =
-              process_injector_events(event_queue, event_log, projections, state.branch_id)
+              Events.process_injector_events(event_queue, event_log, projections, state.branch_id)
 
             # Flush and process mock-injected events
             {projections, event_log} =
-              process_mock_events(mock_registry, index, event_log, projections, state.branch_id)
+              Events.process_mock_events(
+                mock_registry,
+                index,
+                event_log,
+                projections,
+                state.branch_id
+              )
 
             # Update mock projections
             if mock_registry do
@@ -1559,7 +1572,7 @@ defmodule PropertyDamage.Executor do
         # (adapter) process, so a projection apply/2 that raises a
         # transition-invariant violation propagates into the adapter exactly as
         # before, rather than crashing the sink's Agent.
-        projections = update_projections(ctx.projections, event)
+        projections = Events.update_projections(ctx.projections, event)
 
         # 2. Create entry with source :injected
         entry = Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
@@ -1602,33 +1615,6 @@ defmodule PropertyDamage.Executor do
     }
   end
 
-  # Update all projections with a command or event
-  # apply/2 can raise to signal transition invariant violations
-  # Shared with PropertyDamage.Executor.Nemesis (nemesis/restore folds). DR-029.
-  @doc false
-  def update_projections(projections, item) do
-    for {projection, state} <- projections, into: %{} do
-      new_state =
-        try do
-          projection.apply(state, item)
-        rescue
-          e ->
-            # A raising apply/2 is a legitimate transition-invariant signal;
-            # tag it so execute_command can report it instead of crashing.
-            reraise PropertyDamage.ProjectionError,
-                    [
-                      projection: projection,
-                      item: item,
-                      original: e,
-                      original_stacktrace: __STACKTRACE__
-                    ],
-                    __STACKTRACE__
-        end
-
-      {projection, new_state}
-    end
-  end
-
   # Apply updates onto the existing %State{}, preserving every field not being
   # changed. Uses struct!/2 so a write to an undeclared field RAISES rather than
   # silently producing a corrupt struct-shaped map (DR-029); the State struct is
@@ -1636,89 +1622,6 @@ defmodule PropertyDamage.Executor do
   # Shared with PropertyDamage.Executor.Nemesis (active_faults updates). DR-029.
   @doc false
   def put_state(%State{} = state, updates), do: struct!(state, updates)
-
-  # Process events from command execution
-  defp process_events(events, source, command_index, event_log, projections, branch_id) do
-    Enum.reduce(events, {projections, event_log}, fn event, {projs, log} ->
-      entry = %Entry{
-        timestamp: System.monotonic_time(:millisecond),
-        command_index: command_index,
-        event: event,
-        source: source,
-        injector_adapter: nil,
-        nemesis_module: nil,
-        branch_id: branch_id
-      }
-
-      new_projs = update_projections(projs, event)
-      {new_projs, [entry | log]}
-    end)
-  end
-
-  # Shared with PropertyDamage.Executor.Finalization (settle/drain). DR-029.
-  @doc false
-  def process_injector_events(nil, event_log, projections, _branch_id),
-    do: {projections, event_log}
-
-  def process_injector_events(event_queue, event_log, projections, branch_id) do
-    entries = EventQueue.drain(event_queue)
-
-    Enum.reduce(entries, {projections, event_log}, fn queue_entry, {projs, log} ->
-      # Build entry based on source type
-      entry =
-        case queue_entry do
-          %{source: :resource_poller} ->
-            Entry.from_resource_poller(
-              queue_entry.event,
-              queue_entry.command_index,
-              queue_entry.poller_id,
-              timestamp: queue_entry.timestamp,
-              branch_id: queue_entry.branch_id || branch_id
-            )
-
-          _ ->
-            # Regular injector adapter entry
-            %Entry{
-              timestamp: queue_entry.timestamp,
-              command_index: nil,
-              event: queue_entry.event,
-              source: :injector,
-              injector_adapter: queue_entry.adapter_module,
-              nemesis_module: nil,
-              branch_id: branch_id
-            }
-        end
-
-      new_projs = update_projections(projs, queue_entry.event)
-      {new_projs, [entry | log]}
-    end)
-  end
-
-  # Flush and process events from mock service adapters
-  defp process_mock_events(nil, _command_index, event_log, projections, _branch_id),
-    do: {projections, event_log}
-
-  defp process_mock_events(mock_registry, command_index, event_log, projections, branch_id) do
-    events = MockServiceRegistry.flush_events(mock_registry)
-
-    Enum.reduce(events, {projections, event_log}, fn event, {projs, log} ->
-      entry = %Entry{
-        timestamp: System.monotonic_time(:millisecond),
-        command_index: command_index,
-        event: event,
-        source: :mock,
-        injector_adapter: nil,
-        nemesis_module: nil,
-        branch_id: branch_id
-      }
-
-      # Notify mock registry of the event so mocks can react
-      MockServiceRegistry.notify_event(mock_registry, event)
-
-      new_projs = update_projections(projs, event)
-      {new_projs, [entry | log]}
-    end)
-  end
 
   # Run all triggered assertions
   # assertion_ctx contains: step_type (:command | :event), module, step_count
@@ -2168,7 +2071,7 @@ defmodule PropertyDamage.Executor do
     folded =
       Enum.reduce_while(new_entries, {projs_before, counters, failures}, fn entry,
                                                                             {projs, c, f} ->
-        projs = update_projections(projs, entry.event)
+        projs = Events.update_projections(projs, entry.event)
 
         case check_async_event(model, projs, entry.event, entry.command_index, c, mode, f) do
           {:ok, c, f} -> {:cont, {projs, c, f}}

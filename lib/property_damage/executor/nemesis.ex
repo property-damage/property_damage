@@ -9,9 +9,9 @@ defmodule PropertyDamage.Executor.Nemesis do
   # the individual nemesis modules; this module is the executor-side glue that
   # drives them, folds their events, and runs assertions.
   #
-  # Shared command-processing helpers (resolve_command_placeholders,
-  # update_projections, run_checks, check_async, process_injector_events,
-  # put_state) stay in PropertyDamage.Executor and are called back here.
+  # Shared command-processing helpers are called back: resolve_command_placeholders,
+  # run_checks, check_async and put_state from PropertyDamage.Executor; event folds
+  # (update_projections, process_injector_events) from PropertyDamage.Executor.Events.
 
   alias PropertyDamage.Executor
   alias PropertyDamage.EventLog.Entry
@@ -65,7 +65,7 @@ defmodule PropertyDamage.Executor.Nemesis do
     case nemesis_module.inject(resolved_command, nemesis_context) do
       {:ok, events} ->
         # Update projections with nemesis command
-        projections = Executor.update_projections(state.projections, resolved_command)
+        projections = Executor.Events.update_projections(state.projections, resolved_command)
 
         # DR-025: capture pre-drain state so check_async can locate an async
         # violation at the observing event's command_index.
@@ -85,7 +85,12 @@ defmodule PropertyDamage.Executor.Nemesis do
 
         # Drain and process injector events
         {projections, event_log} =
-          Executor.process_injector_events(event_queue, event_log, projections, state.branch_id)
+          Executor.Events.process_injector_events(
+            event_queue,
+            event_log,
+            projections,
+            state.branch_id
+          )
 
         # Track active fault if auto-restoring
         active_faults = Map.get(state, :active_faults, %{})
@@ -284,7 +289,7 @@ defmodule PropertyDamage.Executor.Nemesis do
     Enum.reduce(events, {projections, event_log}, fn event, {projs, log} ->
       entry = Entry.from_nemesis(event, command_index, nemesis_module, branch_id: branch_id)
 
-      new_projs = Executor.update_projections(projs, event)
+      new_projs = Executor.Events.update_projections(projs, event)
       {new_projs, [entry | log]}
     end)
   end
