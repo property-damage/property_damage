@@ -13,9 +13,11 @@
 `Adapter.execute/2` becomes `Adapter.execute/3`: `execute(command, user_context, runtime)`.
 
 - `user_context` is **exactly** what the adapter's `setup/1` returned — zero framework keys.
-- `runtime` is a `%PropertyDamage.Runtime{inject, start_poller, stutter, handlers}` handle.
+- `runtime` is a `%PropertyDamage.Runtime{inject, start_poller, stutter}` handle.
   `Runtime.stuttering?/1` exposes the retry/first-execution distinction (replaces the
   implicit `%{stutter: _}` key-presence check). `stutter` is `nil` on the first execution.
+  (Command-correlated injector events are declared on `Command.awaits/2` per DR-030, not
+  carried on the runtime handle, so there is no per-command handler field here.)
 - `inject` and `start_poller` are per-command closures over an explicit
   `PropertyDamage.Runtime.Sink` (an `Agent`, created per command), which replaces the former
   process-dictionary channels. The sink carries the per-command injection context (the evolving
