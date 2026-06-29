@@ -16,11 +16,17 @@
 - `runtime` is a `%PropertyDamage.Runtime{inject, start_poller, stutter, handlers}` handle.
   `Runtime.stuttering?/1` exposes the retry/first-execution distinction (replaces the
   implicit `%{stutter: _}` key-presence check). `stutter` is `nil` on the first execution.
-- `inject` and `start_poller` are per-command closures over a **run-scoped Agent sink**
-  (`%PropertyDamage.Runtime.Sink{}`) created once per run and carried in
-  `%PropertyDamage.Executor.State{}` (DR-029). The sink is **append-only** (ordered injected
-  events + started pollers); injected events are folded in order *after* `execute/3` returns,
-  which is observably identical to today's real-time fold (assertions run post-`execute`).
+- `inject` and `start_poller` are per-command closures over an explicit
+  `PropertyDamage.Runtime.Sink` (an `Agent`, created per command), which replaces the former
+  process-dictionary channels. The sink carries the per-command injection context (the evolving
+  projections, the newest-first event log, and the injected events in injection order) plus the
+  resource pollers started during the command, and is surfaced through the `%Runtime{}` handle.
+  `inject` folds the event into projections in the **caller** process exactly as before, so a
+  projection `apply/2` that raises a transition-invariant violation still propagates into the
+  adapter (rather than crashing the Agent); only the already-computed result is stored in the
+  sink. Referencing the sink by pid (not the process dictionary) is what makes `inject` and
+  `start_poller` work when the adapter runs in a spawned process (e.g. the load-test worker's
+  `Task`), which the process dictionary did not.
 - `Adapter.teardown/1` receives `user_context` (exactly the `setup/1` return). The framework
   owns poller/handler teardown.
 - `teardown` is best-effort: wrapped in `try/rescue` with `Logger.warning` (implements the
