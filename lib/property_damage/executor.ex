@@ -95,13 +95,7 @@ defmodule PropertyDamage.Executor do
 
   alias PropertyDamage.Executor.State
 
-  # Process dictionary key for injection context during adapter execution.
-  # This allows adapters to inject events mid-execution using ctx.inject.(event).
-  @injection_ctx_key :pd_injection_context
-
-  # Process dictionary key for tracking resource pollers started during execute.
-  # This allows collecting pollers spawned by ctx.start_poller.(opts).
-  @resource_pollers_key :pd_resource_pollers
+  alias PropertyDamage.Runtime
 
   @typedoc """
   Assertion mode controls whether and how assertion failures are handled.
@@ -1541,20 +1535,20 @@ defmodule PropertyDamage.Executor do
     # 1. Resolve placeholders in command
     case resolve_command_placeholders(command, placeholder_registry) do
       {:ok, resolved_command} ->
-        # 2. Set up injection context for mid-execution event injection
-        injection_ctx = %{
+        # 2. Per-command injection/poller sink (DR-027): an explicit Agent that
+        # replaces the former @injection_ctx_key/@resource_pollers_key
+        # process-dictionary channels, so inject/start_poller accumulate correctly
+        # even when the adapter runs execute in a spawned process.
+        {:ok, sink} = Runtime.Sink.start_link()
+
+        Runtime.Sink.put_ctx(sink, %{
           projections: state.projections,
           event_log: state.event_log,
           injected_events: [],
           command_index: index,
           branch_id: state.branch_id,
           command: command
-        }
-
-        Process.put(@injection_ctx_key, injection_ctx)
-
-        # 2b. Initialize resource poller tracking
-        Process.put(@resource_pollers_key, [])
+        })
 
         # Build start_poller closure for resource polling
         start_poller_fn = fn opts ->
@@ -1567,16 +1561,14 @@ defmodule PropertyDamage.Executor do
               )
             )
 
-          # Track started poller in process dictionary
-          pollers = Process.get(@resource_pollers_key, [])
-          Process.put(@resource_pollers_key, [poller | pollers])
+          Runtime.Sink.add_poller(sink, poller)
           poller
         end
 
         # Add inject function and start_poller to adapter context
         adapter_context_with_inject =
           adapter_context
-          |> Map.put(:inject, &inject_event/1)
+          |> Map.put(:inject, fn event -> inject_event(sink, event) end)
           |> Map.put(:start_poller, start_poller_fn)
 
         # 3. Execute via adapter (with settle logic for probes/async).
@@ -1599,18 +1591,13 @@ defmodule PropertyDamage.Executor do
               # Capture stacktrace for adapter exceptions
               stacktrace = __STACKTRACE__
               {:error, {e, stacktrace}}
-          after
-            # Always clean up - get final injection state first
-            :ok
           end
 
-        # Get accumulated state from injection context (includes any injected events)
-        final_injection_ctx = Process.get(@injection_ctx_key)
-        Process.delete(@injection_ctx_key)
-
-        # Collect resource pollers started during execution
-        started_resource_pollers = Process.get(@resource_pollers_key, [])
-        Process.delete(@resource_pollers_key)
+        # Drain the accumulated injection state (includes any injected events) and
+        # the resource pollers started during execution, then stop the sink.
+        final_injection_ctx = Runtime.Sink.get_ctx(sink)
+        started_resource_pollers = Runtime.Sink.get_pollers(sink)
+        Runtime.Sink.stop(sink)
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections
@@ -2030,31 +2017,37 @@ defmodule PropertyDamage.Executor do
   defp settle_config(command, _spec), do: Settle.get_config(command)
 
   # Inject an event mid-execution from an adapter.
-  # Called via ctx.inject.(event) from adapter execute/2.
-  # Updates projections immediately and records in event log.
-  defp inject_event(event) do
-    case Process.get(@injection_ctx_key) do
+  # Called via ctx.inject.(event) from adapter execute; `sink` is the per-command
+  # Runtime.Sink (DR-027), replacing the former process-dictionary channel.
+  # Updates projections immediately and records in the event log.
+  defp inject_event(sink, event) do
+    case Runtime.Sink.get_ctx(sink) do
       nil ->
         raise ArgumentError, "inject called outside adapter execution context"
 
       ctx ->
-        # 1. Update projections immediately
+        # 1. Update projections immediately. The fold runs HERE, in the caller
+        # (adapter) process, so a projection apply/2 that raises a
+        # transition-invariant violation propagates into the adapter exactly as
+        # before, rather than crashing the sink's Agent.
         projections = update_projections(ctx.projections, event)
 
         # 2. Create entry with source :injected
         entry = Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
 
-        # 3. Update process dictionary with accumulated state. Injected events are
-        # accumulated in injection order so external() values they carry can be
-        # captured (DR-021): the producer's logical event list is the injected
-        # events followed by the events returned from execute/2, matching the
-        # order used to assign each placeholder's event_index during generation.
-        Process.put(@injection_ctx_key, %{
-          ctx
-          | projections: projections,
-            injected_events: ctx.injected_events ++ [event],
-            event_log: [entry | ctx.event_log]
-        })
+        # 3. Store the accumulated state. Injected events are accumulated in
+        # injection order so external() values they carry can be captured
+        # (DR-021): the producer's logical event list is the injected events
+        # followed by the events returned from execute, matching the order used to
+        # assign each placeholder's event_index during generation.
+        Runtime.Sink.update_ctx(sink, fn ctx ->
+          %{
+            ctx
+            | projections: projections,
+              injected_events: ctx.injected_events ++ [event],
+              event_log: [entry | ctx.event_log]
+          }
+        end)
 
         :ok
     end
