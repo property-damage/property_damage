@@ -42,7 +42,7 @@ defmodule PropertyDamage.PlaceholderTransportTest do
     @impl true
     def setup(config), do: {:ok, config}
     @impl true
-    def execute(command, %{test_pid: pid}) do
+    def execute(command, %{test_pid: pid}, _runtime) do
       send(pid, {:executed, command})
       {:ok, []}
     end

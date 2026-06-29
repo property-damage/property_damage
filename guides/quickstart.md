@@ -24,7 +24,7 @@ through projections. There is no direct `next_state(State, Result, Call)` functi
 Instead:
 
 ```
-Command -> Adapter.execute/2 -> {:ok, [events]} -> Projection.apply/2 -> new state
+Command -> Adapter.execute/3 -> {:ok, [events]} -> Projection.apply/2 -> new state
 ```
 
 **Commands are transport-agnostic.** A `CreateOrder` command is a pure data
@@ -121,7 +121,7 @@ defmodule AccountAdapter do
   def teardown(_ctx), do: :ok
 
   @impl true
-  def execute(%CreateAccount{name: name}, _ctx) do
+  def execute(%CreateAccount{name: name}, _ctx, _runtime) do
     id = "acc_#{System.unique_integer([:positive])}"
     {:ok, [%AccountCreated{id: id, name: name}]}
   end

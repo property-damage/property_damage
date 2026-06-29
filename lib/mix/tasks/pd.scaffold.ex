@@ -82,7 +82,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     use PropertyDamage.Adapter
 
     @impl true
-    def execute(%Commands.CreateUser{} = cmd, ctx) do
+    def execute(%Commands.CreateUser{} = cmd, _ctx, _runtime) do
       # ... build url/body, then map the response to events via the command:
       case http_request(:post, url, body, []) do
         {:ok, status, response} -> {:ok, cmd.__struct__.events(cmd, status, response)}
@@ -1183,7 +1183,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
     """
       @impl true
-      def execute(%Commands.#{op.module_name}{} = cmd, ctx) do
+      def execute(%Commands.#{op.module_name}{} = cmd, ctx, _runtime) do
         url = build_url(ctx.base_url, cmd.__struct__.__http_path__(), cmd)
         query = build_query(cmd)
         full_url = if query != "", do: url <> "?" <> query, else: url

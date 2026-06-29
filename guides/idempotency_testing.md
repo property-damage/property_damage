@@ -176,15 +176,21 @@ event modules. Both count as a match.
 
 ## Adapter Integration
 
-On retry executions, the adapter receives stutter context in the execution
-context map. The first execution has no `:stutter` key -- only retries include
-it.
+On retry executions, the adapter receives stutter context through the
+`%PropertyDamage.Runtime{}` handle passed as the third argument to `execute/3`.
+On the first (non-retry) execution `runtime.stutter` is `nil` -- only retries
+populate it. You can also use `PropertyDamage.Runtime.stuttering?(runtime)` to
+test whether the current execution is a retry.
 
 ```elixir
 defmodule MyAdapter do
   @behaviour PropertyDamage.Adapter
 
-  def execute(%CreateOrder{} = cmd, %{stutter: %{idempotency_key: key}} = _ctx)
+  def execute(
+        %CreateOrder{} = cmd,
+        _user_context,
+        %PropertyDamage.Runtime{stutter: %{idempotency_key: key}}
+      )
       when is_binary(key) do
     # Retry execution -- include idempotency header
     headers = [{"Idempotency-Key", key}]
@@ -192,15 +198,15 @@ defmodule MyAdapter do
     {:ok, [result.event]}
   end
 
-  def execute(%CreateOrder{} = cmd, _ctx) do
-    # First execution -- no stutter context
+  def execute(%CreateOrder{} = cmd, _user_context, _runtime) do
+    # First execution -- runtime.stutter is nil
     result = HttpClient.post("/orders", %{amount: cmd.amount})
     {:ok, [result.event]}
   end
 end
 ```
 
-The stutter context map contains:
+The `runtime.stutter` map contains:
 
 - `attempt` -- attempt number (2, 3, ...)
 - `is_retry` -- always `true` for retry executions

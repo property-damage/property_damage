@@ -21,7 +21,7 @@ defmodule PropertyDamage.IExTest do
     def setup(opts), do: {:ok, Map.new(opts)}
     def teardown(_context), do: :ok
 
-    def execute(%CreateItem{name: name, quantity: qty}, _context) do
+    def execute(%CreateItem{name: name, quantity: qty}, _context, _runtime) do
       {:ok, %ItemCreated{item_ref: "item_0", name: name, quantity: qty}}
     end
   end
@@ -30,14 +30,14 @@ defmodule PropertyDamage.IExTest do
     @moduledoc false
     def setup(opts), do: {:ok, Map.new(opts)}
     def teardown(_context), do: :ok
-    def execute(_command, _context), do: {:error, :boom}
+    def execute(_command, _context, _runtime), do: {:error, :boom}
   end
 
   defmodule SetupFailingAdapter do
     @moduledoc false
     def setup(_opts), do: {:error, :no_connection}
     def teardown(_context), do: :ok
-    def execute(_command, _context), do: {:ok, %ItemCreated{}}
+    def execute(_command, _context, _runtime), do: {:ok, %ItemCreated{}}
   end
 
   describe "explain/1" do

@@ -164,12 +164,12 @@ defmodule PropertyDamage.Test.EtsRegister.CorrectAdapter do
   end
 
   @impl true
-  def execute(%Increment{}, %{table: table}) do
+  def execute(%Increment{}, %{table: table}, _runtime) do
     {from, to} = EtsRegister.increment(table)
     {:ok, [%Incremented{from: from, to: to}]}
   end
 
-  def execute(%ReadValue{}, %{table: table}) do
+  def execute(%ReadValue{}, %{table: table}, _runtime) do
     {:ok, [%ValueRead{value: EtsRegister.read(table)}]}
   end
 end

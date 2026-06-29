@@ -65,7 +65,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%Bump{}, _context), do: {:ok, [%Counted{amount: 1}]}
+    def execute(%Bump{}, _context, _runtime), do: {:ok, [%Counted{amount: 1}]}
   end
 
   defmodule FixedAdapter do
@@ -80,7 +80,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
     # The "bug" is fixed: a bump no longer increments, so the invariant holds.
     @impl true
-    def execute(%Bump{}, _context), do: {:ok, [%Counted{amount: 0}]}
+    def execute(%Bump{}, _context, _runtime), do: {:ok, [%Counted{amount: 0}]}
   end
 
   defmodule FailingModel do

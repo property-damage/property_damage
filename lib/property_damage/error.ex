@@ -78,14 +78,14 @@ defmodule PropertyDamage.Error do
     Adapter: #{inspect(adapter)}
     Error: #{format_message(reason)}
 
-    The adapter's execute/2 function returned an error or raised an exception.
+    The adapter's execute/3 function returned an error or raised an exception.
     This usually indicates a problem communicating with the system under test.
 
     Suggestions:
       - Check that the SUT is running and accessible
       - Verify adapter configuration (URLs, credentials, etc.)
       - Look for network issues or timeouts
-      - Check the adapter's execute/2 implementation
+      - Check the adapter's execute/3 implementation
     """
     |> String.trim()
   end

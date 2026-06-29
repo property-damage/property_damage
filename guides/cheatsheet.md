@@ -173,7 +173,7 @@ defmodule MyApp.TestAdapter do
   end
 
   @impl true
-  def execute(%CreateOrder{amount: amt}, %{client: client} = ctx) do
+  def execute(%CreateOrder{amount: amt}, %{client: client} = _ctx, _runtime) do
     case HTTPClient.post(client, "/orders", %{amount: amt}) do
       {:ok, %{status: 201, body: body}} ->
         {:ok, [%OrderCreated{id: body["id"], amount: amt}]}
@@ -194,16 +194,23 @@ defmodule MyApp.TestAdapter do
 end
 ```
 
-### Execute Context Keys
+### Execute Signature
 
-| Key | Type | Description |
-|-----|------|-------------|
-| *(your setup keys)* | any | Whatever `setup/1` returned |
-| `:inject` | `(event -> :ok)` | Inject event mid-execution into projections |
-| `:start_poller` | `(keyword -> poller)` | Start background resource poller |
-| `:stutter` | map or absent | Present only during retry executions |
+`def execute(command, user_context, runtime)`
 
-Stutter context (when present): `%{attempt: 2, is_retry: true, idempotency_key: "abc" | nil}`
+- `user_context` is exactly what `setup/1` returned (no framework keys mixed in).
+- `runtime` is a `%PropertyDamage.Runtime{}` handle providing the framework hooks.
+
+### Runtime Handle Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `runtime.inject` | `(event -> :ok)` | Inject event mid-execution into projections |
+| `runtime.start_poller` | `(keyword -> poller)` | Start background resource poller |
+| `runtime.stutter` | map or `nil` | `nil` on first (non-retry) execution; a map during retries |
+
+Stutter map (when present): `%{attempt: 2, is_retry: true, idempotency_key: "abc" | nil}`.
+Prefer `PropertyDamage.Runtime.stuttering?(runtime)` to detect a retry.
 
 ## Nemesis Template
 
@@ -310,7 +317,7 @@ PropertyDamage.run(
 | `:log` | Log failures to console, continue execution |
 | `:disabled` | Skip all assertions |
 
-### Return Values from Adapter.execute/2
+### Return Values from Adapter.execute/3
 
 | Return | Meaning |
 |--------|---------|
@@ -324,13 +331,13 @@ setup_once/1
 ├── Run 1
 │   ├── Model.setup_each/1
 │   ├── Adapter.setup/1
-│   ├── [Adapter.execute/2 x N]
+│   ├── [Adapter.execute/3 x N]
 │   ├── Adapter.teardown/1
 │   └── Model.teardown_each/1
 ├── Run 2
 │   ├── Model.setup_each/1
 │   ├── Adapter.setup/1
-│   ├── [Adapter.execute/2 x N]
+│   ├── [Adapter.execute/3 x N]
 │   ├── Adapter.teardown/1
 │   └── Model.teardown_each/1
 ├── ...
@@ -338,7 +345,7 @@ setup_once/1
 │   ├── Shrink 1
 │   │   ├── Model.setup_each/1
 │   │   ├── Adapter.setup/1
-│   │   ├── [Adapter.execute/2 x M]  (shorter sequence)
+│   │   ├── [Adapter.execute/3 x M]  (shorter sequence)
 │   │   ├── Adapter.teardown/1
 │   │   └── Model.teardown_each/1
 │   └── ...

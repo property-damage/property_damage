@@ -75,18 +75,18 @@ defmodule PropertyDamage.InjectionTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%CreateResource{name: name}, ctx) do
+    def execute(%CreateResource{name: name}, _ctx, runtime) do
       # Generate a real ID
       real_id = "resource_#{:erlang.unique_integer([:positive])}"
 
       # Inject the created event immediately
-      ctx.inject.(%ResourceCreated{resource_id: real_id, name: name})
+      runtime.inject.(%ResourceCreated{resource_id: real_id, name: name})
 
       # Simulate polling/settling and return settlement event
       {:ok, [%ResourceSettled{resource_id: real_id, status: :approved}]}
     end
 
-    def execute(%SimpleCommand{data: data}, _ctx) do
+    def execute(%SimpleCommand{data: data}, _ctx, _runtime) do
       {:ok, [%OtherEvent{data: data}]}
     end
   end
@@ -102,7 +102,7 @@ defmodule PropertyDamage.InjectionTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%CreateResource{name: name}, _ctx) do
+    def execute(%CreateResource{name: name}, _ctx, _runtime) do
       real_id = "resource_#{:erlang.unique_integer([:positive])}"
 
       # Returns all events at end - doesn't use ctx.inject
@@ -113,7 +113,7 @@ defmodule PropertyDamage.InjectionTest do
        ]}
     end
 
-    def execute(%SimpleCommand{data: data}, _ctx) do
+    def execute(%SimpleCommand{data: data}, _ctx, _runtime) do
       {:ok, [%OtherEvent{data: data}]}
     end
   end
@@ -129,18 +129,18 @@ defmodule PropertyDamage.InjectionTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%CreateResource{name: name}, ctx) do
+    def execute(%CreateResource{name: name}, _ctx, runtime) do
       real_id = "resource_#{:erlang.unique_integer([:positive])}"
 
       # Inject multiple events during execution
-      ctx.inject.(%ResourceCreated{resource_id: real_id, name: name})
-      ctx.inject.(%ResourceSettled{resource_id: real_id, status: :pending})
+      runtime.inject.(%ResourceCreated{resource_id: real_id, name: name})
+      runtime.inject.(%ResourceSettled{resource_id: real_id, status: :pending})
 
       # Return final event
       {:ok, [%ResourceSettled{resource_id: real_id, status: :approved}]}
     end
 
-    def execute(%SimpleCommand{data: data}, _ctx) do
+    def execute(%SimpleCommand{data: data}, _ctx, _runtime) do
       {:ok, [%OtherEvent{data: data}]}
     end
   end

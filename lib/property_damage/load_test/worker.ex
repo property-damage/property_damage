@@ -3,12 +3,9 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   use GenServer
 
-  alias PropertyDamage.{Generator, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.{Generator, PlaceholderRegistry, Runtime, Sequence}
   alias PropertyDamage.LoadTest.Metrics
   alias PropertyDamage.Model.Projection
-
-  # Process dictionary key for injection context during adapter execution
-  @injection_ctx_key :property_damage_load_test_injection_ctx
 
   defstruct [
     :worker_id,
@@ -315,20 +312,26 @@ defmodule PropertyDamage.LoadTest.Worker do
         # Get timeout from adapter
         timeout_ms = normalize_timeout(state.adapter.timeout(resolved_command))
 
-        # Set up injection context in process dictionary
-        Process.put(@injection_ctx_key, %{events: [], command: command})
+        # Per-command injection sink (DR-027). The inject closure captures the
+        # sink pid, so it accumulates correctly from inside the spawned timeout
+        # Task below; the worker's process dictionary did not cross that
+        # boundary, which made inject raise "outside adapter execution context".
+        {:ok, sink} = Runtime.Sink.start_link()
+        Runtime.Sink.put_ctx(sink, %{events: []})
 
-        # Add inject function to adapter context
-        adapter_context_with_inject = Map.put(state.adapter_context, :inject, &inject_event/1)
+        runtime = %Runtime{
+          inject: fn event ->
+            Runtime.Sink.update_ctx(sink, fn ctx -> %{ctx | events: [event | ctx.events]} end)
+          end,
+          start_poller: fn _opts ->
+            raise ArgumentError, "Runtime.start_poller is not supported in load-test workers"
+          end
+        }
 
         # Execute with timeout - wrap in Task to enforce timeout
         task =
           Task.async(fn ->
-            try do
-              state.adapter.execute(resolved_command, adapter_context_with_inject)
-            after
-              :ok
-            end
+            state.adapter.execute(resolved_command, state.adapter_context, runtime)
           end)
 
         result =
@@ -343,10 +346,9 @@ defmodule PropertyDamage.LoadTest.Worker do
                 timeout_ms: timeout_ms
           end
 
-        # Get injected events from context
-        injection_ctx = Process.get(@injection_ctx_key)
-        Process.delete(@injection_ctx_key)
-        injected_events = Enum.reverse(injection_ctx.events)
+        # Drain injected events (injection order) and stop the sink.
+        injected_events = Enum.reverse(Runtime.Sink.get_ctx(sink).events)
+        Runtime.Sink.stop(sink)
 
         case result do
           {:ok, returned_events} ->
@@ -389,17 +391,6 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp categorize_error({:timeout, _}), do: :timeout
   defp categorize_error({:connection_refused, _}), do: :connection_error
   defp categorize_error(_), do: :unknown_error
-
-  defp inject_event(event) do
-    case Process.get(@injection_ctx_key) do
-      nil ->
-        raise ArgumentError, "inject called outside adapter execution context"
-
-      ctx ->
-        Process.put(@injection_ctx_key, %{ctx | events: [event | ctx.events]})
-        :ok
-    end
-  end
 
   # ============================================================================
   # Assertion Support

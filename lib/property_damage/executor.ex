@@ -176,7 +176,7 @@ defmodule PropertyDamage.Executor do
 
         {:ok, result}
       after
-        adapter.teardown(adapter_context)
+        safe_teardown(adapter, adapter_context)
       end
     end
   end
@@ -184,6 +184,25 @@ defmodule PropertyDamage.Executor do
   # Backwards compatibility: accept list of commands as linear sequence
   def run(commands, model, adapter, opts) when is_list(commands) do
     run(Sequence.linear(commands), model, adapter, opts)
+  end
+
+  # Adapter teardown is best-effort (DR-027): a raising teardown logs a warning
+  # but never fails the run, so a cleanup hiccup cannot mask the actual result
+  # (or, during shrinking, perturb the failure being minimized).
+  defp safe_teardown(adapter, user_context) do
+    require Logger
+
+    try do
+      adapter.teardown(user_context)
+    rescue
+      e ->
+        Logger.warning(
+          "Adapter #{inspect(adapter)} teardown/1 raised: " <>
+            Exception.format(:error, e, __STACKTRACE__)
+        )
+
+        :ok
+    end
   end
 
   @doc """
@@ -1565,11 +1584,13 @@ defmodule PropertyDamage.Executor do
           poller
         end
 
-        # Add inject function and start_poller to adapter context
-        adapter_context_with_inject =
-          adapter_context
-          |> Map.put(:inject, fn event -> inject_event(sink, event) end)
-          |> Map.put(:start_poller, start_poller_fn)
+        # Build the per-command Runtime handle (DR-027). user_context stays
+        # exactly the adapter's setup/1 return; inject/start_poller travel here
+        # over the explicit sink rather than being merged into the user's map.
+        runtime = %Runtime{
+          inject: fn event -> inject_event(sink, event) end,
+          start_poller: start_poller_fn
+        }
 
         # 3. Execute via adapter (with settle logic for probes/async).
         # Commands may be plain maps in low-level/test usage, hence the guard.
@@ -1583,7 +1604,8 @@ defmodule PropertyDamage.Executor do
             execute_with_settle(
               resolved_command,
               adapter,
-              adapter_context_with_inject,
+              adapter_context,
+              runtime,
               command_spec
             )
           rescue
@@ -1992,20 +2014,20 @@ defmodule PropertyDamage.Executor do
   end
 
   # Execute command with settle logic for probes/async, sourced from the spec
-  defp execute_with_settle(command, adapter, adapter_context, spec) do
+  defp execute_with_settle(command, adapter, user_context, runtime, spec) do
     execution = settle_execution(command, spec)
 
     if execution in [:probe, :async] do
       config = settle_config(command, spec)
 
       Settle.settle(
-        fn -> adapter.execute(command, adapter_context) end,
+        fn -> adapter.execute(command, user_context, runtime) end,
         timeout_ms: config.timeout_ms,
         interval_ms: config.interval_ms,
         backoff: config.backoff
       )
     else
-      adapter.execute(command, adapter_context)
+      adapter.execute(command, user_context, runtime)
     end
   end
 
@@ -2017,7 +2039,7 @@ defmodule PropertyDamage.Executor do
   defp settle_config(command, _spec), do: Settle.get_config(command)
 
   # Inject an event mid-execution from an adapter.
-  # Called via ctx.inject.(event) from adapter execute; `sink` is the per-command
+  # Called via runtime.inject.(event) from adapter execute; `sink` is the per-command
   # Runtime.Sink (DR-027), replacing the former process-dictionary channel.
   # Updates projections immediately and records in the event log.
   defp inject_event(sink, event) do
@@ -2051,6 +2073,24 @@ defmodule PropertyDamage.Executor do
 
         :ok
     end
+  end
+
+  # A %Runtime{} for execution paths that have no live injection window:
+  #   * stutter retries run after the per-command sink has been drained and
+  #     stopped, and
+  #   * execute_raw/3 runs commands without projections to fold into.
+  # Calling inject/start_poller there raises a clear ArgumentError rather than
+  # the old KeyError (those keys simply weren't present in the context before).
+  defp inject_unavailable_runtime(reason, stutter \\ nil) do
+    %Runtime{
+      inject: fn _event ->
+        raise ArgumentError, "Runtime.inject is not available #{reason}"
+      end,
+      start_poller: fn _opts ->
+        raise ArgumentError, "Runtime.start_poller is not available #{reason}"
+      end,
+      stutter: stutter
+    }
   end
 
   # Update all projections with a command or event
@@ -2764,14 +2804,14 @@ defmodule PropertyDamage.Executor do
           Process.sleep(delay_ms)
         end
 
-        # Build stutter context for adapter
+        # Build stutter context and a Runtime carrying it (DR-027). Stutter
+        # retries run after the per-command injection window has closed, so
+        # inject/start_poller raise if an adapter reaches for them here.
         stutter_ctx = Stutter.build_context(attempt, true, idempotency_key)
-
-        # Merge stutter context into adapter context
-        ctx_with_stutter = Map.put(adapter_context, :stutter, stutter_ctx)
+        runtime = inject_unavailable_runtime("during stutter retries", stutter_ctx)
 
         # Execute retry
-        case adapter.execute(resolved_command, ctx_with_stutter) do
+        case adapter.execute(resolved_command, adapter_context, runtime) do
           {:ok, retry_events} ->
             {:ok, attempt, retry_events}
 
@@ -3387,16 +3427,27 @@ defmodule PropertyDamage.Executor do
 
     case resolved_result do
       {:ok, resolved_command} ->
-        # Merge event_queue into adapter_context so adapters can access it
-        execute_context =
+        # Raw mode has no projections to fold, but it does drain the event_queue
+        # for injector events below, so `runtime.inject` routes there (DR-027):
+        # an adapter emits an out-of-band event via `runtime.inject.(event)`
+        # rather than reaching into a framework key on its user_context. With no
+        # event_queue configured, inject/start_poller raise a clear error.
+        # start_poller has no home in raw mode either way.
+        runtime =
           if event_queue do
-            Map.put(adapter_context, :event_queue, event_queue)
+            %Runtime{
+              inject: fn event -> EventQueue.push(event_queue, adapter, event) end,
+              start_poller: fn _opts ->
+                raise ArgumentError,
+                      "Runtime.start_poller is not available in Executor.execute_raw/3"
+              end
+            }
           else
-            adapter_context
+            inject_unavailable_runtime("in Executor.execute_raw/3 (no event queue configured)")
           end
 
         # Execute via adapter
-        case adapter.execute(resolved_command, execute_context) do
+        case adapter.execute(resolved_command, adapter_context, runtime) do
           {:ok, events} ->
             # Capture external() values this command produced, keyed by its linear
             # position, so later commands resolve them (DR-021).

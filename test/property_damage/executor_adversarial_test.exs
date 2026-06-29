@@ -61,12 +61,12 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def setup(config), do: {:ok, config}
 
     @impl true
-    def execute(%Cmd{}, %{behaviour: :raise}), do: raise("adapter boom")
-    def execute(%Cmd{}, %{behaviour: :malformed_atom}), do: :garbage
-    def execute(%Cmd{}, %{behaviour: :malformed_ok}), do: {:ok, :not_a_list}
-    def execute(%Cmd{}, %{behaviour: :sync_retry}), do: {:retry, :not_ready}
-    def execute(%Cmd{}, %{behaviour: :error}), do: {:error, :nope}
-    def execute(%Cmd{}, _ctx), do: {:ok, [%Ev{tag: :x}]}
+    def execute(%Cmd{}, %{behaviour: :raise}, _runtime), do: raise("adapter boom")
+    def execute(%Cmd{}, %{behaviour: :malformed_atom}, _runtime), do: :garbage
+    def execute(%Cmd{}, %{behaviour: :malformed_ok}, _runtime), do: {:ok, :not_a_list}
+    def execute(%Cmd{}, %{behaviour: :sync_retry}, _runtime), do: {:retry, :not_ready}
+    def execute(%Cmd{}, %{behaviour: :error}, _runtime), do: {:error, :nope}
+    def execute(%Cmd{}, _ctx, _runtime), do: {:ok, [%Ev{tag: :x}]}
 
     @impl true
     def teardown(_ctx), do: :ok

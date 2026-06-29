@@ -429,7 +429,7 @@ testing.
 
 ### Sync (default)
 
-Synchronous commands mutate the SUT and complete immediately. The adapter's `execute/2`
+Synchronous commands mutate the SUT and complete immediately. The adapter's `execute/3`
 is called once and events are recorded.
 
     use PropertyDamage.Command, execution: :sync
@@ -453,7 +453,7 @@ Key behaviors:
 ### Async
 
 Async commands create a resource and wait for it to settle. The adapter handles
-internal polling, optionally injecting intermediate events via `context.inject`.
+internal polling, optionally injecting intermediate events via `runtime.inject`.
 
     use PropertyDamage.Command, execution: :async
 

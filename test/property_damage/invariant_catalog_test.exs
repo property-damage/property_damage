@@ -62,7 +62,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%Tick{}, _ctx), do: {:ok, [%Ticked{}]}
+    def execute(%Tick{}, _ctx, _runtime), do: {:ok, [%Ticked{}]}
   end
 
   test "a never-firing assertion is reported uncovered; a firing one is covered" do
@@ -404,7 +404,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%Start{}, _ctx), do: {:ok, [%Started{}]}
+    def execute(%Start{}, _ctx, _runtime), do: {:ok, [%Started{}]}
   end
 
   test "spawning a @poll_state poller counts as firing the invariant" do

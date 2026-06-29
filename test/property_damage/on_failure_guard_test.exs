@@ -38,7 +38,7 @@ defmodule PropertyDamage.OnFailureGuardTest do
     use PropertyDamage.Adapter
     def setup(config), do: {:ok, config}
     def teardown(_context), do: :ok
-    def execute(_command, _context), do: {:ok, []}
+    def execute(_command, _context, _runtime), do: {:ok, []}
   end
 
   test "a raising on_failure handler is caught; the failure report survives" do

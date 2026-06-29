@@ -28,7 +28,7 @@ defmodule PropertyDamage.DeterminismTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%CreateItem{} = cmd, ctx) do
+    def execute(%CreateItem{} = cmd, ctx, _runtime) do
       ref =
         Agent.get_and_update(ctx.recorder, fn state ->
           {"item_#{state.counter}",
@@ -38,12 +38,12 @@ defmodule PropertyDamage.DeterminismTest do
       {:ok, [%ItemCreated{item_ref: ref, name: cmd.name, quantity: cmd.quantity}]}
     end
 
-    def execute(%ViewItem{} = cmd, ctx) do
+    def execute(%ViewItem{} = cmd, ctx, _runtime) do
       record(ctx, cmd)
       {:ok, [%ItemViewed{item_ref: cmd.item_ref}]}
     end
 
-    def execute(%MinimalCommand{} = cmd, ctx) do
+    def execute(%MinimalCommand{} = cmd, ctx, _runtime) do
       record(ctx, cmd)
       {:ok, []}
     end
@@ -91,7 +91,7 @@ defmodule PropertyDamage.DeterminismTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(cmd, ctx) do
+    def execute(cmd, ctx, _runtime) do
       Agent.update(ctx.recorder, fn state ->
         %{state | commands: [cmd | state.commands]}
       end)

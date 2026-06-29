@@ -169,7 +169,7 @@ defmodule PropertyDamage.ValidationTest do
       @impl true
       def teardown(_ctx), do: :ok
       @impl true
-      def execute(%PollCommand{}, _ctx), do: {:ok, [%PollEvents.Started{}]}
+      def execute(%PollCommand{}, _ctx, _runtime), do: {:ok, [%PollEvents.Started{}]}
     end
 
     test "validation does not crash on a @poll_state assertion" do

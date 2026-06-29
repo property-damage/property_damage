@@ -34,9 +34,16 @@
 - `teardown` is best-effort: wrapped in `try/rescue` with `Logger.warning` (implements the
   execution-engine "SHALL log a warning if teardown raises" requirement; previously a bare
   `after`).
-- A reserved-key guard raises if `setup/1` returns a map containing a framework-reserved key.
+- No reserved-key guard is needed: because `execute/3` passes `user_context` as a distinct
+  argument and merges nothing into it, a `setup/1` that returns a map with an `:inject` (etc.)
+  key can no longer collide with framework plumbing. (An earlier draft proposed a guard against
+  the `Map.put` merge; the merge is gone, so the collision it guarded against cannot occur.)
 - The two process-dictionary channels (`@injection_ctx_key`, `@resource_pollers_key`) are
-  **deleted**.
+  **deleted** (the executor's per-command channel and the load-test worker's channel).
+- In `Executor.execute_raw/3` (raw mode, no projections), `runtime.inject` routes the emitted
+  event through the run's `EventQueue` (the only collection channel raw mode has), replacing the
+  former practice of merging the `:event_queue` into the adapter's context map. `start_poller`
+  is unavailable in raw mode.
 - `Adapter.register_handler/2` is **deleted** from the behaviour; the capability it promised
   is reimplemented on the semantic surface (see DR-030).
 

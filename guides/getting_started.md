@@ -217,7 +217,7 @@ defmodule MyApp.TestAdapter do
   def teardown(_ctx), do: :ok
 
   @impl true
-  def execute(%CreateUser{email: email, name: name}, ctx) do
+  def execute(%CreateUser{email: email, name: name}, ctx, _runtime) do
     case post(ctx.base_url, "/users", %{email: email, name: name}) do
       {:ok, %{status: 201, body: body}} ->
         events = [%UserCreated{
@@ -245,7 +245,7 @@ The example above uses HTTP, but adapters can target any transport:
 
 **In-memory** — Call application functions directly for fast tests:
 
-    def execute(%CreateOrder{amount: amt}, ctx) do
+    def execute(%CreateOrder{amount: amt}, _ctx, _runtime) do
       case MyApp.Orders.create(%{amount: amt}) do
         {:ok, order} -> {:ok, [%OrderCreated{id: order.id, amount: amt}]}
         {:error, reason} -> {:ok, [%OrderRejected{reason: reason}]}
@@ -259,7 +259,7 @@ The example above uses HTTP, but adapters can target any transport:
       {:ok, %{channel: channel}}
     end
 
-    def execute(%CreateOrder{amount: amt}, %{channel: ch}) do
+    def execute(%CreateOrder{amount: amt}, %{channel: ch}, _runtime) do
       {:ok, reply} = OrderService.Stub.create(ch, %CreateRequest{amount: amt})
       {:ok, [%OrderCreated{id: reply.id, amount: amt}]}
     end
@@ -267,7 +267,8 @@ The example above uses HTTP, but adapters can target any transport:
 **Testing in IEx** — Test your adapter manually:
 
     iex> {:ok, ctx} = MyAdapter.setup(%{base_url: "http://localhost:4000"})
-    iex> {:ok, events} = MyAdapter.execute(%CreateOrder{amount: 100}, ctx)
+    iex> runtime = %PropertyDamage.Runtime{inject: fn _ -> :ok end, start_poller: fn _ -> nil end}
+    iex> {:ok, events} = MyAdapter.execute(%CreateOrder{amount: 100}, ctx, runtime)
     iex> MyAdapter.teardown(ctx)
 
 See the [Cheatsheet](cheatsheet.md) for complete adapter templates.

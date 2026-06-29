@@ -38,22 +38,22 @@ defmodule CachexBench.Adapter do
   end
 
   @impl true
-  def execute(%PutKey{key: key, value: value}, %{cache: cache}) do
+  def execute(%PutKey{key: key, value: value}, %{cache: cache}, _runtime) do
     {:ok, true} = Cachex.put(cache, key, value)
     {:ok, [%EntryPut{key: key, value: value}]}
   end
 
-  def execute(%GetKey{key: key}, %{cache: cache}) do
+  def execute(%GetKey{key: key}, %{cache: cache}, _runtime) do
     {:ok, value} = Cachex.get(cache, key)
     {:ok, [%EntryRead{key: key, value: value}]}
   end
 
-  def execute(%DelKey{key: key}, %{cache: cache}) do
+  def execute(%DelKey{key: key}, %{cache: cache}, _runtime) do
     {:ok, _existed?} = Cachex.del(cache, key)
     {:ok, [%EntryDeleted{key: key}]}
   end
 
-  def execute(%ClearCache{}, %{cache: cache}) do
+  def execute(%ClearCache{}, %{cache: cache}, _runtime) do
     {:ok, _count} = Cachex.clear(cache)
     {:ok, [%CacheCleared{}]}
   end
