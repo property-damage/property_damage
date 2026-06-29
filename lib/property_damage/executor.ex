@@ -158,6 +158,7 @@ defmodule PropertyDamage.Executor do
     mock_registry = Keyword.get(opts, :mock_registry)
     assertion_mode = Keyword.get(opts, :assertion_mode, :halt)
     external_markers = Keyword.get(opts, :external_markers, [])
+    rng_seed = Keyword.get(opts, :rng_seed)
 
     with {:ok, adapter_context} <- adapter.setup(adapter_config) do
       try do
@@ -171,7 +172,8 @@ defmodule PropertyDamage.Executor do
             stutter_config,
             mock_registry,
             assertion_mode,
-            external_markers
+            external_markers,
+            rng_seed
           )
 
         {:ok, result}
@@ -235,7 +237,8 @@ defmodule PropertyDamage.Executor do
           Stutter.Config.t() | nil,
           pid() | nil,
           assertion_mode(),
-          [atom()]
+          [atom()],
+          integer() | nil
         ) ::
           result()
   def execute_sequence(
@@ -247,7 +250,8 @@ defmodule PropertyDamage.Executor do
         stutter_config \\ nil,
         mock_registry \\ nil,
         assertion_mode \\ :halt,
-        external_markers \\ []
+        external_markers \\ [],
+        rng_seed \\ nil
       )
 
   def execute_sequence(
@@ -259,7 +263,8 @@ defmodule PropertyDamage.Executor do
         stutter_config,
         mock_registry,
         assertion_mode,
-        external_markers
+        external_markers,
+        rng_seed
       ) do
     # Linear sequence: just execute prefix ++ suffix
     commands = Sequence.to_list(sequence)
@@ -274,7 +279,8 @@ defmodule PropertyDamage.Executor do
       mock_registry,
       assertion_mode,
       external_markers,
-      sequence.registry
+      sequence.registry,
+      rng_seed
     )
   end
 
@@ -287,7 +293,8 @@ defmodule PropertyDamage.Executor do
         stutter_config,
         mock_registry,
         assertion_mode,
-        external_markers
+        external_markers,
+        rng_seed
       ) do
     # Branching sequence: execute prefix, branches, suffix
     PropertyDamage.Executor.Branching.execute_branching(
@@ -299,7 +306,8 @@ defmodule PropertyDamage.Executor do
       stutter_config,
       mock_registry,
       assertion_mode,
-      external_markers
+      external_markers,
+      rng_seed
     )
   end
 
@@ -313,7 +321,8 @@ defmodule PropertyDamage.Executor do
         stutter_config,
         mock_registry,
         assertion_mode,
-        external_markers
+        external_markers,
+        rng_seed
       )
       when is_list(commands) do
     execute_linear(
@@ -325,7 +334,9 @@ defmodule PropertyDamage.Executor do
       stutter_config,
       mock_registry,
       assertion_mode,
-      external_markers
+      external_markers,
+      nil,
+      rng_seed
     )
   end
 
@@ -343,7 +354,8 @@ defmodule PropertyDamage.Executor do
          mock_registry,
          assertion_mode,
          external_markers,
-         registry \\ nil
+         registry,
+         rng_seed
        ) do
     initial_state =
       build_initial_state(
@@ -353,7 +365,8 @@ defmodule PropertyDamage.Executor do
         mock_registry,
         assertion_mode,
         external_markers,
-        registry
+        registry,
+        rng_seed
       )
 
     # DR-024: @trigger at: :startup checks run on the initial init/0 state,
@@ -471,12 +484,16 @@ defmodule PropertyDamage.Executor do
         mock_registry,
         assertion_mode,
         external_markers,
-        registry
+        registry,
+        rng_seed \\ nil
       ) do
     %State{
       event_log: [],
       projections: init_projections(model),
       projections_before: nil,
+      # Explicit stutter RNG base (DR-029); the per-command generator is derived
+      # from {rng_seed, index} in PropertyDamage.Executor.Stutter.
+      rng_seed: rng_seed,
       # Seed the placeholder registry from the generated sequence (DR-021); the
       # id-indexed registry + producer_link transport from generation to here.
       placeholder_registry: registry || PlaceholderRegistry.new(),
@@ -515,7 +532,8 @@ defmodule PropertyDamage.Executor do
       Keyword.get(opts, :mock_registry),
       Keyword.get(opts, :assertion_mode, :halt),
       Keyword.get(opts, :external_markers, []),
-      Keyword.get(opts, :placeholder_registry)
+      Keyword.get(opts, :placeholder_registry),
+      Keyword.get(opts, :rng_seed)
     )
   end
 

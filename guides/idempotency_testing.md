@@ -258,6 +258,14 @@ Command: CreateOrder
 In this example, the SUT created a second order on retry instead of returning
 an idempotent response.
 
+Idempotency violations are **shrunk** like any other failure: the framework
+re-runs candidate sequences with stutter forced on so the violation reproduces
+regardless of the offending command's position, then minimizes to the smallest
+sequence that still violates (often the single non-idempotent command). The
+reported sequence is therefore the minimal reproduction, not the full random
+sequence that first tripped it. Stutter decisions are deterministic per seed, so
+re-running with the reported `seed:` reproduces the same violation.
+
 To debug violations:
 
 1. Check the **command index** to identify which command in the sequence failed.
