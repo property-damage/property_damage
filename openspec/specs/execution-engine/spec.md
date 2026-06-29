@@ -69,6 +69,26 @@ After the last command of a run (linear or merged-branch), the framework SHALL f
 - **WHEN** an async `@trigger every:` assertion trips on an event folded during the settled-state drain while a resource poller has also errored
 - **THEN** the framework SHALL report the async assertion violation, at the observing event's `command_index`, rather than the resource-poller error
 
+### Requirement: Explicit Stutter RNG and Determinism (DR-029)
+
+Stutter (idempotency-retry) decisions SHALL be driven by an explicit RNG threaded through the executor, NOT by the process-global `:rand` stream. For each command the framework SHALL derive a fresh generator state from the run's seed and the command's index, so a command's stutter decisions (whether to stutter, how many retries, and inter-retry delays) depend only on the run seed and that command's index, not on draws consumed by earlier commands or earlier runs in the campaign. The run seed used as the RNG base SHALL be the run's effective seed (the same value reported for reproduction), so re-running with the same campaign seed reproduces the same stutter decisions. Sequence generation determinism is unaffected: it is seeded separately via the generator's per-run seed.
+
+This determinism is self-consistent (same seed produces the same decisions) and preserves shrink failure-equivalence (DR-017). It is NOT a guarantee of byte-identical reproduction of any prior process-global `:rand` stream.
+
+Because stutter decisions are reproducible, stutter failures (idempotency violations and stutter-retry execution failures) SHALL be shrinkable. The shrinker SHALL reproduce a stutter failure with stutter forced on (probability 1.0, preserving the original command filter, comparison mode, and max-repeats) so that index-shift under sequence truncation cannot un-stutter the offending command, and SHALL minimize the failure to its smallest reproduction. Forced-stutter reproduction SHALL apply only when the original failure is a stutter failure; for all other failure types the shrinker SHALL re-run without stutter.
+
+#### Scenario: Same seed reproduces the same stutter outcome
+- **WHEN** a sequence is run twice with the same run seed and stutter enabled
+- **THEN** the stutter decisions, event log, and result SHALL be identical
+
+#### Scenario: A stutter idempotency violation shrinks to its minimal reproduction
+- **WHEN** a run fails with an idempotency violation caused by a single non-idempotent command embedded in a longer sequence
+- **THEN** the shrinker SHALL reproduce the violation with stutter forced on and minimize the sequence to the offending command
+
+#### Scenario: Non-stutter shrinking is not perturbed by stutter
+- **WHEN** a run fails for a non-stutter reason (for example a `@trigger` assertion)
+- **THEN** the shrinker SHALL re-run candidates without stutter, exactly as for a run with stutter disabled
+
 ### Requirement: Adapter Execute Arguments (user_context and runtime)
 
 `execute/3` SHALL receive three arguments: the resolved command, the `user_context`, and a `%PropertyDamage.Runtime{}` handle (DR-027). The `user_context` SHALL be exactly what the adapter's `setup/1` returned, with no framework keys merged in. The framework's per-command affordances SHALL travel on the runtime handle: an `inject` function for mid-execution event injection, a `start_poller` function for background resource polling, and a `stutter` field that is populated only on stutter/idempotency retries (and `nil` on the first execution).

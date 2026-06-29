@@ -27,6 +27,9 @@ defmodule PropertyDamage.Executor.State do
     * `:external_markers` - declared `external()` marker atoms
     * `:command_specs` - `%{command_module => resolved_spec}` (built once)
     * `:placeholder_registry` - DR-021 id-indexed placeholder registry
+    * `:rng_seed` - integer seed for explicit stutter RNG (DR-029); the executor
+      derives a per-command generator from `{rng_seed, command_index}`. `nil`
+      collapses to a fixed base so draws stay deterministic.
 
   Evolving run state:
 
@@ -64,6 +67,7 @@ defmodule PropertyDamage.Executor.State do
     :external_markers,
     :command_specs,
     :placeholder_registry,
+    rng_seed: nil,
     event_log: [],
     projections: %{},
     projections_before: nil,
@@ -87,6 +91,7 @@ defmodule PropertyDamage.Executor.State do
           external_markers: list(),
           command_specs: map(),
           placeholder_registry: term(),
+          rng_seed: integer() | nil,
           event_log: list(),
           projections: map(),
           projections_before: map() | nil,

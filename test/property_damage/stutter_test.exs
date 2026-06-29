@@ -8,7 +8,12 @@ defmodule PropertyDamage.StutterTest do
     defstruct []
   end
 
-  describe "should_stutter?/2" do
+  # A fresh, fixed-seed RNG state for the policy draws (DR-029): the draw
+  # functions take and return an explicit `:rand` state rather than reading the
+  # process-global RNG.
+  defp rng, do: :rand.seed_s(:exsss, 42)
+
+  describe "should_stutter?/3" do
     test "returns false when the config is disabled" do
       config = %Config{
         probability: 1.0,
@@ -19,7 +24,7 @@ defmodule PropertyDamage.StutterTest do
         enabled: false
       }
 
-      refute Stutter.should_stutter?(%Cmd{}, config)
+      assert {false, _rng} = Stutter.should_stutter?(%Cmd{}, config, rng())
     end
 
     test "stutters when enabled with probability 1.0" do
@@ -32,21 +37,44 @@ defmodule PropertyDamage.StutterTest do
         enabled: true
       }
 
-      assert Stutter.should_stutter?(%Cmd{}, config)
+      assert {true, _rng} = Stutter.should_stutter?(%Cmd{}, config, rng())
+    end
+
+    test "is self-consistent: the same RNG state yields the same decision" do
+      config = %Config{
+        probability: 0.5,
+        max_repeats: 2,
+        delay_ms: {0, 0},
+        commands: :all,
+        comparison: :strict,
+        enabled: true
+      }
+
+      {a, _} = Stutter.should_stutter?(%Cmd{}, config, rng())
+      {b, _} = Stutter.should_stutter?(%Cmd{}, config, rng())
+      assert a == b
     end
   end
 
-  describe "retry_delay_ms/1" do
+  describe "retry_delay_ms/2" do
     test "returns a delay within the configured range" do
       config = %Config{delay_ms: {10, 20}}
-      delay = Stutter.retry_delay_ms(config)
+      {delay, _rng} = Stutter.retry_delay_ms(config, rng())
       assert delay >= 10 and delay <= 20
     end
 
     test "does not raise on an inverted {max < min} delay tuple" do
       config = %Config{delay_ms: {100, 0}}
-      delay = Stutter.retry_delay_ms(config)
+      {delay, _rng} = Stutter.retry_delay_ms(config, rng())
       assert delay >= 0 and delay <= 100
+    end
+  end
+
+  describe "retry_count/2" do
+    test "returns a count between 1 and max_repeats" do
+      config = %Config{max_repeats: 3}
+      {count, _rng} = Stutter.retry_count(config, rng())
+      assert count >= 1 and count <= 3
     end
   end
 end

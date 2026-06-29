@@ -12,6 +12,12 @@ defmodule PropertyDamage.Executor.Stutter do
   # `inject_unavailable_runtime/2` is shared with Executor.execute_raw/3 and stays
   # in PropertyDamage.Executor; it is called back here (stutter retries run after
   # the per-command injection window has closed).
+  #
+  # Stutter draws come from an explicit RNG (DR-029): a fresh generator state
+  # derived per command from `{state.rng_seed, index}`. Keying on the command's
+  # index (not an advancing run-global stream) makes the draws index-local, so
+  # shrink truncation that removes earlier commands does not perturb a surviving
+  # command's stutter decisions.
 
   alias PropertyDamage.Executor
   alias PropertyDamage.EventLog.Entry
@@ -31,8 +37,10 @@ defmodule PropertyDamage.Executor.Stutter do
         adapter_context
       ) do
     stutter_config = Map.get(state, :stutter_config)
+    rng = stutter_rng(Map.get(state, :rng_seed), index)
+    {do_stutter?, rng} = Stutter.should_stutter?(command, stutter_config, rng)
 
-    if stutter_config && Stutter.should_stutter?(command, stutter_config) do
+    if do_stutter? do
       execute_stutter_retries(
         resolved_command,
         original_events,
@@ -41,11 +49,20 @@ defmodule PropertyDamage.Executor.Stutter do
         stutter_config,
         adapter,
         adapter_context,
-        state.branch_id
+        state.branch_id,
+        rng
       )
     else
       {:ok, event_log}
     end
+  end
+
+  # Derive the per-command stutter RNG from the run seed and the command index.
+  # phash2 folds the pair into a deterministic seed integer; a nil rng_seed
+  # (stepping shell / direct executor callers that pass no seed) collapses to a
+  # fixed base so draws stay deterministic.
+  defp stutter_rng(rng_seed, index) do
+    :rand.seed_s(:exsss, :erlang.phash2({rng_seed || 0, index}, 4_294_967_296))
   end
 
   defp execute_stutter_retries(
@@ -56,16 +73,17 @@ defmodule PropertyDamage.Executor.Stutter do
          stutter_config,
          adapter,
          adapter_context,
-         branch_id
+         branch_id,
+         rng
        ) do
-    retry_count = Stutter.retry_count(stutter_config)
+    {retry_count, rng} = Stutter.retry_count(stutter_config, rng)
     idempotency_key = Stutter.get_idempotency_key(resolved_command)
 
-    # Execute retries
-    retry_results =
-      Enum.map(2..(retry_count + 1), fn attempt ->
+    # Execute retries, threading the RNG through each retry's delay draw.
+    {retry_results, _rng} =
+      Enum.map_reduce(2..(retry_count + 1), rng, fn attempt, rng ->
         # Add delay between retries
-        delay_ms = Stutter.retry_delay_ms(stutter_config)
+        {delay_ms, rng} = Stutter.retry_delay_ms(stutter_config, rng)
 
         if delay_ms > 0 do
           Process.sleep(delay_ms)
@@ -78,13 +96,16 @@ defmodule PropertyDamage.Executor.Stutter do
         runtime = Executor.inject_unavailable_runtime("during stutter retries", stutter_ctx)
 
         # Execute retry
-        case adapter.execute(resolved_command, adapter_context, runtime) do
-          {:ok, retry_events} ->
-            {:ok, attempt, retry_events}
+        result =
+          case adapter.execute(resolved_command, adapter_context, runtime) do
+            {:ok, retry_events} ->
+              {:ok, attempt, retry_events}
 
-          {:error, reason} ->
-            {:error, attempt, reason}
-        end
+            {:error, reason} ->
+              {:error, attempt, reason}
+          end
+
+        {result, rng}
       end)
 
     # Process retry results and compare

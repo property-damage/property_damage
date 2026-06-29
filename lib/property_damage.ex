@@ -618,7 +618,11 @@ defmodule PropertyDamage do
             Executor.run(sequence, model, adapter,
               adapter_config: adapter_config,
               event_queue: event_queue,
-              stutter_config: stutter_config
+              stutter_config: stutter_config,
+              # Explicit stutter RNG base (DR-029): per-run seed so stutter
+              # decisions are decoupled from run count and seed-library replay
+              # drift, yet reproduce on the same campaign seed.
+              rng_seed: run_seed
             )
 
           # Emit telemetry for sequence stop
@@ -669,6 +673,7 @@ defmodule PropertyDamage do
               reporter,
               run_seed,
               run_number,
+              stutter_config,
               coverage_acc.fires
             )
           end
@@ -925,6 +930,7 @@ defmodule PropertyDamage do
             ctx.reporter,
             seed,
             0,
+            ctx.stutter_config,
             # Replay is a pre-exploration phase; whole-run anti-vacuity coverage
             # is an exploration concern, so no firings are accumulated here.
             %{}
@@ -964,7 +970,9 @@ defmodule PropertyDamage do
             Executor.run(sequence, ctx.model, ctx.adapter,
               adapter_config: ctx.adapter_config,
               event_queue: event_queue,
-              stutter_config: ctx.stutter_config
+              stutter_config: ctx.stutter_config,
+              # Replay derives run 0, whose effective seed is the replayed seed.
+              rng_seed: seed
             )
 
           fun.(sequence, result, event_queue)
@@ -1100,15 +1108,15 @@ defmodule PropertyDamage do
          reporter,
          seed,
          run_number,
+         stutter_config,
          assertion_fires
        ) do
-    # Skip shrinking for stutter-related failures since:
-    # 1. The failure is about SUT idempotency, not the command sequence
-    # 2. Shrinking without stutter won't reproduce the failure
-    should_shrink = shrink and not stutter_failure?(result.failure_reason)
-
+    # Stutter failures are now shrinkable (DR-029): the shrinker reproduces them
+    # with stutter forced on (probability 1.0), so they minimize to the offending
+    # command rather than being skipped. `seed` is the run's effective seed,
+    # reused as the stutter RNG base so reproduction tracks the original run.
     {shrunk_sequence, shrink_iterations, shrink_time_ms} =
-      if should_shrink do
+      if shrink do
         shrink_result =
           Shrinker.shrink(sequence,
             failed_at_index: result.failed_at_index,
@@ -1117,7 +1125,9 @@ defmodule PropertyDamage do
             adapter: adapter,
             adapter_config: adapter_config,
             config: shrinker_config,
-            event_queue: event_queue
+            event_queue: event_queue,
+            stutter_config: stutter_config,
+            rng_seed: seed
           )
 
         {shrink_result.sequence, shrink_result.iterations, shrink_result.time_ms}
@@ -1126,12 +1136,14 @@ defmodule PropertyDamage do
       end
 
     # Re-execute shrunk sequence to get fresh event log and state
-    # (the original result has state from before shrinking)
-    {:ok, fresh_result} =
-      Executor.run(shrunk_sequence, model, adapter,
-        adapter_config: adapter_config,
-        event_queue: event_queue
-      )
+    # (the original result has state from before shrinking). For a stutter
+    # failure, force stutter on (prob 1.0) with the run's seed so the report's
+    # fresh state actually carries the reproduced violation (DR-029).
+    fresh_opts =
+      [adapter_config: adapter_config, event_queue: event_queue] ++
+        stutter_repro_run_opts(result.failure_reason, stutter_config, seed)
+
+    {:ok, fresh_result} = Executor.run(shrunk_sequence, model, adapter, fresh_opts)
 
     # Create rich failure report with fresh state from shrunk sequence
     failure_report =
@@ -1190,6 +1202,19 @@ defmodule PropertyDamage do
   defp stutter_failure?({:idempotency_violation, _}), do: true
   defp stutter_failure?({:stutter_execution_failed, _}), do: true
   defp stutter_failure?(_), do: false
+
+  # Extra Executor.run opts for the post-shrink re-execution (DR-029). For a
+  # stutter failure, force stutter on (prob 1.0) with the run seed so the
+  # report's fresh state reproduces the violation; otherwise no stutter opts.
+  defp stutter_repro_run_opts(failure_reason, %Stutter.Config{} = config, seed) do
+    if stutter_failure?(failure_reason) do
+      [stutter_config: %{config | probability: 1.0, enabled: true}, rng_seed: seed]
+    else
+      []
+    end
+  end
+
+  defp stutter_repro_run_opts(_failure_reason, _config, _seed), do: []
 
   # Build the on_failure callback from :on_failure and :regression options
   defp build_on_failure_callback(opts) do

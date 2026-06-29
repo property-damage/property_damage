@@ -29,15 +29,24 @@
   state-mutating clusters.
 - **Explicit RNG.** The process-global `:rand` (seeded in `property_damage.ex`, consumed by
   stutter) is replaced by an explicit RNG term threaded through `%Executor.State{}` and the
-  shrinker, landed as its own golden-tested commit. Target is **self-consistent determinism**
-  (same seed → same stutter decisions, plus DR-017 shrink-equivalence), not byte-identical
-  reproduction of the old global stream. `Generator.run_seed` (the determinism users rely on)
-  is untouched throughout.
+  shrinker, landed as its own golden-tested commit. The executor derives a fresh generator per
+  command from `{rng_seed, command_index}` (the run's effective seed flows in as `rng_seed`), so
+  stutter draws are index-local: decoupled from earlier commands, earlier runs, and seed-library
+  replay drift. Target is **self-consistent determinism** (same seed → same stutter decisions,
+  plus DR-017 shrink-equivalence), not byte-identical reproduction of the old global stream.
+  `Generator.run_seed` (the determinism users rely on) is untouched throughout. Because the draws
+  are now reproducible, this bullet also lands **shrinkable stutter** (Scope B): stutter failures,
+  formerly excluded from shrinking, are reproduced by the shrinker with stutter forced on (prob
+  1.0) and minimized to the offending command. Forced reproduction is gated to stutter failures
+  only, so non-stutter shrinking is unperturbed. This is a behavioral change with an
+  execution-engine spec delta (the explicit-RNG determinism requirement), not a pure refactor.
 - **Preserved invariants.** The finalize ordering — `finalize_pollers` → `finalize_resource_
   pollers` → `settle_event_queue` → `finalize_after_settle` → `run_phase_assertions(:teardown)`,
   with the async-halt / poll-timeout / settle-halt / resource-halt precedences — is locked by
-  ordering guard tests written before extraction. Public seam (`run/4`, `execute_sequence/9`,
-  `init_state/2`, `step_command/7`, `stop_pollers/1`) is unchanged.
+  ordering guard tests written before extraction. Public seam (`run/4`, `execute_sequence`,
+  `init_state/2`, `step_command/7`, `stop_pollers/1`) is unchanged apart from the explicit-RNG
+  threading: `run/4` accepts an optional `:rng_seed` and `execute_sequence` gained a trailing
+  optional `rng_seed` argument (arity grows 9 → 10, defaulted so existing callers are unaffected).
 
 ## Context
 
