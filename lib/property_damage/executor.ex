@@ -93,6 +93,8 @@ defmodule PropertyDamage.Executor do
 
   alias PropertyDamage.EventLog.Entry
 
+  alias PropertyDamage.Executor.State
+
   # Process dictionary key for injection context during adapter execution.
   # This allows adapters to inject events mid-execution using ctx.inject.(event).
   @injection_ctx_key :pd_injection_context
@@ -1142,7 +1144,7 @@ defmodule PropertyDamage.Executor do
          external_markers,
          registry
        ) do
-    %{
+    %State{
       event_log: [],
       projections: init_projections(model),
       projections_before: nil,
@@ -1622,12 +1624,10 @@ defmodule PropertyDamage.Executor do
         # the failure branches below, so finalize_result/2 can stop them at run
         # end; otherwise an adapter that starts a poller and then errors leaks it
         # (and shrinking re-runs failures many times).
-        state_with_pollers =
-          Map.put(
-            state,
-            :active_resource_pollers,
-            Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-          )
+        state_with_pollers = %{
+          state
+          | active_resource_pollers: state.active_resource_pollers ++ started_resource_pollers
+        }
 
         case result do
           {:ok, events} when is_list(events) ->
@@ -2085,11 +2085,11 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Merge updates onto the existing state, preserving every key not being
-  # changed. Replaces the old hand-rolled state-map literals that silently
-  # dropped keys (placeholder_registry, stutter_config, mock_registry,
-  # external_markers, active_faults, model, pollers, ...).
-  defp put_state(state, updates), do: Map.merge(state, Map.new(updates))
+  # Apply updates onto the existing %State{}, preserving every field not being
+  # changed. Uses struct!/2 so a write to an undeclared field RAISES rather than
+  # silently producing a corrupt struct-shaped map (DR-029); the State struct is
+  # the single source of truth for the run-state shape.
+  defp put_state(%State{} = state, updates), do: struct!(state, updates)
 
   # Process events from command execution
   defp process_events(events, source, command_index, event_log, projections, branch_id) do
@@ -3102,16 +3102,24 @@ defmodule PropertyDamage.Executor do
       {:halt, name, reason, idx, counters} ->
         Enum.each(pollers, &StatePoller.stop/1)
 
-        halted_state =
-          %{state | projections: projections, event_log: event_log, assertion_counters: counters}
-          |> Map.put(:async_halt, {name, reason, idx})
+        halted_state = %{
+          state
+          | projections: projections,
+            event_log: event_log,
+            assertion_counters: counters,
+            async_halt: {name, reason, idx}
+        }
 
         {results, halted_state}
 
       {:ok, counters, failures} ->
-        state =
-          %{state | projections: projections, event_log: event_log, assertion_counters: counters}
-          |> Map.put(:assertion_failures, failures)
+        state = %{
+          state
+          | projections: projections,
+            event_log: event_log,
+            assertion_counters: counters,
+            assertion_failures: failures
+        }
 
         # 2. Refresh each poller's getter to read the freshly-updated projections
         update_poller_state_getters(%{state | active_pollers: pollers})
