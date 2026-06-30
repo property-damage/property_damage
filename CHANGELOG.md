@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (DR-032):** `external_markers` is now an explicit run option only;
+  the `config :property_damage, external_markers: [...]` app-config channel is no
+  longer consulted. `PropertyDamage.External.external?/1` no longer recognizes
+  configured atom markers (only the `%External{}` struct and `ExternalMarker`
+  protocol implementers are intrinsic); `external?/2` and `external_paths/2` use
+  the explicit list as their sole source. Pass markers via
+  `PropertyDamage.run(..., external_markers: [:__external__])` instead of app
+  config. This completes the ambient-state removal begun in DR-027 and DR-029.
 - **BREAKING (DR-028):** `command_spec/1` is now the single surface for a command's
   *static* metadata. The per-metadata `Command` callbacks are removed:
   `semantics/0`, `settle_config/0`, `read_only?/0`, `idempotent?/0`,

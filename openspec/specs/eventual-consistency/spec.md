@@ -44,7 +44,7 @@ Settle behavior SHALL be configurable with `timeout_ms` (default 2000), `interva
 
 #### Scenario: Default configuration applied
 - **WHEN** a command requires settling but provides no custom configuration
-- **THEN** the framework SHALL use timeout of 2000ms, interval of 100ms, and linear backoff
+- **THEN** the framework SHALL use timeout of 2000ms, interval of 300ms, and linear backoff
 
 #### Scenario: Custom configuration from command spec
 - **WHEN** a command spec includes a `:settle` field with custom values
@@ -55,8 +55,8 @@ Settle behavior SHALL be configurable with `timeout_ms` (default 2000), `interva
 When the backoff strategy is `:linear`, the system SHALL use a constant interval between retries for the entire settle duration.
 
 #### Scenario: Constant retry interval
-- **WHEN** settle is configured with `:linear` backoff and an interval of 100ms
-- **THEN** each retry SHALL wait approximately 100ms before the next attempt
+- **WHEN** settle is configured with `:linear` backoff and an interval of 300ms
+- **THEN** each retry SHALL wait approximately 300ms before the next attempt
 - **AND** the interval SHALL remain constant across all retries
 
 ### Requirement: Exponential Backoff
@@ -64,9 +64,9 @@ When the backoff strategy is `:linear`, the system SHALL use a constant interval
 When the backoff strategy is `:exponential`, the system SHALL double the interval after each retry, capped so that the total wait does not exceed the timeout.
 
 #### Scenario: Doubling interval
-- **WHEN** settle is configured with `:exponential` backoff and an initial interval of 100ms
-- **THEN** the first retry SHALL wait approximately 100ms
-- **AND** the second retry SHALL wait approximately 200ms
+- **WHEN** settle is configured with `:exponential` backoff and an initial interval of 300ms
+- **THEN** the first retry SHALL wait approximately 300ms
+- **AND** the second retry SHALL wait approximately 600ms
 - **AND** subsequent retries SHALL continue doubling
 
 #### Scenario: Interval capped at remaining time
