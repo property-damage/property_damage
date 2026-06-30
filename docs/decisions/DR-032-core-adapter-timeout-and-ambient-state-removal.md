@@ -1,6 +1,6 @@
 # DR-032: Core Adapter Timeout + Ambient-State Removal
 
-**Status:** Accepted (design pass; implementation in progress)
+**Status:** Accepted (implemented)
 **Date:** 2026-06-29
 
 > Part of the served/servant clean-break campaign (discrepancy sweep / deep cleanup). Closes a
@@ -36,11 +36,20 @@
   The alternatives considered and rejected: opt-in enforcement (spares the in-process case but
   weakens the guarantee to "can be bounded"), and a reversed watchdog that kills the run process
   (destroys run state, and reduces to the same cross-process problem one level up).
-- **Per-instance nemesis fault state.** Cooperative/host-effect nemeses (ClockSkew, SlowIO,
-  CertificateExpiry, MemoryPressure, CPUStress, ResourceExhaustion) stop storing fault state in
-  *shared global* process-dictionary keys. Each `inject/2` returns a per-instance handle that
-  `restore/2` consumes, so concurrent instances no longer collide and cleanup no longer
-  blanket-sweeps every instance.
+- **Remove the misaligned nemeses (supersedes the per-instance-handle plan).** The nemeses that
+  stored fault state in *shared global* process-dictionary keys (ClockSkew, SlowIO,
+  CertificateExpiry, CPUStress, MemoryPressure, ResourceExhaustion) plus the one-shot ProcessKill
+  are **removed**, not re-plumbed. The original plan was to give each `inject/2` a per-instance
+  handle that `restore/2` consumes. Grilling (2026-06-30) reframed the problem: these nemeses are
+  *architecturally misaligned*, not merely sharing state. They stress or observe the **local BEAM/
+  host** (CPU, memory, OS resources, local process kills) or install a virtual clock the adapter
+  reads via a global no-arg API; none of that reaches an **external** System Under Test driven
+  through an adapter. The host-stress ones also destabilize the run (and now manufacture false
+  `CommandTimeoutError`s under the new core timeout). The remaining built-ins are the three
+  Toxiproxy network nemeses (`NetworkPartition`, `NetworkLatency`, `PacketLoss`), which fault the
+  SUT's real network path and hold **no** BEAM-local fault state, so the shared-global-key problem
+  is eliminated by removal and no `inject`/`restore` contract change is needed. This is removing a
+  misaligned feature, not down-scoping an underbuilt one.
 - **external_markers off Application env.** `External` reads `external_markers` from an explicit
   run option threaded through the run rather than `Application.get_env/3` (a config-time ambient
   channel).

@@ -165,19 +165,10 @@ The framework SHALL provide utility functions to identify Nemesis modules and co
 
 ### Requirement: Built-in Fault Types
 
-The framework SHALL provide 10 built-in Nemesis implementations covering common fault categories.
+The framework SHALL provide built-in Nemesis implementations that fault the System Under Test's network path. Built-in nemeses SHALL inject faults into the SUT's environment, not the test harness's own VM; nemeses that would only stress or observe the local BEAM/host (CPU, memory, OS resources, local process kills, a virtual clock the adapter reads) are out of scope and SHALL NOT be provided as built-ins (fault an in-process collaborator from your own adapter/command code instead).
 
 #### Scenario: Network faults
 
 - **WHEN** testing network resilience
 - **THEN** the framework SHALL provide `NetworkPartition`, `NetworkLatency`, and `PacketLoss` Nemesis modules
-
-#### Scenario: Resource faults
-
-- **WHEN** testing resource exhaustion resilience
-- **THEN** the framework SHALL provide `CpuStress`, `MemoryPressure`, and `ResourceExhaustion` Nemesis modules
-
-#### Scenario: Infrastructure faults
-
-- **WHEN** testing infrastructure resilience
-- **THEN** the framework SHALL provide `ClockSkew`, `ProcessKill`, `CertificateExpiry`, and `SlowIo` Nemesis modules
+- **AND** these SHALL inject through Toxiproxy when configured in the adapter context, tagging events `simulated: true` otherwise

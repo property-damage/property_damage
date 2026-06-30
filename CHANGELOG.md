@@ -113,6 +113,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   index. Best-effort: a raising `label/2` degrades to no annotation rather than
   failing the report.
 
+### Removed
+
+- **BREAKING (DR-032):** removed 7 of the 10 built-in nemeses, keeping only the
+  three that fault the SUT's network path: `NetworkPartition`, `NetworkLatency`,
+  `PacketLoss`. Removed `ClockSkew`, `SlowIO`, `CertificateExpiry` (cooperative:
+  a virtual clock / flags the adapter reads via a global no-arg API),
+  `CPUStress`, `MemoryPressure`, `ResourceExhaustion` (host-effect: stress the
+  *local* BEAM/host), and `ProcessKill` (kills a *local* process). These only
+  affected the test harness's own VM, not an external System Under Test driven
+  through an adapter, so they tested the wrong thing; the host-stress ones could
+  also destabilize the run (and, under the new core timeout, manufacture false
+  `CommandTimeoutError`s). To fault an in-process collaborator, do it in your own
+  adapter/command code. This also removes the last shared-global process-dict
+  fault state (the original "per-instance handle" plan is superseded by removal).
+
 ## [0.2.0] - 2026-06-25
 
 This cycle made the headline features that 0.1.0 advertised actually work end to
