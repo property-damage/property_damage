@@ -48,8 +48,10 @@ defmodule PropertyDamage.CommandSpecTest do
     end
   end
 
-  # Legacy command without use macro
-  defmodule LegacyCommand do
+  # Spec-less command: implements only the required generator/1 (no command_spec/1).
+  # It must resolve to the framework defaults (DR-028: there is no per-callback
+  # fallback; a command without command_spec/1 is simply all-defaults).
+  defmodule SpeclessCommand do
     @behaviour PropertyDamage.Command
 
     defstruct [:id]
@@ -59,17 +61,6 @@ defmodule PropertyDamage.CommandSpecTest do
       %{id: StreamData.positive_integer()}
       |> PropertyDamage.Generator.merge_overrides(overrides)
       |> StreamData.fixed_map()
-    end
-
-    @impl true
-    def semantics, do: :probe
-
-    @impl true
-    def read_only?, do: true
-
-    @impl true
-    def settle_config do
-      %{timeout_ms: 3_000, interval_ms: 150}
     end
   end
 
@@ -110,6 +101,9 @@ defmodule PropertyDamage.CommandSpecTest do
       assert defaults.when.(%{}) == true
       assert defaults.with == %{}
       assert defaults.weight == 1
+      assert defaults.observables == []
+      assert defaults.idempotent == true
+      assert defaults.acceptable_retry_events == []
     end
   end
 
@@ -147,37 +141,6 @@ defmodule PropertyDamage.CommandSpecTest do
       assert spec.weight == 2
       # From overrides
       assert spec.shrink == :prefer_remove
-    end
-  end
-
-  describe "build_spec_from_legacy/1" do
-    test "reads semantics from legacy callback" do
-      spec = Command.build_spec_from_legacy(LegacyCommand)
-
-      assert spec.execution == :probe
-    end
-
-    test "reads settle_config from legacy callback" do
-      spec = Command.build_spec_from_legacy(LegacyCommand)
-
-      assert spec.settle.timeout_ms == 3_000
-      assert spec.settle.interval_ms == 150
-      # Should merge with defaults for missing keys
-      assert spec.settle.backoff == :linear
-    end
-
-    test "converts read_only? to shrink: :prefer_remove" do
-      spec = Command.build_spec_from_legacy(LegacyCommand)
-
-      assert spec.shrink == :prefer_remove
-    end
-
-    test "uses defaults when legacy callbacks not implemented" do
-      spec = Command.build_spec_from_legacy(SyncCommand)
-
-      assert spec.execution == :sync
-      assert spec.shrink == :neutral
-      assert spec.settle == %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear}
     end
   end
 
@@ -247,13 +210,13 @@ defmodule PropertyDamage.CommandSpecTest do
       assert spec.weight == 3
     end
 
-    test "falls back to legacy for commands without command_spec" do
-      {weight, module, spec} = Model.normalize_command_spec(LegacyCommand)
+    test "falls back to framework defaults for commands without command_spec" do
+      {weight, module, spec} = Model.normalize_command_spec(SpeclessCommand)
 
       assert weight == 1
-      assert module == LegacyCommand
-      assert spec.execution == :probe
-      assert spec.shrink == :prefer_remove
+      assert module == SpeclessCommand
+      assert spec.execution == :sync
+      assert spec.shrink == :neutral
     end
 
     test "handles map form" do
@@ -286,17 +249,18 @@ defmodule PropertyDamage.CommandSpecTest do
       assert spec.shrink == :prefer_keep
     end
 
-    test "falls back to legacy callbacks" do
-      spec = Model.resolve_spec(LegacyCommand, [])
+    test "falls back to framework defaults for spec-less commands" do
+      spec = Model.resolve_spec(SpeclessCommand, [])
 
-      assert spec.execution == :probe
-      assert spec.shrink == :prefer_remove
+      assert spec.command == SpeclessCommand
+      assert spec.execution == :sync
+      assert spec.shrink == :neutral
     end
 
-    test "opts override legacy values" do
-      spec = Model.resolve_spec(LegacyCommand, shrink: :neutral)
+    test "opts override defaults for spec-less commands" do
+      spec = Model.resolve_spec(SpeclessCommand, shrink: :prefer_keep)
 
-      assert spec.shrink == :neutral
+      assert spec.shrink == :prefer_keep
     end
   end
 

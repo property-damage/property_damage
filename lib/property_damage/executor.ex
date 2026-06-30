@@ -91,8 +91,10 @@ defmodule PropertyDamage.Executor do
 
   alias PropertyDamage.EventLog.Entry
 
+  alias PropertyDamage.Executor.Branching
   alias PropertyDamage.Executor.Events
   alias PropertyDamage.Executor.Finalization
+  alias PropertyDamage.Executor.Settle
   alias PropertyDamage.Executor.State
 
   alias PropertyDamage.Runtime
@@ -297,7 +299,7 @@ defmodule PropertyDamage.Executor do
         rng_seed
       ) do
     # Branching sequence: execute prefix, branches, suffix
-    PropertyDamage.Executor.Branching.execute_branching(
+    Branching.execute_branching(
       sequence,
       model,
       adapter,
@@ -475,7 +477,7 @@ defmodule PropertyDamage.Executor do
   # Build the executor's internal per-run state map. Shared by linear and
   # branching execution (and exposed to the stepping shell via init_state/2)
   # so the state shape lives in exactly one place.
-  # Shared with PropertyDamage.Executor.Branching. DR-029.
+  # Shared with Branching. DR-029.
   @doc false
   def build_initial_state(
         model,
@@ -690,7 +692,7 @@ defmodule PropertyDamage.Executor do
 
         result =
           try do
-            PropertyDamage.Executor.Settle.execute_with_settle(
+            Settle.execute_with_settle(
               resolved_command,
               adapter,
               adapter_context,
@@ -1124,10 +1126,9 @@ defmodule PropertyDamage.Executor do
   end
 
   # Build a %{command_module => resolved_spec} lookup so execution-time
-  # settle behaviour comes from the normalized command spec (which honors
-  # `use PropertyDamage.Command, execution: :probe`, model-level overrides,
-  # AND legacy semantics/0 callbacks via build_spec_from_legacy) rather than
-  # only the struct's legacy callbacks.
+  # settle/stutter behaviour comes from the single resolved command spec (DR-028),
+  # which honors `use PropertyDamage.Command, execution: :probe` and model-level
+  # overrides.
   defp build_command_specs(model) do
     model.commands()
     |> PropertyDamage.Model.normalize_commands()

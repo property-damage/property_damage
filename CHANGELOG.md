@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (DR-028):** `command_spec/1` is now the single surface for a command's
+  *static* metadata. The per-metadata `Command` callbacks are removed:
+  `semantics/0`, `settle_config/0`, `read_only?/0`, `idempotent?/0`,
+  `acceptable_retry_events/0`, and `downstream_observables/0`. Move each onto the
+  spec map (authored via `use PropertyDamage.Command, <opts>` or an explicit
+  `command_spec/1`):
+  - `def semantics, do: :probe` → `use PropertyDamage.Command, execution: :probe`
+  - `def settle_config, do: %{...}` → `use PropertyDamage.Command, settle: %{...}`
+  - `def read_only?, do: true` → `use PropertyDamage.Command, shrink: :prefer_remove`
+    (read-only IS the `:prefer_remove` shrink hint; there is no separate boolean)
+  - `def downstream_observables, do: [...]` → `use PropertyDamage.Command, observables: [...]`
+  - `def idempotent?, do: false` → `use PropertyDamage.Command, idempotent: false`
+  - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]`
+  The per-instance callbacks `generator/1` (required), `idempotency_key/1`,
+  `label/2`, and `awaits/2` are unchanged (they take the command and/or state, so
+  they cannot live in a static map). `PropertyDamage.Command.build_spec_from_legacy/1`
+  and the legacy branch of `Model.resolve_spec/2` are removed; a command module
+  without `command_spec/1` now resolves to the framework defaults (plus any
+  Model-supplied overrides). This supersedes the legacy-fallback portion of DR-019.
 - **BREAKING (DR-027):** The `Adapter` callback `execute/2` is now `execute/3`:
   `execute(command, user_context, runtime)`. The `user_context` (second argument)
   is now *exactly* what your `setup/1` returned, with no framework keys merged in;

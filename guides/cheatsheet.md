@@ -7,7 +7,14 @@ Compact syntax reference for all five core behaviours, run options, and common p
 ```elixir
 defmodule MyApp.Commands.CreateOrder do
   use PropertyDamage.Command
-  # Optional use opts: execution: :probe, shrink: :prefer_remove, weight: 2
+  # Optional use opts (all static metadata lives here, DR-028):
+  #   execution: :probe,                 # :sync (default) | :probe | :async
+  #   shrink: :prefer_remove,            # read-only commands pruned first
+  #   weight: 2,
+  #   observables: [OrderCreated],       # event types this command produces
+  #   idempotent: false,                 # exclude from stutter (default true)
+  #   acceptable_retry_events: [OrderAlreadyExists],
+  #   settle: %{timeout_ms: 5_000, interval_ms: 200, backoff: :exponential}
 
   defstruct [:amount, :currency]
 
@@ -28,21 +35,12 @@ defmodule MyApp.Commands.CreateOrder do
   #   PropertyDamage.Command.build_spec(__MODULE__, [execution: :probe], overrides)
   # end
 
-  # Metadata used by framework for shrinking/validation/debugging
-  # (server-generated values: mark them external() on the event struct)
-  # def downstream_observables, do: [OrderCreated, OrderRejected]
-  # def read_only?, do: false
+  # Optional per-instance callbacks (take the command/state, so they stay functions):
   # def label(_state, %__MODULE__{amount: 0}), do: "zero amount"
   # def label(_state, _cmd), do: nil
-
-  # Execution semantics (or set via use opts / command_spec)
-  # def semantics, do: :sync                  # :sync | :probe | :async
-  # def settle_config, do: %{timeout_ms: 5_000, interval_ms: 200, backoff: :exponential}
-
-  # Idempotency testing
-  # def idempotent?, do: true
   # def idempotency_key(%__MODULE__{} = cmd), do: cmd.idempotency_key
-  # def acceptable_retry_events, do: [OrderCreated, OrderAlreadyExists]
+  # def awaits(_state, %__MODULE__{id: id}),
+  #   do: [%PropertyDamage.Await{match: &match?(%Webhook{id: ^id}, &1)}]
 end
 ```
 

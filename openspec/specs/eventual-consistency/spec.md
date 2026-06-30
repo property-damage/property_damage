@@ -40,7 +40,7 @@ The system SHALL provide retry logic for probe and async commands, repeatedly ex
 
 ### Requirement: Settle Configuration
 
-Settle behavior SHALL be configurable with `timeout_ms` (default 2000), `interval_ms` (default 300), and `backoff` strategy (`:linear` or `:exponential`). Configuration SHALL be sourced from the command spec's `:settle` field or from a legacy `settle_config/0` callback.
+Settle behavior SHALL be configurable with `timeout_ms` (default 2000), `interval_ms` (default 300), and `backoff` strategy (`:linear` or `:exponential`). Configuration SHALL be sourced from the command spec's `:settle` field (DR-028); there is no separate `settle_config/0` callback.
 
 #### Scenario: Default configuration applied
 - **WHEN** a command requires settling but provides no custom configuration
@@ -49,10 +49,6 @@ Settle behavior SHALL be configurable with `timeout_ms` (default 2000), `interva
 #### Scenario: Custom configuration from command spec
 - **WHEN** a command spec includes a `:settle` field with custom values
 - **THEN** those values SHALL override the corresponding defaults
-
-#### Scenario: Legacy settle_config callback
-- **WHEN** a command module implements `settle_config/0`
-- **THEN** the returned configuration SHALL be merged with defaults
 
 ### Requirement: Linear Backoff
 

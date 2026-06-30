@@ -11,7 +11,8 @@ Commands follow a pure generator pattern - they are decoupled from state shape a
 Commands define:
 - **Struct fields** - The data needed for the operation
 - **`generator/1`** - How to generate valid field values
-- **Metadata** - Optional callbacks like `read_only?/0`, `downstream_observables/0`
+- **Static metadata** - declared on the single `command_spec/1` surface (via `use`
+  options): `execution`, `shrink`, `observables`, `idempotent`, ...
 
 Commands do NOT define:
 - When the command is valid (preconditions) - defined in Model via `when:`
@@ -22,7 +23,8 @@ Commands do NOT define:
 
 ```elixir
 defmodule MyTest.Commands.CreateOrder do
-  @behaviour PropertyDamage.Command
+  # Events this command can produce are declared on the command_spec surface.
+  use PropertyDamage.Command, observables: [OrderCreated, OrderRejected]
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:amount, :currency]
@@ -36,9 +38,6 @@ defmodule MyTest.Commands.CreateOrder do
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
   end
-
-  # Optional: events this command can produce
-  def downstream_observables, do: [OrderCreated, OrderRejected]
 end
 
 # The corresponding event marks server-generated fields with external()
@@ -56,7 +55,11 @@ For commands that need state-dependent values (like selecting from existing refs
 
 ```elixir
 defmodule MyTest.Commands.ViewOrder do
-  @behaviour PropertyDamage.Command
+  # Read-only commands set shrink: :prefer_remove so they are pruned first.
+  use PropertyDamage.Command,
+    shrink: :prefer_remove,
+    observables: [OrderViewed, OrderNotFound]
+
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:order_ref]
@@ -68,9 +71,6 @@ defmodule MyTest.Commands.ViewOrder do
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
   end
-
-  def read_only?, do: true
-  def downstream_observables, do: [OrderViewed, OrderNotFound]
 end
 ```
 
@@ -385,23 +385,26 @@ defmodule ViewOrder do
 end
 ```
 
-## Optional Command Callbacks
+## Static Metadata (`command_spec/1`)
 
-### `read_only?/0`
-
-Mark commands that don't modify state (prioritized for removal during shrinking):
-
-```elixir
-def read_only?, do: true
-```
-
-### `downstream_observables/0`
-
-Declare which event types this command can produce:
+A command's static metadata is declared once, on the `command_spec/1` surface,
+authored via `use PropertyDamage.Command, <opts>`:
 
 ```elixir
-def downstream_observables, do: [OrderCreated, OrderRejected]
+use PropertyDamage.Command,
+  execution: :probe,                       # :sync (default) | :probe | :async
+  shrink: :prefer_remove,                   # read-only commands are pruned first
+  observables: [OrderCreated, OrderRejected], # event types this command can produce
+  idempotent: false,                        # exclude from stutter testing (default true)
+  acceptable_retry_events: [OrderAlreadyExists] # acceptable alternative stutter responses
 ```
+
+Each key has a sensible default, so you only declare what differs from the defaults.
+
+## Optional Per-Instance Callbacks
+
+These take the command and/or state, so they stay function callbacks rather than
+static spec keys.
 
 ### `label/2`
 
@@ -413,19 +416,19 @@ def label(_state, %__MODULE__{order_ref: ref}) do
 end
 ```
 
-### `semantics/0`
+### `idempotency_key/1`
 
-Declare execution semantics (`:sync`, `:probe`, `:async`):
+Return the idempotency key passed to the adapter during stutter testing.
 
-```elixir
-def semantics, do: :probe  # For read operations that may need retry/settle
-```
+### `awaits/2`
+
+Declare which inbound (injector) events this command correlates. See
+`PropertyDamage.Await`.
 
 ## Execution Semantics
 
-Commands declare their execution mode via `command_spec/1` or the legacy `semantics/0`
-callback. The execution mode determines how the framework handles the command during
-testing.
+Commands declare their execution mode via the `:execution` key of `command_spec/1`.
+The execution mode determines how the framework handles the command during testing.
 
 ### Sync (default)
 
@@ -479,7 +482,7 @@ interval doubles after each retry (capped at the timeout).
 |---------|----------|
 | Struct fields | Command |
 | Field generation | Command (`generator/1`) |
-| Metadata | Command (optional callbacks) |
+| Static metadata | Command (`command_spec/1` / `use` options) |
 | When to enable | Model (`when:` option) |
 | State-dependent params | Model (`with:` option) |
 | Expected events | Simulator (`simulate/2` via `simulator/0`) |

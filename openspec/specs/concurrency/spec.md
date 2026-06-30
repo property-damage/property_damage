@@ -69,6 +69,16 @@ The system SHALL support probabilistic command retries to verify that the SUT be
 - **THEN** events from the initial execution SHALL be applied to projections
 - **AND** events from retry executions SHALL be captured but NOT applied to projections
 
+#### Scenario: Idempotency eligibility from command spec
+- **WHEN** a command declares `idempotent: false` in its `command_spec/1` (DR-028)
+- **THEN** the command SHALL be excluded from stutter selection
+- **AND** a command that declares no `:idempotent` value defaults to eligible (`true`)
+
+#### Scenario: Acceptable retry events from command spec
+- **WHEN** a command declares `:acceptable_retry_events` in its `command_spec/1` (DR-028)
+- **AND** a retry returns events whose modules are all in that list (or match the original)
+- **THEN** the retry SHALL be treated as a match, not an idempotency violation
+
 ### Requirement: Stutter Configuration
 
 Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (range or fixed), a commands filter, and a comparison mode.

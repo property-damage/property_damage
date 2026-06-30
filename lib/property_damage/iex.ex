@@ -219,11 +219,7 @@ defmodule PropertyDamage.IEx do
   end
 
   defp get_semantics(cmd_module) do
-    if function_exported?(cmd_module, :semantics, 0) do
-      cmd_module.semantics()
-    else
-      :sync
-    end
+    PropertyDamage.Settle.get_semantics(cmd_module)
   end
 
   # ============================================================================

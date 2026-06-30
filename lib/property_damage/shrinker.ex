@@ -799,7 +799,26 @@ defmodule PropertyDamage.Shrinker do
   # Sort command indices by shrink priority.
   # Commands with :prefer_remove (probes, read-only) are prioritized for removal.
   # Commands with :prefer_keep are removed last.
-  # Uses command_spec/1 if available, falls back to semantics-based heuristics.
+  # Reads the :shrink key from the command's resolved spec; spec-less commands
+  # default to :neutral.
+  defp shrink_priority_for_command(cmd) when is_struct(cmd) do
+    case Map.get(resolved_shrink_spec(cmd.__struct__), :shrink, :neutral) do
+      :prefer_remove -> 0
+      :neutral -> 1
+      :prefer_keep -> 2
+    end
+  end
+
+  defp shrink_priority_for_command(_cmd), do: 1
+
+  defp resolved_shrink_spec(module) do
+    if function_exported?(module, :command_spec, 1) do
+      module.command_spec([])
+    else
+      PropertyDamage.Command.framework_defaults()
+    end
+  end
+
   defp sort_indices_by_shrink_priority(commands) do
     commands
     |> Enum.with_index()
@@ -808,33 +827,6 @@ defmodule PropertyDamage.Shrinker do
     end)
     |> Enum.map(fn {_cmd, idx} -> idx end)
   end
-
-  # Determine shrink priority for a command.
-  # Returns 0 for prefer_remove (try first), 1 for neutral, 2 for prefer_keep (try last).
-  defp shrink_priority_for_command(cmd) when is_struct(cmd) do
-    module = cmd.__struct__
-
-    # Try command_spec/1 first
-    if function_exported?(module, :command_spec, 1) do
-      spec = module.command_spec([])
-
-      case Map.get(spec, :shrink, :neutral) do
-        :prefer_remove -> 0
-        :neutral -> 1
-        :prefer_keep -> 2
-      end
-    else
-      # Fallback to semantics-based heuristics (legacy behavior)
-      case Settle.get_semantics(cmd) do
-        # Probe commands are read-only, prioritize for removal
-        :probe -> 0
-        # All other commands have equal priority
-        _ -> 1
-      end
-    end
-  end
-
-  defp shrink_priority_for_command(_cmd), do: 1
 
   defp do_linear_shrink(state, []) do
     state

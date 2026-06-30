@@ -25,7 +25,10 @@ defmodule PropertyDamage.Command do
         shrink: :prefer_remove | :neutral | :prefer_keep,  # Shrinking priority
         when: (state -> boolean),             # Precondition
         with: (state -> map) | map,           # Generator overrides
-        weight: pos_integer()                 # Generation weight
+        weight: pos_integer(),                # Generation weight
+        observables: [module()],              # Events this command can produce
+        idempotent: boolean(),                # Eligible for stutter testing
+        acceptable_retry_events: [module()]   # Acceptable stutter-retry responses
       }
 
   ## Using PropertyDamage.Command
@@ -138,21 +141,21 @@ defmodule PropertyDamage.Command do
         ]
       end
 
-  ## Migration from Legacy Callbacks
+  ## Static Metadata Lives in the Spec
 
-  The `command_spec/1` pattern consolidates multiple callbacks:
+  `command_spec/1` is the single surface for a command's static metadata. Per-instance
+  computations (`generator/1`, `idempotency_key/1`, `label/2`, `awaits/2`) stay function
+  callbacks; everything static is a spec key:
 
-  | Legacy Callback     | Spec Field     |
-  |---------------------|----------------|
-  | `semantics/0`       | `:execution`   |
-  | `settle_config/0`   | `:settle`      |
-  | `read_only?/0`      | `:shrink`      |
-  | Model's `when:`     | `:when`        |
-  | Model's `with:`     | `:with`        |
-  | Model's `weight:`   | `:weight`      |
-
-  Legacy callbacks continue to work - the framework falls back to them when
-  `command_spec/1` is not implemented.
+  | Spec Field                 | Meaning                                            |
+  |----------------------------|----------------------------------------------------|
+  | `:execution`               | `:sync` / `:probe` / `:async`                      |
+  | `:settle`                  | Retry config for probe/async                       |
+  | `:shrink`                  | Shrinking priority (read-only -> `:prefer_remove`) |
+  | `:observables`             | Event modules this command can produce             |
+  | `:idempotent`              | Eligibility for stutter testing                    |
+  | `:acceptable_retry_events` | Acceptable alternative stutter-retry responses     |
+  | `:when` / `:with` / `:weight` | Model-level wiring (precondition/overrides/weight) |
 
   ## Design Principles
 
@@ -167,14 +170,15 @@ defmodule PropertyDamage.Command do
     Models define WHEN to use them and HOW to parameterize them.
     Adapters define HOW to execute them against the SUT.
 
-  ## Optional Metadata Callbacks
+  ## Optional Per-Instance Callbacks
 
-  Commands can implement optional callbacks to provide metadata used by
-  the framework for shrinking, validation, and debugging:
+  Beyond the static `command_spec/1` surface, commands may implement these
+  per-instance callbacks (each takes the command and/or state, so it cannot live
+  in a static map):
 
-  - `downstream_observables/0` - Event modules this command can produce
-  - `read_only?/0` - Whether command only reads state (prioritized for removal during shrinking)
-  - `label/2` - Human-readable label for debugging
+  - `label/2` - Human-readable label for debugging output
+  - `idempotency_key/1` - Idempotency key passed to the adapter during stutter
+  - `awaits/2` - Inbound (injector) events this command correlates (see `PropertyDamage.Await`)
 
   The framework reads these via `function_exported?/3`, using sensible
   defaults when not implemented.
@@ -217,112 +221,6 @@ defmodule PropertyDamage.Command do
   @callback label(state :: map(), command :: struct()) :: String.t() | nil
 
   @doc """
-  (Optional) Returns the list of event modules this command can produce.
-
-  Used for:
-  - Validation (ensuring all referenced events exist)
-  - Causality tracking during shrinking
-  - Documentation
-
-  ## Example
-
-      def downstream_observables, do: [OrderCreated, OrderRejected]
-  """
-  @callback downstream_observables() :: [module()]
-
-  @doc """
-  (Optional) Returns true if this command only reads state, never modifies it.
-
-  Read-only commands are prioritized for removal during shrinking since
-  they typically don't affect the failure.
-
-  ## Example
-
-      def read_only?, do: true
-  """
-  @callback read_only?() :: boolean()
-
-  @doc """
-  (Optional) Returns the execution semantics of this command.
-
-  ## Semantics
-
-  - `:sync` - Synchronous operation. Mutates SUT state, completes immediately.
-    Postconditions are weak (check response codes). This is the default if not implemented.
-
-  - `:probe` - Queries SUT state without mutation, for eventually consistent
-    systems. The framework runs `execute/3` through the settle loop: the adapter
-    returns `{:settled, events}` once the condition holds or `{:retry, reason}`
-    to be called again (it does not poll inside `execute/3`). Should also
-    implement `read_only?/0` returning `true`.
-
-  - `:async` - Asynchronous operation that creates a resource and waits for it
-    to settle. Like `:probe`, it uses the framework settle loop (return
-    `{:retry, _}`/`{:settled, _}` from `execute/3`); the framework owns the
-    retries per `settle_config/0`. Async commands are protected during shrinking
-    if their ref is used by other commands.
-
-  ## Examples
-
-      # Sync (default) - creates/modifies state synchronously
-      def semantics, do: :sync
-
-      # Probe - queries and settles
-      def semantics, do: :probe
-
-      # Async - waits for async completion
-      def semantics, do: :async
-  """
-  @callback semantics() :: :sync | :probe | :async
-
-  @doc """
-  (Optional) Returns settle configuration for probes and async commands.
-
-  When a command's `semantics/0` is `:probe` or `:async`, this configuration
-  controls the retry behavior when waiting for eventual consistency.
-
-  ## Fields
-
-  - `:timeout_ms` - Maximum time to wait (default: 2000)
-  - `:interval_ms` - Time between retries (default: 300)
-  - `:backoff` - Backoff strategy, `:linear` or `:exponential` (default: `:linear`)
-
-  ## Example
-
-      def settle_config do
-        %{
-          timeout_ms: 5_000,
-          interval_ms: 200,
-          backoff: :exponential
-        }
-      end
-  """
-  @callback settle_config() :: %{
-              timeout_ms: pos_integer(),
-              interval_ms: pos_integer(),
-              backoff: :linear | :exponential
-            }
-
-  # ===========================================================================
-  # Idempotency Testing Callbacks
-  # ===========================================================================
-
-  @doc """
-  (Optional) Whether this command should be included in stutter/idempotency testing.
-
-  Commands that are intentionally non-idempotent (like `IncrementCounter`) should
-  return `false` to be excluded from stutter testing.
-
-  Default: `true` (command is assumed idempotent and will be stuttered)
-
-  ## Example
-
-      # Non-idempotent command - exclude from stutter testing
-      def idempotent?, do: false
-  """
-  @callback idempotent?() :: boolean()
-
-  @doc """
   (Optional) Returns the idempotency key for this command instance.
 
   The idempotency key is passed to the adapter in the stutter context,
@@ -337,24 +235,6 @@ defmodule PropertyDamage.Command do
       def idempotency_key(%__MODULE__{idempotency_key: key}), do: key
   """
   @callback idempotency_key(command :: struct()) :: String.t() | nil
-
-  @doc """
-  (Optional) Event modules that are acceptable as retry responses.
-
-  When stutter testing, a retry might return different events than the
-  original execution while still being correct (e.g., `OrderCreated` vs
-  `OrderAlreadyExists`). This callback declares which alternative event
-  types are acceptable.
-
-  If not implemented, only events matching the original execution are accepted.
-
-  ## Example
-
-      def acceptable_retry_events do
-        [OrderCreated, OrderAlreadyExists]
-      end
-  """
-  @callback acceptable_retry_events() :: [module()]
 
   @doc """
   (Optional) Returns the complete command specification.
@@ -379,6 +259,10 @@ defmodule PropertyDamage.Command do
   - `:when` - Precondition function `(state -> boolean)`
   - `:with` - Generator overrides `(state -> map)` or map
   - `:weight` - Generation weight (positive integer)
+  - `:observables` - Event modules this command can produce (default `[]`)
+  - `:idempotent` - Whether the command is eligible for stutter testing (default `true`)
+  - `:acceptable_retry_events` - Event modules acceptable as alternative stutter-retry
+    responses (default `[]`)
 
   ## Example
 
@@ -416,13 +300,7 @@ defmodule PropertyDamage.Command do
 
   @optional_callbacks [
     label: 2,
-    downstream_observables: 0,
-    read_only?: 0,
-    semantics: 0,
-    settle_config: 0,
-    idempotent?: 0,
     idempotency_key: 1,
-    acceptable_retry_events: 0,
     awaits: 2,
     command_spec: 1
   ]
@@ -442,6 +320,10 @@ defmodule PropertyDamage.Command do
   - `:settle` - Settle configuration map for probe/async commands
   - `:shrink` - Shrinking priority (`:prefer_remove`, `:neutral`, `:prefer_keep`), default `:neutral`
   - `:weight` - Default generation weight, default `1`
+  - `:observables` - Event modules this command can produce, default `[]`
+  - `:idempotent` - Whether the command is eligible for stutter testing, default `true`
+  - `:acceptable_retry_events` - Event modules acceptable as alternative stutter-retry
+    responses, default `[]`
 
   ## Example
 
@@ -501,7 +383,10 @@ defmodule PropertyDamage.Command do
       shrink: :neutral,
       when: fn _ -> true end,
       with: %{},
-      weight: 1
+      weight: 1,
+      observables: [],
+      idempotent: true,
+      acceptable_retry_events: []
     }
   end
 
@@ -530,61 +415,5 @@ defmodule PropertyDamage.Command do
     |> Map.merge(%{command: module})
     |> Map.merge(Map.new(module_defaults))
     |> Map.merge(Map.new(overrides))
-  end
-
-  @doc """
-  Builds a command spec from legacy callbacks.
-
-  Used for backward compatibility when a command doesn't implement `command_spec/1`
-  but does implement legacy callbacks like `semantics/0`, `settle_config/0`, etc.
-
-  ## Parameters
-
-  - `module` - The command module
-
-  ## Returns
-
-  A spec map built from legacy callbacks, with framework defaults for
-  any callbacks not implemented.
-  """
-  @spec build_spec_from_legacy(module()) :: map()
-  def build_spec_from_legacy(module) do
-    %{
-      command: module,
-      execution: get_legacy_semantics(module),
-      settle: get_legacy_settle(module),
-      shrink: get_legacy_shrink(module),
-      when: fn _ -> true end,
-      with: %{},
-      weight: 1
-    }
-  end
-
-  # Private helpers for reading legacy callbacks
-
-  defp get_legacy_semantics(module) do
-    if function_exported?(module, :semantics, 0) do
-      module.semantics()
-    else
-      :sync
-    end
-  end
-
-  defp get_legacy_settle(module) do
-    default = %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear}
-
-    if function_exported?(module, :settle_config, 0) do
-      Map.merge(default, module.settle_config())
-    else
-      default
-    end
-  end
-
-  defp get_legacy_shrink(module) do
-    if function_exported?(module, :read_only?, 0) and module.read_only?() do
-      :prefer_remove
-    else
-      :neutral
-    end
   end
 end

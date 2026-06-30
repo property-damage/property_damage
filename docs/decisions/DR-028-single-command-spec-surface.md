@@ -1,6 +1,6 @@
 # DR-028: Single command_spec Surface for Static Command Metadata
 
-**Status:** Accepted (design pass; implementation in progress)
+**Status:** Accepted (implemented)
 **Date:** 2026-06-29
 
 > Part of the served/servant clean-break campaign. Collapses the `Command` behaviour to one

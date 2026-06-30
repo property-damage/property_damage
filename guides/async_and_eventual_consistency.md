@@ -29,7 +29,7 @@ PropertyDamage provides several mechanisms to handle these patterns.
 
 ## Command Semantics
 
-Commands declare their behavior via the `semantics/0` callback:
+Commands declare their behavior via the `:execution` key of `command_spec/1`:
 
 | Semantics | Purpose | Mutates State? | Settle Behavior |
 |-----------|---------|----------------|-----------------|
@@ -51,7 +51,17 @@ Use probes for **read-only queries** that may need to wait for eventual consiste
 
 ```elixir
 defmodule MyTest.Commands.GetOrder do
-  @behaviour PropertyDamage.Command
+  # Probe semantics enables settle/retry logic; read-only commands are
+  # prioritized for removal during shrinking; settle tunes retry behavior.
+  use PropertyDamage.Command,
+    execution: :probe,
+    shrink: :prefer_remove,
+    settle: %{
+      timeout_ms: 5_000,     # Max time to wait
+      interval_ms: 200,      # Time between retries
+      backoff: :exponential  # :linear or :exponential
+    }
+
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:order_id]
@@ -62,21 +72,6 @@ defmodule MyTest.Commands.GetOrder do
     %{order_id: nil}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
-  end
-
-  # Probe semantics enables settle/retry logic
-  def semantics, do: :probe
-
-  # Read-only commands are prioritized for removal during shrinking
-  def read_only?, do: true
-
-  # Configure retry behavior
-  def settle_config do
-    %{
-      timeout_ms: 5_000,     # Max time to wait
-      interval_ms: 200,      # Time between retries
-      backoff: :exponential  # :linear or :exponential
-    }
   end
 end
 ```
@@ -164,7 +159,9 @@ Handle the entire create-and-poll flow inside `execute/3`:
 
 ```elixir
 defmodule MyTest.Commands.CreateAuthorization do
-  @behaviour PropertyDamage.Command
+  # Async semantics protects this command during shrinking
+  # if downstream commands use its authorization_id
+  use PropertyDamage.Command, execution: :async
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:account_id, :amount, :currency]
@@ -180,10 +177,6 @@ defmodule MyTest.Commands.CreateAuthorization do
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
   end
-
-  # Async semantics protects this command during shrinking
-  # if downstream commands use its authorization_id
-  def semantics, do: :async
 end
 
 # The event marks server-generated fields with external()

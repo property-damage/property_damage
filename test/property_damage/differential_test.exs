@@ -21,13 +21,10 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   defmodule TestCommand do
-    @behaviour PropertyDamage.Command
+    use PropertyDamage.Command, observables: [TestEvent]
     import PropertyDamage.Generator, only: [merge_overrides: 2]
 
     defstruct [:value, :item_ref]
-
-    @impl true
-    def downstream_observables, do: [TestEvent]
 
     @impl true
     def generator(overrides \\ %{}) do

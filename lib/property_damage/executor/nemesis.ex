@@ -13,8 +13,8 @@ defmodule PropertyDamage.Executor.Nemesis do
   # run_checks, check_async and put_state from PropertyDamage.Executor; event folds
   # (update_projections, process_injector_events) from PropertyDamage.Executor.Events.
 
-  alias PropertyDamage.Executor
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.Executor
   alias PropertyDamage.Nemesis
   alias PropertyDamage.PlaceholderRegistry
 

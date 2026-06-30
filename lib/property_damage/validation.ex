@@ -395,12 +395,12 @@ defmodule PropertyDamage.Validation do
     commands = model.commands()
     normalized = PropertyDamage.Model.normalize_commands(commands)
 
-    for {_weight, cmd, _spec} <- normalized,
-        not function_exported?(cmd, :downstream_observables, 0),
+    for {_weight, cmd, spec} <- normalized,
+        Map.get(spec, :observables, []) == [],
         reduce: [] do
       acc ->
         [
-          "Command #{inspect(cmd)} missing downstream_observables/0 - event coverage not verified"
+          "Command #{inspect(cmd)} declares no :observables - event coverage not verified"
           | acc
         ]
     end
@@ -412,9 +412,8 @@ defmodule PropertyDamage.Validation do
 
     # Collect all events that commands can produce
     produced_events =
-      for {_weight, cmd, _spec} <- normalized,
-          function_exported?(cmd, :downstream_observables, 0),
-          event <- cmd.downstream_observables() do
+      for {_weight, _cmd, spec} <- normalized,
+          event <- Map.get(spec, :observables, []) do
         event
       end
       |> Enum.uniq()

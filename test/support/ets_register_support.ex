@@ -47,12 +47,9 @@ end
 
 defmodule PropertyDamage.Test.EtsRegister.Commands.ReadValue do
   @moduledoc "Read the register; the model asserts the value matches expectation."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command, shrink: :prefer_remove
 
   defstruct []
-
-  @impl true
-  def read_only?, do: true
 
   @impl true
   def generator(_overrides \\ %{}), do: StreamData.constant(%{})

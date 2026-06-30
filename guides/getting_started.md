@@ -70,12 +70,12 @@ these values automatically.
 
 ## Step 2: Define Commands
 
-Commands represent operations. Each command must implement the
-`PropertyDamage.Command` behaviour:
+Commands represent operations. Each command implements the
+`PropertyDamage.Command` behaviour, most simply via `use`:
 
 ```elixir
 defmodule MyApp.Commands.CreateUser do
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:email, :name]
@@ -98,10 +98,11 @@ end
 Note: The `user_id` is **not** in the command - it's server-generated and marked
 with `external()` in the `UserCreated` event struct.
 
-### Key Command Callbacks
+### Key Command Surface
 
 - **`generator/1`** - Generate command field values (returns `StreamData` of maps)
-- **`read_only?/0`** (optional) - Whether command only reads state
+- **`command_spec/1`** (via `use` options) - Static metadata: `execution`, `shrink`
+  (`:prefer_remove` for read-only commands), `observables`, `idempotent`, ...
 
 ## Step 3: Define Projections
 

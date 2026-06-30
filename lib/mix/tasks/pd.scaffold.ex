@@ -616,7 +616,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       `simulate/2` callback.
       \"\"\"
 
-      @behaviour PropertyDamage.Command
+      #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "use PropertyDamage.Command, shrink: :prefer_remove", else: "use PropertyDamage.Command"}
       import PropertyDamage.Generator, only: [merge_overrides: 2]
 
       defstruct #{inspect(field_atoms)}
@@ -643,8 +643,6 @@ defmodule Mix.Tasks.Pd.Scaffold do
       end
 
       #{if op.method == "POST", do: "# Server-generated fields (e.g. an id) belong in the event struct via\n  # external(): `defstruct [..., id: external()]`. See the Events module.", else: ""}
-
-      #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "@impl true\n      def read_only?, do: true", else: ""}
 
       # HTTP Info (for adapter)
       def __http_method__, do: :#{String.downcase(op.method)}

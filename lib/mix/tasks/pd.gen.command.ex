@@ -99,10 +99,12 @@ defmodule Mix.Tasks.Pd.Gen.Command do
     fields_atoms = Enum.map(fields, &String.to_atom/1)
     defstruct_line = if fields == [], do: "[]", else: inspect(fields_atoms)
 
-    semantics_function =
+    # Static metadata (execution semantics, etc.) is declared on the single
+    # command_spec/1 surface via `use` options (DR-028).
+    use_line =
       case semantics do
-        "sync" -> ""
-        other -> "\n  @impl true\n  def semantics, do: :#{other}\n"
+        "sync" -> "use PropertyDamage.Command"
+        other -> "use PropertyDamage.Command, execution: :#{other}"
       end
 
     generator_body = generate_generator_body(fields)
@@ -118,7 +120,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
       `when:` option, not here.
       \"\"\"
 
-      @behaviour PropertyDamage.Command
+      #{use_line}
 
       defstruct #{defstruct_line}
 
@@ -128,7 +130,7 @@ defmodule Mix.Tasks.Pd.Gen.Command do
         # to a %#{module_name}{} struct.
         #{generator_body}
       end
-    #{semantics_function}end
+    end
     """
   end
 

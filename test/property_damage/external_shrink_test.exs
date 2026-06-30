@@ -26,12 +26,10 @@ defmodule PropertyDamage.ExternalShrinkTest do
   end
 
   defmodule AsyncCreate do
-    @behaviour PropertyDamage.Command
+    use PropertyDamage.Command, execution: :async
     defstruct []
     @impl true
     def generator(_overrides), do: StreamData.constant(%{})
-    @impl true
-    def semantics, do: :async
   end
 
   defmodule Noise do
