@@ -47,12 +47,9 @@ end
 
 defmodule PropertyDamage.Test.EtsRegister.Commands.ReadValue do
   @moduledoc "Read the register; the model asserts the value matches expectation."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command, shrink: :prefer_remove
 
   defstruct []
-
-  @impl true
-  def read_only?, do: true
 
   @impl true
   def generator(_overrides \\ %{}), do: StreamData.constant(%{})
@@ -164,12 +161,12 @@ defmodule PropertyDamage.Test.EtsRegister.CorrectAdapter do
   end
 
   @impl true
-  def execute(%Increment{}, %{table: table}) do
+  def execute(%Increment{}, %{table: table}, _runtime) do
     {from, to} = EtsRegister.increment(table)
     {:ok, [%Incremented{from: from, to: to}]}
   end
 
-  def execute(%ReadValue{}, %{table: table}) do
+  def execute(%ReadValue{}, %{table: table}, _runtime) do
     {:ok, [%ValueRead{value: EtsRegister.read(table)}]}
   end
 end

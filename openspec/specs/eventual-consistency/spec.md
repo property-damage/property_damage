@@ -4,7 +4,7 @@
 
 Defines the settle retry logic, resource polling, state polling, and probe command semantics that enable the PropertyDamage framework to test eventually consistent systems where operations may not produce immediate results.
 
-Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage)
+Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-030 (Command-Correlated Injector Events -- liveness over a correlated set, poll-timeout locality)
 
 ## Requirements
 
@@ -40,7 +40,7 @@ The system SHALL provide retry logic for probe and async commands, repeatedly ex
 
 ### Requirement: Settle Configuration
 
-Settle behavior SHALL be configurable with `timeout_ms` (default 2000), `interval_ms` (default 300), and `backoff` strategy (`:linear` or `:exponential`). Configuration SHALL be sourced from the command spec's `:settle` field or from a legacy `settle_config/0` callback.
+Settle behavior SHALL be configurable with `timeout_ms` (default 2000), `interval_ms` (default 300), and `backoff` strategy (`:linear` or `:exponential`). Configuration SHALL be sourced from the command spec's `:settle` field (DR-028); there is no separate `settle_config/0` callback.
 
 #### Scenario: Default configuration applied
 - **WHEN** a command requires settling but provides no custom configuration
@@ -49,10 +49,6 @@ Settle behavior SHALL be configurable with `timeout_ms` (default 2000), `interva
 #### Scenario: Custom configuration from command spec
 - **WHEN** a command spec includes a `:settle` field with custom values
 - **THEN** those values SHALL override the corresponding defaults
-
-#### Scenario: Legacy settle_config callback
-- **WHEN** a command module implements `settle_config/0`
-- **THEN** the returned configuration SHALL be merged with defaults
 
 ### Requirement: Linear Backoff
 
@@ -79,10 +75,10 @@ When the backoff strategy is `:exponential`, the system SHALL double the interva
 
 ### Requirement: Resource Poller
 
-The system SHALL support command-triggered background polling of external resources via the `ctx.start_poller` function available in adapter context. The poller SHALL periodically call a poll function and pass results to a handler.
+The system SHALL support command-triggered background polling of external resources via the `runtime.start_poller` function on the `%PropertyDamage.Runtime{}` handle passed to `execute/3` (DR-027). The poller SHALL periodically call a poll function and pass results to a handler.
 
 #### Scenario: Poller started during command execution
-- **WHEN** an adapter calls `ctx.start_poller.(opts)` during `execute/2`
+- **WHEN** an adapter calls `runtime.start_poller.(opts)` during `execute/3`
 - **THEN** a background polling process SHALL be spawned
 - **AND** the poller SHALL call the configured `poll_fn` at the configured `interval_ms`
 
@@ -120,6 +116,14 @@ The system SHALL support `@poll_state` temporal assertions that spawn a backgrou
 - **AND** the predicate never becomes true before the timeout
 - **THEN** the state poller SHALL report failure with diagnostic information
 - **AND** the report SHALL include the trigger event, predicate source, final state, elapsed time, and poll count
+
+#### Scenario: Poll timeout attributed to its triggering command (DR-030)
+- **WHEN** a `@poll_state` poller times out
+- **THEN** the failure's `failed_at_index` SHALL be the `command_index` of the command whose event opened the poll window, so the shrinker can truncate to it
+
+#### Scenario: Liveness over a correlated set (DR-030)
+- **WHEN** a command correlates an injector event via `awaits/2` and a `@poll_state` predicate asserts that the command's correlated set becomes non-empty
+- **THEN** the predicate observes the awaited event once it is folded and attributed, and the framework's existing `@poll_state` finalize drain (which already awaits the internal event queue) supplies the wait — no separate await loop exists
 
 #### Scenario: Configurable polling parameters
 - **WHEN** a `@poll_state` assertion specifies timeout and interval

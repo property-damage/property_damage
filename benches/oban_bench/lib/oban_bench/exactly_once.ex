@@ -45,11 +45,11 @@ defmodule ObanBench.ExactlyOnce do
   a terminal state. The exactly-once oracle is the projection's
   `@trigger at: :teardown` safety check, not this adapter.
   """
-  def enqueue(base, key, worker_mod, ctx) do
+  def enqueue(base, key, worker_mod, ctx, runtime) do
     name = "#{ctx.run_id}:#{base}"
     {:ok, job} = Oban.insert(worker_mod.new(%{"counter" => name, "key" => "#{key}"}))
 
-    ctx.start_poller.(
+    runtime.start_poller.(
       poll_fn: fn -> {ObanBench.DB.job_state(job.id), ObanBench.DB.value(name)} end,
       interval_ms: 20,
       timeout_ms: 3000,

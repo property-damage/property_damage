@@ -54,7 +54,7 @@ defmodule PropertyDamage.ExportTest do
 
     def setup(_config), do: {:ok, %{}}
     def teardown(_context), do: :ok
-    def execute(_cmd, _context), do: {:ok, []}
+    def execute(_cmd, _context, _runtime), do: {:ok, []}
 
     def http_spec(%CreateAccount{currency: currency}, _ctx) do
       %HTTPSpec{

@@ -29,7 +29,7 @@ PropertyDamage provides several mechanisms to handle these patterns.
 
 ## Command Semantics
 
-Commands declare their behavior via the `semantics/0` callback:
+Commands declare their behavior via the `:execution` key of `command_spec/1`:
 
 | Semantics | Purpose | Mutates State? | Settle Behavior |
 |-----------|---------|----------------|-----------------|
@@ -51,7 +51,17 @@ Use probes for **read-only queries** that may need to wait for eventual consiste
 
 ```elixir
 defmodule MyTest.Commands.GetOrder do
-  @behaviour PropertyDamage.Command
+  # Probe semantics enables settle/retry logic; read-only commands are
+  # prioritized for removal during shrinking; settle tunes retry behavior.
+  use PropertyDamage.Command,
+    execution: :probe,
+    shrink: :prefer_remove,
+    settle: %{
+      timeout_ms: 5_000,     # Max time to wait
+      interval_ms: 200,      # Time between retries
+      backoff: :exponential  # :linear or :exponential
+    }
+
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:order_id]
@@ -62,21 +72,6 @@ defmodule MyTest.Commands.GetOrder do
     %{order_id: nil}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
-  end
-
-  # Probe semantics enables settle/retry logic
-  def semantics, do: :probe
-
-  # Read-only commands are prioritized for removal during shrinking
-  def read_only?, do: true
-
-  # Configure retry behavior
-  def settle_config do
-    %{
-      timeout_ms: 5_000,     # Max time to wait
-      interval_ms: 200,      # Time between retries
-      backoff: :exponential  # :linear or :exponential
-    }
   end
 end
 ```
@@ -98,7 +93,7 @@ end
 Return `{:retry, reason}` when the data isn't ready yet:
 
 ```elixir
-def execute(%GetOrder{order_id: id}, ctx) do
+def execute(%GetOrder{order_id: id}, ctx, _runtime) do
   case Req.get(ctx.client, url: "/orders/#{id}") do
     {:ok, %{status: 200, body: body}} ->
       {:ok, [%OrderRetrieved{order_id: id, data: body}]}
@@ -119,7 +114,7 @@ end
 ```
 
 The executor wraps probe execution with `Settle.settle/2`, which:
-1. Calls `adapter.execute/2`
+1. Calls `adapter.execute/3`
 2. If `{:retry, reason}` is returned, sleeps and retries
 3. Continues until `{:ok, events}`, `{:error, reason}`, or timeout
 
@@ -140,7 +135,7 @@ Use async commands for **operations that create resources and must wait for them
 ```elixir
 # Inside executor - same command every time
 Settle.settle(
-  fn -> adapter.execute(command, adapter_context) end,
+  fn -> adapter.execute(command, user_context, runtime) end,
   ...
 )
 ```
@@ -149,7 +144,7 @@ This means `{:retry, reason}` **does not work** for create-then-poll scenarios:
 
 ```elixir
 # BROKEN: First call creates, retry creates AGAIN!
-def execute(%CreateAuthorization{} = cmd, ctx) do
+def execute(%CreateAuthorization{} = cmd, ctx, _runtime) do
   case Req.post(ctx.client, url: "/authorizations", json: payload(cmd)) do
     {:ok, %{body: %{"status" => "processing"}}} ->
       {:retry, :processing}  # Next retry will POST again!
@@ -160,11 +155,13 @@ end
 
 ### Recommended Pattern: Internal Polling
 
-Handle the entire create-and-poll flow inside `execute/2`:
+Handle the entire create-and-poll flow inside `execute/3`:
 
 ```elixir
 defmodule MyTest.Commands.CreateAuthorization do
-  @behaviour PropertyDamage.Command
+  # Async semantics protects this command during shrinking
+  # if downstream commands use its authorization_id
+  use PropertyDamage.Command, execution: :async
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:account_id, :amount, :currency]
@@ -180,10 +177,6 @@ defmodule MyTest.Commands.CreateAuthorization do
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
   end
-
-  # Async semantics protects this command during shrinking
-  # if downstream commands use its authorization_id
-  def semantics, do: :async
 end
 
 # The event marks server-generated fields with external()
@@ -214,7 +207,7 @@ defmodule MyTest.HTTPAdapter do
   @poll_timeout_ms 10_000
   @poll_interval_ms 200
 
-  def execute(%CreateAuthorization{} = cmd, ctx) do
+  def execute(%CreateAuthorization{} = cmd, ctx, _runtime) do
     payload = %{
       account_id: cmd.account_id,
       amount: cmd.amount,
@@ -309,10 +302,10 @@ end
 
 The internal polling pattern above has a limitation: **all events are returned together
 at the end**, compressing the timeline. If your model needs to see intermediate states
-(e.g., verify the authorization exists before it's approved), use `ctx.inject`:
+(e.g., verify the authorization exists before it's approved), use `runtime.inject`:
 
 ```elixir
-def execute(%CreateAuthorization{} = cmd, ctx) do
+def execute(%CreateAuthorization{} = cmd, ctx, runtime) do
   payload = %{
     account_id: cmd.account_id,
     amount: cmd.amount,
@@ -322,7 +315,7 @@ def execute(%CreateAuthorization{} = cmd, ctx) do
   case Req.post(ctx.client, url: "/authorizations", json: payload) do
     {:ok, %{status: 201, body: %{"id" => id, "status" => status}}} ->
       # Inject AuthorizationCreated NOW - projections update immediately
-      ctx.inject.(%AuthorizationCreated{
+      runtime.inject.(%AuthorizationCreated{
         authorization_id: id,
         account_id: cmd.account_id,
         amount: cmd.amount,
@@ -359,15 +352,15 @@ defp poll_until_settled(client, id, cmd) do
 end
 ```
 
-**Key behaviors of `ctx.inject`:**
+**Key behaviors of `runtime.inject`:**
 
 - Injected events update projections **immediately** when injected
 - Injected events are recorded with source `:injected` in the event log
 - For events with `external()` fields, values are captured from the **first** injected event
-- Events returned from `execute/2` are processed **after** injected events
-- Adapters not using `inject` continue to work unchanged (backward compatible)
+- Events returned from `execute/3` are processed **after** injected events
+- Adapters that ignore the `runtime` handle continue to work unchanged
 
-**When to use `ctx.inject`:**
+**When to use `runtime.inject`:**
 
 - Model assertions depend on intermediate states
 - Projections need to track resources before they settle
@@ -380,7 +373,7 @@ If you prefer using `{:retry, reason}` with the Settle module, track in-flight
 operations using the process dictionary:
 
 ```elixir
-def execute(%CreateAuthorization{} = cmd, ctx) do
+def execute(%CreateAuthorization{} = cmd, ctx, _runtime) do
   # Use command hash as key to track this specific operation
   cmd_key = :erlang.phash2({cmd.account_id, cmd.amount, cmd.currency})
 
@@ -543,6 +536,51 @@ PropertyDamage.run(
 
 The executor drains injected events after each command, applying them to
 projections just like events from regular command execution.
+
+### Correlating events to a command (`awaits/2`)
+
+By default an injected event is *ambient*: it folds into projections but is
+attributed to no command (`command_index: nil`). When an inbound event is the
+delayed result of a specific command (a webhook for the issue you just closed,
+a callback for the payment you just initiated), declare the optional
+`Command.awaits/2` callback so the framework correlates it back to that command:
+
+```elixir
+defmodule CloseIssue do
+  use PropertyDamage.Command
+  defstruct [:issue_id]
+
+  @impl true
+  def generator(overrides \\ %{}), do: # ...
+
+  # Claim the webhook delivered for *this* issue.
+  @impl true
+  def awaits(_state, %__MODULE__{issue_id: id}) do
+    [%PropertyDamage.Await{match: &match?(%IssueClosedWebhook{issue_id: ^id}, &1)}]
+  end
+end
+```
+
+`awaits/2` returns a list of `%PropertyDamage.Await{match}` structs; `match` is a
+predicate `(event -> boolean)` built from the command's own (resolved) fields. A
+matching injected event is then attributed to that command's `command_index`,
+persistently for the rest of the run (a late arrival still correlates). When two
+commands' matchers accept the same event, the first-registered wins and an
+overlap diagnostic is logged.
+
+`awaits/2` is **pure correlation** — it never blocks and asserts nothing.
+Express judgment over a command's correlated set with ordinary projection
+assertions:
+
+- **liveness** ("the webhook must arrive") — a `@poll_state` over the correlated
+  set (e.g. `fn s -> s.webhooks[id] >= 1 end`). A timeout is reported at the
+  awaiting command's index.
+- **safety / cardinality** ("exactly one webhook per close") — a `@trigger` or
+  `@invariant` over the correlated set.
+
+When you also run in simulator mode, have `Model.simulate/2` predict the awaited
+event so the simulated projection state matches a live, correlated run (the
+`awaits/2` ↔ `simulate/2` contract).
 
 ### Model Configuration
 
@@ -742,8 +780,8 @@ overshoot fully.
 | Pattern | Use When | Implementation |
 |---------|----------|----------------|
 | **Probe** | Read-only query waiting for data | Return `{:retry, reason}` from adapter |
-| **Async (internal poll)** | Create + wait for completion | Poll inside `execute/2` |
-| **Async (ctx.inject)** | Create + wait, need accurate event timing | Call `ctx.inject.(event)` mid-execution |
+| **Async (internal poll)** | Create + wait for completion | Poll inside `execute/3` |
+| **Async (runtime.inject)** | Create + wait, need accurate event timing | Call `runtime.inject.(event)` mid-execution |
 | **Async (process dict)** | Create + wait, prefer Settle module | Track state in process dictionary |
 | **Adapter.Injector** | External system pushes webhooks | Implement `to_event/1` callback |
 | **Polling Adapter.Injector** | Poll but inject events between commands | Background GenServer + EventQueue |
@@ -751,5 +789,5 @@ overshoot fully.
 Choose the simplest pattern that fits your use case:
 
 - **Most async create operations**: Use **internal polling** (simplest)
-- **Need intermediate state visibility**: Use **ctx.inject** for accurate event timing
+- **Need intermediate state visibility**: Use **runtime.inject** for accurate event timing
 - **External webhooks/callbacks**: Use **Adapter.Injector**

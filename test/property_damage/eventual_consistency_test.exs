@@ -85,8 +85,8 @@ defmodule PropertyDamage.EventualConsistencyTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%InitiatePayment{id: id}, ctx) do
-      ctx.start_poller.(
+    def execute(%InitiatePayment{id: id}, _ctx, runtime) do
+      runtime.start_poller.(
         poll_fn: fn -> :tick end,
         handler: fn _ -> {:done, [%PaymentConfirmed{id: id}]} end,
         interval_ms: 10,
@@ -108,7 +108,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%InitiatePayment{id: id}, _ctx) do
+    def execute(%InitiatePayment{id: id}, _ctx, _runtime) do
       {:ok, [%PaymentInitiated{id: id}]}
     end
   end
@@ -190,7 +190,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%ProbeCheck{}, ctx) do
+    def execute(%ProbeCheck{}, ctx, _runtime) do
       n = Agent.get_and_update(ctx.counter, fn n -> {n, n + 1} end)
 
       if n < 2 do
@@ -231,6 +231,10 @@ defmodule PropertyDamage.EventualConsistencyTest do
 
     assert {:error, %PropertyDamage.FailureReport{} = report} = result
     assert {:poll_timeout, _info} = report.failure_reason
-    assert report.failed_at_index == nil
+
+    # DR-030: a @poll_state liveness timeout is now attributed to the command
+    # whose event opened the poll window (InitiatePayment at index 0), so the
+    # shrinker keeps locality. (Previously reported as nil.)
+    assert report.failed_at_index == 0
   end
 end

@@ -80,7 +80,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%Bump{}, _ctx), do: {:ok, [%Bumped{}, %Bumped{}]}
+    def execute(%Bump{}, _ctx, _runtime), do: {:ok, [%Bumped{}, %Bumped{}]}
   end
 
   defmodule SingleBumpAdapter do
@@ -90,7 +90,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%Bump{}, _ctx), do: {:ok, [%Bumped{}]}
+    def execute(%Bump{}, _ctx, _runtime), do: {:ok, [%Bumped{}]}
   end
 
   test "a teardown check fails as a named assertion failure (not a poll timeout) when the settled state violates it" do
@@ -137,7 +137,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%Bump{}, _ctx), do: {:error, :boom}
+    def execute(%Bump{}, _ctx, _runtime), do: {:error, :boom}
   end
 
   test "the teardown checkpoint does not run when the run aborts early" do
@@ -164,8 +164,8 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%Bump{}, ctx) do
-      ctx.start_poller.(
+    def execute(%Bump{}, _ctx, runtime) do
+      runtime.start_poller.(
         poll_fn: fn -> :tick end,
         handler: fn _ -> {:done, [%Bumped{}]} end,
         interval_ms: 10,
@@ -237,7 +237,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%Initiate{}, _ctx), do: {:ok, [%Initiated{}]}
+    def execute(%Initiate{}, _ctx, _runtime), do: {:ok, [%Initiated{}]}
   end
 
   test "a genuine @poll_state liveness timeout preempts the teardown checkpoint" do
@@ -262,8 +262,8 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%Initiate{}, ctx) do
-      ctx.start_poller.(
+    def execute(%Initiate{}, _ctx, runtime) do
+      runtime.start_poller.(
         poll_fn: fn -> :tick end,
         handler: fn _ -> {:done, [%Confirmed{}]} end,
         interval_ms: 10,
@@ -347,7 +347,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%Bump{}, ctx) do
+    def execute(%Bump{}, ctx, _runtime) do
       Agent.update(ctx.agent, &(&1 + 1))
       {:ok, [%Bumped{}]}
     end
@@ -516,7 +516,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%Bump{}, _ctx), do: {:ok, [%Bumped{}, %Bumped{}, %Unbumped{}]}
+    def execute(%Bump{}, _ctx, _runtime), do: {:ok, [%Bumped{}, %Bumped{}, %Unbumped{}]}
   end
 
   # ACCUMULATOR: retains the maximum ever observed, so the healed transient

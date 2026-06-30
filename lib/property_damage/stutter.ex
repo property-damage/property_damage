@@ -102,13 +102,16 @@ defmodule PropertyDamage.Stutter do
         }
       )
 
-  ## Command Callbacks
+  ## Command Configuration
 
-  Commands can opt into idempotency testing by implementing:
+  Commands tune idempotency testing through their `command_spec/1`:
 
-  - `idempotent?/0` - Return true if command should be stuttered (default: true)
-  - `idempotency_key/1` - Return the idempotency key for requests
-  - `acceptable_retry_events/0` - Event modules acceptable as retry responses
+  - `idempotent: false` - Exclude the command from stutter testing (default: `true`)
+  - `acceptable_retry_events: [...]` - Event modules acceptable as alternative retry
+    responses
+
+  plus the per-instance `idempotency_key/1` callback, which returns the idempotency
+  key passed to the adapter for each request.
 
   ## Comparison Modes
 
@@ -154,20 +157,31 @@ defmodule PropertyDamage.Stutter do
     }
   end
 
+  @typedoc """
+  An explicit `:rand` generator state (DR-029).
+
+  Stutter draws thread this term instead of reading the process-global RNG: the
+  executor derives one per command from `{rng_seed, command_index}`, so a
+  command's stutter decisions depend only on the run seed and the command's
+  index, not on draws consumed by earlier commands or earlier runs.
+  """
+  @type rng :: :rand.state()
+
   @doc """
   Determine if a command should be stuttered based on configuration.
 
-  The probabilistic check reads the process RNG (`:rand`). Determinism comes
-  from the executor seeding that RNG once per run (`:rand.seed(:exsss, seed)`
-  before the run loop), not from any per-call seeding here: re-running with the
-  same seed reproduces the same stutter decisions. The same applies to
-  `retry_count/1` and `retry_delay_ms/1`.
+  Draws from the explicit `rng` (DR-029) rather than the process-global `:rand`,
+  returning `{decision, rng'}` so the caller threads the advanced state into the
+  subsequent `retry_count/2` / `retry_delay_ms/2` draws. Determinism is
+  self-consistent: the same `rng` reproduces the same decision. The same applies
+  to `retry_count/2` and `retry_delay_ms/2`.
   """
-  @spec should_stutter?(struct(), Config.t()) :: boolean()
-  def should_stutter?(_command, nil), do: false
-  def should_stutter?(_command, %Config{enabled: false}), do: false
+  @spec should_stutter?(struct(), Config.t() | nil, rng(), map() | nil) :: {boolean(), rng()}
+  def should_stutter?(command, config, rng, spec \\ nil)
+  def should_stutter?(_command, nil, rng, _spec), do: {false, rng}
+  def should_stutter?(_command, %Config{enabled: false}, rng, _spec), do: {false, rng}
 
-  def should_stutter?(command, %Config{} = config) do
+  def should_stutter?(command, %Config{} = config, rng, spec) do
     command_module = command.__struct__
 
     # Check if command is in the allowed list
@@ -177,45 +191,45 @@ defmodule PropertyDamage.Stutter do
         modules when is_list(modules) -> command_module in modules
       end
 
-    # Check if command declares itself as idempotent
-    command_idempotent =
-      if function_exported?(command_module, :idempotent?, 0) do
-        command_module.idempotent?()
-      else
-        true
-      end
+    # Idempotency eligibility comes from the resolved command spec (DR-028).
+    command_idempotent = Map.get(spec || %{}, :idempotent, true)
 
-    # Probabilistic check using seeded RNG
-    probability_check = :rand.uniform() < config.probability
+    # Probabilistic check from the explicit RNG
+    {sample, rng} = :rand.uniform_s(rng)
+    probability_check = sample < config.probability
 
-    command_allowed and command_idempotent and probability_check
+    {command_allowed and command_idempotent and probability_check, rng}
   end
 
   @doc """
   Get the number of retry attempts for a stuttered command.
 
-  Returns a random number between 1 and max_repeats.
+  Returns `{count, rng'}` where count is between 1 and max_repeats, drawn from
+  the explicit `rng`.
   """
-  @spec retry_count(Config.t()) :: pos_integer()
-  def retry_count(%Config{max_repeats: max}) do
+  @spec retry_count(Config.t(), rng()) :: {pos_integer(), rng()}
+  def retry_count(%Config{max_repeats: max}, rng) do
     # At least 1 retry, up to max_repeats
-    :rand.uniform(max)
+    :rand.uniform_s(max, rng)
   end
 
   @doc """
   Get the delay in milliseconds before a retry attempt.
+
+  Returns `{delay, rng'}`, drawn from the explicit `rng`.
   """
-  @spec retry_delay_ms(Config.t()) :: non_neg_integer()
-  def retry_delay_ms(%Config{delay_ms: {a, b}}) do
-    # Tolerate an inverted {max, min} tuple: :rand.uniform/1 raises on a
+  @spec retry_delay_ms(Config.t(), rng()) :: {non_neg_integer(), rng()}
+  def retry_delay_ms(%Config{delay_ms: {a, b}}, rng) do
+    # Tolerate an inverted {max, min} tuple: :rand.uniform_s/2 raises on a
     # non-positive argument, so normalize the bounds before drawing.
     lo = min(a, b)
     hi = max(a, b)
-    lo + :rand.uniform(hi - lo + 1) - 1
+    {sample, rng} = :rand.uniform_s(hi - lo + 1, rng)
+    {lo + sample - 1, rng}
   end
 
-  def retry_delay_ms(%Config{delay_ms: fixed}) when is_integer(fixed) do
-    fixed
+  def retry_delay_ms(%Config{delay_ms: fixed}, rng) when is_integer(fixed) do
+    {fixed, rng}
   end
 
   @doc """
@@ -250,9 +264,9 @@ defmodule PropertyDamage.Stutter do
   Returns `:match` if events are considered equivalent, or
   `{:mismatch, details}` if they differ.
   """
-  @spec compare_events([struct()], [struct()], Config.t(), struct()) ::
+  @spec compare_events([struct()], [struct()], Config.t(), map() | nil) ::
           :match | {:mismatch, map()}
-  def compare_events(original_events, retry_events, config, command) do
+  def compare_events(original_events, retry_events, config, spec \\ nil) do
     case config.comparison do
       :strict ->
         compare_strict(original_events, retry_events)
@@ -264,7 +278,7 @@ defmodule PropertyDamage.Stutter do
         fun.(original_events, retry_events)
 
       _ ->
-        compare_with_acceptable(original_events, retry_events, command)
+        compare_with_acceptable(original_events, retry_events, spec)
     end
   end
 
@@ -302,15 +316,10 @@ defmodule PropertyDamage.Stutter do
 
   defp drop_fields(event, _fields), do: event
 
-  defp compare_with_acceptable(original_events, retry_events, command) do
-    command_module = command.__struct__
-
-    acceptable_modules =
-      if function_exported?(command_module, :acceptable_retry_events, 0) do
-        command_module.acceptable_retry_events()
-      else
-        []
-      end
+  defp compare_with_acceptable(original_events, retry_events, spec) do
+    # Acceptable alternative retry events come from the resolved command spec
+    # (DR-028).
+    acceptable_modules = Map.get(spec || %{}, :acceptable_retry_events, [])
 
     # If retry events are from acceptable modules, it's a match
     retry_modules = Enum.map(retry_events, & &1.__struct__)

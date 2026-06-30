@@ -89,7 +89,7 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Command"
+      assert content =~ "use PropertyDamage.Command"
       # The required Command callback is generator/1 (not new!/2), returning a
       # map generator the executor maps to the struct.
       assert content =~ "def generator"
@@ -117,7 +117,7 @@ defmodule Mix.Tasks.PdGenTest do
       content = File.read!(path)
       assert content =~ "def generator"
       refute content =~ "def new!"
-      assert content =~ "def semantics, do: :probe"
+      assert content =~ "use PropertyDamage.Command, execution: :probe"
       assert content =~ "thing_ref:"
       assert content =~ "name:"
       assert content =~ "PropertyDamage.Generator.merge_overrides(overrides)"

@@ -4,7 +4,7 @@
 
 Commands are the semantic building blocks of stateful property-based tests. Each command defines a pure generator that produces field maps, a specification describing execution and shrinking behavior, and optional metadata callbacks. Commands are deliberately decoupled from state shape and execution transport, enabling reuse across different models and adapters.
 
-Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern)
+Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits)
 
 ## Requirements
 
@@ -29,7 +29,7 @@ Commands SHALL define a `generator/1` callback that accepts an overrides map and
 
 ### Requirement: Command Spec Pattern
 
-Commands SHALL support a `command_spec/1` callback that returns a complete specification map. The spec map SHALL contain the keys `:command`, `:execution`, `:settle`, `:shrink`, `:when`, `:with`, and `:weight`.
+Commands SHALL support a `command_spec/1` callback that returns a complete specification map. The spec map SHALL contain the keys `:command`, `:execution`, `:settle`, `:shrink`, `:when`, `:with`, `:weight`, `:observables`, `:idempotent`, and `:acceptable_retry_events`. `command_spec/1` is the single surface for a command's static metadata (DR-028); there are no separate per-metadata callbacks.
 
 #### Scenario: Default spec from use macro
 - **WHEN** a module uses `PropertyDamage.Command` without options
@@ -40,6 +40,9 @@ Commands SHALL support a `command_spec/1` callback that returns a complete speci
 - **AND** `:weight` defaults to `1`
 - **AND** `:when` defaults to a function that always returns true
 - **AND** `:with` defaults to an empty map
+- **AND** `:observables` defaults to an empty list
+- **AND** `:idempotent` defaults to `true`
+- **AND** `:acceptable_retry_events` defaults to an empty list
 
 #### Scenario: Module-level defaults via use options
 - **WHEN** a module uses `PropertyDamage.Command` with options like `execution: :probe`
@@ -118,65 +121,89 @@ Commands with `:probe` or `:async` execution semantics SHALL support a settle co
 - **WHEN** a command specifies `settle: %{timeout_ms: 5000, interval_ms: 200, backoff: :exponential}`
 - **THEN** the framework retries using exponential backoff at 200ms intervals up to 5 seconds
 
-### Requirement: Optional Metadata Callbacks
+### Requirement: Static Metadata Spec Keys
 
-Commands MAY implement optional callbacks that provide metadata for shrinking, validation, and debugging. The framework SHALL detect these via `function_exported?/3` and use sensible defaults when they are not implemented.
+A command's static metadata for shrinking, validation, and debugging SHALL be declared on the `command_spec/1` map (DR-028), not via separate per-metadata callbacks. The framework SHALL resolve every static read through the materialized spec map and use the framework defaults when a key is not specified.
 
-#### Scenario: Downstream observables callback
-- **WHEN** a command implements `downstream_observables/0`
-- **THEN** it returns a list of event modules that this command can produce
+#### Scenario: Observables spec key
+- **WHEN** a command declares `:observables` in its `command_spec/1`
+- **THEN** it is a list of event modules that this command can produce
 - **AND** the framework uses this for validation and causality tracking during shrinking
+- **AND** a command that declares no `:observables` defaults to an empty list
 
-#### Scenario: Read-only callback
-- **WHEN** a command implements `read_only?/0` returning `true`
+#### Scenario: Read-only via shrink key
+- **WHEN** a command declares `shrink: :prefer_remove`
 - **THEN** the command is prioritized for removal during shrinking
+- **AND** there is no separate `read_only?` boolean: read-only IS the `:prefer_remove` shrink hint
 
-#### Scenario: Label callback
-- **WHEN** a command implements `label/2` with state and command arguments
+#### Scenario: Label callback (per-instance)
+- **WHEN** a command implements the per-instance `label/2` callback with state and command arguments
 - **THEN** it returns a human-readable string for debugging output
 - **AND** returning `nil` indicates no special label
 
-#### Scenario: Metadata callbacks not implemented
-- **WHEN** a command does not implement an optional metadata callback
-- **THEN** the framework uses sensible defaults without raising an error
+### Requirement: Idempotency Testing Metadata
 
-### Requirement: Idempotency Testing Callbacks
-
-Commands MAY implement callbacks that control stutter/idempotency testing behavior.
+Commands SHALL control stutter/idempotency testing behavior via `command_spec/1` keys (`:idempotent`, `:acceptable_retry_events`) and the per-instance `idempotency_key/1` callback.
 
 #### Scenario: Idempotent command included in stutter testing
-- **WHEN** a command does not implement `idempotent?/0` or returns `true`
-- **THEN** the command is included in stutter testing by default
+- **WHEN** a command's `command_spec/1` has `idempotent: true` (the default)
+- **THEN** the command is included in stutter testing
 
 #### Scenario: Non-idempotent command excluded from stutter testing
-- **WHEN** a command implements `idempotent?/0` returning `false`
+- **WHEN** a command declares `idempotent: false` in its `command_spec/1`
 - **THEN** the command is excluded from stutter testing
 
 #### Scenario: Idempotency key provided
-- **WHEN** a command implements `idempotency_key/1`
+- **WHEN** a command implements the per-instance `idempotency_key/1` callback
 - **THEN** the returned key is passed to the adapter in the stutter context
 - **AND** the adapter can include the key in request metadata (e.g., HTTP headers)
 
 #### Scenario: Acceptable retry events declared
-- **WHEN** a command implements `acceptable_retry_events/0`
+- **WHEN** a command declares `:acceptable_retry_events` in its `command_spec/1`
 - **THEN** retry responses matching any listed event module are accepted as correct
 - **AND** this allows different-but-valid responses on retry (e.g., created vs. already exists)
 
-### Requirement: Legacy Callback Fallback
+### Requirement: Event Correlation via Awaits
 
-The framework SHALL support legacy callbacks for backward compatibility. When a command does not implement `command_spec/1`, the framework SHALL build a spec from legacy callbacks `semantics/0`, `settle_config/0`, and `read_only?/0`.
+Commands MAY implement the optional `awaits/2` callback (DR-030) to correlate inbound injector events back to the command that semantically owns them. `awaits(state, command)` SHALL return a list of `PropertyDamage.Await` structs, each carrying a `match` predicate `(event -> boolean)` built from the command's resolved fields and captured response. This is **pure correlation**: a matching injector event is attributed to the declaring command's `command_index`; the callback SHALL NOT block, time out, or assert. Judgment over a command's correlated set is expressed in projections (a `@poll_state` for liveness, a `@trigger`/`@invariant` for safety). A command that does not implement `awaits/2` correlates nothing (default `[]`).
 
-#### Scenario: Legacy semantics callback
-- **WHEN** a command implements `semantics/0` but not `command_spec/1`
-- **THEN** the framework reads the execution mode from `semantics/0`
+#### Scenario: Awaits correlates an injector event to its command
+- **WHEN** a command implements `awaits/2` returning a `%Await{match: predicate}`
+- **AND** an injector event satisfies the predicate
+- **THEN** the framework attributes that event to the command's `command_index` (instead of the ambient `nil`)
 
-#### Scenario: Legacy read_only maps to shrink hint
-- **WHEN** a command implements `read_only?/0` returning `true` but not `command_spec/1`
-- **THEN** the framework sets `:shrink` to `:prefer_remove` in the resolved spec
+#### Scenario: Match predicate built from the resolved command
+- **WHEN** `awaits/2` is evaluated after execution and placeholder capture
+- **THEN** the `match` predicate MAY close over the command's resolved fields and captured response (the correlation key)
 
-#### Scenario: No legacy callbacks implemented
-- **WHEN** a command implements neither `command_spec/1` nor any legacy callbacks
-- **THEN** the framework uses all framework defaults (`:sync` execution, `:neutral` shrink, weight 1)
+#### Scenario: Persistent correlation outlives the command
+- **WHEN** a matching injector event arrives in a later drain (including at finalize)
+- **THEN** it is still attributed to the command that declared the matching await
+
+#### Scenario: First-registered wins on overlap
+- **WHEN** an injector event satisfies the matchers of more than one command
+- **THEN** it is attributed to the first-registered command (deterministic)
+- **AND** the framework logs an overlap diagnostic
+
+#### Scenario: Unmatched injector events remain ambient
+- **WHEN** an injector event satisfies no registered await
+- **THEN** it folds with `command_index: nil` as before
+
+#### Scenario: Simulator predicts the awaited event
+- **WHEN** a command declares `awaits/2` and the model implements `simulate/2`
+- **THEN** `simulate/2` SHALL predict the awaited event, so the simulated projection state matches a live correlated run (the `awaits/2` ↔ `simulate/2` contract)
+
+### Requirement: Spec-less Command Defaults
+
+A command module that does not implement `command_spec/1` SHALL resolve to the framework defaults layered with any Model-supplied overrides. There is no per-callback legacy fallback (DR-028 supersedes the DR-019 legacy path): a command's static metadata is either declared on `command_spec/1` or defaulted.
+
+#### Scenario: Spec-less command resolves to defaults
+- **WHEN** a command implements only `generator/1` (no `command_spec/1`)
+- **THEN** the framework uses all framework defaults (`:sync` execution, `:neutral` shrink, weight 1, empty observables, idempotent true)
+
+#### Scenario: Model overrides layer over defaults for spec-less commands
+- **WHEN** a spec-less command is listed in the Model with overrides (e.g., `shrink: :prefer_keep`)
+- **THEN** the resolved spec applies those overrides over the framework defaults
 
 ### Requirement: Separation of Concerns
 

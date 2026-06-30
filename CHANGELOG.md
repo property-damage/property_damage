@@ -5,6 +5,73 @@ All notable changes to PropertyDamage will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING (DR-028):** `command_spec/1` is now the single surface for a command's
+  *static* metadata. The per-metadata `Command` callbacks are removed:
+  `semantics/0`, `settle_config/0`, `read_only?/0`, `idempotent?/0`,
+  `acceptable_retry_events/0`, and `downstream_observables/0`. Move each onto the
+  spec map (authored via `use PropertyDamage.Command, <opts>` or an explicit
+  `command_spec/1`):
+  - `def semantics, do: :probe` → `use PropertyDamage.Command, execution: :probe`
+  - `def settle_config, do: %{...}` → `use PropertyDamage.Command, settle: %{...}`
+  - `def read_only?, do: true` → `use PropertyDamage.Command, shrink: :prefer_remove`
+    (read-only IS the `:prefer_remove` shrink hint; there is no separate boolean)
+  - `def downstream_observables, do: [...]` → `use PropertyDamage.Command, observables: [...]`
+  - `def idempotent?, do: false` → `use PropertyDamage.Command, idempotent: false`
+  - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]`
+  The per-instance callbacks `generator/1` (required), `idempotency_key/1`,
+  `label/2`, and `awaits/2` are unchanged (they take the command and/or state, so
+  they cannot live in a static map). `PropertyDamage.Command.build_spec_from_legacy/1`
+  and the legacy branch of `Model.resolve_spec/2` are removed; a command module
+  without `command_spec/1` now resolves to the framework defaults (plus any
+  Model-supplied overrides). This supersedes the legacy-fallback portion of DR-019.
+- **BREAKING (DR-027):** The `Adapter` callback `execute/2` is now `execute/3`:
+  `execute(command, user_context, runtime)`. The `user_context` (second argument)
+  is now *exactly* what your `setup/1` returned, with no framework keys merged in;
+  the framework's per-command affordances move to an explicit
+  `%PropertyDamage.Runtime{}` handle (third argument). Migration:
+  - `def execute(cmd, ctx)` becomes `def execute(cmd, user_context, runtime)`.
+  - `ctx.inject.(event)` becomes `runtime.inject.(event)`.
+  - `ctx.start_poller.(opts)` becomes `runtime.start_poller.(opts)`.
+  - A `%{stutter: s}` match on the context becomes `runtime.stutter` (prefer
+    `PropertyDamage.Runtime.stuttering?(runtime)`); `runtime.stutter` is `nil` on
+    the first execution.
+  - `delegate_execution/1` now forwards three arguments to the sub-adapter, which
+    must also implement `execute/3`.
+  This restores the served/servant layering (your data vs. framework plumbing) and
+  removes the ambient process-dictionary channels the plumbing used to ride on. As
+  a direct consequence, mid-execution `inject` now works from the load-test worker's
+  spawned task and from `Differential` targets, which the process dictionary did not
+  reach. `teardown/1` is unchanged in arity (it already received your `setup/1`
+  return) but is now best-effort: a raising teardown logs a warning instead of
+  failing the run.
+- **BREAKING (DR-027):** The optional `Adapter.register_handler/2` callback is
+  removed. Command/event correlation moves to the semantic surface (see DR-030);
+  inbound transport stays with `Adapter.Injector`.
+- **(DR-030):** A `@poll_state` liveness timeout is now attributed to the command
+  whose event opened the poll window: its `failed_at_index` (previously `nil`) is
+  that command's index, so the shrinker keeps locality. Code that asserted poll
+  timeouts report `failed_at_index: nil` must update.
+
+### Added
+
+- **`Command.awaits/2` (DR-030):** a new optional, per-instance callback that
+  correlates inbound injector events back to the command that owns them. It
+  returns `[%PropertyDamage.Await{match}]`, where `match` is a predicate
+  `(event -> boolean)` built from the command's resolved fields and captured
+  response. A matching injector event is attributed to the declaring command's
+  `command_index` (instead of the ambient `nil`), persistently for the rest of
+  the run; overlapping matchers resolve to the first-registered with a logged
+  diagnostic. This is **pure correlation**: judgment over a command's correlated
+  set is expressed in projections (a `@poll_state` for liveness, a
+  `@trigger`/`@invariant` for safety/cardinality), reusing the existing assertion
+  machinery rather than a separate await loop. This implements, on the correct
+  (semantic) surface, the capability the removed `Adapter.register_handler/2`
+  advertised.
+
 ## [0.2.0] - 2026-06-25
 
 This cycle made the headline features that 0.1.0 advertised actually work end to

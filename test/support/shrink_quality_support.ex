@@ -82,16 +82,13 @@ end
 
 defmodule PropertyDamage.Test.ShrinkQuality.Commands.GetKey do
   @moduledoc "Read a key; the model asserts the returned value matches expectation."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command, shrink: :prefer_remove
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   alias PropertyDamage.Test.ShrinkQuality
 
   defstruct [:key]
-
-  @impl true
-  def read_only?, do: true
 
   @impl true
   def generator(overrides \\ %{}) do
@@ -232,16 +229,16 @@ defmodule PropertyDamage.Test.ShrinkQuality.CorrectAdapter do
   end
 
   @impl true
-  def execute(%PutKey{key: key, value: value}, %{store: pid}) do
+  def execute(%PutKey{key: key, value: value}, %{store: pid}, _runtime) do
     Store.put(pid, key, value)
     {:ok, [%EntryPut{key: key, value: value}]}
   end
 
-  def execute(%GetKey{key: key}, %{store: pid}) do
+  def execute(%GetKey{key: key}, %{store: pid}, _runtime) do
     {:ok, [%EntryRead{key: key, value: Store.get(pid, key)}]}
   end
 
-  def execute(%DelKey{key: key}, %{store: pid}) do
+  def execute(%DelKey{key: key}, %{store: pid}, _runtime) do
     Store.delete(pid, key)
     {:ok, [%EntryDeleted{key: key}]}
   end

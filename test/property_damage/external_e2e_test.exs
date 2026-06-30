@@ -59,12 +59,12 @@ defmodule PropertyDamage.ExternalE2ETest do
     def setup(config), do: {:ok, config}
 
     @impl true
-    def execute(%Create{label: label}, _ctx) do
+    def execute(%Create{label: label}, _ctx, _runtime) do
       n = System.unique_integer([:positive])
       {:ok, [%Created{label: label, id: "real_#{n}"}]}
     end
 
-    def execute(%Use{target: target}, %{test_pid: pid}) do
+    def execute(%Use{target: target}, %{test_pid: pid}, _runtime) do
       send(pid, {:used, target})
       {:ok, []}
     end
@@ -247,13 +247,13 @@ defmodule PropertyDamage.ExternalE2ETest do
     def setup(config), do: {:ok, config}
 
     @impl true
-    def execute(%Create{label: label}, ctx) do
+    def execute(%Create{label: label}, _ctx, runtime) do
       n = System.unique_integer([:positive])
-      ctx.inject.(%Created{label: label, id: "real_#{n}"})
+      runtime.inject.(%Created{label: label, id: "real_#{n}"})
       {:ok, []}
     end
 
-    def execute(%Use{target: target}, %{test_pid: pid}) do
+    def execute(%Use{target: target}, %{test_pid: pid}, _runtime) do
       send(pid, {:used, target})
       {:ok, []}
     end

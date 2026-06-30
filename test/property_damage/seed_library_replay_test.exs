@@ -56,7 +56,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     use PropertyDamage.Adapter
     def setup(config), do: {:ok, config}
     def teardown(_context), do: :ok
-    def execute(_command, _context), do: {:ok, []}
+    def execute(_command, _context, _runtime), do: {:ok, []}
   end
 
   setup do

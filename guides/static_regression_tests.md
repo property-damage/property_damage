@@ -39,17 +39,22 @@ defmodule MyApp.RegressionTest do
       # Setup adapter directly
       {:ok, adapter_ctx} = TestAdapter.setup(%{base_url: "http://localhost:4000"})
 
+      # A no-op runtime handle for the now-required 3rd argument of execute/3.
+      # When calling the adapter directly there is no framework to inject events
+      # or start pollers, so both fields are no-ops.
+      runtime = %PropertyDamage.Runtime{inject: fn _ -> :ok end, start_poller: fn _ -> nil end}
+
       try do
         # Execute commands and assert on return values
         {:ok, [%UserCreated{id: user_id, name: "alice"}]} =
-          TestAdapter.execute(%CreateUser{name: "alice"}, adapter_ctx)
+          TestAdapter.execute(%CreateUser{name: "alice"}, adapter_ctx, runtime)
 
         # Chain commands using values from previous responses
         {:ok, [%UserUpdated{id: ^user_id, name: "alice_updated"}]} =
-          TestAdapter.execute(%UpdateUser{id: user_id, name: "alice_updated"}, adapter_ctx)
+          TestAdapter.execute(%UpdateUser{id: user_id, name: "alice_updated"}, adapter_ctx, runtime)
 
         {:ok, [%UserDeleted{id: ^user_id}]} =
-          TestAdapter.execute(%DeleteUser{id: user_id}, adapter_ctx)
+          TestAdapter.execute(%DeleteUser{id: user_id}, adapter_ctx, runtime)
       after
         TestAdapter.teardown(adapter_ctx)
       end
@@ -64,7 +69,8 @@ end
 - Easy to understand and debug
 
 **Limitations:**
-- Cannot capture injected events (webhooks, callbacks)
+- Cannot capture injected events (webhooks, callbacks): the `runtime` handle's
+  `inject`/`start_poller` are no-ops here
 - Must manually chain values between commands
 - No automatic ref resolution
 
@@ -89,7 +95,7 @@ defmodule MyApp.RegressionTest do
     test "payment confirmation triggers webhook" do
       # CreatePayment produces a PaymentCreated event whose `payment_id` is
       # `external()` (server-generated). Build a placeholder for that producer
-      # (command 0, its first event) and reuse it downstream; execute/2 captures
+      # (command 0, its first event) and reuse it downstream; execute/3 captures
       # the real value and resolves it.
       payment_id = Placeholder.new_at(PaymentCreated, [:payment_id], {:prefix, 0}, 0)
 

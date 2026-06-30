@@ -471,8 +471,8 @@ defmodule PropertyDamage.ErrorOrigin do
     module_str = to_string(module)
 
     cond do
-      module_str =~ ~r/Adapter$/ and function == :execute and arity == 2 ->
-        "Implement execute/2 in your adapter module"
+      module_str =~ ~r/Adapter$/ and function == :execute and arity == 3 ->
+        "Implement execute/3 in your adapter module"
 
       module_str =~ ~r/Adapter$/ and function == :setup and arity == 1 ->
         "Implement setup/1 in your adapter module"

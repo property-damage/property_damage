@@ -11,12 +11,12 @@ defmodule PropertyDamage.CommandTest do
       Code.ensure_loaded!(CreateItem)
       # Verify generator is implemented
       assert function_exported?(CreateItem, :generator, 1)
-      # Verify metadata callbacks
-      assert function_exported?(CreateItem, :downstream_observables, 0)
+      # Verify the static metadata surface
+      assert function_exported?(CreateItem, :command_spec, 1)
     end
 
-    test "downstream_observables returns expected events" do
-      assert CreateItem.downstream_observables() == [ItemCreated]
+    test "command_spec :observables returns expected events" do
+      assert CreateItem.command_spec([]).observables == [ItemCreated]
     end
 
     test "generator/1 produces valid maps" do
@@ -42,16 +42,15 @@ defmodule PropertyDamage.CommandTest do
     test "compiles correctly with behaviour" do
       Code.ensure_loaded!(ViewItem)
       assert function_exported?(ViewItem, :generator, 1)
-      assert function_exported?(ViewItem, :read_only?, 0)
-      assert function_exported?(ViewItem, :downstream_observables, 0)
+      assert function_exported?(ViewItem, :command_spec, 1)
     end
 
-    test "read_only? returns true" do
-      assert ViewItem.read_only?() == true
+    test "read-only commands declare shrink: :prefer_remove" do
+      assert ViewItem.command_spec([]).shrink == :prefer_remove
     end
 
-    test "downstream_observables returns expected events" do
-      assert ViewItem.downstream_observables() == [ItemViewed]
+    test "command_spec :observables returns expected events" do
+      assert ViewItem.command_spec([]).observables == [ItemViewed]
     end
 
     test "generator/1 produces valid maps with nil item_ref" do
@@ -91,8 +90,8 @@ defmodule PropertyDamage.CommandTest do
     test "optional callbacks are not exported" do
       Code.ensure_loaded!(MinimalCommand)
       refute function_exported?(MinimalCommand, :label, 2)
-      refute function_exported?(MinimalCommand, :downstream_observables, 0)
-      refute function_exported?(MinimalCommand, :read_only?, 0)
+      refute function_exported?(MinimalCommand, :idempotency_key, 1)
+      refute function_exported?(MinimalCommand, :awaits, 2)
     end
 
     test "generator/1 produces empty map" do
@@ -113,8 +112,22 @@ defmodule PropertyDamage.CommandTest do
       optional = PropertyDamage.Command.behaviour_info(:optional_callbacks)
 
       assert {:label, 2} in optional
-      assert {:downstream_observables, 0} in optional
-      assert {:read_only?, 0} in optional
+      assert {:idempotency_key, 1} in optional
+      assert {:awaits, 2} in optional
+      assert {:command_spec, 1} in optional
+    end
+
+    test "the deleted static metadata callbacks are no longer declared (DR-028)" do
+      optional = PropertyDamage.Command.behaviour_info(:optional_callbacks)
+      callbacks = PropertyDamage.Command.behaviour_info(:callbacks)
+      all = optional ++ callbacks
+
+      refute {:semantics, 0} in all
+      refute {:settle_config, 0} in all
+      refute {:read_only?, 0} in all
+      refute {:idempotent?, 0} in all
+      refute {:acceptable_retry_events, 0} in all
+      refute {:downstream_observables, 0} in all
     end
 
     test "precondition is no longer a callback (moved to Model)" do

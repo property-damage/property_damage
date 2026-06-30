@@ -28,9 +28,9 @@ defmodule ObanBench.SeededBugTest do
     def teardown(ctx), do: ObanBench.Adapter.teardown(ctx)
 
     @impl true
-    def execute(%Increment{counter: base}, ctx) do
+    def execute(%Increment{counter: base}, ctx, runtime) do
       # Same path as the real adapter, but enqueues the no-op worker.
-      ObanBench.Adapter.enqueue_increment(base, NoOpWorker, ctx)
+      ObanBench.Adapter.enqueue_increment(base, NoOpWorker, ctx, runtime)
     end
   end
 

@@ -118,7 +118,7 @@ defmodule PropertyDamage.Nemesis.AutoRestoreTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%NoOp{}, _ctx), do: {:ok, []}
+    def execute(%NoOp{}, _ctx, _runtime), do: {:ok, []}
   end
 
   defmodule FailAdapter do
@@ -129,7 +129,7 @@ defmodule PropertyDamage.Nemesis.AutoRestoreTest do
     @impl true
     def teardown(_ctx), do: :ok
     @impl true
-    def execute(%NoOp{}, _ctx), do: {:error, :boom}
+    def execute(%NoOp{}, _ctx, _runtime), do: {:error, :boom}
   end
 
   setup do

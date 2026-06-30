@@ -8,24 +8,21 @@ defmodule PropertyDamage.Settle do
 
   ## Usage
 
-  Commands with `semantics/0` returning `:probe` or `:async` can implement `settle_config/0`
-  to customize retry behavior. The Executor uses this module to repeatedly execute
-  the command until it succeeds or times out.
+  Commands whose `command_spec/1` declares `execution: :probe` or `:async` customize
+  retry behavior via the spec's `:settle` map. The Executor uses this module to
+  repeatedly execute the command until it succeeds or times out.
 
   ## Example
 
       defmodule MyProbe do
-        @behaviour PropertyDamage.Command
+        use PropertyDamage.Command,
+          execution: :probe,
+          settle: %{timeout_ms: 5_000, interval_ms: 200, backoff: :exponential}
 
-        def semantics, do: :probe
+        defstruct []
 
-        def settle_config do
-          %{
-            timeout_ms: 5_000,
-            interval_ms: 200,
-            backoff: :exponential
-          }
-        end
+        @impl true
+        def generator(_overrides \\\\ %{}), do: StreamData.constant(%{})
       end
 
   ## Backoff Strategies
@@ -45,8 +42,9 @@ defmodule PropertyDamage.Settle do
   @doc """
   Get the settle configuration for a command.
 
-  Returns the command's settle_config if implemented, otherwise returns defaults.
-  Also accepts a command spec map with a :settle key.
+  For a command module/struct, resolves the `:settle` map from its `command_spec/1`
+  (falling back to defaults when the command has no spec). Also accepts a command
+  spec map directly via its `:settle` key.
   """
   @spec get_config(module() | struct() | map()) :: map()
   def get_config(command) when is_struct(command) do
@@ -54,11 +52,7 @@ defmodule PropertyDamage.Settle do
   end
 
   def get_config(command_module) when is_atom(command_module) do
-    if function_exported?(command_module, :settle_config, 0) do
-      Map.merge(@default_config, command_module.settle_config())
-    else
-      @default_config
-    end
+    get_settle_config(resolve_spec(command_module))
   end
 
   # Spec map with :settle key
@@ -91,10 +85,11 @@ defmodule PropertyDamage.Settle do
   def get_settle_config(_), do: @default_config
 
   @doc """
-  Get the semantics of a command.
+  Get the execution semantics of a command.
 
-  Returns the command's semantics if implemented, otherwise returns :sync (default).
-  Also accepts a command spec map with an :execution key.
+  For a command module/struct, resolves `:execution` from its `command_spec/1`
+  (`:sync` when the command has no spec). Also accepts a command spec map with an
+  `:execution` key.
   """
   @spec get_semantics(module() | struct() | map()) :: :sync | :probe | :async
   def get_semantics(command) when is_struct(command) do
@@ -102,11 +97,7 @@ defmodule PropertyDamage.Settle do
   end
 
   def get_semantics(command_module) when is_atom(command_module) do
-    if function_exported?(command_module, :semantics, 0) do
-      command_module.semantics()
-    else
-      :sync
-    end
+    Map.get(resolve_spec(command_module), :execution, :sync)
   end
 
   # Spec map with :execution key
@@ -114,6 +105,17 @@ defmodule PropertyDamage.Settle do
 
   # Plain maps are always sync
   def get_semantics(map) when is_map(map), do: :sync
+
+  # Resolve a command module's spec via its command_spec/1, falling back to the
+  # framework defaults for spec-less command modules (DR-028: command_spec is the
+  # single static-metadata surface; there is no per-callback fallback).
+  defp resolve_spec(command_module) do
+    if function_exported?(command_module, :command_spec, 1) do
+      command_module.command_spec([])
+    else
+      PropertyDamage.Command.framework_defaults()
+    end
+  end
 
   @doc """
   Check if a command requires settling (is a probe or async).

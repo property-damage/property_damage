@@ -30,14 +30,14 @@ defmodule RedisBench.ProxyAdapter do
   end
 
   @impl true
-  def execute(%Increment{}, %{conn: conn, key: key}) do
+  def execute(%Increment{}, %{conn: conn, key: key}, _runtime) do
     case Redix.command(conn, ["INCR", key], timeout: @command_timeout) do
       {:ok, to} -> {:ok, [%Incremented{from: to - 1, to: to}]}
       {:error, reason} -> {:error, {:redis_unavailable, reason}}
     end
   end
 
-  def execute(%ReadValue{}, %{conn: conn, key: key}) do
+  def execute(%ReadValue{}, %{conn: conn, key: key}, _runtime) do
     case Redix.command(conn, ["GET", key], timeout: @command_timeout) do
       {:ok, raw} -> {:ok, [%ValueRead{value: RedisBench.Adapter.to_int(raw)}]}
       {:error, reason} -> {:error, {:redis_unavailable, reason}}
