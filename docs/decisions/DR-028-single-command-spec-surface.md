@@ -50,6 +50,33 @@ with the individual static callbacks removed rather than deprecated.
   acceptable-retry), `openspec/specs/shrinking` (read_only → shrink).
 - Supersedes the legacy-fallback portion of DR-019. `CHANGELOG.md` BREAKING entry.
 
+## Amendment (P7): `label/2` rendering
+
+The per-instance `label/2` callback survives this DR (it takes state + command, so it
+cannot live in the static spec map). At the time of P6 it was declared and documented but
+had **zero consumers** in `lib/`: a dead surface. P7 wires it, completing the per-instance
+side of the "one canonical Command surface" tension.
+
+- **Lazy, failure-only computation.** Labels are built solely inside `FailureReport.new/1`,
+  so passing and generation runs pay nothing.
+- **Pre-state by fold, not capture.** Each command's label is computed against the
+  `command_sequence_projection` state *before* that command, reconstructed by folding the
+  shrunk sequence through the projection with the exact `apply(command)`-then-`apply(events)`
+  recipe generation uses (`Generator.update_state/4`). No dependency on the failing run's
+  captured state.
+- **Flattened-index store.** Labels live in a new `FailureReport.command_labels` map keyed
+  by the flattened `Sequence.to_list/1` index, the lingua franca every formatter and exporter
+  already iterates with (rejecting a `{branch_id, index}` key, which would force all six
+  consumers to invert their flat index before lookup). Branch-awareness lives only in
+  construction; the fold order equals the displayed order, so a branch command's pre-state is
+  the linearization the report renders rather than a per-branch fork.
+- **Best-effort.** A command without `label/2`, or a raising user implementation, contributes
+  no annotation and never fails the report being built for an unrelated failure.
+
+Spec deltas: `openspec/specs/command` (label rendering scenario), `openspec/specs/failure-analysis`
+(`command_labels` + rendered formats), `openspec/specs/export` (labels as comments). Additive,
+not breaking: `CHANGELOG.md` `### Added`.
+
 ## References
 
 - `openspec/specs/command/spec.md`

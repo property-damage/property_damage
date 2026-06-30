@@ -141,6 +141,13 @@ A command's static metadata for shrinking, validation, and debugging SHALL be de
 - **THEN** it returns a human-readable string for debugging output
 - **AND** returning `nil` indicates no special label
 
+#### Scenario: Label rendered in failure reports and exports
+- **WHEN** a failure report is constructed for a sequence containing labeled commands
+- **THEN** each command's label is computed lazily (only at report construction, never during generation or passing runs)
+- **AND** the label is computed against the `command_sequence_projection` pre-state for that command, reconstructed by folding the shrunk sequence in flattened (`Sequence.to_list/1`) order with the same `apply(command)`-then-`apply(events)` recipe generation uses
+- **AND** the non-nil label appears next to the command in the rendered failure report (terminal, markdown, JSON) and in every exported reproduction (ExUnit, scripts, Livebook)
+- **AND** a command without `label/2`, or whose `label/2` returns `nil` or raises, contributes no annotation and never fails report construction
+
 ### Requirement: Idempotency Testing Metadata
 
 Commands SHALL control stutter/idempotency testing behavior via `command_spec/1` keys (`:idempotent`, `:acceptable_retry_events`) and the per-instance `idempotency_key/1` callback.

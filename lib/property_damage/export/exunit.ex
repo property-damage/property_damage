@@ -120,7 +120,13 @@ defmodule PropertyDamage.Export.ExUnit do
 
     command_strs =
       commands
-      |> Enum.map_join(",\n", &format_command/1)
+      |> Enum.with_index()
+      |> Enum.map_join(",\n", fn {command, index} ->
+        case Map.get(report.command_labels, index) do
+          label when is_binary(label) -> "      # #{label}\n#{format_command(command)}"
+          _ -> format_command(command)
+        end
+      end)
 
     # Bound with a leading underscore: the regression test reproduces the
     # failure by re-running with the exact seed (max_runs: 1), so this list is

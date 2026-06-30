@@ -367,8 +367,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
         marker = if is_failure, do: "#{red(color)}►#{reset()}", else: " "
         idx_color = if is_failure, do: red(color), else: dim(color)
         failure_label = if is_failure, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
+        label = command_label_suffix(report, idx, color)
 
-        "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command(cmd, color)}#{failure_label}"
+        "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command(cmd, color)}#{label}#{failure_label}"
       end)
 
     truncated =
@@ -382,6 +383,16 @@ defmodule PropertyDamage.FailureReport.Formatter do
     #{section_header("Minimal Reproduction (#{length(commands)} commands)", color)}
     #{commands_text}#{truncated}
     """
+  end
+
+  # The human-readable `Command.label/2` for the command at flattened index
+  # `idx` (P7), rendered as a dim trailing `# <label>` comment. Empty when the
+  # command produced no label.
+  defp command_label_suffix(report, idx, color) do
+    case Map.get(report.command_labels, idx) do
+      label when is_binary(label) -> "  #{dim(color)}# #{label}#{reset()}"
+      _ -> ""
+    end
   end
 
   # Translate the executor's (failed_at_index, branch_id) into a position in
@@ -815,7 +826,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
       |> Enum.map_join("\n\n", fn {cmd, idx} ->
         marker = if idx == report.failed_at_index, do: "► ", else: "  "
 
-        "#{marker}# [#{idx}] #{module_name(cmd.__struct__)}\n#{marker}#{inspect(cmd, pretty: true)}"
+        label =
+          case Map.get(report.command_labels, idx) do
+            l when is_binary(l) -> ": #{l}"
+            _ -> ""
+          end
+
+        "#{marker}# [#{idx}] #{module_name(cmd.__struct__)}#{label}\n#{marker}#{inspect(cmd, pretty: true)}"
       end)
 
     truncated =
@@ -938,7 +955,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         "iterations" => report.shrink_iterations,
         "time_ms" => report.shrink_time_ms
       },
-      "sequence" => serialize_sequence(report.shrunk_sequence),
+      "sequence" => serialize_sequence(report.shrunk_sequence, report.command_labels),
       "reproduction" => FailureReport.reproduction_command(report)
     }
 
@@ -971,7 +988,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     Jason.encode!(data, pretty: indent > 0)
   end
 
-  defp serialize_sequence(sequence) do
+  defp serialize_sequence(sequence, command_labels) do
     sequence
     |> Sequence.to_list()
     |> Enum.with_index()
@@ -979,7 +996,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       %{
         "index" => idx,
         "type" => module_name(cmd.__struct__),
-        "fields" => cmd |> Map.from_struct() |> serialize_map()
+        "fields" => cmd |> Map.from_struct() |> serialize_map(),
+        "label" => Map.get(command_labels, idx)
       }
     end)
   end
