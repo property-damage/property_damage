@@ -21,6 +21,13 @@ defmodule PropertyDamage.Nemesis.SilentDeceptionTest do
   alias PropertyDamage.Nemesis
   alias PropertyDamage.Nemesis.{NetworkLatency, NetworkPartition, PacketLoss}
 
+  # A real-effect event has no `:simulated` field (the marker is only added by
+  # the network nemeses that can be a silent no-op).
+  defmodule RealEffectEvent do
+    @moduledoc false
+    defstruct [:detail]
+  end
+
   # No toxiproxy in the context => these nemeses inject nothing.
   @no_toxiproxy %{}
 
@@ -76,7 +83,7 @@ defmodule PropertyDamage.Nemesis.SilentDeceptionTest do
 
   describe "simulated_event?/1" do
     test "is false for real-effect nemesis events (no :simulated field)" do
-      refute Nemesis.simulated_event?(%CPUStressInjected{intensity: 5})
+      refute Nemesis.simulated_event?(%RealEffectEvent{detail: :stress})
       refute Nemesis.simulated_event?(%{some: :event})
     end
 
