@@ -282,9 +282,14 @@ When the `seed_library:` option is enabled and the library is non-empty, the sys
 - **THEN** random exploration SHALL proceed normally
 - **AND** an explicit `seed:` SHALL still get its exploration run after the replay phase
 
-### Requirement: Adapter Timeout
+### Requirement: Adapter Timeout (DR-032)
 
-Each command execution SHALL be subject to a configurable timeout. The default timeout SHALL be 30 seconds. Adapters MAY override the timeout per command type.
+Each `adapter.execute/3` call SHALL be subject to a configurable per-command wall-clock timeout, in an ordinary core `Executor` run as well as in load-test workers. The default timeout SHALL be 30 seconds. Adapters MAY override the timeout per command type (an integer of seconds, or a `{n, unit}` tuple). Because enforcing a hard timeout requires a separately-killable process, the framework SHALL run `execute/3` in a child process; the `$callers` chain SHALL be propagated so connection-ownership mechanisms (e.g. Ecto `SQL.Sandbox`, Mox) resolve from that child.
+
+#### Scenario: A wedged command times out instead of hanging
+- **WHEN** an `execute/3` call exceeds the command's timeout in a core run
+- **THEN** the framework SHALL stop waiting and surface a `CommandTimeoutError` through the adapter-error channel (so it flows through the failure report like any other adapter error)
+- **AND** it SHALL NOT block the run indefinitely
 
 #### Scenario: Default timeout applies
 - **WHEN** an adapter does not override the timeout

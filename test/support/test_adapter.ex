@@ -9,17 +9,16 @@ defmodule PropertyDamage.Test.TestAdapter do
 
   @impl true
   def setup(config) do
-    Process.put({__MODULE__, :item_counter}, 0)
-    {:ok, %{config: config}}
+    # Cross-process counter (DR-032 always-on timeout); see SimpleAdapter.
+    {:ok, %{config: config, item_counter: :atomics.new(1, [])}}
   end
 
   @impl true
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, _context, _runtime) do
-    counter = Process.get({__MODULE__, :item_counter}, 0)
-    Process.put({__MODULE__, :item_counter}, counter + 1)
+  def execute(%CreateItem{name: name, quantity: qty}, %{item_counter: ref}, _runtime) do
+    counter = :atomics.add_get(ref, 1, 1) - 1
 
     event = %ItemCreated{
       item_ref: "item_#{counter}",

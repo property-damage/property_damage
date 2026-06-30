@@ -280,7 +280,12 @@ defmodule PropertyDamage.ResourcePoller do
     on_timeout = Keyword.get(opts, :on_timeout, :fail)
     branch_id = Keyword.get(opts, :branch_id)
 
-    caller = self()
+    # The poller sends its result to `caller` (consumed by await/await_all/check).
+    # That consumer is the run process, but `start/1` may run in a short-lived
+    # child process (DR-032 always-on timeout wraps adapter.execute/3 in a Task),
+    # so the owner must be passed explicitly rather than captured as self(),
+    # which would route the result to the dead child's mailbox.
+    caller = Keyword.get(opts, :caller, self())
     started_at = System.monotonic_time(:millisecond)
 
     init_state = %{

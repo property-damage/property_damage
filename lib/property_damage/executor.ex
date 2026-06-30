@@ -96,6 +96,7 @@ defmodule PropertyDamage.Executor do
   alias PropertyDamage.Executor.Finalization
   alias PropertyDamage.Executor.Settle
   alias PropertyDamage.Executor.State
+  alias PropertyDamage.Executor.Timeout
 
   alias PropertyDamage.Runtime
 
@@ -660,14 +661,20 @@ defmodule PropertyDamage.Executor do
           command: command
         })
 
-        # Build start_poller closure for resource polling
+        # Build start_poller closure for resource polling. `runtime.start_poller`
+        # is invoked from inside adapter.execute/3, which (DR-032) runs in a
+        # child Task; capture the run process here so the poller routes its
+        # result to a stable mailbox, not the short-lived Task's.
+        poller_owner = self()
+
         start_poller_fn = fn opts ->
           poller =
             ResourcePoller.start(
               Keyword.merge(opts,
                 event_queue: event_queue,
                 command_index: index,
-                branch_id: state.branch_id
+                branch_id: state.branch_id,
+                caller: poller_owner
               )
             )
 
@@ -1945,8 +1952,8 @@ defmodule PropertyDamage.Executor do
             inject_unavailable_runtime("in Executor.execute_raw/3 (no event queue configured)")
           end
 
-        # Execute via adapter
-        case adapter.execute(resolved_command, adapter_context, runtime) do
+        # Execute via adapter (bounded by adapter.timeout/1, DR-032)
+        case Timeout.execute(adapter, resolved_command, adapter_context, runtime) do
           {:ok, events} ->
             # Capture external() values this command produced, keyed by its linear
             # position, so later commands resolve them (DR-021).

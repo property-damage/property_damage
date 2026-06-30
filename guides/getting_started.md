@@ -240,6 +240,18 @@ defmodule MyApp.TestAdapter do
 end
 ```
 
+> #### Where adapter state lives
+>
+> Each command is run under the adapter's `timeout/1` as a hard wall-clock bound,
+> which means `execute/3` runs in a short-lived child process (so a hung command
+> fails with `PropertyDamage.CommandTimeoutError` instead of hanging the run).
+> Keep your SUT state in the SUT and your adapter state in `user_context` (what
+> `setup/1` returns) and the `runtime`, never in the run process's process
+> dictionary or keyed on `self()`. Ecto's `SQL.Sandbox` and `Mox` keep working
+> unchanged (they resolve access through `$callers`, which is propagated). See
+> the `PropertyDamage.Adapter` module docs, "Execution process and the
+> per-command timeout", for the full contract.
+
 ### Adapter Variations
 
 The example above uses HTTP, but adapters can target any transport:

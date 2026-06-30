@@ -195,7 +195,12 @@ defmodule PropertyDamage.ExecutorTest do
         %CreateItem{name: "C", quantity: 3}
       ]
 
-      {:ok, events} = Executor.execute_raw(commands, SimpleAdapter, %{adapter_context: %{}})
+      # execute_raw/3 bypasses setup/1, so the caller supplies the context the
+      # adapter needs (here SimpleAdapter's per-run counter).
+      {:ok, events} =
+        Executor.execute_raw(commands, SimpleAdapter, %{
+          adapter_context: %{item_counter: :atomics.new(1, [])}
+        })
 
       names = Enum.map(events, & &1.event.name)
       assert names == ["A", "B", "C"]
