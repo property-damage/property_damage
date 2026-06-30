@@ -90,6 +90,13 @@ Nemesis commands SHALL participate in the normal command sequence as defined by 
 - **THEN** the framework SHALL select Nemesis commands according to their weights during sequence generation
 - **AND** Nemesis commands SHALL be subject to the same `when:` predicates as regular commands
 
+#### Scenario: Generating a selected Nemesis command (DR-031)
+
+- **WHEN** the generator selects a Nemesis module during sequence generation
+- **THEN** it SHALL produce a command instance via the Nemesis module's `new!/2` callback (passing the current generation state and any `with:` overrides), since Nemesis modules implement `new!/2` rather than `generator/1`
+- **AND** the Nemesis module's `precondition/1` SHALL act as a generation-time filter: a Nemesis whose precondition is unmet for the current state SHALL NOT be selected
+- **AND** if a selected Nemesis module does not implement `new!/2`, the framework SHALL raise a clear error rather than fall through to `generator/1`
+
 #### Scenario: Adjusting assertions during active faults
 
 - **WHEN** an assertion projection fires while a Nemesis fault is active

@@ -1,6 +1,6 @@
 # DR-031: Nemesis Generation Dispatch (new!/2 + precondition/1 wired into generation)
 
-**Status:** Accepted (design pass; implementation in progress)
+**Status:** Accepted (implemented)
 **Date:** 2026-06-29
 
 > Part of the served/servant clean-break campaign (discrepancy sweep). Makes a documented,
