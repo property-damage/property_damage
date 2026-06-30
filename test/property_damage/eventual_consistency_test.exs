@@ -231,6 +231,10 @@ defmodule PropertyDamage.EventualConsistencyTest do
 
     assert {:error, %PropertyDamage.FailureReport{} = report} = result
     assert {:poll_timeout, _info} = report.failure_reason
-    assert report.failed_at_index == nil
+
+    # DR-030: a @poll_state liveness timeout is now attributed to the command
+    # whose event opened the poll window (InitiatePayment at index 0), so the
+    # shrinker keeps locality. (Previously reported as nil.)
+    assert report.failed_at_index == 0
   end
 end

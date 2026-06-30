@@ -388,6 +388,32 @@ defmodule PropertyDamage.Command do
   """
   @callback command_spec(overrides :: keyword()) :: map()
 
+  @doc """
+  (Optional) Declares which inbound (injector) events this command correlates.
+
+  Returns a list of `PropertyDamage.Await` structs, each carrying a `match`
+  predicate `(event -> boolean)` built from the command's own resolved fields
+  (and captured response). When an injector event satisfies a `match`, the
+  framework attributes it to this command's `command_index` for the rest of the
+  run, instead of folding it as ambient (`command_index: nil`).
+
+  This is **pure correlation**: it never blocks and asserts nothing. Judgment
+  over the correlated set lives in projections (a `@poll_state` assertion for
+  liveness, a `@trigger`/`@invariant` for safety/cardinality). See
+  `PropertyDamage.Await` for the multiplicity rules (first-registered wins).
+
+  Evaluated per command instance, after execution and placeholder capture, so
+  the predicate can close over server-assigned values. Default: `[]` (the
+  command correlates nothing).
+
+  ## Example
+
+      def awaits(_state, %__MODULE__{issue_id: id}) do
+        [%PropertyDamage.Await{match: &match?(%IssueClosedWebhook{issue_id: ^id}, &1)}]
+      end
+  """
+  @callback awaits(state :: map(), command :: struct()) :: [PropertyDamage.Await.t()]
+
   @optional_callbacks [
     label: 2,
     downstream_observables: 0,
@@ -397,6 +423,7 @@ defmodule PropertyDamage.Command do
     idempotent?: 0,
     idempotency_key: 1,
     acceptable_retry_events: 0,
+    awaits: 2,
     command_spec: 1
   ]
 

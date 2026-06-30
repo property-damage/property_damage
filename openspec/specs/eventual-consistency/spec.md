@@ -4,7 +4,7 @@
 
 Defines the settle retry logic, resource polling, state polling, and probe command semantics that enable the PropertyDamage framework to test eventually consistent systems where operations may not produce immediate results.
 
-Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage)
+Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-030 (Command-Correlated Injector Events -- liveness over a correlated set, poll-timeout locality)
 
 ## Requirements
 
@@ -120,6 +120,14 @@ The system SHALL support `@poll_state` temporal assertions that spawn a backgrou
 - **AND** the predicate never becomes true before the timeout
 - **THEN** the state poller SHALL report failure with diagnostic information
 - **AND** the report SHALL include the trigger event, predicate source, final state, elapsed time, and poll count
+
+#### Scenario: Poll timeout attributed to its triggering command (DR-030)
+- **WHEN** a `@poll_state` poller times out
+- **THEN** the failure's `failed_at_index` SHALL be the `command_index` of the command whose event opened the poll window, so the shrinker can truncate to it
+
+#### Scenario: Liveness over a correlated set (DR-030)
+- **WHEN** a command correlates an injector event via `awaits/2` and a `@poll_state` predicate asserts that the command's correlated set becomes non-empty
+- **THEN** the predicate observes the awaited event once it is folded and attributed, and the framework's existing `@poll_state` finalize drain (which already awaits the internal event queue) supplies the wait — no separate await loop exists
 
 #### Scenario: Configurable polling parameters
 - **WHEN** a `@poll_state` assertion specifies timeout and interval

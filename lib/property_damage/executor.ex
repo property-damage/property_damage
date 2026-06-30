@@ -753,6 +753,12 @@ defmodule PropertyDamage.Executor do
                 state.branch_id
               )
 
+            # 6.5. DR-030: register this command's awaits matchers (post-capture,
+            #      so the match predicate can close over captured response values).
+            #      Persist them on the state so later drains (including finalize)
+            #      still correlate, then drain with the full registry in effect.
+            state = register_awaits(state, resolved_command, index, model, projections)
+
             # 7. Drain and process injector events. DR-025: capture the
             #    pre-drain projections/log so check_async can assert each async
             #    event on the state it produced and locate a violation at the
@@ -761,7 +767,13 @@ defmodule PropertyDamage.Executor do
             log_before_async = event_log
 
             {projections, event_log} =
-              Events.process_injector_events(event_queue, event_log, projections, state.branch_id)
+              Events.process_injector_events(
+                event_queue,
+                event_log,
+                projections,
+                state.branch_id,
+                state.await_matchers
+              )
 
             # 7.5. Flush and process mock-injected events
             {projections, event_log} =
@@ -849,7 +861,7 @@ defmodule PropertyDamage.Executor do
                           })
 
                         # Spawn pollers for any @poll_state assertions triggered by these events
-                        new_state = maybe_spawn_pollers(new_state, events, model)
+                        new_state = maybe_spawn_pollers(new_state, events, model, index)
                         new_state = update_poller_state_getters(new_state)
 
                         {:ok, new_state}
@@ -927,11 +939,21 @@ defmodule PropertyDamage.Executor do
                 state.branch_id
               )
 
+            # DR-030: register this command's awaits matchers before draining
+            # (see the {:ok, events} branch).
+            state = register_awaits(state, resolved_command, index, model, projections)
+
             projs_before_async = projections
             log_before_async = event_log
 
             {projections, event_log} =
-              Events.process_injector_events(event_queue, event_log, projections, state.branch_id)
+              Events.process_injector_events(
+                event_queue,
+                event_log,
+                projections,
+                state.branch_id,
+                state.await_matchers
+              )
 
             # Flush and process mock-injected events
             {projections, event_log} =
@@ -1018,7 +1040,7 @@ defmodule PropertyDamage.Executor do
                           })
 
                         # Spawn pollers for any @poll_state assertions triggered by these events
-                        new_state = maybe_spawn_pollers(new_state, events, model)
+                        new_state = maybe_spawn_pollers(new_state, events, model, index)
                         new_state = update_poller_state_getters(new_state)
 
                         {:ok, new_state}
@@ -1671,7 +1693,33 @@ defmodule PropertyDamage.Executor do
 
   @doc false
   # Spawn pollers for any @poll_state assertions triggered by the given events
-  defp maybe_spawn_pollers(state, events, model) do
+  # DR-030: build and register the awaits matchers a command declares. Pure
+  # correlation: each %Await{match} becomes a registry entry carrying the
+  # command's index + branch, appended in registration order (so first-registered
+  # wins on overlap). A matcher persists for the rest of the run, so a late
+  # injector event still correlates to the command that claimed it. Plain-map
+  # commands (low-level/test usage) and commands without awaits/2 are no-ops.
+  defp register_awaits(state, command, index, model, projections) do
+    if is_struct(command) and awaits?(command.__struct__) do
+      module = command.__struct__
+      model_state = Map.get(projections, model.command_sequence_projection())
+
+      new_matchers =
+        for %PropertyDamage.Await{match: match} <- module.awaits(model_state, command) do
+          %{command_index: index, branch_id: state.branch_id, match: match}
+        end
+
+      %{state | await_matchers: state.await_matchers ++ new_matchers}
+    else
+      state
+    end
+  end
+
+  defp awaits?(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :awaits, 2)
+  end
+
+  defp maybe_spawn_pollers(state, events, model, command_index) do
     assertion_mode = Map.get(state, :assertion_mode, :halt)
 
     # Skip if assertions are disabled
@@ -1725,7 +1773,11 @@ defmodule PropertyDamage.Executor do
               projection: projection,
               interval_ms: assertion.poll_state.interval_ms,
               timeout_ms: assertion.poll_state.timeout_ms,
-              triggered_by: %{event: event, assertion_name: assertion.name},
+              triggered_by: %{
+                event: event,
+                assertion_name: assertion.name,
+                command_index: command_index
+              },
               get_state_fn: get_state_fn
             )
 

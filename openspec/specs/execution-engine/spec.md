@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -179,6 +179,12 @@ The system SHALL provide a shared event queue where injector adapters push incom
 - **AND** drained events SHALL be processed through projections
 - **AND** drained events SHALL be evaluated against `@trigger every:` assertions (DR-025)
 - **AND** each entry SHALL record the source adapter module and timestamp
+
+#### Scenario: Correlated injector events attributed to their command (DR-030)
+- **WHEN** a drained injector event satisfies the `match` predicate of a command's registered `awaits/2` declaration
+- **THEN** the entry's `command_index` SHALL be the declaring command's index, rather than the ambient `nil`
+- **AND** when several commands' matchers accept the same event, the first-registered command SHALL win and the framework SHALL log an overlap diagnostic
+- **AND** an injector event matching no registered await SHALL fold with `command_index: nil` as before
 
 ### Requirement: Mock Service Adapter
 
