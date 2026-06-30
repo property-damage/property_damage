@@ -162,6 +162,36 @@ Commands MAY implement callbacks that control stutter/idempotency testing behavi
 - **THEN** retry responses matching any listed event module are accepted as correct
 - **AND** this allows different-but-valid responses on retry (e.g., created vs. already exists)
 
+### Requirement: Event Correlation via Awaits
+
+Commands MAY implement the optional `awaits/2` callback (DR-030) to correlate inbound injector events back to the command that semantically owns them. `awaits(state, command)` SHALL return a list of `PropertyDamage.Await` structs, each carrying a `match` predicate `(event -> boolean)` built from the command's resolved fields and captured response. This is **pure correlation**: a matching injector event is attributed to the declaring command's `command_index`; the callback SHALL NOT block, time out, or assert. Judgment over a command's correlated set is expressed in projections (a `@poll_state` for liveness, a `@trigger`/`@invariant` for safety). A command that does not implement `awaits/2` correlates nothing (default `[]`).
+
+#### Scenario: Awaits correlates an injector event to its command
+- **WHEN** a command implements `awaits/2` returning a `%Await{match: predicate}`
+- **AND** an injector event satisfies the predicate
+- **THEN** the framework attributes that event to the command's `command_index` (instead of the ambient `nil`)
+
+#### Scenario: Match predicate built from the resolved command
+- **WHEN** `awaits/2` is evaluated after execution and placeholder capture
+- **THEN** the `match` predicate MAY close over the command's resolved fields and captured response (the correlation key)
+
+#### Scenario: Persistent correlation outlives the command
+- **WHEN** a matching injector event arrives in a later drain (including at finalize)
+- **THEN** it is still attributed to the command that declared the matching await
+
+#### Scenario: First-registered wins on overlap
+- **WHEN** an injector event satisfies the matchers of more than one command
+- **THEN** it is attributed to the first-registered command (deterministic)
+- **AND** the framework logs an overlap diagnostic
+
+#### Scenario: Unmatched injector events remain ambient
+- **WHEN** an injector event satisfies no registered await
+- **THEN** it folds with `command_index: nil` as before
+
+#### Scenario: Simulator predicts the awaited event
+- **WHEN** a command declares `awaits/2` and the model implements `simulate/2`
+- **THEN** `simulate/2` SHALL predict the awaited event, so the simulated projection state matches a live correlated run (the `awaits/2` ↔ `simulate/2` contract)
+
 ### Requirement: Legacy Callback Fallback
 
 The framework SHALL support legacy callbacks for backward compatibility. When a command does not implement `command_spec/1`, the framework SHALL build a spec from legacy callbacks `semantics/0`, `settle_config/0`, and `read_only?/0`.

@@ -89,7 +89,8 @@ defmodule PropertyDamage.Executor.Nemesis do
             event_queue,
             event_log,
             projections,
-            state.branch_id
+            state.branch_id,
+            Map.get(state, :await_matchers, [])
           )
 
         # Track active fault if auto-restoring

@@ -215,7 +215,9 @@ defmodule PropertyDamage.Executor.Finalization do
       event_log: Enum.reverse(state.event_log),
       projections: state.projections,
       projections_before: Map.get(state, :projections_before),
-      failed_at_index: nil,
+      # DR-030: a @poll_state liveness timeout reports at the command whose event
+      # opened the window (nil for poll errors / resource pollers / older info).
+      failed_at_index: poller_failure_index(failure_reason),
       failure_reason: failure_reason,
       stacktrace: nil,
       linearization: linearization,
@@ -223,6 +225,11 @@ defmodule PropertyDamage.Executor.Finalization do
       assertion_counters: Map.get(state, :assertion_counters, %{})
     }
   end
+
+  defp poller_failure_index({:poll_timeout, info}),
+    do: Map.get(info.triggered_by, :command_index)
+
+  defp poller_failure_index(_), do: nil
 
   # Result shape for a failing @trigger at: :teardown safety check (DR-024).
   # Like poller_failure_result but carries the assertion's named failure reason
@@ -325,7 +332,8 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :event_queue),
         log_before,
         projs_before,
-        Map.get(state, :branch_id)
+        Map.get(state, :branch_id),
+        Map.get(state, :await_matchers, [])
       )
 
     state = %{state | projections: projections, event_log: event_log}
@@ -461,7 +469,8 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :event_queue),
         log_before,
         projs_before,
-        nil
+        nil,
+        Map.get(state, :await_matchers, [])
       )
 
     case Executor.check_async(
@@ -641,7 +650,10 @@ defmodule PropertyDamage.Executor.Finalization do
       assertion_name: info.triggered_by.assertion_name,
       reason: {:poll_timeout, info},
       command: nil,
-      command_index: nil,
+      # DR-030: attribute the liveness timeout to the command whose event opened
+      # the @poll_state window, so the shrinker keeps locality (nil for older
+      # poll info that predates command_index threading).
+      command_index: Map.get(info.triggered_by, :command_index),
       step_type: :event,
       module: info.triggered_by.event.__struct__,
       timestamp: System.monotonic_time(:millisecond),

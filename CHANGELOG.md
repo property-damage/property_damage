@@ -32,6 +32,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING (DR-027):** The optional `Adapter.register_handler/2` callback is
   removed. Command/event correlation moves to the semantic surface (see DR-030);
   inbound transport stays with `Adapter.Injector`.
+- **(DR-030):** A `@poll_state` liveness timeout is now attributed to the command
+  whose event opened the poll window: its `failed_at_index` (previously `nil`) is
+  that command's index, so the shrinker keeps locality. Code that asserted poll
+  timeouts report `failed_at_index: nil` must update.
+
+### Added
+
+- **`Command.awaits/2` (DR-030):** a new optional, per-instance callback that
+  correlates inbound injector events back to the command that owns them. It
+  returns `[%PropertyDamage.Await{match}]`, where `match` is a predicate
+  `(event -> boolean)` built from the command's resolved fields and captured
+  response. A matching injector event is attributed to the declaring command's
+  `command_index` (instead of the ambient `nil`), persistently for the rest of
+  the run; overlapping matchers resolve to the first-registered with a logged
+  diagnostic. This is **pure correlation**: judgment over a command's correlated
+  set is expressed in projections (a `@poll_state` for liveness, a
+  `@trigger`/`@invariant` for safety/cardinality), reusing the existing assertion
+  machinery rather than a separate await loop. This implements, on the correct
+  (semantic) surface, the capability the removed `Adapter.register_handler/2`
+  advertised.
 
 ## [0.2.0] - 2026-06-25
 

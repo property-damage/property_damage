@@ -46,6 +46,11 @@ defmodule PropertyDamage.Executor.State do
     * `:active_faults` - `%{{nemesis_module, index} => fault}` (ghost field)
     * `:async_halt` - `{name, reason, command_index}` set when a DR-025 async
       `every:` assertion trips during a `@poll_state` await drain (ghost field)
+    * `:await_matchers` - DR-030 correlation registry: a registration-ordered
+      list of `%{command_index:, branch_id:, match:}` declared via
+      `Command.awaits/2`. Persists for the rest of the run (a matcher outlives
+      the command that declared it) so late injector events still correlate.
+      First-registered wins when several match one event.
   """
 
   @enforce_keys [
@@ -79,7 +84,8 @@ defmodule PropertyDamage.Executor.State do
     active_pollers: [],
     active_resource_pollers: [],
     active_faults: %{},
-    async_halt: nil
+    async_halt: nil,
+    await_matchers: []
   ]
 
   @type t :: %__MODULE__{
@@ -103,6 +109,7 @@ defmodule PropertyDamage.Executor.State do
           active_pollers: list(),
           active_resource_pollers: list(),
           active_faults: map(),
-          async_halt: term()
+          async_halt: term(),
+          await_matchers: [map()]
         }
 end

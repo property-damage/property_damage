@@ -57,10 +57,12 @@ defmodule PropertyDamage.Executor.Events do
     end)
   end
 
-  def process_injector_events(nil, event_log, projections, _branch_id),
+  def process_injector_events(event_queue, event_log, projections, branch_id, matchers \\ [])
+
+  def process_injector_events(nil, event_log, projections, _branch_id, _matchers),
     do: {projections, event_log}
 
-  def process_injector_events(event_queue, event_log, projections, branch_id) do
+  def process_injector_events(event_queue, event_log, projections, branch_id, matchers) do
     entries = EventQueue.drain(event_queue)
 
     Enum.reduce(entries, {projections, event_log}, fn queue_entry, {projs, log} ->
@@ -77,10 +79,12 @@ defmodule PropertyDamage.Executor.Events do
             )
 
           _ ->
-            # Regular injector adapter entry
+            # Regular injector adapter entry. DR-030: correlate against the
+            # registered awaits matchers, attributing the event to the declaring
+            # command's index (ambient `nil` when nothing matches).
             %Entry{
               timestamp: queue_entry.timestamp,
-              command_index: nil,
+              command_index: correlate(queue_entry.event, matchers),
               event: queue_entry.event,
               source: :injector,
               injector_adapter: queue_entry.adapter_module,
@@ -92,6 +96,41 @@ defmodule PropertyDamage.Executor.Events do
       new_projs = update_projections(projs, queue_entry.event)
       {new_projs, [entry | log]}
     end)
+  end
+
+  # DR-030 correlation: return the `command_index` of the first-registered await
+  # whose `match` predicate accepts the event (deterministic tie-break). When
+  # several matchers accept the same event, log an overlap diagnostic once and
+  # keep the first. An event matching nothing folds as ambient (`nil`).
+  defp correlate(_event, []), do: nil
+
+  defp correlate(event, matchers) do
+    case Enum.filter(matchers, fn %{match: match} -> safe_match(match, event) end) do
+      [] ->
+        nil
+
+      [%{command_index: index}] ->
+        index
+
+      [%{command_index: index} = first | rest] ->
+        require Logger
+
+        Logger.warning(
+          "Await overlap: #{inspect(event.__struct__)} matched #{length(rest) + 1} commands " <>
+            "(indices #{inspect(Enum.map([first | rest], & &1.command_index))}); " <>
+            "attributing to first-registered command #{index}."
+        )
+
+        index
+    end
+  end
+
+  # A matcher must be total; guard a raising predicate so one bad matcher cannot
+  # crash the drain (treat a raise as "does not match").
+  defp safe_match(match, event) do
+    match.(event) == true
+  rescue
+    _ -> false
   end
 
   # Flush and process events from mock service adapters

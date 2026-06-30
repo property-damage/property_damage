@@ -544,6 +544,51 @@ PropertyDamage.run(
 The executor drains injected events after each command, applying them to
 projections just like events from regular command execution.
 
+### Correlating events to a command (`awaits/2`)
+
+By default an injected event is *ambient*: it folds into projections but is
+attributed to no command (`command_index: nil`). When an inbound event is the
+delayed result of a specific command (a webhook for the issue you just closed,
+a callback for the payment you just initiated), declare the optional
+`Command.awaits/2` callback so the framework correlates it back to that command:
+
+```elixir
+defmodule CloseIssue do
+  use PropertyDamage.Command
+  defstruct [:issue_id]
+
+  @impl true
+  def generator(overrides \\ %{}), do: # ...
+
+  # Claim the webhook delivered for *this* issue.
+  @impl true
+  def awaits(_state, %__MODULE__{issue_id: id}) do
+    [%PropertyDamage.Await{match: &match?(%IssueClosedWebhook{issue_id: ^id}, &1)}]
+  end
+end
+```
+
+`awaits/2` returns a list of `%PropertyDamage.Await{match}` structs; `match` is a
+predicate `(event -> boolean)` built from the command's own (resolved) fields. A
+matching injected event is then attributed to that command's `command_index`,
+persistently for the rest of the run (a late arrival still correlates). When two
+commands' matchers accept the same event, the first-registered wins and an
+overlap diagnostic is logged.
+
+`awaits/2` is **pure correlation** — it never blocks and asserts nothing.
+Express judgment over a command's correlated set with ordinary projection
+assertions:
+
+- **liveness** ("the webhook must arrive") — a `@poll_state` over the correlated
+  set (e.g. `fn s -> s.webhooks[id] >= 1 end`). A timeout is reported at the
+  awaiting command's index.
+- **safety / cardinality** ("exactly one webhook per close") — a `@trigger` or
+  `@invariant` over the correlated set.
+
+When you also run in simulator mode, have `Model.simulate/2` predict the awaited
+event so the simulated projection state matches a live, correlated run (the
+`awaits/2` ↔ `simulate/2` contract).
+
 ### Model Configuration
 
 Declare which events can be injected in your model:
