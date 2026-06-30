@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Core adapter timeout (DR-032).** Each `adapter.execute/3` call in an ordinary
+  `PropertyDamage.run/1` is now bounded by `adapter.timeout/1` (default 30s, per-command
+  override), not just in load-test workers. A wedged `execute/3` now fails with
+  `PropertyDamage.CommandTimeoutError` instead of hanging the run. Enforcing a hard
+  wall-clock bound requires a separately-killable process, so `execute/3` now runs in
+  a short-lived child process. Ecto `SQL.Sandbox` and Mox adapters are unaffected (they
+  resolve ownership through the `$callers` chain, which is propagated), but adapters that
+  stashed state in the run process's process dictionary or relied on `self()` identity must
+  thread that state through `user_context` instead. See the `PropertyDamage.Adapter` module
+  docs, "Execution process and the per-command timeout".
 - **Nemesis generation dispatch (DR-031).** A Nemesis module listed in a Model's
   `commands/0` is now selected by weight during sequence generation and produces
   instances via its `new!/2` callback (Nemesis modules implement `new!/2`, not

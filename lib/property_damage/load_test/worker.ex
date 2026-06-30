@@ -3,6 +3,7 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   use GenServer
 
+  alias PropertyDamage.Executor.Timeout
   alias PropertyDamage.{Generator, PlaceholderRegistry, Runtime, Sequence}
   alias PropertyDamage.LoadTest.Metrics
   alias PropertyDamage.Model.Projection
@@ -310,7 +311,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     case PlaceholderRegistry.resolve_data(registry, command) do
       {:ok, resolved_command} ->
         # Get timeout from adapter
-        timeout_ms = normalize_timeout(state.adapter.timeout(resolved_command))
+        timeout_ms = Timeout.normalize_timeout(state.adapter.timeout(resolved_command))
 
         # Per-command injection sink (DR-027). The inject closure captures the
         # sink pid, so it accumulates correctly from inside the spawned timeout
@@ -370,11 +371,6 @@ defmodule PropertyDamage.LoadTest.Worker do
         {:error, {:unresolved_placeholder, reason}}
     end
   end
-
-  defp normalize_timeout(seconds) when is_integer(seconds), do: seconds * 1000
-  defp normalize_timeout({value, :milliseconds}), do: value
-  defp normalize_timeout({value, :seconds}), do: value * 1000
-  defp normalize_timeout({value, :minutes}), do: value * 60 * 1000
 
   # ============================================================================
   # Helpers
