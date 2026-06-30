@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Nemesis generation dispatch (DR-031).** A Nemesis module listed in a Model's
+  `commands/0` is now selected by weight during sequence generation and produces
+  instances via its `new!/2` callback (Nemesis modules implement `new!/2`, not
+  `generator/1`). Its `precondition/1` acts as a generation-time filter, the
+  Nemesis analogue of a command's `when:`. Previously a weighted Nemesis would
+  fall through to `generator/1` and crash; Nemesis commands only reached the
+  runtime when pre-baked into a sequence. A selected Nemesis without `new!/2` now
+  raises a clear error instead of an opaque `UndefinedFunctionError`.
+
 ### Changed
 
 - **BREAKING (DR-028):** `command_spec/1` is now the single surface for a command's
