@@ -506,7 +506,12 @@ defmodule PropertyDamage.Model do
   end
 
   @doc """
-  Resolve command spec from module, using command_spec/1 or legacy callbacks.
+  Resolve a command's spec map.
+
+  Commands authored via `use PropertyDamage.Command` (or an explicit
+  `command_spec/1`) resolve through that single surface. A command module without
+  `command_spec/1` resolves to the framework defaults layered with `opts`, so
+  spec-less commands still produce a complete spec map.
 
   ## Parameters
 
@@ -522,8 +527,7 @@ defmodule PropertyDamage.Model do
     if function_exported?(module, :command_spec, 1) do
       module.command_spec(opts)
     else
-      PropertyDamage.Command.build_spec_from_legacy(module)
-      |> Map.merge(Map.new(opts))
+      PropertyDamage.Command.build_spec(module, [], opts)
     end
   end
 

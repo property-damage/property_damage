@@ -17,6 +17,7 @@ defmodule PropertyDamage.Executor.Branching do
   alias PropertyDamage.Executor
   alias PropertyDamage.Executor.Events
   alias PropertyDamage.Executor.Finalization
+  alias PropertyDamage.Executor.Nemesis
   alias PropertyDamage.Linearization
   alias PropertyDamage.Placeholder
   alias PropertyDamage.PlaceholderRegistry
@@ -105,7 +106,7 @@ defmodule PropertyDamage.Executor.Branching do
              ) do
           {:ok, new_state} ->
             {:cont,
-             PropertyDamage.Executor.Nemesis.restore_elapsed_faults(
+             Nemesis.restore_elapsed_faults(
                new_state,
                adapter_context,
                event_queue
@@ -170,7 +171,7 @@ defmodule PropertyDamage.Executor.Branching do
                      ) do
                   {:ok, new_state} ->
                     {:cont,
-                     PropertyDamage.Executor.Nemesis.restore_elapsed_faults(
+                     Nemesis.restore_elapsed_faults(
                        new_state,
                        adapter_context,
                        event_queue

@@ -124,14 +124,11 @@ defmodule PropertyDamage.ValidationTest do
     end
 
     defmodule PollCommand do
-      @behaviour PropertyDamage.Command
+      use PropertyDamage.Command, observables: [PollEvents.Started]
       defstruct []
 
       @impl true
       def generator(_overrides \\ %{}), do: StreamData.constant(%{})
-
-      @impl true
-      def downstream_observables, do: [PollEvents.Started]
     end
 
     defmodule PollProjection do

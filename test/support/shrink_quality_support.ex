@@ -82,16 +82,13 @@ end
 
 defmodule PropertyDamage.Test.ShrinkQuality.Commands.GetKey do
   @moduledoc "Read a key; the model asserts the returned value matches expectation."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command, shrink: :prefer_remove
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   alias PropertyDamage.Test.ShrinkQuality
 
   defstruct [:key]
-
-  @impl true
-  def read_only?, do: true
 
   @impl true
   def generator(overrides \\ %{}) do

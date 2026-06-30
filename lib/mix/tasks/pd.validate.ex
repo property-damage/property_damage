@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Pd.Validate do
   - Injectable events are covered by injector adapters
 
   ### Warnings (validation passes with warnings)
-  - Commands missing `downstream_observables/0`
+  - Commands that declare no `:observables` in their `command_spec/1`
   - Events produced but not handled by assertion projections
   - Missing optional callbacks that may be useful
 
@@ -229,10 +229,10 @@ defmodule Mix.Tasks.Pd.Validate do
 
     # Collect warnings
     warnings =
-      for {_weight, cmd, _spec} <- commands,
+      for {_weight, cmd, spec} <- commands,
           Code.ensure_loaded?(cmd),
-          not function_exported?(cmd, :downstream_observables, 0) do
-        "Command #{cmd |> Module.split() |> List.last()} missing downstream_observables/0"
+          Map.get(spec, :observables, []) == [] do
+        "Command #{cmd |> Module.split() |> List.last()} declares no :observables"
       end
 
     warnings = warnings ++ invariant_warnings(model)

@@ -292,7 +292,9 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
 
       # The codegen contract that makes it usable by the executor:
       assert function_exported?(Module.concat(ns, "Commands.PutValue"), :events, 3)
-      assert function_exported?(Module.concat(ns, "Commands.GetValue"), :read_only?, 0)
+      get_value = Module.concat(ns, "Commands.GetValue")
+      assert function_exported?(get_value, :command_spec, 1)
+      assert get_value.command_spec([]).shrink == :prefer_remove
       adapter = Module.concat(ns, "Adapter")
       assert function_exported?(adapter, :execute, 3)
       # timeout/1 is a required Adapter callback; `use` must inject the default.
@@ -547,7 +549,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       code = generate_command(create_pet, "PetStore")
 
       assert code =~ "defmodule PetStore.Commands.CreatePet do"
-      assert code =~ "@behaviour PropertyDamage.Command"
+      assert code =~ "use PropertyDamage.Command"
       assert code =~ "defstruct"
       assert code =~ "def generator(overrides"
       assert code =~ "merge_overrides(overrides)"
@@ -556,13 +558,13 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "def events(command, status, response)"
     end
 
-    test "generates GET command as read_only" do
+    test "generates GET command as read_only (shrink: :prefer_remove)" do
       operations = extract_operations(@sample_openapi_spec, nil)
       list_pets = Enum.find(operations, &(&1.operation_id == "listPets"))
 
       code = generate_command(list_pets, "PetStore")
 
-      assert code =~ "def read_only?, do: true"
+      assert code =~ "use PropertyDamage.Command, shrink: :prefer_remove"
     end
 
     test "includes HTTP metadata functions" do

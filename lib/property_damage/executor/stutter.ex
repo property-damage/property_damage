@@ -19,8 +19,8 @@ defmodule PropertyDamage.Executor.Stutter do
   # shrink truncation that removes earlier commands does not perturb a surviving
   # command's stutter decisions.
 
-  alias PropertyDamage.Executor
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.Executor
   alias PropertyDamage.Stutter
 
   @doc false
@@ -38,7 +38,16 @@ defmodule PropertyDamage.Executor.Stutter do
       ) do
     stutter_config = Map.get(state, :stutter_config)
     rng = stutter_rng(Map.get(state, :rng_seed), index)
-    {do_stutter?, rng} = Stutter.should_stutter?(command, stutter_config, rng)
+
+    # The resolved command spec carries the static stutter metadata (DR-028):
+    # `:idempotent` eligibility and `:acceptable_retry_events`. nil for plain-map
+    # / spec-less commands, where the policy falls back to its defaults.
+    spec =
+      if is_struct(command) do
+        Map.get(Map.get(state, :command_specs, %{}), command.__struct__)
+      end
+
+    {do_stutter?, rng} = Stutter.should_stutter?(command, stutter_config, rng, spec)
 
     if do_stutter? do
       execute_stutter_retries(
@@ -50,7 +59,8 @@ defmodule PropertyDamage.Executor.Stutter do
         adapter,
         adapter_context,
         state.branch_id,
-        rng
+        rng,
+        spec
       )
     else
       {:ok, event_log}
@@ -74,7 +84,8 @@ defmodule PropertyDamage.Executor.Stutter do
          adapter,
          adapter_context,
          branch_id,
-         rng
+         rng,
+         spec
        ) do
     {retry_count, rng} = Stutter.retry_count(stutter_config, rng)
     idempotency_key = Stutter.get_idempotency_key(resolved_command)
@@ -116,7 +127,8 @@ defmodule PropertyDamage.Executor.Stutter do
       index,
       event_log,
       stutter_config,
-      branch_id
+      branch_id,
+      spec
     )
   end
 
@@ -127,7 +139,8 @@ defmodule PropertyDamage.Executor.Stutter do
          index,
          event_log,
          stutter_config,
-         branch_id
+         branch_id,
+         spec
        ) do
     # Check for execution errors
     case Enum.find(retry_results, &match?({:error, _, _}, &1)) do
@@ -143,7 +156,8 @@ defmodule PropertyDamage.Executor.Stutter do
           index,
           event_log,
           stutter_config,
-          branch_id
+          branch_id,
+          spec
         )
     end
   end
@@ -155,13 +169,14 @@ defmodule PropertyDamage.Executor.Stutter do
          index,
          event_log,
          stutter_config,
-         branch_id
+         branch_id,
+         spec
        ) do
     # Compare each retry's events with original
     comparisons =
       Enum.map(retry_results, fn {:ok, attempt, retry_events} ->
         comparison =
-          Stutter.compare_events(original_events, retry_events, stutter_config, command)
+          Stutter.compare_events(original_events, retry_events, stutter_config, spec)
 
         {attempt, retry_events, comparison}
       end)

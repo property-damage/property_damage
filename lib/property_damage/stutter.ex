@@ -102,13 +102,16 @@ defmodule PropertyDamage.Stutter do
         }
       )
 
-  ## Command Callbacks
+  ## Command Configuration
 
-  Commands can opt into idempotency testing by implementing:
+  Commands tune idempotency testing through their `command_spec/1`:
 
-  - `idempotent?/0` - Return true if command should be stuttered (default: true)
-  - `idempotency_key/1` - Return the idempotency key for requests
-  - `acceptable_retry_events/0` - Event modules acceptable as retry responses
+  - `idempotent: false` - Exclude the command from stutter testing (default: `true`)
+  - `acceptable_retry_events: [...]` - Event modules acceptable as alternative retry
+    responses
+
+  plus the per-instance `idempotency_key/1` callback, which returns the idempotency
+  key passed to the adapter for each request.
 
   ## Comparison Modes
 
@@ -173,11 +176,12 @@ defmodule PropertyDamage.Stutter do
   self-consistent: the same `rng` reproduces the same decision. The same applies
   to `retry_count/2` and `retry_delay_ms/2`.
   """
-  @spec should_stutter?(struct(), Config.t() | nil, rng()) :: {boolean(), rng()}
-  def should_stutter?(_command, nil, rng), do: {false, rng}
-  def should_stutter?(_command, %Config{enabled: false}, rng), do: {false, rng}
+  @spec should_stutter?(struct(), Config.t() | nil, rng(), map() | nil) :: {boolean(), rng()}
+  def should_stutter?(command, config, rng, spec \\ nil)
+  def should_stutter?(_command, nil, rng, _spec), do: {false, rng}
+  def should_stutter?(_command, %Config{enabled: false}, rng, _spec), do: {false, rng}
 
-  def should_stutter?(command, %Config{} = config, rng) do
+  def should_stutter?(command, %Config{} = config, rng, spec) do
     command_module = command.__struct__
 
     # Check if command is in the allowed list
@@ -187,13 +191,8 @@ defmodule PropertyDamage.Stutter do
         modules when is_list(modules) -> command_module in modules
       end
 
-    # Check if command declares itself as idempotent
-    command_idempotent =
-      if function_exported?(command_module, :idempotent?, 0) do
-        command_module.idempotent?()
-      else
-        true
-      end
+    # Idempotency eligibility comes from the resolved command spec (DR-028).
+    command_idempotent = Map.get(spec || %{}, :idempotent, true)
 
     # Probabilistic check from the explicit RNG
     {sample, rng} = :rand.uniform_s(rng)
@@ -265,9 +264,9 @@ defmodule PropertyDamage.Stutter do
   Returns `:match` if events are considered equivalent, or
   `{:mismatch, details}` if they differ.
   """
-  @spec compare_events([struct()], [struct()], Config.t(), struct()) ::
+  @spec compare_events([struct()], [struct()], Config.t(), map() | nil) ::
           :match | {:mismatch, map()}
-  def compare_events(original_events, retry_events, config, command) do
+  def compare_events(original_events, retry_events, config, spec \\ nil) do
     case config.comparison do
       :strict ->
         compare_strict(original_events, retry_events)
@@ -279,7 +278,7 @@ defmodule PropertyDamage.Stutter do
         fun.(original_events, retry_events)
 
       _ ->
-        compare_with_acceptable(original_events, retry_events, command)
+        compare_with_acceptable(original_events, retry_events, spec)
     end
   end
 
@@ -317,15 +316,10 @@ defmodule PropertyDamage.Stutter do
 
   defp drop_fields(event, _fields), do: event
 
-  defp compare_with_acceptable(original_events, retry_events, command) do
-    command_module = command.__struct__
-
-    acceptable_modules =
-      if function_exported?(command_module, :acceptable_retry_events, 0) do
-        command_module.acceptable_retry_events()
-      else
-        []
-      end
+  defp compare_with_acceptable(original_events, retry_events, spec) do
+    # Acceptable alternative retry events come from the resolved command spec
+    # (DR-028).
+    acceptable_modules = Map.get(spec || %{}, :acceptable_retry_events, [])
 
     # If retry events are from acceptable modules, it's a match
     retry_modules = Enum.map(retry_events, & &1.__struct__)

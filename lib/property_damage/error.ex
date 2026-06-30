@@ -102,7 +102,7 @@ defmodule PropertyDamage.Error do
     The system did not reach the expected state within the timeout period.
 
     Suggestions:
-      - Increase the settle timeout in the command's settle_config/0
+      - Increase the settle timeout in the command's command_spec :settle config
       - Check if the async operation is completing at all
       - Verify the expected condition will eventually be met
       - Look for deadlocks or stuck operations
