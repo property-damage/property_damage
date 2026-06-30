@@ -77,8 +77,8 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%Bump{}, ctx) do
-      ctx.start_poller.(
+    def execute(%Bump{}, _ctx, runtime) do
+      runtime.start_poller.(
         poll_fn: fn -> :tick end,
         handler: fn _ -> {:done, [%Bumped{}, %Bumped{}]} end,
         interval_ms: 10,
@@ -89,7 +89,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     end
 
     @impl true
-    def execute(%Noise{}, _ctx), do: {:ok, []}
+    def execute(%Noise{}, _ctx, _runtime), do: {:ok, []}
   end
 
   defp run_seq(seq, model, adapter) do

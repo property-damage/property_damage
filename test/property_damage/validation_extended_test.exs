@@ -83,7 +83,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   defmodule ValidAdapter do
     def setup(_config), do: {:ok, %{}}
     def teardown(_ctx), do: :ok
-    def execute(_cmd, _ctx), do: {:ok, %{}}
+    def execute(_cmd, _ctx, _runtime), do: {:ok, %{}}
   end
 
   # ============================================================================

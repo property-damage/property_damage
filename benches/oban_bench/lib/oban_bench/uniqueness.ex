@@ -167,7 +167,7 @@ defmodule ObanBench.Uniqueness.Adapter do
   def teardown(ctx), do: ExactlyOnce.teardown(ctx)
 
   @impl true
-  def execute(%UniqueIncrement{counter: base, key: key}, ctx) do
-    ExactlyOnce.enqueue(base, key, UniqueWorker, ctx)
+  def execute(%UniqueIncrement{counter: base, key: key}, ctx, runtime) do
+    ExactlyOnce.enqueue(base, key, UniqueWorker, ctx, runtime)
   end
 end

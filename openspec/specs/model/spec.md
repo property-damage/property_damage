@@ -215,14 +215,14 @@ Models SHALL NOT know transport details (HTTP, database, etc.). Commands SHALL N
 
 ### Requirement: Command Spec Resolution
 
-The framework SHALL resolve command specs by calling `command_spec/1` when available, falling back to legacy callbacks when it is not. Model-provided overrides SHALL be merged into the resolved spec.
+The framework SHALL resolve command specs by calling `command_spec/1` when available, falling back to the framework defaults when it is not (DR-028). Model-provided overrides SHALL be merged into the resolved spec.
 
 #### Scenario: Resolution via command_spec/1
 - **WHEN** a command module exports `command_spec/1`
 - **THEN** the framework calls it with the Model's overrides as the argument
 - **AND** uses the returned map as the resolved spec
 
-#### Scenario: Resolution via legacy callbacks
+#### Scenario: Resolution for spec-less commands
 - **WHEN** a command module does not export `command_spec/1`
-- **THEN** the framework builds a spec from `semantics/0`, `settle_config/0`, and `read_only?/0`
-- **AND** merges Model-provided overrides on top of the legacy-derived spec
+- **THEN** the framework builds a spec from the framework defaults
+- **AND** merges Model-provided overrides on top of the default-derived spec

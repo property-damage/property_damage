@@ -7,7 +7,14 @@ Compact syntax reference for all five core behaviours, run options, and common p
 ```elixir
 defmodule MyApp.Commands.CreateOrder do
   use PropertyDamage.Command
-  # Optional use opts: execution: :probe, shrink: :prefer_remove, weight: 2
+  # Optional use opts (all static metadata lives here, DR-028):
+  #   execution: :probe,                 # :sync (default) | :probe | :async
+  #   shrink: :prefer_remove,            # read-only commands pruned first
+  #   weight: 2,
+  #   observables: [OrderCreated],       # event types this command produces
+  #   idempotent: false,                 # exclude from stutter (default true)
+  #   acceptable_retry_events: [OrderAlreadyExists],
+  #   settle: %{timeout_ms: 5_000, interval_ms: 200, backoff: :exponential}
 
   defstruct [:amount, :currency]
 
@@ -28,21 +35,12 @@ defmodule MyApp.Commands.CreateOrder do
   #   PropertyDamage.Command.build_spec(__MODULE__, [execution: :probe], overrides)
   # end
 
-  # Metadata used by framework for shrinking/validation/debugging
-  # (server-generated values: mark them external() on the event struct)
-  # def downstream_observables, do: [OrderCreated, OrderRejected]
-  # def read_only?, do: false
+  # Optional per-instance callbacks (take the command/state, so they stay functions):
   # def label(_state, %__MODULE__{amount: 0}), do: "zero amount"
   # def label(_state, _cmd), do: nil
-
-  # Execution semantics (or set via use opts / command_spec)
-  # def semantics, do: :sync                  # :sync | :probe | :async
-  # def settle_config, do: %{timeout_ms: 5_000, interval_ms: 200, backoff: :exponential}
-
-  # Idempotency testing
-  # def idempotent?, do: true
   # def idempotency_key(%__MODULE__{} = cmd), do: cmd.idempotency_key
-  # def acceptable_retry_events, do: [OrderCreated, OrderAlreadyExists]
+  # def awaits(_state, %__MODULE__{id: id}),
+  #   do: [%PropertyDamage.Await{match: &match?(%Webhook{id: ^id}, &1)}]
 end
 ```
 
@@ -173,7 +171,7 @@ defmodule MyApp.TestAdapter do
   end
 
   @impl true
-  def execute(%CreateOrder{amount: amt}, %{client: client} = ctx) do
+  def execute(%CreateOrder{amount: amt}, %{client: client} = _ctx, _runtime) do
     case HTTPClient.post(client, "/orders", %{amount: amt}) do
       {:ok, %{status: 201, body: body}} ->
         {:ok, [%OrderCreated{id: body["id"], amount: amt}]}
@@ -194,16 +192,23 @@ defmodule MyApp.TestAdapter do
 end
 ```
 
-### Execute Context Keys
+### Execute Signature
 
-| Key | Type | Description |
-|-----|------|-------------|
-| *(your setup keys)* | any | Whatever `setup/1` returned |
-| `:inject` | `(event -> :ok)` | Inject event mid-execution into projections |
-| `:start_poller` | `(keyword -> poller)` | Start background resource poller |
-| `:stutter` | map or absent | Present only during retry executions |
+`def execute(command, user_context, runtime)`
 
-Stutter context (when present): `%{attempt: 2, is_retry: true, idempotency_key: "abc" | nil}`
+- `user_context` is exactly what `setup/1` returned (no framework keys mixed in).
+- `runtime` is a `%PropertyDamage.Runtime{}` handle providing the framework hooks.
+
+### Runtime Handle Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `runtime.inject` | `(event -> :ok)` | Inject event mid-execution into projections |
+| `runtime.start_poller` | `(keyword -> poller)` | Start background resource poller |
+| `runtime.stutter` | map or `nil` | `nil` on first (non-retry) execution; a map during retries |
+
+Stutter map (when present): `%{attempt: 2, is_retry: true, idempotency_key: "abc" | nil}`.
+Prefer `PropertyDamage.Runtime.stuttering?(runtime)` to detect a retry.
 
 ## Nemesis Template
 
@@ -310,7 +315,7 @@ PropertyDamage.run(
 | `:log` | Log failures to console, continue execution |
 | `:disabled` | Skip all assertions |
 
-### Return Values from Adapter.execute/2
+### Return Values from Adapter.execute/3
 
 | Return | Meaning |
 |--------|---------|
@@ -324,13 +329,13 @@ setup_once/1
 ├── Run 1
 │   ├── Model.setup_each/1
 │   ├── Adapter.setup/1
-│   ├── [Adapter.execute/2 x N]
+│   ├── [Adapter.execute/3 x N]
 │   ├── Adapter.teardown/1
 │   └── Model.teardown_each/1
 ├── Run 2
 │   ├── Model.setup_each/1
 │   ├── Adapter.setup/1
-│   ├── [Adapter.execute/2 x N]
+│   ├── [Adapter.execute/3 x N]
 │   ├── Adapter.teardown/1
 │   └── Model.teardown_each/1
 ├── ...
@@ -338,7 +343,7 @@ setup_once/1
 │   ├── Shrink 1
 │   │   ├── Model.setup_each/1
 │   │   ├── Adapter.setup/1
-│   │   ├── [Adapter.execute/2 x M]  (shorter sequence)
+│   │   ├── [Adapter.execute/3 x M]  (shorter sequence)
 │   │   ├── Adapter.teardown/1
 │   │   └── Model.teardown_each/1
 │   └── ...

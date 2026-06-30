@@ -21,13 +21,10 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   defmodule TestCommand do
-    @behaviour PropertyDamage.Command
+    use PropertyDamage.Command, observables: [TestEvent]
     import PropertyDamage.Generator, only: [merge_overrides: 2]
 
     defstruct [:value, :item_ref]
-
-    @impl true
-    def downstream_observables, do: [TestEvent]
 
     @impl true
     def generator(overrides \\ %{}) do
@@ -48,12 +45,12 @@ defmodule PropertyDamage.DifferentialTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%TestCommand{value: value}, ctx) do
+    def execute(%TestCommand{value: value}, ctx, _runtime) do
       item_ref = "item_#{ctx.counter}"
       {:ok, [%TestEvent{value: value, item_ref: item_ref, id: 1, timestamp: 1000}]}
     end
 
-    def execute(_cmd, _ctx), do: {:ok, []}
+    def execute(_cmd, _ctx, _runtime), do: {:ok, []}
   end
 
   defmodule IdenticalAdapter do
@@ -67,12 +64,12 @@ defmodule PropertyDamage.DifferentialTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%TestCommand{value: value}, ctx) do
+    def execute(%TestCommand{value: value}, ctx, _runtime) do
       item_ref = "item_#{ctx.counter}"
       {:ok, [%TestEvent{value: value, item_ref: item_ref, id: 1, timestamp: 1000}]}
     end
 
-    def execute(_cmd, _ctx), do: {:ok, []}
+    def execute(_cmd, _ctx, _runtime), do: {:ok, []}
   end
 
   defmodule DivergentAdapter do
@@ -86,13 +83,13 @@ defmodule PropertyDamage.DifferentialTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%TestCommand{value: value}, ctx) do
+    def execute(%TestCommand{value: value}, ctx, _runtime) do
       item_ref = "item_#{ctx.counter}"
       # Returns different value
       {:ok, [%TestEvent{value: value + 100, item_ref: item_ref, id: 2, timestamp: 2000}]}
     end
 
-    def execute(_cmd, _ctx), do: {:ok, []}
+    def execute(_cmd, _ctx, _runtime), do: {:ok, []}
   end
 
   defmodule SlowAdapter do
@@ -106,13 +103,13 @@ defmodule PropertyDamage.DifferentialTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(%TestCommand{value: value}, ctx) do
+    def execute(%TestCommand{value: value}, ctx, _runtime) do
       Process.sleep(ctx.delay_ms)
       item_ref = "item_#{ctx.counter}"
       {:ok, [%TestEvent{value: value, item_ref: item_ref, id: 1, timestamp: 1000}]}
     end
 
-    def execute(_cmd, _ctx), do: {:ok, []}
+    def execute(_cmd, _ctx, _runtime), do: {:ok, []}
   end
 
   defmodule ErrorAdapter do
@@ -126,7 +123,7 @@ defmodule PropertyDamage.DifferentialTest do
     def teardown(_ctx), do: :ok
 
     @impl true
-    def execute(_cmd, _ctx), do: {:error, :simulated_error}
+    def execute(_cmd, _ctx, _runtime), do: {:error, :simulated_error}
   end
 
   # ============================================================================

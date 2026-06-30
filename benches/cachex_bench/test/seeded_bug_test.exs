@@ -21,12 +21,13 @@ defmodule CachexBench.SeededBugTest do
     def teardown(ctx), do: CachexBench.Adapter.teardown(ctx)
 
     @impl true
-    def execute(%DelKey{key: key}, _ctx) do
+    def execute(%DelKey{key: key}, _ctx, _runtime) do
       # BUG: claims the entry was deleted but never touches the cache
       {:ok, [%EntryDeleted{key: key}]}
     end
 
-    def execute(command, ctx), do: CachexBench.Adapter.execute(command, ctx)
+    def execute(command, ctx, runtime),
+      do: CachexBench.Adapter.execute(command, ctx, runtime)
   end
 
   test "the seeded delete bug is found and shrunk to a minimal reproduction" do

@@ -19,18 +19,15 @@ defmodule PropertyDamage.Test.Commands.CreateItem do
 
   Demonstrates:
   - Pure generator/1 pattern (state-independent)
-  - downstream_observables/0 for validation
+  - `:observables` spec key for validation
 
   Note: preconditions, overrides, and simulate are defined in the Model.
   """
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command, observables: [PropertyDamage.Test.Events.ItemCreated]
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:name, :quantity]
-
-  @impl true
-  def downstream_observables, do: [PropertyDamage.Test.Events.ItemCreated]
 
   @impl true
   def generator(overrides \\ %{}) do
@@ -54,17 +51,13 @@ defmodule PropertyDamage.Test.Commands.ViewItem do
   Note: The Model defines when this command is valid (items must exist)
   and how to parameterize it (select from existing item refs).
   """
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command,
+    shrink: :prefer_remove,
+    observables: [PropertyDamage.Test.Events.ItemViewed]
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:item_ref]
-
-  @impl true
-  def read_only?, do: true
-
-  @impl true
-  def downstream_observables, do: [PropertyDamage.Test.Events.ItemViewed]
 
   @impl true
   def generator(overrides \\ %{}) do
@@ -104,20 +97,14 @@ defmodule PropertyDamage.Test.Commands.ProbeItem do
   Probe commands are read-only polling operations that should be
   prioritized for removal during shrinking (see DR-008).
   """
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command,
+    execution: :probe,
+    shrink: :prefer_remove,
+    observables: [PropertyDamage.Test.Events.ItemViewed]
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:item_ref]
-
-  @impl true
-  def semantics, do: :probe
-
-  @impl true
-  def read_only?, do: true
-
-  @impl true
-  def downstream_observables, do: [PropertyDamage.Test.Events.ItemViewed]
 
   @impl true
   def generator(overrides \\ %{}) do

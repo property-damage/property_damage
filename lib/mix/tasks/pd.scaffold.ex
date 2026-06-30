@@ -82,7 +82,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     use PropertyDamage.Adapter
 
     @impl true
-    def execute(%Commands.CreateUser{} = cmd, ctx) do
+    def execute(%Commands.CreateUser{} = cmd, _ctx, _runtime) do
       # ... build url/body, then map the response to events via the command:
       case http_request(:post, url, body, []) do
         {:ok, status, response} -> {:ok, cmd.__struct__.events(cmd, status, response)}
@@ -616,7 +616,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       `simulate/2` callback.
       \"\"\"
 
-      @behaviour PropertyDamage.Command
+      #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "use PropertyDamage.Command, shrink: :prefer_remove", else: "use PropertyDamage.Command"}
       import PropertyDamage.Generator, only: [merge_overrides: 2]
 
       defstruct #{inspect(field_atoms)}
@@ -643,8 +643,6 @@ defmodule Mix.Tasks.Pd.Scaffold do
       end
 
       #{if op.method == "POST", do: "# Server-generated fields (e.g. an id) belong in the event struct via\n  # external(): `defstruct [..., id: external()]`. See the Events module.", else: ""}
-
-      #{if Enum.member?(["GET", "HEAD", "OPTIONS"], op.method), do: "@impl true\n      def read_only?, do: true", else: ""}
 
       # HTTP Info (for adapter)
       def __http_method__, do: :#{String.downcase(op.method)}
@@ -1183,7 +1181,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
     """
       @impl true
-      def execute(%Commands.#{op.module_name}{} = cmd, ctx) do
+      def execute(%Commands.#{op.module_name}{} = cmd, ctx, _runtime) do
         url = build_url(ctx.base_url, cmd.__struct__.__http_path__(), cmd)
         query = build_query(cmd)
         full_url = if query != "", do: url <> "?" <> query, else: url

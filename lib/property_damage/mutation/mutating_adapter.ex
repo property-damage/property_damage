@@ -99,12 +99,12 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
   end
 
   @impl PropertyDamage.Adapter
-  def execute(command, context) do
-    adapter = extract_adapter(context)
+  def execute(command, user_context, runtime) do
+    adapter = extract_adapter(user_context)
     inner_context = adapter.inner_context
 
-    # Execute the real command
-    case adapter.inner_adapter.execute(command, inner_context) do
+    # Execute the real command, forwarding the Runtime handle to the inner adapter
+    case adapter.inner_adapter.execute(command, inner_context, runtime) do
       {:ok, events} ->
         # Check if we should mutate this command's response
         if should_mutate?(command, adapter) do

@@ -17,7 +17,7 @@ defmodule PropertyDamage.Test.TestAdapter do
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, _context) do
+  def execute(%CreateItem{name: name, quantity: qty}, _context, _runtime) do
     counter = Process.get({__MODULE__, :item_counter}, 0)
     Process.put({__MODULE__, :item_counter}, counter + 1)
 
@@ -30,12 +30,12 @@ defmodule PropertyDamage.Test.TestAdapter do
     {:ok, [event]}
   end
 
-  def execute(%ViewItem{item_ref: ref}, _context) do
+  def execute(%ViewItem{item_ref: ref}, _context, _runtime) do
     event = %ItemViewed{item_ref: ref}
     {:ok, [event]}
   end
 
-  def execute(%MinimalCommand{}, _context) do
+  def execute(%MinimalCommand{}, _context, _runtime) do
     {:ok, []}
   end
 end
@@ -64,7 +64,7 @@ defmodule PropertyDamage.Test.ItemSubAdapter do
   """
   alias PropertyDamage.Test.Events.ItemCreated
 
-  def execute(%{name: name, quantity: qty}, _context) do
+  def execute(%{name: name, quantity: qty}, _context, _runtime) do
     {:ok, [%ItemCreated{item_ref: "delegated_item", name: name, quantity: qty}]}
   end
 end
@@ -75,7 +75,7 @@ defmodule PropertyDamage.Test.ViewSubAdapter do
   """
   alias PropertyDamage.Test.Events.ItemViewed
 
-  def execute(%{item_ref: ref}, _context) do
+  def execute(%{item_ref: ref}, _context, _runtime) do
     {:ok, [%ItemViewed{item_ref: ref}]}
   end
 end
@@ -99,11 +99,11 @@ defmodule PropertyDamage.Test.FailingAdapter do
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%{fail: true}, _context) do
+  def execute(%{fail: true}, _context, _runtime) do
     {:error, :execution_failed}
   end
 
-  def execute(_command, _context) do
+  def execute(_command, _context, _runtime) do
     {:ok, []}
   end
 end

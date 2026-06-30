@@ -78,14 +78,14 @@ defmodule PropertyDamage.Error do
     Adapter: #{inspect(adapter)}
     Error: #{format_message(reason)}
 
-    The adapter's execute/2 function returned an error or raised an exception.
+    The adapter's execute/3 function returned an error or raised an exception.
     This usually indicates a problem communicating with the system under test.
 
     Suggestions:
       - Check that the SUT is running and accessible
       - Verify adapter configuration (URLs, credentials, etc.)
       - Look for network issues or timeouts
-      - Check the adapter's execute/2 implementation
+      - Check the adapter's execute/3 implementation
     """
     |> String.trim()
   end
@@ -102,7 +102,7 @@ defmodule PropertyDamage.Error do
     The system did not reach the expected state within the timeout period.
 
     Suggestions:
-      - Increase the settle timeout in the command's settle_config/0
+      - Increase the settle timeout in the command's command_spec :settle config
       - Check if the async operation is completing at all
       - Verify the expected condition will eventually be met
       - Look for deadlocks or stuck operations

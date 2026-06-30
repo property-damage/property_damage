@@ -3,41 +3,38 @@ defmodule PropertyDamage.SettleTest do
 
   alias PropertyDamage.Settle
 
-  # Test command modules for semantics testing
+  # Test command modules: static execution/settle metadata lives in command_spec/1
+  # (DR-028), authored via `use PropertyDamage.Command, ...`.
   defmodule SyncCommand do
+    use PropertyDamage.Command
     defstruct [:id]
-    def semantics, do: :sync
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
   defmodule ProbeCommand do
-    defstruct [:id]
-    def semantics, do: :probe
+    use PropertyDamage.Command,
+      execution: :probe,
+      settle: %{timeout_ms: 500, interval_ms: 50, backoff: :linear}
 
-    def settle_config do
-      %{
-        timeout_ms: 500,
-        interval_ms: 50,
-        backoff: :linear
-      }
-    end
+    defstruct [:id]
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
   defmodule AsyncCommand do
-    defstruct [:id]
-    def semantics, do: :async
+    use PropertyDamage.Command,
+      execution: :async,
+      settle: %{timeout_ms: 1000, interval_ms: 100, backoff: :exponential}
 
-    def settle_config do
-      %{
-        timeout_ms: 1000,
-        interval_ms: 100,
-        backoff: :exponential
-      }
-    end
+    defstruct [:id]
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
   defmodule NoSemanticsCommand do
     defstruct [:id]
-    # No semantics/0 callback - should default to :sync
+    # No command_spec/1 - should resolve to the framework default (:sync)
   end
 
   describe "get_semantics/1" do

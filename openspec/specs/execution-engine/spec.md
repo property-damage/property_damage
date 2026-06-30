@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -24,12 +24,12 @@ The system SHALL execute command sequences in two distinct phases: a symbolic ge
 
 ### Requirement: Adapter Lifecycle
 
-The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is called once to establish context, `execute/2` is called for each command in the sequence, and `teardown/1` is called once for cleanup. Lifecycle-boundary assertions (DR-024) are evaluated at the edges of this lifecycle: `@trigger at: :startup` assertions after `setup/1` and before the first command, and `@trigger at: :teardown` assertions on the settled state before `teardown/1`.
+The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is called once to establish context, `execute/3` is called for each command in the sequence, and `teardown/1` is called once for cleanup. `teardown/1` receives the `setup/1` return exactly (the `user_context`). Lifecycle-boundary assertions (DR-024) are evaluated at the edges of this lifecycle: `@trigger at: :startup` assertions after `setup/1` and before the first command, and `@trigger at: :teardown` assertions on the settled state before `teardown/1`.
 
 #### Scenario: Normal adapter lifecycle
 - **WHEN** a command sequence is executed
 - **THEN** the framework SHALL call `setup/1` exactly once before any command execution
-- **AND** the framework SHALL call `execute/2` once per command in sequence order
+- **AND** the framework SHALL call `execute/3` once per command in sequence order
 - **AND** the framework SHALL call `teardown/1` exactly once after all commands complete
 
 #### Scenario: Teardown on failure
@@ -43,7 +43,7 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 
 #### Scenario: Startup assertions gate the initial state
 - **WHEN** a projection declares an `@trigger at: :startup` assertion
-- **THEN** the framework SHALL evaluate it on the initial `init/0` state after `setup/1` and before the first `execute/2`
+- **THEN** the framework SHALL evaluate it on the initial `init/0` state after `setup/1` and before the first `execute/3`
 - **AND** a failing startup assertion SHALL halt the run before any command is executed
 
 #### Scenario: Teardown assertions evaluate the settled state
@@ -57,24 +57,61 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 - **THEN** `@trigger at: :teardown` assertions SHALL NOT be evaluated
 - **AND** the framework SHALL report the proximate failure rather than a settled-state assertion result
 
-### Requirement: Adapter Execute Context
+### Requirement: Finalize-Chain Ordering and Precedence (DR-029)
 
-The adapter context passed to `execute/2` SHALL include an `:inject` function for mid-execution event injection and a `:start_poller` function for background resource polling. When stutter testing is active, retry executions SHALL additionally receive a `:stutter` key.
+After the last command of a run (linear or merged-branch), the framework SHALL finalize the run through a fixed chain of stages in this order: finalize `@poll_state` pollers (draining the event queue and evaluating async checks during the await window), finalize resource pollers, drain the settled-state event queue (evaluating async checks on the folded events), then evaluate the `@trigger at: :teardown` checkpoint on the settled state. When more than one failure is live at finalize time, the framework SHALL report exactly one, by this precedence (highest first): an async `@trigger every:` violation observed during the `@poll_state` await drain, then a `@poll_state` poll timeout/error, then an async `@trigger every:` violation observed during the settled-state drain, then a resource-poller error, then a failing `@trigger at: :teardown` checkpoint. The two async violations SHALL carry the observing event's `command_index` as the reported failure index. This ordering is an internal invariant (no observable-behavior change); it is owned by `PropertyDamage.Executor.Finalization` and locked by dedicated ordering-guard tests so the chain cannot be silently reordered.
 
-#### Scenario: Inject function available in context
-- **WHEN** the adapter receives the context in `execute/2`
-- **THEN** the context SHALL contain an `:inject` key with a callable function
-- **AND** calling that function with an event struct SHALL immediately update projections
+#### Scenario: An async drain violation preempts a concurrent poll timeout
+- **WHEN** an async `@trigger every:` assertion trips on an event folded during the `@poll_state` await drain while a `@poll_state` poller is also timing out
+- **THEN** the framework SHALL report the async assertion violation, at the observing event's `command_index`, rather than the poll timeout
 
-#### Scenario: Start poller function available in context
-- **WHEN** the adapter receives the context in `execute/2`
-- **THEN** the context SHALL contain a `:start_poller` key with a callable function
-- **AND** calling that function with poller options SHALL spawn a background resource poller
+#### Scenario: A settled-state drain violation preempts a resource-poller error
+- **WHEN** an async `@trigger every:` assertion trips on an event folded during the settled-state drain while a resource poller has also errored
+- **THEN** the framework SHALL report the async assertion violation, at the observing event's `command_index`, rather than the resource-poller error
 
-#### Scenario: Stutter context on retries only
+### Requirement: Explicit Stutter RNG and Determinism (DR-029)
+
+Stutter (idempotency-retry) decisions SHALL be driven by an explicit RNG threaded through the executor, NOT by the process-global `:rand` stream. For each command the framework SHALL derive a fresh generator state from the run's seed and the command's index, so a command's stutter decisions (whether to stutter, how many retries, and inter-retry delays) depend only on the run seed and that command's index, not on draws consumed by earlier commands or earlier runs in the campaign. The run seed used as the RNG base SHALL be the run's effective seed (the same value reported for reproduction), so re-running with the same campaign seed reproduces the same stutter decisions. Sequence generation determinism is unaffected: it is seeded separately via the generator's per-run seed.
+
+This determinism is self-consistent (same seed produces the same decisions) and preserves shrink failure-equivalence (DR-017). It is NOT a guarantee of byte-identical reproduction of any prior process-global `:rand` stream.
+
+Because stutter decisions are reproducible, stutter failures (idempotency violations and stutter-retry execution failures) SHALL be shrinkable. The shrinker SHALL reproduce a stutter failure with stutter forced on (probability 1.0, preserving the original command filter, comparison mode, and max-repeats) so that index-shift under sequence truncation cannot un-stutter the offending command, and SHALL minimize the failure to its smallest reproduction. Forced-stutter reproduction SHALL apply only when the original failure is a stutter failure; for all other failure types the shrinker SHALL re-run without stutter.
+
+#### Scenario: Same seed reproduces the same stutter outcome
+- **WHEN** a sequence is run twice with the same run seed and stutter enabled
+- **THEN** the stutter decisions, event log, and result SHALL be identical
+
+#### Scenario: A stutter idempotency violation shrinks to its minimal reproduction
+- **WHEN** a run fails with an idempotency violation caused by a single non-idempotent command embedded in a longer sequence
+- **THEN** the shrinker SHALL reproduce the violation with stutter forced on and minimize the sequence to the offending command
+
+#### Scenario: Non-stutter shrinking is not perturbed by stutter
+- **WHEN** a run fails for a non-stutter reason (for example a `@trigger` assertion)
+- **THEN** the shrinker SHALL re-run candidates without stutter, exactly as for a run with stutter disabled
+
+### Requirement: Adapter Execute Arguments (user_context and runtime)
+
+`execute/3` SHALL receive three arguments: the resolved command, the `user_context`, and a `%PropertyDamage.Runtime{}` handle (DR-027). The `user_context` SHALL be exactly what the adapter's `setup/1` returned, with no framework keys merged in. The framework's per-command affordances SHALL travel on the runtime handle: an `inject` function for mid-execution event injection, a `start_poller` function for background resource polling, and a `stutter` field that is populated only on stutter/idempotency retries (and `nil` on the first execution).
+
+#### Scenario: user_context is exactly the setup return
+- **WHEN** the adapter receives its arguments in `execute/3`
+- **THEN** the second argument SHALL equal the value returned by `setup/1`
+- **AND** it SHALL NOT contain framework keys such as `:inject`, `:start_poller`, or `:stutter`
+
+#### Scenario: Inject available on the runtime
+- **WHEN** the adapter receives the runtime in `execute/3`
+- **THEN** `runtime.inject` SHALL be a callable 1-arity function
+- **AND** calling it with an event struct SHALL immediately update projections
+
+#### Scenario: Start poller available on the runtime
+- **WHEN** the adapter receives the runtime in `execute/3`
+- **THEN** `runtime.start_poller` SHALL be a callable 1-arity function
+- **AND** calling it with poller options SHALL spawn a background resource poller
+
+#### Scenario: Stutter populated on retries only
 - **WHEN** stutter testing is enabled and a command is retried
-- **THEN** the context SHALL contain a `:stutter` key with attempt number, is_retry flag, and idempotency key
-- **AND** the first execution (attempt 1) SHALL NOT include stutter context
+- **THEN** `runtime.stutter` SHALL be a map with attempt number, is_retry flag, and idempotency key, and `PropertyDamage.Runtime.stuttering?/1` SHALL return `true`
+- **AND** on the first execution (attempt 1) `runtime.stutter` SHALL be `nil` and `stuttering?/1` SHALL return `false`
 
 ### Requirement: Injector Adapter for External Events
 
@@ -96,8 +133,8 @@ The system SHALL support a delegation macro that routes specific command types t
 
 #### Scenario: Delegated command execution
 - **WHEN** an adapter defines `delegate_execution for: [CommandA, CommandB], to: SubAdapter`
-- **THEN** executing `CommandA` or `CommandB` SHALL invoke `SubAdapter.execute/2`
-- **AND** the sub-adapter SHALL receive the same context as the parent adapter
+- **THEN** executing `CommandA` or `CommandB` SHALL invoke `SubAdapter.execute/3`
+- **AND** the sub-adapter SHALL receive the same `user_context` and `runtime` as the parent adapter
 
 #### Scenario: Multiple delegation targets
 - **WHEN** an adapter delegates different commands to different sub-adapters
@@ -142,6 +179,12 @@ The system SHALL provide a shared event queue where injector adapters push incom
 - **AND** drained events SHALL be processed through projections
 - **AND** drained events SHALL be evaluated against `@trigger every:` assertions (DR-025)
 - **AND** each entry SHALL record the source adapter module and timestamp
+
+#### Scenario: Correlated injector events attributed to their command (DR-030)
+- **WHEN** a drained injector event satisfies the `match` predicate of a command's registered `awaits/2` declaration
+- **THEN** the entry's `command_index` SHALL be the declaring command's index, rather than the ambient `nil`
+- **AND** when several commands' matchers accept the same event, the first-registered command SHALL win and the framework SHALL log an overlap diagnostic
+- **AND** an injector event matching no registered await SHALL fold with `command_index: nil` as before
 
 ### Requirement: Mock Service Adapter
 

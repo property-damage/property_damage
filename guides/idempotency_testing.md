@@ -109,43 +109,47 @@ stutter: [
 
 Return `:match` or `{:mismatch, details}`.
 
-## Command Callbacks
+## Command Configuration
 
-Commands interact with stutter testing through three optional callbacks defined
-in the `PropertyDamage.Command` behaviour.
+Commands interact with stutter testing through two `command_spec/1` keys and one
+per-instance callback.
 
-### `idempotent?/0`
+### `idempotent:` spec key
 
-Return `false` to exclude a command from stutter testing. Commands are assumed
-idempotent by default.
+Set `idempotent: false` to exclude a command from stutter testing. Commands are
+assumed idempotent by default.
 
 ```elixir
 defmodule IncrementCounter do
-  @behaviour PropertyDamage.Command
-
   # Non-idempotent by design -- exclude from stutter testing
-  def idempotent?, do: false
+  use PropertyDamage.Command, idempotent: false
 
-  def generator(_state) do
+  defstruct [:counter_id]
+
+  @impl true
+  def generator(_overrides) do
     StreamData.fixed_map(%{counter_id: StreamData.string(:alphanumeric, length: 8)})
   end
 end
 ```
 
-### `idempotency_key/1`
+### `idempotency_key/1` callback
 
 Return a key string that the adapter can include in requests (e.g., as an HTTP
-header). If not implemented, no idempotency key is provided.
+header). This is a per-instance callback (it reads the command struct). If not
+implemented, no idempotency key is provided.
 
 ```elixir
 defmodule CreateOrder do
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   defstruct [:amount, :idempotency_key]
 
+  @impl true
   def idempotency_key(%__MODULE__{idempotency_key: key}), do: key
 
-  def generator(_state) do
+  @impl true
+  def generator(_overrides) do
     StreamData.fixed_map(%{
       amount: StreamData.integer(1..10_000),
       idempotency_key: StreamData.string(:alphanumeric, length: 16)
@@ -154,7 +158,7 @@ defmodule CreateOrder do
 end
 ```
 
-### `acceptable_retry_events/0`
+### `acceptable_retry_events:` spec key
 
 Declare alternative event types that are valid on retry. A `CreateOrder` retry
 might return `OrderAlreadyExists` instead of `OrderCreated` -- both are correct
@@ -162,11 +166,13 @@ idempotent behavior.
 
 ```elixir
 defmodule CreateOrder do
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command,
+    acceptable_retry_events: [OrderCreated, OrderAlreadyExists]
 
-  def acceptable_retry_events do
-    [OrderCreated, OrderAlreadyExists]
-  end
+  defstruct [:amount]
+
+  @impl true
+  def generator(_overrides), do: StreamData.fixed_map(%{amount: StreamData.integer(1..10_000)})
 end
 ```
 
@@ -176,15 +182,21 @@ event modules. Both count as a match.
 
 ## Adapter Integration
 
-On retry executions, the adapter receives stutter context in the execution
-context map. The first execution has no `:stutter` key -- only retries include
-it.
+On retry executions, the adapter receives stutter context through the
+`%PropertyDamage.Runtime{}` handle passed as the third argument to `execute/3`.
+On the first (non-retry) execution `runtime.stutter` is `nil` -- only retries
+populate it. You can also use `PropertyDamage.Runtime.stuttering?(runtime)` to
+test whether the current execution is a retry.
 
 ```elixir
 defmodule MyAdapter do
   @behaviour PropertyDamage.Adapter
 
-  def execute(%CreateOrder{} = cmd, %{stutter: %{idempotency_key: key}} = _ctx)
+  def execute(
+        %CreateOrder{} = cmd,
+        _user_context,
+        %PropertyDamage.Runtime{stutter: %{idempotency_key: key}}
+      )
       when is_binary(key) do
     # Retry execution -- include idempotency header
     headers = [{"Idempotency-Key", key}]
@@ -192,15 +204,15 @@ defmodule MyAdapter do
     {:ok, [result.event]}
   end
 
-  def execute(%CreateOrder{} = cmd, _ctx) do
-    # First execution -- no stutter context
+  def execute(%CreateOrder{} = cmd, _user_context, _runtime) do
+    # First execution -- runtime.stutter is nil
     result = HttpClient.post("/orders", %{amount: cmd.amount})
     {:ok, [result.event]}
   end
 end
 ```
 
-The stutter context map contains:
+The `runtime.stutter` map contains:
 
 - `attempt` -- attempt number (2, 3, ...)
 - `is_retry` -- always `true` for retry executions
@@ -252,6 +264,14 @@ Command: CreateOrder
 In this example, the SUT created a second order on retry instead of returning
 an idempotent response.
 
+Idempotency violations are **shrunk** like any other failure: the framework
+re-runs candidate sequences with stutter forced on so the violation reproduces
+regardless of the offending command's position, then minimizes to the smallest
+sequence that still violates (often the single non-idempotent command). The
+reported sequence is therefore the minimal reproduction, not the full random
+sequence that first tripped it. Stutter decisions are deterministic per seed, so
+re-running with the reported `seed:` reproduces the same violation.
+
 To debug violations:
 
 1. Check the **command index** to identify which command in the sequence failed.
@@ -259,7 +279,7 @@ To debug violations:
    subsequent attempts show what the retry produced.
 3. Use `seed:` to reproduce the exact sequence deterministically.
 4. If the violation is expected (e.g., a legitimately non-idempotent command),
-   implement `idempotent?/0` returning `false` on that command.
+   set `idempotent: false` in that command's `command_spec/1`.
 
 ## Full Example
 

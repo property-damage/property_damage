@@ -124,14 +124,11 @@ defmodule PropertyDamage.ValidationTest do
     end
 
     defmodule PollCommand do
-      @behaviour PropertyDamage.Command
+      use PropertyDamage.Command, observables: [PollEvents.Started]
       defstruct []
 
       @impl true
       def generator(_overrides \\ %{}), do: StreamData.constant(%{})
-
-      @impl true
-      def downstream_observables, do: [PollEvents.Started]
     end
 
     defmodule PollProjection do
@@ -169,7 +166,7 @@ defmodule PropertyDamage.ValidationTest do
       @impl true
       def teardown(_ctx), do: :ok
       @impl true
-      def execute(%PollCommand{}, _ctx), do: {:ok, [%PollEvents.Started{}]}
+      def execute(%PollCommand{}, _ctx, _runtime), do: {:ok, [%PollEvents.Started{}]}
     end
 
     test "validation does not crash on a @poll_state assertion" do

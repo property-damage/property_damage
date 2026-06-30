@@ -114,7 +114,16 @@ defmodule PropertyDamage.Shrinker do
   ```
   """
 
-  alias PropertyDamage.{Executor, Placeholder, PlaceholderRegistry, Sequence, Settle, Validator}
+  alias PropertyDamage.{
+    Executor,
+    Placeholder,
+    PlaceholderRegistry,
+    Sequence,
+    Settle,
+    Stutter,
+    Validator
+  }
+
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """
@@ -204,6 +213,21 @@ defmodule PropertyDamage.Shrinker do
     sig1.type == sig2.type and sig1.check_name == sig2.check_name
   end
 
+  # Stutter reproduction config for shrinking (DR-029). A stutter failure
+  # (idempotency violation / stutter execution failure) only reproduces if the
+  # offending command is stuttered, but its index shifts as truncation removes
+  # earlier commands, so the original probabilistic decision is not stable.
+  # Forcing probability 1.0 (keeping the original command filter, comparison, and
+  # max_repeats) makes every eligible command stutter on every reproduction, so
+  # the violation reproduces regardless of position. Non-stutter failures return
+  # nil so the shrinker re-runs without stutter, exactly as before P4.
+  defp stutter_repro_config(%{type: type}, %Stutter.Config{} = config)
+       when type in [:idempotency_violation, :stutter_execution_failed] do
+    %{config | probability: 1.0, enabled: true}
+  end
+
+  defp stutter_repro_config(_signature, _config), do: nil
+
   @doc """
   Shrink a failing command sequence.
 
@@ -281,7 +305,14 @@ defmodule PropertyDamage.Shrinker do
       event_queue: event_queue,
       iterations: 0,
       start_time: start_time,
-      original_signature: original_signature
+      original_signature: original_signature,
+      # Stutter reproduction (DR-029): when the original failure is a stutter
+      # failure, reproduce it during shrinking with stutter forced on (prob 1.0)
+      # so index-shift under truncation cannot un-stutter the offending command.
+      # nil for non-stutter failures, leaving normal shrinking unperturbed.
+      stutter_config:
+        stutter_repro_config(original_signature, Keyword.get(opts, :stutter_config)),
+      rng_seed: Keyword.get(opts, :rng_seed)
     }
 
     # Truncating at the failure point is an optimization, not an assumption
@@ -394,7 +425,11 @@ defmodule PropertyDamage.Shrinker do
       iterations: 0,
       start_time: start_time,
       failed_at_index: failed_at_index,
-      original_signature: original_signature
+      original_signature: original_signature,
+      # See shrink_linear: forced-stutter reproduction for stutter failures.
+      stutter_config:
+        stutter_repro_config(original_signature, Keyword.get(opts, :stutter_config)),
+      rng_seed: Keyword.get(opts, :rng_seed)
     }
 
     # Strategy 1: Try converting to linear (maybe race isn't needed)
@@ -453,7 +488,11 @@ defmodule PropertyDamage.Shrinker do
               adapter_config: state.adapter_config,
               config: state.config,
               event_queue: state.event_queue,
-              failure_reason: reconstruct_failure_reason(state.original_signature)
+              failure_reason: reconstruct_failure_reason(state.original_signature),
+              # Carry stutter reproduction into the converted-linear shrink. The
+              # config is already forced (re-forcing is idempotent).
+              stutter_config: state.stutter_config,
+              rng_seed: state.rng_seed
             )
 
           %{
@@ -760,7 +799,26 @@ defmodule PropertyDamage.Shrinker do
   # Sort command indices by shrink priority.
   # Commands with :prefer_remove (probes, read-only) are prioritized for removal.
   # Commands with :prefer_keep are removed last.
-  # Uses command_spec/1 if available, falls back to semantics-based heuristics.
+  # Reads the :shrink key from the command's resolved spec; spec-less commands
+  # default to :neutral.
+  defp shrink_priority_for_command(cmd) when is_struct(cmd) do
+    case Map.get(resolved_shrink_spec(cmd.__struct__), :shrink, :neutral) do
+      :prefer_remove -> 0
+      :neutral -> 1
+      :prefer_keep -> 2
+    end
+  end
+
+  defp shrink_priority_for_command(_cmd), do: 1
+
+  defp resolved_shrink_spec(module) do
+    if function_exported?(module, :command_spec, 1) do
+      module.command_spec([])
+    else
+      PropertyDamage.Command.framework_defaults()
+    end
+  end
+
   defp sort_indices_by_shrink_priority(commands) do
     commands
     |> Enum.with_index()
@@ -769,33 +827,6 @@ defmodule PropertyDamage.Shrinker do
     end)
     |> Enum.map(fn {_cmd, idx} -> idx end)
   end
-
-  # Determine shrink priority for a command.
-  # Returns 0 for prefer_remove (try first), 1 for neutral, 2 for prefer_keep (try last).
-  defp shrink_priority_for_command(cmd) when is_struct(cmd) do
-    module = cmd.__struct__
-
-    # Try command_spec/1 first
-    if function_exported?(module, :command_spec, 1) do
-      spec = module.command_spec([])
-
-      case Map.get(spec, :shrink, :neutral) do
-        :prefer_remove -> 0
-        :neutral -> 1
-        :prefer_keep -> 2
-      end
-    else
-      # Fallback to semantics-based heuristics (legacy behavior)
-      case Settle.get_semantics(cmd) do
-        # Probe commands are read-only, prioritize for removal
-        :probe -> 0
-        # All other commands have equal priority
-        _ -> 1
-      end
-    end
-  end
-
-  defp shrink_priority_for_command(_cmd), do: 1
 
   defp do_linear_shrink(state, []) do
     state
@@ -917,7 +948,9 @@ defmodule PropertyDamage.Shrinker do
 
         case Executor.run(candidate_sequence, state.model, state.adapter,
                adapter_config: state.adapter_config,
-               event_queue: state.event_queue
+               event_queue: state.event_queue,
+               stutter_config: state.stutter_config,
+               rng_seed: state.rng_seed
              ) do
           {:ok, result} ->
             if result.success do
@@ -954,7 +987,9 @@ defmodule PropertyDamage.Shrinker do
 
         case Executor.run(sequence, state.model, state.adapter,
                adapter_config: state.adapter_config,
-               event_queue: state.event_queue
+               event_queue: state.event_queue,
+               stutter_config: state.stutter_config,
+               rng_seed: state.rng_seed
              ) do
           {:ok, result} ->
             cond do
@@ -998,7 +1033,9 @@ defmodule PropertyDamage.Shrinker do
 
         case Executor.run(sequence, state.model, state.adapter,
                adapter_config: state.adapter_config,
-               event_queue: state.event_queue
+               event_queue: state.event_queue,
+               stutter_config: state.stutter_config,
+               rng_seed: state.rng_seed
              ) do
           {:ok, result} ->
             if result.success do

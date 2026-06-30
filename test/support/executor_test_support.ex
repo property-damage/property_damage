@@ -126,12 +126,12 @@ defmodule PropertyDamage.Test.SimpleAdapter do
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, _context) do
+  def execute(%CreateItem{name: name, quantity: qty}, _context, _runtime) do
     item_ref = "item_#{next_counter()}"
     {:ok, [%ItemCreated{item_ref: item_ref, name: name, quantity: qty}]}
   end
 
-  def execute(%ViewItem{item_ref: ref}, _context) do
+  def execute(%ViewItem{item_ref: ref}, _context, _runtime) do
     {:ok, [%ItemViewed{item_ref: ref}]}
   end
 
@@ -155,11 +155,11 @@ defmodule PropertyDamage.Test.ErrorAdapter do
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%{fail: true}, _context) do
+  def execute(%{fail: true}, _context, _runtime) do
     {:error, :command_failed}
   end
 
-  def execute(_command, _context) do
+  def execute(_command, _context, _runtime) do
     {:ok, []}
   end
 end
@@ -310,14 +310,14 @@ defmodule PropertyDamage.Test.ProbeAdapter do
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, _context) do
+  def execute(%CreateItem{name: name, quantity: qty}, _context, _runtime) do
     counter = Process.get({__MODULE__, :item_counter}, 0)
     Process.put({__MODULE__, :item_counter}, counter + 1)
     item_ref = "item_#{counter}"
     {:ok, [%ItemCreated{item_ref: item_ref, name: name, quantity: qty}]}
   end
 
-  def execute(%ProbeItem{item_ref: ref}, _context) do
+  def execute(%ProbeItem{item_ref: ref}, _context, _runtime) do
     {:ok, [%ItemViewed{item_ref: ref}]}
   end
 end
@@ -447,7 +447,7 @@ defmodule PropertyDamage.Test.LinkAdapter do
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%Link{weight: weight}, _context) do
+  def execute(%Link{weight: weight}, _context, _runtime) do
     counter = Process.get({__MODULE__, :counter}, 0)
     Process.put({__MODULE__, :counter}, counter + 1)
     {:ok, [%LinkAdded{ref: "link_#{counter}", weight: weight}]}

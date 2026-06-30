@@ -45,9 +45,9 @@ defmodule PropertyDamage.ResourcePollerLeakTest do
     def teardown(_context), do: :ok
 
     @impl true
-    def execute(%PollerCmd{}, ctx) do
+    def execute(%PollerCmd{}, ctx, runtime) do
       poller =
-        ctx.start_poller.(
+        runtime.start_poller.(
           poll_fn: fn -> :polling end,
           handler: fn _ -> :continue end,
           interval_ms: 60_000,

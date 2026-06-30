@@ -4,7 +4,7 @@ This guide explains how to use the `ResourcePoller` mechanism for commands that 
 
 ## When to Use Resource Polling
 
-Use `ctx.start_poller.(opts)` when your adapter needs to:
+Use `runtime.start_poller.(opts)` when your adapter needs to:
 
 1. **Poll external resources asynchronously** - Start a background poller that monitors a resource while the command returns immediately
 2. **Inject events as status changes** - Push events to the event queue as the resource transitions through states
@@ -30,7 +30,7 @@ defmodule MyAdapter do
   use PropertyDamage.Adapter
 
   @impl true
-  def execute(%CreateAuthorization{user_id: user_id, amount: amount} = cmd, ctx) do
+  def execute(%CreateAuthorization{user_id: user_id, amount: amount} = cmd, ctx, runtime) do
     # Step 1: Create the authorization (returns immediately)
     {:ok, %{body: %{"id" => id, "status" => "processing"}}} =
       Req.post(ctx.client, url: "/authorizations", json: %{
@@ -39,7 +39,7 @@ defmodule MyAdapter do
       })
 
     # Step 2: Start background poller for status changes
-    _poller = ctx.start_poller.(
+    _poller = runtime.start_poller.(
       poll_fn: fn ->
         Req.get(ctx.client, url: "/authorizations/#{id}")
       end,
@@ -226,7 +226,7 @@ its stacktrace and reported as `{:on_timeout_error, exception, stacktrace}`.
 
 ## Lifecycle
 
-1. **During command execution**: Adapter calls `ctx.start_poller.(opts)`
+1. **During command execution**: Adapter calls `runtime.start_poller.(opts)`
 2. **Poller spawns**: Starts polling immediately in background process
 3. **Command returns**: Initial events returned, executor continues to next command
 4. **Between commands**: EventQueue drained, poller-injected events processed
@@ -284,9 +284,12 @@ When testing adapters that use resource polling, you can use the returned poller
 test "authorization polling" do
   {:ok, queue} = EventQueue.start_link()
 
-  # Create mock context with start_poller
-  ctx = %{
-    client: mock_client,
+  # User context is exactly the setup/1 return
+  ctx = %{client: mock_client}
+
+  # Framework keys live on the runtime handle
+  runtime = %PropertyDamage.Runtime{
+    inject: fn _ -> :ok end,
     start_poller: fn opts ->
       ResourcePoller.start(Keyword.merge(opts, [
         event_queue: queue,
@@ -296,7 +299,7 @@ test "authorization polling" do
   }
 
   # Execute the command
-  {:ok, events} = MyAdapter.execute(%CreateAuthorization{...}, ctx)
+  {:ok, events} = MyAdapter.execute(%CreateAuthorization{...}, ctx, runtime)
 
   # Initial event returned immediately
   assert [%AuthorizationCreated{}] = events
@@ -313,7 +316,7 @@ end
 
 ## Best Practices
 
-1. **Return initial event immediately** - Don't block in `execute/2`, let the poller handle status changes
+1. **Return initial event immediately** - Don't block in `execute/3`, let the poller handle status changes
 
 2. **Use appropriate intervals** - Balance responsiveness with API rate limits
 
@@ -328,5 +331,6 @@ end
 ## See Also
 
 - `PropertyDamage.ResourcePoller` - Module documentation
-- `PropertyDamage.Adapter` - Adapter behaviour and context
+- `PropertyDamage.Adapter` - Adapter behaviour and runtime handle
+- `PropertyDamage.Runtime` - Runtime handle providing `inject`, `start_poller`, and `stutter`
 - [Async and Eventual Consistency](async_and_eventual_consistency.md) - Related guide

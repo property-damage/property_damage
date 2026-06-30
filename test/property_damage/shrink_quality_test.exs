@@ -41,9 +41,9 @@ defmodule PropertyDamage.ShrinkQualityTest do
     def teardown(context), do: CorrectAdapter.teardown(context)
 
     @impl true
-    def execute(%DelKey{key: key}, _ctx), do: {:ok, [%EntryDeleted{key: key}]}
+    def execute(%DelKey{key: key}, _ctx, _runtime), do: {:ok, [%EntryDeleted{key: key}]}
 
-    def execute(command, ctx), do: CorrectAdapter.execute(command, ctx)
+    def execute(command, ctx, runtime), do: CorrectAdapter.execute(command, ctx, runtime)
   end
 
   # The bug: put never overwrites an existing key. The minimal reproduction is
@@ -62,12 +62,12 @@ defmodule PropertyDamage.ShrinkQualityTest do
     def teardown(context), do: CorrectAdapter.teardown(context)
 
     @impl true
-    def execute(%PutKey{key: key, value: value}, %{store: pid}) do
+    def execute(%PutKey{key: key, value: value}, %{store: pid}, _runtime) do
       if Store.get(pid, key) == nil, do: Store.put(pid, key, value)
       {:ok, [%EntryPut{key: key, value: value}]}
     end
 
-    def execute(command, ctx), do: CorrectAdapter.execute(command, ctx)
+    def execute(command, ctx, runtime), do: CorrectAdapter.execute(command, ctx, runtime)
   end
 
   defp run_seeded(adapter, seed) do

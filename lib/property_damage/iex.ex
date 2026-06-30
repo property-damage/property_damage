@@ -219,11 +219,7 @@ defmodule PropertyDamage.IEx do
   end
 
   defp get_semantics(cmd_module) do
-    if function_exported?(cmd_module, :semantics, 0) do
-      cmd_module.semantics()
-    else
-      :sync
-    end
+    PropertyDamage.Settle.get_semantics(cmd_module)
   end
 
   # ============================================================================
@@ -446,9 +442,22 @@ defmodule PropertyDamage.IEx do
           # Resolve refs in command
           resolved_command = resolve_refs(command, refs)
 
-          # Execute
+          # Execute. This single-command debug runner has no projection or
+          # injection window, so the Runtime's inject/start_poller raise if used
+          # (DR-027); user_context is the adapter's setup/1 return.
+          runtime = %PropertyDamage.Runtime{
+            inject: fn _event ->
+              raise ArgumentError,
+                    "Runtime.inject is not available in iex single-command execution"
+            end,
+            start_poller: fn _opts ->
+              raise ArgumentError,
+                    "Runtime.start_poller is not available in iex single-command execution"
+            end
+          }
+
           start_time = System.monotonic_time(:millisecond)
-          result = adapter.execute(resolved_command, context)
+          result = adapter.execute(resolved_command, context, runtime)
           elapsed = System.monotonic_time(:millisecond) - start_time
 
           # Print result

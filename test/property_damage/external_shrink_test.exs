@@ -26,12 +26,10 @@ defmodule PropertyDamage.ExternalShrinkTest do
   end
 
   defmodule AsyncCreate do
-    @behaviour PropertyDamage.Command
+    use PropertyDamage.Command, execution: :async
     defstruct []
     @impl true
     def generator(_overrides), do: StreamData.constant(%{})
-    @impl true
-    def semantics, do: :async
   end
 
   defmodule Noise do
@@ -74,17 +72,17 @@ defmodule PropertyDamage.ExternalShrinkTest do
     def setup(config), do: {:ok, config}
 
     @impl true
-    def execute(%Create{}, _ctx) do
+    def execute(%Create{}, _ctx, _runtime) do
       {:ok, [%Created{id: "real_#{System.unique_integer([:positive])}"}]}
     end
 
-    def execute(%AsyncCreate{}, _ctx) do
+    def execute(%AsyncCreate{}, _ctx, _runtime) do
       {:ok, [%Created{id: "real_#{System.unique_integer([:positive])}"}]}
     end
 
-    def execute(%Noise{}, _ctx), do: {:ok, []}
+    def execute(%Noise{}, _ctx, _runtime), do: {:ok, []}
 
-    def execute(%Use{target: target}, _ctx) do
+    def execute(%Use{target: target}, _ctx, _runtime) do
       if is_binary(target) and String.starts_with?(target, "real_") do
         {:error, :consumer_saw_real_id}
       else

@@ -37,10 +37,10 @@ defmodule ObanBench.UniquenessTest do
     def teardown(ctx), do: ExactlyOnce.teardown(ctx)
 
     @impl true
-    def execute(%UniqueIncrement{counter: base, key: key}, ctx) do
+    def execute(%UniqueIncrement{counter: base, key: key}, ctx, runtime) do
       # Same path as the correct adapter, but a worker that never deduplicates:
       # the counter will overshoot when a key repeats.
-      ExactlyOnce.enqueue(base, key, NonUniqueWorker, ctx)
+      ExactlyOnce.enqueue(base, key, NonUniqueWorker, ctx, runtime)
     end
   end
 

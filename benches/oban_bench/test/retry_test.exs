@@ -43,8 +43,8 @@ defmodule ObanBench.RetryTest do
     def teardown(ctx), do: ExactlyOnce.teardown(ctx)
 
     @impl true
-    def execute(%Increment{counter: base}, ctx) do
-      ExactlyOnce.enqueue(base, nil, DoubleApplyWorker, ctx)
+    def execute(%Increment{counter: base}, ctx, runtime) do
+      ExactlyOnce.enqueue(base, nil, DoubleApplyWorker, ctx, runtime)
     end
   end
 

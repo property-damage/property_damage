@@ -25,12 +25,12 @@ defmodule RedisBench.Adapter do
   end
 
   @impl true
-  def execute(%Increment{}, %{conn: conn, key: key}) do
+  def execute(%Increment{}, %{conn: conn, key: key}, _runtime) do
     {:ok, to} = Redix.command(conn, ["INCR", key])
     {:ok, [%Incremented{from: to - 1, to: to}]}
   end
 
-  def execute(%ReadValue{}, %{conn: conn, key: key}) do
+  def execute(%ReadValue{}, %{conn: conn, key: key}, _runtime) do
     {:ok, raw} = Redix.command(conn, ["GET", key])
     {:ok, [%ValueRead{value: to_int(raw)}]}
   end
