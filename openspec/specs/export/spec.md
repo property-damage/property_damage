@@ -25,6 +25,13 @@ The system SHALL provide a central entry point for converting failure reports to
 - **WHEN** `Export.save_all(failure, directory, opts)` is called
 - **THEN** the system SHALL generate and save all supported formats and return `{:ok, paths}` with paths to each file
 
+#### Scenario: Command labels emitted as comments (DR-028 amendment, P7)
+
+- **WHEN** a failure report whose `command_labels` map is non-empty is exported to any format (ExUnit, curl/bash, Python, Elixir, Livebook)
+- **THEN** each labeled command SHALL carry its human-readable label as a comment adjacent to that command in the generated output
+- **AND** the label is looked up by the command's flattened (`Sequence.to_list/1`) index, the same index every exporter already iterates with
+- **AND** an unlabeled command SHALL produce the same output as before
+
 ### Requirement: ExUnit Export
 
 The system SHALL generate ExUnit regression test files from failure reports that reproduce the failure using PropertyDamage.

@@ -71,6 +71,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   machinery rather than a separate await loop. This implements, on the correct
   (semantic) surface, the capability the removed `Adapter.register_handler/2`
   advertised.
+- **`Command.label/2` rendering (DR-028 amendment):** the optional per-instance
+  `label/2` callback, previously declared but consumed nowhere, is now wired into
+  failure reporting. When a `FailureReport` is built, each command's label is
+  computed lazily (zero cost on passing/generation runs) against its
+  `command_sequence_projection` pre-state, reconstructed by folding the shrunk
+  sequence in flattened order with the same recipe generation uses. Non-nil
+  labels render next to their command in the failure report (terminal, markdown,
+  JSON) and as comments in every exported reproduction (ExUnit, curl/bash,
+  Python, Elixir, Livebook). Labels are stored in a new `FailureReport`
+  `command_labels` field keyed by the flattened (`Sequence.to_list/1`) command
+  index. Best-effort: a raising `label/2` degrades to no annotation rather than
+  failing the report.
 
 ## [0.2.0] - 2026-06-25
 

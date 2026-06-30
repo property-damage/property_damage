@@ -111,6 +111,7 @@ defmodule PropertyDamage.Export.LiveBook do
       |> Enum.with_index()
       |> Enum.map(fn {cmd, idx} ->
         is_failure_point = idx == report.failed_at_index
+        label = Map.get(report.command_labels, idx)
 
         generate_command_section(
           cmd,
@@ -119,7 +120,8 @@ defmodule PropertyDamage.Export.LiveBook do
           is_failure_point,
           include_state,
           var_map,
-          extractions
+          extractions,
+          label
         )
       end)
 
@@ -133,13 +135,15 @@ defmodule PropertyDamage.Export.LiveBook do
          is_failure_point,
          include_state,
          var_map,
-         extractions
+         extractions,
+         label
        ) do
     step_num = index + 1
     cmd_name = Common.command_name(command)
     http_spec = Common.get_http_spec(command, adapter, %{})
 
     failure_marker = if is_failure_point, do: " (FAILURE)", else: ""
+    label_suffix = if is_binary(label), do: ": #{label}", else: ""
     warning = if is_failure_point, do: "\n> ⚠️ **This command caused the failure**\n", else: ""
 
     code =
@@ -154,7 +158,7 @@ defmodule PropertyDamage.Export.LiveBook do
       )
 
     """
-    ### Step #{step_num}: #{cmd_name}#{failure_marker}
+    ### Step #{step_num}: #{cmd_name}#{label_suffix}#{failure_marker}
     #{warning}
     ```elixir
     # Command: #{Common.command_to_comment(command)}
