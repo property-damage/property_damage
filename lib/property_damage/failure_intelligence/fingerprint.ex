@@ -7,7 +7,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   clustering of similar failures.
   """
 
-  alias PropertyDamage.FailureReport
+  alias PropertyDamage.{FailureReport, Sequence}
 
   @type t :: %__MODULE__{
           failure_type: atom(),
@@ -49,13 +49,20 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   """
   @spec from_failure_report(FailureReport.t()) :: t()
   def from_failure_report(%FailureReport{} = report) do
+    # The failing command and its observed events, recomputed from the event log
+    # + shrunk sequence via the failure step (nil for a non-localized failure;
+    # the extract_* helpers already treat nil/[] as "no command / no events").
+    step = FailureReport.failure_step(report)
+    command = step && step.command
+    events = (step && step.events) || []
+
     %__MODULE__{
       failure_type: report.failure_type,
       check_name: report.check_name,
-      command_type: extract_command_type(report.command_at_failure),
-      command_shape: extract_command_shape(report.command_at_failure),
-      event_types: extract_event_types(report.events_at_failure),
-      event_count: length(report.events_at_failure || []),
+      command_type: extract_command_type(command),
+      command_shape: extract_command_shape(command),
+      event_types: extract_event_types(events),
+      event_count: length(events),
       sequence_length: extract_sequence_length(report.shrunk_sequence),
       sequence_shape: extract_sequence_shape(report.shrunk_sequence),
       state_keys: extract_state_keys(report.state_at_failure),
@@ -176,6 +183,10 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
 
   defp extract_sequence_length(nil), do: 0
 
+  defp extract_sequence_length(%Sequence{} = sequence) do
+    Sequence.command_count(sequence)
+  end
+
   defp extract_sequence_length(%{commands: commands}) when is_list(commands) do
     length(commands)
   end
@@ -187,6 +198,10 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   defp extract_sequence_length(_), do: 0
 
   defp extract_sequence_shape(nil), do: []
+
+  defp extract_sequence_shape(%Sequence{} = sequence) do
+    sequence |> Sequence.to_list() |> Enum.map(&extract_command_type/1)
+  end
 
   defp extract_sequence_shape(%{commands: commands}) when is_list(commands) do
     Enum.map(commands, &extract_command_type/1)
