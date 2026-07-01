@@ -192,13 +192,13 @@ The system SHALL produce structured failure reports containing location (run num
 #### Scenario: Structural step query interface
 
 - **WHEN** a `FailureReport` is inspected structurally
-- **THEN** `FailureReport.steps/1` SHALL return the failed run as an ordered list of `%FailureReport.Step{position, flattened_index, command, events, label, failed?}`, one per command in `Sequence.to_list/1` (flattened) reading order
+- **THEN** `FailureReport.steps/1` SHALL return the failed run as an ordered list of `%FailureReport.Step{position, flattened_index, command, entries, label, failed?}`, one per command in `Sequence.to_list/1` (flattened) reading order
 - **AND** each step's `position` SHALL be a `%Sequence.Position{section, offset}` naming the command's section (`:prefix`, `:suffix`, or `{:branch, id}`) and its offset within that section, giving each command an identity that is unambiguous across parallel branches even when they share an executor command index
-- **AND** each step's `events` SHALL be the command-produced events whose `(command_index, branch_id)` resolve to that step's position, in log order; events carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
+- **AND** each step's `entries` SHALL be the full `EventLog.Entry` structs whose `(command_index, branch_id)` resolve to that step's position, in log order, preserving each event's provenance (`source`, `branch_id`; the bare event is `entry.event`) so a nemesis / mock / stutter event attributed to the command stays distinguishable from SUT output; entries carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
 - **AND** at most one step SHALL have `failed?: true` — the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index` (an executor index that diverges from the flattened ordinal for branch failures)
 - **AND** `FailureReport.failure_step/1` SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run / linearization, where `failed_at_index` is `nil`)
-- **AND** `FailureReport.events_at/2` SHALL return the events for a command addressed by either its flattened index or its `%Sequence.Position{}`
-- **AND** `steps/1` / `failure_step/1` SHALL be the ONLY structural accessors for the failing command and its events: the report SHALL NOT carry materialized `command_at_failure` / `events_at_failure` fields (removed), and every renderer, exporter, and forensic analyzer SHALL obtain the failing command/events via the step interface (which resolves them branch-aware) rather than by re-walking `shrunk_sequence` / `event_log` / `failed_at_index`
+- **AND** `FailureReport.event_entries_at/2` SHALL return the log entries for a command addressed by either its flattened index or its `%Sequence.Position{}`
+- **AND** `steps/1` / `failure_step/1` SHALL be the ONLY structural accessors for the failing command and its entries: the report SHALL NOT carry materialized `command_at_failure` / `events_at_failure` fields (removed), and every renderer, exporter, and forensic analyzer SHALL obtain the failing command/events via the step interface (which resolves them branch-aware) rather than by re-walking `shrunk_sequence` / `event_log` / `failed_at_index`; in particular the event timeline's per-command provenance view (source badges + branch) SHALL be served from `steps/1` `entries` rather than a private `event_log` walk
 
 ### Requirement: Diff-Based Debugging
 
