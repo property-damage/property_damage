@@ -198,25 +198,4 @@ defmodule PropertyDamage.FailureReport.StepTest do
                [%Ev{tag: :s0}]
     end
   end
-
-  # Equivalence guard: proves failure_step/1 reproduces the materialized
-  # command_at_failure / events_at_failure fields, so Phase B can remove them
-  # without losing information.
-  describe "equivalence with materialized command_at_failure / events_at_failure" do
-    test "linear report" do
-      report = linear_report()
-      step = FailureReport.failure_step(report)
-
-      assert step.command == report.command_at_failure
-      assert step.events == report.events_at_failure
-    end
-
-    test "branched report (the case where indices diverge)" do
-      report = branched_report()
-      step = FailureReport.failure_step(report)
-
-      assert step.command == report.command_at_failure
-      assert step.events == report.events_at_failure
-    end
-  end
 end
