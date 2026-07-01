@@ -148,10 +148,22 @@ defmodule PropertyDamage.FailureReport.Formatter do
     """
     #{section_header("Failure Location", color)}
     #{label("Run Number", color)}    #{report.run_number + 1}
-    #{label("Command Index", color)} #{report.failed_at_index}
+    #{label("Command Index", color)} #{location_index(report)}
     #{label("Random Seed", color)}   #{report.seed}
     #{label("Timestamp", color)}     #{DateTime.to_string(report.timestamp)}
     """
+  end
+
+  # The reader-facing failure index: the flattened (reading-order) ordinal of
+  # the failing command, resolved branch-aware via the failure step. Falls back
+  # to the raw executor index for a non-localized failure (typically nil). This
+  # is what a human cross-references against the reproduction listing; the raw
+  # `failed_at_index` (an executor index) diverges from it for branch failures.
+  defp location_index(report) do
+    case FailureReport.failure_step(report) do
+      %FailureReport.Step{flattened_index: index} -> index
+      nil -> report.failed_at_index
+    end
   end
 
   # Headline the invariant the failing check validates (DR-026), with the check
@@ -238,18 +250,19 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp build_check_explanation(report, color) do
-    # Get the failing command
-    failed_cmd = report.command_at_failure
+    # The failing command and its reading-order index, resolved branch-aware via
+    # the failure step (nil for a non-localized failure).
+    case FailureReport.failure_step(report) do
+      %FailureReport.Step{command: command, flattened_index: index} ->
+        cmd_name = module_name(command.__struct__)
 
-    if failed_cmd do
-      cmd_name = module_name(failed_cmd.__struct__)
+        """
+        #{yellow(color)}Why it failed:#{reset()} Command #{cyan(color)}#{cmd_name}#{reset()} at index #{index}
+        violated the #{cyan(color)}#{report.check_name}#{reset()} invariant.
+        """
 
-      """
-      #{yellow(color)}Why it failed:#{reset()} Command #{cyan(color)}#{cmd_name}#{reset()} at index #{report.failed_at_index}
-      violated the #{cyan(color)}#{report.check_name}#{reset()} invariant.
-      """
-    else
-      nil
+      nil ->
+        nil
     end
   end
 
@@ -351,78 +364,40 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp terminal_shrunk_sequence(report, opts) do
     color = Keyword.get(opts, :color, true)
     max_commands = Keyword.get(opts, :max_commands, 30)
-    commands = Sequence.to_list(report.shrunk_sequence)
-
-    # Branch-aware flattened marker position; nil (no marker) when the
-    # index is absent or out of range, rather than mismarking the last
-    # command
-    failed_at = flattened_failure_index(report, length(commands))
+    steps = FailureReport.steps(report)
+    total = length(steps)
 
     commands_text =
-      commands
+      steps
       |> Enum.take(max_commands)
-      |> Enum.with_index()
-      |> Enum.map_join("\n", fn {cmd, idx} ->
-        is_failure = failed_at != nil and idx == failed_at
-        marker = if is_failure, do: "#{red(color)}►#{reset()}", else: " "
-        idx_color = if is_failure, do: red(color), else: dim(color)
-        failure_label = if is_failure, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
-        label = command_label_suffix(report, idx, color)
+      |> Enum.map_join("\n", fn step ->
+        marker = if step.failed?, do: "#{red(color)}►#{reset()}", else: " "
+        idx_color = if step.failed?, do: red(color), else: dim(color)
+        failure_label = if step.failed?, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
+        label = command_label_suffix(step.label, color)
 
-        "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command(cmd, color)}#{label}#{failure_label}"
+        "#{marker} #{idx_color}[#{step.flattened_index}]#{reset()} #{format_command(step.command, color)}#{label}#{failure_label}"
       end)
 
     truncated =
-      if length(commands) > max_commands do
-        "\n#{dim(color)}  ... and #{length(commands) - max_commands} more commands#{reset()}"
+      if total > max_commands do
+        "\n#{dim(color)}  ... and #{total - max_commands} more commands#{reset()}"
       else
         ""
       end
 
     """
-    #{section_header("Minimal Reproduction (#{length(commands)} commands)", color)}
+    #{section_header("Minimal Reproduction (#{total} commands)", color)}
     #{commands_text}#{truncated}
     """
   end
 
-  # The human-readable `Command.label/2` for the command at flattened index
-  # `idx` (P7), rendered as a dim trailing `# <label>` comment. Empty when the
-  # command produced no label.
-  defp command_label_suffix(report, idx, color) do
-    case Map.get(report.command_labels, idx) do
-      label when is_binary(label) -> "  #{dim(color)}# #{label}#{reset()}"
-      _ -> ""
-    end
-  end
+  # The step's human-readable `Command.label/2` (P7), rendered as a dim trailing
+  # `# <label>` comment. Empty when the command produced no label.
+  defp command_label_suffix(label, color) when is_binary(label),
+    do: "  #{dim(color)}# #{label}#{reset()}"
 
-  # Translate the executor's (failed_at_index, branch_id) into a position in
-  # the FLATTENED command list (prefix ++ branch0 ++ branch1 ++ ... ++
-  # suffix). Branch indices are prefix-relative and overlap across branches;
-  # suffix indices already continue after the sum of branch lengths, so they
-  # map to the flattened position unchanged.
-  defp flattened_failure_index(report, flattened_length) do
-    seq = report.shrunk_sequence
-    index = report.failed_at_index
-
-    flat =
-      cond do
-        not is_integer(index) ->
-          nil
-
-        report.branch_id == nil or seq == nil or Sequence.linear?(seq) ->
-          index
-
-        true ->
-          prefix_len = length(seq.prefix)
-
-          earlier_branches =
-            seq.branches |> Enum.take(report.branch_id) |> Enum.map(&length/1) |> Enum.sum()
-
-          prefix_len + earlier_branches + (index - prefix_len)
-      end
-
-    if is_integer(flat) and flat >= 0 and flat < flattened_length, do: flat, else: nil
-  end
+  defp command_label_suffix(_label, _color), do: ""
 
   defp terminal_original_sequence(report, opts) do
     color = Keyword.get(opts, :color, true)
@@ -435,17 +410,15 @@ defmodule PropertyDamage.FailureReport.Formatter do
     if length(commands) == shrunk_count do
       nil
     else
+      # No failure marker here: `failed_at_index` localizes the failure on the
+      # *shrunk* run, so it does not index the (longer) original sequence. This
+      # section is reference-only ("the full sequence before shrinking").
       commands_text =
         commands
         |> Enum.take(max_commands)
         |> Enum.with_index()
         |> Enum.map_join("\n", fn {cmd, idx} ->
-          is_failure = idx == report.failed_at_index
-          marker = if is_failure, do: "#{red(color)}►#{reset()}", else: " "
-          idx_color = if is_failure, do: red(color), else: dim(color)
-          failure_label = if is_failure, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
-
-          "#{marker} #{idx_color}[#{idx}]#{reset()} #{format_command(cmd, color)}#{failure_label}"
+          "  #{dim(color)}[#{idx}]#{reset()} #{format_command(cmd, color)}"
         end)
 
       truncated =
@@ -660,7 +633,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     | Property | Value |
     |----------|-------|
     | Run Number | #{report.run_number + 1} |
-    | Command Index | #{report.failed_at_index} |
+    | Command Index | #{location_index(report)} |
     | Random Seed | `#{report.seed}` |
     """
   end
@@ -817,27 +790,23 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp markdown_command_sequence(report, opts) do
     max_commands = Keyword.get(opts, :max_commands, 20)
-    commands = Sequence.to_list(report.shrunk_sequence)
+    steps = FailureReport.steps(report)
+    total = length(steps)
 
     commands_text =
-      commands
+      steps
       |> Enum.take(max_commands)
-      |> Enum.with_index()
-      |> Enum.map_join("\n\n", fn {cmd, idx} ->
-        marker = if idx == report.failed_at_index, do: "► ", else: "  "
+      |> Enum.map_join("\n\n", fn step ->
+        marker = if step.failed?, do: "► ", else: "  "
+        label = if is_binary(step.label), do: ": #{step.label}", else: ""
+        idx = step.flattened_index
 
-        label =
-          case Map.get(report.command_labels, idx) do
-            l when is_binary(l) -> ": #{l}"
-            _ -> ""
-          end
-
-        "#{marker}# [#{idx}] #{module_name(cmd.__struct__)}#{label}\n#{marker}#{inspect(cmd, pretty: true)}"
+        "#{marker}# [#{idx}] #{module_name(step.command.__struct__)}#{label}\n#{marker}#{inspect(step.command, pretty: true)}"
       end)
 
     truncated =
-      if length(commands) > max_commands do
-        "\n# ... and #{length(commands) - max_commands} more commands"
+      if total > max_commands do
+        "\n# ... and #{total - max_commands} more commands"
       else
         ""
       end
@@ -1084,7 +1053,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         _ -> "[FAIL]"
       end
 
-    "#{origin_tag} #{type} | run=#{report.run_number + 1} cmd=#{report.failed_at_index} " <>
+    "#{origin_tag} #{type} | run=#{report.run_number + 1} cmd=#{location_index(report)} " <>
       "shrunk=#{cmd_count} seed=#{report.seed}"
   end
 
