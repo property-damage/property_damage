@@ -179,6 +179,21 @@ defmodule PropertyDamage.FailureReport.StepTest do
     end
   end
 
+  describe "failure_index/1" do
+    test "linear failure: flattened index equals the executor index" do
+      assert FailureReport.failure_index(linear_report()) == 1
+    end
+
+    test "branch failure: flattened index, not the executor failed_at_index" do
+      # B1b failed: executor failed_at_index 2, but flattened index 4.
+      assert FailureReport.failure_index(branched_report()) == 4
+    end
+
+    test "non-localized failure: nil" do
+      assert FailureReport.failure_index(teardown_report()) == nil
+    end
+  end
+
   describe "events_at/2" do
     test "addresses events by flattened index" do
       report = linear_report()
