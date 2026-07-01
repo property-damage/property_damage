@@ -17,7 +17,7 @@ ADMIN_PASSWORD="${PD_GITEA_ADMIN_PASSWORD:-Pd-Admin-12345}"
 
 docker compose up -d --wait
 
-for svc in gitea-api gitea-ui; do
+for svc in gitea-api gitea-ui gitea-webhook; do
   # The first user a fresh Gitea has is created here; on a reused container this
   # is a no-op (user exists), so we swallow the error.
   docker compose exec -T -u git "$svc" gitea admin user create \

@@ -15,10 +15,8 @@ defmodule GiteaBench.Commands do
 
   defmodule CreateUser do
     @moduledoc "Create a (non-admin) user. login/email injected by the model."
-    use PropertyDamage.Command
+    use PropertyDamage.Command, observables: [GiteaBench.Events.UserCreated]
 
-    @impl true
-    def downstream_observables, do: [GiteaBench.Events.UserCreated]
     defstruct [:login, :email]
 
     @impl true
@@ -31,10 +29,8 @@ defmodule GiteaBench.Commands do
 
   defmodule CreateRepo do
     @moduledoc "Create a repo owned by an existing user. owner/name injected."
-    use PropertyDamage.Command
+    use PropertyDamage.Command, observables: [GiteaBench.Events.RepoCreated]
 
-    @impl true
-    def downstream_observables, do: [GiteaBench.Events.RepoCreated]
     defstruct [:owner, :name]
 
     @impl true
@@ -47,10 +43,8 @@ defmodule GiteaBench.Commands do
 
   defmodule CreateIssue do
     @moduledoc "Open an issue in an existing repo. repo is the `owner/name` ref."
-    use PropertyDamage.Command
+    use PropertyDamage.Command, observables: [GiteaBench.Events.IssueCreated]
 
-    @impl true
-    def downstream_observables, do: [GiteaBench.Events.IssueCreated]
     defstruct [:repo, :title]
 
     @impl true
@@ -63,10 +57,8 @@ defmodule GiteaBench.Commands do
 
   defmodule CreateLabel do
     @moduledoc "Define a label in an existing repo."
-    use PropertyDamage.Command
+    use PropertyDamage.Command, observables: [GiteaBench.Events.LabelCreated]
 
-    @impl true
-    def downstream_observables, do: [GiteaBench.Events.LabelCreated]
     defstruct [:repo, :name, :color]
 
     @impl true
@@ -87,10 +79,8 @@ defmodule GiteaBench.Commands do
     correlated values travel as one `assignment` field (`%{repo:, number:, label:}`)
     so the model can pick a coherent (repo, issue, label) triple in one shot.
     """
-    use PropertyDamage.Command
+    use PropertyDamage.Command, observables: [GiteaBench.Events.LabelAssigned]
 
-    @impl true
-    def downstream_observables, do: [GiteaBench.Events.LabelAssigned]
     defstruct [:assignment]
 
     @impl true
@@ -103,10 +93,10 @@ defmodule GiteaBench.Commands do
 
   defmodule CloseIssue do
     @moduledoc "Close an open issue. target is `%{repo:, number:}` of an open issue."
-    use PropertyDamage.Command
+    use PropertyDamage.Command, observables: [GiteaBench.Events.IssueClosed]
 
-    @impl true
-    def downstream_observables, do: [GiteaBench.Events.IssueClosed]
+    alias GiteaBench.Events.IssueClosedWebhook
+
     defstruct [:target]
 
     @impl true
@@ -114,6 +104,19 @@ defmodule GiteaBench.Commands do
       %{target: StreamData.constant(nil)}
       |> merge_overrides(overrides)
       |> StreamData.fixed_map()
+    end
+
+    # DR-030 pure correlation: claim the `issues` (closed) webhook the SUT
+    # delivers for *this* issue, keyed by the client-chosen {full_name, number}.
+    # This attributes the delivery to this command's index (failure localization);
+    # the "exactly one webhook" judgment lives in GiteaBench.WebhookAssertions.
+    @impl true
+    def awaits(_state, %__MODULE__{target: %{repo: full_name, number: number}}) do
+      [
+        %PropertyDamage.Await{
+          match: &match?(%IssueClosedWebhook{full_name: ^full_name, number: ^number}, &1)
+        }
+      ]
     end
   end
 end
