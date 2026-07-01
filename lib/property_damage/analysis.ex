@@ -71,13 +71,16 @@ defmodule PropertyDamage.Analysis do
     # Build dependency graph
     graph = Graph.build(commands)
 
-    # Find which commands are ancestors of the failing command
-    ancestors = Graph.ancestors(graph, failed_at)
+    # Find which commands are ancestors of the failing command. A non-localized
+    # failure (failed_at nil) has no failing node to trace ancestors from.
+    ancestors = if failed_at, do: Graph.ancestors(graph, failed_at), else: MapSet.new()
 
     # Analyze each command
+    localized? = failed_at != nil
+
     command_explanations =
       Enum.map(steps, fn step ->
-        analyze_command(step, ancestors, report)
+        analyze_command(step, ancestors, report, localized?)
       end)
 
     %{
@@ -146,17 +149,7 @@ defmodule PropertyDamage.Analysis do
     Enum.join(lines ++ command_lines ++ chain_lines, "\n")
   end
 
-  # The failing command's flattened (reading-order) index, resolved branch-aware
-  # via the failure step. Falls back to the raw executor index for a
-  # non-localized failure (typically nil).
-  defp failure_flattened_index(report) do
-    case FailureReport.failure_step(report) do
-      %FailureReport.Step{flattened_index: index} -> index
-      nil -> report.failed_at_index
-    end
-  end
-
-  defp analyze_command(%FailureReport.Step{} = step, ancestors, report) do
+  defp analyze_command(%FailureReport.Step{} = step, ancestors, report, localized?) do
     cmd = step.command
     idx = step.flattened_index
     cmd_name = cmd.__struct__ |> Module.split() |> List.last()
@@ -170,6 +163,11 @@ defmodule PropertyDamage.Analysis do
           # Ancestor in the dependency graph: produces state or values the
           # failing command depends on.
           {:dependency, "Provides state or values required by the failing command"}
+
+        not localized? ->
+          # The failure was not localized to a specific command (teardown /
+          # whole-run / linearization check), so no per-command role applies.
+          {:unknown, "Failure not localized to a specific command"}
 
         true ->
           # Not an ancestor and not the trigger - shouldn't be in shrunk sequence
@@ -566,7 +564,7 @@ defmodule PropertyDamage.Analysis do
         # The minimal sequence that triggers the failure:
     #{command_code}
 
-        # The failure occurs at command index #{failure_flattened_index(report)}
+        # The failure occurs at command index #{FailureReport.failure_index(report)}
         # Failure message: #{String.slice(report.failure_message || "", 0, 100)}
       end
     end
@@ -593,7 +591,7 @@ defmodule PropertyDamage.Analysis do
     IO.inspect(result, label: "Result")
 
     # Option 2: The minimal failing sequence
-    # #{length(commands)} commands, failure at index #{failure_flattened_index(report)}
+    # #{length(commands)} commands, failure at index #{FailureReport.failure_index(report)}
     #
     #{command_code}
     """
@@ -623,14 +621,14 @@ defmodule PropertyDamage.Analysis do
 
     ## Minimal Failing Sequence
 
-    #{format_commands_markdown(commands, failure_flattened_index(report))}
+    #{format_commands_markdown(commands, FailureReport.failure_index(report))}
 
     ## Failure Details
 
     - **Type**: #{report.failure_type}
     - **Check**: #{report.check_name || "N/A"}
     - **Message**: #{report.failure_message || "N/A"}
-    - **Command Index**: #{failure_flattened_index(report)}
+    - **Command Index**: #{FailureReport.failure_index(report)}
 
     ## Analysis
 

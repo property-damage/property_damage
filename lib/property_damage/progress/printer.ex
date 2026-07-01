@@ -101,7 +101,15 @@ defmodule PropertyDamage.Progress.Printer do
     # Basic failure info
     IO.puts("  Run:          #{report.run_number + 1}")
     IO.puts("  Seed:         #{report.seed}")
-    IO.puts("  Failed at:    Command #{report.failed_at_index + 1}")
+
+    IO.puts(
+      "  Failed at:    " <>
+        case FailureReport.failure_index(report) do
+          nil -> "not localized to a command"
+          index -> "Command #{index + 1}"
+        end
+    )
+
     IO.puts("")
 
     # Failure reason with formatted error message

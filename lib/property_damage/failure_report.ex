@@ -587,6 +587,25 @@ defmodule PropertyDamage.FailureReport do
     report |> steps() |> Enum.find(& &1.failed?)
   end
 
+  @doc """
+  The flattened (reading-order) index of the failing command, for reader-facing
+  display.
+
+  This is the ordinal into `steps/1` / `Sequence.to_list/1`, i.e. the number a
+  reader cross-references against the reproduction listing. It differs from the
+  raw `failed_at_index` field, which is the *executor* command index and diverges
+  from the flattened ordinal for parallel-branch failures. Falls back to
+  `failed_at_index` when the failure can't be localized to a step (typically
+  `nil`, e.g. a teardown / whole-run / linearization failure).
+  """
+  @spec failure_index(t()) :: non_neg_integer() | nil
+  def failure_index(%__MODULE__{} = report) do
+    case failure_step(report) do
+      %Step{flattened_index: index} -> index
+      nil -> report.failed_at_index
+    end
+  end
+
   # ============================================================================
   # Private Helpers
   # ============================================================================

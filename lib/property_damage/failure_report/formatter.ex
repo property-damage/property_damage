@@ -148,22 +148,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
     """
     #{section_header("Failure Location", color)}
     #{label("Run Number", color)}    #{report.run_number + 1}
-    #{label("Command Index", color)} #{location_index(report)}
+    #{label("Command Index", color)} #{FailureReport.failure_index(report)}
     #{label("Random Seed", color)}   #{report.seed}
     #{label("Timestamp", color)}     #{DateTime.to_string(report.timestamp)}
     """
-  end
-
-  # The reader-facing failure index: the flattened (reading-order) ordinal of
-  # the failing command, resolved branch-aware via the failure step. Falls back
-  # to the raw executor index for a non-localized failure (typically nil). This
-  # is what a human cross-references against the reproduction listing; the raw
-  # `failed_at_index` (an executor index) diverges from it for branch failures.
-  defp location_index(report) do
-    case FailureReport.failure_step(report) do
-      %FailureReport.Step{flattened_index: index} -> index
-      nil -> report.failed_at_index
-    end
   end
 
   # Headline the invariant the failing check validates (DR-026), with the check
@@ -633,7 +621,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     | Property | Value |
     |----------|-------|
     | Run Number | #{report.run_number + 1} |
-    | Command Index | #{location_index(report)} |
+    | Command Index | #{FailureReport.failure_index(report)} |
     | Random Seed | `#{report.seed}` |
     """
   end
@@ -1053,7 +1041,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         _ -> "[FAIL]"
       end
 
-    "#{origin_tag} #{type} | run=#{report.run_number + 1} cmd=#{location_index(report)} " <>
+    "#{origin_tag} #{type} | run=#{report.run_number + 1} cmd=#{FailureReport.failure_index(report)} " <>
       "shrunk=#{cmd_count} seed=#{report.seed}"
   end
 
