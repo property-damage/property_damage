@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Structural failure-query interface (Phase A).** `FailureReport` gains
+  `steps/1`, `events_at/2`, and `failure_step/1` so callers ask the report about
+  a failed run's timeline instead of re-walking `shrunk_sequence` / `event_log` /
+  `failed_at_index`. `steps/1` returns first-class
+  `%FailureReport.Step{position, flattened_index, command, events, label,
+  failed?}` values in flattened reading order. Each step carries a new shared
+  `%PropertyDamage.Sequence.Position{section, offset}` (reifying the executor's
+  `current_position` tuple, DR-021) that identifies a command unambiguously
+  across parallel branches, plus its derived flattened index. New
+  `Sequence.indexed/1` owns the position ↔ flattened-index mapping and
+  `Sequence.position_at/3` resolves an executor command index to a position.
+  `failed?` is matched by position, not by comparing the flattened index to
+  `failed_at_index` (an executor index that diverges from the flattened ordinal
+  for branch failures); `failure_step/1` is `nil` for non-localized failures.
+  This is additive: the materialized `command_at_failure` / `events_at_failure`
+  fields and the ~20 existing callers are unchanged (their migration is Phase B).
 - **Core adapter timeout (DR-032).** Each `adapter.execute/3` call in an ordinary
   `PropertyDamage.run/1` is now bounded by `adapter.timeout/1` (default 30s, per-command
   override), not just in load-test workers. A wedged `execute/3` now fails with
@@ -137,6 +153,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reproduce (and keeps the shrunk sequence and fresh state on a genuine repro).
   `shrink_further/2` shared the gap and now returns the incoming report unchanged
   when its re-execution fails to reproduce.
+- **`FailureReport.failed_at_index` typespec now admits `nil`.** The field is set
+  `nil` for non-localized failures (teardown / whole-run / linearization safety
+  checks), but the type declared `non_neg_integer()`. Corrected to
+  `non_neg_integer() | nil` to match the code.
 - **Injector-adapter validation no longer spuriously raises.** When an injector
   adapter is passed by module name, `PropertyDamage.run/1` now
   `Code.ensure_loaded?`s it before reflecting on its `@emits`, so an

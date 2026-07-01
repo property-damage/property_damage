@@ -189,6 +189,16 @@ The system SHALL produce structured failure reports containing location (run num
 - **AND** the `:terminal`, `:markdown`, and `:json` formats SHALL render each command's label next to that command in the minimal-reproduction sequence
 - **AND** a command without a label SHALL render exactly as before
 
+#### Scenario: Structural step query interface
+
+- **WHEN** a `FailureReport` is inspected structurally
+- **THEN** `FailureReport.steps/1` SHALL return the failed run as an ordered list of `%FailureReport.Step{position, flattened_index, command, events, label, failed?}`, one per command in `Sequence.to_list/1` (flattened) reading order
+- **AND** each step's `position` SHALL be a `%Sequence.Position{section, offset}` naming the command's section (`:prefix`, `:suffix`, or `{:branch, id}`) and its offset within that section, giving each command an identity that is unambiguous across parallel branches even when they share an executor command index
+- **AND** each step's `events` SHALL be the command-produced events whose `(command_index, branch_id)` resolve to that step's position, in log order; events carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
+- **AND** at most one step SHALL have `failed?: true` — the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index` (an executor index that diverges from the flattened ordinal for branch failures)
+- **AND** `FailureReport.failure_step/1` SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run / linearization, where `failed_at_index` is `nil`)
+- **AND** `FailureReport.events_at/2` SHALL return the events for a command addressed by either its flattened index or its `%Sequence.Position{}`
+
 ### Requirement: Diff-Based Debugging
 
 The system SHALL compare passing and failing execution traces to identify the divergence point and display actionable differences.

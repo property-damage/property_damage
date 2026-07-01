@@ -51,6 +51,7 @@ defmodule PropertyDamage.FailureReport do
   """
 
   alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Sequence}
+  alias PropertyDamage.FailureReport.Step
 
   @type failure_type ::
           :check_failed
@@ -66,7 +67,7 @@ defmodule PropertyDamage.FailureReport do
           # Location
           seed: integer(),
           run_number: non_neg_integer(),
-          failed_at_index: non_neg_integer(),
+          failed_at_index: non_neg_integer() | nil,
           failure_type: failure_type(),
 
           # Sequences
@@ -508,6 +509,93 @@ defmodule PropertyDamage.FailureReport do
     adapter_str = if adapter, do: "adapter: #{inspect(adapter)}, ", else: ""
 
     "PropertyDamage.run(#{model_str}#{adapter_str}seed: #{seed}, max_runs: 1)"
+  end
+
+  @doc """
+  The failed run as a timeline of `Step` structs, in flattened (reading) order.
+
+  Each step pairs a command with its `Sequence.Position`, flattened index,
+  observed events, label, and a `failed?` flag. This is the structural
+  accessor callers use instead of re-walking `shrunk_sequence` / `event_log` /
+  `failed_at_index` themselves; `events_at/2` and `failure_step/1` are sugar
+  over it.
+
+  Returns `[]` for a report with no sequence (e.g. a partially hand-built
+  struct).
+  """
+  @spec steps(t()) :: [Step.t()]
+  def steps(%__MODULE__{shrunk_sequence: nil}), do: []
+
+  def steps(%__MODULE__{shrunk_sequence: %Sequence{} = sequence} = report) do
+    # Group command-produced events by the position of the command that produced
+    # them. Injector/telemetry events carry no command_index and so belong to no
+    # step. `(command_index, branch_id)` resolves uniquely to a position, so this
+    # is the branch-aware equivalent of grouping by command_index alone.
+    events_by_position =
+      report.event_log
+      |> Enum.filter(&(&1.command_index != nil))
+      |> Enum.group_by(
+        fn entry -> Sequence.position_at(sequence, entry.command_index, entry.branch_id) end,
+        & &1.event
+      )
+
+    # The failing command's position (nil for a non-localized failure). Resolved
+    # via position_at, NOT by comparing flattened_index to failed_at_index: the
+    # latter is an executor index and diverges from the flattened ordinal for
+    # branch failures.
+    failed_position =
+      if report.failed_at_index != nil do
+        Sequence.position_at(sequence, report.failed_at_index, report.branch_id)
+      end
+
+    sequence
+    |> Sequence.indexed()
+    |> Enum.map(fn {position, flattened_index, command} ->
+      %Step{
+        position: position,
+        flattened_index: flattened_index,
+        command: command,
+        events: Map.get(events_by_position, position, []),
+        label: Map.get(report.command_labels, flattened_index),
+        failed?: failed_position != nil and position == failed_position
+      }
+    end)
+  end
+
+  @doc """
+  The events observed for a single command, addressed by flattened index or
+  `Sequence.Position`.
+
+  Sugar over `steps/1`. Returns `[]` when nothing matches.
+  """
+  @spec events_at(t(), non_neg_integer() | Sequence.Position.t()) :: [struct()]
+  def events_at(%__MODULE__{} = report, %Sequence.Position{} = position) do
+    report
+    |> steps()
+    |> Enum.find(&(&1.position == position))
+    |> step_events()
+  end
+
+  def events_at(%__MODULE__{} = report, flattened_index) when is_integer(flattened_index) do
+    report
+    |> steps()
+    |> Enum.find(&(&1.flattened_index == flattened_index))
+    |> step_events()
+  end
+
+  defp step_events(nil), do: []
+  defp step_events(%Step{events: events}), do: events
+
+  @doc """
+  The `Step` where the failure was localized, or `nil`.
+
+  Returns `nil` for non-localized failures (teardown / whole-run / linearization
+  checks, where `failed_at_index` is `nil`). At most one step is ever the failure
+  step.
+  """
+  @spec failure_step(t()) :: Step.t() | nil
+  def failure_step(%__MODULE__{} = report) do
+    report |> steps() |> Enum.find(& &1.failed?)
   end
 
   # ============================================================================
