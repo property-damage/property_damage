@@ -9,8 +9,13 @@ defmodule GiteaBench.UiAdapter do
   differs between the two adapters: how the change was made.
 
   Gitea's UI can only create a repo under the acting account, so to keep true
-  parity with the API transport the adapter logs in *as* the relevant user
-  (tracked in an Agent, switched by clearing cookies and re-authenticating).
+  parity with the API transport the adapter logs in *as* the relevant user. Each
+  user gets its **own browser context** (isolated cookies), logged in once on
+  first use and reused, so switching users is free after the first login. Every
+  command then runs on a **fresh page** opened in that context: a page is never
+  shared between commands, so one command's asynchronous after-effects (a
+  form-submit reload, a live-update redirect) can never land on the next
+  command's page and navigate it away mid-interaction. See `page_for/2`.
 
   Config (`opts`/`adapter_config`): `:base_url` (required), `:admin_user`,
   `:admin_password`, and `:seed_bug` (when true, label creation fills the wrong
@@ -42,25 +47,26 @@ defmodule GiteaBench.UiAdapter do
     :ok = Gitea.reset!(client)
 
     {:ok, browser} = Playwright.launch(:chromium, %{headless: true})
-    context = Browser.new_context(browser)
-    page = BrowserContext.new_page(context)
-    {:ok, session} = Agent.start_link(fn -> nil end)
+    # One logged-in browser context per user, created lazily on first use:
+    # %{user => context}. Each command opens a *fresh page* in the user's context
+    # (see page_for/2), so it never inherits an in-flight navigation or other
+    # residue from the previous command's page.
+    {:ok, sessions} = Agent.start_link(fn -> %{} end)
 
     {:ok,
      %{
        client: client,
        browser: browser,
-       context: context,
-       page: page,
-       session: session,
+       sessions: sessions,
        base_url: client.base_url,
        seed_bug: Map.get(config, :seed_bug, false)
      }}
   end
 
   @impl true
-  def teardown(%{browser: browser, session: session}) do
-    Agent.stop(session)
+  def teardown(%{browser: browser, sessions: sessions}) do
+    Agent.stop(sessions)
+    # Closing the browser tears down every per-user context and page it owns.
     Browser.close(browser)
     :ok
   end
@@ -69,10 +75,9 @@ defmodule GiteaBench.UiAdapter do
 
   @impl true
   def execute(%CreateUser{login: login, email: email}, ctx, _runtime) do
-    ensure_login(ctx, ctx.client.admin_user)
-    page = ctx.page
+    page = page_for(ctx, ctx.client.admin_user)
 
-    Page.goto(page, ctx.base_url <> "/admin/users/new", %{timeout: @nav_timeout})
+    navigate(page, ctx.base_url <> "/admin/users/new", "input[name=user_name]")
     Page.fill(page, "input[name=user_name]", login)
     Page.fill(page, "input[name=email]", email)
     Page.fill(page, "input[name=password]", Gitea.user_password())
@@ -91,10 +96,9 @@ defmodule GiteaBench.UiAdapter do
   end
 
   def execute(%CreateRepo{owner: owner, name: name}, ctx, _runtime) do
-    ensure_login(ctx, owner)
-    page = ctx.page
+    page = page_for(ctx, owner)
 
-    Page.goto(page, ctx.base_url <> "/repo/create", %{timeout: @nav_timeout})
+    navigate(page, ctx.base_url <> "/repo/create", "input[name=repo_name]")
     Page.fill(page, "input[name=repo_name]", name)
     Page.click(page, ~s|button:has-text("Create Repository")|)
 
@@ -104,10 +108,9 @@ defmodule GiteaBench.UiAdapter do
 
   def execute(%CreateIssue{repo: full_name, title: title}, ctx, _runtime) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
-    ensure_login(ctx, owner)
-    page = ctx.page
+    page = page_for(ctx, owner)
 
-    Page.goto(page, ctx.base_url <> "/#{owner}/#{repo}/issues/new", %{timeout: @nav_timeout})
+    navigate(page, ctx.base_url <> "/#{owner}/#{repo}/issues/new", "input[name=title]")
     Page.fill(page, "input[name=title]", title)
     Page.click(page, ~s|button:has-text("Create Issue")|)
     Page.wait_for_selector(page, "#status-button", %{timeout: @nav_timeout})
@@ -125,11 +128,10 @@ defmodule GiteaBench.UiAdapter do
 
   def execute(%CreateLabel{repo: full_name, name: name, color: color}, ctx, _runtime) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
-    ensure_login(ctx, owner)
-    page = ctx.page
+    page = page_for(ctx, owner)
     color = if ctx.seed_bug, do: @seeded_wrong_color, else: color
 
-    Page.goto(page, ctx.base_url <> "/#{owner}/#{repo}/labels", %{timeout: @nav_timeout})
+    navigate(page, ctx.base_url <> "/#{owner}/#{repo}/labels", ".new-label.button")
     Page.click(page, ".new-label.button")
     Page.fill(page, ".new-label.modal input[name=title]", name)
     Page.fill(page, ".new-label.modal input[name=color]", color)
@@ -145,11 +147,10 @@ defmodule GiteaBench.UiAdapter do
         _runtime
       ) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
-    ensure_login(ctx, owner)
-    page = ctx.page
+    page = page_for(ctx, owner)
     label_id = Gitea.label_id(ctx.client, owner, repo, label)
 
-    Page.goto(page, ctx.base_url <> "/#{owner}/#{repo}/issues/#{number}", %{timeout: @nav_timeout})
+    navigate(page, ctx.base_url <> "/#{owner}/#{repo}/issues/#{number}", ".select-label.dropdown")
 
     item = ".select-label .menu .item[data-id='#{label_id}']"
 
@@ -180,10 +181,9 @@ defmodule GiteaBench.UiAdapter do
 
   def execute(%CloseIssue{target: %{repo: full_name, number: number}}, ctx, _runtime) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
-    ensure_login(ctx, owner)
-    page = ctx.page
+    page = page_for(ctx, owner)
 
-    Page.goto(page, ctx.base_url <> "/#{owner}/#{repo}/issues/#{number}", %{timeout: @nav_timeout})
+    navigate(page, ctx.base_url <> "/#{owner}/#{repo}/issues/#{number}", "#status-button")
 
     Page.click(page, "#status-button")
 
@@ -198,22 +198,69 @@ defmodule GiteaBench.UiAdapter do
 
   # --- session management ----------------------------------------------------
 
-  defp ensure_login(ctx, user) do
-    if Agent.get(ctx.session, & &1) != user do
-      BrowserContext.clear_cookies(ctx.context)
-      login(ctx.page, ctx.base_url, user, password_for(ctx, user))
-      Agent.update(ctx.session, fn _ -> user end)
-    end
+  # A fresh page authenticated as `user`. The per-user browser context (with its
+  # login cookies) is created and logged in on first use and reused thereafter,
+  # but every call returns a NEW page in that context. Reusing a single page
+  # across a run's commands let a mutating command's asynchronous after-effects (a
+  # form-submit reload, a live-update redirect) land on the *next* command's page
+  # mid-interaction and navigate it away, so that command then waited out its
+  # timeout on an element no longer present. A fresh page per command cannot
+  # inherit that residue; the context (hence the login) is still shared, so this
+  # costs a `new_page`, not a re-login. Pages accumulate until teardown closes the
+  # browser, which is fine for a run's modest command count.
+  defp page_for(ctx, user) do
+    BrowserContext.new_page(context_for(ctx, user))
+  end
 
-    :ok
+  # Get or lazily create the logged-in context for `user`. Commands execute
+  # sequentially within a run, so a plain get/create/put is race-free; the login
+  # runs outside the Agent so it never holds the lock.
+  defp context_for(ctx, user) do
+    case Agent.get(ctx.sessions, &Map.get(&1, user)) do
+      nil ->
+        context = Browser.new_context(ctx.browser)
+        login_page = BrowserContext.new_page(context)
+        login(login_page, ctx.base_url, user, password_for(ctx, user))
+        # Login set the auth cookies on the context; the login page itself is no
+        # longer needed (each command opens its own fresh page).
+        Page.close(login_page)
+        Agent.update(ctx.sessions, &Map.put(&1, user, context))
+        context
+
+      context ->
+        context
+    end
   end
 
   defp login(page, base_url, user, password) do
     Page.goto(page, base_url <> "/user/login", %{timeout: @nav_timeout})
+
+    # Wait for the login form to be present and visible before filling. Without
+    # this, a fill/press auto-waits its full (30s) default timeout whenever the
+    # form is not immediately actionable -- e.g. if /user/login redirected away
+    # because the context was already authenticated.
+    Page.wait_for_selector(page, "input[name=user_name]", %{
+      state: "visible",
+      timeout: @nav_timeout
+    })
+
     Page.fill(page, "input[name=user_name]", user)
     Page.fill(page, "input[name=password]", password)
     Page.press(page, "input[name=password]", "Enter")
-    Page.wait_for_selector(page, "a[href='/#{user}']", %{timeout: @nav_timeout})
+
+    # Login is complete once the form is gone (we have navigated to the
+    # dashboard). Wait for the username field to DETACH rather than for a
+    # dashboard element: Gitea renders the user's profile link (a[href="/<user>"])
+    # inside the *collapsed* avatar dropdown, so it is in the DOM but not visible
+    # (0x0). `wait_for_selector` waits for visibility by default, so waiting on
+    # that link burns the entire timeout even though login already succeeded --
+    # the original cause of intermittent ~10-30s login stalls. A failed login
+    # (bad credentials) re-renders the form, so the field stays attached and this
+    # correctly times out.
+    Page.wait_for_selector(page, "input[name=user_name]", %{
+      state: "detached",
+      timeout: @nav_timeout
+    })
   end
 
   defp password_for(ctx, user) do
@@ -221,6 +268,60 @@ defmodule GiteaBench.UiAdapter do
   end
 
   # --- helpers ---------------------------------------------------------------
+
+  # Navigate to `url` and confirm we actually arrived by waiting for `ready` (an
+  # element that only exists on the destination page) to be visible; re-issue the
+  # goto if we did not land.
+  #
+  # A page is reused across the commands of a run, and a preceding mutating
+  # command can leave it with an in-flight navigation (e.g. CloseIssue clicks
+  # `#status-button`, which submits a form and reloads the issue page, then
+  # settles against the *API* without waiting for that reload). A single
+  # `Page.goto` issued while that navigation is in flight can be superseded --
+  # it returns without error but the page stays on the previous URL, so every
+  # subsequent action then waits out its full timeout on an element that is not
+  # there. Verifying arrival and retrying makes navigation robust against that
+  # race (a re-goto after the in-flight navigation settles lands cleanly).
+  defp navigate(page, url, ready, attempts \\ 4) do
+    # First let any navigation the *previous* command left in flight settle. A
+    # mutating command (e.g. CloseIssue clicking `#status-button`) submits a form
+    # that reloads the page and returns after settling against the API, without
+    # waiting for that reload; if we goto while it is in flight, our navigation is
+    # superseded and the page drifts back to the old URL.
+    wait_load(page)
+    Page.goto(page, url, %{timeout: @nav_timeout})
+    wait_load(page)
+
+    cond do
+      arrived?(page, ready, if(attempts <= 1, do: @nav_timeout, else: 1_500)) ->
+        :ok
+
+      attempts <= 1 ->
+        # Out of retries: a final, full-timeout wait so a genuine failure surfaces
+        # as a clear "waiting for <ready>" error rather than a silent stall.
+        Page.wait_for_selector(page, ready, %{state: "visible", timeout: @nav_timeout})
+
+      true ->
+        navigate(page, url, ready, attempts - 1)
+    end
+  end
+
+  defp arrived?(page, ready, timeout) do
+    Page.wait_for_selector(page, ready, %{state: "visible", timeout: timeout})
+    true
+  rescue
+    _ -> false
+  end
+
+  # Best-effort wait for the page's load event; never raises (a page with no
+  # pending navigation is already loaded).
+  defp wait_load(page) do
+    Page.wait_for_load_state(page, "load")
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
 
   defp issue_number_from_url(url) do
     [_, n] = Regex.run(~r{/issues/(\d+)}, url)
