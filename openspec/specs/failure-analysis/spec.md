@@ -198,6 +198,7 @@ The system SHALL produce structured failure reports containing location (run num
 - **AND** at most one step SHALL have `failed?: true` — the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index` (an executor index that diverges from the flattened ordinal for branch failures)
 - **AND** `FailureReport.failure_step/1` SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run / linearization, where `failed_at_index` is `nil`)
 - **AND** `FailureReport.events_at/2` SHALL return the events for a command addressed by either its flattened index or its `%Sequence.Position{}`
+- **AND** `steps/1` / `failure_step/1` SHALL be the ONLY structural accessors for the failing command and its events: the report SHALL NOT carry materialized `command_at_failure` / `events_at_failure` fields (removed), and every renderer, exporter, and forensic analyzer SHALL obtain the failing command/events via the step interface (which resolves them branch-aware) rather than by re-walking `shrunk_sequence` / `event_log` / `failed_at_index`
 
 ### Requirement: Diff-Based Debugging
 
