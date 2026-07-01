@@ -52,6 +52,8 @@ defmodule PropertyDamage.Sequence do
   - Refs created in branches CAN be used in `suffix` (after merge)
   """
 
+  alias PropertyDamage.Sequence.Position
+
   @type command :: struct()
 
   @type t :: %__MODULE__{
@@ -188,6 +190,110 @@ defmodule PropertyDamage.Sequence do
   def to_list(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix}) do
     flattened_branches = List.flatten(branches)
     prefix ++ flattened_branches ++ suffix
+  end
+
+  @doc """
+  Pair every command with its structured `Position` and its flattened index.
+
+  Returns `[{%Position{}, flattened_index, command}]` in `to_list/1` reading
+  order: prefix commands first, then each branch's commands in branch order,
+  then suffix commands. The `flattened_index` is the `0..n-1` ordinal in that
+  order (the same index `command_labels`/exporters/diff key on); the `Position`
+  is the command's canonical section+offset location.
+
+  This is the single owner of the position ↔ flattened-index mapping. The two
+  are not derivable from each other in isolation (a lone position needs the
+  sizes of preceding branches to know its flattened index), so callers that
+  need either should ask here rather than re-deriving.
+
+  ## Examples
+
+      iex> seq = PropertyDamage.Sequence.branching([:a], [[:b], [:c]], [:d])
+      iex> PropertyDamage.Sequence.indexed(seq)
+      [
+        {%PropertyDamage.Sequence.Position{section: :prefix, offset: 0}, 0, :a},
+        {%PropertyDamage.Sequence.Position{section: {:branch, 0}, offset: 0}, 1, :b},
+        {%PropertyDamage.Sequence.Position{section: {:branch, 1}, offset: 0}, 2, :c},
+        {%PropertyDamage.Sequence.Position{section: :suffix, offset: 0}, 3, :d}
+      ]
+  """
+  @spec indexed(t()) :: [{Position.t(), non_neg_integer(), command()}]
+  def indexed(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix}) do
+    prefix_entries =
+      prefix
+      |> Enum.with_index()
+      |> Enum.map(fn {command, offset} ->
+        {%Position{section: :prefix, offset: offset}, command}
+      end)
+
+    branch_entries =
+      (branches || [])
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {branch, branch_id} ->
+        branch
+        |> Enum.with_index()
+        |> Enum.map(fn {command, offset} ->
+          {%Position{section: {:branch, branch_id}, offset: offset}, command}
+        end)
+      end)
+
+    suffix_entries =
+      suffix
+      |> Enum.with_index()
+      |> Enum.map(fn {command, offset} ->
+        {%Position{section: :suffix, offset: offset}, command}
+      end)
+
+    (prefix_entries ++ branch_entries ++ suffix_entries)
+    |> Enum.with_index()
+    |> Enum.map(fn {{position, command}, flattened_index} ->
+      {position, flattened_index, command}
+    end)
+  end
+
+  @doc """
+  Resolve an executor command index (and branch id) to its `Position`.
+
+  This is the inverse of the executor's indexing scheme: prefix commands are
+  numbered `0..len(prefix)-1`; every branch's commands continue from
+  `len(prefix)` (overlapping across branches, disambiguated only by `branch_id`);
+  suffix commands continue after the *sum* of all branch lengths. A `branch_id`
+  of `nil` means the index refers to a prefix or suffix command.
+
+  The result is consistent with `indexed/1`: the position returned for an
+  event log entry's `(command_index, branch_id)` is exactly the position of the
+  command that produced it. Note the argument is the *executor* command index,
+  which for branch commands is NOT the flattened index.
+
+  ## Examples
+
+      iex> seq = PropertyDamage.Sequence.branching([:a], [[:b], [:c]], [:d])
+      iex> PropertyDamage.Sequence.position_at(seq, 1, 1)
+      %PropertyDamage.Sequence.Position{section: {:branch, 1}, offset: 0}
+      iex> PropertyDamage.Sequence.position_at(seq, 3, nil)
+      %PropertyDamage.Sequence.Position{section: :suffix, offset: 0}
+  """
+  @spec position_at(t(), non_neg_integer(), non_neg_integer() | nil) :: Position.t()
+  def position_at(%__MODULE__{} = sequence, command_index, branch_id) do
+    prefix_len = length(sequence.prefix)
+
+    cond do
+      branch_id != nil ->
+        %Position{section: {:branch, branch_id}, offset: command_index - prefix_len}
+
+      command_index < prefix_len ->
+        %Position{section: :prefix, offset: command_index}
+
+      true ->
+        total_branch = branch_command_count(sequence)
+        %Position{section: :suffix, offset: command_index - prefix_len - total_branch}
+    end
+  end
+
+  defp branch_command_count(%__MODULE__{branches: nil}), do: 0
+
+  defp branch_command_count(%__MODULE__{branches: branches}) do
+    branches |> Enum.map(&length/1) |> Enum.sum()
   end
 
   @doc """
