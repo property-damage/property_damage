@@ -344,13 +344,13 @@ defmodule PropertyDamage.FailureReport.Timeline do
     """
 
     # This is the entry-level view: unlike the plain command timeline it renders
-    # each event's source badge (CMD/NEM/MOC/STU/INJ) and branch. A Step exposes
-    # only bare events, so this reads the full log entries directly, grouping
-    # them by the position their (command_index, branch_id) resolves to — the
-    # same branch-aware grouping steps/1 does, but keeping the entries. The
-    # failure is marked by the failing step's position, not by comparing a
-    # flattened ordinal to the executor failed_at_index.
-    body = format_event_timeline_body(report.shrunk_sequence, report, max_events, color)
+    # each event's source badge (CMD/NEM/MOC/STU/INJ) and branch. It reads the
+    # command-attributed entries straight off `FailureReport.steps/1` — each
+    # `Step.entries` is the full, branch-aware-grouped `EventLog.Entry` list, so
+    # the per-event provenance (source, branch_id) and the failure marker
+    # (`step.failed?`) come from the failure-query interface rather than from a
+    # private re-walk of `event_log`.
+    body = format_event_timeline_body(report, max_events, color)
 
     # Events from injectors and other async sources carry command_index: nil;
     # they belong to no command but must still appear rather than vanish.
@@ -360,37 +360,20 @@ defmodule PropertyDamage.FailureReport.Timeline do
     header <> body <> async_section
   end
 
-  defp format_event_timeline_body(%Sequence{} = sequence, report, max_events, color) do
-    entries_by_position =
-      report.event_log
-      |> Enum.filter(&(&1.command_index != nil))
-      |> Enum.group_by(fn entry ->
-        Sequence.position_at(sequence, entry.command_index, entry.branch_id)
-      end)
-
-    failed_position =
-      case FailureReport.failure_step(report) do
-        %FailureReport.Step{position: position} -> position
-        nil -> nil
-      end
-
-    sequence
-    |> Sequence.indexed()
-    |> Enum.map_join("\n\n", fn {position, idx, cmd} ->
-      entries = Map.get(entries_by_position, position, [])
-
+  defp format_event_timeline_body(report, max_events, color) do
+    report
+    |> FailureReport.steps()
+    |> Enum.map_join("\n\n", fn step ->
       format_command_with_events(
-        cmd,
-        idx,
-        entries,
-        position == failed_position,
+        step.command,
+        step.flattened_index,
+        step.entries,
+        step.failed?,
         max_events,
         color
       )
     end)
   end
-
-  defp format_event_timeline_body(_sequence, _report, _max_events, _color), do: ""
 
   defp format_async_events([], _max_events, _color), do: ""
 

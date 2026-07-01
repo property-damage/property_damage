@@ -125,30 +125,33 @@ defmodule PropertyDamage.FailureReport.StepTest do
              ]
     end
 
-    test "attaches command events by position; injector events belong to no step" do
+    test "attaches command entries by position; injector events belong to no step" do
       steps = FailureReport.steps(linear_report())
 
-      assert Enum.map(steps, & &1.events) == [
+      assert Enum.map(steps, fn step -> Enum.map(step.entries, & &1.event) end) == [
                [%Ev{tag: :e0}],
                [%Ev{tag: :e1}],
                [%Ev{tag: :e2}]
              ]
 
       # The async injector event (command_index nil) is attached nowhere.
-      refute Enum.any?(steps, fn step -> Enum.any?(step.events, &(&1.tag == :async)) end)
+      refute Enum.any?(steps, fn step ->
+               Enum.any?(step.entries, &(&1.event.tag == :async))
+             end)
     end
 
-    test "disambiguates events across branches that share a command_index" do
+    test "disambiguates entries across branches that share a command_index" do
       steps = FailureReport.steps(branched_report())
 
       by_position = Map.new(steps, &{&1.position, &1})
+      events_at = fn position -> Enum.map(by_position[position].entries, & &1.event) end
 
       # Both branches' first command have executor command_index 1; each step
       # must get only its own branch's event.
-      assert by_position[%Position{section: {:branch, 0}, offset: 0}].events == [%Ev{tag: :b0a}]
-      assert by_position[%Position{section: {:branch, 1}, offset: 0}].events == [%Ev{tag: :b0b}]
-      assert by_position[%Position{section: {:branch, 0}, offset: 1}].events == [%Ev{tag: :b1a}]
-      assert by_position[%Position{section: {:branch, 1}, offset: 1}].events == [%Ev{tag: :b1b}]
+      assert events_at.(%Position{section: {:branch, 0}, offset: 0}) == [%Ev{tag: :b0a}]
+      assert events_at.(%Position{section: {:branch, 1}, offset: 0}) == [%Ev{tag: :b0b}]
+      assert events_at.(%Position{section: {:branch, 0}, offset: 1}) == [%Ev{tag: :b1a}]
+      assert events_at.(%Position{section: {:branch, 1}, offset: 1}) == [%Ev{tag: :b1b}]
     end
 
     test "marks exactly the localized failure step, by position not by index" do
@@ -194,23 +197,52 @@ defmodule PropertyDamage.FailureReport.StepTest do
     end
   end
 
-  describe "events_at/2" do
-    test "addresses events by flattened index" do
-      report = linear_report()
+  describe "entries carry per-event provenance (candidate 8b)" do
+    test "a step's entries are full EventLog.Entry structs, not bare events" do
+      steps = FailureReport.steps(linear_report())
 
-      assert FailureReport.events_at(report, 0) == [%Ev{tag: :e0}]
-      assert FailureReport.events_at(report, 2) == [%Ev{tag: :e2}]
-      assert FailureReport.events_at(report, 99) == []
+      entries = Enum.flat_map(steps, & &1.entries)
+      assert Enum.all?(entries, &match?(%Entry{}, &1))
+
+      # The provenance that bare events dropped survives: each entry still knows
+      # its source, and the event struct is reachable by projecting `.event`.
+      assert Enum.map(entries, & &1.source) == [:command, :command, :command]
+      assert Enum.map(entries, & &1.event) == [%Ev{tag: :e0}, %Ev{tag: :e1}, %Ev{tag: :e2}]
     end
 
-    test "addresses events by Position" do
+    test "branch id and source are preserved on each entry" do
+      steps = FailureReport.steps(branched_report())
+      by_position = Map.new(steps, &{&1.position, &1})
+
+      assert [%Entry{source: :command, branch_id: 1, event: %Ev{tag: :b1b}}] =
+               by_position[%Position{section: {:branch, 1}, offset: 1}].entries
+
+      assert [%Entry{source: :command, branch_id: 0, event: %Ev{tag: :b0a}}] =
+               by_position[%Position{section: {:branch, 0}, offset: 0}].entries
+    end
+  end
+
+  describe "event_entries_at/2" do
+    test "addresses entries by flattened index" do
+      report = linear_report()
+
+      assert [%Entry{source: :command, event: %Ev{tag: :e0}}] =
+               FailureReport.event_entries_at(report, 0)
+
+      assert [%Entry{source: :command, event: %Ev{tag: :e2}}] =
+               FailureReport.event_entries_at(report, 2)
+
+      assert FailureReport.event_entries_at(report, 99) == []
+    end
+
+    test "addresses entries by Position" do
       report = branched_report()
 
-      assert FailureReport.events_at(report, %Position{section: {:branch, 1}, offset: 1}) ==
-               [%Ev{tag: :b1b}]
+      assert [%Entry{branch_id: 1, event: %Ev{tag: :b1b}}] =
+               FailureReport.event_entries_at(report, %Position{section: {:branch, 1}, offset: 1})
 
-      assert FailureReport.events_at(report, %Position{section: :suffix, offset: 0}) ==
-               [%Ev{tag: :s0}]
+      assert [%Entry{event: %Ev{tag: :s0}}] =
+               FailureReport.event_entries_at(report, %Position{section: :suffix, offset: 0})
     end
   end
 end

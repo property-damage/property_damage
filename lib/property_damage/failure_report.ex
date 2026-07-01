@@ -504,10 +504,10 @@ defmodule PropertyDamage.FailureReport do
   The failed run as a timeline of `Step` structs, in flattened (reading) order.
 
   Each step pairs a command with its `Sequence.Position`, flattened index,
-  observed events, label, and a `failed?` flag. This is the structural
+  observed log entries, label, and a `failed?` flag. This is the structural
   accessor callers use instead of re-walking `shrunk_sequence` / `event_log` /
-  `failed_at_index` themselves; `events_at/2` and `failure_step/1` are sugar
-  over it.
+  `failed_at_index` themselves; `event_entries_at/2` and `failure_step/1` are
+  sugar over it.
 
   Returns `[]` for a report with no sequence (e.g. a partially hand-built
   struct).
@@ -516,17 +516,18 @@ defmodule PropertyDamage.FailureReport do
   def steps(%__MODULE__{shrunk_sequence: nil}), do: []
 
   def steps(%__MODULE__{shrunk_sequence: %Sequence{} = sequence} = report) do
-    # Group command-produced events by the position of the command that produced
-    # them. Injector/telemetry events carry no command_index and so belong to no
-    # step. `(command_index, branch_id)` resolves uniquely to a position, so this
-    # is the branch-aware equivalent of grouping by command_index alone.
-    events_by_position =
+    # Group the command-attributed log entries by the position of the command
+    # that produced them. Injector/telemetry entries carry no command_index and
+    # so belong to no step. `(command_index, branch_id)` resolves uniquely to a
+    # position, so this is the branch-aware equivalent of grouping by
+    # command_index alone. Full entries (not bare events) are kept so each step
+    # preserves per-event provenance (source, branch_id) for the event timeline.
+    entries_by_position =
       report.event_log
       |> Enum.filter(&(&1.command_index != nil))
-      |> Enum.group_by(
-        fn entry -> Sequence.position_at(sequence, entry.command_index, entry.branch_id) end,
-        & &1.event
-      )
+      |> Enum.group_by(fn entry ->
+        Sequence.position_at(sequence, entry.command_index, entry.branch_id)
+      end)
 
     # The failing command's position (nil for a non-localized failure). Resolved
     # via position_at, NOT by comparing flattened_index to failed_at_index: the
@@ -544,7 +545,7 @@ defmodule PropertyDamage.FailureReport do
         position: position,
         flattened_index: flattened_index,
         command: command,
-        events: Map.get(events_by_position, position, []),
+        entries: Map.get(entries_by_position, position, []),
         label: Map.get(report.command_labels, flattened_index),
         failed?: failed_position != nil and position == failed_position
       }
@@ -552,28 +553,31 @@ defmodule PropertyDamage.FailureReport do
   end
 
   @doc """
-  The events observed for a single command, addressed by flattened index or
-  `Sequence.Position`.
+  The `EventLog.Entry` structs observed for a single command, addressed by
+  flattened index or `Sequence.Position`.
 
-  Sugar over `steps/1`. Returns `[]` when nothing matches.
+  Sugar over `steps/1`. Each entry carries its per-event provenance (`source`,
+  `branch_id`); the bare event struct is `entry.event`. Returns `[]` when nothing
+  matches.
   """
-  @spec events_at(t(), non_neg_integer() | Sequence.Position.t()) :: [struct()]
-  def events_at(%__MODULE__{} = report, %Sequence.Position{} = position) do
+  @spec event_entries_at(t(), non_neg_integer() | Sequence.Position.t()) :: [Entry.t()]
+  def event_entries_at(%__MODULE__{} = report, %Sequence.Position{} = position) do
     report
     |> steps()
     |> Enum.find(&(&1.position == position))
-    |> step_events()
+    |> step_entries()
   end
 
-  def events_at(%__MODULE__{} = report, flattened_index) when is_integer(flattened_index) do
+  def event_entries_at(%__MODULE__{} = report, flattened_index)
+      when is_integer(flattened_index) do
     report
     |> steps()
     |> Enum.find(&(&1.flattened_index == flattened_index))
-    |> step_events()
+    |> step_entries()
   end
 
-  defp step_events(nil), do: []
-  defp step_events(%Step{events: events}), do: events
+  defp step_entries(nil), do: []
+  defp step_entries(%Step{entries: entries}), do: entries
 
   @doc """
   The `Step` where the failure was localized, or `nil`.

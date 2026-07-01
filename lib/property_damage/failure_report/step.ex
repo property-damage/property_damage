@@ -5,7 +5,7 @@ defmodule PropertyDamage.FailureReport.Step do
   A `Step` is the first-class value callers pattern-match instead of re-walking
   `shrunk_sequence` / `event_log` / `failed_at_index` to reconstruct "what
   happened at command N". `PropertyDamage.FailureReport.steps/1` produces the
-  full timeline; `events_at/2` and `failure_step/1` are sugar over it.
+  full timeline; `event_entries_at/2` and `failure_step/1` are sugar over it.
 
   ## Fields
 
@@ -16,13 +16,16 @@ defmodule PropertyDamage.FailureReport.Step do
     view of the location; `position` is authoritative. For branch commands it
     differs from the executor command index.
   - `command` — the command struct.
-  - `events` — the events observed for this command, in log order: the bare
-    events of the log entries whose `(command_index, branch_id)` resolves to this
+  - `entries` — the `EventLog.Entry` structs observed for this command, in log
+    order: the log entries whose `(command_index, branch_id)` resolves to this
     step's `position`. This is everything *attributed* to the command by its
     index, which includes its own output plus any mock / nemesis / stutter events
-    recorded against it; only their event structs are kept here, so the per-event
-    source is not preserved (read the `event_log` directly if you need it).
-    Injector / telemetry events carry no command index and belong to no step.
+    recorded against it. Full entries (not bare events) are kept so per-event
+    provenance survives: each entry carries its `source`
+    (`:command` / `:nemesis` / `:mock` / `:stutter` / `:resource_poller`) and
+    `branch_id`, which is what lets the event timeline distinguish fault-injected
+    events from SUT output. The bare event struct is `entry.event`. Injector /
+    telemetry events carry no command index and belong to no step.
   - `label` — the command's human-readable label (`command_labels` for this
     `flattened_index`), or `nil` if the model produced none.
   - `failed?` — `true` for the single step where the failure was localized, and
@@ -34,17 +37,18 @@ defmodule PropertyDamage.FailureReport.Step do
   `state_at_failure`).
   """
 
+  alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Sequence
 
   @type t :: %__MODULE__{
           position: Sequence.Position.t(),
           flattened_index: non_neg_integer(),
           command: struct(),
-          events: [struct()],
+          entries: [Entry.t()],
           label: String.t() | nil,
           failed?: boolean()
         }
 
-  @enforce_keys [:position, :flattened_index, :command, :events, :label, :failed?]
-  defstruct [:position, :flattened_index, :command, :events, :label, :failed?]
+  @enforce_keys [:position, :flattened_index, :command, :entries, :label, :failed?]
+  defstruct [:position, :flattened_index, :command, :entries, :label, :failed?]
 end

@@ -209,7 +209,7 @@ defmodule PropertyDamage.PersistenceTest do
       # from the untouched event_log + shrunk_sequence.
       step = FailureReport.failure_step(loaded)
       assert step.command == command
-      assert step.events == [event]
+      assert Enum.map(step.entries, & &1.event) == [event]
     end
   end
 

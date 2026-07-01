@@ -10,11 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Structural failure-query interface (Phase A).** `FailureReport` gains
-  `steps/1`, `events_at/2`, and `failure_step/1` so callers ask the report about
-  a failed run's timeline instead of re-walking `shrunk_sequence` / `event_log` /
-  `failed_at_index`. `steps/1` returns first-class
-  `%FailureReport.Step{position, flattened_index, command, events, label,
-  failed?}` values in flattened reading order. Each step carries a new shared
+  `steps/1`, `event_entries_at/2`, and `failure_step/1` so callers ask the report
+  about a failed run's timeline instead of re-walking `shrunk_sequence` /
+  `event_log` / `failed_at_index`. `steps/1` returns first-class
+  `%FailureReport.Step{position, flattened_index, command, entries, label,
+  failed?}` values in flattened reading order. Each step's `entries` are the full
+  `EventLog.Entry` structs attributed to the command, in log order, so per-event
+  provenance (`source`, `branch_id`; the bare event is `entry.event`) is
+  preserved — a nemesis / mock / stutter event stays distinguishable from SUT
+  output, and the "Command → Event Timeline" (with its CMD/NEM/MOC/STU source
+  badges) is served from `steps/1` rather than a private `event_log` walk. Each
+  step also carries a new shared
   `%PropertyDamage.Sequence.Position{section, offset}` (reifying the executor's
   `current_position` tuple, DR-021) that identifies a command unambiguously
   across parallel branches, plus its derived flattened index. New
@@ -154,10 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING (Phase B):** `FailureReport` no longer carries the materialized
   `command_at_failure` / `events_at_failure` fields. They were redundant with the
   structural step interface added in Phase A; use
-  `FailureReport.failure_step(report).command` and `.events` instead (both
+  `FailureReport.failure_step(report).command` and `.entries` instead (both
   recomputed branch-aware from `event_log` + `shrunk_sequence`, `nil` for a
-  non-localized failure). Existing `.pd` files remain loadable (see the
-  persistence 2 → 3 note above).
+  non-localized failure; the bare event of an entry is `entry.event`). Existing
+  `.pd` files remain loadable (see the persistence 2 → 3 note above).
 
 - **BREAKING (DR-032):** removed 7 of the 10 built-in nemeses, keeping only the
   three that fault the SUT's network path: `NetworkPartition`, `NetworkLatency`,
