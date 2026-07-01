@@ -27,6 +27,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fall through to `generator/1` and crash; Nemesis commands only reached the
   runtime when pre-baked into a sequence. A selected Nemesis without `new!/2` now
   raises a clear error instead of an opaque `UndefinedFunctionError`.
+- **`Command.awaits/2` (DR-030):** a new optional, per-instance callback that
+  correlates inbound injector events back to the command that owns them. It
+  returns `[%PropertyDamage.Await{match}]`, where `match` is a predicate
+  `(event -> boolean)` built from the command's resolved fields and captured
+  response. A matching injector event is attributed to the declaring command's
+  `command_index` (instead of the ambient `nil`), persistently for the rest of
+  the run; overlapping matchers resolve to the first-registered with a logged
+  diagnostic. This is **pure correlation**: judgment over a command's correlated
+  set is expressed in projections (a `@poll_state` for liveness, a
+  `@trigger`/`@invariant` for safety/cardinality), reusing the existing assertion
+  machinery rather than a separate await loop. This implements, on the correct
+  (semantic) surface, the capability the removed `Adapter.register_handler/2`
+  advertised.
+- **`Command.label/2` rendering (DR-028 amendment):** the optional per-instance
+  `label/2` callback, previously declared but consumed nowhere, is now wired into
+  failure reporting. When a `FailureReport` is built, each command's label is
+  computed lazily (zero cost on passing/generation runs) against its
+  `command_sequence_projection` pre-state, reconstructed by folding the shrunk
+  sequence in flattened order with the same recipe generation uses. Non-nil
+  labels render next to their command in the failure report (terminal, markdown,
+  JSON) and as comments in every exported reproduction (ExUnit, curl/bash,
+  Python, Elixir, Livebook). Labels are stored in a new `FailureReport`
+  `command_labels` field keyed by the flattened (`Sequence.to_list/1`) command
+  index. Best-effort: a raising `label/2` degrades to no annotation rather than
+  failing the report.
 
 ### Changed
 
@@ -85,34 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that command's index, so the shrinker keeps locality. Code that asserted poll
   timeouts report `failed_at_index: nil` must update.
 
-### Added
-
-- **`Command.awaits/2` (DR-030):** a new optional, per-instance callback that
-  correlates inbound injector events back to the command that owns them. It
-  returns `[%PropertyDamage.Await{match}]`, where `match` is a predicate
-  `(event -> boolean)` built from the command's resolved fields and captured
-  response. A matching injector event is attributed to the declaring command's
-  `command_index` (instead of the ambient `nil`), persistently for the rest of
-  the run; overlapping matchers resolve to the first-registered with a logged
-  diagnostic. This is **pure correlation**: judgment over a command's correlated
-  set is expressed in projections (a `@poll_state` for liveness, a
-  `@trigger`/`@invariant` for safety/cardinality), reusing the existing assertion
-  machinery rather than a separate await loop. This implements, on the correct
-  (semantic) surface, the capability the removed `Adapter.register_handler/2`
-  advertised.
-- **`Command.label/2` rendering (DR-028 amendment):** the optional per-instance
-  `label/2` callback, previously declared but consumed nowhere, is now wired into
-  failure reporting. When a `FailureReport` is built, each command's label is
-  computed lazily (zero cost on passing/generation runs) against its
-  `command_sequence_projection` pre-state, reconstructed by folding the shrunk
-  sequence in flattened order with the same recipe generation uses. Non-nil
-  labels render next to their command in the failure report (terminal, markdown,
-  JSON) and as comments in every exported reproduction (ExUnit, curl/bash,
-  Python, Elixir, Livebook). Labels are stored in a new `FailureReport`
-  `command_labels` field keyed by the flattened (`Sequence.to_list/1`) command
-  index. Best-effort: a raising `label/2` degrades to no annotation rather than
-  failing the report.
-
 ### Removed
 
 - **BREAKING (DR-032):** removed 7 of the 10 built-in nemeses, keeping only the
@@ -127,6 +124,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CommandTimeoutError`s). To fault an in-process collaborator, do it in your own
   adapter/command code. This also removes the last shared-global process-dict
   fault state (the original "per-instance handle" plan is superseded by removal).
+
+### Fixed
+
+- **Injector-adapter validation no longer spuriously raises.** When an injector
+  adapter is passed by module name, `PropertyDamage.run/1` now
+  `Code.ensure_loaded?`s it before reflecting on its `@emits`, so an
+  as-yet-unloaded injector is no longer treated as declaring zero injectable
+  events. Previously a valid event could be rejected with a false "not covered by
+  any InjectorAdapter `@emits`" error purely because the adapter module had not
+  been loaded at reflection time.
 
 ## [0.2.0] - 2026-06-25
 
