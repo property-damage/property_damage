@@ -71,6 +71,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Structural failure-query interface (Phase B): callers migrated.** Every
+  renderer, exporter, and forensic analyzer that previously re-walked
+  `shrunk_sequence` / `event_log` / `failed_at_index` to reconstruct "the command
+  and events at the failure" now goes through `FailureReport.steps/1` /
+  `failure_step/1`: the terminal/markdown formatters and timeline, the ExUnit /
+  script (curl/python/elixir) / Livebook exporters, `FailureIntelligence.Fingerprint`,
+  and `Analysis.explain/1` / `isolate_trigger/2`. This fixes latent branch bugs
+  where a flattened ordinal was compared to the executor `failed_at_index` (they
+  diverge for parallel-branch failures), so the failure marker, per-command event
+  grouping, and dependency-graph trigger now land on the correct command;
+  reader-facing "Command Index" text now shows the flattened (reading-order)
+  ordinal. `Fingerprint` also now reports a correct `sequence_length` /
+  `sequence_shape` for real reports (it silently returned 0/`[]` before because it
+  only matched a `%{commands: ...}` map, not a `%Sequence{}`); this changes the
+  computed `Fingerprint.hash/1` for such reports, so similarity clustering should
+  be recomputed rather than compared against values cached under the old bug.
+- **Persistence format 2 → 3.** `.pd` files now stamp format version `3`, which
+  tracks the `FailureReport` struct shape. Version 1 and 2 files still load. A
+  file written before the field removal below deserializes losslessly: the two
+  removed keys are recognized (not reported as struct-shape drift), and the
+  failing command/events remain recoverable via `failure_step/1`, recomputed from
+  the untouched `event_log` + `shrunk_sequence`.
+
 - **BREAKING (DR-032):** `external_markers` is now an explicit run option only;
   the `config :property_damage, external_markers: [...]` app-config channel is no
   longer consulted. `PropertyDamage.External.external?/1` no longer recognizes
@@ -127,6 +150,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeouts report `failed_at_index: nil` must update.
 
 ### Removed
+
+- **BREAKING (Phase B):** `FailureReport` no longer carries the materialized
+  `command_at_failure` / `events_at_failure` fields. They were redundant with the
+  structural step interface added in Phase A; use
+  `FailureReport.failure_step(report).command` and `.events` instead (both
+  recomputed branch-aware from `event_log` + `shrunk_sequence`, `nil` for a
+  non-localized failure). Existing `.pd` files remain loadable (see the
+  persistence 2 → 3 note above).
 
 - **BREAKING (DR-032):** removed 7 of the 10 built-in nemeses, keeping only the
   three that fault the SUT's network path: `NetworkPartition`, `NetworkLatency`,

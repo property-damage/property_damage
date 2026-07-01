@@ -116,15 +116,13 @@ defmodule PropertyDamage.Export.ExUnit do
   # ============================================================================
 
   defp generate_commands_code(report) do
-    commands = Common.extract_commands(report)
-
     command_strs =
-      commands
-      |> Enum.with_index()
-      |> Enum.map_join(",\n", fn {command, index} ->
-        case Map.get(report.command_labels, index) do
-          label when is_binary(label) -> "      # #{label}\n#{format_command(command)}"
-          _ -> format_command(command)
+      report
+      |> FailureReport.steps()
+      |> Enum.map_join(",\n", fn step ->
+        case step.label do
+          label when is_binary(label) -> "      # #{label}\n#{format_command(step.command)}"
+          _ -> format_command(step.command)
         end
       end)
 

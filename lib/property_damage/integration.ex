@@ -457,7 +457,7 @@ defmodule PropertyDamage.Integration do
           "#{String.pad_leading("#{stats.total_commands}", 3)} commands ✓"
 
         {:error, failure} ->
-          "failed at command #{failure.failed_at_index} ✗ (seed #{failure.seed})"
+          "failed at command #{PropertyDamage.FailureReport.failure_index(failure)} ✗ (seed #{failure.seed})"
       end
 
     IO.puts("Run #{String.pad_leading("#{run_num}", 3)}/#{max_runs}: #{detail}")

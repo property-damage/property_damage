@@ -17,6 +17,7 @@ The system SHALL save and load failure reports to `.pd` files using Erlang term 
 - **WHEN** a failure report is saved to a directory
 - **THEN** the system SHALL write a `.pd` file containing a version header, the Erlang term-encoded `FailureReport` struct, and a checksum for integrity verification
 - **AND** the filename SHALL follow the pattern `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
+- **AND** the version header SHALL record the current format version (`3`), which tracks the `FailureReport` struct shape
 
 #### Scenario: Save with custom filename
 
@@ -61,6 +62,17 @@ The system SHALL include version metadata in persisted files and warn when loadi
 
 - **WHEN** a `.pd` file references a dependency not present in the current environment
 - **THEN** the system SHALL return a `{:dependency_missing, dep, saved_version}` warning
+
+#### Scenario: Older format versions still load
+
+- **WHEN** a `.pd` file written under an earlier format version (`1` or `2`) is loaded
+- **THEN** the system SHALL decode it with the corresponding version clause and return its `FailureReport`, so no data is lost when the current version is `3`
+
+#### Scenario: Pre-v3 file carrying removed fields loads without data loss or drift
+
+- **WHEN** a `.pd` file written before `command_at_failure` / `events_at_failure` were removed is loaded
+- **THEN** the deserialized report SHALL carry those keys as extra (stored) keys, and the system SHALL NOT report them as `{:struct_shape_drift, ...}` (they are recognized as intentionally-removed fields)
+- **AND** the failing command and its events SHALL remain recoverable via `FailureReport.failure_step/1`, recomputed from the untouched `event_log` + `shrunk_sequence`, so the removal is lossless for existing files
 
 ### Requirement: Seed Library
 

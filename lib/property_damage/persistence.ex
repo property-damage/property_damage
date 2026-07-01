@@ -54,8 +54,16 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{FailureReport, Sequence}
 
-  @version 2
+  @version 3
   @extension ".pd"
+
+  # Fields removed from FailureReport after a given format version. A file
+  # written by an older version carries them; binary_to_term faithfully
+  # reconstructs the stored shape, so a loaded pre-v3 report has these as
+  # *extra* keys. Their presence is expected and benign (the data they held is
+  # recomputed on demand via FailureReport.failure_step/1 from the untouched
+  # event_log + shrunk_sequence), so they are not reported as struct drift.
+  @removed_fields [:command_at_failure, :events_at_failure]
 
   # Upper bound on the term size we are willing to reconstruct from a file.
   # Compressed external term format declares its uncompressed size in the
@@ -349,8 +357,25 @@ defmodule PropertyDamage.Persistence do
     end
   end
 
-  # V2 format - has metadata
+  # V2/V3 format - metadata payload. V3 is identical in shape; the version bump
+  # only records that FailureReport dropped command_at_failure/events_at_failure
+  # (see @removed_fields), which is why both versions decode the same way.
   defp decode(<<"PD", 2::8, stored_checksum::32, term_binary::binary>>) do
+    decode_metadata_payload(stored_checksum, term_binary)
+  end
+
+  defp decode(<<"PD", 3::8, stored_checksum::32, term_binary::binary>>) do
+    decode_metadata_payload(stored_checksum, term_binary)
+  end
+
+  defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
+       when version > @version do
+    {:error, {:incompatible_version, version, @version}}
+  end
+
+  defp decode(_), do: {:error, :invalid_format}
+
+  defp decode_metadata_payload(stored_checksum, term_binary) do
     actual_checksum = :erlang.crc32(term_binary)
 
     cond do
@@ -376,13 +401,6 @@ defmodule PropertyDamage.Persistence do
         end
     end
   end
-
-  defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
-       when version > @version do
-    {:error, {:incompatible_version, version, @version}}
-  end
-
-  defp decode(_), do: {:error, :invalid_format}
 
   # The external term format declares its uncompressed size in the header for
   # compressed terms (`<<131, 80, size::32, ...>>`); bound that BEFORE decoding
@@ -494,7 +512,14 @@ defmodule PropertyDamage.Persistence do
     loaded = MapSet.new(Map.keys(report))
 
     missing = current |> MapSet.difference(loaded) |> Enum.sort()
-    unexpected = loaded |> MapSet.difference(current) |> Enum.sort()
+
+    # Keys intentionally removed in a later format version are expected on an
+    # older file and are not drift; only genuinely-unknown keys are surfaced.
+    unexpected =
+      loaded
+      |> MapSet.difference(current)
+      |> MapSet.difference(MapSet.new(@removed_fields))
+      |> Enum.sort()
 
     if missing == [] and unexpected == [] do
       []
