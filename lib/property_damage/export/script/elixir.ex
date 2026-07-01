@@ -31,7 +31,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
       generate_shebang(),
       generate_header(metadata, report),
       generate_setup(env_var, base_url),
-      generate_steps(commands, report, adapter, verbose, var_map, extractions),
+      generate_steps(report, adapter, verbose, var_map, extractions),
       generate_footer(metadata)
     ]
     |> Enum.join("\n")
@@ -77,13 +77,20 @@ defmodule PropertyDamage.Export.Script.Elixir do
     """
   end
 
-  defp generate_steps(commands, report, adapter, verbose, var_map, extractions) do
-    commands
-    |> Enum.with_index()
-    |> Enum.map_join("\n", fn {cmd, idx} ->
-      is_failure_point = idx == report.failed_at_index
-      label = Map.get(report.command_labels, idx)
-      generate_step(cmd, idx, adapter, is_failure_point, verbose, var_map, extractions, label)
+  defp generate_steps(report, adapter, verbose, var_map, extractions) do
+    report
+    |> FailureReport.steps()
+    |> Enum.map_join("\n", fn step ->
+      generate_step(
+        step.command,
+        step.flattened_index,
+        adapter,
+        step.failed?,
+        verbose,
+        var_map,
+        extractions,
+        step.label
+      )
     end)
   end
 

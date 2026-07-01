@@ -33,7 +33,7 @@ defmodule PropertyDamage.Export.Script.Curl do
       generate_shebang(),
       generate_header(metadata, report),
       generate_setup(env_var, base_url),
-      generate_steps(commands, report, adapter, env_var, verbose, var_map, extractions),
+      generate_steps(report, adapter, env_var, verbose, var_map, extractions),
       generate_footer(metadata)
     ]
     |> Enum.join("\n")
@@ -79,23 +79,20 @@ defmodule PropertyDamage.Export.Script.Curl do
     """
   end
 
-  defp generate_steps(commands, report, adapter, env_var, verbose, var_map, extractions) do
-    commands
-    |> Enum.with_index()
-    |> Enum.map_join("\n", fn {cmd, idx} ->
-      is_failure_point = idx == report.failed_at_index
-      label = Map.get(report.command_labels, idx)
-
+  defp generate_steps(report, adapter, env_var, verbose, var_map, extractions) do
+    report
+    |> FailureReport.steps()
+    |> Enum.map_join("\n", fn step ->
       generate_step(
-        cmd,
-        idx,
+        step.command,
+        step.flattened_index,
         adapter,
         env_var,
-        is_failure_point,
+        step.failed?,
         verbose,
         var_map,
         extractions,
-        label
+        step.label
       )
     end)
   end
