@@ -383,7 +383,11 @@ defmodule PropertyDamage.Validation do
 
   defp collect_emitted_events(injector_adapters) do
     Enum.flat_map(injector_adapters, fn adapter ->
-      if function_exported?(adapter, :__emits__, 0) do
+      # Ensure the module is loaded before reflecting on it: an injector adapter
+      # is passed by name and may never have been called yet, and
+      # function_exported?/3 reports false for an unloaded module (it does not
+      # load it), which would spuriously report every injectable event uncovered.
+      if Code.ensure_loaded?(adapter) and function_exported?(adapter, :__emits__, 0) do
         adapter.__emits__()
       else
         []
