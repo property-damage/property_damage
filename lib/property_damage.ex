@@ -1145,24 +1145,41 @@ defmodule PropertyDamage do
 
     {:ok, fresh_result} = Executor.run(shrunk_sequence, model, adapter, fresh_opts)
 
-    # Create rich failure report with fresh state from shrunk sequence
+    # Normally the re-execution reproduces the failure on the (possibly smaller)
+    # shrunk sequence, giving the report fresh state and a minimal repro. But an
+    # intermittent failure may not reproduce on this single re-run: the fresh
+    # result then carries `success: true / failure_reason: nil / failed_at_index:
+    # nil`, which would render as a contentless "Unknown Failure" and discard the
+    # reason we actually observed. When the re-run fails to reproduce, fall back
+    # to the original failing run -- report its sequence, reason, index, and
+    # state. A genuine reproduction keeps the shrunk sequence and fresh state.
+    reproduced? = not fresh_result.success and not is_nil(fresh_result.failure_reason)
+
+    {report_shrunk_sequence, report_result} =
+      if reproduced? do
+        {shrunk_sequence, fresh_result}
+      else
+        {sequence, result}
+      end
+
+    # Create rich failure report from whichever run carries the observed failure.
     failure_report =
       FailureReport.new(
         seed: seed,
         run_number: run_number,
         original_sequence: sequence,
-        shrunk_sequence: shrunk_sequence,
-        failed_at_index: fresh_result.failed_at_index,
-        failure_reason: fresh_result.failure_reason,
+        shrunk_sequence: report_shrunk_sequence,
+        failed_at_index: report_result.failed_at_index,
+        failure_reason: report_result.failure_reason,
         shrink_iterations: shrink_iterations,
         shrink_time_ms: shrink_time_ms,
-        event_log: fresh_result.event_log,
-        projections: fresh_result.projections,
-        projections_before: fresh_result.projections_before,
+        event_log: report_result.event_log,
+        projections: report_result.projections,
+        projections_before: report_result.projections_before,
         model: model,
         adapter: adapter,
-        linearization: fresh_result.linearization,
-        stacktrace: Map.get(fresh_result, :stacktrace),
+        linearization: report_result.linearization,
+        stacktrace: Map.get(report_result, :stacktrace),
         assertion_fires: assertion_fires
       )
 
@@ -1333,27 +1350,36 @@ defmodule PropertyDamage do
 
         end_time = System.monotonic_time(:millisecond)
 
-        # Create updated failure report
-        new_report =
-          FailureReport.new(
-            seed: report.seed,
-            run_number: report.run_number,
-            original_sequence: report.original_sequence,
-            shrunk_sequence: shrink_result.sequence,
-            failed_at_index: fresh_result.failed_at_index,
-            failure_reason: fresh_result.failure_reason,
-            shrink_iterations: report.shrink_iterations + shrink_result.iterations,
-            shrink_time_ms: report.shrink_time_ms + (end_time - start_time),
-            event_log: fresh_result.event_log,
-            projections: fresh_result.projections,
-            projections_before: fresh_result.projections_before,
-            model: model,
-            adapter: adapter,
-            linearization: fresh_result.linearization,
-            stacktrace: Map.get(fresh_result, :stacktrace)
-          )
+        # As in handle_failure/N: only adopt the further-shrunk sequence on a
+        # genuine reproduction. If the re-execution did not reproduce the failure
+        # (a flaky repro), the fresh result carries `success: true / reason: nil`,
+        # which would emit a nil-reason "Unknown Failure" for an unverified
+        # smaller sequence. In that case return the incoming report unchanged --
+        # the further-shrink found nothing it could confirm.
+        if fresh_result.success or is_nil(fresh_result.failure_reason) do
+          {:ok, report}
+        else
+          new_report =
+            FailureReport.new(
+              seed: report.seed,
+              run_number: report.run_number,
+              original_sequence: report.original_sequence,
+              shrunk_sequence: shrink_result.sequence,
+              failed_at_index: fresh_result.failed_at_index,
+              failure_reason: fresh_result.failure_reason,
+              shrink_iterations: report.shrink_iterations + shrink_result.iterations,
+              shrink_time_ms: report.shrink_time_ms + (end_time - start_time),
+              event_log: fresh_result.event_log,
+              projections: fresh_result.projections,
+              projections_before: fresh_result.projections_before,
+              model: model,
+              adapter: adapter,
+              linearization: fresh_result.linearization,
+              stacktrace: Map.get(fresh_result, :stacktrace)
+            )
 
-        {:ok, new_report}
+          {:ok, new_report}
+        end
       after
         EventQueue.stop(event_queue)
       end
