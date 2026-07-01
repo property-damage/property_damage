@@ -84,7 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reader-facing "Command Index" text now shows the flattened (reading-order)
   ordinal. `Fingerprint` also now reports a correct `sequence_length` /
   `sequence_shape` for real reports (it silently returned 0/`[]` before because it
-  only matched a `%{commands: ...}` map, not a `%Sequence{}`).
+  only matched a `%{commands: ...}` map, not a `%Sequence{}`); this changes the
+  computed `Fingerprint.hash/1` for such reports, so similarity clustering should
+  be recomputed rather than compared against values cached under the old bug.
 - **Persistence format 2 → 3.** `.pd` files now stamp format version `3`, which
   tracks the `FailureReport` struct shape. Version 1 and 2 files still load. A
   file written before the field removal below deserializes losslessly: the two

@@ -23,8 +23,8 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
   # Flattened reading order: Alpha=0, Beta=1, Gamma=2, Delta=3.
   # The executor numbers BOTH branch commands from prefix_len (=1), so Beta and
   # Gamma share executor command_index 1, disambiguated only by branch_id. A
-  # failure in branch 1 (Gamma) is recorded as failed_at_index: 1, branch_id: 1
-  # — its flattened index is 2, so `idx == failed_at_index` would mismark Beta.
+  # failure in branch 1 (Gamma) is recorded as failed_at_index: 1, branch_id: 1,
+  # whose flattened index is 2, so `idx == failed_at_index` would mismark Beta.
   defp branch_failure_report do
     FailureReport.new(
       seed: 1,
@@ -70,6 +70,38 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
       # The injector event is not attributable to a command, but it still
       # belongs in the timeline rather than being silently dropped.
       assert output =~ "PaymentConfirmed"
+    end
+
+    test "shows the source badge for a command-attributed non-command event" do
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: Sequence.linear([%CreateOrder{id: 1}]),
+          shrunk_sequence: Sequence.linear([%CreateOrder{id: 1}]),
+          failed_at_index: 0,
+          failure_reason: {:check_failed, :TestCheck, "boom"},
+          event_log: [
+            %Entry{timestamp: 1, command_index: 0, event: %CreateOrder{id: 1}, source: :command},
+            # A nemesis event recorded against command 0 (non-nil command_index):
+            # it must render with its NEM badge, not as a bare command output, so
+            # fault injection stays visible.
+            %Entry{
+              timestamp: 2,
+              command_index: 0,
+              event: %PaymentConfirmed{id: 1},
+              source: :nemesis,
+              nemesis_module: SomeNemesis
+            }
+          ],
+          model: TestModel,
+          adapter: TestAdapter
+        )
+
+      output = strip_ansi(Timeline.format_event_timeline(report, color: false))
+
+      assert output =~ "NEM"
+      assert output =~ "CMD"
     end
 
     test "marks the branch failure on its flattened command, not the index collision" do
