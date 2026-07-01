@@ -56,13 +56,13 @@ defmodule PropertyDamage.PersistenceTest do
     end
 
     @tag :tmp_dir
-    test "includes metadata in v2 files", %{tmp_dir: dir} do
+    test "writes the current format version in the header", %{tmp_dir: dir} do
       report = create_test_report()
       {:ok, path} = Persistence.save(report, dir)
 
       # Read raw binary to verify format
       {:ok, <<"PD", version::8, _checksum::32, _rest::binary>>} = File.read(path)
-      assert version == 2
+      assert version == 3
     end
   end
 
@@ -85,7 +85,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Read the file and manually modify the metadata to simulate version mismatch
       {:ok, binary} = File.read(path)
-      <<"PD", 2::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 3::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       # Add a fake dependency that will be missing (guaranteed to trigger warning)
@@ -94,7 +94,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 2::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 3::8, new_checksum::32, new_term_binary::binary>>)
 
       # Now load should return warnings about missing dependency
       {:ok, _report, warnings} = Persistence.load(path)
@@ -123,7 +123,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Modify file to add fake missing dependency (guaranteed to trigger warning)
       {:ok, binary} = File.read(path)
-      <<"PD", 2::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 3::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       modified_metadata = %{payload.metadata | dependency_versions: %{fake_missing_app: "1.0.0"}}
@@ -131,7 +131,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 2::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 3::8, new_checksum::32, new_term_binary::binary>>)
 
       assert_raise ArgumentError, ~r/Version compatibility warnings/, fn ->
         Persistence.load!(path)
@@ -162,6 +162,54 @@ defmodule PropertyDamage.PersistenceTest do
       # Should load without warnings
       {:ok, loaded} = Persistence.load(path)
       assert loaded.seed == report.seed
+    end
+  end
+
+  describe "v2 → v3 field removal backward compatibility" do
+    @tag :tmp_dir
+    test "loads a pre-v3 file carrying the removed fields without data loss or drift",
+         %{tmp_dir: dir} do
+      command = %TestCommand{id: "1", amount: 100}
+      event = %TestEvent{id: "1", amount: 100, status: :failed}
+
+      report =
+        create_test_report(
+          commands: [command],
+          events: [
+            %PropertyDamage.EventLog.Entry{
+              timestamp: 0,
+              command_index: 0,
+              branch_id: nil,
+              event: event,
+              source: :command
+            }
+          ]
+        )
+
+      # Simulate a file written BEFORE command_at_failure/events_at_failure were
+      # removed: a struct-tagged map that still carries those keys, framed as v2.
+      old_report =
+        report
+        |> Map.from_struct()
+        |> Map.put(:__struct__, FailureReport)
+        |> Map.put(:command_at_failure, command)
+        |> Map.put(:events_at_failure, [event])
+
+      payload = %{format_version: 2, report: old_report, metadata: %{}}
+      term_binary = :erlang.term_to_binary(payload, [:compressed])
+      checksum = :erlang.crc32(term_binary)
+      path = Path.join(dir, "pre-v3.pd")
+      File.write!(path, <<"PD", 2::8, checksum::32, term_binary::binary>>)
+
+      # The intentionally-removed keys are recognized (not drift), so the file
+      # loads clean: a 2-tuple means zero warnings, including no struct drift.
+      assert {:ok, loaded} = Persistence.load(path)
+
+      # No data loss: the failing command and its events are recomputed on demand
+      # from the untouched event_log + shrunk_sequence.
+      step = FailureReport.failure_step(loaded)
+      assert step.command == command
+      assert step.events == [event]
     end
   end
 
@@ -300,7 +348,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Modify to cause version mismatch
       {:ok, binary} = File.read(path)
-      <<"PD", 2::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 3::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       modified_metadata =
@@ -310,7 +358,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 2::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 3::8, new_checksum::32, new_term_binary::binary>>)
 
       # Still valid even with warnings
       assert Persistence.valid?(path)
