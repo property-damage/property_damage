@@ -179,6 +179,21 @@ defmodule PropertyDamage.FailureReport.StepTest do
     end
   end
 
+  describe "failure_index/1" do
+    test "linear failure: flattened index equals the executor index" do
+      assert FailureReport.failure_index(linear_report()) == 1
+    end
+
+    test "branch failure: flattened index, not the executor failed_at_index" do
+      # B1b failed: executor failed_at_index 2, but flattened index 4.
+      assert FailureReport.failure_index(branched_report()) == 4
+    end
+
+    test "non-localized failure: nil" do
+      assert FailureReport.failure_index(teardown_report()) == nil
+    end
+  end
+
   describe "events_at/2" do
     test "addresses events by flattened index" do
       report = linear_report()
@@ -196,27 +211,6 @@ defmodule PropertyDamage.FailureReport.StepTest do
 
       assert FailureReport.events_at(report, %Position{section: :suffix, offset: 0}) ==
                [%Ev{tag: :s0}]
-    end
-  end
-
-  # Equivalence guard: proves failure_step/1 reproduces the materialized
-  # command_at_failure / events_at_failure fields, so Phase B can remove them
-  # without losing information.
-  describe "equivalence with materialized command_at_failure / events_at_failure" do
-    test "linear report" do
-      report = linear_report()
-      step = FailureReport.failure_step(report)
-
-      assert step.command == report.command_at_failure
-      assert step.events == report.events_at_failure
-    end
-
-    test "branched report (the case where indices diverge)" do
-      report = branched_report()
-      step = FailureReport.failure_step(report)
-
-      assert step.command == report.command_at_failure
-      assert step.events == report.events_at_failure
     end
   end
 end

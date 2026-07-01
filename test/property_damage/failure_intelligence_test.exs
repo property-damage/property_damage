@@ -33,33 +33,52 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     defstruct [:account_ref, :amount, :new_balance]
   end
 
+  # Builds a report whose failing command and events are recovered by
+  # FailureReport.failure_step/1 from a real shrunk %Sequence{} + event_log
+  # (not the removed materialized command_at_failure/events_at_failure fields):
+  # the failing command is the last command in a 2-command linear sequence, and
+  # its events are the log entries tagged with that command's index.
   def create_failure_report(opts \\ []) do
+    failing_command =
+      Keyword.get(
+        opts,
+        :command,
+        %TestCommand.DebitAccount{account_ref: "acc_1", amount: 200, currency: "USD"}
+      )
+
+    events =
+      Keyword.get(opts, :events, [
+        %TestEvent.AccountDebited{account_ref: "acc_1", amount: 200, new_balance: -100}
+      ])
+
+    commands = [
+      %TestCommand.CreateAccount{account_ref: "acc_1", initial_balance: 100, currency: "USD"},
+      failing_command
+    ]
+
+    failed_at = length(commands) - 1
+    sequence = Keyword.get(opts, :sequence, PropertyDamage.Sequence.linear(commands))
+
+    event_log =
+      Enum.map(events, fn event ->
+        %PropertyDamage.EventLog.Entry{
+          timestamp: 0,
+          command_index: failed_at,
+          branch_id: nil,
+          event: event,
+          source: :command
+        }
+      end)
+
     %FailureReport{
       seed: Keyword.get(opts, :seed, 12_345),
+      run_number: 0,
       failure_type: Keyword.get(opts, :failure_type, :check_failed),
       check_name: Keyword.get(opts, :check_name, :balance_non_negative),
       failure_message: Keyword.get(opts, :message, "Balance -100 is negative"),
-      shrunk_sequence:
-        Keyword.get(opts, :sequence, %{
-          commands: [
-            %TestCommand.CreateAccount{
-              account_ref: "acc_1",
-              initial_balance: 100,
-              currency: "USD"
-            },
-            %TestCommand.DebitAccount{account_ref: "acc_1", amount: 200, currency: "USD"}
-          ]
-        }),
-      command_at_failure:
-        Keyword.get(
-          opts,
-          :command,
-          %TestCommand.DebitAccount{account_ref: "acc_1", amount: 200, currency: "USD"}
-        ),
-      events_at_failure:
-        Keyword.get(opts, :events, [
-          %TestEvent.AccountDebited{account_ref: "acc_1", amount: 200, new_balance: -100}
-        ]),
+      shrunk_sequence: sequence,
+      failed_at_index: failed_at,
+      event_log: event_log,
       state_at_failure: Keyword.get(opts, :state, %{accounts: %{"acc_1" => %{balance: -100}}}),
       model: Keyword.get(opts, :model, nil),
       adapter: Keyword.get(opts, :adapter, nil)

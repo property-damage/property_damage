@@ -32,7 +32,7 @@ defmodule PropertyDamage.Export.LiveBook do
     sections = [
       generate_header(title, metadata),
       generate_setup_section(base_url, include_state),
-      generate_command_sections(commands, report, adapter, include_state, var_map, extractions)
+      generate_command_sections(report, adapter, include_state, var_map, extractions)
     ]
 
     sections =
@@ -103,25 +103,22 @@ defmodule PropertyDamage.Export.LiveBook do
   # Command Sections
   # ============================================================================
 
-  defp generate_command_sections(commands, report, adapter, include_state, var_map, extractions) do
+  defp generate_command_sections(report, adapter, include_state, var_map, extractions) do
     header = "\n## Command Sequence\n"
 
     sections =
-      commands
-      |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
-        is_failure_point = idx == report.failed_at_index
-        label = Map.get(report.command_labels, idx)
-
+      report
+      |> FailureReport.steps()
+      |> Enum.map(fn step ->
         generate_command_section(
-          cmd,
-          idx,
+          step.command,
+          step.flattened_index,
           adapter,
-          is_failure_point,
+          step.failed?,
           include_state,
           var_map,
           extractions,
-          label
+          step.label
         )
       end)
 

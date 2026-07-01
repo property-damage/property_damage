@@ -20,10 +20,16 @@ defmodule PropertyDamage.FailureReport.Timeline do
     color = Keyword.get(opts, :color, true)
     column_width = Keyword.get(opts, :column_width, @default_column_width)
 
+    # The failure marker is resolved once, branch-aware, via the failing step's
+    # canonical position (nil for a non-localized failure). Renderers compare
+    # each command's position to it rather than comparing a flattened ordinal to
+    # the executor `failed_at_index` (which diverge for branch failures).
+    failed? = failed_position_predicate(report)
+
     if Sequence.branching?(sequence) do
-      format_branching_timeline(sequence, report, color, column_width)
+      format_branching_sequence(sequence, failed?, color, column_width)
     else
-      format_linear_timeline(sequence, report, color)
+      format_linear_sequence(sequence, failed?, color)
     end
   end
 
@@ -38,12 +44,52 @@ defmodule PropertyDamage.FailureReport.Timeline do
     column_width = Keyword.get(opts, :column_width, @default_column_width)
     failed_at_index = Keyword.get(opts, :failed_at_index)
 
+    # Without a report there is no branch attribution, so the raw index is
+    # treated as an executor command index and marks every branch that has a
+    # command there.
+    failed? = executor_index_predicate(sequence, failed_at_index)
+
     if Sequence.branching?(sequence) do
-      # Without a report there is no branch attribution; nil marks the
-      # failing index in every branch that has a command there
-      format_branching_sequence(sequence, failed_at_index, nil, color, column_width)
+      format_branching_sequence(sequence, failed?, color, column_width)
     else
-      format_linear_sequence(sequence, failed_at_index, color)
+      format_linear_sequence(sequence, failed?, color)
+    end
+  end
+
+  # A predicate `(Position.t() -> boolean())` marking the single failed position,
+  # resolved via `failure_step/1`. A non-localized failure yields a predicate
+  # that is false everywhere.
+  defp failed_position_predicate(%FailureReport{} = report) do
+    case FailureReport.failure_step(report) do
+      %FailureReport.Step{position: position} -> &(&1 == position)
+      nil -> fn _position -> false end
+    end
+  end
+
+  # A predicate treating `index` as an executor command index (prefix commands
+  # `0..len-1`; every branch continues from `len(prefix)`; suffix after the sum
+  # of branch lengths), matching any branch at that offset. Used by the
+  # report-less `format_sequence/2` path.
+  defp executor_index_predicate(_sequence, nil), do: fn _position -> false end
+
+  defp executor_index_predicate(%Sequence{} = sequence, index) do
+    prefix_len = length(sequence.prefix)
+
+    branch_count =
+      case sequence.branches do
+        nil -> 0
+        branches -> branches |> Enum.map(&length/1) |> Enum.sum()
+      end
+
+    fn
+      %Sequence.Position{section: :prefix, offset: offset} ->
+        offset == index
+
+      %Sequence.Position{section: {:branch, _b}, offset: offset} ->
+        prefix_len + offset == index
+
+      %Sequence.Position{section: :suffix, offset: offset} ->
+        prefix_len + branch_count + offset == index
     end
   end
 
@@ -51,12 +97,9 @@ defmodule PropertyDamage.FailureReport.Timeline do
   # Linear Timeline
   # ============================================================================
 
-  defp format_linear_timeline(sequence, report, color) do
-    format_linear_sequence(sequence, report.failed_at_index, color)
-  end
-
-  defp format_linear_sequence(sequence, failed_at_index, color) do
-    commands = Sequence.to_list(sequence)
+  defp format_linear_sequence(sequence, failed?, color) do
+    indexed = Sequence.indexed(sequence)
+    count = length(indexed)
 
     header = """
     #{bold(color)}Timeline (Linear Execution)#{reset()}
@@ -65,14 +108,13 @@ defmodule PropertyDamage.FailureReport.Timeline do
     """
 
     body =
-      commands
-      |> Enum.with_index()
-      |> Enum.map_join("\n", fn {cmd, idx} ->
+      indexed
+      |> Enum.map_join("\n", fn {position, idx, cmd} ->
         format_linear_command(
           cmd,
           idx,
-          idx == failed_at_index,
-          idx == length(commands) - 1,
+          failed?.(position),
+          idx == count - 1,
           color
         )
       end)
@@ -94,17 +136,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
   # Branching Timeline
   # ============================================================================
 
-  defp format_branching_timeline(sequence, report, color, column_width) do
-    format_branching_sequence(
-      sequence,
-      report.failed_at_index,
-      report.branch_id,
-      color,
-      column_width
-    )
-  end
-
-  defp format_branching_sequence(sequence, failed_at_index, failed_branch_id, color, column_width) do
+  defp format_branching_sequence(sequence, failed?, color, column_width) do
     %Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence
 
     sections = []
@@ -121,7 +153,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
     # Prefix section
     sections =
       if prefix != [] do
-        prefix_text = format_prefix_section(prefix, failed_at_index, color)
+        prefix_text = format_prefix_section(prefix, failed?, color)
 
         [
           "\n#{yellow(color)}PREFIX#{reset()} #{dim(color)}(sequential)#{reset()}\n#{prefix_text}"
@@ -140,8 +172,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
           format_branches_section(
             branches,
             prefix_len,
-            failed_at_index,
-            failed_branch_id,
+            failed?,
             color,
             column_width
           )
@@ -162,7 +193,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
         prefix_len = length(prefix)
         branch_cmd_count = if branches, do: Enum.map(branches, &length/1) |> Enum.sum(), else: 0
         suffix_start = prefix_len + branch_cmd_count
-        suffix_text = format_suffix_section(suffix, suffix_start, failed_at_index, color)
+        suffix_text = format_suffix_section(suffix, suffix_start, failed?, color)
 
         [
           "\n#{yellow(color)}SUFFIX#{reset()} #{dim(color)}(sequential)#{reset()}\n#{suffix_text}"
@@ -180,19 +211,19 @@ defmodule PropertyDamage.FailureReport.Timeline do
     |> Enum.join("")
   end
 
-  defp format_prefix_section(prefix, failed_at_index, color) do
+  defp format_prefix_section(prefix, failed?, color) do
     prefix
     |> Enum.with_index()
     |> Enum.map_join("\n", fn {cmd, idx} ->
-      format_linear_command(cmd, idx, idx == failed_at_index, idx == length(prefix) - 1, color)
+      position = %Sequence.Position{section: :prefix, offset: idx}
+      format_linear_command(cmd, idx, failed?.(position), idx == length(prefix) - 1, color)
     end)
   end
 
   defp format_branches_section(
          branches,
          prefix_len,
-         failed_at_index,
-         failed_branch_id,
+         failed?,
          color,
          column_width
        ) do
@@ -227,20 +258,18 @@ defmodule PropertyDamage.FailureReport.Timeline do
           branches
           |> Enum.with_index()
           |> Enum.map(fn {branch_cmds, branch_idx} ->
+            # The cell displays the executor command index (branches restart at
+            # prefix_len); the failure marker is decided by the cell's canonical
+            # position, so overlapping branch indices stay disambiguated.
             cmd_idx = prefix_len + row_idx
+            position = %Sequence.Position{section: {:branch, branch_idx}, offset: row_idx}
 
             case Enum.at(branch_cmds, row_idx) do
               nil ->
                 pad_cell("", column_width)
 
               cmd ->
-                # Branch indices overlap, so the marker needs branch
-                # attribution when available
-                is_failure =
-                  cmd_idx == failed_at_index and
-                    (failed_branch_id == nil or branch_idx == failed_branch_id)
-
-                format_branch_cell(cmd, cmd_idx, is_failure, color, column_width)
+                format_branch_cell(cmd, cmd_idx, failed?.(position), color, column_width)
             end
           end)
 
@@ -272,15 +301,17 @@ defmodule PropertyDamage.FailureReport.Timeline do
     end
   end
 
-  defp format_suffix_section(suffix, start_idx, failed_at_index, color) do
+  defp format_suffix_section(suffix, start_idx, failed?, color) do
     suffix
-    |> Enum.with_index(start_idx)
-    |> Enum.map_join("\n", fn {cmd, idx} ->
+    |> Enum.with_index()
+    |> Enum.map_join("\n", fn {cmd, offset} ->
+      position = %Sequence.Position{section: :suffix, offset: offset}
+
       format_linear_command(
         cmd,
-        idx,
-        idx == failed_at_index,
-        idx == start_idx + length(suffix) - 1,
+        start_idx + offset,
+        failed?.(position),
+        offset == length(suffix) - 1,
         color
       )
     end)
@@ -306,34 +337,60 @@ defmodule PropertyDamage.FailureReport.Timeline do
     color = Keyword.get(opts, :color, true)
     max_events = Keyword.get(opts, :max_events_per_command, 5)
 
-    commands = Sequence.to_list(report.shrunk_sequence)
-
-    # Group events by command index
-    events_by_cmd =
-      report.event_log
-      |> Enum.group_by(& &1.command_index)
-
     header = """
     #{bold(color)}Command → Event Timeline#{reset()}
     #{dim(color)}════════════════════════════════════════════════════#{reset()}
 
     """
 
-    body =
-      commands
-      |> Enum.with_index()
-      |> Enum.map_join("\n\n", fn {cmd, idx} ->
-        events = Map.get(events_by_cmd, idx, [])
-        is_failure = idx == report.failed_at_index
-        format_command_with_events(cmd, idx, events, is_failure, max_events, color)
-      end)
+    # This is the entry-level view: unlike the plain command timeline it renders
+    # each event's source badge (CMD/NEM/MOC/STU/INJ) and branch. A Step exposes
+    # only bare events, so this reads the full log entries directly, grouping
+    # them by the position their (command_index, branch_id) resolves to — the
+    # same branch-aware grouping steps/1 does, but keeping the entries. The
+    # failure is marked by the failing step's position, not by comparing a
+    # flattened ordinal to the executor failed_at_index.
+    body = format_event_timeline_body(report.shrunk_sequence, report, max_events, color)
 
     # Events from injectors and other async sources carry command_index: nil;
-    # they are not attributable to a command but must still appear, not vanish.
-    async_section = format_async_events(Map.get(events_by_cmd, nil, []), max_events, color)
+    # they belong to no command but must still appear rather than vanish.
+    async_entries = Enum.filter(report.event_log, &(&1.command_index == nil))
+    async_section = format_async_events(async_entries, max_events, color)
 
     header <> body <> async_section
   end
+
+  defp format_event_timeline_body(%Sequence{} = sequence, report, max_events, color) do
+    entries_by_position =
+      report.event_log
+      |> Enum.filter(&(&1.command_index != nil))
+      |> Enum.group_by(fn entry ->
+        Sequence.position_at(sequence, entry.command_index, entry.branch_id)
+      end)
+
+    failed_position =
+      case FailureReport.failure_step(report) do
+        %FailureReport.Step{position: position} -> position
+        nil -> nil
+      end
+
+    sequence
+    |> Sequence.indexed()
+    |> Enum.map_join("\n\n", fn {position, idx, cmd} ->
+      entries = Map.get(entries_by_position, position, [])
+
+      format_command_with_events(
+        cmd,
+        idx,
+        entries,
+        position == failed_position,
+        max_events,
+        color
+      )
+    end)
+  end
+
+  defp format_event_timeline_body(_sequence, _report, _max_events, _color), do: ""
 
   defp format_async_events([], _max_events, _color), do: ""
 
@@ -358,6 +415,11 @@ defmodule PropertyDamage.FailureReport.Timeline do
       events_text <> truncated
   end
 
+  # `events` are the full log entries attributed to this command (by
+  # command_index), which INCLUDE command output plus any mock/nemesis/stutter
+  # events recorded against it — so each is rendered with its source badge and
+  # branch, keeping fault-injected/retry events visually distinct from SUT
+  # output.
   defp format_command_with_events(cmd, idx, events, is_failure, max_events, color) do
     marker = if is_failure, do: " #{red(color)}► FAILURE#{reset()}", else: ""
     cmd_name = short_module_name(cmd.__struct__)

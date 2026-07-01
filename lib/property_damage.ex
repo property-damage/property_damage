@@ -276,7 +276,7 @@ defmodule PropertyDamage do
         model: MyModel,
         adapter: MyAdapter,
         on_failure: fn failure_report ->
-          IO.puts("Failed at command \#{failure_report.failed_at_index}")
+          IO.puts("Failed at command \#{PropertyDamage.FailureReport.failure_index(failure_report)}")
         end
       )
 

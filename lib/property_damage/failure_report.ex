@@ -85,8 +85,6 @@ defmodule PropertyDamage.FailureReport do
 
           # Event trail
           event_log: [Entry.t()],
-          command_at_failure: struct() | nil,
-          events_at_failure: [struct()],
 
           # Idempotency-specific (for stutter failures)
           idempotency_violation: map() | nil,
@@ -137,8 +135,6 @@ defmodule PropertyDamage.FailureReport do
             state_before_failure: nil,
             state_at_failure: nil,
             event_log: [],
-            command_at_failure: nil,
-            events_at_failure: [],
             idempotency_violation: nil,
             poll_timeout_info: nil,
             branch_id: nil,
@@ -199,11 +195,6 @@ defmodule PropertyDamage.FailureReport do
      branch_id} =
       parse_failure_reason(failure_reason)
 
-    # Extract command and events at failure point (branch-aware: branch
-    # command indices are prefix-relative and overlap across branches)
-    {command_at_failure, events_at_failure} =
-      extract_failure_context(shrunk_sequence, event_log, failed_at_index, branch_id)
-
     # Extract branch events if parallel
     branch_events = extract_branch_events(event_log)
 
@@ -233,8 +224,6 @@ defmodule PropertyDamage.FailureReport do
       state_before_failure: projections_before,
       state_at_failure: projections,
       event_log: event_log,
-      command_at_failure: command_at_failure,
-      events_at_failure: events_at_failure,
       idempotency_violation: idempotency_violation,
       poll_timeout_info: poll_timeout_info,
       branch_id: branch_id,
@@ -598,6 +587,25 @@ defmodule PropertyDamage.FailureReport do
     report |> steps() |> Enum.find(& &1.failed?)
   end
 
+  @doc """
+  The flattened (reading-order) index of the failing command, for reader-facing
+  display.
+
+  This is the ordinal into `steps/1` / `Sequence.to_list/1`, i.e. the number a
+  reader cross-references against the reproduction listing. It differs from the
+  raw `failed_at_index` field, which is the *executor* command index and diverges
+  from the flattened ordinal for parallel-branch failures. Falls back to
+  `failed_at_index` when the failure can't be localized to a step (typically
+  `nil`, e.g. a teardown / whole-run / linearization failure).
+  """
+  @spec failure_index(t()) :: non_neg_integer() | nil
+  def failure_index(%__MODULE__{} = report) do
+    case failure_step(report) do
+      %Step{flattened_index: index} -> index
+      nil -> report.failed_at_index
+    end
+  end
+
   # ============================================================================
   # Private Helpers
   # ============================================================================
@@ -694,43 +702,6 @@ defmodule PropertyDamage.FailureReport do
 
   defp format_idempotency_message(violation) do
     inspect(violation)
-  end
-
-  defp extract_failure_context(_sequence, _event_log, nil, _branch_id), do: {nil, []}
-
-  defp extract_failure_context(sequence, event_log, failed_at_index, branch_id) do
-    command = command_at(sequence, failed_at_index, branch_id)
-
-    events =
-      event_log
-      |> Enum.filter(fn entry ->
-        entry.command_index == failed_at_index and entry.branch_id == branch_id
-      end)
-      |> Enum.map(& &1.event)
-
-    {command, events}
-  end
-
-  # Resolve an executor command index against the sequence structure.
-  # Executor indexing: prefix commands are 0..len(prefix)-1; EVERY branch's
-  # commands continue from len(prefix) (overlapping across branches, hence
-  # branch_id); suffix indices continue after the SUM of branch lengths.
-  defp command_at(sequence, index, branch_id) do
-    cond do
-      Sequence.linear?(sequence) ->
-        sequence |> Sequence.to_list() |> Enum.at(index)
-
-      branch_id != nil ->
-        branch = Enum.at(sequence.branches || [], branch_id) || []
-        Enum.at(branch, index - length(sequence.prefix))
-
-      index < length(sequence.prefix) ->
-        Enum.at(sequence.prefix, index)
-
-      true ->
-        total_branch = sequence.branches |> Enum.map(&length/1) |> Enum.sum()
-        Enum.at(sequence.suffix, index - length(sequence.prefix) - total_branch)
-    end
   end
 
   defp extract_branch_events(event_log) do

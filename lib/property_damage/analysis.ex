@@ -58,21 +58,29 @@ defmodule PropertyDamage.Analysis do
   """
   @spec explain(FailureReport.t()) :: map()
   def explain(%FailureReport{} = report) do
-    commands = Sequence.to_list(report.shrunk_sequence)
-    failed_at = report.failed_at_index
+    steps = FailureReport.steps(report)
+    commands = Enum.map(steps, & &1.command)
+
+    # The dependency graph is built over the flattened command list and indexed
+    # by flattened (reading) order, so the failing node must be the flattened
+    # index. failed_at_index is an executor index and diverges from it for
+    # branch failures, so read it off the already-materialized failed step
+    # (nil for a non-localized failure).
+    failed_at = Enum.find_value(steps, fn step -> step.failed? && step.flattened_index end)
 
     # Build dependency graph
     graph = Graph.build(commands)
 
-    # Find which commands are ancestors of the failing command
-    ancestors = Graph.ancestors(graph, failed_at)
+    # Find which commands are ancestors of the failing command. A non-localized
+    # failure (failed_at nil) has no failing node to trace ancestors from.
+    ancestors = if failed_at, do: Graph.ancestors(graph, failed_at), else: MapSet.new()
 
     # Analyze each command
+    localized? = failed_at != nil
+
     command_explanations =
-      commands
-      |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
-        analyze_command(cmd, idx, failed_at, ancestors, graph, commands, report)
+      Enum.map(steps, fn step ->
+        analyze_command(step, ancestors, report, localized?)
       end)
 
     %{
@@ -141,18 +149,25 @@ defmodule PropertyDamage.Analysis do
     Enum.join(lines ++ command_lines ++ chain_lines, "\n")
   end
 
-  defp analyze_command(cmd, idx, failed_at, ancestors, _graph, _commands, report) do
+  defp analyze_command(%FailureReport.Step{} = step, ancestors, report, localized?) do
+    cmd = step.command
+    idx = step.flattened_index
     cmd_name = cmd.__struct__ |> Module.split() |> List.last()
 
     {role, reason} =
       cond do
-        idx == failed_at ->
+        step.failed? ->
           {:trigger, "Triggers #{report.check_name || report.failure_type} failure"}
 
         MapSet.member?(ancestors, idx) ->
           # Ancestor in the dependency graph: produces state or values the
           # failing command depends on.
           {:dependency, "Provides state or values required by the failing command"}
+
+        not localized? ->
+          # The failure was not localized to a specific command (teardown /
+          # whole-run / linearization check), so no per-command role applies.
+          {:unknown, "Failure not localized to a specific command"}
 
         true ->
           # Not an ancestor and not the trigger - shouldn't be in shrunk sequence
@@ -268,30 +283,48 @@ defmodule PropertyDamage.Analysis do
   @spec isolate_trigger(FailureReport.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def isolate_trigger(%FailureReport{} = report, opts \\ []) do
     commands = Sequence.to_list(report.shrunk_sequence)
-    failed_at = report.failed_at_index
-    trigger_cmd = Enum.at(commands, failed_at)
+    # `commands` is the flattened list the modified sequence is re-run against,
+    # so the trigger must be addressed by its flattened index (not the executor
+    # failed_at_index, which diverges for branch failures).
+    step = FailureReport.failure_step(report)
+    failed_at = step && step.flattened_index
+    trigger_cmd = step && step.command
     model = report.model
     adapter = report.adapter
 
-    if is_nil(model) or is_nil(adapter) do
-      {:error, :missing_model_or_adapter}
-    else
-      # Get adapter config from opts or use empty
-      adapter_config = Keyword.get(opts, :adapter_config, %{})
+    cond do
+      is_nil(step) ->
+        # Non-localized failure (teardown / whole-run / linearization): there is
+        # no single trigger command to vary.
+        {:error, :failure_not_localized}
 
-      # Try variations of the trigger command
-      changes =
-        find_eliminating_changes(trigger_cmd, commands, failed_at, model, adapter, adapter_config)
+      is_nil(model) or is_nil(adapter) ->
+        {:error, :missing_model_or_adapter}
 
-      likely_cause = infer_cause(changes, trigger_cmd, commands, report)
+      true ->
+        # Get adapter config from opts or use empty
+        adapter_config = Keyword.get(opts, :adapter_config, %{})
 
-      {:ok,
-       %{
-         trigger_command: trigger_cmd,
-         trigger_index: failed_at,
-         changes: changes,
-         likely_cause: likely_cause
-       }}
+        # Try variations of the trigger command
+        changes =
+          find_eliminating_changes(
+            trigger_cmd,
+            commands,
+            failed_at,
+            model,
+            adapter,
+            adapter_config
+          )
+
+        likely_cause = infer_cause(changes, trigger_cmd, commands, report)
+
+        {:ok,
+         %{
+           trigger_command: trigger_cmd,
+           trigger_index: failed_at,
+           changes: changes,
+           likely_cause: likely_cause
+         }}
     end
   end
 
@@ -531,7 +564,7 @@ defmodule PropertyDamage.Analysis do
         # The minimal sequence that triggers the failure:
     #{command_code}
 
-        # The failure occurs at command index #{report.failed_at_index}
+        # The failure occurs at command index #{FailureReport.failure_index(report)}
         # Failure message: #{String.slice(report.failure_message || "", 0, 100)}
       end
     end
@@ -558,7 +591,7 @@ defmodule PropertyDamage.Analysis do
     IO.inspect(result, label: "Result")
 
     # Option 2: The minimal failing sequence
-    # #{length(commands)} commands, failure at index #{report.failed_at_index}
+    # #{length(commands)} commands, failure at index #{FailureReport.failure_index(report)}
     #
     #{command_code}
     """
@@ -588,14 +621,14 @@ defmodule PropertyDamage.Analysis do
 
     ## Minimal Failing Sequence
 
-    #{format_commands_markdown(commands, report.failed_at_index)}
+    #{format_commands_markdown(commands, FailureReport.failure_index(report))}
 
     ## Failure Details
 
     - **Type**: #{report.failure_type}
     - **Check**: #{report.check_name || "N/A"}
     - **Message**: #{report.failure_message || "N/A"}
-    - **Command Index**: #{report.failed_at_index}
+    - **Command Index**: #{FailureReport.failure_index(report)}
 
     ## Analysis
 
