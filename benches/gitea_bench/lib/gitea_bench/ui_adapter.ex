@@ -151,8 +151,21 @@ defmodule GiteaBench.UiAdapter do
 
     Page.goto(page, ctx.base_url <> "/#{owner}/#{repo}/issues/#{number}", %{timeout: @nav_timeout})
 
+    item = ".select-label .menu .item[data-id='#{label_id}']"
+
     Page.click(page, ".select-label.dropdown")
-    Page.click(page, ".select-label .menu .item[data-id='#{label_id}']")
+    Page.wait_for_selector(page, item, %{timeout: @nav_timeout})
+
+    # Gitea's dropdown item is a *toggle*: clicking an already-checked label removes
+    # it. The model's AddLabelToIssue intent is idempotent-additive (it matches the
+    # API transport's `POST .../labels`, which unions the label set), and the model
+    # can generate a duplicate assignment for an already-labelled issue, so only
+    # click when the label is not yet checked. Clicking unconditionally would
+    # silently *unassign* the label and make the invariant fire on a phantom miss.
+    unless Page.eval_on_selector(page, item, "el => el.classList.contains('checked')") do
+      Page.click(page, item)
+    end
+
     # Clicking outside the dropdown commits the change (Gitea posts via AJAX).
     Page.click(page, "footer")
 
