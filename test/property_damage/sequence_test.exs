@@ -44,6 +44,98 @@ defmodule PropertyDamage.SequenceTest do
     end
   end
 
+  describe "indexed/1" do
+    alias PropertyDamage.Sequence.Position
+
+    test "pairs each command of a linear sequence with a :prefix position" do
+      seq = Sequence.linear([%Cmd1{id: 1}, %Cmd2{id: 2}, %Cmd3{id: 3}])
+
+      assert Sequence.indexed(seq) == [
+               {%Position{section: :prefix, offset: 0}, 0, %Cmd1{id: 1}},
+               {%Position{section: :prefix, offset: 1}, 1, %Cmd2{id: 2}},
+               {%Position{section: :prefix, offset: 2}, 2, %Cmd3{id: 3}}
+             ]
+    end
+
+    test "walks prefix, then each branch, then suffix in to_list order" do
+      seq =
+        Sequence.branching(
+          [%Cmd1{id: 0}],
+          [[%Cmd2{id: 1}, %Cmd2{id: 2}], [%Cmd3{id: 3}]],
+          [%Cmd1{id: 4}]
+        )
+
+      indexed = Sequence.indexed(seq)
+
+      # flattened index follows to_list order and section/offset are canonical
+      assert indexed == [
+               {%Position{section: :prefix, offset: 0}, 0, %Cmd1{id: 0}},
+               {%Position{section: {:branch, 0}, offset: 0}, 1, %Cmd2{id: 1}},
+               {%Position{section: {:branch, 0}, offset: 1}, 2, %Cmd2{id: 2}},
+               {%Position{section: {:branch, 1}, offset: 0}, 3, %Cmd3{id: 3}},
+               {%Position{section: :suffix, offset: 0}, 4, %Cmd1{id: 4}}
+             ]
+
+      # flattened commands match to_list/1 exactly
+      assert Enum.map(indexed, fn {_pos, _i, cmd} -> cmd end) == Sequence.to_list(seq)
+    end
+  end
+
+  describe "position_at/3" do
+    alias PropertyDamage.Sequence.Position
+
+    test "resolves prefix and suffix executor indices for a linear sequence" do
+      seq = Sequence.linear([%Cmd1{id: 1}, %Cmd2{id: 2}])
+
+      assert Sequence.position_at(seq, 0, nil) == %Position{section: :prefix, offset: 0}
+      assert Sequence.position_at(seq, 1, nil) == %Position{section: :prefix, offset: 1}
+    end
+
+    test "disambiguates overlapping branch indices by branch_id" do
+      seq =
+        Sequence.branching(
+          [%Cmd1{id: 0}],
+          [[%Cmd2{id: 1}, %Cmd2{id: 2}], [%Cmd3{id: 3}, %Cmd3{id: 4}]],
+          [%Cmd1{id: 5}]
+        )
+
+      # Both branches' first command share executor command_index 1 (len(prefix));
+      # only branch_id tells them apart.
+      assert Sequence.position_at(seq, 1, 0) == %Position{section: {:branch, 0}, offset: 0}
+      assert Sequence.position_at(seq, 1, 1) == %Position{section: {:branch, 1}, offset: 0}
+      assert Sequence.position_at(seq, 2, 0) == %Position{section: {:branch, 0}, offset: 1}
+      assert Sequence.position_at(seq, 2, 1) == %Position{section: {:branch, 1}, offset: 1}
+
+      # suffix_start = len(prefix) 1 + branch commands 4 = 5
+      assert Sequence.position_at(seq, 5, nil) == %Position{section: :suffix, offset: 0}
+    end
+
+    test "is consistent with indexed/1 for every command" do
+      seq =
+        Sequence.branching(
+          [%Cmd1{id: 0}],
+          [[%Cmd2{id: 1}], [%Cmd3{id: 2}, %Cmd3{id: 3}]],
+          [%Cmd1{id: 4}]
+        )
+
+      # Reconstruct the executor (command_index, branch_id) for each command and
+      # confirm position_at lands on the same position indexed/1 assigned.
+      prefix_len = length(seq.prefix)
+
+      cases = [
+        {%Position{section: :prefix, offset: 0}, 0, nil},
+        {%Position{section: {:branch, 0}, offset: 0}, prefix_len + 0, 0},
+        {%Position{section: {:branch, 1}, offset: 0}, prefix_len + 0, 1},
+        {%Position{section: {:branch, 1}, offset: 1}, prefix_len + 1, 1},
+        {%Position{section: :suffix, offset: 0}, prefix_len + 3, nil}
+      ]
+
+      for {position, command_index, branch_id} <- cases do
+        assert Sequence.position_at(seq, command_index, branch_id) == position
+      end
+    end
+  end
+
   describe "linear?/1" do
     test "returns true for linear sequences" do
       assert Sequence.linear?(Sequence.linear([%Cmd1{id: 1}]))
