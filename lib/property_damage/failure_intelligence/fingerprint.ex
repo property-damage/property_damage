@@ -52,9 +52,11 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
     # The failing command and its observed events, recomputed from the event log
     # + shrunk sequence via the failure step (nil for a non-localized failure;
     # the extract_* helpers already treat nil/[] as "no command / no events").
+    # A step carries full EventLog.Entry structs; the fingerprint keys on event
+    # types, so project the bare event out of each entry.
     step = FailureReport.failure_step(report)
     command = step && step.command
-    events = (step && step.events) || []
+    events = Enum.map((step && step.entries) || [], & &1.event)
 
     %__MODULE__{
       failure_type: report.failure_type,
