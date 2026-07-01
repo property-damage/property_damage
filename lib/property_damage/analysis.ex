@@ -58,8 +58,14 @@ defmodule PropertyDamage.Analysis do
   """
   @spec explain(FailureReport.t()) :: map()
   def explain(%FailureReport{} = report) do
-    commands = Sequence.to_list(report.shrunk_sequence)
-    failed_at = report.failed_at_index
+    steps = FailureReport.steps(report)
+    commands = Enum.map(steps, & &1.command)
+
+    # The dependency graph is built over the flattened command list and indexed
+    # by flattened (reading) order, so the failing node must be the flattened
+    # index. failed_at_index is an executor index and diverges from it for
+    # branch failures, so resolve via the failure step.
+    failed_at = failure_flattened_index(report)
 
     # Build dependency graph
     graph = Graph.build(commands)
@@ -69,10 +75,8 @@ defmodule PropertyDamage.Analysis do
 
     # Analyze each command
     command_explanations =
-      commands
-      |> Enum.with_index()
-      |> Enum.map(fn {cmd, idx} ->
-        analyze_command(cmd, idx, failed_at, ancestors, graph, commands, report)
+      Enum.map(steps, fn step ->
+        analyze_command(step, ancestors, report)
       end)
 
     %{
@@ -141,12 +145,24 @@ defmodule PropertyDamage.Analysis do
     Enum.join(lines ++ command_lines ++ chain_lines, "\n")
   end
 
-  defp analyze_command(cmd, idx, failed_at, ancestors, _graph, _commands, report) do
+  # The failing command's flattened (reading-order) index, resolved branch-aware
+  # via the failure step. Falls back to the raw executor index for a
+  # non-localized failure (typically nil).
+  defp failure_flattened_index(report) do
+    case FailureReport.failure_step(report) do
+      %FailureReport.Step{flattened_index: index} -> index
+      nil -> report.failed_at_index
+    end
+  end
+
+  defp analyze_command(%FailureReport.Step{} = step, ancestors, report) do
+    cmd = step.command
+    idx = step.flattened_index
     cmd_name = cmd.__struct__ |> Module.split() |> List.last()
 
     {role, reason} =
       cond do
-        idx == failed_at ->
+        step.failed? ->
           {:trigger, "Triggers #{report.check_name || report.failure_type} failure"}
 
         MapSet.member?(ancestors, idx) ->
@@ -268,8 +284,12 @@ defmodule PropertyDamage.Analysis do
   @spec isolate_trigger(FailureReport.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def isolate_trigger(%FailureReport{} = report, opts \\ []) do
     commands = Sequence.to_list(report.shrunk_sequence)
-    failed_at = report.failed_at_index
-    trigger_cmd = Enum.at(commands, failed_at)
+    # `commands` is the flattened list the modified sequence is re-run against,
+    # so the trigger must be addressed by its flattened index (not the executor
+    # failed_at_index, which diverges for branch failures).
+    step = FailureReport.failure_step(report)
+    failed_at = step && step.flattened_index
+    trigger_cmd = step && step.command
     model = report.model
     adapter = report.adapter
 
@@ -531,7 +551,7 @@ defmodule PropertyDamage.Analysis do
         # The minimal sequence that triggers the failure:
     #{command_code}
 
-        # The failure occurs at command index #{report.failed_at_index}
+        # The failure occurs at command index #{failure_flattened_index(report)}
         # Failure message: #{String.slice(report.failure_message || "", 0, 100)}
       end
     end
@@ -558,7 +578,7 @@ defmodule PropertyDamage.Analysis do
     IO.inspect(result, label: "Result")
 
     # Option 2: The minimal failing sequence
-    # #{length(commands)} commands, failure at index #{report.failed_at_index}
+    # #{length(commands)} commands, failure at index #{failure_flattened_index(report)}
     #
     #{command_code}
     """
@@ -588,14 +608,14 @@ defmodule PropertyDamage.Analysis do
 
     ## Minimal Failing Sequence
 
-    #{format_commands_markdown(commands, report.failed_at_index)}
+    #{format_commands_markdown(commands, failure_flattened_index(report))}
 
     ## Failure Details
 
     - **Type**: #{report.failure_type}
     - **Check**: #{report.check_name || "N/A"}
     - **Message**: #{report.failure_message || "N/A"}
-    - **Command Index**: #{report.failed_at_index}
+    - **Command Index**: #{failure_flattened_index(report)}
 
     ## Analysis
 
