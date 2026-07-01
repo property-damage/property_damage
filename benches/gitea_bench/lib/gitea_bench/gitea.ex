@@ -88,6 +88,48 @@ defmodule GiteaBench.Gitea do
     :ok
   end
 
+  # --- system webhooks (P9 injector) -----------------------------------------
+
+  @doc """
+  Delete every admin-level (system/default) webhook on the instance.
+
+  Run in the injector's `setup/1` before creating our own, so repeated runs never
+  accumulate hooks (which would make the "exactly one webhook" invariant see
+  duplicate deliveries). Requires a gitea instance that exposes the admin hooks
+  API (1.24+ for system webhooks).
+  """
+  def delete_all_admin_hooks(%__MODULE__{} = client) do
+    {:ok, 200, hooks} = req(:get, client, "/admin/hooks?limit=50", auth: admin_auth(client))
+
+    for %{"id" => id} <- hooks do
+      {:ok, _status, _body} = req(:delete, client, "/admin/hooks/#{id}", auth: admin_auth(client))
+    end
+
+    :ok
+  end
+
+  @doc """
+  Create a single system webhook (fires for every repository, existing or new)
+  that POSTs the native gitea `issues` event to `callback_url`.
+
+  `is_system_webhook` lives in the string-valued `config` map (gitea's hook config
+  is `map[string]string`), and only takes effect from gitea 1.24 on.
+  """
+  def create_system_webhook(%__MODULE__{} = client, callback_url) do
+    body = %{
+      type: "gitea",
+      active: true,
+      events: ["issues"],
+      config: %{
+        "url" => callback_url,
+        "content_type" => "json",
+        "is_system_webhook" => "true"
+      }
+    }
+
+    expect(req(:post, client, "/admin/hooks", json: body, auth: admin_auth(client)), [201])
+  end
+
   # --- mutations (API transport) ---------------------------------------------
 
   def create_user(client, login, email) do
