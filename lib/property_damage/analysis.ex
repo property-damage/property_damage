@@ -64,8 +64,9 @@ defmodule PropertyDamage.Analysis do
     # The dependency graph is built over the flattened command list and indexed
     # by flattened (reading) order, so the failing node must be the flattened
     # index. failed_at_index is an executor index and diverges from it for
-    # branch failures, so resolve via the failure step.
-    failed_at = failure_flattened_index(report)
+    # branch failures, so read it off the already-materialized failed step
+    # (nil for a non-localized failure).
+    failed_at = Enum.find_value(steps, fn step -> step.failed? && step.flattened_index end)
 
     # Build dependency graph
     graph = Graph.build(commands)
@@ -293,25 +294,39 @@ defmodule PropertyDamage.Analysis do
     model = report.model
     adapter = report.adapter
 
-    if is_nil(model) or is_nil(adapter) do
-      {:error, :missing_model_or_adapter}
-    else
-      # Get adapter config from opts or use empty
-      adapter_config = Keyword.get(opts, :adapter_config, %{})
+    cond do
+      is_nil(step) ->
+        # Non-localized failure (teardown / whole-run / linearization): there is
+        # no single trigger command to vary.
+        {:error, :failure_not_localized}
 
-      # Try variations of the trigger command
-      changes =
-        find_eliminating_changes(trigger_cmd, commands, failed_at, model, adapter, adapter_config)
+      is_nil(model) or is_nil(adapter) ->
+        {:error, :missing_model_or_adapter}
 
-      likely_cause = infer_cause(changes, trigger_cmd, commands, report)
+      true ->
+        # Get adapter config from opts or use empty
+        adapter_config = Keyword.get(opts, :adapter_config, %{})
 
-      {:ok,
-       %{
-         trigger_command: trigger_cmd,
-         trigger_index: failed_at,
-         changes: changes,
-         likely_cause: likely_cause
-       }}
+        # Try variations of the trigger command
+        changes =
+          find_eliminating_changes(
+            trigger_cmd,
+            commands,
+            failed_at,
+            model,
+            adapter,
+            adapter_config
+          )
+
+        likely_cause = infer_cause(changes, trigger_cmd, commands, report)
+
+        {:ok,
+         %{
+           trigger_command: trigger_cmd,
+           trigger_index: failed_at,
+           changes: changes,
+           likely_cause: likely_cause
+         }}
     end
   end
 

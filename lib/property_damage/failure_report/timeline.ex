@@ -343,31 +343,54 @@ defmodule PropertyDamage.FailureReport.Timeline do
 
     """
 
-    # Each Step already pairs a command with its observed (command-produced)
-    # events, flattened index, and failed? flag, resolved branch-aware. The
-    # per-command events are the bare event structs steps/1 exposes.
-    body =
-      report
-      |> FailureReport.steps()
-      |> Enum.map_join("\n\n", fn step ->
-        format_command_with_events(
-          step.command,
-          step.flattened_index,
-          step.events,
-          step.failed?,
-          max_events,
-          color
-        )
-      end)
+    # This is the entry-level view: unlike the plain command timeline it renders
+    # each event's source badge (CMD/NEM/MOC/STU/INJ) and branch. A Step exposes
+    # only bare events, so this reads the full log entries directly, grouping
+    # them by the position their (command_index, branch_id) resolves to — the
+    # same branch-aware grouping steps/1 does, but keeping the entries. The
+    # failure is marked by the failing step's position, not by comparing a
+    # flattened ordinal to the executor failed_at_index.
+    body = format_event_timeline_body(report.shrunk_sequence, report, max_events, color)
 
     # Events from injectors and other async sources carry command_index: nil;
-    # they belong to no Step (steps/1 drops them), but must still appear rather
-    # than vanish, and they retain their source attribution as full log entries.
+    # they belong to no command but must still appear rather than vanish.
     async_entries = Enum.filter(report.event_log, &(&1.command_index == nil))
     async_section = format_async_events(async_entries, max_events, color)
 
     header <> body <> async_section
   end
+
+  defp format_event_timeline_body(%Sequence{} = sequence, report, max_events, color) do
+    entries_by_position =
+      report.event_log
+      |> Enum.filter(&(&1.command_index != nil))
+      |> Enum.group_by(fn entry ->
+        Sequence.position_at(sequence, entry.command_index, entry.branch_id)
+      end)
+
+    failed_position =
+      case FailureReport.failure_step(report) do
+        %FailureReport.Step{position: position} -> position
+        nil -> nil
+      end
+
+    sequence
+    |> Sequence.indexed()
+    |> Enum.map_join("\n\n", fn {position, idx, cmd} ->
+      entries = Map.get(entries_by_position, position, [])
+
+      format_command_with_events(
+        cmd,
+        idx,
+        entries,
+        position == failed_position,
+        max_events,
+        color
+      )
+    end)
+  end
+
+  defp format_event_timeline_body(_sequence, _report, _max_events, _color), do: ""
 
   defp format_async_events([], _max_events, _color), do: ""
 
@@ -392,10 +415,11 @@ defmodule PropertyDamage.FailureReport.Timeline do
       events_text <> truncated
   end
 
-  # `events` are the bare event structs a Step carries (command-produced events
-  # only). Their source is `:command`-family by construction, so no per-event
-  # source badge is shown here; the ASYNC section renders full entries with
-  # badges for events that belong to no command.
+  # `events` are the full log entries attributed to this command (by
+  # command_index), which INCLUDE command output plus any mock/nemesis/stutter
+  # events recorded against it — so each is rendered with its source badge and
+  # branch, keeping fault-injected/retry events visually distinct from SUT
+  # output.
   defp format_command_with_events(cmd, idx, events, is_failure, max_events, color) do
     marker = if is_failure, do: " #{red(color)}► FAILURE#{reset()}", else: ""
     cmd_name = short_module_name(cmd.__struct__)
@@ -407,9 +431,11 @@ defmodule PropertyDamage.FailureReport.Timeline do
       events_text =
         events
         |> Enum.take(max_events)
-        |> Enum.map_join("\n", fn event ->
-          event_name = short_module_name(event.__struct__)
-          "    #{green(color)}→#{reset()} #{event_name}"
+        |> Enum.map_join("\n", fn entry ->
+          event_name = short_module_name(entry.event.__struct__)
+          source = format_source_badge(entry.source, color)
+          branch = if entry.branch_id, do: " #{dim(color)}B#{entry.branch_id}#{reset()}", else: ""
+          "    #{source}#{branch} #{green(color)}→#{reset()} #{event_name}"
         end)
 
       truncated =

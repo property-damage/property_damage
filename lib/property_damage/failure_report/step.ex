@@ -16,10 +16,13 @@ defmodule PropertyDamage.FailureReport.Step do
     view of the location; `position` is authoritative. For branch commands it
     differs from the executor command index.
   - `command` — the command struct.
-  - `events` — the events observed for this command, in log order. These are the
-    event log entries whose `(command_index, branch_id)` resolves to this step's
-    `position` (command-produced events only; injector/telemetry events, which
-    carry no command index, belong to no step).
+  - `events` — the events observed for this command, in log order: the bare
+    events of the log entries whose `(command_index, branch_id)` resolves to this
+    step's `position`. This is everything *attributed* to the command by its
+    index, which includes its own output plus any mock / nemesis / stutter events
+    recorded against it; only their event structs are kept here, so the per-event
+    source is not preserved (read the `event_log` directly if you need it).
+    Injector / telemetry events carry no command index and belong to no step.
   - `label` — the command's human-readable label (`command_labels` for this
     `flattened_index`), or `nil` if the model produced none.
   - `failed?` — `true` for the single step where the failure was localized, and
