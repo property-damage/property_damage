@@ -127,6 +127,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A flaky failure that does not reproduce no longer reports a blank "Unknown
+  Failure".** After finding a failing run, `PropertyDamage.run/1` re-executes the
+  (shrunk) sequence to gather fresh state for the report. For an intermittent
+  failure that re-run can pass, leaving the fresh result with `failure_reason:
+  nil`; the report then rendered `[FAIL] Unknown Failure` with `Reason: nil`,
+  discarding the reason actually observed. The report now falls back to the
+  original failing run's reason, index, and state when the re-execution does not
+  reproduce (and keeps the shrunk sequence and fresh state on a genuine repro).
+  `shrink_further/2` shared the gap and now returns the incoming report unchanged
+  when its re-execution fails to reproduce.
 - **Injector-adapter validation no longer spuriously raises.** When an injector
   adapter is passed by module name, `PropertyDamage.run/1` now
   `Code.ensure_loaded?`s it before reflecting on its `@emits`, so an
