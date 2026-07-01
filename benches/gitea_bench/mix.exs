@@ -22,7 +22,11 @@ defmodule GiteaBench.MixProject do
     [
       {:property_damage, path: "../.."},
       {:playwright, "~> 1.49.1-alpha.2"},
-      {:req, "~> 0.5"}
+      {:req, "~> 0.5"},
+      # P9 webhook demo: a tiny HTTP listener that receives Gitea's issues
+      # webhook and pushes it into the run's EventQueue.
+      {:bandit, "~> 1.0"},
+      {:plug, "~> 1.16"}
     ]
   end
 

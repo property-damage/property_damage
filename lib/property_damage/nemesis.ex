@@ -85,12 +85,17 @@ defmodule PropertyDamage.Nemesis do
   that did. Use `simulated_event?/1` to detect it, or assert against the
   `:simulated` field directly.
 
-  The host-effect nemeses (`CPUStress`, `MemoryPressure`, `ResourceExhaustion`,
-  `ProcessKill`) always inject real effects in the BEAM. The cooperative ones
-  (`ClockSkew`, `SlowIO`, `CertificateExpiry`) install real state but only
-  change behavior if your adapter consults their public API
-  (e.g. `ClockSkew.now/0`); they are real, not simulated, but require adapter
-  cooperation to observe.
+  > #### Scope: faults reach the SUT, not the test harness {: .info}
+  >
+  > The built-in nemeses fault the SUT's **network path** through Toxiproxy.
+  > Earlier versions also shipped nemeses that stressed the *local* BEAM/host
+  > (CPU, memory, OS resources), killed local processes, or installed a virtual
+  > clock the adapter had to read. Those were removed: they only affected the
+  > test harness's own VM, not an external System Under Test driven through an
+  > adapter, so they tested the wrong thing (and the host-stress ones could
+  > destabilize the run itself). A nemesis should inject a fault into the SUT's
+  > environment; if you need to fault an in-process collaborator, do it in your
+  > own adapter/command code.
 
   Assertion projections can adjust invariants during active faults:
 

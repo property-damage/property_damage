@@ -181,6 +181,14 @@ The system SHALL produce structured failure reports containing location (run num
 - **THEN** the report SHALL headline the invariant's `name` and `description`, with the specific failing assertion shown as secondary detail
 - **AND** when the invariant has no description, the report SHALL fall back to the assertion name as today
 
+#### Scenario: Report renders per-command labels (DR-028 amendment, P7)
+
+- **WHEN** a failure report is created for a sequence whose commands implement `label/2`
+- **THEN** the report SHALL carry a `command_labels` map keyed by the flattened (`Sequence.to_list/1`) command index, populated only with non-nil labels
+- **AND** each label SHALL be computed lazily at report construction against that command's `command_sequence_projection` pre-state
+- **AND** the `:terminal`, `:markdown`, and `:json` formats SHALL render each command's label next to that command in the minimal-reproduction sequence
+- **AND** a command without a label SHALL render exactly as before
+
 ### Requirement: Diff-Based Debugging
 
 The system SHALL compare passing and failing execution traces to identify the divergence point and display actionable differences.

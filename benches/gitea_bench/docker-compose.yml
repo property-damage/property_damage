@@ -10,8 +10,16 @@ name: pd_gitea_bench
 # setup/1). SQLite keeps the lifecycle to a single small container each.
 #
 # Host ports (overridable):
-#   PD_GITEA_API_PORT (default 3101) -> gitea-api
-#   PD_GITEA_UI_PORT  (default 3102) -> gitea-ui
+#   PD_GITEA_API_PORT     (default 3101) -> gitea-api
+#   PD_GITEA_UI_PORT      (default 3102) -> gitea-ui
+#   PD_GITEA_WEBHOOK_PORT (default 3103) -> gitea-webhook
+#
+# The `gitea-webhook` instance is dedicated to the P9 webhook demo (an injector
+# receives its `issues` webhook). It pins gitea 1.24 because creating a *system*
+# webhook via the admin API (`config.is_system_webhook`) only exists from 1.24
+# on; keeping it separate leaves the differential/UI instances on 1.22 untouched.
+# `extra_hosts` maps `host.docker.internal` to the host gateway so the container
+# can POST back to the Bandit listener the bench starts on the host.
 
 x-gitea-common: &gitea-common
   image: gitea/gitea:1.22
@@ -51,3 +59,16 @@ services:
       GITEA__server__ROOT_URL: "http://localhost:${PD_GITEA_UI_PORT:-3102}/"
     ports:
       - "${PD_GITEA_UI_PORT:-3102}:3000"
+
+  gitea-webhook:
+    <<: *gitea-common
+    image: gitea/gitea:1.24
+    environment:
+      <<: *gitea-env
+      GITEA__server__ROOT_URL: "http://localhost:${PD_GITEA_WEBHOOK_PORT:-3103}/"
+      # Allow the instance to POST webhooks to the host loopback / gateway.
+      GITEA__webhook__ALLOWED_HOST_LIST: "*"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PD_GITEA_WEBHOOK_PORT:-3103}:3000"

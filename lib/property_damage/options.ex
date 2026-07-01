@@ -105,8 +105,8 @@ defmodule PropertyDamage.Options do
           # In test project
           PropertyDamage.run(model: M, adapter: A, external_markers: [:__external__])
 
-      These markers are combined with any markers configured in app config
-      via `config :property_damage, external_markers: [...]`.
+      This run option is the sole source of atom markers; there is no ambient
+      app-config channel (DR-032).
       """
     ],
     adapter_config: [

@@ -767,97 +767,11 @@ end
 %NetworkLatency{latency_ms: 200, jitter_ms: 50, duration_ms: 10_000}
 ```
 
-#### Resource Operations
-
-| Operation | Description |
-|-----------|-------------|
-| `MemoryPressure` | Allocate memory to create pressure (bulk or fragmented) |
-| `CPUStress` | Spawn busy-loop processes to stress schedulers |
-| `ResourceExhaustion` | Exhaust file descriptors, ports, ETS tables, or processes |
-
-```elixir
-alias PropertyDamage.Nemesis.{MemoryPressure, CPUStress}
-
-# Create memory pressure (100MB)
-%MemoryPressure{megabytes: 100, allocation_pattern: :bulk}
-
-# Create CPU stress (intensity 1-10)
-%CPUStress{intensity: 5, schedulers: :all, duration_ms: 5000}
-```
-
-#### Time Operations
-
-| Operation | Description |
-|-----------|-------------|
-| `ClockSkew` | Shift virtual time forward/backward with optional drift |
-
-```elixir
-alias PropertyDamage.Nemesis.ClockSkew
-
-# Jump 1 minute into the future
-%ClockSkew{skew_ms: 60_000, mode: :instant}
-
-# Gradual drift (10% fast)
-%ClockSkew{skew_ms: 0, drift_rate: 1.1, mode: :gradual}
-
-# In your adapter, use the virtual clock:
-def get_current_time do
-  ClockSkew.now()  # Returns skewed time when active
-end
-```
-
-#### Process Operations
-
-| Operation | Description |
-|-----------|-------------|
-| `ProcessKill` | Kill processes by name, pattern, or randomly |
-| `SlowIO` | Add artificial delay to I/O operations |
-
-#### Security Operations
-
-| Operation | Description |
-|-----------|-------------|
-| `CertificateExpiry` | Simulate TLS certificate failures (expired, wrong host, self-signed, revoked)
-
-```elixir
-alias PropertyDamage.Nemesis.CertificateExpiry
-
-# Simulate expired certificate
-%CertificateExpiry{failure_type: :expired}
-
-# Simulate hostname mismatch
-%CertificateExpiry{failure_type: :wrong_host, target: :api}
-
-# In your adapter:
-def connect(host, port, opts) do
-  if CertificateExpiry.should_fail?() do
-    CertificateExpiry.get_ssl_error()  # Returns {:error, {:tls_alert, ...}}
-  else
-    :ssl.connect(host, port, opts)
-  end
-end
-```
-
-#### Process Operations (continued)
-
-```elixir
-alias PropertyDamage.Nemesis.{ProcessKill, SlowIO}
-
-# Kill a specific named process
-%ProcessKill{target: {:name, :my_worker}, signal: :kill}
-
-# Kill random processes from supervised children
-%ProcessKill{target: {:supervised_by, MyApp.WorkerSupervisor}}
-
-# Slow down I/O operations
-%SlowIO{delay_ms: 100, target: :all}  # :reads, :writes, or :all
-
-# In your adapter:
-def read_data(path) do
-  if SlowIO.should_delay?(:reads), do: SlowIO.apply_delay()
-  File.read(path)
-end
-```
+> **Scope.** The built-in nemeses fault the SUT's *network path* only. They
+> deliberately do not stress the local BEAM/host (CPU, memory, OS resources),
+> kill local processes, or install a virtual clock: those affect the test
+> harness's own VM rather than an external SUT driven through an adapter. To
+> fault an in-process collaborator, do it in your own adapter/command code.
 
 #### Integration with Toxiproxy
 
@@ -881,10 +795,8 @@ context = %{
 > inject a real fault. Without it they currently fall back to a *simulated*
 > mode that emits the fault event but injects nothing at the transport layer,
 > so a test can pass with zero fault actually applied. Treat un-backed network
-> nemesis as documentation, not evidence, until the 6d nemesis bench audits
-> each operation. `CPUStress`/`MemoryPressure` act on the local BEAM and are
-> real; `ClockSkew` is a virtual clock that requires your adapter to read
-> `ClockSkew.now/0`.
+> nemesis as documentation, not evidence; the Redis bench's nemesis audit
+> exercises each operation against a live SUT.
 
 ### Adjusting Invariants During Faults
 

@@ -84,7 +84,19 @@ defmodule PropertyDamage.Export.Script.Curl do
     |> Enum.with_index()
     |> Enum.map_join("\n", fn {cmd, idx} ->
       is_failure_point = idx == report.failed_at_index
-      generate_step(cmd, idx, adapter, env_var, is_failure_point, verbose, var_map, extractions)
+      label = Map.get(report.command_labels, idx)
+
+      generate_step(
+        cmd,
+        idx,
+        adapter,
+        env_var,
+        is_failure_point,
+        verbose,
+        var_map,
+        extractions,
+        label
+      )
     end)
   end
 
@@ -96,13 +108,15 @@ defmodule PropertyDamage.Export.Script.Curl do
          is_failure_point,
          verbose,
          var_map,
-         extractions
+         extractions,
+         label
        ) do
     step_num = index + 1
     cmd_name = Common.command_name(command)
     http_spec = Common.get_http_spec(command, adapter, %{})
 
     failure_marker = if is_failure_point, do: " (FAILURE POINT)", else: ""
+    label_comment = if is_binary(label), do: "# #{label}\n", else: ""
 
     header =
       if verbose do
@@ -124,7 +138,7 @@ defmodule PropertyDamage.Export.Script.Curl do
 
     curl_cmd = generate_curl_command(command, http_spec, env_var, index, var_map, extractions)
 
-    header <> comment <> curl_cmd
+    header <> label_comment <> comment <> curl_cmd
   end
 
   defp generate_curl_command(command, nil, _env_var, index, _var_map, _extractions) do

@@ -13,9 +13,11 @@ defmodule PropertyDamage.Executor.Settle do
   # The framework push-settle await for command-correlated injector events
   # (Command.awaits/2, DR-030) will also live here.
 
+  alias PropertyDamage.Executor.Timeout
   alias PropertyDamage.Settle
 
-  # Execute command with settle logic for probes/async, sourced from the spec
+  # Execute command with settle logic for probes/async, sourced from the spec.
+  # Each adapter.execute/3 attempt is bounded by adapter.timeout/1 (DR-032).
   def execute_with_settle(command, adapter, user_context, runtime, spec) do
     execution = settle_execution(command, spec)
 
@@ -23,13 +25,13 @@ defmodule PropertyDamage.Executor.Settle do
       config = settle_config(command, spec)
 
       Settle.settle(
-        fn -> adapter.execute(command, user_context, runtime) end,
+        fn -> Timeout.execute(adapter, command, user_context, runtime) end,
         timeout_ms: config.timeout_ms,
         interval_ms: config.interval_ms,
         backoff: config.backoff
       )
     else
-      adapter.execute(command, user_context, runtime)
+      Timeout.execute(adapter, command, user_context, runtime)
     end
   end
 

@@ -141,8 +141,12 @@ defmodule PropertyDamage.External do
 
   Recognizes:
   - `%PropertyDamage.External{}` struct (always)
-  - Atoms configured in app config `:property_damage, :external_markers`
   - Values implementing `PropertyDamage.ExternalMarker` protocol
+
+  Atom markers (e.g. a domain library's `:__external__`) are recognized only
+  via an explicit markers list: pass them as the `external_markers:` run option,
+  which threads through to `external?/2`. There is no ambient app-config channel
+  (DR-032).
 
   ## Examples
 
@@ -152,17 +156,11 @@ defmodule PropertyDamage.External do
       iex> PropertyDamage.External.external?("some_id")
       false
 
-      # With app config: config :property_damage, external_markers: [:__external__]
-      # PropertyDamage.External.external?(:__external__)
-      # => true
+      iex> PropertyDamage.External.external?(:__external__)
+      false
   """
   @spec external?(term()) :: boolean()
   def external?(%__MODULE__{}), do: true
-
-  def external?(value) when is_atom(value) and not is_nil(value) do
-    markers = Application.get_env(:property_damage, :external_markers, [])
-    value in markers
-  end
 
   def external?(value) do
     PropertyDamage.ExternalMarker.external?(value)
@@ -171,7 +169,7 @@ defmodule PropertyDamage.External do
   @doc """
   Check if a value is an external marker with explicit markers list.
 
-  The explicit markers list is combined with app config markers.
+  The explicit markers list is the sole source of atom markers (DR-032).
 
   ## Examples
 
@@ -185,8 +183,7 @@ defmodule PropertyDamage.External do
   def external?(%__MODULE__{}, _markers), do: true
 
   def external?(value, markers) when is_atom(value) and not is_nil(value) and is_list(markers) do
-    app_markers = Application.get_env(:property_damage, :external_markers, [])
-    value in markers or value in app_markers
+    value in markers
   end
 
   def external?(value, _markers) do
@@ -196,7 +193,8 @@ defmodule PropertyDamage.External do
   @doc """
   Get paths to fields marked as external() in a struct module.
 
-  Uses app config markers only. For explicit markers, use `external_paths/2`.
+  Recognizes only intrinsic markers (`%PropertyDamage.External{}` and protocol
+  implementers). For atom markers, pass them explicitly via `external_paths/2`.
 
   Returns a list of paths where each path is a list of keys/indices.
   Paths are returned in depth-first order.
@@ -223,7 +221,7 @@ defmodule PropertyDamage.External do
   @doc """
   Get paths to fields marked as external() in a struct module with explicit markers.
 
-  The explicit markers list is combined with app config markers.
+  The explicit markers list is the sole source of atom markers (DR-032).
 
   ## Examples
 
