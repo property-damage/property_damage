@@ -85,6 +85,32 @@ defmodule PropertyDamage.Test.FailingInjectorAdapter do
   def to_event(_), do: :skip
 end
 
+defmodule PropertyDamage.Test.UnloadedEmitsInjector do
+  @moduledoc """
+  Injector for the "unloaded module" validation regression test.
+
+  Lives in test/support (so it is compiled to a findable `.beam` on the code
+  path, exactly like a real injector adapter) but is referenced only by that one
+  test, which purges it before validating. This mirrors the real case: an
+  injector passed by name that has not yet been loaded into the VM, which
+  `Code.ensure_loaded?` must load before `function_exported?/3` can see `@emits`.
+  """
+  use PropertyDamage.Adapter.Injector
+
+  alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+
+  @emits [ItemCreated, ItemViewed]
+
+  @impl true
+  def setup(config), do: {:ok, config}
+
+  @impl true
+  def teardown(_context), do: :ok
+
+  @impl true
+  def to_event(_payload), do: :skip
+end
+
 defmodule PropertyDamage.Test.NoEmitsInjectorAdapter do
   @moduledoc """
   Test injector adapter without @emits attribute.

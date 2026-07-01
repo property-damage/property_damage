@@ -194,9 +194,9 @@ defmodule PropertyDamage.Executor.Nemesis do
   # `restore_all_faults/3` runs at sequence end so no fault leaks past the run.
   #
   # inject/2 and restore/2 both run in the executor loop process (linear and
-  # branching alike execute commands synchronously here), so process-dictionary
-  # backed faults (CPUStress, MemoryPressure, ...) clean up in the same process
-  # that created them.
+  # branching alike execute commands synchronously here). The built-in nemeses
+  # fault the SUT's network path via Toxiproxy (reached through the adapter
+  # context); they hold no BEAM-local fault state.
 
   @doc false
   # Restore every auto-restoring fault whose duration has elapsed.

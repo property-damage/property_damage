@@ -5,8 +5,10 @@ defmodule PropertyDamage.ValidationTest do
 
   alias PropertyDamage.Test.{
     ExecutorModel,
+    FullModel,
     SimpleAdapter,
-    SimpleInjectorAdapter
+    SimpleInjectorAdapter,
+    UnloadedEmitsInjector
   }
 
   describe "validate!/3" do
@@ -66,6 +68,24 @@ defmodule PropertyDamage.ValidationTest do
         Validation.validate!(ExecutorModel, SimpleAdapter,
           injector_adapters: [SimpleInjectorAdapter]
         )
+    end
+
+    test "covers injectable events even when the injector module is not yet loaded" do
+      # Regression: an injector adapter is passed by name and may never have been
+      # called, so its module can be unloaded when validation runs.
+      # function_exported?/3 reports false for an unloaded module and does not
+      # load it, which made collect_emitted_events see no @emits and report every
+      # injectable event uncovered. collect_emitted_events must Code.ensure_loaded?
+      # first. FullModel.injectable_events == UnloadedEmitsInjector.@emits, so a
+      # false "uncovered" would raise here.
+      :code.purge(UnloadedEmitsInjector)
+      :code.delete(UnloadedEmitsInjector)
+      refute :erlang.module_loaded(UnloadedEmitsInjector)
+
+      assert {:ok, _warnings} =
+               Validation.validate!(FullModel, SimpleAdapter,
+                 injector_adapters: [UnloadedEmitsInjector]
+               )
     end
   end
 

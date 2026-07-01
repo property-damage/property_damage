@@ -115,19 +115,20 @@ defmodule PropertyDamage.Test.SimpleAdapter do
 
   @impl true
   def setup(config) do
-    # The adapter contract has no context threading across execute calls,
-    # so the counter lives in the executor's process dictionary, reset per
-    # run. Refs are item_0, item_1, ... and deterministic across runs.
-    Process.put({__MODULE__, :item_counter}, 0)
-    {:ok, config}
+    # execute/3 may run in a child process (DR-032 always-on timeout), so the
+    # per-run counter must be reachable cross-process: an atomics ref carried in
+    # user_context, not the run process's dictionary. Fresh per run, so refs are
+    # item_0, item_1, ... and deterministic. Map.new tolerates a keyword/empty
+    # config (e.g. from IEx.debug_command).
+    {:ok, config |> Map.new() |> Map.put(:item_counter, :atomics.new(1, []))}
   end
 
   @impl true
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, _context, _runtime) do
-    item_ref = "item_#{next_counter()}"
+  def execute(%CreateItem{name: name, quantity: qty}, context, _runtime) do
+    item_ref = "item_#{next_counter(context)}"
     {:ok, [%ItemCreated{item_ref: item_ref, name: name, quantity: qty}]}
   end
 
@@ -135,11 +136,7 @@ defmodule PropertyDamage.Test.SimpleAdapter do
     {:ok, [%ItemViewed{item_ref: ref}]}
   end
 
-  defp next_counter do
-    counter = Process.get({__MODULE__, :item_counter}, 0)
-    Process.put({__MODULE__, :item_counter}, counter + 1)
-    counter
-  end
+  defp next_counter(%{item_counter: ref}), do: :atomics.add_get(ref, 1, 1) - 1
 end
 
 defmodule PropertyDamage.Test.ErrorAdapter do
@@ -302,18 +299,16 @@ defmodule PropertyDamage.Test.ProbeAdapter do
 
   @impl true
   def setup(config) do
-    Process.put({__MODULE__, :item_counter}, 0)
-    {:ok, config}
+    # Cross-process counter (DR-032 always-on timeout); see SimpleAdapter.
+    {:ok, config |> Map.new() |> Map.put(:item_counter, :atomics.new(1, []))}
   end
 
   @impl true
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%CreateItem{name: name, quantity: qty}, _context, _runtime) do
-    counter = Process.get({__MODULE__, :item_counter}, 0)
-    Process.put({__MODULE__, :item_counter}, counter + 1)
-    item_ref = "item_#{counter}"
+  def execute(%CreateItem{name: name, quantity: qty}, %{item_counter: ref}, _runtime) do
+    item_ref = "item_#{:atomics.add_get(ref, 1, 1) - 1}"
     {:ok, [%ItemCreated{item_ref: item_ref, name: name, quantity: qty}]}
   end
 
@@ -439,17 +434,16 @@ defmodule PropertyDamage.Test.LinkAdapter do
 
   @impl true
   def setup(config) do
-    Process.put({__MODULE__, :counter}, 0)
-    {:ok, config}
+    # Cross-process counter (DR-032 always-on timeout); see SimpleAdapter.
+    {:ok, config |> Map.new() |> Map.put(:counter, :atomics.new(1, []))}
   end
 
   @impl true
   def teardown(_context), do: :ok
 
   @impl true
-  def execute(%Link{weight: weight}, _context, _runtime) do
-    counter = Process.get({__MODULE__, :counter}, 0)
-    Process.put({__MODULE__, :counter}, counter + 1)
+  def execute(%Link{weight: weight}, %{counter: ref}, _runtime) do
+    counter = :atomics.add_get(ref, 1, 1) - 1
     {:ok, [%LinkAdded{ref: "link_#{counter}", weight: weight}]}
   end
 end

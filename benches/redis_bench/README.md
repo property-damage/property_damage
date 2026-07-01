@@ -31,16 +31,14 @@ What it validates:
   PropertyDamage surfaces the fault honestly as a connection error rather than a
   false consistency violation. This is the oracle the nemesis audit builds on.
 
-- **Nemesis audit** (`test/nemesis_audit_test.exs`): proves each of the 10
-  built-in nemesis implementations either REALLY injects its fault (an
-  observable differential) or is honestly reported as `simulated: true`. The
-  network trio (`NetworkLatency` / `NetworkPartition` / `PacketLoss`) is driven
-  through the bench's real Toxiproxy proxy (round-trip time / connectivity
-  changes), the host-effect nemeses against real BEAM/host state (stress
-  processes, allocated memory, ETS tables, a killed pid), and the cooperative
-  ones (`ClockSkew` / `SlowIO` / `CertificateExpiry`) via their public API. Each
-  also verifies `restore/2` lifts the fault. This retires the Phase 2 "chaos
-  theater" finding.
+- **Nemesis audit** (`test/nemesis_audit_test.exs`): proves each built-in
+  nemesis either REALLY injects its fault (an observable differential) or is
+  honestly reported as `simulated: true`. The network trio (`NetworkLatency` /
+  `NetworkPartition` / `PacketLoss`) is driven through the bench's real
+  Toxiproxy proxy (round-trip time / connectivity changes), and each verifies
+  `restore/2` lifts the fault. This retires the Phase 2 "chaos theater" finding.
+  (The former host-effect / cooperative / one-shot nemeses were removed in
+  DR-032: they faulted the local BEAM, not the SUT.)
 
 ## Infrastructure
 

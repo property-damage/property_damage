@@ -115,7 +115,13 @@ defmodule PropertyDamage.FailureReport do
           # Invariant identity + coverage (DR-026)
           invariant_name: atom() | nil,
           invariant_description: String.t() | nil,
-          assertion_fires: %{{module(), atom()} => non_neg_integer()}
+          assertion_fires: %{{module(), atom()} => non_neg_integer()},
+
+          # Human-readable command labels (DR-028 amendment, P7): keyed by the
+          # flattened command index (the 0..n-1 index of `Sequence.to_list/1`,
+          # which every formatter/exporter iterates with). Only commands whose
+          # `label/2` returns a non-nil string appear.
+          command_labels: %{non_neg_integer() => String.t()}
         }
 
   defstruct seed: nil,
@@ -147,7 +153,8 @@ defmodule PropertyDamage.FailureReport do
             stacktrace: nil,
             invariant_name: nil,
             invariant_description: nil,
-            assertion_fires: %{}
+            assertion_fires: %{},
+            command_labels: %{}
 
   @doc """
   Create a new failure report from execution results.
@@ -207,6 +214,11 @@ defmodule PropertyDamage.FailureReport do
     {invariant_name, invariant_description} =
       resolve_invariant(Keyword.get(opts, :model), check_name)
 
+    # Lazily reconstruct each command's human-readable label (P7). Only runs at
+    # report construction (i.e. on a failure), so passing/generation runs pay
+    # nothing.
+    command_labels = build_command_labels(shrunk_sequence, Keyword.get(opts, :model))
+
     %__MODULE__{
       seed: seed,
       run_number: run_number,
@@ -237,8 +249,80 @@ defmodule PropertyDamage.FailureReport do
       stacktrace: stacktrace,
       invariant_name: invariant_name,
       invariant_description: invariant_description,
-      assertion_fires: Keyword.get(opts, :assertion_fires, %{})
+      assertion_fires: Keyword.get(opts, :assertion_fires, %{}),
+      command_labels: command_labels
     }
+  end
+
+  # Reconstruct command labels by folding the shrunk sequence through the model's
+  # command_sequence_projection, computing each command's `label/2` against the
+  # pre-state generation saw. The fold mirrors the generator's `update_state`
+  # (`Generator.update_state/4`): apply the command, then each simulated event.
+  #
+  # Commands are folded in flattened (`Sequence.to_list/1`) order, and labels are
+  # keyed by that flat index, so the displayed order a reader sees IS the order
+  # the pre-states were folded in. For a branching sequence this is a
+  # linearization (branch N's pre-state reflects earlier branches), matching the
+  # linear reproduction the report renders rather than any per-branch fork.
+  #
+  # Best-effort and never load-bearing: a model without the callback, or any
+  # error in user `label/2`/projection/simulator code, degrades to "no labels"
+  # rather than failing the report being built for an unrelated failure.
+  @spec build_command_labels(Sequence.t() | nil, module() | nil) ::
+          %{non_neg_integer() => String.t()}
+  defp build_command_labels(nil, _model), do: %{}
+  defp build_command_labels(_sequence, nil), do: %{}
+
+  defp build_command_labels(%Sequence{} = sequence, model) when is_atom(model) do
+    projection = model.command_sequence_projection()
+
+    {labels, _state} =
+      sequence
+      |> Sequence.to_list()
+      |> Enum.with_index()
+      |> Enum.reduce({%{}, projection.init()}, fn {command, index}, {acc, state} ->
+        acc =
+          case command_label(command, state) do
+            label when is_binary(label) -> Map.put(acc, index, label)
+            _ -> acc
+          end
+
+        {acc, advance_command_state(state, command, model, projection)}
+      end)
+
+    labels
+  rescue
+    _ -> %{}
+  end
+
+  # Call a command's optional `label/2` against its pre-state, guarding both the
+  # not-loaded-module case (see PropertyDamage.Linearization) and a raising user
+  # implementation.
+  defp command_label(command, state) when is_struct(command) do
+    module = command.__struct__
+
+    if Code.ensure_loaded?(module) and function_exported?(module, :label, 2) do
+      module.label(state, command)
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp command_label(_command, _state), do: nil
+
+  # Advance the projection exactly as generation does: apply the command, then
+  # the events the simulator predicts for it.
+  defp advance_command_state(state, command, model, projection) do
+    events =
+      if Code.ensure_loaded?(model) and function_exported?(model, :simulator, 0) do
+        model.simulator().simulate(command, state)
+      else
+        []
+      end
+
+    Enum.reduce(events, projection.apply(state, command), fn event, acc ->
+      projection.apply(acc, event)
+    end)
   end
 
   # Resolve the invariant a failing assertion (by its logical check name) checks,

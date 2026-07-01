@@ -208,10 +208,16 @@ defmodule PropertyDamage.Command do
   @callback generator(overrides :: map()) :: StreamData.t(map())
 
   @doc """
-  (Optional) Provides human-readable label for debugging output.
+  (Optional) Provides a human-readable label for a command instance.
 
   Labels can be static or dynamic based on state and command fields.
   Return `nil` for no special label.
+
+  When a failure report is built, the label is computed lazily (only on failure,
+  never during generation or passing runs) against the command's
+  `command_sequence_projection` pre-state, and rendered next to the command in
+  the failure report (terminal/markdown/JSON) and in every exported reproduction
+  (ExUnit, scripts, Livebook). A raising implementation degrades to no label.
 
   ## Example
 

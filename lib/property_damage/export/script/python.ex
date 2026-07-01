@@ -91,16 +91,27 @@ Run with: python #{Common.generate_filename(report, :python)}
     |> Enum.with_index()
     |> Enum.map_join("\n", fn {cmd, idx} ->
       is_failure_point = idx == report.failed_at_index
-      generate_step(cmd, idx, adapter, is_failure_point, verbose, var_map, extractions)
+      label = Map.get(report.command_labels, idx)
+      generate_step(cmd, idx, adapter, is_failure_point, verbose, var_map, extractions, label)
     end)
   end
 
-  defp generate_step(command, index, adapter, is_failure_point, verbose, var_map, extractions) do
+  defp generate_step(
+         command,
+         index,
+         adapter,
+         is_failure_point,
+         verbose,
+         var_map,
+         extractions,
+         label
+       ) do
     step_num = index + 1
     cmd_name = Common.command_name(command)
     http_spec = Common.get_http_spec(command, adapter, %{})
 
     failure_marker = if is_failure_point, do: " (FAILURE POINT)", else: ""
+    label_comment = if is_binary(label), do: "# #{label}\n", else: ""
 
     header =
       if verbose do
@@ -122,7 +133,7 @@ Run with: python #{Common.generate_filename(report, :python)}
 
     req_code = generate_requests_code(command, http_spec, index, var_map, extractions)
 
-    header <> comment <> req_code
+    header <> label_comment <> comment <> req_code
   end
 
   defp generate_requests_code(command, nil, _index, _var_map, _extractions) do

@@ -113,14 +113,7 @@ defmodule PropertyDamage.MixProject do
         "Fault Injection": [
           PropertyDamage.Nemesis.NetworkLatency,
           PropertyDamage.Nemesis.NetworkPartition,
-          PropertyDamage.Nemesis.PacketLoss,
-          PropertyDamage.Nemesis.MemoryPressure,
-          PropertyDamage.Nemesis.CPUStress,
-          PropertyDamage.Nemesis.ClockSkew,
-          PropertyDamage.Nemesis.ProcessKill,
-          PropertyDamage.Nemesis.SlowIO,
-          PropertyDamage.Nemesis.ResourceExhaustion,
-          PropertyDamage.Nemesis.CertificateExpiry
+          PropertyDamage.Nemesis.PacketLoss
         ],
         "Diagnostics & Reporting": [
           PropertyDamage.FailureReport,

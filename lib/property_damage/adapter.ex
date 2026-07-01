@@ -51,6 +51,38 @@ defmodule PropertyDamage.Adapter do
     framework affordances (`inject`, `start_poller`, `stutter`). See
     `PropertyDamage.Runtime`.
 
+  ## Execution process and the per-command timeout (DR-032)
+
+  Every command is run under `timeout/1` as a hard wall-clock bound: if your
+  `execute/3` hangs (a wedged HTTP call, a deadlocked query), the run reports a
+  `PropertyDamage.CommandTimeoutError` instead of hanging forever. Enforcing a
+  hard timeout requires running `execute/3` in a separate, killable process, so
+  **`execute/3` runs in a short-lived child process, not the run process** (on
+  every command, not only slow ones).
+
+  This is almost always invisible, and it is the correct mental model for an
+  adapter regardless: your SUT state belongs in the SUT, and your adapter state
+  belongs in `user_context` (from `setup/1`) and the `runtime`, never in the
+  run process itself. Concretely:
+
+  - **Connection-ownership libraries keep working.** Ecto's `SQL.Sandbox` and
+    `Mox` resolve access through the `$callers` chain, which is propagated into
+    the child, so a sandboxed or mock-backed adapter needs no changes. (If you
+    spawn your *own* processes inside `execute/3` with raw `spawn`, propagate
+    `$callers` or use `Task` so they inherit it, exactly as in any test.)
+  - **Do not rely on the run process's process dictionary.** Mutable state that
+    must persist across commands belongs in a process or table referenced from
+    `user_context` (an `Agent`/`GenServer` pid, an ETS table id, an `:atomics`
+    or `:counters` ref), not `Process.put/get`. A value put in the dictionary
+    during one command is not visible to the next.
+  - **Do not rely on `self()` identity.** `self()` inside `execute/3` is the
+    child, not the run process. If the SUT must call back a stable pid, register
+    a long-lived process in `setup/1` and pass its pid through `user_context`.
+
+  A timed-out command is killed mid-flight, so if it was part-way through a
+  non-atomic external mutation, partial effects may remain in the SUT. That is
+  inherent to any hard timeout and is part of the failure to investigate.
+
   ## Example
 
       defmodule MyTest.APIAdapter do
@@ -266,8 +298,11 @@ defmodule PropertyDamage.Adapter do
   Return the timeout for executing a command.
 
   This callback allows adapters to specify how long a command execution
-  should be allowed to run before timing out. This is particularly useful
-  for load testing where hung commands should not cause unbounded pool growth.
+  should be allowed to run before timing out. It bounds every command in an
+  ordinary `PropertyDamage.run/1` (DR-032), as well as load-test workers; a
+  command that exceeds it fails with `PropertyDamage.CommandTimeoutError`
+  instead of hanging. See "Execution process and the per-command timeout" in
+  the module doc for the cross-process consequence of enforcing it.
 
   Integer values are interpreted as seconds. Use tuples for other units:
   - `30` - 30 seconds

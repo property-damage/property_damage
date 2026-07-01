@@ -21,6 +21,7 @@ defmodule PropertyDamage.Executor.Stutter do
 
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Executor
+  alias PropertyDamage.Executor.Timeout
   alias PropertyDamage.Stutter
 
   @doc false
@@ -106,9 +107,9 @@ defmodule PropertyDamage.Executor.Stutter do
         stutter_ctx = Stutter.build_context(attempt, true, idempotency_key)
         runtime = Executor.inject_unavailable_runtime("during stutter retries", stutter_ctx)
 
-        # Execute retry
+        # Execute retry (bounded by adapter.timeout/1, DR-032)
         result =
-          case adapter.execute(resolved_command, adapter_context, runtime) do
+          case Timeout.execute(adapter, resolved_command, adapter_context, runtime) do
             {:ok, retry_events} ->
               {:ok, attempt, retry_events}
 

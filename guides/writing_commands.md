@@ -408,13 +408,20 @@ static spec keys.
 
 ### `label/2`
 
-Provide human-readable labels for debugging:
+Provide a human-readable label for a command instance:
 
 ```elixir
 def label(_state, %__MODULE__{order_ref: ref}) do
   "view order #{inspect(ref)}"
 end
 ```
+
+The label is computed lazily when a failure report is built (never during
+generation or passing runs), against the command's `command_sequence_projection`
+pre-state. It is rendered next to the command in the failure report (terminal,
+markdown, JSON) and as a comment in every exported reproduction (ExUnit, scripts,
+Livebook), so a minimal repro reads like `# view order ...` next to the offending
+step. Return `nil` (or omit the callback) for no label.
 
 ### `idempotency_key/1`
 

@@ -7,8 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Core adapter timeout (DR-032).** Each `adapter.execute/3` call in an ordinary
+  `PropertyDamage.run/1` is now bounded by `adapter.timeout/1` (default 30s, per-command
+  override), not just in load-test workers. A wedged `execute/3` now fails with
+  `PropertyDamage.CommandTimeoutError` instead of hanging the run. Enforcing a hard
+  wall-clock bound requires a separately-killable process, so `execute/3` now runs in
+  a short-lived child process. Ecto `SQL.Sandbox` and Mox adapters are unaffected (they
+  resolve ownership through the `$callers` chain, which is propagated), but adapters that
+  stashed state in the run process's process dictionary or relied on `self()` identity must
+  thread that state through `user_context` instead. See the `PropertyDamage.Adapter` module
+  docs, "Execution process and the per-command timeout".
+- **Nemesis generation dispatch (DR-031).** A Nemesis module listed in a Model's
+  `commands/0` is now selected by weight during sequence generation and produces
+  instances via its `new!/2` callback (Nemesis modules implement `new!/2`, not
+  `generator/1`). Its `precondition/1` acts as a generation-time filter, the
+  Nemesis analogue of a command's `when:`. Previously a weighted Nemesis would
+  fall through to `generator/1` and crash; Nemesis commands only reached the
+  runtime when pre-baked into a sequence. A selected Nemesis without `new!/2` now
+  raises a clear error instead of an opaque `UndefinedFunctionError`.
+- **`Command.awaits/2` (DR-030):** a new optional, per-instance callback that
+  correlates inbound injector events back to the command that owns them. It
+  returns `[%PropertyDamage.Await{match}]`, where `match` is a predicate
+  `(event -> boolean)` built from the command's resolved fields and captured
+  response. A matching injector event is attributed to the declaring command's
+  `command_index` (instead of the ambient `nil`), persistently for the rest of
+  the run; overlapping matchers resolve to the first-registered with a logged
+  diagnostic. This is **pure correlation**: judgment over a command's correlated
+  set is expressed in projections (a `@poll_state` for liveness, a
+  `@trigger`/`@invariant` for safety/cardinality), reusing the existing assertion
+  machinery rather than a separate await loop. This implements, on the correct
+  (semantic) surface, the capability the removed `Adapter.register_handler/2`
+  advertised.
+- **`Command.label/2` rendering (DR-028 amendment):** the optional per-instance
+  `label/2` callback, previously declared but consumed nowhere, is now wired into
+  failure reporting. When a `FailureReport` is built, each command's label is
+  computed lazily (zero cost on passing/generation runs) against its
+  `command_sequence_projection` pre-state, reconstructed by folding the shrunk
+  sequence in flattened order with the same recipe generation uses. Non-nil
+  labels render next to their command in the failure report (terminal, markdown,
+  JSON) and as comments in every exported reproduction (ExUnit, curl/bash,
+  Python, Elixir, Livebook). Labels are stored in a new `FailureReport`
+  `command_labels` field keyed by the flattened (`Sequence.to_list/1`) command
+  index. Best-effort: a raising `label/2` degrades to no annotation rather than
+  failing the report.
+
 ### Changed
 
+- **BREAKING (DR-032):** `external_markers` is now an explicit run option only;
+  the `config :property_damage, external_markers: [...]` app-config channel is no
+  longer consulted. `PropertyDamage.External.external?/1` no longer recognizes
+  configured atom markers (only the `%External{}` struct and `ExternalMarker`
+  protocol implementers are intrinsic); `external?/2` and `external_paths/2` use
+  the explicit list as their sole source. Pass markers via
+  `PropertyDamage.run(..., external_markers: [:__external__])` instead of app
+  config. This completes the ambient-state removal begun in DR-027 and DR-029.
 - **BREAKING (DR-028):** `command_spec/1` is now the single surface for a command's
   *static* metadata. The per-metadata `Command` callbacks are removed:
   `semantics/0`, `settle_config/0`, `read_only?/0`, `idempotent?/0`,
@@ -56,21 +110,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that command's index, so the shrinker keeps locality. Code that asserted poll
   timeouts report `failed_at_index: nil` must update.
 
-### Added
+### Removed
 
-- **`Command.awaits/2` (DR-030):** a new optional, per-instance callback that
-  correlates inbound injector events back to the command that owns them. It
-  returns `[%PropertyDamage.Await{match}]`, where `match` is a predicate
-  `(event -> boolean)` built from the command's resolved fields and captured
-  response. A matching injector event is attributed to the declaring command's
-  `command_index` (instead of the ambient `nil`), persistently for the rest of
-  the run; overlapping matchers resolve to the first-registered with a logged
-  diagnostic. This is **pure correlation**: judgment over a command's correlated
-  set is expressed in projections (a `@poll_state` for liveness, a
-  `@trigger`/`@invariant` for safety/cardinality), reusing the existing assertion
-  machinery rather than a separate await loop. This implements, on the correct
-  (semantic) surface, the capability the removed `Adapter.register_handler/2`
-  advertised.
+- **BREAKING (DR-032):** removed 7 of the 10 built-in nemeses, keeping only the
+  three that fault the SUT's network path: `NetworkPartition`, `NetworkLatency`,
+  `PacketLoss`. Removed `ClockSkew`, `SlowIO`, `CertificateExpiry` (cooperative:
+  a virtual clock / flags the adapter reads via a global no-arg API),
+  `CPUStress`, `MemoryPressure`, `ResourceExhaustion` (host-effect: stress the
+  *local* BEAM/host), and `ProcessKill` (kills a *local* process). These only
+  affected the test harness's own VM, not an external System Under Test driven
+  through an adapter, so they tested the wrong thing; the host-stress ones could
+  also destabilize the run (and, under the new core timeout, manufacture false
+  `CommandTimeoutError`s). To fault an in-process collaborator, do it in your own
+  adapter/command code. This also removes the last shared-global process-dict
+  fault state (the original "per-instance handle" plan is superseded by removal).
+
+### Fixed
+
+- **Injector-adapter validation no longer spuriously raises.** When an injector
+  adapter is passed by module name, `PropertyDamage.run/1` now
+  `Code.ensure_loaded?`s it before reflecting on its `@emits`, so an
+  as-yet-unloaded injector is no longer treated as declaring zero injectable
+  events. Previously a valid event could be rejected with a false "not covered by
+  any InjectorAdapter `@emits`" error purely because the adapter module had not
+  been loaded at reflection time.
 
 ## [0.2.0] - 2026-06-25
 
