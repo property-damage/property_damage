@@ -736,372 +736,39 @@ defmodule PropertyDamage.Executor do
           | active_resource_pollers: state.active_resource_pollers ++ started_resource_pollers
         }
 
+        # Lexical inputs the shared post-events pipeline closes over. Both
+        # success arms run the identical pipeline (verified byte-for-byte on the
+        # unfolded code), so both pass this context to handle_command_events/2.
+        event_ctx = %{
+          state: state,
+          command: command,
+          resolved_command: resolved_command,
+          index: index,
+          model: model,
+          adapter: adapter,
+          adapter_context: adapter_context,
+          event_queue: event_queue,
+          mock_registry: mock_registry,
+          placeholder_registry: placeholder_registry,
+          injected_events: injected_events,
+          base_projections: base_projections,
+          base_event_log: base_event_log,
+          assertion_mode: assertion_mode,
+          assertion_failures: assertion_failures,
+          started_resource_pollers: started_resource_pollers
+        }
+
         case result do
+          # Sync commands return {:ok, events}; probe/async commands that settle
+          # return {:settled, events} (Settle passes it through). The post-events
+          # pipeline is identical for both, so both delegate to the one shared
+          # implementation (handle_command_events/2 below). The non-success arms
+          # stay here so a {:retry, _} from a sync command is still rejected.
           {:ok, events} when is_list(events) ->
-            # 4b. Capture external values from real events (DR-021): resolve the
-            # placeholders this command produces, found by its structured position.
-            # Injected events come first so externals they carry resolve too.
-            updated_registry =
-              capture_externals(
-                injected_events ++ events,
-                state.current_position,
-                placeholder_registry
-              )
-
-            # 5. Update projections with command
-            projections = Events.update_projections(base_projections, resolved_command)
-
-            # 6. Update projections with returned events and record in log
-            {projections, event_log} =
-              Events.process_events(
-                events,
-                :command,
-                index,
-                base_event_log,
-                projections,
-                state.branch_id
-              )
-
-            # 6.5. DR-030: register this command's awaits matchers (post-capture,
-            #      so the match predicate can close over captured response values).
-            #      Persist them on the state so later drains (including finalize)
-            #      still correlate, then drain with the full registry in effect.
-            state = register_awaits(state, resolved_command, index, model, projections)
-
-            # 7. Drain and process injector events. DR-025: capture the
-            #    pre-drain projections/log so check_async can assert each async
-            #    event on the state it produced and locate a violation at the
-            #    observing event's command_index.
-            projs_before_async = projections
-            log_before_async = event_log
-
-            {projections, event_log} =
-              Events.process_injector_events(
-                event_queue,
-                event_log,
-                projections,
-                state.branch_id,
-                state.await_matchers
-              )
-
-            # 7.5. Flush and process mock-injected events
-            {projections, event_log} =
-              Events.process_mock_events(
-                mock_registry,
-                index,
-                event_log,
-                projections,
-                state.branch_id
-              )
-
-            # 7.6. Update mock projections
-            if mock_registry do
-              MockServiceRegistry.update_projections(mock_registry, projections)
-            end
-
-            # 7.7. DR-025: evaluate @trigger every: assertions on the async
-            #      events just folded (injector + mock), incrementally.
-            case check_async(
-                   model,
-                   projs_before_async,
-                   log_before_async,
-                   event_log,
-                   state.assertion_counters,
-                   assertion_mode,
-                   assertion_failures
-                 ) do
-              {:halt, async_name, async_reason, _idx, async_counters} ->
-                failed_state =
-                  put_state(state, %{
-                    event_log: event_log,
-                    projections: projections,
-                    placeholder_registry: updated_registry,
-                    step_count: state.step_count + 1,
-                    assertion_counters: async_counters,
-                    active_resource_pollers:
-                      Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                  })
-
-                {:error, {:assertion_failed, async_name, async_reason}, failed_state}
-
-              {:ok, async_counters, async_failures} ->
-                # 8. Run checks
-                check_ctx = %{
-                  command: resolved_command,
-                  events: events,
-                  command_index: index,
-                  step_count: state.step_count + 1,
-                  projections: projections,
-                  branch_id: state.branch_id
-                }
-
-                case run_checks(
-                       model,
-                       projections,
-                       check_ctx,
-                       async_counters,
-                       assertion_mode,
-                       async_failures
-                     ) do
-                  {:ok, assertion_counters, updated_failures} ->
-                    # 9. Execute stutter retries if configured
-                    case PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
-                           command,
-                           resolved_command,
-                           events,
-                           index,
-                           event_log,
-                           state,
-                           adapter,
-                           adapter_context
-                         ) do
-                      {:ok, final_event_log} ->
-                        new_state =
-                          put_state(state, %{
-                            event_log: final_event_log,
-                            projections: projections,
-                            placeholder_registry: updated_registry,
-                            step_count: state.step_count + 1,
-                            assertion_counters: assertion_counters,
-                            assertion_failures: updated_failures,
-                            active_resource_pollers:
-                              Map.get(state, :active_resource_pollers, []) ++
-                                started_resource_pollers
-                          })
-
-                        # Spawn pollers for any @poll_state assertions triggered by these events
-                        new_state = maybe_spawn_pollers(new_state, events, model, index)
-                        new_state = update_poller_state_getters(new_state)
-
-                        {:ok, new_state}
-
-                      {:error, :idempotency_violation, violation} ->
-                        failed_state =
-                          put_state(state, %{
-                            event_log: event_log,
-                            projections: projections,
-                            placeholder_registry: updated_registry,
-                            step_count: state.step_count + 1,
-                            assertion_counters: assertion_counters,
-                            assertion_failures: updated_failures,
-                            active_resource_pollers:
-                              Map.get(state, :active_resource_pollers, []) ++
-                                started_resource_pollers
-                          })
-
-                        {:error, {:idempotency_violation, violation}, failed_state}
-
-                      {:error, :stutter_execution_failed, details} ->
-                        failed_state =
-                          put_state(state, %{
-                            event_log: event_log,
-                            projections: projections,
-                            placeholder_registry: updated_registry,
-                            step_count: state.step_count + 1,
-                            assertion_counters: assertion_counters,
-                            assertion_failures: updated_failures,
-                            active_resource_pollers:
-                              Map.get(state, :active_resource_pollers, []) ++
-                                started_resource_pollers
-                          })
-
-                        {:error, {:stutter_execution_failed, details}, failed_state}
-                    end
-
-                  {:error, assertion_name, reason, assertion_counters} ->
-                    failed_state =
-                      put_state(state, %{
-                        event_log: event_log,
-                        projections: projections,
-                        placeholder_registry: updated_registry,
-                        step_count: state.step_count + 1,
-                        assertion_counters: assertion_counters,
-                        active_resource_pollers:
-                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                      })
-
-                    {:error, {:assertion_failed, assertion_name, reason}, failed_state}
-                end
-            end
+            handle_command_events(events, event_ctx)
 
           {:settled, events} ->
-            # Probe/async settled successfully - treat same as {:ok, events}
-            # Capture external values from real events (DR-021), keyed by the
-            # command's structured position. Injected events come first so
-            # externals they carry resolve too.
-            updated_registry =
-              capture_externals(
-                injected_events ++ events,
-                state.current_position,
-                placeholder_registry
-              )
-
-            projections = Events.update_projections(base_projections, resolved_command)
-
-            {projections, event_log} =
-              Events.process_events(
-                events,
-                :command,
-                index,
-                base_event_log,
-                projections,
-                state.branch_id
-              )
-
-            # DR-030: register this command's awaits matchers before draining
-            # (see the {:ok, events} branch).
-            state = register_awaits(state, resolved_command, index, model, projections)
-
-            projs_before_async = projections
-            log_before_async = event_log
-
-            {projections, event_log} =
-              Events.process_injector_events(
-                event_queue,
-                event_log,
-                projections,
-                state.branch_id,
-                state.await_matchers
-              )
-
-            # Flush and process mock-injected events
-            {projections, event_log} =
-              Events.process_mock_events(
-                mock_registry,
-                index,
-                event_log,
-                projections,
-                state.branch_id
-              )
-
-            # Update mock projections
-            if mock_registry do
-              MockServiceRegistry.update_projections(mock_registry, projections)
-            end
-
-            # DR-025: assert @trigger every: assertions on the async events folded
-            # above, incrementally, before the command's own checks.
-            case check_async(
-                   model,
-                   projs_before_async,
-                   log_before_async,
-                   event_log,
-                   state.assertion_counters,
-                   assertion_mode,
-                   assertion_failures
-                 ) do
-              {:halt, async_name, async_reason, _idx, async_counters} ->
-                failed_state =
-                  put_state(state, %{
-                    event_log: event_log,
-                    projections: projections,
-                    placeholder_registry: updated_registry,
-                    step_count: state.step_count + 1,
-                    assertion_counters: async_counters,
-                    active_resource_pollers:
-                      Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                  })
-
-                {:error, {:assertion_failed, async_name, async_reason}, failed_state}
-
-              {:ok, async_counters, async_failures} ->
-                check_ctx = %{
-                  command: resolved_command,
-                  events: events,
-                  command_index: index,
-                  step_count: state.step_count + 1,
-                  projections: projections,
-                  branch_id: state.branch_id
-                }
-
-                case run_checks(
-                       model,
-                       projections,
-                       check_ctx,
-                       async_counters,
-                       assertion_mode,
-                       async_failures
-                     ) do
-                  {:ok, assertion_counters, updated_failures} ->
-                    # Execute stutter retries if configured (same as {:ok, events} path)
-                    case PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
-                           command,
-                           resolved_command,
-                           events,
-                           index,
-                           event_log,
-                           state,
-                           adapter,
-                           adapter_context
-                         ) do
-                      {:ok, final_event_log} ->
-                        new_state =
-                          put_state(state, %{
-                            event_log: final_event_log,
-                            projections: projections,
-                            placeholder_registry: updated_registry,
-                            step_count: state.step_count + 1,
-                            assertion_counters: assertion_counters,
-                            assertion_failures: updated_failures,
-                            active_resource_pollers:
-                              Map.get(state, :active_resource_pollers, []) ++
-                                started_resource_pollers
-                          })
-
-                        # Spawn pollers for any @poll_state assertions triggered by these events
-                        new_state = maybe_spawn_pollers(new_state, events, model, index)
-                        new_state = update_poller_state_getters(new_state)
-
-                        {:ok, new_state}
-
-                      {:error, :idempotency_violation, violation} ->
-                        failed_state =
-                          put_state(state, %{
-                            event_log: event_log,
-                            projections: projections,
-                            placeholder_registry: updated_registry,
-                            step_count: state.step_count + 1,
-                            assertion_counters: assertion_counters,
-                            assertion_failures: updated_failures,
-                            active_resource_pollers:
-                              Map.get(state, :active_resource_pollers, []) ++
-                                started_resource_pollers
-                          })
-
-                        {:error, {:idempotency_violation, violation}, failed_state}
-
-                      {:error, :stutter_execution_failed, details} ->
-                        failed_state =
-                          put_state(state, %{
-                            event_log: event_log,
-                            projections: projections,
-                            placeholder_registry: updated_registry,
-                            step_count: state.step_count + 1,
-                            assertion_counters: assertion_counters,
-                            assertion_failures: updated_failures,
-                            active_resource_pollers:
-                              Map.get(state, :active_resource_pollers, []) ++
-                                started_resource_pollers
-                          })
-
-                        {:error, {:stutter_execution_failed, details}, failed_state}
-                    end
-
-                  {:error, assertion_name, reason, assertion_counters} ->
-                    failed_state =
-                      put_state(state, %{
-                        event_log: event_log,
-                        projections: projections,
-                        placeholder_registry: updated_registry,
-                        step_count: state.step_count + 1,
-                        assertion_counters: assertion_counters,
-                        active_resource_pollers:
-                          Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
-                      })
-
-                    {:error, {:assertion_failed, assertion_name, reason}, failed_state}
-                end
-            end
+            handle_command_events(events, event_ctx)
 
           {:timeout, last_reason} ->
             {:error, {:settle_timeout, last_reason}, state_with_pollers}
@@ -1129,6 +796,203 @@ defmodule PropertyDamage.Executor do
 
       {:error, reason} ->
         {:error, {:ref_resolution_error, reason}, state}
+    end
+  end
+
+  # Shared post-events pipeline for both command success arms: {:ok, events} from
+  # sync commands and {:settled, events} from probe/async commands that settled
+  # via Settle. The two arms were byte-for-byte identical (only their comments
+  # differed), so this is the single implementation of the pipeline. `ctx` is the
+  # event_ctx map assembled in execute_regular_command, carrying the lexical
+  # inputs both arms used.
+  defp handle_command_events(events, ctx) do
+    %{
+      state: state,
+      command: command,
+      resolved_command: resolved_command,
+      index: index,
+      model: model,
+      adapter: adapter,
+      adapter_context: adapter_context,
+      event_queue: event_queue,
+      mock_registry: mock_registry,
+      placeholder_registry: placeholder_registry,
+      injected_events: injected_events,
+      base_projections: base_projections,
+      base_event_log: base_event_log,
+      assertion_mode: assertion_mode,
+      assertion_failures: assertion_failures,
+      started_resource_pollers: started_resource_pollers
+    } = ctx
+
+    # 4b. Capture external values from real events (DR-021): resolve the
+    # placeholders this command produces, found by its structured position.
+    # Injected events come first so externals they carry resolve too.
+    updated_registry =
+      capture_externals(
+        injected_events ++ events,
+        state.current_position,
+        placeholder_registry
+      )
+
+    # 5. Update projections with command
+    projections = Events.update_projections(base_projections, resolved_command)
+
+    # 6. Update projections with returned events and record in log
+    {projections, event_log} =
+      Events.process_events(
+        events,
+        :command,
+        index,
+        base_event_log,
+        projections,
+        state.branch_id
+      )
+
+    # 6.5. DR-030: register this command's awaits matchers (post-capture,
+    #      so the match predicate can close over captured response values).
+    #      Persist them on the state so later drains (including finalize)
+    #      still correlate, then drain with the full registry in effect.
+    state = register_awaits(state, resolved_command, index, model, projections)
+
+    # 7. Drain and process injector events. DR-025: capture the
+    #    pre-drain projections/log so check_async can assert each async
+    #    event on the state it produced and locate a violation at the
+    #    observing event's command_index.
+    projs_before_async = projections
+    log_before_async = event_log
+
+    {projections, event_log} =
+      Events.process_injector_events(
+        event_queue,
+        event_log,
+        projections,
+        state.branch_id,
+        state.await_matchers
+      )
+
+    # 7.5. Flush and process mock-injected events
+    {projections, event_log} =
+      Events.process_mock_events(
+        mock_registry,
+        index,
+        event_log,
+        projections,
+        state.branch_id
+      )
+
+    # 7.6. Update mock projections
+    if mock_registry do
+      MockServiceRegistry.update_projections(mock_registry, projections)
+    end
+
+    # Pack the post-events State. Every outcome path below writes the same
+    # State fields; only the event_log (final_event_log on the success path),
+    # the assertion counters, and whether assertion_failures is set differ.
+    # put_state/2 is struct!/2, so omitting :assertion_failures preserves the
+    # prior value (the async-halt and check-fail paths deliberately do not
+    # overwrite it). This closure is the single pack site the two former arms
+    # mirrored across ten put_state calls.
+    pack = fn fields ->
+      put_state(
+        state,
+        Map.merge(
+          %{
+            event_log: event_log,
+            projections: projections,
+            placeholder_registry: updated_registry,
+            step_count: state.step_count + 1,
+            active_resource_pollers:
+              Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
+          },
+          fields
+        )
+      )
+    end
+
+    # 7.7. DR-025: evaluate @trigger every: assertions on the async
+    #      events just folded (injector + mock), incrementally.
+    case check_async(
+           model,
+           projs_before_async,
+           log_before_async,
+           event_log,
+           state.assertion_counters,
+           assertion_mode,
+           assertion_failures
+         ) do
+      {:halt, async_name, async_reason, _idx, async_counters} ->
+        failed_state = pack.(%{assertion_counters: async_counters})
+        {:error, {:assertion_failed, async_name, async_reason}, failed_state}
+
+      {:ok, async_counters, async_failures} ->
+        # 8. Run checks
+        check_ctx = %{
+          command: resolved_command,
+          events: events,
+          command_index: index,
+          step_count: state.step_count + 1,
+          projections: projections,
+          branch_id: state.branch_id
+        }
+
+        case run_checks(
+               model,
+               projections,
+               check_ctx,
+               async_counters,
+               assertion_mode,
+               async_failures
+             ) do
+          {:ok, assertion_counters, updated_failures} ->
+            # 9. Execute stutter retries if configured
+            case PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
+                   command,
+                   resolved_command,
+                   events,
+                   index,
+                   event_log,
+                   state,
+                   adapter,
+                   adapter_context
+                 ) do
+              {:ok, final_event_log} ->
+                new_state =
+                  pack.(%{
+                    event_log: final_event_log,
+                    assertion_counters: assertion_counters,
+                    assertion_failures: updated_failures
+                  })
+
+                # Spawn pollers for any @poll_state assertions triggered by these events
+                new_state = maybe_spawn_pollers(new_state, events, model, index)
+                new_state = update_poller_state_getters(new_state)
+
+                {:ok, new_state}
+
+              {:error, :idempotency_violation, violation} ->
+                failed_state =
+                  pack.(%{
+                    assertion_counters: assertion_counters,
+                    assertion_failures: updated_failures
+                  })
+
+                {:error, {:idempotency_violation, violation}, failed_state}
+
+              {:error, :stutter_execution_failed, details} ->
+                failed_state =
+                  pack.(%{
+                    assertion_counters: assertion_counters,
+                    assertion_failures: updated_failures
+                  })
+
+                {:error, {:stutter_execution_failed, details}, failed_state}
+            end
+
+          {:error, assertion_name, reason, assertion_counters} ->
+            failed_state = pack.(%{assertion_counters: assertion_counters})
+            {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+        end
     end
   end
 
