@@ -519,72 +519,10 @@ defmodule PropertyDamage.Executor do
     }
   end
 
-  # ============================================================================
-  # Stepping API (used by PropertyDamage.Replay)
-  # ============================================================================
-
-  @doc false
-  # Build a fresh executor state for stepping a sequence one command at a time.
-  # The caller owns the adapter lifecycle (setup/teardown) and the event queue.
-  @spec init_state(module(), keyword()) :: map()
-  def init_state(model, opts \\ []) do
-    build_initial_state(
-      model,
-      Keyword.get(opts, :event_queue),
-      Keyword.get(opts, :stutter_config),
-      Keyword.get(opts, :mock_registry),
-      Keyword.get(opts, :assertion_mode, :halt),
-      Keyword.get(opts, :external_markers, []),
-      Keyword.get(opts, :placeholder_registry),
-      Keyword.get(opts, :rng_seed)
-    )
-  end
-
-  @doc false
-  # Execute exactly one command against an existing executor state, capturing
-  # the pre-command projections first (as the linear loop does). This is the
-  # single per-command engine path: ref/placeholder resolution, settle, nemesis,
-  # injector/mock events, projections, assertions, stutter, and pollers all run
-  # exactly as in a full run. Returns {:ok, new_state} or
-  # {:error, reason, failed_state}.
-  @spec step_command(
-          struct() | map(),
-          non_neg_integer(),
-          map(),
-          module(),
-          module(),
-          map(),
-          pid() | nil
-        ) ::
-          {:ok, map()} | {:error, term(), map()}
-  def step_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    # Replay steps a linear sequence, so positions are {:prefix, index} (DR-021).
-    state_with_before = %{
-      state
-      | projections_before: state.projections,
-        current_position: {:prefix, index}
-    }
-
-    execute_command(
-      command,
-      index,
-      state_with_before,
-      model,
-      adapter,
-      adapter_context,
-      event_queue
-    )
-  end
-
-  @doc false
-  # Stop any pollers spawned during stepping. Best-effort cleanup for the
-  # stepping shell; a full run finalizes pollers through finalize_result/2.
-  @spec stop_pollers(map()) :: :ok
-  def stop_pollers(state) do
-    Enum.each(Map.get(state, :active_pollers, []), &StatePoller.stop/1)
-    Enum.each(Map.get(state, :active_resource_pollers, []), &ResourcePoller.stop/1)
-    :ok
-  end
+  # The per-command stepping seam (init_state / step / stop_pollers) lives in
+  # PropertyDamage.Executor.Stepping, the documented public interface. It builds
+  # on the engine primitives below (build_initial_state / execute_command), which
+  # are also shared with Executor.Branching (DR-029).
 
   # Execute a single command
   # Shared with PropertyDamage.Executor.Branching (prefix/branch/suffix). DR-029.
