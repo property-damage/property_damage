@@ -299,3 +299,30 @@ Each `adapter.execute/3` call SHALL be subject to a configurable per-command wal
 - **WHEN** an adapter overrides the timeout for a specific command type
 - **THEN** that command SHALL use the overridden timeout value
 - **AND** the timeout MAY be specified as an integer (seconds) or a tuple with units (e.g., `{500, :milliseconds}`)
+
+### Requirement: Reproducible Run Inputs (DR-034)
+
+Every run SHALL be identified by a base `seed`, a `run_number`, and a `run_nonce`. The base seed and run number SHALL determine the generated plan: the effective seed is `Generator.run_seed(seed, run_number)`, and the plan is a pure function of that effective seed. The `run_nonce` SHALL be an integer that is independent of plan generation and SHALL seed only the resolution of run-scoped minted values (DR-034, command domain). Each of `seed` and `run_nonce` SHALL be resolved as `explicit option || environment variable || random default`, reading `PD_SEED` and `PD_RUN_NONCE` respectively, mirroring how ExUnit selects and prints a random seed. The chosen `seed`, `run_number`, and `run_nonce` SHALL be recorded on the run's trace and report so the exact execution is reproducible. `mix test` SHALL NOT be required to forward a custom flag: ad-hoc reproduction SHALL be available through the environment variables, and programmatic reproduction through the persisted report.
+
+#### Scenario: Random nonce by default, recorded
+
+- **WHEN** a run executes without an explicit `run_nonce` or `PD_RUN_NONCE`
+- **THEN** the framework SHALL choose a random `run_nonce`
+- **AND** SHALL record it on the trace/report so the run can be reproduced
+
+#### Scenario: Pinned nonce reproduces minted values
+
+- **WHEN** a run executes against a pristine SUT with a `run_nonce` (option or `PD_RUN_NONCE`) equal to a prior run's recorded nonce
+- **THEN** all run-scoped minted values SHALL be regenerated identically to that prior run
+
+#### Scenario: Nonce is independent of the plan
+
+- **WHEN** two runs share `seed` and `run_number` but differ in `run_nonce`
+- **THEN** they SHALL execute the identical generated plan (identical `original_sequence`)
+- **AND** SHALL differ only in run-scoped minted values
+
+#### Scenario: Nonce is inert without run-scoped values
+
+- **WHEN** a model declares no run-scoped minted fields
+- **THEN** the `run_nonce` SHALL have no effect on execution
+- **AND** reproduction from `seed` and `run_number` alone SHALL be exact

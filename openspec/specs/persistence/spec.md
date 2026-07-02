@@ -186,3 +186,18 @@ The system SHALL support step-by-step re-execution of a saved command sequence f
 - **AND** the system SHALL refuse to start when the working tree has uncommitted changes, and SHALL error cleanly on an invalid `--good`/`--bad` ref, in both cases without leaving a bisect in progress
 - **AND** the system SHALL copy the failure file outside the working tree before bisecting (so it survives checkouts of commits where it is not tracked) and SHALL always run `git bisect reset` afterward, restoring the original branch on success, error, and exception
 - **AND** the system SHALL replay the saved concrete shrunk sequence rather than re-generating from the seed, so the search remains valid across commits that changed generators, command weights, or `when:` predicates
+
+### Requirement: Run Trace Persistence (DR-033)
+
+A `RunTrace` SHALL be serializable to and loadable from disk independently of a `FailureReport`, so that traces captured in separate processes or on separate commits (for example, a passing run on one CI job and a failing run on another) can be collected and compared later. Trace serialization SHALL record the run identity including `run_nonce` (DR-034) and the source revision, and SHALL carry a format version. When a `FailureReport` composes a `RunTrace` (DR-033), the persisted report format SHALL advance to version 4; older report files SHALL continue to load under this domain's tolerant-loading rules.
+
+#### Scenario: Trace round-trips independently
+
+- **WHEN** a `RunTrace` is saved and later loaded, possibly in a different process
+- **THEN** the loaded trace SHALL reproduce the executed commands, event log, identity, and outcome sufficient for comparison
+
+#### Scenario: Report format version advances
+
+- **WHEN** a `FailureReport` composing a `RunTrace` is persisted
+- **THEN** the file SHALL be written at format version 4
+- **AND** pre-v4 report files SHALL still load without data loss

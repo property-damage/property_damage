@@ -225,3 +225,38 @@ Commands SHALL define WHAT operations exist and their fields. Models SHALL defin
 - **WHEN** a command is defined with its generator and struct
 - **THEN** it contains no references to HTTP, database, or other transport mechanisms
 - **AND** all transport concerns are handled by the Adapter layer
+
+### Requirement: Client-Minted Run-Scoped Values (DR-034)
+
+A command generator MAY mark a field as run-scoped via `PropertyDamage.mint_per_run/1`, meaning the field's value SHALL be minted client-side at execution rather than fixed during symbolic generation. In the symbolic plan the field SHALL be a placeholder, so the plan stays a pure function of the effective seed and remains positionally identical across runs that share it. At execution the value SHALL be resolved deterministically from `(run_nonce, command_index, field)` using seeded generation only (never wall-clock reads, `:rand` at call time, `UUID.uuid4/0`, or other unrecorded entropy), so it is unique per run yet reproducible given the recorded `run_nonce`. `mint_per_run/1` SHALL contrast with `external/0`: `external` captures a value the SUT returns, whereas `mint_per_run` mints a value the client sends.
+
+#### Scenario: Run-scoped field is a placeholder symbolically
+
+- **WHEN** a generator field is `mint_per_run(:uuid)`
+- **THEN** the generated plan SHALL carry a placeholder at that field, not a concrete value
+- **AND** the plan SHALL be identical across runs that share the effective seed
+
+#### Scenario: Resolved deterministically at execution
+
+- **WHEN** the command executes with a given `run_nonce`
+- **THEN** the field SHALL resolve to a value derived purely from `(run_nonce, command_index, field)`
+- **AND** re-executing with the same `run_nonce` SHALL produce the same value
+
+#### Scenario: Distinct across runs on a shared SUT
+
+- **WHEN** the same plan is executed multiple times with distinct `run_nonce` values against a SUT that is not reset between runs
+- **THEN** each execution SHALL mint distinct values, avoiding duplicate-identity collisions
+
+### Requirement: Value Provenance Classification (DR-034)
+
+Each value appearing in a run's executed commands and events SHALL be classifiable into one of three provenance classes, and the framework SHALL make this classification available to consumers (notably run comparison): `plan-generated` (a pure function of the effective seed), `run-scoped` (minted via `mint_per_run`, a function of the `run_nonce`), and `server-resolved` (captured from SUT output, e.g. via `external`). Provenance SHALL determine how a cross-run difference is interpreted: a differing `plan-generated` value across runs that claim the same plan is a comparability violation; a differing `run-scoped` value is expected by design; a differing `server-resolved` value is an observed behavioral difference.
+
+#### Scenario: Provenance available to consumers
+
+- **WHEN** a value is resolved during execution
+- **THEN** the framework SHALL record enough provenance for a consumer to classify it as plan-generated, run-scoped, or server-resolved
+
+#### Scenario: Differing plan-generated value signals incomparability
+
+- **WHEN** two runs assert the same plan identity but a plan-generated value differs between them
+- **THEN** the framework SHALL treat the runs as not comparable
