@@ -105,7 +105,6 @@ defmodule PropertyDamage.Diagram do
     opts =
       @default_options
       |> Keyword.merge(opts)
-      |> Keyword.put(:failed_at_index, report.failed_at_index)
       |> Keyword.put(:failure_message, report.failure_message)
       |> Keyword.put(:failure_type, report.failure_type)
 
@@ -115,7 +114,9 @@ defmodule PropertyDamage.Diagram do
 
     opts = Keyword.put(opts, :title, title)
 
-    generate(report.shrunk_sequence, report.event_log, format, opts)
+    # `steps/1` attributes events and the failure point by branch-aware position;
+    # each Step carries its command, entries, and failed? flag.
+    report |> FailureReport.steps() |> render(format, opts)
   end
 
   @doc """
@@ -136,15 +137,18 @@ defmodule PropertyDamage.Diagram do
   def generate(sequence, event_log, format, opts \\ []) do
     opts = Keyword.merge(@default_options, opts)
     opts = Keyword.update(opts, :title, @default_title, fn t -> t || @default_title end)
-    commands = Sequence.to_list(sequence)
-    events_by_command = group_events_by_command(event_log)
 
-    case format do
-      :mermaid -> generate_mermaid(commands, events_by_command, opts)
-      :plantuml -> generate_plantuml(commands, events_by_command, opts)
-      :websequence -> generate_websequence(commands, events_by_command, opts)
-    end
+    # No report here, so labels are empty; the failure point (if any) is passed
+    # through opts. FailureReport owns the grouping so both diagram entry points
+    # share one branch-aware step timeline.
+    sequence
+    |> FailureReport.build_steps(event_log, %{}, Keyword.get(opts, :failed_at_index))
+    |> render(format, opts)
   end
+
+  defp render(steps, :mermaid, opts), do: generate_mermaid(steps, opts)
+  defp render(steps, :plantuml, opts), do: generate_plantuml(steps, opts)
+  defp render(steps, :websequence, opts), do: generate_websequence(steps, opts)
 
   @doc """
   Generate diagrams in all supported formats.
@@ -183,10 +187,9 @@ defmodule PropertyDamage.Diagram do
   # Mermaid Format
   # ============================================================================
 
-  defp generate_mermaid(commands, events_by_command, opts) do
+  defp generate_mermaid(steps, opts) do
     title = Keyword.get(opts, :title)
     show_state = Keyword.get(opts, :show_state)
-    failed_at = Keyword.get(opts, :failed_at_index)
     failure_message = Keyword.get(opts, :failure_message)
 
     participants =
@@ -204,14 +207,7 @@ defmodule PropertyDamage.Diagram do
       end
 
     interactions =
-      commands
-      |> Enum.with_index()
-      |> Enum.map_join("\n", fn {cmd, idx} ->
-        events = Map.get(events_by_command, idx, [])
-        is_failure = idx == failed_at
-
-        generate_mermaid_interaction(cmd, events, idx, is_failure, failure_message, opts)
-      end)
+      Enum.map_join(steps, "\n", &generate_mermaid_interaction(&1, failure_message, opts))
 
     """
     ```mermaid
@@ -223,24 +219,24 @@ defmodule PropertyDamage.Diagram do
     """
   end
 
-  defp generate_mermaid_interaction(cmd, events, idx, is_failure, failure_message, opts) do
-    cmd_name = command_name(cmd)
-    cmd_params = command_params(cmd, opts)
+  defp generate_mermaid_interaction(step, failure_message, opts) do
+    cmd_name = command_name(step.command)
+    cmd_params = command_params(step.command, opts)
     max_len = Keyword.get(opts, :max_value_length)
 
     cmd_str = truncate("#{cmd_name}(#{cmd_params})", max_len)
 
     # Command line
     cmd_line =
-      if is_failure do
-        "    Note over Test,SUT: ❌ FAILURE at command #{idx}\n    Test-xSUT: #{cmd_str}"
+      if step.failed? do
+        "    Note over Test,SUT: ❌ FAILURE at command #{step.flattened_index}\n    Test-xSUT: #{cmd_str}"
       else
         "    Test->>SUT: #{cmd_str}"
       end
 
     # Event lines
     event_lines =
-      events
+      step.entries
       |> Enum.map_join("\n", fn entry ->
         event_name = event_name(entry.event)
         event_params = event_params(entry.event, opts)
@@ -260,7 +256,7 @@ defmodule PropertyDamage.Diagram do
 
     # Failure note
     failure_note =
-      if is_failure and failure_message do
+      if step.failed? and failure_message do
         "\n    Note right of SUT: #{truncate(failure_message, 40)}"
       else
         ""
@@ -275,10 +271,9 @@ defmodule PropertyDamage.Diagram do
   # PlantUML Format
   # ============================================================================
 
-  defp generate_plantuml(commands, events_by_command, opts) do
+  defp generate_plantuml(steps, opts) do
     title = Keyword.get(opts, :title)
     show_state = Keyword.get(opts, :show_state)
-    failed_at = Keyword.get(opts, :failed_at_index)
     failure_message = Keyword.get(opts, :failure_message)
 
     participants =
@@ -296,14 +291,7 @@ defmodule PropertyDamage.Diagram do
       end
 
     interactions =
-      commands
-      |> Enum.with_index()
-      |> Enum.map_join("\n", fn {cmd, idx} ->
-        events = Map.get(events_by_command, idx, [])
-        is_failure = idx == failed_at
-
-        generate_plantuml_interaction(cmd, events, idx, is_failure, failure_message, opts)
-      end)
+      Enum.map_join(steps, "\n", &generate_plantuml_interaction(&1, failure_message, opts))
 
     """
     @startuml
@@ -316,18 +304,18 @@ defmodule PropertyDamage.Diagram do
     """
   end
 
-  defp generate_plantuml_interaction(cmd, events, idx, is_failure, failure_message, opts) do
-    cmd_name = command_name(cmd)
-    cmd_params = command_params(cmd, opts)
+  defp generate_plantuml_interaction(step, failure_message, opts) do
+    cmd_name = command_name(step.command)
+    cmd_params = command_params(step.command, opts)
     max_len = Keyword.get(opts, :max_value_length)
 
     cmd_str = truncate("#{cmd_name}(#{cmd_params})", max_len)
 
     # Command line
     cmd_line =
-      if is_failure do
+      if step.failed? do
         """
-        hnote over Test,SUT #ffcccc : FAILURE at command #{idx}
+        hnote over Test,SUT #ffcccc : FAILURE at command #{step.flattened_index}
         Test -x SUT : #{cmd_str}
         """
       else
@@ -336,7 +324,7 @@ defmodule PropertyDamage.Diagram do
 
     # Event lines
     event_lines =
-      events
+      step.entries
       |> Enum.map_join("\n", fn entry ->
         event_name = event_name(entry.event)
         event_params = event_params(entry.event, opts)
@@ -355,7 +343,7 @@ defmodule PropertyDamage.Diagram do
 
     # Failure note
     failure_note =
-      if is_failure and failure_message do
+      if step.failed? and failure_message do
         "\nnote right of SUT #ffcccc\n  #{truncate(failure_message, 60)}\nend note"
       else
         ""
@@ -370,44 +358,36 @@ defmodule PropertyDamage.Diagram do
   # WebSequence (sequencediagram.org) Format
   # ============================================================================
 
-  defp generate_websequence(commands, events_by_command, opts) do
+  defp generate_websequence(steps, opts) do
     title = Keyword.get(opts, :title)
-    failed_at = Keyword.get(opts, :failed_at_index)
     failure_message = Keyword.get(opts, :failure_message)
 
     header = "title #{title}\n"
 
     interactions =
-      commands
-      |> Enum.with_index()
-      |> Enum.map_join("\n", fn {cmd, idx} ->
-        events = Map.get(events_by_command, idx, [])
-        is_failure = idx == failed_at
-
-        generate_websequence_interaction(cmd, events, idx, is_failure, failure_message, opts)
-      end)
+      Enum.map_join(steps, "\n", &generate_websequence_interaction(&1, failure_message, opts))
 
     header <> "\n" <> interactions
   end
 
-  defp generate_websequence_interaction(cmd, events, idx, is_failure, failure_message, opts) do
-    cmd_name = command_name(cmd)
-    cmd_params = command_params(cmd, opts)
+  defp generate_websequence_interaction(step, failure_message, opts) do
+    cmd_name = command_name(step.command)
+    cmd_params = command_params(step.command, opts)
     max_len = Keyword.get(opts, :max_value_length)
 
     cmd_str = truncate("#{cmd_name}(#{cmd_params})", max_len)
 
     # Command line
     cmd_line =
-      if is_failure do
-        "note over Test,SUT: FAILURE at command #{idx}\nTest->SUT: #{cmd_str}"
+      if step.failed? do
+        "note over Test,SUT: FAILURE at command #{step.flattened_index}\nTest->SUT: #{cmd_str}"
       else
         "Test->SUT: #{cmd_str}"
       end
 
     # Event lines
     event_lines =
-      events
+      step.entries
       |> Enum.map_join("\n", fn entry ->
         event_name = event_name(entry.event)
         event_params = event_params(entry.event, opts)
@@ -417,7 +397,7 @@ defmodule PropertyDamage.Diagram do
 
     # Failure note
     failure_note =
-      if is_failure and failure_message do
+      if step.failed? and failure_message do
         "\nnote right of SUT: #{truncate(failure_message, 40)}"
       else
         ""
@@ -432,12 +412,6 @@ defmodule PropertyDamage.Diagram do
   # Helpers
   # ============================================================================
 
-  defp group_events_by_command(event_log) do
-    event_log
-    |> Enum.filter(&(&1.command_index != nil))
-    |> Enum.group_by(& &1.command_index)
-  end
-
   defp command_name(cmd) do
     cmd.__struct__
     |> Module.split()
@@ -450,6 +424,7 @@ defmodule PropertyDamage.Diagram do
     cmd
     |> Map.from_struct()
     |> Enum.reject(fn {k, _} -> k == :__struct__ end)
+    |> Enum.sort_by(fn {k, _} -> to_string(k) end)
     |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{format_value(v)}" end)
     |> truncate(max_len)
   end
@@ -466,6 +441,7 @@ defmodule PropertyDamage.Diagram do
     event
     |> Map.from_struct()
     |> Enum.reject(fn {k, _} -> k == :__struct__ end)
+    |> Enum.sort_by(fn {k, _} -> to_string(k) end)
     |> Enum.take(3)
     |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{format_value(v)}" end)
     |> truncate(max_len)

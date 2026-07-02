@@ -360,6 +360,62 @@ defmodule PropertyDamage.ExportTest do
     end
   end
 
+  # Trap 5: python already resolved placeholders nested in body collections;
+  # elixir/livebook fell through to inspect (dumping the raw struct) and curl
+  # raised in Jason.encode!. The StepPlan resolved-arg view tags placeholders
+  # recursively, so all four now render the nested value as a variable ref.
+  describe "to_script/3 - nested-collection placeholders resolve in every target" do
+    setup do
+      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
+
+      report = %FailureReport{
+        seed: 1,
+        failed_at_index: 1,
+        failure_type: :check_failed,
+        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+
+      %{report: report}
+    end
+
+    test "elixir renders the nested placeholder as a refs lookup, not the struct",
+         %{report: report} do
+      script =
+        Export.to_script(report, :elixir,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ ~s(refs["provisioned_id_0"])
+      refute script =~ "Placeholder"
+    end
+
+    test "livebook renders the nested placeholder as a refs lookup, not the struct",
+         %{report: report} do
+      notebook =
+        Export.to_livebook(report, base_url: "http://localhost:4000", adapter: TestHTTPAdapter)
+
+      assert notebook =~ ~s(state.refs["provisioned_id_0"])
+      refute notebook =~ "Placeholder"
+    end
+
+    test "curl renders the nested placeholder as a variable ref instead of raising",
+         %{report: report} do
+      script =
+        Export.to_script(report, :curl,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "$provisioned_id_0"
+      refute script =~ "Placeholder"
+    end
+  end
+
   describe "to_script/3 - reproduce filename header" do
     alias PropertyDamage.Export.Common
 
@@ -636,6 +692,104 @@ defmodule PropertyDamage.ExportTest do
 
       assert comment =~ "CreateAccount"
       assert comment =~ "currency"
+    end
+  end
+
+  # ============================================================================
+  # Characterization Goldens
+  # ============================================================================
+  #
+  # Byte-for-byte guard for the StepPlan refactor (F3): the generated output of
+  # every script/notebook target must not drift for the non-nested reports.
+  # Re-baseline deliberately with CAPTURE_GOLDENS=1 (only when an output change
+  # is intended and reviewed).
+
+  describe "characterization goldens (StepPlan refactor guard)" do
+    @golden_dir Path.join([__DIR__, "..", "support", "fixtures", "export"])
+
+    defp golden_path(name), do: Path.join(@golden_dir, name)
+
+    # The reproduce filename embeds a hash of the report, and DR-021 reports
+    # carry a Placeholder whose id is make_ref/0, so that hash is non-deterministic
+    # across runs. Neutralize it so the golden captures everything else verbatim.
+    defp normalize(output) do
+      Regex.replace(~r/(reproduce_\d+_)[0-9a-f]+/, output, "\\1HASH")
+    end
+
+    defp check_golden(name, actual) do
+      actual = normalize(actual)
+
+      if System.get_env("CAPTURE_GOLDENS") == "1" do
+        File.mkdir_p!(@golden_dir)
+        File.write!(golden_path(name), actual)
+        assert true
+      else
+        expected = File.read!(golden_path(name))
+
+        assert actual == expected,
+               "#{name} drifted from golden. Re-baseline with CAPTURE_GOLDENS=1 only if the change is intended."
+      end
+    end
+
+    # A DR-021 producer/consumer report: placeholder consumed in a path param
+    # (Consume) and produced by an upstream command (Provision).
+    defp dr021_report do
+      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      commands = [%Provision{spec: nil}, %Consume{target: ph}]
+
+      %FailureReport{
+        seed: 1,
+        failed_at_index: 1,
+        failure_type: :check_failed,
+        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+    end
+
+    for {format, ext} <- [{:curl, "sh"}, {:python, "py"}, {:elixir, "exs"}] do
+      test "#{format} output is byte-identical for a plain multi-command report" do
+        report = create_test_failure_report()
+
+        actual =
+          Export.to_script(report, unquote(format),
+            base_url: "http://localhost:4000",
+            adapter: TestHTTPAdapter
+          )
+
+        check_golden("plain.#{unquote(ext)}", actual)
+      end
+
+      test "#{format} output is byte-identical for a DR-021 producer/consumer report" do
+        actual =
+          Export.to_script(dr021_report(), unquote(format),
+            base_url: "http://localhost:4000",
+            adapter: TestHTTPAdapter
+          )
+
+        check_golden("dr021.#{unquote(ext)}", actual)
+      end
+    end
+
+    test "livebook output is byte-identical for a plain multi-command report" do
+      actual =
+        Export.to_livebook(create_test_failure_report(),
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      check_golden("plain.livemd", actual)
+    end
+
+    test "livebook output is byte-identical for a DR-021 producer/consumer report" do
+      actual =
+        Export.to_livebook(dr021_report(),
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      check_golden("dr021.livemd", actual)
     end
   end
 end

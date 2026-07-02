@@ -1,8 +1,8 @@
 defmodule PropertyDamage.Export.LiveBook do
   @moduledoc false
 
-  alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Placeholder}
+  alias PropertyDamage.Export.{Common, HTTPSpec, StepPlan}
+  alias PropertyDamage.FailureReport
 
   @doc """
   Generates a LiveBook notebook from a failure report.
@@ -23,16 +23,14 @@ defmodule PropertyDamage.Export.LiveBook do
     include_state = Keyword.get(opts, :include_state_tracking, true)
 
     metadata = Common.extract_metadata(report)
-    commands = Common.extract_commands(report)
     title = Keyword.get(opts, :title, generate_title(metadata))
 
-    var_map = Common.placeholder_var_map(commands)
-    extractions = Common.producer_extractions(commands)
+    steps = StepPlan.build(report, adapter)
 
     sections = [
       generate_header(title, metadata),
       generate_setup_section(base_url, include_state),
-      generate_command_sections(report, adapter, include_state, var_map, extractions)
+      generate_command_sections(steps, include_state)
     ]
 
     sections =
@@ -103,77 +101,34 @@ defmodule PropertyDamage.Export.LiveBook do
   # Command Sections
   # ============================================================================
 
-  defp generate_command_sections(report, adapter, include_state, var_map, extractions) do
+  defp generate_command_sections(steps, include_state) do
     header = "\n## Command Sequence\n"
-
-    sections =
-      report
-      |> FailureReport.steps()
-      |> Enum.map(fn step ->
-        generate_command_section(
-          step.command,
-          step.flattened_index,
-          adapter,
-          step.failed?,
-          include_state,
-          var_map,
-          extractions,
-          step.label
-        )
-      end)
-
+    sections = Enum.map(steps, &generate_command_section(&1, include_state))
     [header | sections]
   end
 
-  defp generate_command_section(
-         command,
-         index,
-         adapter,
-         is_failure_point,
-         include_state,
-         var_map,
-         extractions,
-         label
-       ) do
-    step_num = index + 1
-    cmd_name = Common.command_name(command)
-    http_spec = Common.get_http_spec(command, adapter, %{})
+  defp generate_command_section(%StepPlan.Step{} = step, include_state) do
+    step_num = step.flattened_index + 1
+    cmd_name = Common.command_name(step.command)
 
-    failure_marker = if is_failure_point, do: " (FAILURE)", else: ""
-    label_suffix = if is_binary(label), do: ": #{label}", else: ""
-    warning = if is_failure_point, do: "\n> ⚠️ **This command caused the failure**\n", else: ""
+    failure_marker = if step.failed?, do: " (FAILURE)", else: ""
+    label_suffix = if is_binary(step.label), do: ": #{step.label}", else: ""
+    warning = if step.failed?, do: "\n> ⚠️ **This command caused the failure**\n", else: ""
 
-    code =
-      generate_livebook_code(
-        command,
-        http_spec,
-        index,
-        include_state,
-        is_failure_point,
-        var_map,
-        extractions
-      )
+    code = generate_livebook_code(step, include_state)
 
     """
     ### Step #{step_num}: #{cmd_name}#{label_suffix}#{failure_marker}
     #{warning}
     ```elixir
-    # Command: #{Common.command_to_comment(command)}
+    # Command: #{Common.command_to_comment(step.command)}
     #{code}
     ```
     """
   end
 
-  defp generate_livebook_code(
-         command,
-         nil,
-         _index,
-         _include_state,
-         _is_failure,
-         _var_map,
-         _extractions
-       ) do
-    cmd_name = Common.command_name(command)
+  defp generate_livebook_code(%StepPlan.Step{http_spec: nil} = step, _include_state) do
+    cmd_name = Common.command_name(step.command)
 
     """
     # TODO: Add http_spec/2 to your adapter for #{cmd_name}
@@ -181,18 +136,10 @@ defmodule PropertyDamage.Export.LiveBook do
     """
   end
 
-  defp generate_livebook_code(
-         command,
-         %HTTPSpec{} = spec,
-         index,
-         include_state,
-         is_failure,
-         var_map,
-         extractions
-       ) do
+  defp generate_livebook_code(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step, include_state) do
     method = spec.method
-    path = generate_path_code(spec, index, var_map)
-    req_opts = build_req_opts(spec, command, index, var_map)
+    path = generate_path_code(spec.path, step.resolved_path_params)
+    req_opts = build_req_opts(spec, step.resolved_body)
 
     req_call =
       case method do
@@ -206,13 +153,13 @@ defmodule PropertyDamage.Export.LiveBook do
 
     state_update =
       if include_state do
-        generate_state_update(index, extractions)
+        generate_state_update(step)
       else
         ""
       end
 
     failure_check =
-      if is_failure do
+      if step.failed? do
         """
 
         # Check the state at failure point
@@ -234,13 +181,13 @@ defmodule PropertyDamage.Export.LiveBook do
   # Path and Body Generation
   # ============================================================================
 
-  defp generate_path_code(%HTTPSpec{path: path, path_params: params}, _index, var_map) do
+  defp generate_path_code(path, params) do
     if map_size(params) == 0 do
       inspect(path)
     else
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
-          replacement = generate_value_interpolation(value, var_map)
+          replacement = generate_value_interpolation(value)
           String.replace(acc, ":#{key}", "\#{#{replacement}}")
         end)
 
@@ -248,21 +195,20 @@ defmodule PropertyDamage.Export.LiveBook do
     end
   end
 
-  defp generate_value_interpolation(%Placeholder{} = ph, var_map) do
-    "state.refs[#{inspect(Map.fetch!(var_map, ph.id))}]"
+  defp generate_value_interpolation(%StepPlan.Var{name: name}) do
+    "state.refs[#{inspect(name)}]"
   end
 
-  defp generate_value_interpolation(value, _var_map) do
+  defp generate_value_interpolation(value) do
     inspect(value)
   end
 
-  defp build_req_opts(spec, command, index, var_map) do
+  defp build_req_opts(spec, resolved_body) do
     opts = []
 
     opts =
-      if HTTPSpec.has_body?(spec) do
-        body = generate_body_map(spec.body, command, index, var_map)
-        opts ++ ["json: #{body}"]
+      if resolved_body do
+        opts ++ ["json: #{generate_body_map(resolved_body)}"]
       else
         opts
       end
@@ -282,38 +228,51 @@ defmodule PropertyDamage.Export.LiveBook do
     end
   end
 
-  defp generate_body_map(body, command, index, var_map) do
+  defp generate_body_map(body) do
     fields =
-      body
-      |> Enum.map_join(", ", fn {key, _default} ->
-        value = Map.get(command, key)
-        formatted = format_body_value(value, index, var_map)
-        "#{key}: #{formatted}"
-      end)
+      Enum.map_join(body, ", ", fn {key, value} -> "#{key}: #{format_body_value(value)}" end)
 
     "%{#{fields}}"
   end
 
-  defp format_body_value(%Placeholder{} = ph, _cmd_index, var_map) do
-    "state.refs[#{inspect(Map.fetch!(var_map, ph.id))}]"
+  # A variable ref renders as a `state.refs[...]` lookup. Collections carrying a
+  # ref are rendered element-by-element so nested placeholders resolve; those
+  # without a ref fall through to `inspect/1`, preserving prior output exactly.
+  defp format_body_value(%StepPlan.Var{name: name}), do: "state.refs[#{inspect(name)}]"
+
+  defp format_body_value(value) when is_list(value) do
+    if StepPlan.contains_var?(value) do
+      "[" <> Enum.map_join(value, ", ", &format_body_value/1) <> "]"
+    else
+      inspect(value)
+    end
   end
 
-  defp format_body_value(value, _cmd_index, _var_map) when is_atom(value), do: inspect(value)
-  defp format_body_value(value, _cmd_index, _var_map), do: inspect(value)
+  defp format_body_value(value) when is_map(value) and not is_struct(value) do
+    if StepPlan.contains_var?(value) do
+      "%{" <> Enum.map_join(value, ", ", &format_body_pair/1) <> "}"
+    else
+      inspect(value)
+    end
+  end
+
+  defp format_body_value(value), do: inspect(value)
+
+  defp format_body_pair({key, value}) when is_atom(key), do: "#{key}: #{format_body_value(value)}"
+
+  defp format_body_pair({key, value}),
+    do: "#{format_body_value(key)} => #{format_body_value(value)}"
 
   # ============================================================================
   # State Tracking (DR-021 placeholder extraction)
   # ============================================================================
 
-  defp generate_state_update(index, extractions) do
-    bindings = Map.get(extractions, index, [])
-
+  defp generate_state_update(%StepPlan.Step{} = step) do
     puts =
-      bindings
-      |> Enum.map_join("\n", fn {ph, var} ->
+      Enum.map_join(step.producer_bindings, "\n", fn {path, var} ->
         key = inspect(var)
 
-        "state = put_in(state, [:refs, #{key}], get_in(resp.body, #{ex_access(ph.path)}))"
+        "state = put_in(state, [:refs, #{key}], get_in(resp.body, #{ex_access(path)}))"
       end)
 
     if puts == "" do

@@ -1,8 +1,8 @@
 defmodule PropertyDamage.Export.Script.Curl do
   @moduledoc false
 
-  alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Placeholder}
+  alias PropertyDamage.Export.{Common, HTTPSpec, StepPlan}
+  alias PropertyDamage.FailureReport
 
   @doc """
   Generates a Bash/curl script from a failure report.
@@ -22,18 +22,13 @@ defmodule PropertyDamage.Export.Script.Curl do
     verbose = Keyword.get(opts, :verbose, true)
 
     metadata = Common.extract_metadata(report)
-    commands = Common.extract_commands(report)
-
-    # DR-021 placeholder wiring: var name per consumed external value, and the
-    # values each producer command must extract from its response.
-    var_map = Common.placeholder_var_map(commands)
-    extractions = Common.producer_extractions(commands)
+    steps = StepPlan.build(report, adapter)
 
     [
       generate_shebang(),
       generate_header(metadata, report),
       generate_setup(env_var, base_url),
-      generate_steps(report, adapter, env_var, verbose, var_map, extractions),
+      generate_steps(steps, env_var, verbose),
       generate_footer(metadata)
     ]
     |> Enum.join("\n")
@@ -79,41 +74,16 @@ defmodule PropertyDamage.Export.Script.Curl do
     """
   end
 
-  defp generate_steps(report, adapter, env_var, verbose, var_map, extractions) do
-    report
-    |> FailureReport.steps()
-    |> Enum.map_join("\n", fn step ->
-      generate_step(
-        step.command,
-        step.flattened_index,
-        adapter,
-        env_var,
-        step.failed?,
-        verbose,
-        var_map,
-        extractions,
-        step.label
-      )
-    end)
+  defp generate_steps(steps, env_var, verbose) do
+    Enum.map_join(steps, "\n", &generate_step(&1, env_var, verbose))
   end
 
-  defp generate_step(
-         command,
-         index,
-         adapter,
-         env_var,
-         is_failure_point,
-         verbose,
-         var_map,
-         extractions,
-         label
-       ) do
-    step_num = index + 1
-    cmd_name = Common.command_name(command)
-    http_spec = Common.get_http_spec(command, adapter, %{})
+  defp generate_step(%StepPlan.Step{} = step, env_var, verbose) do
+    step_num = step.flattened_index + 1
+    cmd_name = Common.command_name(step.command)
 
-    failure_marker = if is_failure_point, do: " (FAILURE POINT)", else: ""
-    label_comment = if is_binary(label), do: "# #{label}\n", else: ""
+    failure_marker = if step.failed?, do: " (FAILURE POINT)", else: ""
+    label_comment = if is_binary(step.label), do: "# #{step.label}\n", else: ""
 
     header =
       if verbose do
@@ -128,20 +98,18 @@ defmodule PropertyDamage.Export.Script.Curl do
 
     comment =
       if verbose do
-        "# Command: #{Common.command_to_comment(command)}\n"
+        "# Command: #{Common.command_to_comment(step.command)}\n"
       else
         ""
       end
 
-    curl_cmd = generate_curl_command(command, http_spec, env_var, index, var_map, extractions)
-
-    header <> label_comment <> comment <> curl_cmd
+    header <> label_comment <> comment <> generate_curl_command(step, env_var)
   end
 
-  defp generate_curl_command(command, nil, _env_var, index, _var_map, _extractions) do
+  defp generate_curl_command(%StepPlan.Step{http_spec: nil} = step, _env_var) do
     # No HTTPSpec available, generate placeholder
-    cmd_name = Common.command_name(command)
-    var_name = "RESP#{index + 1}"
+    cmd_name = Common.command_name(step.command)
+    var_name = "RESP#{step.flattened_index + 1}"
 
     """
     # TODO: Add http_spec/2 to your adapter for #{cmd_name}
@@ -150,10 +118,10 @@ defmodule PropertyDamage.Export.Script.Curl do
     """
   end
 
-  defp generate_curl_command(command, %HTTPSpec{} = spec, env_var, index, var_map, extractions) do
-    var_name = "RESP#{index + 1}"
+  defp generate_curl_command(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step, env_var) do
+    var_name = "RESP#{step.flattened_index + 1}"
     method = HTTPSpec.method_string(spec)
-    path = resolve_path_with_refs(spec, var_map)
+    path = resolve_path(spec.path, step.resolved_path_params)
 
     curl_parts = [
       "curl -s",
@@ -171,9 +139,8 @@ defmodule PropertyDamage.Export.Script.Curl do
 
     # Add body if present
     curl_parts =
-      if HTTPSpec.has_body?(spec) do
-        body = resolve_body_with_refs(spec.body, command, var_map)
-        curl_parts ++ ["-d '#{body}'"]
+      if step.resolved_body do
+        curl_parts ++ ["-d '#{resolve_body_json(step.resolved_body)}'"]
       else
         curl_parts
       end
@@ -181,7 +148,7 @@ defmodule PropertyDamage.Export.Script.Curl do
     curl_line = Enum.join(curl_parts, " \\\n  ")
 
     # Extract any external values this command produces (DR-021).
-    extraction = generate_placeholder_extraction(index, extractions)
+    extraction = generate_placeholder_extraction(step)
 
     """
     #{var_name}=$(#{curl_line})
@@ -193,58 +160,49 @@ defmodule PropertyDamage.Export.Script.Curl do
   # Placeholder Handling
   # ============================================================================
 
-  defp resolve_path_with_refs(%HTTPSpec{path: path, path_params: params}, var_map) do
+  defp resolve_path(path, params) do
     Enum.reduce(params, path, fn {key, value}, acc ->
-      resolved = resolve_value_for_bash(value, var_map)
-      String.replace(acc, ":#{key}", resolved)
+      String.replace(acc, ":#{key}", resolve_value_for_bash(value))
     end)
   end
 
-  defp resolve_value_for_bash(%Placeholder{} = ph, var_map) do
-    "$" <> Map.fetch!(var_map, ph.id)
-  end
+  defp resolve_value_for_bash(%StepPlan.Var{name: name}), do: "$" <> name
+  defp resolve_value_for_bash(value), do: to_string(value)
 
-  defp resolve_value_for_bash(value, _var_map), do: to_string(value)
-
-  defp resolve_body_with_refs(body, command, var_map) do
-    resolved =
-      body
-      |> Enum.map(fn {key, value} ->
-        resolved_value = Map.get(command, key, value)
-        {key, format_json_value(resolved_value, var_map)}
-      end)
-      |> Enum.into(%{})
-
-    json = Jason.encode!(resolved)
+  defp resolve_body_json(resolved_body) do
+    json = resolved_body |> mark_refs() |> Jason.encode!()
 
     # Replace placeholder markers with bash variable references. Markers use the
     # variable name (alphanumeric + underscore), so match that, not digits.
-    json
-    |> then(&Regex.replace(~r/"__PH_([a-z0-9_]+)__"/, &1, fn _, var -> "$#{var}" end))
+    Regex.replace(~r/"__PH_([a-z0-9_]+)__"/, json, fn _, var -> "$#{var}" end)
   end
 
-  defp format_json_value(%Placeholder{} = ph, var_map), do: "__PH_#{Map.fetch!(var_map, ph.id)}__"
-  defp format_json_value(value, _var_map) when is_atom(value), do: to_string(value)
-  defp format_json_value(value, _var_map), do: value
+  # Render the resolved body into a Jason-encodable structure, turning each
+  # variable ref into a marker string (recursing through collections) so a
+  # placeholder nested in a list/map wires up like a top-level one.
+  defp mark_refs(%StepPlan.Var{name: name}), do: "__PH_#{name}__"
+  defp mark_refs(value) when is_atom(value), do: to_string(value)
+  defp mark_refs(value) when is_list(value), do: Enum.map(value, &mark_refs/1)
+  defp mark_refs(%_{} = struct), do: struct
+  defp mark_refs(value) when is_map(value), do: Map.new(value, fn {k, v} -> {k, mark_refs(v)} end)
+  defp mark_refs(value), do: value
 
   # Emit shell that binds each external value this command produces (DR-021),
   # extracting the placeholder's path from the JSON response with jq.
-  defp generate_placeholder_extraction(index, extractions) do
-    case Map.get(extractions, index, []) do
-      [] ->
-        ""
+  defp generate_placeholder_extraction(%StepPlan.Step{producer_bindings: []}), do: ""
 
-      bindings ->
-        Enum.map_join(bindings, "", fn {ph, var} ->
-          """
+  defp generate_placeholder_extraction(%StepPlan.Step{} = step) do
+    resp_var = "RESP#{step.flattened_index + 1}"
 
-          #{var}=$(echo "$RESP#{index + 1}" | jq -r '#{jq_path(ph.path)} // empty')
-          if [ -n "$#{var}" ]; then
-            echo "  -> bound #{var}: $#{var}"
-          fi
-          """
-        end)
-    end
+    Enum.map_join(step.producer_bindings, "", fn {path, var} ->
+      """
+
+      #{var}=$(echo "$#{resp_var}" | jq -r '#{jq_path(path)} // empty')
+      if [ -n "$#{var}" ]; then
+        echo "  -> bound #{var}: $#{var}"
+      fi
+      """
+    end)
   end
 
   defp jq_path(path) do
