@@ -22,6 +22,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
   alias PropertyDamage.{EventQueue, Executor}
 
   alias PropertyDamage.Test.{FailingModel, SimpleAdapter, SimpleInjectorAdapter}
+
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
   alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
