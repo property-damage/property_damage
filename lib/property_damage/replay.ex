@@ -73,7 +73,8 @@ defmodule PropertyDamage.Replay do
     definitions, which are reachable from the persisted model.)
   """
 
-  alias PropertyDamage.{EventQueue, Executor, FailureReport, Options, Sequence}
+  alias PropertyDamage.{EventQueue, FailureReport, Options, Sequence}
+  alias PropertyDamage.Executor.Stepping
 
   defstruct [
     :failure,
@@ -215,7 +216,7 @@ defmodule PropertyDamage.Replay do
     case adapter.setup(adapter_config) do
       {:ok, adapter_context} ->
         exec_state =
-          Executor.init_state(model,
+          Stepping.init_state(model,
             event_queue: event_queue,
             stutter_config: opts[:stutter_config],
             external_markers: opts[:external_markers] || [],
@@ -267,15 +268,14 @@ defmodule PropertyDamage.Replay do
     before_log_count = length(before_state.event_log)
     projections_before = before_state.projections
 
-    case Executor.step_command(
-           command,
-           next_index,
-           before_state,
-           session.model,
-           session.adapter,
-           session.adapter_context,
-           session.event_queue
-         ) do
+    step_context = %Stepping.Context{
+      model: session.model,
+      adapter: session.adapter,
+      adapter_context: session.adapter_context,
+      event_queue: session.event_queue
+    }
+
+    case Stepping.step(command, next_index, before_state, step_context) do
       {:ok, new_exec_state} ->
         emit_step(
           session,
@@ -381,7 +381,7 @@ defmodule PropertyDamage.Replay do
   """
   @spec stop(t()) :: :ok
   def stop(%__MODULE__{} = session) do
-    if session.exec_state, do: Executor.stop_pollers(session.exec_state)
+    if session.exec_state, do: Stepping.stop_pollers(session.exec_state)
 
     if is_pid(session.event_queue) and Process.alive?(session.event_queue) do
       EventQueue.stop(session.event_queue)

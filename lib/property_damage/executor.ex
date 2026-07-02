@@ -519,72 +519,10 @@ defmodule PropertyDamage.Executor do
     }
   end
 
-  # ============================================================================
-  # Stepping API (used by PropertyDamage.Replay)
-  # ============================================================================
-
-  @doc false
-  # Build a fresh executor state for stepping a sequence one command at a time.
-  # The caller owns the adapter lifecycle (setup/teardown) and the event queue.
-  @spec init_state(module(), keyword()) :: map()
-  def init_state(model, opts \\ []) do
-    build_initial_state(
-      model,
-      Keyword.get(opts, :event_queue),
-      Keyword.get(opts, :stutter_config),
-      Keyword.get(opts, :mock_registry),
-      Keyword.get(opts, :assertion_mode, :halt),
-      Keyword.get(opts, :external_markers, []),
-      Keyword.get(opts, :placeholder_registry),
-      Keyword.get(opts, :rng_seed)
-    )
-  end
-
-  @doc false
-  # Execute exactly one command against an existing executor state, capturing
-  # the pre-command projections first (as the linear loop does). This is the
-  # single per-command engine path: ref/placeholder resolution, settle, nemesis,
-  # injector/mock events, projections, assertions, stutter, and pollers all run
-  # exactly as in a full run. Returns {:ok, new_state} or
-  # {:error, reason, failed_state}.
-  @spec step_command(
-          struct() | map(),
-          non_neg_integer(),
-          map(),
-          module(),
-          module(),
-          map(),
-          pid() | nil
-        ) ::
-          {:ok, map()} | {:error, term(), map()}
-  def step_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    # Replay steps a linear sequence, so positions are {:prefix, index} (DR-021).
-    state_with_before = %{
-      state
-      | projections_before: state.projections,
-        current_position: {:prefix, index}
-    }
-
-    execute_command(
-      command,
-      index,
-      state_with_before,
-      model,
-      adapter,
-      adapter_context,
-      event_queue
-    )
-  end
-
-  @doc false
-  # Stop any pollers spawned during stepping. Best-effort cleanup for the
-  # stepping shell; a full run finalizes pollers through finalize_result/2.
-  @spec stop_pollers(map()) :: :ok
-  def stop_pollers(state) do
-    Enum.each(Map.get(state, :active_pollers, []), &StatePoller.stop/1)
-    Enum.each(Map.get(state, :active_resource_pollers, []), &ResourcePoller.stop/1)
-    :ok
-  end
+  # The per-command stepping seam (init_state / step / stop_pollers) lives in
+  # PropertyDamage.Executor.Stepping, the documented public interface. It builds
+  # on the engine primitives below (build_initial_state / execute_command), which
+  # are also shared with Executor.Branching (DR-029).
 
   # Execute a single command
   # Shared with PropertyDamage.Executor.Branching (prefix/branch/suffix). DR-029.
@@ -646,49 +584,51 @@ defmodule PropertyDamage.Executor do
     # 1. Resolve placeholders in command
     case resolve_command_placeholders(command, placeholder_registry) do
       {:ok, resolved_command} ->
-        # 2. Per-command injection/poller sink (DR-027): an explicit Agent that
-        # replaces the former @injection_ctx_key/@resource_pollers_key
-        # process-dictionary channels, so inject/start_poller accumulate correctly
-        # even when the adapter runs execute in a spawned process.
-        {:ok, sink} = Runtime.Sink.start_link()
-
-        Runtime.Sink.put_ctx(sink, %{
+        # 2. Per-command injection/poller sink (DR-027), opened via the shared
+        # Runtime.InjectionWindow so the sink lifecycle lives in one place (the
+        # same window the differential and load-test paths use). The engine seeds
+        # a rich context its inject folds projections into, and starts real
+        # resource pollers; those closures below are the engine's contribution to
+        # the shared window.
+        initial_ctx = %{
           projections: state.projections,
           event_log: state.event_log,
           injected_events: [],
           command_index: index,
           branch_id: state.branch_id,
           command: command
-        })
+        }
 
-        # Build start_poller closure for resource polling. `runtime.start_poller`
-        # is invoked from inside adapter.execute/3, which (DR-032) runs in a
-        # child Task; capture the run process here so the poller routes its
-        # result to a stable mailbox, not the short-lived Task's.
+        # Capture the run process now: `runtime.start_poller` is invoked from
+        # inside adapter.execute/3, which (DR-032) runs in a child Task; the
+        # poller must route its result to this stable mailbox, not the
+        # short-lived Task's.
         poller_owner = self()
 
-        start_poller_fn = fn opts ->
-          poller =
-            ResourcePoller.start(
-              Keyword.merge(opts,
-                event_queue: event_queue,
-                command_index: index,
-                branch_id: state.branch_id,
-                caller: poller_owner
+        build_runtime = fn sink ->
+          start_poller_fn = fn opts ->
+            poller =
+              ResourcePoller.start(
+                Keyword.merge(opts,
+                  event_queue: event_queue,
+                  command_index: index,
+                  branch_id: state.branch_id,
+                  caller: poller_owner
+                )
               )
-            )
 
-          Runtime.Sink.add_poller(sink, poller)
-          poller
+            Runtime.Sink.add_poller(sink, poller)
+            poller
+          end
+
+          # The per-command Runtime handle (DR-027). user_context stays exactly
+          # the adapter's setup/1 return; inject/start_poller travel here over the
+          # explicit sink rather than being merged into the user's map.
+          %Runtime{
+            inject: fn event -> inject_event(sink, event) end,
+            start_poller: start_poller_fn
+          }
         end
-
-        # Build the per-command Runtime handle (DR-027). user_context stays
-        # exactly the adapter's setup/1 return; inject/start_poller travel here
-        # over the explicit sink rather than being merged into the user's map.
-        runtime = %Runtime{
-          inject: fn event -> inject_event(sink, event) end,
-          start_poller: start_poller_fn
-        }
 
         # 3. Execute via adapter (with settle logic for probes/async).
         # Commands may be plain maps in low-level/test usage, hence the guard.
@@ -697,7 +637,7 @@ defmodule PropertyDamage.Executor do
             Map.get(Map.get(state, :command_specs, %{}), command.__struct__)
           end
 
-        result =
+        execute_fn = fn runtime ->
           try do
             Settle.execute_with_settle(
               resolved_command,
@@ -712,12 +652,13 @@ defmodule PropertyDamage.Executor do
               stacktrace = __STACKTRACE__
               {:error, {e, stacktrace}}
           end
+        end
 
-        # Drain the accumulated injection state (includes any injected events) and
-        # the resource pollers started during execution, then stop the sink.
-        final_injection_ctx = Runtime.Sink.get_ctx(sink)
-        started_resource_pollers = Runtime.Sink.get_pollers(sink)
-        Runtime.Sink.stop(sink)
+        # The window drains the accumulated injection context and any resource
+        # pollers started during execution, then stops the sink (even if the
+        # adapter raises).
+        {result, final_injection_ctx, started_resource_pollers} =
+          Runtime.InjectionWindow.run(initial_ctx, build_runtime, execute_fn)
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections
