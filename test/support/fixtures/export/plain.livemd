@@ -1,0 +1,95 @@
+# Failure Investigation: NonNegativeBalance
+
+**Seed**: 512902757
+**Failure Type**: NonNegativeBalance check failed
+**Date**: 2025-12-26
+
+This notebook allows you to step through the command sequence that triggered a failure,
+inspect state at each step, and explore variations to understand the root cause.
+
+## Setup
+
+```elixir
+Mix.install([{:req, "~> 0.5"}, {:jason, "~> 1.4"}])
+
+base_url = "http://localhost:4000"
+state = %{refs: %{}, data: %{}}
+```
+
+
+## Command Sequence
+
+### Step 1: CreateAccount
+
+```elixir
+# Command: %CreateAccount{currency: :USD}
+resp = Req.post!(base_url <> "/api/accounts", json: %{currency: :USD})
+IO.inspect(resp.body, label: "Response")
+
+IO.inspect(state, label: "State")
+
+
+```
+
+### Step 2: CreditAccount
+
+```elixir
+# Command: %CreditAccount{account_ref: "acc_0", amount: 100}
+resp = Req.post!(base_url <> "/api/accounts/#{"acc_0"}/credit", json: %{amount: 100})
+IO.inspect(resp.body, label: "Response")
+
+IO.inspect(state, label: "State")
+
+
+```
+
+### Step 3: DebitAccount (FAILURE)
+
+> ⚠️ **This command caused the failure**
+
+```elixir
+# Command: %DebitAccount{account_ref: "acc_0", amount: 200}
+resp = Req.post!(base_url <> "/api/accounts/#{"acc_0"}/debit", json: %{amount: 200})
+IO.inspect(resp.body, label: "Response")
+
+IO.inspect(state, label: "State")
+
+# Check the state at failure point
+IO.puts("\n--- Failure Analysis ---")
+IO.inspect(state, label: "State at failure")
+
+
+```
+
+## Exploration
+
+Use this section to experiment with variations and understand the bug better.
+
+```elixir
+# Try different values or additional commands here
+# The `state` variable contains refs bound from previous steps
+# The `base_url` is available for making HTTP calls
+
+IO.puts("Available refs: #{inspect(Map.keys(state.refs))}")
+
+# Example: Try a different operation
+# Req.post!(base_url <> "/api/...", json: %{...})
+
+# Example: Inspect current state
+IO.inspect(state, label: "Current state")
+```
+
+### What to Try
+
+- Modify amounts/values in the command sequence above and re-run
+- Add additional commands to see how state evolves
+- Comment out commands to find the minimal reproduction
+- Try boundary values (0, -1, max int, etc.)
+
+```elixir
+# Notes and observations
+# -----------------------
+#
+# Add your findings here as you investigate
+#
+```
