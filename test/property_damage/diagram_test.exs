@@ -297,4 +297,84 @@ defmodule PropertyDamage.DiagramTest do
       assert File.exists?(Path.join(tmp_dir, "d3.txt"))
     end
   end
+
+  # ============================================================================
+  # Characterization Goldens
+  # ============================================================================
+  #
+  # Byte-for-byte guard for the shared step-builder migration (F3): diagram
+  # output must not drift for the report-less generate/4 path or the
+  # report-driven from_failure_report/3 path. Re-baseline deliberately with
+  # CAPTURE_GOLDENS=1.
+
+  describe "characterization goldens (shared step-builder migration guard)" do
+    @golden_dir Path.join([__DIR__, "..", "support", "fixtures", "diagram"])
+
+    defp golden_path(name), do: Path.join(@golden_dir, name)
+
+    defp check_golden(name, actual) do
+      if System.get_env("CAPTURE_GOLDENS") == "1" do
+        File.mkdir_p!(@golden_dir)
+        File.write!(golden_path(name), actual)
+        assert true
+      else
+        expected = File.read!(golden_path(name))
+
+        assert actual == expected,
+               "#{name} drifted from golden. Re-baseline with CAPTURE_GOLDENS=1 only if the change is intended."
+      end
+    end
+
+    defp report_fixture do
+      commands = [
+        %TestCommand{account_id: "acc_1", amount: 50},
+        %AnotherCommand{id: "order_1"}
+      ]
+
+      sequence = Sequence.linear(commands)
+
+      event_log = [
+        %Entry{
+          timestamp: 1000,
+          command_index: 0,
+          event: %TestEvent{id: "e1", balance: 50},
+          source: :command
+        }
+      ]
+
+      %FailureReport{
+        seed: 12_345,
+        run_number: 1,
+        failed_at_index: 1,
+        failure_type: :check_failed,
+        original_sequence: sequence,
+        shrunk_sequence: sequence,
+        failure_reason: {:check_failed, :NonNegativeBalance, "Balance is -50"},
+        check_name: :NonNegativeBalance,
+        failure_message: "Balance is -50",
+        event_log: event_log,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+    end
+
+    for {format, ext} <- [{:mermaid, "mmd"}, {:plantuml, "puml"}, {:websequence, "wsd"}] do
+      test "generate/4 #{format} is byte-identical", %{
+        sequence: sequence,
+        event_log: event_log
+      } do
+        actual =
+          Diagram.generate(sequence, event_log, unquote(format),
+            title: "Fixture",
+            show_state: true
+          )
+
+        check_golden("generate.#{unquote(ext)}", actual)
+      end
+
+      test "from_failure_report/3 #{format} is byte-identical" do
+        actual = Diagram.from_failure_report(report_fixture(), unquote(format))
+        check_golden("from_report.#{unquote(ext)}", actual)
+      end
+    end
+  end
 end

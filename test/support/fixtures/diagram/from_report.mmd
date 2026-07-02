@@ -1,0 +1,13 @@
+```mermaid
+sequenceDiagram
+    title Failure: Invariant Violation: NonNegativeBalance (seed: 12345)
+    participant Test
+    participant SUT
+
+    Test->>SUT: TestCommand(account_id: "acc_1", amount: 50)
+    SUT-->>Test: TestEvent(balance: 50, id: "e1")
+    Note over Test,SUT: ❌ FAILURE at command 1
+    Test-xSUT: AnotherCommand(id: "order_1")
+
+    Note right of SUT: Balance is -50
+```

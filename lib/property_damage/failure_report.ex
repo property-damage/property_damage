@@ -516,6 +516,34 @@ defmodule PropertyDamage.FailureReport do
   def steps(%__MODULE__{shrunk_sequence: nil}), do: []
 
   def steps(%__MODULE__{shrunk_sequence: %Sequence{} = sequence} = report) do
+    build_steps(sequence, report.event_log, report.command_labels, report.failed_at_index,
+      branch_id: report.branch_id
+    )
+  end
+
+  @doc """
+  Builds the `Step` timeline from raw pieces, without a full `FailureReport`.
+
+  This is the grouping core shared by `steps/1` and consumers that hold a
+  sequence and event log but no report (e.g. `PropertyDamage.Diagram`'s
+  report-less entry point). `command_labels` may be `%{}` and `failed_at_index`
+  may be `nil` when those facts are unavailable.
+
+  ## Options
+
+    * `:branch_id` - the failing branch, used with `failed_at_index` to resolve
+      the failing command's position (defaults to `nil`).
+  """
+  @spec build_steps(
+          Sequence.t(),
+          [Entry.t()],
+          %{non_neg_integer() => String.t()},
+          non_neg_integer() | nil,
+          keyword()
+        ) :: [Step.t()]
+  def build_steps(%Sequence{} = sequence, event_log, command_labels, failed_at_index, opts \\ []) do
+    branch_id = Keyword.get(opts, :branch_id)
+
     # Group the command-attributed log entries by the position of the command
     # that produced them. Injector/telemetry entries carry no command_index and
     # so belong to no step. `(command_index, branch_id)` resolves uniquely to a
@@ -523,7 +551,8 @@ defmodule PropertyDamage.FailureReport do
     # command_index alone. Full entries (not bare events) are kept so each step
     # preserves per-event provenance (source, branch_id) for the event timeline.
     entries_by_position =
-      report.event_log
+      event_log
+      |> List.wrap()
       |> Enum.filter(&(&1.command_index != nil))
       |> Enum.group_by(fn entry ->
         Sequence.position_at(sequence, entry.command_index, entry.branch_id)
@@ -534,8 +563,8 @@ defmodule PropertyDamage.FailureReport do
     # latter is an executor index and diverges from the flattened ordinal for
     # branch failures.
     failed_position =
-      if report.failed_at_index != nil do
-        Sequence.position_at(sequence, report.failed_at_index, report.branch_id)
+      if failed_at_index != nil do
+        Sequence.position_at(sequence, failed_at_index, branch_id)
       end
 
     sequence
@@ -546,7 +575,7 @@ defmodule PropertyDamage.FailureReport do
         flattened_index: flattened_index,
         command: command,
         entries: Map.get(entries_by_position, position, []),
-        label: Map.get(report.command_labels, flattened_index),
+        label: Map.get(command_labels, flattened_index),
         failed?: failed_position != nil and position == failed_position
       }
     end)
