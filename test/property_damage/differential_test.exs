@@ -126,6 +126,69 @@ defmodule PropertyDamage.DifferentialTest do
     def execute(_cmd, _ctx, _runtime), do: {:error, :simulated_error}
   end
 
+  # Characterization support (F2 sink-window refactor): an adapter that injects
+  # one event mid-execution and then returns another. The framework must fold the
+  # injected event into the target's result AHEAD of the returned event
+  # (injected ++ returned), so divergence sees one uniform stream.
+  defmodule InjectingCandidateAdapter do
+    @moduledoc "Injects a fixed event during execute, then returns a value event."
+    use PropertyDamage.Adapter
+
+    @injected %TestEvent{value: -1, item_ref: "injected", id: :inj, timestamp: 0}
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(%TestCommand{value: value}, _ctx, runtime) do
+      runtime.inject.(@injected)
+      {:ok, [%TestEvent{value: value, item_ref: "returned", id: :ret, timestamp: 0}]}
+    end
+
+    def execute(_cmd, _ctx, _runtime), do: {:ok, []}
+  end
+
+  defmodule PreCombinedAdapter do
+    @moduledoc "Returns [injected, returned] directly (no inject); the reference."
+    use PropertyDamage.Adapter
+
+    @injected %TestEvent{value: -1, item_ref: "injected", id: :inj, timestamp: 0}
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(%TestCommand{value: value}, _ctx, _runtime) do
+      {:ok, [@injected, %TestEvent{value: value, item_ref: "returned", id: :ret, timestamp: 0}]}
+    end
+
+    def execute(_cmd, _ctx, _runtime), do: {:ok, []}
+  end
+
+  defmodule ReturnedOnlyAdapter do
+    @moduledoc "Returns only the returned event (no injected); negative control."
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(%TestCommand{value: value}, _ctx, _runtime) do
+      {:ok, [%TestEvent{value: value, item_ref: "returned", id: :ret, timestamp: 0}]}
+    end
+
+    def execute(_cmd, _ctx, _runtime), do: {:ok, []}
+  end
+
   # ============================================================================
   # Test Support - Model
   # ============================================================================
@@ -760,6 +823,64 @@ defmodule PropertyDamage.DifferentialTest do
 
       assert_received {:telemetry, [:property_damage, :differential, :result], _m,
                        %{data: %DifferentialResult{}}}
+    end
+  end
+
+  # ============================================================================
+  # Characterization: per-target injected-event capture (F2 sink-window refactor)
+  #
+  # These lock the observable contract of execute_target_command's injection sink
+  # BEFORE it is refactored onto the shared injection-sink window helper: an
+  # adapter that injects mid-execution has the injected event folded into its
+  # result AHEAD of its returned events (injected ++ returned), and this holds in
+  # both interleaved and sequential modes. If the refactor drops, reorders, or
+  # double-counts injected events, the positive tests flip to divergent; the
+  # negative control proves the tests actually observe the injected event.
+  # ============================================================================
+  describe "injected-event folding (characterization)" do
+    for mode <- [:interleaved, :sequential] do
+      test "#{mode}: an injected event is folded ahead of returned events" do
+        {:ok, result} =
+          Differential.run(
+            model: TestModel,
+            targets: [
+              {PreCombinedAdapter, role: :reference},
+              {InjectingCandidateAdapter, name: "injecting"}
+            ],
+            compare: :correctness,
+            execution: unquote(mode),
+            max_runs: 3,
+            max_commands: 3,
+            seed: 12_345
+          )
+
+        # The injecting target's result equals [injected, returned], matching the
+        # reference that returns that stream directly: no divergence.
+        assert result.status == :equivalent
+        assert result.divergences == []
+      end
+
+      test "#{mode}: the injected event is actually observed (negative control)" do
+        {:ok, result} =
+          Differential.run(
+            model: TestModel,
+            targets: [
+              {ReturnedOnlyAdapter, role: :reference},
+              {InjectingCandidateAdapter, name: "injecting"}
+            ],
+            compare: :correctness,
+            execution: unquote(mode),
+            max_runs: 3,
+            max_commands: 3,
+            seed: 12_345
+          )
+
+        # Reference emits only the returned event; the injecting target additionally
+        # carries the injected event, so the streams diverge. This proves the
+        # positive test above is not passing by silently dropping injected events.
+        assert result.status == :divergent
+        assert result.divergences != []
+      end
     end
   end
 

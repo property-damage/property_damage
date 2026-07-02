@@ -313,29 +313,20 @@ defmodule PropertyDamage.LoadTest.Worker do
         # Get timeout from adapter
         timeout_ms = Timeout.normalize_timeout(state.adapter.timeout(resolved_command))
 
-        # Per-command injection sink (DR-027). The inject closure captures the
-        # sink pid, so it accumulates correctly from inside the spawned timeout
-        # Task below; the worker's process dictionary did not cross that
-        # boundary, which made inject raise "outside adapter execution context".
-        {:ok, sink} = Runtime.Sink.start_link()
-        Runtime.Sink.put_ctx(sink, %{events: []})
+        # Per-command injection sink (DR-027), opened via the shared
+        # Runtime.InjectionWindow. The inject closure captures the sink pid, so it
+        # accumulates correctly from inside the spawned timeout Task below; the
+        # worker's process dictionary did not cross that boundary, which made
+        # inject raise "outside adapter execution context". The window also
+        # guarantees the sink is stopped even when the command times out.
+        #
+        # Execute with timeout - wrap in Task to enforce timeout.
+        execute_fn = fn runtime ->
+          task =
+            Task.async(fn ->
+              state.adapter.execute(resolved_command, state.adapter_context, runtime)
+            end)
 
-        runtime = %Runtime{
-          inject: fn event ->
-            Runtime.Sink.update_ctx(sink, fn ctx -> %{ctx | events: [event | ctx.events]} end)
-          end,
-          start_poller: fn _opts ->
-            raise ArgumentError, "Runtime.start_poller is not supported in load-test workers"
-          end
-        }
-
-        # Execute with timeout - wrap in Task to enforce timeout
-        task =
-          Task.async(fn ->
-            state.adapter.execute(resolved_command, state.adapter_context, runtime)
-          end)
-
-        result =
           case Task.yield(task, timeout_ms) || Task.shutdown(task) do
             {:ok, adapter_result} ->
               adapter_result
@@ -346,10 +337,13 @@ defmodule PropertyDamage.LoadTest.Worker do
                 command: resolved_command,
                 timeout_ms: timeout_ms
           end
+        end
 
-        # Drain injected events (injection order) and stop the sink.
-        injected_events = Enum.reverse(Runtime.Sink.get_ctx(sink).events)
-        Runtime.Sink.stop(sink)
+        {result, injected_events} =
+          Runtime.InjectionWindow.run_accumulating(
+            execute_fn,
+            "Runtime.start_poller is not supported in load-test workers"
+          )
 
         case result do
           {:ok, returned_events} ->

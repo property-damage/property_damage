@@ -880,21 +880,11 @@ defmodule PropertyDamage.Differential do
   # paths), so projections, capture, and divergence all see one uniform stream.
   # A non-injecting adapter leaves the sink empty, so its result is unchanged.
   defp execute_target_command(adapter, context, resolved_command) do
-    {:ok, sink} = Runtime.Sink.start_link()
-    Runtime.Sink.put_ctx(sink, %{events: []})
-
-    runtime = %Runtime{
-      inject: fn event ->
-        Runtime.Sink.update_ctx(sink, fn c -> %{c | events: [event | c.events]} end)
-      end,
-      start_poller: fn _opts ->
-        raise ArgumentError, "Runtime.start_poller is not supported in Differential targets"
-      end
-    }
-
-    result = adapter.execute(resolved_command, context, runtime)
-    injected = Enum.reverse(Runtime.Sink.get_ctx(sink).events)
-    Runtime.Sink.stop(sink)
+    {result, injected} =
+      Runtime.InjectionWindow.run_accumulating(
+        fn runtime -> adapter.execute(resolved_command, context, runtime) end,
+        "Runtime.start_poller is not supported in Differential targets"
+      )
 
     case result do
       {:ok, events} when is_list(events) -> {:ok, injected ++ events}
