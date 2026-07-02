@@ -458,6 +458,27 @@ defmodule PropertyDamage.LoadTestTest do
     end
   end
 
+  # Characterization support (F2 sink-window refactor): an adapter that injects
+  # mid-execution. The worker's inject closure captures the per-command sink pid
+  # so it accumulates from inside the spawned timeout Task (DR-027); a regression
+  # that breaks the sink boundary makes inject raise "outside adapter execution
+  # context", surfacing as a command error in the worker's metrics.
+  defmodule WorkerInjectingAdapter do
+    use PropertyDamage.Adapter, default_timeout: 30
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(_cmd, _ctx, runtime) do
+      runtime.inject.(%{type: :injected})
+      {:ok, [%{type: :executed}]}
+    end
+  end
+
   # ============================================================================
   # Worker Tests
   # ============================================================================
@@ -509,6 +530,32 @@ defmodule PropertyDamage.LoadTestTest do
       Process.sleep(50)
       snapshot = Metrics.snapshot(metrics)
       assert snapshot.total_requests >= 2
+
+      Worker.stop(worker)
+      Metrics.stop(metrics)
+    end
+
+    test "an adapter that injects mid-execution runs without error (characterization)" do
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, worker} =
+        Worker.start_link(
+          worker_id: 1,
+          model: WorkerTestModel,
+          adapter: WorkerInjectingAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      assert {:ok, stats} = Worker.execute_sequence(worker)
+
+      # The injecting adapter executes cleanly: every command ran and none errored.
+      # If inject lost its sink across the spawned timeout Task, each command would
+      # raise and be counted as an error here.
+      assert stats.commands_run >= 1
+      assert stats.errors == 0
 
       Worker.stop(worker)
       Metrics.stop(metrics)
