@@ -646,49 +646,51 @@ defmodule PropertyDamage.Executor do
     # 1. Resolve placeholders in command
     case resolve_command_placeholders(command, placeholder_registry) do
       {:ok, resolved_command} ->
-        # 2. Per-command injection/poller sink (DR-027): an explicit Agent that
-        # replaces the former @injection_ctx_key/@resource_pollers_key
-        # process-dictionary channels, so inject/start_poller accumulate correctly
-        # even when the adapter runs execute in a spawned process.
-        {:ok, sink} = Runtime.Sink.start_link()
-
-        Runtime.Sink.put_ctx(sink, %{
+        # 2. Per-command injection/poller sink (DR-027), opened via the shared
+        # Runtime.InjectionWindow so the sink lifecycle lives in one place (the
+        # same window the differential and load-test paths use). The engine seeds
+        # a rich context its inject folds projections into, and starts real
+        # resource pollers; those closures below are the engine's contribution to
+        # the shared window.
+        initial_ctx = %{
           projections: state.projections,
           event_log: state.event_log,
           injected_events: [],
           command_index: index,
           branch_id: state.branch_id,
           command: command
-        })
+        }
 
-        # Build start_poller closure for resource polling. `runtime.start_poller`
-        # is invoked from inside adapter.execute/3, which (DR-032) runs in a
-        # child Task; capture the run process here so the poller routes its
-        # result to a stable mailbox, not the short-lived Task's.
+        # Capture the run process now: `runtime.start_poller` is invoked from
+        # inside adapter.execute/3, which (DR-032) runs in a child Task; the
+        # poller must route its result to this stable mailbox, not the
+        # short-lived Task's.
         poller_owner = self()
 
-        start_poller_fn = fn opts ->
-          poller =
-            ResourcePoller.start(
-              Keyword.merge(opts,
-                event_queue: event_queue,
-                command_index: index,
-                branch_id: state.branch_id,
-                caller: poller_owner
+        build_runtime = fn sink ->
+          start_poller_fn = fn opts ->
+            poller =
+              ResourcePoller.start(
+                Keyword.merge(opts,
+                  event_queue: event_queue,
+                  command_index: index,
+                  branch_id: state.branch_id,
+                  caller: poller_owner
+                )
               )
-            )
 
-          Runtime.Sink.add_poller(sink, poller)
-          poller
+            Runtime.Sink.add_poller(sink, poller)
+            poller
+          end
+
+          # The per-command Runtime handle (DR-027). user_context stays exactly
+          # the adapter's setup/1 return; inject/start_poller travel here over the
+          # explicit sink rather than being merged into the user's map.
+          %Runtime{
+            inject: fn event -> inject_event(sink, event) end,
+            start_poller: start_poller_fn
+          }
         end
-
-        # Build the per-command Runtime handle (DR-027). user_context stays
-        # exactly the adapter's setup/1 return; inject/start_poller travel here
-        # over the explicit sink rather than being merged into the user's map.
-        runtime = %Runtime{
-          inject: fn event -> inject_event(sink, event) end,
-          start_poller: start_poller_fn
-        }
 
         # 3. Execute via adapter (with settle logic for probes/async).
         # Commands may be plain maps in low-level/test usage, hence the guard.
@@ -697,7 +699,7 @@ defmodule PropertyDamage.Executor do
             Map.get(Map.get(state, :command_specs, %{}), command.__struct__)
           end
 
-        result =
+        execute_fn = fn runtime ->
           try do
             Settle.execute_with_settle(
               resolved_command,
@@ -712,12 +714,13 @@ defmodule PropertyDamage.Executor do
               stacktrace = __STACKTRACE__
               {:error, {e, stacktrace}}
           end
+        end
 
-        # Drain the accumulated injection state (includes any injected events) and
-        # the resource pollers started during execution, then stop the sink.
-        final_injection_ctx = Runtime.Sink.get_ctx(sink)
-        started_resource_pollers = Runtime.Sink.get_pollers(sink)
-        Runtime.Sink.stop(sink)
+        # The window drains the accumulated injection context and any resource
+        # pollers started during execution, then stops the sink (even if the
+        # adapter raises).
+        {result, final_injection_ctx, started_resource_pollers} =
+          Runtime.InjectionWindow.run(initial_ctx, build_runtime, execute_fn)
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections
