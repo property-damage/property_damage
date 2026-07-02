@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the differential testing and mutation testing subsystems that allow PropertyDamage to compare multiple implementations against the same command sequences and to measure test suite quality by injecting faults into adapter responses.
+Define the differential testing and mutation testing subsystems that allow PropertyDamage to compare multiple implementations against the same command sequences and to measure test suite quality by injecting faults into adapter responses. This domain also defines run comparison (DR-035): the post-hoc comparison of two or more full run traces of the same plan, used to localize regressions and flakiness.
 
 ## Requirements
 
@@ -251,3 +251,44 @@ The framework SHALL support multiple output formats for mutation testing reports
 
 - **WHEN** a mutation report is formatted with `:json`
 - **THEN** the framework SHALL produce JSON output suitable for programmatic analysis
+
+### Requirement: Run Comparison (DR-035)
+
+The framework SHALL compare two or more full `RunTrace` records (DR-033) of the same plan to help a human or an LLM localize regressions and flakiness. All compared traces MUST share a plan identity (equal `original_sequence` and model); the framework SHALL refuse or clearly flag a comparison of traces that do not, treating an unequal `original_sequence` or a differing `plan-generated` value (DR-034) as the incomparability signal. Comparison SHALL operate over `PropertyDamage.RunComparison` and SHALL NOT consume shrunk failure reports, since a shrunk sequence is a different, smaller plan that cannot be aligned against a full run. Rows SHALL be commands and their events (two levels; SUT-call / request-body rows are out of scope for this requirement). Columns SHALL be runs, grouped by outcome (passing versus failing) but otherwise peers, so any run may be compared against any other.
+
+#### Scenario: Comparability guard
+
+- **WHEN** run comparison is asked to compare traces whose `original_sequence` differs, or where a `plan-generated` value differs between them
+- **THEN** the framework SHALL treat the traces as not comparable and SHALL surface this rather than emit a misleading diff
+
+#### Scenario: Command and event alignment
+
+- **WHEN** traces are aligned
+- **THEN** commands SHALL align by their branch-aware step position, which is identical across same-plan runs
+- **AND** events within a command SHALL align by a longest-common-subsequence keyed on event struct module, so a value difference within a matched event is distinguished from an inserted or removed event
+- **AND** a model MAY supply a per-event identity function to override the default module key
+
+#### Scenario: Discriminative analysis across multiple runs
+
+- **WHEN** more than one passing run is compared against one or more failing runs
+- **THEN** the framework SHALL classify each aligned field difference by its correlation with outcome: a difference that also varies among the passing runs SHALL be ranked as incidental, and a difference that is stable within each outcome group but differs between groups SHALL be ranked as discriminating
+- **AND** the framework SHALL emit a ranked list of the most discriminating differences
+- **AND** with a single passing run the analysis SHALL degrade to a plain pairwise diff
+
+#### Scenario: Provenance-aware highlighting
+
+- **WHEN** an aligned difference is rendered
+- **THEN** `run-scoped` values (DR-034) that differ SHALL be shown as correlation identifiers rather than flagged as suspicious
+- **AND** `server-resolved` differences SHALL be the subject of the discriminative ranking
+
+#### Scenario: Self-contained report artifact
+
+- **WHEN** a comparison report is produced
+- **THEN** it SHALL be a single self-contained HTML file with no external dependencies, embedding the machine-readable comparison data in one JSON block and rendering a static human-readable table that JavaScript MAY enhance with interactivity
+- **AND** it SHALL carry a reproducibility header naming the model, adapter, UTC timestamp, source revision, seed, run number, and per-run `run_nonce`
+
+#### Scenario: Semantic-difference row highlighting
+
+- **WHEN** an aligned row (command or event) has a semantic difference across runs
+- **THEN** the row SHALL be highlighted in a color distinct from the pass/fail green and red (for example, amber)
+- **AND** the specific differing attributes within the row SHALL be highlighted per diff convention (added, removed, changed)
