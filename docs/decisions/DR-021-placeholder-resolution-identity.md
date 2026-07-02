@@ -1,7 +1,14 @@
 # DR-021: Placeholder Resolution Identity
 
-**Status:** Accepted
+**Status:** Accepted (amended by DR-036)
 **Date:** 2026-06-14
+
+> **Amendment (DR-036, 2026-07-02):** the id is no longer minted with
+> `make_ref/0`; it is a deterministic function of the placeholder's
+> generation-time coordinates `(position, event_index, path)`. The split
+> identity scheme below (consumer resolution by id, producer capture by
+> position rebuilt per run) is unchanged — only the id's construction is,
+> so that two generations of the same plan compare equal. See DR-036.
 
 > Unlike DR-001 through DR-020 (reconstructed after the fact), this is a
 > forward-looking decision recorded at the time it was made, as part of

@@ -302,27 +302,53 @@ Each `adapter.execute/3` call SHALL be subject to a configurable per-command wal
 
 ### Requirement: Reproducible Run Inputs (DR-034)
 
-Every run SHALL be identified by a base `seed`, a `run_number`, and a `run_nonce`. The base seed and run number SHALL determine the generated plan: the effective seed is `Generator.run_seed(seed, run_number)`, and the plan is a pure function of that effective seed. The `run_nonce` SHALL be an integer that is independent of plan generation and SHALL seed only the resolution of run-scoped minted values (DR-034, command domain). Each of `seed` and `run_nonce` SHALL be resolved as `explicit option || environment variable || random default`, reading `PD_SEED` and `PD_RUN_NONCE` respectively, mirroring how ExUnit selects and prints a random seed. The chosen `seed`, `run_number`, and `run_nonce` SHALL be recorded on the run's trace and report so the exact execution is reproducible. `mix test` SHALL NOT be required to forward a custom flag: ad-hoc reproduction SHALL be available through the environment variables, and programmatic reproduction through the persisted report.
+Every run SHALL be identified by a base `seed`, a `run_number`, and a `run_nonce`; every SUT execution within a logical run additionally carries a `mint_epoch`. The base seed and run number SHALL determine the generated plan: the effective seed is `Generator.run_seed(seed, run_number)`, and the plan is a pure function of that effective seed. The `run_nonce` SHALL be a 64-bit integer that is independent of plan generation and SHALL seed only the resolution of run-scoped minted values (DR-034, command domain). Each of `seed` and `run_nonce` SHALL be resolved as `explicit option || environment variable || random default`, reading `PD_SEED` and `PD_RUN_NONCE` respectively, mirroring how ExUnit selects and prints a random seed. The nonce's random default SHALL be drawn from entropy independent of the process RNG (e.g. `:crypto.strong_rand_bytes/1`), NEVER from `:rand`: ExUnit seeds each test process's `:rand` from the suite seed, so a process-RNG default would be silently pinned whenever a user reruns with `mix test --seed N`, re-minting colliding values against a non-resettable SUT — the exact failure the random default exists to prevent. The `mint_epoch` distinguishes SUT executions within one logical run: epoch 0 is the recorded exploration run; the shrinker SHALL assign a fresh epoch per shrink attempt; the report's reproduction execution and replays SHALL default to fresh epochs with an option to pin, so repeated executions do not re-send identical minted values to a non-resettable SUT. The chosen `seed`, `run_number`, `run_nonce`, and `mint_epoch` SHALL be recorded on the run's trace and report so the exact execution is reproducible. `mix test` SHALL NOT be required to forward a custom flag: ad-hoc reproduction SHALL be available through the environment variables, and programmatic reproduction through the persisted artifact.
 
-#### Scenario: Random nonce by default, recorded
+#### Scenario: Random nonce by default, recorded, independent of the process RNG
 
 - **WHEN** a run executes without an explicit `run_nonce` or `PD_RUN_NONCE`
-- **THEN** the framework SHALL choose a random `run_nonce`
+- **THEN** the framework SHALL choose a random `run_nonce` from entropy independent of `:rand`
 - **AND** SHALL record it on the trace/report so the run can be reproduced
+- **AND** two invocations under the same `mix test --seed` SHALL still receive distinct nonces
 
-#### Scenario: Pinned nonce reproduces minted values
+#### Scenario: Pinned nonce and epoch reproduce minted values
 
-- **WHEN** a run executes against a pristine SUT with a `run_nonce` (option or `PD_RUN_NONCE`) equal to a prior run's recorded nonce
+- **WHEN** a run executes against a pristine SUT with a `run_nonce` and `mint_epoch` (option or `PD_RUN_NONCE`) equal to a prior run's recorded values
 - **THEN** all run-scoped minted values SHALL be regenerated identically to that prior run
 
 #### Scenario: Nonce is independent of the plan
 
 - **WHEN** two runs share `seed` and `run_number` but differ in `run_nonce`
-- **THEN** they SHALL execute the identical generated plan (identical `original_sequence`)
+- **THEN** they SHALL execute the identical generated plan (equal plan fingerprints, DR-036)
 - **AND** SHALL differ only in run-scoped minted values
+
+#### Scenario: Shrink attempts do not collide on minted values
+
+- **WHEN** the shrinker re-executes candidate sequences against a SUT that is not reset between attempts
+- **THEN** each attempt SHALL carry a distinct `mint_epoch`, so minted values differ per attempt and cannot manufacture duplicate-identity failures that mask the real one
 
 #### Scenario: Nonce is inert without run-scoped values
 
 - **WHEN** a model declares no run-scoped minted fields
-- **THEN** the `run_nonce` SHALL have no effect on execution
+- **THEN** the `run_nonce` and `mint_epoch` SHALL have no effect on execution
 - **AND** reproduction from `seed` and `run_number` alone SHALL be exact
+
+### Requirement: Deterministic Symbolic Identity (DR-036)
+
+Symbolic identity SHALL be deterministic so that two generations of the same plan are recognizably equal. A `%Placeholder{}` id SHALL be a pure function of its generation-time coordinates `(position, event_index, path)` rather than `make_ref/0`; run-scoped mint markers (DR-034) SHALL carry the same coordinate-derived identity. DR-021's split identity scheme is otherwise unchanged: consumers resolve by id, producers capture by structured position rebuilt per run. The framework SHALL expose a canonical plan fingerprint (`RunTrace.plan_fingerprint/1`, DR-033): a stable digest of the branch-structured command list with the derived `registry` excluded, and two plans SHALL be considered identical for comparison purposes (DR-035) exactly when their fingerprints are equal.
+
+#### Scenario: Same plan generates equal
+
+- **WHEN** the same plan is generated twice from the same effective seed
+- **THEN** the two sequences SHALL be structurally equal, including all embedded placeholder and mint-marker identities
+- **AND** their plan fingerprints SHALL be equal
+
+#### Scenario: Fingerprint ignores the derived registry
+
+- **WHEN** two same-plan sequences differ only in their derived `registry` state
+- **THEN** their plan fingerprints SHALL be equal
+
+#### Scenario: Cross-commit generator drift is detected
+
+- **WHEN** traces are captured on two commits between which generators, command structs, or event structs changed such that the generated plan differs
+- **THEN** their plan fingerprints SHALL differ, and run comparison SHALL refuse rather than misalign
