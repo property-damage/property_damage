@@ -31,7 +31,14 @@
           "apps/*/test/",
           "apps/*/web/"
         ],
-        excluded: [~r"/_build/", ~r"/deps/", ~r"/node_modules/"]
+        # test/support/fixtures holds verbatim generator output (including .exs
+        # reproduction scripts); it is golden data, not project source.
+        excluded: [
+          ~r"/_build/",
+          ~r"/deps/",
+          ~r"/node_modules/",
+          ~r"/test/support/fixtures/"
+        ]
       },
       #
       # Load and configure plugins here:

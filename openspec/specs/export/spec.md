@@ -87,6 +87,33 @@ The system SHALL generate standalone scripts in multiple languages that reproduc
 - **WHEN** a generated script is executed
 - **THEN** it SHALL be self-contained and runnable using only its language runtime and standard HTTP libraries
 
+### Requirement: External Value Resolution (DR-021)
+
+The system SHALL wire server-generated values (external placeholders) through generated scripts and notebooks so a consumer command references a value produced by an upstream command, resolving that wiring once per report and sharing it across every script and notebook target.
+
+#### Scenario: Producer extraction and consumer reference
+
+- **WHEN** a command consumes an external value produced by an upstream command and the report is exported to a script or notebook target
+- **THEN** the producing step SHALL extract the value from its response into a stable variable
+- **AND** the consuming step SHALL reference that same variable rather than emitting a literal placeholder or raw internal struct
+
+#### Scenario: Resolution shared across targets
+
+- **WHEN** the same report is exported to more than one target (curl/bash, Python, Elixir, Livebook)
+- **THEN** the variable name for a given produced value SHALL be identical across targets
+- **AND** the placeholder wiring SHALL be derived once per report, with each target contributing only its own output syntax
+
+#### Scenario: External value nested in a collection
+
+- **WHEN** a consumed external value appears inside a list or map field of a command's request body
+- **THEN** every target SHALL render it as a reference to the producer's variable at its nested position
+- **AND** the generated output SHALL NOT contain the raw internal placeholder struct
+
+#### Scenario: Best-effort linear wiring
+
+- **WHEN** a produced value originates from a parallel branch or suffix command rather than the linear prefix
+- **THEN** the wiring MAY be omitted, since standalone scripts reproduce the linear sequence
+
 ### Requirement: LiveBook Export
 
 The system SHALL generate interactive LiveBook notebooks from failure reports for exploratory debugging.
