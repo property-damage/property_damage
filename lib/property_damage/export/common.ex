@@ -1,7 +1,6 @@
 defmodule PropertyDamage.Export.Common do
   @moduledoc false
 
-  alias PropertyDamage.Export.HTTPSpec
   alias PropertyDamage.{FailureReport, Placeholder, Sequence}
 
   # ============================================================================
@@ -34,179 +33,6 @@ defmodule PropertyDamage.Export.Common do
       adapter: report.adapter
     }
   end
-
-  # ============================================================================
-  # HTTPSpec Resolution
-  # ============================================================================
-
-  @doc """
-  Gets the HTTPSpec for a command from an adapter.
-
-  If the adapter implements `http_spec/2`, calls it.
-  Otherwise, returns nil (the script generator should handle this gracefully).
-  """
-  @spec get_http_spec(struct(), module() | nil, map()) :: HTTPSpec.t() | nil
-  def get_http_spec(_command, nil, _context), do: nil
-
-  def get_http_spec(command, adapter, context) do
-    if function_exported?(adapter, :http_spec, 2) do
-      adapter.http_spec(command, context)
-    else
-      nil
-    end
-  end
-
-  # ============================================================================
-  # Command Extraction
-  # ============================================================================
-
-  @doc """
-  Extracts ref bindings from events.
-
-  Looks for fields ending in `_ref` or `_id` in events and builds a map
-  of command_index -> field_name -> value.
-
-  This is used to track which refs are bound by which commands.
-  """
-  @spec extract_ref_bindings([struct()], [PropertyDamage.EventLog.Entry.t()]) :: map()
-  def extract_ref_bindings(commands, events) do
-    # Group events by command index
-    events_by_command =
-      events
-      |> Enum.filter(&(&1.command_index != nil))
-      |> Enum.group_by(& &1.command_index)
-
-    # For each command, extract potential ref bindings from its events
-    commands
-    |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {_cmd, idx}, acc ->
-      case Map.get(events_by_command, idx, []) do
-        [] ->
-          acc
-
-        cmd_events ->
-          bindings = extract_bindings_from_events(cmd_events)
-
-          if map_size(bindings) > 0 do
-            Map.put(acc, idx, bindings)
-          else
-            acc
-          end
-      end
-    end)
-  end
-
-  defp extract_bindings_from_events(events) do
-    Enum.reduce(events, %{}, fn entry, acc ->
-      event = entry.event
-
-      event
-      |> Map.from_struct()
-      |> Enum.filter(fn {key, value} ->
-        ref_field?(key) and bindable_value?(value)
-      end)
-      |> Enum.into(acc)
-    end)
-  end
-
-  defp ref_field?(key) do
-    key_str = to_string(key)
-    String.ends_with?(key_str, "_ref") or String.ends_with?(key_str, "_id") or key == :id
-  end
-
-  defp bindable_value?(value) when is_binary(value), do: true
-  defp bindable_value?(value) when is_integer(value), do: true
-  defp bindable_value?(_), do: false
-
-  # ============================================================================
-  # Placeholder Wiring (DR-021)
-  # ============================================================================
-  #
-  # A consumer command field can hold a `%Placeholder{}`: a server-generated
-  # value produced by an upstream command. The placeholder carries everything a
-  # standalone reproduction script needs to wire it: `position` (the producing
-  # command's structured index), `path` (the field within that command's
-  # response), and `id` (a stable identity shared by all consumers of the same
-  # produced value). These helpers let each script generator extract the value at
-  # the producer's step and reference it from consumers, without guessing.
-
-  # All placeholders consumed anywhere in `commands`, de-duplicated by identity
-  # and paired with a stable script variable name. First-appearance order.
-  #
-  # Internal export plumbing: it returns the internal `%Placeholder{}` struct,
-  # so it is not part of the documented API.
-  @doc false
-  @spec placeholder_bindings([struct()]) :: [{Placeholder.t(), String.t()}]
-  def placeholder_bindings(commands) do
-    commands
-    |> Enum.flat_map(&collect_placeholders/1)
-    |> Enum.uniq_by(& &1.id)
-    |> Enum.map(&{&1, placeholder_var(&1)})
-  end
-
-  # Map from placeholder identity (`id`) to its script variable name, for
-  # resolving a consumed `%Placeholder{}` to the variable a producer step binds.
-  #
-  # Internal export plumbing, like `placeholder_bindings/1`.
-  @doc false
-  @spec placeholder_var_map([struct()]) :: %{reference() => String.t()}
-  def placeholder_var_map(commands) do
-    commands
-    |> placeholder_bindings()
-    |> Map.new(fn {ph, name} -> {ph.id, name} end)
-  end
-
-  # Map from a producing command's linear index to the `[{placeholder, var_name}]`
-  # it must extract from its response.
-  #
-  # Only linear (`:prefix`) producers are wired: in a linear sequence the prefix
-  # index equals the flattened command index a script iterates. Branch/suffix
-  # producers are omitted (standalone scripts are best-effort linear).
-  #
-  # Internal export plumbing: it returns the internal `%Placeholder{}` struct,
-  # so it is not part of the documented API.
-  @doc false
-  @spec producer_extractions([struct()]) :: %{
-          non_neg_integer() => [{Placeholder.t(), String.t()}]
-        }
-  def producer_extractions(commands) do
-    commands
-    |> placeholder_bindings()
-    |> Enum.filter(fn {ph, _name} -> match?({:prefix, _}, ph.position) end)
-    |> Enum.group_by(fn {ph, _name} -> elem(ph.position, 1) end)
-  end
-
-  defp placeholder_var(%Placeholder{event_module: mod, path: path, position: position}) do
-    module_part = mod |> Module.split() |> List.last() |> to_string()
-    path_part = Enum.map_join(path, "_", &to_string/1)
-    idx_part = position_suffix(position)
-    sanitize_label("#{module_part}_#{path_part}#{idx_part}")
-  end
-
-  defp position_suffix({:prefix, i}), do: "_#{i}"
-  defp position_suffix({:branch, b, i}), do: "_b#{b}_#{i}"
-  defp position_suffix({:suffix, i}), do: "_s#{i}"
-  defp position_suffix(_), do: ""
-
-  defp collect_placeholders(%Placeholder{} = ph), do: [ph]
-
-  defp collect_placeholders(%_{} = struct) do
-    struct |> Map.from_struct() |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
-  end
-
-  defp collect_placeholders(value) when is_map(value) do
-    value |> Map.values() |> Enum.flat_map(&collect_placeholders/1)
-  end
-
-  defp collect_placeholders(value) when is_list(value) do
-    Enum.flat_map(value, &collect_placeholders/1)
-  end
-
-  defp collect_placeholders(value) when is_tuple(value) do
-    value |> Tuple.to_list() |> Enum.flat_map(&collect_placeholders/1)
-  end
-
-  defp collect_placeholders(_other), do: []
 
   # ============================================================================
   # Value Serialization
@@ -285,16 +111,6 @@ defmodule PropertyDamage.Export.Common do
   defp serialize_map_key(key) when is_atom(key), do: to_string(key)
   defp serialize_map_key(key), do: inspect(key)
 
-  defp sanitize_label(nil), do: "unknown"
-
-  defp sanitize_label(label) when is_binary(label) do
-    label
-    |> String.replace(~r/[^a-zA-Z0-9_]/, "_")
-    |> String.downcase()
-  end
-
-  defp sanitize_label(label), do: sanitize_label(to_string(label))
-
   # ============================================================================
   # Command Serialization
   # ============================================================================
@@ -330,8 +146,11 @@ defmodule PropertyDamage.Export.Common do
     if map_size(fields) == 0 do
       "%#{name}{}"
     else
+      # Sort by the field name's string form for a stable comment: map key
+      # enumeration order is not guaranteed and varies with atom intern order.
       field_strs =
         fields
+        |> Enum.sort_by(fn {k, _} -> to_string(k) end)
         |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{format_comment_value(v)}" end)
 
       "%#{name}{#{field_strs}}"
@@ -344,7 +163,45 @@ defmodule PropertyDamage.Export.Common do
 
   defp format_comment_value(value) when is_binary(value), do: inspect(value)
   defp format_comment_value(value) when is_atom(value), do: ":#{value}"
+
+  # A placeholder nested in a collection renders as `external(...)` like a
+  # top-level one, instead of leaking its raw struct. Collections without a
+  # placeholder keep `inspect/1`'s output (including `limit: 3` truncation).
+  defp format_comment_value(value) when is_list(value) do
+    if contains_placeholder?(value) do
+      "[" <> Enum.map_join(value, ", ", &format_comment_value/1) <> "]"
+    else
+      inspect(value, limit: 3)
+    end
+  end
+
+  defp format_comment_value(value) when is_map(value) and not is_struct(value) do
+    if contains_placeholder?(value) do
+      "%{" <> Enum.map_join(value, ", ", &format_comment_pair/1) <> "}"
+    else
+      inspect(value, limit: 3)
+    end
+  end
+
   defp format_comment_value(value), do: inspect(value, limit: 3)
+
+  defp format_comment_pair({key, value}) when is_atom(key),
+    do: "#{key}: #{format_comment_value(value)}"
+
+  defp format_comment_pair({key, value}),
+    do: "#{format_comment_value(key)} => #{format_comment_value(value)}"
+
+  defp contains_placeholder?(%Placeholder{}), do: true
+
+  defp contains_placeholder?(value) when is_list(value),
+    do: Enum.any?(value, &contains_placeholder?/1)
+
+  defp contains_placeholder?(%_{}), do: false
+
+  defp contains_placeholder?(value) when is_map(value),
+    do: Enum.any?(value, fn {_k, v} -> contains_placeholder?(v) end)
+
+  defp contains_placeholder?(_value), do: false
 
   # ============================================================================
   # Header Generation
