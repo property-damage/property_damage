@@ -21,10 +21,12 @@ defmodule PropertyDamage.ExecutorSettledTest do
 
   alias PropertyDamage.{EventQueue, Executor}
 
-  alias PropertyDamage.Test.{FailingModel, SimpleAdapter, SimpleInjectorAdapter}
-
+  # credo's AliasOrder sorts a multi-alias by its first member, so
+  # PropertyDamage.Test.{FailingModel, ...} sorts as ...Test.FailingModel and
+  # belongs between Test.Events and Test.Projections.
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
+  alias PropertyDamage.Test.{FailingModel, SimpleAdapter, SimpleInjectorAdapter}
   alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
 
   # A probe command that settles after two {:retry, _} attempts. It carries the
