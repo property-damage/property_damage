@@ -1,0 +1,15 @@
+@startuml
+title Failure: Invariant Violation: NonNegativeBalance (seed: 12345)
+
+participant Test
+participant SUT
+
+Test -> SUT : TestCommand(account_id: "acc_1", amount: 50)
+SUT --> Test : TestEvent(balance: 50, id: "e1")
+hnote over Test,SUT #ffcccc : FAILURE at command 1
+Test -x SUT : AnotherCommand(id: "order_1")
+
+note right of SUT #ffcccc
+  Balance is -50
+end note
+@enduml
