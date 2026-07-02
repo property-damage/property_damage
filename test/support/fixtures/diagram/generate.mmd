@@ -1,0 +1,12 @@
+```mermaid
+sequenceDiagram
+    title Fixture
+    participant Test
+    participant SUT
+    participant State
+
+    Test->>SUT: TestCommand(account_id: "acc_123", amount: 100)
+    SUT-->>Test: TestEvent(balance: 100, id: "evt_1")
+    Test->>SUT: AnotherCommand(id: "order_456")
+    SUT-->>Test: AnotherEvent(status: :completed)
+```
