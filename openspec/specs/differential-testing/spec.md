@@ -254,11 +254,11 @@ The framework SHALL support multiple output formats for mutation testing reports
 
 ### Requirement: Run Comparison (DR-035)
 
-The framework SHALL compare two or more full `RunTrace` records (DR-033) of the same plan to help a human or an LLM localize regressions and flakiness. All compared traces MUST share a plan identity (equal `original_sequence` and model); the framework SHALL refuse or clearly flag a comparison of traces that do not, treating an unequal `original_sequence` or a differing `plan-generated` value (DR-034) as the incomparability signal. Comparison SHALL operate over `PropertyDamage.RunComparison` and SHALL NOT consume shrunk failure reports, since a shrunk sequence is a different, smaller plan that cannot be aligned against a full run. Rows SHALL be commands and their events (two levels; SUT-call / request-body rows are out of scope for this requirement). Columns SHALL be runs, grouped by outcome (passing versus failing) but otherwise peers, so any run may be compared against any other.
+The framework SHALL compare two or more full `RunTrace` records (DR-033) of the same plan to help a human or an LLM localize regressions and flakiness. All compared traces MUST share a plan identity: equal `plan_fingerprint` (DR-036) and equal model — raw sequence equality is explicitly NOT the oracle, since the fingerprint is the canonical identity and excludes derived registry state. The framework SHALL refuse or clearly flag a comparison of traces that do not share plan identity, treating an unequal fingerprint or a differing `plan-generated` command-field value (DR-034) as the incomparability signal. Trace capture SHALL be provided by `RunTrace.capture/1` (run one full, unshrunk plan, pass or fail); comparison SHALL operate over `PropertyDamage.RunComparison`, which consumes traces and never runs a SUT. Comparison SHALL NOT consume shrunk failure reports: a shrunk sequence is a different, smaller plan that cannot be aligned against a full run (a `plan_source: :shrunk` trace is comparable only against traces of the same shrunk plan). `RunComparison.investigate/1` SHALL provide flakiness sugar: same plan, N captures, a fresh recorded `run_nonce` per capture. Rows SHALL be commands and their events (two levels; SUT-call / request-body rows are out of scope for this requirement); event-log entries carrying no command index (injector, telemetry) belong to no step and are excluded from comparison in this version — a stated limit, while nemesis and injected events attributed to commands (DR-030) do participate. Columns SHALL be runs, grouped by outcome (passing versus failing) but otherwise peers, so any run may be compared against any other.
 
 #### Scenario: Comparability guard
 
-- **WHEN** run comparison is asked to compare traces whose `original_sequence` differs, or where a `plan-generated` value differs between them
+- **WHEN** run comparison is asked to compare traces whose plan fingerprints differ, or where a `plan-generated` command field differs between them
 - **THEN** the framework SHALL treat the traces as not comparable and SHALL surface this rather than emit a misleading diff
 
 #### Scenario: Command and event alignment
@@ -271,9 +271,19 @@ The framework SHALL compare two or more full `RunTrace` records (DR-033) of the 
 #### Scenario: Discriminative analysis across multiple runs
 
 - **WHEN** more than one passing run is compared against one or more failing runs
-- **THEN** the framework SHALL classify each aligned field difference by its correlation with outcome: a difference that also varies among the passing runs SHALL be ranked as incidental, and a difference that is stable within each outcome group but differs between groups SHALL be ranked as discriminating
+- **THEN** the framework SHALL classify each aligned field difference by its correlation with outcome: a difference that also varies among the passing runs SHALL be ranked as incidental, a difference that is stable within each outcome group but differs between groups SHALL be ranked as discriminating, and any other pattern SHALL be ranked as weak
 - **AND** the framework SHALL emit a ranked list of the most discriminating differences
 - **AND** with a single passing run the analysis SHALL degrade to a plain pairwise diff
+
+#### Scenario: Mixed failure signatures are surfaced
+
+- **WHEN** the failing group contains traces with distinct failure signatures (different failure type or check)
+- **THEN** the framework SHALL surface the heterogeneity rather than silently pool unlike failures into one group, since pooling would corrupt the within-group stability measure
+
+#### Scenario: Timing-dependent repetition is not noise-ranked
+
+- **WHEN** aligned commands differ only in the repetition count of consecutive same-module events (for example settle/probe polling, whose count is timing-dependent)
+- **THEN** the framework SHALL rank that difference as incidental rather than reporting a cascade of inserted-event differences
 
 #### Scenario: Provenance-aware highlighting
 
@@ -285,7 +295,8 @@ The framework SHALL compare two or more full `RunTrace` records (DR-033) of the 
 
 - **WHEN** a comparison report is produced
 - **THEN** it SHALL be a single self-contained HTML file with no external dependencies, embedding the machine-readable comparison data in one JSON block and rendering a static human-readable table that JavaScript MAY enhance with interactivity
-- **AND** it SHALL carry a reproducibility header naming the model, adapter, UTC timestamp, source revision, seed, run number, and per-run `run_nonce`
+- **AND** the embedded JSON SHALL follow a defined, versioned schema (positions, struct values, and non-JSON scalars have specified encodings; the blob carries a `schema_version`)
+- **AND** it SHALL carry a reproducibility header naming the model, adapter, UTC timestamp, source revision, seed, run number, and per-run `run_nonce` and `mint_epoch`
 
 #### Scenario: Semantic-difference row highlighting
 

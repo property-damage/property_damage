@@ -17,7 +17,7 @@ The system SHALL save and load failure reports to `.pd` files using Erlang term 
 - **WHEN** a failure report is saved to a directory
 - **THEN** the system SHALL write a `.pd` file containing a version header, the Erlang term-encoded `FailureReport` struct, and a checksum for integrity verification
 - **AND** the filename SHALL follow the pattern `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
-- **AND** the version header SHALL record the current format version (`3`), which tracks the `FailureReport` struct shape
+- **AND** the version header SHALL record the current format version (`4`, since the report composes a `RunTrace` — DR-033), which tracks the `FailureReport` struct shape
 
 #### Scenario: Save with custom filename
 
@@ -65,14 +65,14 @@ The system SHALL include version metadata in persisted files and warn when loadi
 
 #### Scenario: Older format versions still load
 
-- **WHEN** a `.pd` file written under an earlier format version (`1` or `2`) is loaded
-- **THEN** the system SHALL decode it with the corresponding version clause and return its `FailureReport`, so no data is lost when the current version is `3`
+- **WHEN** a `.pd` file written under an earlier format version (`1`, `2`, or `3`) is loaded
+- **THEN** the system SHALL decode it with the corresponding version clause and return its `FailureReport`, so no data is lost when the current version is `4`
 
 #### Scenario: Pre-v3 file carrying removed fields loads without data loss or drift
 
 - **WHEN** a `.pd` file written before `command_at_failure` / `events_at_failure` were removed is loaded
 - **THEN** the deserialized report SHALL carry those keys as extra (stored) keys, and the system SHALL NOT report them as `{:struct_shape_drift, ...}` (they are recognized as intentionally-removed fields)
-- **AND** the failing command and its events SHALL remain recoverable via `FailureReport.failure_step/1`, recomputed from the untouched `event_log` + `shrunk_sequence`, so the removal is lossless for existing files
+- **AND** the failing command and its events SHALL remain recoverable via `FailureReport.failure_step/1`, served by the `RunTrace` the loader synthesizes from the stored `event_log` + `shrunk_sequence` (DR-033), so the removal is lossless for existing files
 
 ### Requirement: Seed Library
 
@@ -189,15 +189,21 @@ The system SHALL support step-by-step re-execution of a saved command sequence f
 
 ### Requirement: Run Trace Persistence (DR-033)
 
-A `RunTrace` SHALL be serializable to and loadable from disk independently of a `FailureReport`, so that traces captured in separate processes or on separate commits (for example, a passing run on one CI job and a failing run on another) can be collected and compared later. Trace serialization SHALL record the run identity including `run_nonce` (DR-034) and the source revision, and SHALL carry a format version. When a `FailureReport` composes a `RunTrace` (DR-033), the persisted report format SHALL advance to version 4; older report files SHALL continue to load under this domain's tolerant-loading rules.
+A `RunTrace` SHALL be serializable to and loadable from disk independently of a `FailureReport`, so that traces captured in separate processes or on separate commits (for example, a passing run on one CI job and a failing run on another) can be collected and compared later. Trace files SHALL use the same binary framing as reports, with the payload gaining an explicit `kind` (`:run_trace` or `:failure_report`) that loaders dispatch on. Trace serialization SHALL record the run identity including `run_nonce` and `mint_epoch` (DR-034), the `plan_fingerprint` (DR-036), and the source revision, and SHALL carry a format version. When a `FailureReport` composes a `RunTrace` (DR-033), the persisted report format SHALL advance to version 4; older report files SHALL continue to load under this domain's tolerant-loading rules, with the loader synthesizing the embedded trace from the legacy fields (`shrunk_sequence` as the plan with `plan_source: :shrunk`, the event log, and the scalar identity; `run_nonce`, `mint_epoch`, the executed record, and `plan_fingerprint` absent as `nil`) so the step interface keeps working on pre-v4 files. The dependency-version capture and struct-drift checks SHALL extend to walk the embedded trace.
 
 #### Scenario: Trace round-trips independently
 
 - **WHEN** a `RunTrace` is saved and later loaded, possibly in a different process
-- **THEN** the loaded trace SHALL reproduce the executed commands, event log, identity, and outcome sufficient for comparison
+- **THEN** the loaded trace SHALL reproduce the plan, executed commands, event log, identity (including nonce, epoch, and fingerprint), and outcome sufficient for comparison
 
 #### Scenario: Report format version advances
 
 - **WHEN** a `FailureReport` composing a `RunTrace` is persisted
 - **THEN** the file SHALL be written at format version 4
 - **AND** pre-v4 report files SHALL still load without data loss
+
+#### Scenario: Pre-v4 report loads with a synthesized trace
+
+- **WHEN** a v3 (or older) report file is loaded
+- **THEN** the loader SHALL synthesize the embedded `RunTrace` from the legacy fields
+- **AND** `FailureReport.steps/1` and `event_entries_at/2` SHALL work on the loaded report exactly as they did before the composition

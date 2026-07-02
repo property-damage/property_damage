@@ -158,12 +158,12 @@ The system SHALL analyze a model's commands, events, and projections to suggest 
 
 ### Requirement: Structured Failure Reports
 
-The system SHALL produce structured failure reports containing location (run number, command index, seed), original and shrunk command sequences, projection states before and at failure, the complete event trail, and the structured failure reason.
+The system SHALL produce structured failure reports containing location (run number, command index, seed), original and shrunk command sequences, projection states before and at failure, the complete event trail, and the structured failure reason. The shrunk sequence and event trail are served through the report's embedded `RunTrace` (DR-033) — `shrunk_sequence/1` and `event_log/1` are accessors over the trace, not struct fields.
 
 #### Scenario: Report creation
 
 - **WHEN** a test failure occurs
-- **THEN** a `FailureReport` SHALL be created with seed, run_number, original_sequence, shrunk_sequence, failed_at_index, and failure_reason
+- **THEN** a `FailureReport` SHALL be created with seed, run_number, original_sequence, failed_at_index, failure_reason, and an embedded `RunTrace` whose plan serves as the shrunk sequence (DR-033)
 
 #### Scenario: Multiple output formats
 
@@ -192,7 +192,7 @@ The system SHALL produce structured failure reports containing location (run num
 #### Scenario: Structural step query interface
 
 - **WHEN** a `FailureReport` is inspected structurally
-- **THEN** `FailureReport.steps/1` SHALL delegate to `RunTrace.steps/1` (DR-033) on the report's embedded trace, returning the run as an ordered list of `%RunTrace.Step{position, flattened_index, command, entries, label, failed?}`, one per command in `Sequence.to_list/1` (flattened) reading order
+- **THEN** `FailureReport.steps/1` SHALL delegate to `RunTrace.steps/1` (DR-033) on the report's embedded trace, returning the run as an ordered list of `%RunTrace.Step{position, flattened_index, command, executed_command, entries, label, failed?}`, one per command in `Sequence.to_list/1` (flattened) reading order; `command` is the plan's symbolic command (unchanged semantics for existing consumers) and `executed_command` is the concrete resolved command actually sent (`nil` when not captured, e.g. a command that never executed)
 - **AND** each step's `position` SHALL be a `%Sequence.Position{section, offset}` naming the command's section (`:prefix`, `:suffix`, or `{:branch, id}`) and its offset within that section, giving each command an identity that is unambiguous across parallel branches even when they share an executor command index
 - **AND** each step's `entries` SHALL be the full `EventLog.Entry` structs whose `(command_index, branch_id)` resolve to that step's position, in log order, preserving each event's provenance (`source`, `branch_id`; the bare event is `entry.event`) so a nemesis / mock / stutter event attributed to the command stays distinguishable from SUT output; entries carrying no command index (e.g. injector or telemetry events) SHALL belong to no step
 - **AND** at most one step SHALL have `failed?: true` — the command where the failure was localized, matched by position rather than by comparing the flattened index to `failed_at_index` (an executor index that diverges from the flattened ordinal for branch failures)
@@ -202,12 +202,12 @@ The system SHALL produce structured failure reports containing location (run num
 
 ### Requirement: Run Trace as the Execution Record (DR-033)
 
-The framework SHALL model the full, unshrunk record of a single run as a `PropertyDamage.RunTrace`, independent of outcome. A `RunTrace` SHALL carry the run identity (`seed`, `run_number`, `run_nonce`, `model`, `adapter`, UTC `timestamp`, and best-effort source revision), the generated plan (`original_sequence`), the concrete executed commands with their resolved and minted values, the complete `EventLog` with per-entry provenance, and an `outcome` of `:pass` or `{:fail, reason}`. `RunTrace` SHALL be the sole owner of the structural step query interface: `RunTrace.steps/1` and `RunTrace.event_entries_at/2` describe any run regardless of outcome, using the same branch-aware `%Sequence.Position{}` identity the failure report already uses. A `FailureReport` SHALL compose the `RunTrace` of its shrunk minimal reproduction and add only failure-specific concerns: the locators `failure_step/1` and `failure_index/1`, the shrink relationship (`original_sequence` vs `shrunk_sequence`), and the failure classification. Full `RunTrace` capture SHALL be on demand, not retained for every exploration run.
+The framework SHALL model the complete record of a single run as a `PropertyDamage.RunTrace`, independent of outcome. A `RunTrace` SHALL carry the run identity (`seed`, `run_number`, `run_nonce`, `mint_epoch` (DR-034), `model`, `adapter`, UTC `timestamp`, and best-effort `source_revision`), the plan (`plan`, the `%Sequence{}` this run executed — deliberately NOT named `original_sequence`, whose report-level meaning is the generated plan of the failing exploration run), a `plan_source` of `:generated` (a pure function of the effective seed) or `:shrunk` (a shrinker product, not regenerable from the seed), the canonical `plan_fingerprint` (DR-036), the concrete executed commands with their resolved and minted values keyed branch-aware by `%Sequence.Position{}`, the complete `EventLog` with per-entry provenance, the `command_labels`, and an `outcome` of `:pass` or `{:fail, reason}`. The executor SHALL always accumulate the resolved concrete command per position (including within branch workers, merged with branch state) so the executed record exists whenever a trace is materialized. `RunTrace` SHALL be the sole owner of the structural step query interface: `RunTrace.steps/1` and `RunTrace.event_entries_at/2` describe any run regardless of outcome, using the same branch-aware `%Sequence.Position{}` identity the failure report already uses. A `FailureReport` SHALL compose the `RunTrace` of the run the report describes — the shrunk minimal reproduction when its re-execution reproduced the failure, otherwise the original failing run (the existing non-reproduction fallback) — and add only failure-specific concerns: the locators `failure_step/1` and `failure_index/1`, the shrink relationship (`original_sequence` vs the trace's plan), and the failure classification. Deep execution-record structures SHALL live once, on the trace: the report SHALL NOT carry `event_log` or `shrunk_sequence` struct fields; `FailureReport.event_log/1` and `FailureReport.shrunk_sequence/1` SHALL be accessors over the embedded trace, while scalar identity (`seed`, `run_number`, `model`, `adapter`, `timestamp`) MAY remain duplicated on the report as its locator surface. Full `RunTrace` capture SHALL be on demand (`RunTrace.capture/1`, DR-035), not retained for every exploration run.
 
 #### Scenario: Trace captured for a passing run
 
 - **WHEN** a run is executed on an on-demand capture path (run comparison or flakiness investigation) and passes
-- **THEN** the framework SHALL produce a `RunTrace` with `outcome: :pass`, the full unshrunk executed plan, and its complete event log
+- **THEN** the framework SHALL produce a `RunTrace` with `outcome: :pass`, `plan_source: :generated`, the full unshrunk executed plan, and its complete event log
 - **AND** `RunTrace.steps/1` SHALL return one step per command in `Sequence.to_list/1` reading order, with the same branch-aware position identity used for failing runs
 
 #### Scenario: FailureReport composes a RunTrace
@@ -216,6 +216,12 @@ The framework SHALL model the full, unshrunk record of a single run as a `Proper
 - **THEN** its execution record (executed commands, event log, step interface) SHALL be served by an embedded `RunTrace` rather than by fields duplicated on the report
 - **AND** `FailureReport.steps/1` and `FailureReport.event_entries_at/2` SHALL delegate to the embedded trace, preserving their existing branch-aware semantics
 - **AND** `FailureReport.failure_step/1` and `FailureReport.failure_index/1` SHALL remain failure-specific locators defined over that trace
+
+#### Scenario: Non-reproduction fallback trace
+
+- **WHEN** the shrunk sequence's re-execution fails to reproduce the failure and the report falls back to the original failing run
+- **THEN** the embedded trace SHALL be the original failing run's trace (`plan_source: :generated`), consistent with the sequence and event log the report already presents in that case
+- **AND** the report SHALL remain internally consistent: `FailureReport.shrunk_sequence/1` and the trace's plan SHALL be the same sequence
 
 #### Scenario: Exploration runs are not retained as traces
 

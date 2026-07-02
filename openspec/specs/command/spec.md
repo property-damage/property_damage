@@ -228,35 +228,45 @@ Commands SHALL define WHAT operations exist and their fields. Models SHALL defin
 
 ### Requirement: Client-Minted Run-Scoped Values (DR-034)
 
-A command generator MAY mark a field as run-scoped via `PropertyDamage.mint_per_run/1`, meaning the field's value SHALL be minted client-side at execution rather than fixed during symbolic generation. In the symbolic plan the field SHALL be a placeholder, so the plan stays a pure function of the effective seed and remains positionally identical across runs that share it. At execution the value SHALL be resolved deterministically from `(run_nonce, command_index, field)` using seeded generation only (never wall-clock reads, `:rand` at call time, `UUID.uuid4/0`, or other unrecorded entropy), so it is unique per run yet reproducible given the recorded `run_nonce`. `mint_per_run/1` SHALL contrast with `external/0`: `external` captures a value the SUT returns, whereas `mint_per_run` mints a value the client sends.
+A command generator MAY mark a field as run-scoped via `PropertyDamage.mint_per_run/1`, meaning the field's value SHALL be minted client-side at execution rather than fixed during symbolic generation. In the symbolic plan the field SHALL carry a marker struct (not a concrete value), reified at generation with the marker's deterministic identity coordinates — the structured generation `%Sequence.Position{}` and field path (DR-036) — so the plan stays a pure function of the effective seed and remains positionally identical across runs that share it. The executor's flat `command_index` SHALL NOT be the minting key: sibling parallel branches share flat indices, so a flat-index key would mint identical "unique" values within one run. Because the coordinates are baked in at generation and the marker travels inside the command struct, a command's minted value is stable under shrinking. At execution the value SHALL be resolved deterministically from `(run_nonce, mint_epoch, position, path, kind)` (DR-034, execution-engine domain) via a full-width derivation — at least 128 bits for identifier kinds, e.g. `sha256` over the stable term encoding — using no unrecorded entropy (never wall-clock reads, `:rand` at call time, or `UUID.uuid4/0`), so it is unique per run yet reproducible given the recorded nonce and epoch. Mint kinds SHALL be named and high-entropy (`:uuid` with RFC 4122 version/variant bits, `{:hex, n}`, or a `{module, function}` formatter receiving the derived bytes); anonymous-function forms SHALL be rejected because markers persist inside plans and traces. `mint_per_run/1` SHALL contrast with `external/0`: `external` captures a value the SUT returns, whereas `mint_per_run` mints a value the client sends.
 
-#### Scenario: Run-scoped field is a placeholder symbolically
+#### Scenario: Run-scoped field is a marker symbolically
 
 - **WHEN** a generator field is `mint_per_run(:uuid)`
-- **THEN** the generated plan SHALL carry a placeholder at that field, not a concrete value
+- **THEN** the generated plan SHALL carry a reified marker at that field, not a concrete value
 - **AND** the plan SHALL be identical across runs that share the effective seed
 
 #### Scenario: Resolved deterministically at execution
 
-- **WHEN** the command executes with a given `run_nonce`
-- **THEN** the field SHALL resolve to a value derived purely from `(run_nonce, command_index, field)`
-- **AND** re-executing with the same `run_nonce` SHALL produce the same value
+- **WHEN** the command executes with a given `run_nonce` and `mint_epoch`
+- **THEN** the field SHALL resolve to a value derived purely from `(run_nonce, mint_epoch, position, path, kind)`
+- **AND** re-executing with the same `run_nonce` and `mint_epoch` SHALL produce the same value
 
 #### Scenario: Distinct across runs on a shared SUT
 
 - **WHEN** the same plan is executed multiple times with distinct `run_nonce` values against a SUT that is not reset between runs
 - **THEN** each execution SHALL mint distinct values, avoiding duplicate-identity collisions
 
+#### Scenario: Distinct within one run across parallel branches
+
+- **WHEN** two commands in sibling parallel branches occupy the same flat executor index and both mint the same field name
+- **THEN** their minted values SHALL be distinct, because the minting key is the structured branch-aware position, not the flat index
+
 ### Requirement: Value Provenance Classification (DR-034)
 
-Each value appearing in a run's executed commands and events SHALL be classifiable into one of three provenance classes, and the framework SHALL make this classification available to consumers (notably run comparison): `plan-generated` (a pure function of the effective seed), `run-scoped` (minted via `mint_per_run`, a function of the `run_nonce`), and `server-resolved` (captured from SUT output, e.g. via `external`). Provenance SHALL determine how a cross-run difference is interpreted: a differing `plan-generated` value across runs that claim the same plan is a comparability violation; a differing `run-scoped` value is expected by design; a differing `server-resolved` value is an observed behavioral difference.
+Each value appearing in a run's executed commands and events SHALL be classifiable into one of three provenance classes, and the framework SHALL make this classification available to consumers (notably run comparison): `plan-generated` (a pure function of the effective seed), `run-scoped` (minted via `mint_per_run`, a function of the `run_nonce`/`mint_epoch`), and `server-resolved` (produced by the SUT). Classification SHALL be derived structurally at consumption time from the plan, the trace, and event-module metadata — no per-value tag is stored on `EventLog.Entry`. The concrete rules: a command field whose plan value is a mint marker is `run-scoped`; a command field whose plan value is a `%Placeholder{}` is `server-resolved`; any other command field is `plan-generated`. An event field at a path in `External.external_paths(event_module)` is `server-resolved`; an event field whose value is a member of the run's minted-value set is a `run-scoped` echo (sound because mint kinds are high-entropy); any other event field is observed SUT output and treated as `server-resolved`. Provenance SHALL determine how a cross-run difference is interpreted: a differing `plan-generated` command field across runs that claim the same plan is a comparability violation (this tripwire applies to command fields only — event fields are never `plan-generated`); a differing `run-scoped` value is expected by design; a differing `server-resolved` value is an observed behavioral difference.
 
-#### Scenario: Provenance available to consumers
+#### Scenario: Provenance derivable by consumers
 
-- **WHEN** a value is resolved during execution
-- **THEN** the framework SHALL record enough provenance for a consumer to classify it as plan-generated, run-scoped, or server-resolved
+- **WHEN** a consumer classifies a value from a run's executed commands or events
+- **THEN** the classification SHALL be derivable from the plan, the trace's executed record, and event-module external paths, without any stored per-value tag
+
+#### Scenario: Minted echo in an event is recognized
+
+- **WHEN** a SUT event reflects back a value the client minted via `mint_per_run` (a correlation id)
+- **THEN** the framework SHALL classify that event field as a `run-scoped` echo rather than an observed behavioral difference
 
 #### Scenario: Differing plan-generated value signals incomparability
 
-- **WHEN** two runs assert the same plan identity but a plan-generated value differs between them
+- **WHEN** two runs assert the same plan identity but a `plan-generated` command field differs between them
 - **THEN** the framework SHALL treat the runs as not comparable
