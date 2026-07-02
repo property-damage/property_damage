@@ -1,8 +1,8 @@
 defmodule PropertyDamage.Export.Script.Elixir do
   @moduledoc false
 
-  alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Placeholder}
+  alias PropertyDamage.Export.{Common, HTTPSpec, StepPlan}
+  alias PropertyDamage.FailureReport
 
   @doc """
   Generates an Elixir script from a failure report.
@@ -22,16 +22,13 @@ defmodule PropertyDamage.Export.Script.Elixir do
     verbose = Keyword.get(opts, :verbose, true)
 
     metadata = Common.extract_metadata(report)
-    commands = Common.extract_commands(report)
-
-    var_map = Common.placeholder_var_map(commands)
-    extractions = Common.producer_extractions(commands)
+    steps = StepPlan.build(report, adapter)
 
     [
       generate_shebang(),
       generate_header(metadata, report),
       generate_setup(env_var, base_url),
-      generate_steps(report, adapter, verbose, var_map, extractions),
+      generate_steps(steps, verbose),
       generate_footer(metadata)
     ]
     |> Enum.join("\n")
@@ -77,39 +74,16 @@ defmodule PropertyDamage.Export.Script.Elixir do
     """
   end
 
-  defp generate_steps(report, adapter, verbose, var_map, extractions) do
-    report
-    |> FailureReport.steps()
-    |> Enum.map_join("\n", fn step ->
-      generate_step(
-        step.command,
-        step.flattened_index,
-        adapter,
-        step.failed?,
-        verbose,
-        var_map,
-        extractions,
-        step.label
-      )
-    end)
+  defp generate_steps(steps, verbose) do
+    Enum.map_join(steps, "\n", &generate_step(&1, verbose))
   end
 
-  defp generate_step(
-         command,
-         index,
-         adapter,
-         is_failure_point,
-         verbose,
-         var_map,
-         extractions,
-         label
-       ) do
-    step_num = index + 1
-    cmd_name = Common.command_name(command)
-    http_spec = Common.get_http_spec(command, adapter, %{})
+  defp generate_step(%StepPlan.Step{} = step, verbose) do
+    step_num = step.flattened_index + 1
+    cmd_name = Common.command_name(step.command)
 
-    failure_marker = if is_failure_point, do: " (FAILURE POINT)", else: ""
-    label_comment = if is_binary(label), do: "# #{label}\n", else: ""
+    failure_marker = if step.failed?, do: " (FAILURE POINT)", else: ""
+    label_comment = if is_binary(step.label), do: "# #{step.label}\n", else: ""
 
     header =
       if verbose do
@@ -124,34 +98,32 @@ defmodule PropertyDamage.Export.Script.Elixir do
 
     comment =
       if verbose do
-        "# Command: #{Common.command_to_comment(command)}\n"
+        "# Command: #{Common.command_to_comment(step.command)}\n"
       else
         ""
       end
 
-    req_code = generate_req_code(command, http_spec, index, var_map, extractions)
-
-    header <> label_comment <> comment <> req_code
+    header <> label_comment <> comment <> generate_req_code(step)
   end
 
-  defp generate_req_code(command, nil, index, _var_map, _extractions) do
+  defp generate_req_code(%StepPlan.Step{http_spec: nil} = step) do
     # No HTTPSpec available, generate placeholder
-    cmd_name = Common.command_name(command)
+    cmd_name = Common.command_name(step.command)
 
     """
     # TODO: Add http_spec/2 to your adapter for #{cmd_name}
     IO.puts("Skipping #{cmd_name} - no HTTP mapping available")
-    resp#{index + 1} = nil
+    resp#{step.flattened_index + 1} = nil
     """
   end
 
-  defp generate_req_code(command, %HTTPSpec{} = spec, index, var_map, extractions) do
-    var_name = "resp#{index + 1}"
+  defp generate_req_code(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step) do
+    var_name = "resp#{step.flattened_index + 1}"
     method = spec.method
-    path = generate_path_code(spec, index, var_map)
+    path = generate_path_code(spec.path, step.resolved_path_params)
 
     # Build the Req call
-    req_opts = build_req_opts(spec, command, index, var_map)
+    req_opts = build_req_opts(spec, step.resolved_body)
 
     req_call =
       case method do
@@ -164,7 +136,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
       end
 
     # Extract any external values this command produces (DR-021).
-    ref_extraction = generate_placeholder_extraction(index, extractions, var_name)
+    ref_extraction = generate_placeholder_extraction(step, var_name)
 
     """
     #{var_name} = #{req_call}
@@ -176,14 +148,14 @@ defmodule PropertyDamage.Export.Script.Elixir do
   # Path and Body Generation
   # ============================================================================
 
-  defp generate_path_code(%HTTPSpec{path: path, path_params: params}, _index, var_map) do
+  defp generate_path_code(path, params) do
     if map_size(params) == 0 do
       inspect(path)
     else
       # Build path with interpolation for refs
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
-          replacement = generate_value_interpolation(value, var_map)
+          replacement = generate_value_interpolation(value)
           String.replace(acc, ":#{key}", "\#{#{replacement}}")
         end)
 
@@ -191,22 +163,21 @@ defmodule PropertyDamage.Export.Script.Elixir do
     end
   end
 
-  defp generate_value_interpolation(%Placeholder{} = ph, var_map) do
-    "refs[#{inspect(Map.fetch!(var_map, ph.id))}]"
+  defp generate_value_interpolation(%StepPlan.Var{name: name}) do
+    "refs[#{inspect(name)}]"
   end
 
-  defp generate_value_interpolation(value, _var_map) do
+  defp generate_value_interpolation(value) do
     inspect(value)
   end
 
-  defp build_req_opts(spec, command, index, var_map) do
+  defp build_req_opts(spec, resolved_body) do
     opts = []
 
     # Add body if present
     opts =
-      if HTTPSpec.has_body?(spec) do
-        body = generate_body_map(spec.body, command, index, var_map)
-        opts ++ ["json: #{body}"]
+      if resolved_body do
+        opts ++ ["json: #{generate_body_map(resolved_body)}"]
       else
         opts
       end
@@ -227,47 +198,58 @@ defmodule PropertyDamage.Export.Script.Elixir do
     end
   end
 
-  defp generate_body_map(body, command, index, var_map) do
+  defp generate_body_map(body) do
     fields =
-      body
-      |> Enum.map_join(", ", fn {key, _default} ->
-        value = Map.get(command, key)
-        formatted = format_body_value(value, index, var_map)
-        "#{key}: #{formatted}"
-      end)
+      Enum.map_join(body, ", ", fn {key, value} -> "#{key}: #{format_body_value(value)}" end)
 
     "%{#{fields}}"
   end
 
-  defp format_body_value(%Placeholder{} = ph, _cmd_index, var_map) do
-    "refs[#{inspect(Map.fetch!(var_map, ph.id))}]"
+  # A variable ref renders as a `refs[...]` lookup. Collections that contain a
+  # ref are rendered element-by-element so nested placeholders resolve; those
+  # without a ref fall through to `inspect/1`, preserving prior output exactly.
+  defp format_body_value(%StepPlan.Var{name: name}), do: "refs[#{inspect(name)}]"
+
+  defp format_body_value(value) when is_list(value) do
+    if StepPlan.contains_var?(value) do
+      "[" <> Enum.map_join(value, ", ", &format_body_value/1) <> "]"
+    else
+      inspect(value)
+    end
   end
 
-  defp format_body_value(value, _cmd_index, _var_map) do
-    inspect(value)
+  defp format_body_value(value) when is_map(value) and not is_struct(value) do
+    if StepPlan.contains_var?(value) do
+      "%{" <> Enum.map_join(value, ", ", &format_body_pair/1) <> "}"
+    else
+      inspect(value)
+    end
   end
+
+  defp format_body_value(value), do: inspect(value)
+
+  defp format_body_pair({key, value}) when is_atom(key), do: "#{key}: #{format_body_value(value)}"
+
+  defp format_body_pair({key, value}),
+    do: "#{format_body_value(key)} => #{format_body_value(value)}"
 
   # ============================================================================
   # Placeholder Extraction (DR-021)
   # ============================================================================
 
-  defp generate_placeholder_extraction(index, extractions, resp_var) do
-    case Map.get(extractions, index, []) do
-      [] ->
-        ""
+  defp generate_placeholder_extraction(%StepPlan.Step{producer_bindings: []}, _resp_var), do: ""
 
-      bindings ->
-        lines =
-          Enum.map_join(bindings, "\n", fn {ph, var} ->
-            key = inspect(var)
+  defp generate_placeholder_extraction(%StepPlan.Step{} = step, resp_var) do
+    lines =
+      Enum.map_join(step.producer_bindings, "\n", fn {path, var} ->
+        key = inspect(var)
 
-            "refs = Map.put(refs, #{key}, get_in(#{resp_var}.body, #{ex_access(ph.path)}))" <>
-              "\n" <>
-              ~s|IO.puts("  -> bound #{var}: \#{inspect(refs[#{key}])}")|
-          end)
+        "refs = Map.put(refs, #{key}, get_in(#{resp_var}.body, #{ex_access(path)}))" <>
+          "\n" <>
+          ~s|IO.puts("  -> bound #{var}: \#{inspect(refs[#{key}])}")|
+      end)
 
-        "\n" <> lines
-    end
+    "\n" <> lines
   end
 
   # Access path for get_in/2 over a JSON-decoded (string-keyed) body.

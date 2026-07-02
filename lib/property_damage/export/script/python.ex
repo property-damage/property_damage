@@ -1,8 +1,8 @@
 defmodule PropertyDamage.Export.Script.Python do
   @moduledoc false
 
-  alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Placeholder}
+  alias PropertyDamage.Export.{Common, HTTPSpec, StepPlan}
+  alias PropertyDamage.FailureReport
 
   @doc """
   Generates a Python script from a failure report.
@@ -22,18 +22,14 @@ defmodule PropertyDamage.Export.Script.Python do
     verbose = Keyword.get(opts, :verbose, true)
 
     metadata = Common.extract_metadata(report)
-    commands = Common.extract_commands(report)
-
-    # DR-021 placeholder wiring (see Export.Common).
-    var_map = Common.placeholder_var_map(commands)
-    extractions = Common.producer_extractions(commands)
+    steps = StepPlan.build(report, adapter)
 
     [
       generate_shebang(),
       generate_docstring(metadata, report),
       generate_imports(),
       generate_setup(env_var, base_url),
-      generate_steps(report, adapter, verbose, var_map, extractions),
+      generate_steps(steps, verbose),
       generate_footer(metadata)
     ]
     |> Enum.join("\n")
@@ -86,39 +82,16 @@ Run with: python #{Common.generate_filename(report, :python)}
     """
   end
 
-  defp generate_steps(report, adapter, verbose, var_map, extractions) do
-    report
-    |> FailureReport.steps()
-    |> Enum.map_join("\n", fn step ->
-      generate_step(
-        step.command,
-        step.flattened_index,
-        adapter,
-        step.failed?,
-        verbose,
-        var_map,
-        extractions,
-        step.label
-      )
-    end)
+  defp generate_steps(steps, verbose) do
+    Enum.map_join(steps, "\n", &generate_step(&1, verbose))
   end
 
-  defp generate_step(
-         command,
-         index,
-         adapter,
-         is_failure_point,
-         verbose,
-         var_map,
-         extractions,
-         label
-       ) do
-    step_num = index + 1
-    cmd_name = Common.command_name(command)
-    http_spec = Common.get_http_spec(command, adapter, %{})
+  defp generate_step(%StepPlan.Step{} = step, verbose) do
+    step_num = step.flattened_index + 1
+    cmd_name = Common.command_name(step.command)
 
-    failure_marker = if is_failure_point, do: " (FAILURE POINT)", else: ""
-    label_comment = if is_binary(label), do: "# #{label}\n", else: ""
+    failure_marker = if step.failed?, do: " (FAILURE POINT)", else: ""
+    label_comment = if is_binary(step.label), do: "# #{step.label}\n", else: ""
 
     header =
       if verbose do
@@ -133,19 +106,17 @@ Run with: python #{Common.generate_filename(report, :python)}
 
     comment =
       if verbose do
-        "# Command: #{Common.command_to_comment(command)}\n"
+        "# Command: #{Common.command_to_comment(step.command)}\n"
       else
         ""
       end
 
-    req_code = generate_requests_code(command, http_spec, index, var_map, extractions)
-
-    header <> label_comment <> comment <> req_code
+    header <> label_comment <> comment <> generate_requests_code(step)
   end
 
-  defp generate_requests_code(command, nil, _index, _var_map, _extractions) do
+  defp generate_requests_code(%StepPlan.Step{http_spec: nil} = step) do
     # No HTTPSpec available, generate placeholder
-    cmd_name = Common.command_name(command)
+    cmd_name = Common.command_name(step.command)
 
     """
     # TODO: Add http_spec/2 to your adapter for #{cmd_name}
@@ -153,16 +124,15 @@ Run with: python #{Common.generate_filename(report, :python)}
     """
   end
 
-  defp generate_requests_code(command, %HTTPSpec{} = spec, index, var_map, extractions) do
-    var_name = "resp#{index + 1}"
-    method = spec.method
-    path = generate_path_code(spec, index, var_map)
+  defp generate_requests_code(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step) do
+    var_name = "resp#{step.flattened_index + 1}"
+    path = generate_path_code(spec.path, step.resolved_path_params)
 
     # Build the requests call
-    req_call = build_requests_call(method, path, spec, command, index, var_map)
+    req_call = build_requests_call(spec.method, path, spec, step.resolved_body)
 
     # Extract any external values this command produces (DR-021).
-    ref_extraction = generate_placeholder_extraction(index, extractions, var_name)
+    ref_extraction = generate_placeholder_extraction(step, var_name)
 
     """
     #{var_name} = #{req_call}
@@ -174,14 +144,14 @@ Run with: python #{Common.generate_filename(report, :python)}
   # Path and Body Generation
   # ============================================================================
 
-  defp generate_path_code(%HTTPSpec{path: path, path_params: params}, _index, var_map) do
+  defp generate_path_code(path, params) do
     if map_size(params) == 0 do
       inspect(path)
     else
       # Build path with f-string interpolation for refs
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
-          replacement = generate_value_interpolation(value, var_map)
+          replacement = generate_value_interpolation(value)
           String.replace(acc, ":#{key}", "{#{replacement}}")
         end)
 
@@ -190,28 +160,27 @@ Run with: python #{Common.generate_filename(report, :python)}
   end
 
   # Single-quoted dict key so it nests safely inside an f-string.
-  defp generate_value_interpolation(%Placeholder{} = ph, var_map) do
-    "refs['#{Map.fetch!(var_map, ph.id)}']"
+  defp generate_value_interpolation(%StepPlan.Var{name: name}) do
+    "refs['#{name}']"
   end
 
-  defp generate_value_interpolation(value, _var_map) when is_binary(value) do
+  defp generate_value_interpolation(value) when is_binary(value) do
     inspect(value)
   end
 
-  defp generate_value_interpolation(value, _var_map) do
+  defp generate_value_interpolation(value) do
     to_string(value)
   end
 
-  defp build_requests_call(method, path, spec, command, index, var_map) do
+  defp build_requests_call(method, path, spec, resolved_body) do
     method_str = to_string(method)
 
     args = ["f\"{base_url}\" + #{path}"]
 
     # Add json body if present
     args =
-      if HTTPSpec.has_body?(spec) do
-        body = generate_body_dict(spec.body, command, index, var_map)
-        args ++ ["json=#{body}"]
+      if resolved_body do
+        args ++ ["json=#{generate_body_dict(resolved_body)}"]
       else
         args
       end
@@ -228,59 +197,55 @@ Run with: python #{Common.generate_filename(report, :python)}
     "requests.#{method_str}(#{Enum.join(args, ", ")})"
   end
 
-  defp generate_body_dict(body, command, index, var_map) do
+  defp generate_body_dict(body) do
     fields =
-      body
-      |> Enum.map_join(", ", fn {key, _default} ->
-        value = Map.get(command, key)
-        formatted = format_body_value(value, index, var_map)
-        ~s("#{key}": #{formatted})
+      Enum.map_join(body, ", ", fn {key, value} ->
+        ~s("#{key}": #{format_body_value(value)})
       end)
 
     "{#{fields}}"
   end
 
-  defp format_body_value(%Placeholder{} = ph, _cmd_index, var_map) do
-    ~s(refs["#{Map.fetch!(var_map, ph.id)}"])
+  defp format_body_value(%StepPlan.Var{name: name}) do
+    ~s(refs["#{name}"])
   end
 
   # Booleans and nil must precede the is_atom clause: they are atoms in
   # Elixir but must render as Python literals, not strings
-  defp format_body_value(value, _cmd_index, _var_map) when is_boolean(value) do
+  defp format_body_value(value) when is_boolean(value) do
     if value, do: "True", else: "False"
   end
 
-  defp format_body_value(nil, _cmd_index, _var_map), do: "None"
+  defp format_body_value(nil), do: "None"
 
-  defp format_body_value(value, _cmd_index, _var_map) when is_atom(value) do
+  defp format_body_value(value) when is_atom(value) do
     inspect(to_string(value))
   end
 
-  defp format_body_value(value, _cmd_index, _var_map) when is_binary(value) do
+  defp format_body_value(value) when is_binary(value) do
     inspect(value)
   end
 
-  defp format_body_value(value, _cmd_index, _var_map) when is_number(value) do
+  defp format_body_value(value) when is_number(value) do
     to_string(value)
   end
 
-  # Recurse into collections so a Placeholder nested in a list/map is
-  # rendered as a refs[...] lookup (Jason.encode!/1 would raise on the struct).
-  defp format_body_value(value, cmd_index, var_map) when is_list(value) do
-    items = Enum.map_join(value, ", ", &format_body_value(&1, cmd_index, var_map))
-    "[#{items}]"
+  # Recurse into collections so a Var nested in a list/map is rendered as a
+  # refs[...] lookup (Jason.encode!/1 would raise on the struct).
+  defp format_body_value(value) when is_list(value) do
+    "[#{Enum.map_join(value, ", ", &format_body_value/1)}]"
   end
 
-  defp format_body_value(value, cmd_index, var_map) when is_map(value) do
+  defp format_body_value(value) when is_map(value) do
     items =
       Enum.map_join(value, ", ", fn {k, v} ->
-        ~s(#{inspect(to_string(k))}: #{format_body_value(v, cmd_index, var_map)})
+        ~s(#{inspect(to_string(k))}: #{format_body_value(v)})
       end)
 
     "{#{items}}"
   end
 
-  defp format_body_value(value, _cmd_index, _var_map) do
+  defp format_body_value(value) do
     inspect(value)
   end
 
@@ -297,21 +262,17 @@ Run with: python #{Common.generate_filename(report, :python)}
   # ============================================================================
 
   # Bind each external value this command produces from its JSON response.
-  defp generate_placeholder_extraction(index, extractions, resp_var) do
-    case Map.get(extractions, index, []) do
-      [] ->
-        ""
+  defp generate_placeholder_extraction(%StepPlan.Step{producer_bindings: []}, _resp_var), do: ""
 
-      bindings ->
-        lines =
-          Enum.map_join(bindings, "\n", fn {ph, var} ->
-            ~s|refs["#{var}"] = #{resp_var}.json()#{py_path(ph.path)}| <>
-              "\n" <>
-              ~s|print(f"  -> bound #{var}: {refs['#{var}']}")|
-          end)
+  defp generate_placeholder_extraction(%StepPlan.Step{} = step, resp_var) do
+    lines =
+      Enum.map_join(step.producer_bindings, "\n", fn {path, var} ->
+        ~s|refs["#{var}"] = #{resp_var}.json()#{py_path(path)}| <>
+          "\n" <>
+          ~s|print(f"  -> bound #{var}: {refs['#{var}']}")|
+      end)
 
-        "\n" <> lines
-    end
+    "\n" <> lines
   end
 
   defp py_path(path) do
