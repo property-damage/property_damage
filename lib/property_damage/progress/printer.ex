@@ -127,7 +127,7 @@ defmodule PropertyDamage.Progress.Printer do
     # Shrinking info
     if report.shrink_iterations > 0 do
       original_count = Sequence.command_count(report.original_sequence)
-      shrunk_count = Sequence.command_count(report.shrunk_sequence)
+      shrunk_count = Sequence.command_count(FailureReport.shrunk_sequence(report))
 
       IO.puts("  Shrinking:")
       IO.puts("    Original commands: #{original_count}")

@@ -289,7 +289,7 @@ defmodule PropertyDamage.Persistence do
       timestamp: DateTime.to_iso8601(report.timestamp),
       model: report.model && inspect(report.model),
       adapter: report.adapter && inspect(report.adapter),
-      shrunk_command_count: length(Sequence.to_list(report.shrunk_sequence)),
+      shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
       original_command_count: length(Sequence.to_list(report.original_sequence)),
       reproduction_command: FailureReport.reproduction_command(report)
     }
@@ -437,7 +437,10 @@ defmodule PropertyDamage.Persistence do
     |> Map.new()
   end
 
-  defp extract_struct_modules(%FailureReport{shrunk_sequence: seq, event_log: events}) do
+  defp extract_struct_modules(%FailureReport{} = report) do
+    seq = FailureReport.shrunk_sequence(report)
+    events = FailureReport.event_log(report)
+
     command_modules =
       seq
       |> Sequence.to_list()
@@ -580,7 +583,7 @@ defmodule PropertyDamage.Persistence do
               failure_type: report.failure_type,
               check_name: report.check_name,
               timestamp: report.timestamp,
-              shrunk_size: length(Sequence.to_list(report.shrunk_sequence))
+              shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
             }
 
           {:ok, report, _warnings} ->
@@ -589,7 +592,7 @@ defmodule PropertyDamage.Persistence do
               failure_type: report.failure_type,
               check_name: report.check_name,
               timestamp: report.timestamp,
-              shrunk_size: length(Sequence.to_list(report.shrunk_sequence))
+              shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
             }
 
           {:error, _} ->

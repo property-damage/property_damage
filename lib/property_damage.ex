@@ -140,6 +140,7 @@ defmodule PropertyDamage do
     Progress.Reporter,
     Progress.RunResult,
     Progress.RunUpdate,
+    RunTrace,
     SeedLibrary,
     Sequence,
     Shrinker,
@@ -1169,6 +1170,11 @@ defmodule PropertyDamage do
         run_number: run_number,
         original_sequence: sequence,
         shrunk_sequence: report_shrunk_sequence,
+        # The embedded trace describes whichever run carries the observed
+        # failure (DR-033): the shrunk minimal reproduction when it reproduced,
+        # else the original generated run.
+        plan_source: if(reproduced?, do: :shrunk, else: :generated),
+        source_revision: RunTrace.source_revision(),
         failed_at_index: report_result.failed_at_index,
         failure_reason: report_result.failure_reason,
         shrink_iterations: shrink_iterations,
@@ -1331,7 +1337,7 @@ defmodule PropertyDamage do
 
         # Perform shrinking on the already-shrunk sequence
         shrink_result =
-          Shrinker.shrink(report.shrunk_sequence,
+          Shrinker.shrink(FailureReport.shrunk_sequence(report),
             failed_at_index: report.failed_at_index,
             failure_reason: report.failure_reason,
             model: model,

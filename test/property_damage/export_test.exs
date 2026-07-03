@@ -131,7 +131,8 @@ defmodule PropertyDamage.ExportTest do
       failure_message: "Balance cannot be negative",
       check_name: :NonNegativeBalance,
       original_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
-      shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+      trace:
+        PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands, branches: nil, suffix: []}),
       timestamp: ~U[2025-12-26 14:30:00Z],
       model: TestModel,
       adapter: TestHTTPAdapter
@@ -272,7 +273,10 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_type: :check_failed,
-        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
         model: TestModelStub,
         adapter: TestHTTPAdapter,
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -342,7 +346,10 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_type: :check_failed,
-        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
         model: TestModelStub,
         adapter: TestHTTPAdapter,
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -373,7 +380,10 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_type: :check_failed,
-        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
         model: TestModelStub,
         adapter: TestHTTPAdapter,
         timestamp: ~U[2025-01-01 00:00:00Z]
@@ -483,7 +493,10 @@ defmodule PropertyDamage.ExportTest do
         check_name: :NonNegativeBalance,
         failure_message: "boom",
         original_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
-        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
         model: TestModelStub,
         adapter: TestHTTPAdapter
       }
@@ -742,7 +755,10 @@ defmodule PropertyDamage.ExportTest do
         seed: 1,
         failed_at_index: 1,
         failure_type: :check_failed,
-        shrunk_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
         model: TestModelStub,
         adapter: TestHTTPAdapter,
         timestamp: ~U[2025-01-01 00:00:00Z]

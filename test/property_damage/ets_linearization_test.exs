@@ -111,7 +111,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
                  branching: @branching
                )
 
-      commands = Sequence.to_list(failure.shrunk_sequence)
+      commands = Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(failure))
 
       assert [%Increment{}, %Increment{}] = commands,
              "expected the minimal two-increment lost update, got: #{inspect(commands)}"
@@ -134,7 +134,10 @@ defmodule PropertyDamage.EtsLinearizationTest do
                )
 
       {:ok, replay} =
-        PropertyDamage.Executor.run(failure.shrunk_sequence, Model, StaleSnapshotAdapter,
+        PropertyDamage.Executor.run(
+          PropertyDamage.FailureReport.shrunk_sequence(failure),
+          Model,
+          StaleSnapshotAdapter,
           adapter_config: %{}
         )
 
@@ -154,7 +157,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
             branching: @branching
           )
 
-        Sequence.to_list(f.shrunk_sequence)
+        Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(f))
       end
 
       assert run.() == run.()

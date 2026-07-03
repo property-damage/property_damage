@@ -201,7 +201,7 @@ defmodule PropertyDamage.ReplayTest do
       failure = %FailureReport{
         model: CounterModel,
         adapter: CounterAdapter,
-        shrunk_sequence: branching
+        trace: PropertyDamage.RunTrace.new(plan: branching)
       }
 
       assert {:error, :branching_replay_unsupported} = Replay.start(failure)
