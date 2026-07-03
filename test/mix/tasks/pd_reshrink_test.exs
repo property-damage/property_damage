@@ -153,7 +153,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
       assert File.exists?(out)
 
       {:ok, reloaded} = PropertyDamage.load_failure(out)
-      assert length(Sequence.to_list(reloaded.shrunk_sequence)) == 3
+      assert length(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(reloaded))) == 3
     end
 
     test "--overwrite replaces the input file in place", %{dir: dir} do
@@ -165,7 +165,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
       assert output =~ "Wrote re-shrunk failure to #{path}"
 
       {:ok, reloaded} = PropertyDamage.load_failure(path)
-      assert length(Sequence.to_list(reloaded.shrunk_sequence)) == 3
+      assert length(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(reloaded))) == 3
     end
   end
 

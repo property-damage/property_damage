@@ -1,7 +1,7 @@
 defmodule PropertyDamage.FailureReport.Formatter do
   @moduledoc false
 
-  alias PropertyDamage.{FailureReport, Sequence}
+  alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
   @type format :: :terminal | :markdown | :json | :compact
 
@@ -241,7 +241,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     # The failing command and its reading-order index, resolved branch-aware via
     # the failure step (nil for a non-localized failure).
     case FailureReport.failure_step(report) do
-      %FailureReport.Step{command: command, flattened_index: index} ->
+      %RunTrace.Step{command: command, flattened_index: index} ->
         cmd_name = module_name(command.__struct__)
 
         """
@@ -334,7 +334,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp terminal_shrinking_stats(report, color) do
     original_count = Sequence.command_count(report.original_sequence)
-    shrunk_count = Sequence.command_count(report.shrunk_sequence)
+    shrunk_count = Sequence.command_count(FailureReport.shrunk_sequence(report))
     removed = original_count - shrunk_count
 
     reduction_pct =
@@ -393,7 +393,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     commands = Sequence.to_list(report.original_sequence)
 
     # Only show if different from shrunk
-    shrunk_count = Sequence.command_count(report.shrunk_sequence)
+    shrunk_count = Sequence.command_count(FailureReport.shrunk_sequence(report))
 
     if length(commands) == shrunk_count do
       nil
@@ -511,9 +511,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp diff_states(_, _), do: ""
 
   defp terminal_event_log(report, max_events, color) do
-    if report.event_log != [] do
+    if FailureReport.event_log(report) != [] do
       events_text =
-        report.event_log
+        FailureReport.event_log(report)
         |> Enum.take(max_events)
         |> Enum.with_index()
         |> Enum.map_join("\n", fn {entry, idx} ->
@@ -526,8 +526,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
         end)
 
       truncated =
-        if length(report.event_log) > max_events do
-          "\n#{dim(color)}  ... and #{length(report.event_log) - max_events} more events#{reset()}"
+        if length(FailureReport.event_log(report)) > max_events do
+          "\n#{dim(color)}  ... and #{length(FailureReport.event_log(report)) - max_events} more events#{reset()}"
         else
           ""
         end
@@ -761,7 +761,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp markdown_shrinking_stats(report) do
     original_count = Sequence.command_count(report.original_sequence)
-    shrunk_count = Sequence.command_count(report.shrunk_sequence)
+    shrunk_count = Sequence.command_count(FailureReport.shrunk_sequence(report))
 
     """
     ## Shrinking Statistics
@@ -833,9 +833,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp markdown_event_log(report, max_events) do
-    if report.event_log != [] do
+    if FailureReport.event_log(report) != [] do
       events_text =
-        report.event_log
+        FailureReport.event_log(report)
         |> Enum.take(max_events)
         |> Enum.map_join("\n", fn entry ->
           source = String.upcase(to_string(entry.source))
@@ -846,8 +846,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
         end)
 
       truncated =
-        if length(report.event_log) > max_events do
-          "\n\n*... and #{length(report.event_log) - max_events} more events*"
+        if length(FailureReport.event_log(report)) > max_events do
+          "\n\n*... and #{length(FailureReport.event_log(report)) - max_events} more events*"
         else
           ""
         end
@@ -908,11 +908,12 @@ defmodule PropertyDamage.FailureReport.Formatter do
       },
       "shrinking" => %{
         "original_commands" => Sequence.command_count(report.original_sequence),
-        "shrunk_commands" => Sequence.command_count(report.shrunk_sequence),
+        "shrunk_commands" => Sequence.command_count(FailureReport.shrunk_sequence(report)),
         "iterations" => report.shrink_iterations,
         "time_ms" => report.shrink_time_ms
       },
-      "sequence" => serialize_sequence(report.shrunk_sequence, report.command_labels),
+      "sequence" =>
+        serialize_sequence(FailureReport.shrunk_sequence(report), report.command_labels),
       "reproduction" => FailureReport.reproduction_command(report)
     }
 
@@ -925,8 +926,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       end
 
     data =
-      if report.event_log != [] do
-        Map.put(data, "event_log", serialize_event_log(report.event_log))
+      if FailureReport.event_log(report) != [] do
+        Map.put(data, "event_log", serialize_event_log(FailureReport.event_log(report)))
       else
         data
       end
@@ -1032,7 +1033,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp format_compact(report) do
     type = FailureReport.failure_type_summary(report)
-    cmd_count = Sequence.command_count(report.shrunk_sequence)
+    cmd_count = Sequence.command_count(FailureReport.shrunk_sequence(report))
 
     origin_tag =
       case report.error_origin do

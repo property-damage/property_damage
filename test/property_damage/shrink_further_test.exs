@@ -95,10 +95,10 @@ defmodule PropertyDamage.ShrinkFurtherTest do
 
   test "reduces a non-minimal sequence to the minimal reproduction" do
     report = report_of_length(8)
-    assert length(Sequence.to_list(report.shrunk_sequence)) == 8
+    assert length(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))) == 8
 
     assert {:ok, smaller} = PropertyDamage.shrink_further(report)
-    assert length(Sequence.to_list(smaller.shrunk_sequence)) == 3
+    assert length(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(smaller))) == 3
   end
 
   test "accumulates shrink_iterations and shrink_time_ms onto the prior report" do
@@ -125,7 +125,7 @@ defmodule PropertyDamage.ShrinkFurtherTest do
     assert {:ok, smaller} =
              PropertyDamage.shrink_further(report, strategy: :exhaustive, max_iterations: 1000)
 
-    assert length(Sequence.to_list(smaller.shrunk_sequence)) == 3
+    assert length(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(smaller))) == 3
   end
 
   test "returns {:error, :missing_model_or_adapter} when the model is nil" do

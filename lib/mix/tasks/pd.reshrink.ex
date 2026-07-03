@@ -170,7 +170,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
   end
 
   defp do_reshrink(failure, path, strategy, opts) do
-    before_count = command_count(failure.shrunk_sequence)
+    before_count = command_count(PropertyDamage.FailureReport.shrunk_sequence(failure))
 
     IO.puts("")
     print_header("PropertyDamage Re-shrink")
@@ -195,7 +195,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
   end
 
   defp report_reduction(new_report, before_count) do
-    after_count = command_count(new_report.shrunk_sequence)
+    after_count = command_count(PropertyDamage.FailureReport.shrunk_sequence(new_report))
 
     IO.puts("Before:     #{before_count} commands")
     IO.puts("After:      #{after_count} commands")

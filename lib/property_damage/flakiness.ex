@@ -49,7 +49,7 @@ defmodule PropertyDamage.Flakiness do
   - **Variance**: What varies (pass/fail, failure type, shrunk size)
   """
 
-  alias PropertyDamage.Sequence
+  alias PropertyDamage.{FailureReport, Sequence}
 
   @type result ::
           {:ok, :deterministic}
@@ -294,8 +294,8 @@ defmodule PropertyDamage.Flakiness do
     # Compare key aspects
     f1.failure_type == f2.failure_type and
       f1.check_name == f2.check_name and
-      length(Sequence.to_list(f1.shrunk_sequence)) ==
-        length(Sequence.to_list(f2.shrunk_sequence))
+      length(Sequence.to_list(FailureReport.shrunk_sequence(f1))) ==
+        length(Sequence.to_list(FailureReport.shrunk_sequence(f2)))
   end
 
   defp results_equal?(_, _), do: false
@@ -310,7 +310,9 @@ defmodule PropertyDamage.Flakiness do
     shrunk_sizes =
       results
       |> Enum.filter(&match?({:error, _}, &1))
-      |> Enum.map(fn {:error, f} -> length(Sequence.to_list(f.shrunk_sequence)) end)
+      |> Enum.map(fn {:error, f} ->
+        length(Sequence.to_list(FailureReport.shrunk_sequence(f)))
+      end)
 
     variance_type = determine_variance_type(passes, failures, failure_types, shrunk_sizes)
 

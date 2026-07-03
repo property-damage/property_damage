@@ -11,8 +11,8 @@ defmodule PropertyDamage.StepsCharacterizationTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.FailureReport
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.FailureReport
   alias PropertyDamage.Sequence
   alias PropertyDamage.Sequence.Position
 

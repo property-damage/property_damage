@@ -159,20 +159,18 @@ defmodule PropertyDamage.Mutation.Runner do
     end
   end
 
-  defp extract_events_from_failure(failure) do
-    case failure do
-      %{event_log: log} when is_list(log) ->
-        Enum.flat_map(log, fn entry ->
-          case entry do
-            %{event: event} -> [event]
-            _ -> []
-          end
-        end)
-
-      _ ->
-        []
-    end
+  defp extract_events_from_failure(%PropertyDamage.FailureReport{} = failure) do
+    # The event log lives on the embedded trace now (DR-033); reach it through
+    # the accessor rather than a struct-field match.
+    failure
+    |> PropertyDamage.FailureReport.event_log()
+    |> Enum.flat_map(fn
+      %{event: event} -> [event]
+      _ -> []
+    end)
   end
+
+  defp extract_events_from_failure(_), do: []
 
   defp generate_mutations_for_command(operator, events, config) do
     if events == [] do

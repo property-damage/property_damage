@@ -25,7 +25,7 @@ defmodule PropertyDamage.Analysis do
       PropertyDamage.Analysis.generate_test(failure, format: :exunit)
   """
 
-  alias PropertyDamage.{Executor, FailureReport, Placeholder, Sequence, Validator}
+  alias PropertyDamage.{Executor, FailureReport, Placeholder, RunTrace, Sequence, Validator}
   alias PropertyDamage.Shrinker.Graph
 
   # ============================================================================
@@ -149,7 +149,7 @@ defmodule PropertyDamage.Analysis do
     Enum.join(lines ++ command_lines ++ chain_lines, "\n")
   end
 
-  defp analyze_command(%FailureReport.Step{} = step, ancestors, report, localized?) do
+  defp analyze_command(%RunTrace.Step{} = step, ancestors, report, localized?) do
     cmd = step.command
     idx = step.flattened_index
     cmd_name = cmd.__struct__ |> Module.split() |> List.last()
@@ -282,7 +282,7 @@ defmodule PropertyDamage.Analysis do
   """
   @spec isolate_trigger(FailureReport.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def isolate_trigger(%FailureReport{} = report, opts \\ []) do
-    commands = Sequence.to_list(report.shrunk_sequence)
+    commands = Sequence.to_list(FailureReport.shrunk_sequence(report))
     # `commands` is the flattened list the modified sequence is re-run against,
     # so the trigger must be addressed by its flattened index (not the executor
     # failed_at_index, which diverges for branch failures).
@@ -526,7 +526,7 @@ defmodule PropertyDamage.Analysis do
 
   defp generate_exunit_test(report, opts) do
     module_name = Keyword.get(opts, :module_name, "ReproductionTest")
-    commands = Sequence.to_list(report.shrunk_sequence)
+    commands = Sequence.to_list(FailureReport.shrunk_sequence(report))
 
     command_code = generate_command_code(commands)
     check_name = report.check_name || report.failure_type
@@ -572,7 +572,7 @@ defmodule PropertyDamage.Analysis do
   end
 
   defp generate_script(report, _opts) do
-    commands = Sequence.to_list(report.shrunk_sequence)
+    commands = Sequence.to_list(FailureReport.shrunk_sequence(report))
     command_code = generate_command_code(commands)
 
     """
@@ -598,7 +598,7 @@ defmodule PropertyDamage.Analysis do
   end
 
   defp generate_markdown(report, _opts) do
-    commands = Sequence.to_list(report.shrunk_sequence)
+    commands = Sequence.to_list(FailureReport.shrunk_sequence(report))
     explanation = explain(report)
 
     """

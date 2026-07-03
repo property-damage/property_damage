@@ -107,7 +107,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
       assert {:error, failure} = run_seeded(LyingDeleteAdapter, @seed)
       assert failure.check_name == :read_consistent
 
-      commands = Sequence.to_list(failure.shrunk_sequence)
+      commands = Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(failure))
 
       assert [%PutKey{key: key}, %DelKey{key: key}, %GetKey{key: key}] = commands,
              "expected the 3-command put/del/get minimal repro, got: #{inspect(commands)}"
@@ -118,13 +118,19 @@ defmodule PropertyDamage.ShrinkQualityTest do
 
     test "the shrunk reproduction still fails the same way" do
       assert {:error, failure} = run_seeded(LyingDeleteAdapter, @seed)
-      assert reproduces?(failure.shrunk_sequence, LyingDeleteAdapter)
+
+      assert reproduces?(
+               PropertyDamage.FailureReport.shrunk_sequence(failure),
+               LyingDeleteAdapter
+             )
     end
 
     test "shrinking is deterministic across repeated runs" do
       assert {:error, a} = run_seeded(LyingDeleteAdapter, @seed)
       assert {:error, b} = run_seeded(LyingDeleteAdapter, @seed)
-      assert Sequence.to_list(a.shrunk_sequence) == Sequence.to_list(b.shrunk_sequence)
+
+      assert Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(a)) ==
+               Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(b))
     end
   end
 
@@ -135,7 +141,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
       assert {:error, failure} = run_seeded(InsertOnlyAdapter, @seed)
       assert failure.check_name == :read_consistent
 
-      commands = Sequence.to_list(failure.shrunk_sequence)
+      commands = Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(failure))
 
       assert [
                %PutKey{key: key, value: v1},
@@ -153,13 +159,15 @@ defmodule PropertyDamage.ShrinkQualityTest do
 
     test "the shrunk reproduction still fails the same way" do
       assert {:error, failure} = run_seeded(InsertOnlyAdapter, @seed)
-      assert reproduces?(failure.shrunk_sequence, InsertOnlyAdapter)
+      assert reproduces?(PropertyDamage.FailureReport.shrunk_sequence(failure), InsertOnlyAdapter)
     end
 
     test "shrinking is deterministic across repeated runs" do
       assert {:error, a} = run_seeded(InsertOnlyAdapter, @seed)
       assert {:error, b} = run_seeded(InsertOnlyAdapter, @seed)
-      assert Sequence.to_list(a.shrunk_sequence) == Sequence.to_list(b.shrunk_sequence)
+
+      assert Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(a)) ==
+               Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(b))
     end
   end
 end

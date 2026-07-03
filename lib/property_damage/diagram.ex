@@ -60,7 +60,7 @@ defmodule PropertyDamage.Diagram do
   - `:show_branches` - Show parallel branches (default: true)
   """
 
-  alias PropertyDamage.{EventLog.Entry, FailureReport, Sequence}
+  alias PropertyDamage.{EventLog.Entry, FailureReport, RunTrace, Sequence}
 
   @type format :: :mermaid | :plantuml | :websequence
   @type options :: [
@@ -139,10 +139,10 @@ defmodule PropertyDamage.Diagram do
     opts = Keyword.update(opts, :title, @default_title, fn t -> t || @default_title end)
 
     # No report here, so labels are empty; the failure point (if any) is passed
-    # through opts. FailureReport owns the grouping so both diagram entry points
+    # through opts. RunTrace owns the grouping so both diagram entry points
     # share one branch-aware step timeline.
     sequence
-    |> FailureReport.build_steps(event_log, %{}, Keyword.get(opts, :failed_at_index))
+    |> RunTrace.build_steps(event_log, %{}, Keyword.get(opts, :failed_at_index))
     |> render(format, opts)
   end
 

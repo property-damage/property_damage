@@ -192,11 +192,10 @@ defmodule PropertyDamage.DiagramTest do
         failed_at_index: 1,
         failure_type: :check_failed,
         original_sequence: sequence,
-        shrunk_sequence: sequence,
         failure_reason: {:check_failed, :NonNegativeBalance, "Balance is -50"},
         check_name: :NonNegativeBalance,
         failure_message: "Balance is -50",
-        event_log: event_log,
+        trace: PropertyDamage.RunTrace.new(plan: sequence, event_log: event_log),
         timestamp: DateTime.utc_now()
       }
 
@@ -348,11 +347,10 @@ defmodule PropertyDamage.DiagramTest do
         failed_at_index: 1,
         failure_type: :check_failed,
         original_sequence: sequence,
-        shrunk_sequence: sequence,
         failure_reason: {:check_failed, :NonNegativeBalance, "Balance is -50"},
         check_name: :NonNegativeBalance,
         failure_message: "Balance is -50",
-        event_log: event_log,
+        trace: PropertyDamage.RunTrace.new(plan: sequence, event_log: event_log),
         timestamp: ~U[2025-01-01 00:00:00Z]
       }
     end
