@@ -7,6 +7,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   alias PropertyDamage.{Generator, PlaceholderRegistry, Runtime, Sequence}
   alias PropertyDamage.LoadTest.Metrics
   alias PropertyDamage.Model.Projection
+  alias PropertyDamage.Sequence.Position
 
   defstruct [
     :worker_id,
@@ -269,7 +270,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     start_time = System.monotonic_time(:microsecond)
 
     # `commands_run` is this command's 0-based position, so capture keys its
-    # produced externals at {:prefix, commands_run} (DR-021).
+    # produced externals at `Position.prefix(commands_run)` (DR-021).
     {result, error_delta, events, registry} =
       case execute_single_command(command, state, registry, commands_run) do
         {:ok, returned_events, new_registry} ->
@@ -362,7 +363,7 @@ defmodule PropertyDamage.LoadTest.Worker do
             # events, keyed by its linear position, so later commands resolve
             # them (DR-021). Injected events are out-of-band and not captured.
             new_registry =
-              PlaceholderRegistry.capture(registry, {:prefix, index}, returned_events)
+              PlaceholderRegistry.capture(registry, Position.prefix(index), returned_events)
 
             # Combine injected events (first) with returned events
             all_events = injected_events ++ returned_events

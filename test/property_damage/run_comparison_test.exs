@@ -128,7 +128,7 @@ defmodule PropertyDamage.RunComparisonTest do
 
   describe "provenance shading" do
     test "a minted-value echo in an event field is run-scoped (incidental), never suspicious" do
-      marker = Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:request_id])
+      marker = Mint.reify(Mint.new(:uuid), Position.prefix(0), [:request_id])
       plan = Sequence.linear([%Cmd{request_id: marker}])
       pos = %Position{section: :prefix, offset: 0}
 
@@ -163,7 +163,7 @@ defmodule PropertyDamage.RunComparisonTest do
       # A mint marker nested inside a map field: per-leaf comparison must
       # classify [:opts, :request_id] as run-scoped, not lump the whole [:opts]
       # container as a differing plan-generated field (a comparability violation).
-      marker = Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:opts, :request_id])
+      marker = Mint.reify(Mint.new(:uuid), Position.prefix(0), [:opts, :request_id])
       plan = Sequence.linear([%CmdNested{opts: %{request_id: marker, kind: :x}}])
       pos = %Position{section: :prefix, offset: 0}
 

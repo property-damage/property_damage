@@ -1,6 +1,8 @@
 defmodule PropertyDamage.ShrinkerHierarchicalTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{Executor, Placeholder, PlaceholderRegistry, Sequence, Shrinker}
   alias PropertyDamage.Shrinker.Config
 
@@ -33,7 +35,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
     # Link i consumes the external produced at index i - 1.
     parents =
       for i <- 0..(chain_length - 1) do
-        if i == 0, do: nil, else: Placeholder.new_at(LinkAdded, [:ref], {:prefix, i - 1}, 0)
+        if i == 0, do: nil, else: Placeholder.new_at(LinkAdded, [:ref], Position.prefix(i - 1), 0)
       end
 
     registry =
@@ -130,7 +132,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
       # single-command sequence as the "minimal repro". The hardening rejects
       # resolution failures on the nil-signature path, so the producer must stay
       # and the reproduction keeps reproducing the real failure.
-      ph = Placeholder.new_at(LinkAdded, [:ref], {:prefix, 0}, 0)
+      ph = Placeholder.new_at(LinkAdded, [:ref], Position.prefix(0), 0)
       registry = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
 
       producer = %Link{parent: nil, weight: 0}

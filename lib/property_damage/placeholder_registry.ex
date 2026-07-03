@@ -13,6 +13,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
   alias PropertyDamage.External
   alias PropertyDamage.Mint
   alias PropertyDamage.Placeholder
+  alias PropertyDamage.Sequence.Position
 
   @typedoc """
   Registry for tracking placeholders throughout sequence execution.
@@ -34,9 +35,9 @@ defmodule PropertyDamage.PlaceholderRegistry do
   Build a registry from a list of items (commands) carrying placeholders.
 
   Collects every `%Placeholder{}` reachable in the items, de-duplicates by id,
-  and registers each. Linear sequences carry `{:prefix, index}` positions, so the
-  registry's `producer_link` maps each producer position to the ids it produces
-  for `capture/3`.
+  and registers each. Linear sequences carry `%Position{section: :prefix}`
+  positions, so the registry's `producer_link` maps each producer position to
+  the ids it produces for `capture/3`.
   """
   @spec build([term()]) :: t()
   def build(items) when is_list(items) do
@@ -73,6 +74,31 @@ defmodule PropertyDamage.PlaceholderRegistry do
   @spec ids_at_position(t(), Placeholder.position()) :: [reference()]
   def ids_at_position(%__MODULE__{} = reg, position) do
     Map.get(reg.producer_link, position, [])
+  end
+
+  @doc """
+  Remap the `producer_link` from original positions onto new positions (DR-021).
+
+  `orig_to_new` maps each original producer position to the position it now
+  occupies. A producer whose original position is absent from the map is dropped
+  (its placeholders simply will not resolve, which is correct: a surviving
+  consumer of a removed producer makes a shrink candidate fail to reproduce).
+  Resolution of embedded placeholders stays by id and is unaffected.
+
+  This is registry-internals knowledge (which producers key which ids), so it
+  lives here rather than being rebuilt by hand in the shrinker.
+  """
+  @spec remap_positions(t(), %{Position.t() => Position.t()}) :: t()
+  def remap_positions(%__MODULE__{} = reg, orig_to_new) do
+    new_link =
+      Enum.reduce(reg.producer_link, %{}, fn {orig_position, ids}, acc ->
+        case Map.get(orig_to_new, orig_position) do
+          nil -> acc
+          new_position -> Map.put(acc, new_position, ids)
+        end
+      end)
+
+    %{reg | producer_link: new_link}
   end
 
   @doc """

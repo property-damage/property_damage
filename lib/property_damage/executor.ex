@@ -100,6 +100,7 @@ defmodule PropertyDamage.Executor do
   alias PropertyDamage.Executor.Timeout
 
   alias PropertyDamage.Runtime
+  alias PropertyDamage.Sequence.Position
 
   @typedoc """
   Assertion mode controls whether and how assertion failures are handled.
@@ -411,7 +412,7 @@ defmodule PropertyDamage.Executor do
             state_with_before = %{
               state
               | projections_before: state.projections,
-                current_position: {:prefix, index}
+                current_position: Position.prefix(index)
             }
 
             case execute_command(
@@ -706,7 +707,7 @@ defmodule PropertyDamage.Executor do
             executed:
               Map.put(
                 state.executed,
-                Sequence.Position.from_tuple(state.current_position),
+                state.current_position,
                 resolved_command
               )
         }
@@ -881,7 +882,7 @@ defmodule PropertyDamage.Executor do
             executed:
               Map.put(
                 state.executed,
-                Sequence.Position.from_tuple(state.current_position),
+                state.current_position,
                 resolved_command
               ),
             step_count: state.step_count + 1,
@@ -1721,7 +1722,7 @@ defmodule PropertyDamage.Executor do
 
     # Build a placeholder registry from the commands so external() values
     # produced by one command resolve in later ones (DR-021). Consumers carry a
-    # %Placeholder{} keyed to its producer's linear {:prefix, index} position.
+    # %Placeholder{} keyed to its producer's linear prefix position.
     registry = build_placeholder_registry(commands)
 
     initial_state = %{
@@ -1804,7 +1805,7 @@ defmodule PropertyDamage.Executor do
           {:ok, events} ->
             # Capture external() values this command produced, keyed by its linear
             # position, so later commands resolve them (DR-021).
-            new_registry = capture_externals(events, {:prefix, index}, registry)
+            new_registry = capture_externals(events, Position.prefix(index), registry)
 
             # Create event log entries
             entries =

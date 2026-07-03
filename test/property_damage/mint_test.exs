@@ -74,22 +74,26 @@ defmodule PropertyDamage.MintTest do
 
   describe "Mint.resolve/3 derivation" do
     test "same (nonce, epoch, position, path, kind) is byte-identical" do
-      m = Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:request_id])
+      m = Mint.reify(Mint.new(:uuid), Position.prefix(0), [:request_id])
       assert Mint.resolve(m, 42, 0) == Mint.resolve(m, 42, 0)
     end
 
     test "a different nonce, epoch, position, or path changes the value" do
-      m = Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:request_id])
+      m = Mint.reify(Mint.new(:uuid), Position.prefix(0), [:request_id])
       base = Mint.resolve(m, 42, 0)
 
       refute base == Mint.resolve(m, 43, 0)
       refute base == Mint.resolve(m, 42, 1)
-      refute base == Mint.resolve(Mint.reify(Mint.new(:uuid), {:prefix, 1}, [:request_id]), 42, 0)
-      refute base == Mint.resolve(Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:other]), 42, 0)
+
+      refute base ==
+               Mint.resolve(Mint.reify(Mint.new(:uuid), Position.prefix(1), [:request_id]), 42, 0)
+
+      refute base ==
+               Mint.resolve(Mint.reify(Mint.new(:uuid), Position.prefix(0), [:other]), 42, 0)
     end
 
     test ":uuid formats as an RFC 4122 v4 UUID" do
-      m = Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:request_id])
+      m = Mint.reify(Mint.new(:uuid), Position.prefix(0), [:request_id])
       uuid = Mint.resolve(m, 1, 0)
 
       assert String.match?(
@@ -99,7 +103,7 @@ defmodule PropertyDamage.MintTest do
     end
 
     test "{:hex, n} yields n hex characters" do
-      m = Mint.reify(Mint.new({:hex, 12}), {:prefix, 0}, [:k])
+      m = Mint.reify(Mint.new({:hex, 12}), Position.prefix(0), [:k])
       assert String.match?(Mint.resolve(m, 1, 0), ~r/\A[0-9a-f]{12}\z/)
     end
 
@@ -116,7 +120,12 @@ defmodule PropertyDamage.MintTest do
 
     test "a generated command holds a reified mint marker at its field" do
       [cmd | _] = generate(1234).prefix
-      assert %Mint{kind: :uuid, position: {:prefix, 0}, path: [:request_id]} = cmd.request_id
+
+      assert %Mint{
+               kind: :uuid,
+               position: %Position{section: :prefix, offset: 0},
+               path: [:request_id]
+             } = cmd.request_id
     end
   end
 
@@ -148,11 +157,11 @@ defmodule PropertyDamage.MintTest do
   describe "sibling branches at the same flat index mint distinct values" do
     test "branch positions keep two same-flat-index mints distinct" do
       # Both branches' first command shares the executor flat index, but their
-      # structured positions ({:branch, 0, 0} vs {:branch, 1, 0}) differ, so the
+      # structured positions (Position.branch(0, 0) vs Position.branch(1, 0)) differ, so the
       # minted values differ. A flat-index key would have collided — the exact
       # duplicate-identity bug DR-034 bakes coordinates in to prevent.
-      b0 = %Send{request_id: Mint.reify(Mint.new(:uuid), {:branch, 0, 0}, [:request_id])}
-      b1 = %Send{request_id: Mint.reify(Mint.new(:uuid), {:branch, 1, 0}, [:request_id])}
+      b0 = %Send{request_id: Mint.reify(Mint.new(:uuid), Position.branch(0, 0), [:request_id])}
+      b1 = %Send{request_id: Mint.reify(Mint.new(:uuid), Position.branch(1, 0), [:request_id])}
       seq = Sequence.branching([], [[b0], [b1]], [])
 
       result = run(seq, 111, 0)
@@ -165,7 +174,7 @@ defmodule PropertyDamage.MintTest do
     end
 
     test "the generator bakes branch-structured positions into branch mints" do
-      # Prove the reification path itself keys on {:branch, b, i}, not the flat
+      # Prove the reification path itself keys on Position.branch(b, i), not the flat
       # index, so the distinctness above is what generation actually produces.
       seq =
         Enum.find_value(1..400, fn seed ->
@@ -185,7 +194,9 @@ defmodule PropertyDamage.MintTest do
             {%Send{request_id: %Mint{position: pos}}, _i} <- Enum.with_index(branch),
             do: {b, pos}
 
-      assert Enum.all?(branch_positions, fn {b, pos} -> match?({:branch, ^b, _}, pos) end)
+      assert Enum.all?(branch_positions, fn {b, pos} ->
+               match?(%Position{section: {:branch, ^b}}, pos)
+             end)
     end
   end
 

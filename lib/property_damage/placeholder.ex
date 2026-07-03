@@ -14,16 +14,15 @@ defmodule PropertyDamage.Placeholder do
   # 3. Resolved when real events arrive from the SUT
   # 4. Deep-resolved before projection apply/2 and command execution
 
+  alias PropertyDamage.Sequence.Position
+
   @typedoc """
   Structured position of the producing command in a sequence.
 
-  Branching-aware so two parallel branches producing the same event module do
-  not collide. See DR-021.
+  A `%PropertyDamage.Sequence.Position{}` (DR-039); branching-aware so two
+  parallel branches producing the same event module do not collide (DR-021).
   """
-  @type position ::
-          {:prefix, non_neg_integer()}
-          | {:branch, non_neg_integer(), non_neg_integer()}
-          | {:suffix, non_neg_integer()}
+  @type position :: Position.t()
 
   @typedoc """
   A placeholder's resolution identity (DR-021, DR-036).
@@ -143,8 +142,10 @@ defimpl Inspect, for: PropertyDamage.Placeholder do
     end
   end
 
-  defp loc({:prefix, i}), do: "pre#{i}"
-  defp loc({:branch, b, i}), do: "br#{b}.#{i}"
-  defp loc({:suffix, i}), do: "suf#{i}"
+  alias PropertyDamage.Sequence.Position
+
+  defp loc(%Position{section: :prefix, offset: i}), do: "pre#{i}"
+  defp loc(%Position{section: {:branch, b}, offset: i}), do: "br#{b}.#{i}"
+  defp loc(%Position{section: :suffix, offset: i}), do: "suf#{i}"
   defp loc(nil), do: "?"
 end

@@ -42,6 +42,7 @@ defmodule PropertyDamage.Generator do
   alias PropertyDamage.Mint
   alias PropertyDamage.Nemesis
   alias PropertyDamage.{Placeholder, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.Sequence.Position
 
   @type command :: struct()
   @type state :: map()
@@ -220,7 +221,7 @@ defmodule PropertyDamage.Generator do
       [],
       [],
       markers,
-      &{:prefix, &1}
+      &Position.prefix/1
     )
     |> StreamData.map(fn {cmds, placeholders} ->
       attach_registry(Sequence.linear(cmds), placeholders)
@@ -230,7 +231,8 @@ defmodule PropertyDamage.Generator do
   # Recursion threads two accumulators: `acc` (commands, reversed) and `acc_ph`
   # (placeholders minted so far). `pos_fun` maps a command's local 0-based index
   # to its structured position (DR-021), so the same recursion serves the linear
-  # path ({:prefix, i}), the branch-continuation suffix, and post-branch suffix.
+  # path (prefix positions), the branch-continuation suffix, and post-branch
+  # suffix.
   defp generate_linear_recursive(_commands, _projection, _model, _state, 0, acc, acc_ph, _m, _pf) do
     StreamData.constant({Enum.reverse(acc), acc_ph})
   end
@@ -336,7 +338,7 @@ defmodule PropertyDamage.Generator do
             )
           else
             # Continue as linear sequence: the whole thing stays linear, so suffix
-            # positions continue the prefix's {:prefix, _} numbering.
+            # positions continue the prefix's numbering.
             generate_linear_recursive(
               commands,
               projection,
@@ -346,7 +348,7 @@ defmodule PropertyDamage.Generator do
               [],
               [],
               markers,
-              &{:prefix, prefix_len + &1}
+              &Position.prefix(prefix_len + &1)
             )
             |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
               attach_registry(Sequence.linear(prefix ++ suffix_cmds), prefix_ph ++ suffix_ph)
@@ -385,7 +387,7 @@ defmodule PropertyDamage.Generator do
             generator = get_command_generator(cmd_module, opts, state)
 
             StreamData.bind(generator, fn command ->
-              position = {:prefix, length(acc)}
+              position = Position.prefix(length(acc))
               command = reify_command_mints(command, position)
               events = simulate_command(model, state, command)
               {events, minted} = instantiate_placeholders(events, position, markers)
@@ -439,9 +441,10 @@ defmodule PropertyDamage.Generator do
     per_branch_max = min(max_branch_length, div(remaining, num_branches))
 
     # Generate each branch independently from the same state snapshot. Each
-    # branch mints with a {:branch, b, i} position (b is the branch's index in
-    # the full generator list); empty branches are dropped below and surviving
-    # branch indices are remapped to match the executor's branch_id ordering.
+    # branch mints with a `{:branch, b}` section position (b is the branch's
+    # index in the full generator list); empty branches are dropped below and
+    # surviving branch indices are remapped to match the executor's branch_id
+    # ordering.
     branch_generators =
       for b <- 0..(num_branches - 1) do
         generate_branch(
@@ -453,7 +456,7 @@ defmodule PropertyDamage.Generator do
           [],
           [],
           markers,
-          fn i -> {:branch, b, i} end
+          fn i -> Position.branch(b, i) end
         )
       end
 
@@ -478,7 +481,7 @@ defmodule PropertyDamage.Generator do
         [],
         [],
         markers,
-        &{:suffix, &1}
+        &Position.suffix/1
       )
       |> StreamData.map(fn {suffix_cmds, suffix_ph} ->
         assemble_branching(prefix, prefix_ph, branch_results, suffix_cmds, suffix_ph)
@@ -488,9 +491,9 @@ defmodule PropertyDamage.Generator do
 
   # Drop empty branches and build the final sequence. Surviving branches are
   # renumbered to a contiguous 0..k range (matching the executor's branch_id),
-  # and their placeholders' {:branch, _, i} positions remapped accordingly. If
-  # fewer than 2 branches survive the sequence collapses to linear, so branch
-  # and suffix placeholders are remapped onto the continuing {:prefix, _} space.
+  # and their placeholders' branch positions remapped accordingly. If fewer than
+  # 2 branches survive the sequence collapses to linear, so branch and suffix
+  # placeholders are remapped onto the continuing prefix space.
   defp assemble_branching(prefix, prefix_ph, branch_results, suffix_cmds, suffix_ph) do
     surviving = Enum.reject(branch_results, fn {branch, _ph} -> Enum.empty?(branch) end)
 
@@ -516,8 +519,11 @@ defmodule PropertyDamage.Generator do
 
       remapped_suffix_ph =
         Enum.map(suffix_ph, fn
-          %Placeholder{position: {:suffix, i}} = p -> %{p | position: {:prefix, suffix_base + i}}
-          p -> p
+          %Placeholder{position: %Position{section: :suffix, offset: i}} = p ->
+            %{p | position: Position.prefix(suffix_base + i)}
+
+          p ->
+            p
         end)
 
       attach_registry(
@@ -529,15 +535,21 @@ defmodule PropertyDamage.Generator do
 
   defp rebranch(placeholders, new_idx) do
     Enum.map(placeholders, fn
-      %Placeholder{position: {:branch, _old, i}} = p -> %{p | position: {:branch, new_idx, i}}
-      p -> p
+      %Placeholder{position: %Position{section: {:branch, _old}, offset: i}} = p ->
+        %{p | position: Position.branch(new_idx, i)}
+
+      p ->
+        p
     end)
   end
 
   defp to_prefix(placeholders, offset) do
     Enum.map(placeholders, fn
-      %Placeholder{position: {:branch, _old, i}} = p -> %{p | position: {:prefix, offset + i}}
-      p -> p
+      %Placeholder{position: %Position{section: {:branch, _old}, offset: i}} = p ->
+        %{p | position: Position.prefix(offset + i)}
+
+      p ->
+        p
     end)
   end
 

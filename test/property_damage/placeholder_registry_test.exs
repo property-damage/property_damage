@@ -1,6 +1,8 @@
 defmodule PropertyDamage.PlaceholderRegistryTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.Placeholder
   alias PropertyDamage.PlaceholderRegistry
 
@@ -25,7 +27,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
   describe "register/2" do
     test "adds placeholder to the id index" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
       reg = PlaceholderRegistry.register(reg, p)
 
@@ -34,46 +36,47 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
     test "indexes by producer position" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
       reg = PlaceholderRegistry.register(reg, p)
 
-      assert PlaceholderRegistry.ids_at_position(reg, {:prefix, 0}) == [p.id]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [p.id]
     end
 
     test "collects multiple placeholders at the same position in order" do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
-      p2 = Placeholder.new_at(TestEvent, [:other], {:prefix, 0}, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
+      p2 = Placeholder.new_at(TestEvent, [:other], Position.prefix(0), 0)
 
       reg = reg |> PlaceholderRegistry.register(p1) |> PlaceholderRegistry.register(p2)
 
-      assert PlaceholderRegistry.ids_at_position(reg, {:prefix, 0}) == [p1.id, p2.id]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [p1.id, p2.id]
     end
 
     test "can register multiple placeholders at distinct positions" do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
-      p2 = Placeholder.new_at(OtherEvent, [:ref], {:branch, 1, 0}, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], Position.branch(1, 0), 0)
 
       reg = reg |> PlaceholderRegistry.register(p1) |> PlaceholderRegistry.register(p2)
 
       assert map_size(reg.placeholders) == 2
-      assert PlaceholderRegistry.ids_at_position(reg, {:prefix, 0}) == [p1.id]
-      assert PlaceholderRegistry.ids_at_position(reg, {:branch, 1, 0}) == [p2.id]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.prefix(0)) == [p1.id]
+      assert PlaceholderRegistry.ids_at_position(reg, Position.branch(1, 0)) == [p2.id]
     end
   end
 
   describe "ids_at_position/2" do
     test "returns [] for a position with no producers" do
-      assert PlaceholderRegistry.ids_at_position(PlaceholderRegistry.new(), {:prefix, 9}) == []
+      assert PlaceholderRegistry.ids_at_position(PlaceholderRegistry.new(), Position.prefix(9)) ==
+               []
     end
   end
 
   describe "get/2" do
     test "returns placeholder by ID" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       reg = PlaceholderRegistry.register(reg, p)
 
       assert PlaceholderRegistry.get(reg, p.id) == p
@@ -87,7 +90,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
   describe "resolve/3 (by id)" do
     test "resolves a placeholder by its id" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       reg = PlaceholderRegistry.register(reg, p)
 
       reg = PlaceholderRegistry.resolve(reg, p.id, "order_123")
@@ -97,7 +100,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
     test "returns the registry unchanged for an unknown id" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       reg = PlaceholderRegistry.register(reg, p)
 
       reg2 = PlaceholderRegistry.resolve(reg, make_ref(), "value")
@@ -107,8 +110,8 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
     test "resolves only the targeted placeholder when several exist" do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
-      p2 = Placeholder.new_at(TestEvent, [:id], {:prefix, 1}, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
+      p2 = Placeholder.new_at(TestEvent, [:id], Position.prefix(1), 0)
 
       reg =
         reg
@@ -124,7 +127,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
   describe "deep_resolve/2" do
     setup do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
       reg =
         reg |> PlaceholderRegistry.register(p) |> PlaceholderRegistry.resolve(p.id, "order_123")
@@ -166,8 +169,8 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
     test "resolves multiple placeholders" do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
-      p2 = Placeholder.new_at(OtherEvent, [:ref], {:prefix, 1}, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], Position.prefix(1), 0)
 
       reg =
         reg
@@ -182,7 +185,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
     test "raises for an unresolved placeholder" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
       reg = PlaceholderRegistry.register(reg, p)
 
       assert_raise ArgumentError, ~r/Unresolved placeholder/, fn ->
@@ -192,14 +195,14 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
     test "unresolved error includes path, position, event" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:ids, :order], {:prefix, 5}, 3)
+      p = Placeholder.new_at(TestEvent, [:ids, :order], Position.prefix(5), 3)
       reg = PlaceholderRegistry.register(reg, p)
 
       assert_raise ArgumentError, ~r/\[:ids, :order\]/, fn ->
         PlaceholderRegistry.deep_resolve(reg, p)
       end
 
-      assert_raise ArgumentError, ~r/position \{:prefix, 5\}/, fn ->
+      assert_raise ArgumentError, ~r/position .*section: :prefix, offset: 5/, fn ->
         PlaceholderRegistry.deep_resolve(reg, p)
       end
 
@@ -210,7 +213,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
     test "raises for an unknown placeholder ID" do
       reg = PlaceholderRegistry.new()
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
       assert_raise ArgumentError, ~r/Unknown placeholder ID/, fn ->
         PlaceholderRegistry.deep_resolve(reg, p)
@@ -229,7 +232,7 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
   describe "contains_placeholder?/1" do
     setup do
-      {:ok, p: Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)}
+      {:ok, p: Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)}
     end
 
     test("true for a Placeholder struct", %{p: p},
@@ -266,14 +269,14 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
   describe "collect_placeholder_ids/1" do
     test "collects ID from a single placeholder" do
-      p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
 
       assert PlaceholderRegistry.collect_placeholder_ids(p) == [p.id]
     end
 
     test "collects IDs from nested structures and deduplicates" do
-      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
-      p2 = Placeholder.new_at(OtherEvent, [:ref], {:prefix, 1}, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], Position.prefix(1), 0)
 
       ids = PlaceholderRegistry.collect_placeholder_ids(%{a: [p1, p2], b: %{c: p1}})
 
@@ -288,8 +291,8 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
 
   describe "collect_placeholders/1" do
     test "returns the placeholder structs, deduplicated by id" do
-      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
-      p2 = Placeholder.new_at(OtherEvent, [:ref], {:prefix, 1}, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], Position.prefix(1), 0)
 
       collected = PlaceholderRegistry.collect_placeholders(%{a: p1, b: [p2, p1]})
 
@@ -300,8 +303,8 @@ defmodule PropertyDamage.PlaceholderRegistryTest do
   describe "all / resolved / unresolved" do
     setup do
       reg = PlaceholderRegistry.new()
-      p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
-      p2 = Placeholder.new_at(OtherEvent, [:ref], {:prefix, 1}, 0)
+      p1 = Placeholder.new_at(TestEvent, [:id], Position.prefix(0), 0)
+      p2 = Placeholder.new_at(OtherEvent, [:ref], Position.prefix(1), 0)
 
       reg =
         reg

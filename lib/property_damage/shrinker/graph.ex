@@ -2,6 +2,7 @@ defmodule PropertyDamage.Shrinker.Graph do
   @moduledoc false
 
   alias PropertyDamage.Placeholder
+  alias PropertyDamage.Sequence.Position
 
   @typedoc """
   Dependency graph structure.
@@ -45,7 +46,7 @@ defmodule PropertyDamage.Shrinker.Graph do
   def build(commands) do
     # Identify producers. A placeholder's producer is identified by its
     # structured position (DR-021); for the linear command list the graph
-    # operates on, {:prefix, i} maps directly to index i.
+    # operates on, a prefix position's offset maps directly to index i.
     producers = add_placeholder_producers(commands, %{})
 
     # Identify consumers and build edges
@@ -104,7 +105,9 @@ defmodule PropertyDamage.Shrinker.Graph do
   # The producing command's index for a placeholder, in the linear command-list
   # index space the graph uses. Non-prefix positions have no producer in this
   # space (nil → no dependency edge).
-  defp placeholder_producer_index(%Placeholder{position: {:prefix, i}}), do: i
+  defp placeholder_producer_index(%Placeholder{position: %Position{section: :prefix, offset: i}}),
+    do: i
+
   defp placeholder_producer_index(%Placeholder{}), do: nil
 
   # Collect all Placeholder structs from a data structure

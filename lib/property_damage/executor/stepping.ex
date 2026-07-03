@@ -43,12 +43,13 @@ defmodule PropertyDamage.Executor.Stepping do
   running.
 
   Stepping assumes a **linear** sequence: each command's position is
-  `{:prefix, index}` (DR-021), where `index` is its 0-based offset. Do not use
-  this API for branching/parallel sequences.
+  `Position.prefix(index)` (DR-021), where `index` is its 0-based offset. Do not
+  use this API for branching/parallel sequences.
   """
 
   alias PropertyDamage.Executor
   alias PropertyDamage.ResourcePoller
+  alias PropertyDamage.Sequence.Position
   alias PropertyDamage.StatePoller
 
   defmodule Context do
@@ -107,17 +108,17 @@ defmodule PropertyDamage.Executor.Stepping do
   Execute exactly one command against an existing stepping state.
 
   Captures the pre-command projections first (as the linear run loop does) and
-  positions the command at `{:prefix, index}`. Returns `{:ok, new_state}` or
+  positions the command at `Position.prefix(index)`. Returns `{:ok, new_state}` or
   `{:error, reason, failed_state}`.
   """
   @spec step(struct() | map(), non_neg_integer(), map(), Context.t()) ::
           {:ok, map()} | {:error, term(), map()}
   def step(command, index, state, %Context{} = ctx) do
-    # Linear stepping: positions are {:prefix, index} (DR-021).
+    # Linear stepping: positions are prefix positions (DR-021).
     state_with_before = %{
       state
       | projections_before: state.projections,
-        current_position: {:prefix, index}
+        current_position: Position.prefix(index)
     }
 
     Executor.execute_command(

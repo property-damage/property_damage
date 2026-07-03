@@ -85,6 +85,7 @@ defmodule PropertyDamage.Differential do
   alias PropertyDamage.{Generator, Options, PlaceholderRegistry, Runtime, Sequence, Telemetry}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate, Reporter}
+  alias PropertyDamage.Sequence.Position
 
   @type compare_mode :: :correctness | :performance | :both
 
@@ -413,7 +414,9 @@ defmodule PropertyDamage.Differential do
                 {:ok, events} ->
                   # Capture this target's external() values, keyed by the
                   # command's linear position, so later commands resolve them.
-                  registry = PlaceholderRegistry.capture(state.registry, {:prefix, index}, events)
+                  registry =
+                    PlaceholderRegistry.capture(state.registry, Position.prefix(index), events)
+
                   projections = apply_events(state.projections, events)
 
                   %{
@@ -592,7 +595,9 @@ defmodule PropertyDamage.Differential do
 
             case result do
               {:ok, events} ->
-                registry = PlaceholderRegistry.capture(state.registry, {:prefix, index}, events)
+                registry =
+                  PlaceholderRegistry.capture(state.registry, Position.prefix(index), events)
+
                 projections = apply_events(state.projections, events)
 
                 %{
