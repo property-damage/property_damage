@@ -319,6 +319,13 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
     ],
+    run_nonce: [
+      type: :non_neg_integer,
+      doc:
+        "Nonce seeding client-minted run-scoped values (DR-034). One per load " <>
+          "test; each worker derives a distinct mint_epoch from its worker id. " <>
+          "Defaults to strong random entropy."
+    ],
     arrival_rate: [
       type: {:custom, __MODULE__, :validate_arrival_rate, []},
       required: true,
@@ -561,6 +568,13 @@ defmodule PropertyDamage.Options do
       type: {:custom, __MODULE__, :validate_module, []},
       required: true,
       doc: "Model module implementing `PropertyDamage.Model` behaviour."
+    ],
+    run_nonce: [
+      type: :non_neg_integer,
+      doc:
+        "Nonce seeding client-minted run-scoped values (DR-034), shared by all " <>
+          "targets so each receives byte-identical minted requests. Defaults to " <>
+          "strong random entropy."
     ],
     targets: [
       type: {:custom, __MODULE__, :validate_non_empty_list, []},

@@ -122,6 +122,11 @@ defmodule PropertyDamage.LoadTest.Runner do
     metrics_interval = opts[:metrics_interval]
     assertion_mode = opts[:assertion_mode]
 
+    # Run nonce for client-minted run-scoped values (DR-034). One nonce for the
+    # whole load test; each worker derives a distinct mint_epoch from its
+    # worker_id, so workers send distinct minted values on the shared SUT.
+    run_nonce = opts[:run_nonce] || :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
+
     # Start metrics collector
     {:ok, metrics} = Metrics.start_link()
 
@@ -132,7 +137,8 @@ defmodule PropertyDamage.LoadTest.Runner do
            adapter_config: adapter_config,
            metrics: metrics,
            think_time_range: think_time_range,
-           assertion_mode: assertion_mode
+           assertion_mode: assertion_mode,
+           run_nonce: run_nonce
          ) do
       {:ok, pool} ->
         # Unified progress projection (DR-022): the user `on_progress:` callback

@@ -202,6 +202,10 @@ defmodule PropertyDamage.Differential do
       max_commands: opts[:max_commands],
       max_runs: opts[:max_runs],
       seed: opts[:seed] || :rand.uniform(1_000_000_000),
+      # One run nonce shared by all targets (DR-034): every target receives
+      # byte-identical client-minted requests (correct like-for-like), yet the
+      # values are unique per differential run on a shared SUT.
+      run_nonce: opts[:run_nonce] || :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned(),
       execution: opts[:execution],
       equivalence: opts[:equivalence],
       baseline: opts[:baseline],
@@ -379,7 +383,7 @@ defmodule PropertyDamage.Differential do
         context = Map.get(target_contexts, target.name)
         registry = Map.get(states, target.name).registry
 
-        case PlaceholderRegistry.resolve_data(registry, command) do
+        case PlaceholderRegistry.resolve_data(registry, command, {config.run_nonce, 0}) do
           {:ok, resolved_command} ->
             start_time = System.monotonic_time(:microsecond)
             result = execute_target_command(target.adapter, context, resolved_command)
@@ -579,7 +583,7 @@ defmodule PropertyDamage.Differential do
       commands
       |> Enum.with_index()
       |> Enum.reduce(initial_state, fn {command, index}, state ->
-        case PlaceholderRegistry.resolve_data(state.registry, command) do
+        case PlaceholderRegistry.resolve_data(state.registry, command, {config.run_nonce, 0}) do
           {:ok, resolved_command} ->
             start_time = System.monotonic_time(:microsecond)
             result = execute_target_command(target.adapter, context, resolved_command)
