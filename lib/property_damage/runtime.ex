@@ -21,6 +21,13 @@ defmodule PropertyDamage.Runtime do
     * `:stutter` - `nil` on a normal execution; on a stutter/idempotency retry it
       is `%{attempt: pos_integer(), is_retry: true, idempotency_key: String.t() | nil}`.
       Prefer `PropertyDamage.Runtime.stuttering?/1` over matching the field directly.
+    * `:mock_registry` - `nil` unless the run declared `mock_services:` (see
+      `PropertyDamage.run/1`); otherwise the pid of the per-run
+      `PropertyDamage.MockServiceRegistry`. An adapter that stands in for a SUT
+      making an outbound call to a mocked third party reaches the mock through
+      this handle (`get_handler_state/2` → the mock's `handle_request/2` →
+      `push_events/3`); the framework flushes those events after the command
+      (`source: :mock`).
 
   ## Example
 
@@ -49,11 +56,12 @@ defmodule PropertyDamage.Runtime do
   @type t :: %__MODULE__{
           inject: (struct() -> :ok),
           start_poller: (keyword() -> PropertyDamage.ResourcePoller.t()),
-          stutter: stutter()
+          stutter: stutter(),
+          mock_registry: pid() | nil
         }
 
   @enforce_keys [:inject, :start_poller]
-  defstruct [:inject, :start_poller, stutter: nil]
+  defstruct [:inject, :start_poller, stutter: nil, mock_registry: nil]
 
   @doc """
   Returns `true` when this is a stutter/idempotency retry execution.
