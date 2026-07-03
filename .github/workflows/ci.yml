@@ -283,3 +283,39 @@ jobs:
           done
 
       - run: mix test
+
+  # Kratos bench validates the MockServiceAdapter: a single Ory Kratos container
+  # (in-memory DSN, no DB sidecar) whose registration web_hook calls the mock the
+  # bench serves on the host. Like gitea it is not run against a service container
+  # (it needs the config mount + host-gateway back-channel), so the job just runs
+  # the bench as-is; its own docker-compose + bench.db.up provision Kratos
+  # (GitHub runners ship Docker Compose v2 and support host-gateway).
+  bench_kratos:
+    name: Bench (kratos_bench)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: benches/kratos_bench
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            benches/kratos_bench/deps
+            benches/kratos_bench/_build
+          key: bench-kratos_bench-${{ hashFiles('benches/kratos_bench/mix.lock') }}
+          restore-keys: bench-kratos_bench-
+
+      - run: mix deps.get
+
+      # Determinism audit (feature 3): generation-only, needs no Kratos.
+      - name: Audit generation determinism
+        run: mix pd.audit KratosBench.Model
+
+      - run: mix test
