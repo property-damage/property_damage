@@ -153,6 +153,32 @@ defmodule PropertyDamage.OptionsF7Test do
     end
   end
 
+  # ---- regression: run-option :adapter parity (WP-C4 c) ---------------------
+
+  describe "run/1 :regression option accepts :adapter" do
+    test "the run schema validates regression: [adapter: ...] and preserves it" do
+      # RED against baseline: the run-level :regression keys omitted :adapter, so
+      # NimbleOptions rejected it as an unknown key and the generated regression
+      # test silently fell back to report.adapter. Regression.handler/1 accepts
+      # :adapter, so the run option must reach it.
+      opts =
+        Options.validate_run!(
+          model: __MODULE__,
+          adapter: __MODULE__,
+          regression: [generate_tests: "dir", adapter: __MODULE__]
+        )
+
+      assert get_in(opts, [:regression, :adapter]) == __MODULE__
+    end
+
+    test "the value survives Regression.handler/1's own validation" do
+      # The umbrella handler schema already accepts :adapter; prove the two
+      # schemas agree so the threaded value is not dropped on the way down.
+      handler = Regression.handler(generate_tests: "dir", adapter: __MODULE__)
+      assert is_function(handler, 1)
+    end
+  end
+
   # ---- Orphan schema wired into Analysis.generate_test ----------------------
 
   describe "Analysis.generate_test/2 validates options" do
