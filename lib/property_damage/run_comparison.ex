@@ -37,7 +37,7 @@ defmodule PropertyDamage.RunComparison do
   """
 
   alias PropertyDamage.{External, Provenance, RunTrace, Sequence}
-  alias PropertyDamage.RunComparison.Align
+  alias PropertyDamage.RunComparison.{Align, Html}
 
   defmodule Field do
     @moduledoc "One aligned field compared across all traces (DR-035)."
@@ -140,6 +140,20 @@ defmodule PropertyDamage.RunComparison do
           header: header
         }
     end
+  end
+
+  @doc """
+  Render a comparison as a single self-contained HTML document (DR-035).
+
+  Inline CSS/JS, no external hosts (repo self-sufficiency); readable with
+  JavaScript disabled (the table is pre-rendered); JS adds only accordion
+  collapse. Carries an embedded, versioned JSON blob
+  (`<script type="application/json" id="run-comparison-data">`) as the
+  machine-readable source of truth. No sibling `.json` file is written.
+  """
+  @spec to_html(t()) :: String.t()
+  def to_html(%__MODULE__{} = comparison) do
+    Html.render(comparison)
   end
 
   @doc """
