@@ -122,10 +122,14 @@ defmodule PropertyDamage.MixProject do
         ],
         "Diagnostics & Reporting": [
           PropertyDamage.FailureReport,
+          PropertyDamage.Analysis,
           PropertyDamage.Replay,
           PropertyDamage.Coverage,
           PropertyDamage.Diagram,
-          PropertyDamage.Diff,
+          PropertyDamage.RunTrace,
+          PropertyDamage.RunTrace.Step,
+          PropertyDamage.RunComparison,
+          PropertyDamage.RunComparison.Html,
           PropertyDamage.Telemetry,
           PropertyDamage.Progress,
           PropertyDamage.Progress.RunUpdate,
@@ -171,7 +175,6 @@ defmodule PropertyDamage.MixProject do
         # this time (see the README note). Grouped last and clearly labelled so
         # the docs do not advertise them alongside the validated core.
         "Advanced (work in progress, not fully supported)": [
-          PropertyDamage.Analysis,
           PropertyDamage.Flakiness,
           PropertyDamage.Mutation,
           PropertyDamage.Mutation.Report,
