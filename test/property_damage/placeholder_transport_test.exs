@@ -10,6 +10,8 @@ defmodule PropertyDamage.PlaceholderTransportTest do
   """
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{Executor, Placeholder, PlaceholderRegistry, Sequence}
 
   defmodule SomeEvent do
@@ -58,7 +60,7 @@ defmodule PropertyDamage.PlaceholderTransportTest do
   end
 
   test "embedded placeholder resolves to its concrete value when the sequence carries the registry" do
-    ph = Placeholder.new_at(SomeEvent, [:id], {:prefix, 0}, 0)
+    ph = Placeholder.new_at(SomeEvent, [:id], Position.prefix(0), 0)
     reg = resolved_registry(ph, "ord_123")
 
     seq =
@@ -75,7 +77,7 @@ defmodule PropertyDamage.PlaceholderTransportTest do
   test "without the carried registry the same command fails to resolve the placeholder" do
     # Mirrors the pre-fix behavior: no registry on the sequence means the
     # executor starts empty and cannot resolve the embedded placeholder.
-    ph = Placeholder.new_at(SomeEvent, [:id], {:prefix, 0}, 0)
+    ph = Placeholder.new_at(SomeEvent, [:id], Position.prefix(0), 0)
 
     seq = Sequence.linear([%UseExternal{order_id: ph}])
 

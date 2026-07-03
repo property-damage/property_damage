@@ -36,7 +36,7 @@ defmodule PropertyDamage.Mint do
 
   @type t :: %__MODULE__{
           kind: kind(),
-          position: Position.tuple_form() | Position.t() | nil,
+          position: Position.t() | nil,
           path: [atom() | non_neg_integer()] | nil
         }
 
@@ -61,7 +61,7 @@ defmodule PropertyDamage.Mint do
   end
 
   @doc "Reify a marker with its generation coordinates (DR-036)."
-  @spec reify(t(), Position.tuple_form(), [atom() | non_neg_integer()]) :: t()
+  @spec reify(t(), Position.t(), [atom() | non_neg_integer()]) :: t()
   def reify(%__MODULE__{} = m, position, path), do: %{m | position: position, path: path}
 
   @doc "Whether a value is a mint marker."

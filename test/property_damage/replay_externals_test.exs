@@ -11,6 +11,8 @@ defmodule PropertyDamage.ReplayExternalsTest do
   """
   use ExUnit.Case, async: false
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{FailureReport, Placeholder, PlaceholderRegistry, Replay, Sequence}
 
   defmodule Created do
@@ -74,7 +76,7 @@ defmodule PropertyDamage.ReplayExternalsTest do
   end
 
   defp external_failure do
-    ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+    ph = Placeholder.new_at(Created, [:id], Position.prefix(0), 0)
     reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
 
     seq =

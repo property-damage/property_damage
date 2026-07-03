@@ -10,6 +10,8 @@ defmodule PropertyDamage.PlaceholderCreationTest do
   """
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{Generator, Placeholder, PlaceholderRegistry, Sequence}
 
   defmodule ItemCreated do
@@ -107,13 +109,13 @@ defmodule PropertyDamage.PlaceholderCreationTest do
         assert %Placeholder{} = p
         assert p.event_module == ItemCreated
         assert p.path == [:id]
-        assert match?({:prefix, i} when is_integer(i), p.position)
+        assert match?(%Position{section: :prefix, offset: i} when is_integer(i), p.position)
         refute Placeholder.resolved?(p)
       end)
 
-      # Positions cover the contiguous {:prefix, 0..n-1} range, one per command.
+      # Positions cover the contiguous Position.prefix(0..n-1) range, one per command.
       positions = placeholders |> Enum.map(& &1.position) |> Enum.sort()
-      expected = Enum.map(0..(length(seq.prefix) - 1), &{:prefix, &1})
+      expected = Enum.map(0..(length(seq.prefix) - 1), &Position.prefix(&1))
       assert positions == expected
     end
 
@@ -142,7 +144,7 @@ defmodule PropertyDamage.PlaceholderCreationTest do
 
   describe "consumer-routing affordance" do
     test "available_externals surfaces placeholders from projection state" do
-      p = Placeholder.new_at(ItemCreated, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(ItemCreated, [:id], Position.prefix(0), 0)
       state = %{items: %{p => "widget"}}
 
       assert Generator.available_externals(state) == [p]
@@ -153,7 +155,7 @@ defmodule PropertyDamage.PlaceholderCreationTest do
     end
 
     test "external_from yields a matching placeholder, or nil when none match" do
-      p = Placeholder.new_at(ItemCreated, [:id], {:prefix, 0}, 0)
+      p = Placeholder.new_at(ItemCreated, [:id], Position.prefix(0), 0)
       state = %{items: %{p => "widget"}}
 
       picked = Generator.external_from(state, path: [:id]) |> Enum.at(0)

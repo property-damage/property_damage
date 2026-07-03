@@ -24,6 +24,7 @@ defmodule PropertyDamage.Export.StepPlan do
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
   alias PropertyDamage.{FailureReport, Placeholder}
+  alias PropertyDamage.Sequence.Position
 
   defmodule Var do
     @moduledoc false
@@ -203,8 +204,8 @@ defmodule PropertyDamage.Export.StepPlan do
   defp producer_extractions(commands) do
     commands
     |> placeholder_bindings()
-    |> Enum.filter(fn {ph, _name} -> match?({:prefix, _}, ph.position) end)
-    |> Enum.group_by(fn {ph, _name} -> elem(ph.position, 1) end)
+    |> Enum.filter(fn {ph, _name} -> match?(%Position{section: :prefix}, ph.position) end)
+    |> Enum.group_by(fn {ph, _name} -> ph.position.offset end)
   end
 
   defp placeholder_var(%Placeholder{event_module: mod, path: path, position: position}) do
@@ -214,9 +215,9 @@ defmodule PropertyDamage.Export.StepPlan do
     sanitize_label("#{module_part}_#{path_part}#{idx_part}")
   end
 
-  defp position_suffix({:prefix, i}), do: "_#{i}"
-  defp position_suffix({:branch, b, i}), do: "_b#{b}_#{i}"
-  defp position_suffix({:suffix, i}), do: "_s#{i}"
+  defp position_suffix(%Position{section: :prefix, offset: i}), do: "_#{i}"
+  defp position_suffix(%Position{section: {:branch, b}, offset: i}), do: "_b#{b}_#{i}"
+  defp position_suffix(%Position{section: :suffix, offset: i}), do: "_s#{i}"
   defp position_suffix(_), do: ""
 
   defp collect_placeholders(%Placeholder{} = ph), do: [ph]

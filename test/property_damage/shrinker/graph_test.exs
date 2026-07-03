@@ -1,6 +1,8 @@
 defmodule PropertyDamage.Shrinker.GraphTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.Placeholder
   alias PropertyDamage.Shrinker.Graph
 
@@ -20,7 +22,7 @@ defmodule PropertyDamage.Shrinker.GraphTest do
   end
 
   # A placeholder produced by the command at prefix index `i`.
-  defp produced_at(i), do: Placeholder.new_at(Event, [:id], {:prefix, i}, 0)
+  defp produced_at(i), do: Placeholder.new_at(Event, [:id], Position.prefix(i), 0)
 
   describe "build/1" do
     test "creates nodes for each command" do

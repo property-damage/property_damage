@@ -11,6 +11,8 @@ defmodule PropertyDamage.ExternalShrinkTest do
   """
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{Executor, Placeholder, PlaceholderRegistry, Sequence, Shrinker}
 
   defmodule Created do
@@ -95,7 +97,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
   end
 
   test "a padded producer->consumer failure shrinks to the minimal pair and still resolves" do
-    ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+    ph = Placeholder.new_at(Created, [:id], Position.prefix(0), 0)
     reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
 
     full =
@@ -135,7 +137,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
     # relies on the dependency graph mapping each placeholder to its producer by
     # structured position. The producer (index 0) must be pulled back whenever
     # the consumer survives, and the shrunk sequence must still resolve.
-    ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+    ph = Placeholder.new_at(Created, [:id], Position.prefix(0), 0)
     reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
 
     noise = List.duplicate(%Noise{}, 12)
@@ -169,7 +171,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
     # consumer embeds its placeholder, so linear shrinking must not drop it.
     # (Correctness is also guaranteed by failure equivalence; this locks the
     # async-protection optimization onto the placeholder identity/position.)
-    ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+    ph = Placeholder.new_at(Created, [:id], Position.prefix(0), 0)
     reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
 
     full =

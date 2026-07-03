@@ -17,7 +17,7 @@ The system SHALL save and load failure reports to `.pd` files using Erlang term 
 - **WHEN** a failure report is saved to a directory
 - **THEN** the system SHALL write a `.pd` file containing a version header, the Erlang term-encoded `FailureReport` struct, and a checksum for integrity verification
 - **AND** the filename SHALL follow the pattern `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
-- **AND** the version header SHALL record the current format version (`4`, since the report composes a `RunTrace` — DR-033), which tracks the `FailureReport` struct shape
+- **AND** the version header SHALL record the current format version (`5`, since positions are `%Sequence.Position{}` structs — DR-039; the report composes a `RunTrace` — DR-033), which tracks the `FailureReport` struct shape
 
 #### Scenario: Save with custom filename
 
@@ -63,16 +63,13 @@ The system SHALL include version metadata in persisted files and warn when loadi
 - **WHEN** a `.pd` file references a dependency not present in the current environment
 - **THEN** the system SHALL return a `{:dependency_missing, dep, saved_version}` warning
 
-#### Scenario: Older format versions still load
+#### Scenario: Pre-v5 format versions are refused
 
-- **WHEN** a `.pd` file written under an earlier format version (`1`, `2`, or `3`) is loaded
-- **THEN** the system SHALL decode it with the corresponding version clause and return its `FailureReport`, so no data is lost when the current version is `4`
+- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1`, `2`, `3`, or `4`) is loaded
+- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 5}}` without attempting to decode the payload
+- **AND** the system SHALL NOT deep-convert the stored terms: a pre-v5 file encodes command positions as raw tuples inside arbitrary user command/event structs, and rewriting them is the encoding-interpretation logic DR-039 removes (the framework is unpublished and such files exist only as regenerable test fixtures), so the user re-captures the failure under the current version instead
 
-#### Scenario: Pre-v3 file carrying removed fields loads without data loss or drift
-
-- **WHEN** a `.pd` file written before `command_at_failure` / `events_at_failure` were removed is loaded
-- **THEN** the deserialized report SHALL carry those keys as extra (stored) keys, and the system SHALL NOT report them as `{:struct_shape_drift, ...}` (they are recognized as intentionally-removed fields)
-- **AND** the failing command and its events SHALL remain recoverable via `FailureReport.failure_step/1`, served by the `RunTrace` the loader synthesizes from the stored `event_log` + `shrunk_sequence` (DR-033), so the removal is lossless for existing files
+> This supersedes the pre-DR-039 requirement that older format versions (`1`–`3`) still load and that a pre-v4 file's legacy `event_log` / `shrunk_sequence` be synthesized into a `RunTrace` on load; that synthesis path is deleted.
 
 ### Requirement: Seed Library
 

@@ -6,6 +6,8 @@ defmodule PropertyDamage.MintEnginesTest do
   """
   use ExUnit.Case, async: false
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{Differential, Mint}
   alias PropertyDamage.LoadTest.{Metrics, Worker, WorkerPool}
 
@@ -65,7 +67,7 @@ defmodule PropertyDamage.MintEnginesTest do
   end
 
   defp expected(nonce, epoch) do
-    Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:request_id])
+    Mint.reify(Mint.new(:uuid), Position.prefix(0), [:request_id])
     |> Mint.resolve(nonce, epoch)
   end
 
