@@ -31,7 +31,7 @@ defmodule OpenapiBench.SeededBugTest do
                verbose: false
              )
 
-    shrunk = PropertyDamage.Sequence.to_list(report.shrunk_sequence)
+    shrunk = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 
     assert [%PutValue{key: put_key}, %GetValue{key: get_key}] = shrunk,
            "expected minimal PutValue -> GetValue, got #{inspect(shrunk)}"
@@ -53,7 +53,7 @@ defmodule OpenapiBench.SeededBugTest do
                verbose: false
              )
 
-    raw = PropertyDamage.Sequence.to_list(report.shrunk_sequence)
+    raw = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 
     assert length(raw) > 2,
            "without shrinking the discovered sequence should be long, got #{inspect(raw)}"

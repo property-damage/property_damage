@@ -48,7 +48,7 @@ defmodule ObanBench.SeededBugTest do
     assert {:poll_timeout, info} = report.failure_reason
     assert info.triggered_by.assertion_name == :counter_eventually_consistent
 
-    commands = PropertyDamage.Sequence.to_list(report.shrunk_sequence)
+    commands = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 
     # A single Increment whose effect never lands is enough to violate the
     # invariant; anything beyond a couple of commands means shrinking regressed.
