@@ -150,8 +150,9 @@ defmodule PropertyDamage.RunTrace do
 
   Optional: `:run_number` (default 0), `:run_nonce` (default fresh crypto
   entropy, DR-034), `:mint_epoch` (default 0), `:adapter_config`,
-  `:max_commands` (default 50), `:branching`, `:source_revision` (default
-  detected).
+  `:max_commands` (default 50), `:branching`, `:injector_adapters` (fault/async
+  injectors, set up around the run so their events land in the trace),
+  `:source_revision` (default detected).
   """
   @spec capture(keyword()) :: t()
   def capture(opts) do
@@ -168,6 +169,7 @@ defmodule PropertyDamage.RunTrace do
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     max_commands = Keyword.get(opts, :max_commands, 50)
     branching = Keyword.get(opts, :branching)
+    injector_adapters = Keyword.get(opts, :injector_adapters, [])
 
     gen_opts =
       [max_commands: max_commands] ++ if(branching, do: [branching: branching], else: [])
@@ -180,6 +182,7 @@ defmodule PropertyDamage.RunTrace do
     end
 
     {:ok, event_queue} = EventQueue.start_link()
+    setup_injectors(injector_adapters, event_queue)
 
     try do
       {:ok, result} =
@@ -207,11 +210,26 @@ defmodule PropertyDamage.RunTrace do
         outcome: outcome_of(result)
       )
     after
+      teardown_injectors(injector_adapters)
       EventQueue.stop(event_queue)
 
       if function_exported?(model, :teardown_each, 1) do
         model.teardown_each(%{adapter_config: adapter_config, run_number: run_number})
       end
+    end
+  end
+
+  # Injector-adapter lifecycle for capture (mirrors the exploration run loop):
+  # setup receives the event queue so injected events land in the run's log.
+  defp setup_injectors(injector_adapters, event_queue) do
+    for adapter <- injector_adapters, function_exported?(adapter, :setup, 1) do
+      adapter.setup(%{event_queue: event_queue})
+    end
+  end
+
+  defp teardown_injectors(injector_adapters) do
+    for adapter <- injector_adapters, function_exported?(adapter, :teardown, 1) do
+      adapter.teardown(%{})
     end
   end
 
