@@ -188,21 +188,27 @@ The system SHALL provide a shared event queue where injector adapters push incom
 
 ### Requirement: Mock Service Adapter
 
-The system SHALL support mock service adapters that start controlled mock servers, allowing the SUT to call mock endpoints instead of real third-party services. Mock adapters SHALL maintain state, respond to SUT requests, and optionally inject events.
+The system SHALL support mock service adapters that stand in for third-party services the SUT calls, allowing the SUT to reach controlled mock endpoints instead of real services. Mock adapters SHALL maintain state, respond to SUT requests, and optionally inject events. Mock services SHALL be reachable through the public `PropertyDamage.run/1` API via the `mock_services:` option, which accepts a list of mock adapter modules or `{module, config}` tuples.
+
+#### Scenario: Framework owns the per-run mock lifecycle
+- **WHEN** a run declares `mock_services:`
+- **THEN** the framework SHALL start a mock service registry for the run, register each declared mock (initializing its state), and call each mock's `setup/1` with the entry's config merged with the framework channels (`:registry` and `:event_queue`)
+- **AND** the framework SHALL call each mock's `teardown/1` and stop the registry at the end of the run
+- **AND** the same registry SHALL be reused across a failure's shrink attempts and the reproduction re-execution, so a mock-dependent failure keeps reproducing as it minimizes
 
 #### Scenario: Mock service intercepts SUT calls
-- **WHEN** a mock service adapter is configured
-- **THEN** the SUT's outbound calls to the third-party service SHALL be routed to the mock
+- **WHEN** a mock service is configured and the SUT (or its adapter stand-in) makes an outbound call
+- **THEN** the caller SHALL reach the mock through the registry handed to the adapter on the runtime handle (`runtime.mock_registry`), driving the mock's `handle_request/2`
 - **AND** the mock SHALL return controlled responses based on its current state
 
 #### Scenario: Mock state evolves with commands
 - **WHEN** a command configures mock behavior (e.g., switch from success to decline)
-- **THEN** the mock's internal state SHALL update
-- **AND** subsequent SUT requests SHALL reflect the new mock behavior
+- **THEN** the framework SHALL call each mock's `on_command/2` before the command executes
+- **AND** the mock's internal state SHALL update so subsequent SUT requests reflect the new behavior
 
 #### Scenario: Mock injects events
-- **WHEN** the SUT calls the mock and the mock handler returns events
-- **THEN** those events SHALL be injected into the framework's event processing pipeline
+- **WHEN** the SUT calls the mock and events are pushed into the registry
+- **THEN** after the command the framework SHALL flush those events, fold them into projection state (recording them with `source: :mock`), and notify each mock via `on_event/2`
 
 ### Requirement: Assertions on Asynchronously-Observed Events
 

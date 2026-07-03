@@ -81,16 +81,18 @@ assertions:
 
 ## Wiring note
 
-`PropertyDamage`'s Executor already knows how to drive a `MockServiceRegistry`
-(notify commands, flush injected events), but the public `PropertyDamage.run/1`
-does not yet thread a registry through to it, and `handle_request/2` has no caller
-inside the framework. So this bench wires the mock the way the
-`MockServiceRegistry` moduledoc documents: `KratosBench.Adapter` owns the registry
+`PropertyDamage.run/1` can own the mock lifecycle for you via its
+`:mock_services` option (WP-C5): it starts a `MockServiceRegistry`, registers and
+`setup/1`s each declared mock, drives `on_command/2` before each command, and
+flushes the events the mock pushes after each command. This bench predates that
+option and instead owns the registry itself: `KratosBench.Adapter` runs the
 lifecycle (`start_link` → `register` → `notify_command` → `flush_events` → `stop`),
-and the mock's own HTTP listener is the glue the Executor would otherwise be — on
-each inbound web_hook it reads the mock's state (`get_handler_state/2`), calls
-`handle_request/2`, and pushes the returned events back (`push_events/3`). Threading
-a registry through `run/1` would make this automatic; see the framework backlog.
+and the mock's own HTTP listener reads the mock's state (`get_handler_state/2`),
+calls `handle_request/2`, and pushes the returned events back (`push_events/3`) on
+each inbound web_hook. Both approaches are valid; the manual one is kept here
+because Kratos reaches the mock over real HTTP and the listener needs the registry
+pid at request time regardless. A migration onto `:mock_services` would hand the
+listener that same pid through the mock's `setup/1` config.
 
 ## Running
 
