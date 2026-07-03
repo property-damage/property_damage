@@ -161,9 +161,33 @@ defmodule PropertyDamage.Coverage do
   end
 
   @doc """
-  Build coverage from a single result (convenience function).
+  Build coverage from a run result (convenience function).
+
+  Handles three shapes:
+
+    * a single sequence result `{:ok, %{sequence: ...}}` or a failure
+      `{:error, report}` — records it into a fresh tracker,
+    * an aggregate `{:ok, stats}` from a multi-run `PropertyDamage.run/1` called
+      with `coverage: true` — returns the pre-merged `stats.coverage` tracker.
+
+  An aggregate `{:ok, stats}` with no `:coverage` key means coverage tracking was
+  not enabled; that raises an `ArgumentError` naming the `coverage: true` option
+  rather than a `KeyError` on `:sequence`.
   """
-  @spec from_result({:ok, map()} | {:error, PropertyDamage.FailureReport.t()}, module()) :: t()
+  @spec from_result(
+          {:ok, map()} | {:error, PropertyDamage.FailureReport.t()},
+          module()
+        ) :: t()
+  def from_result({:ok, %{coverage: %__MODULE__{} = tracker}}, _model), do: tracker
+
+  def from_result({:ok, stats}, _model)
+      when is_map(stats) and not is_map_key(stats, :sequence) do
+    raise ArgumentError,
+          "coverage/2 received an aggregate run result without coverage data. " <>
+            "Pass `coverage: true` to PropertyDamage.run/1; the merged tracker is " <>
+            "then available as `stats.coverage` and returned by this function."
+  end
+
   def from_result(result, model) do
     model
     |> new()

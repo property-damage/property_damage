@@ -26,6 +26,7 @@ defmodule OpenapiBench.Generated.Adapter do
   @compile {:no_warn_undefined, [Req]}
 
   alias OpenapiBench.Generated.Commands
+  alias PropertyDamage.Export.HTTPSpec
 
   @impl true
   def setup(config) do
@@ -70,9 +71,43 @@ defmodule OpenapiBench.Generated.Adapter do
     end
   end
 
+  # Describe a command as an HTTP call for failure export (curl/Python/Elixir
+  # scripts via `PropertyDamage.Export`). This is the optional `http_spec/2`
+  # the exporters look up via `function_exported?/3`; it is derived from the
+  # same OpenAPI introspection the commands expose (`__http_method__/0`,
+  # `__http_path__/0`, and the optional `__path_params__/0`/`__query_params__/0`),
+  # so an exported reproduction drives the same HTTP calls as `execute/3`.
+  def http_spec(cmd, _context) do
+    mod = cmd.__struct__
+
+    path_params =
+      if function_exported?(mod, :__path_params__, 0), do: mod.__path_params__(), else: []
+
+    query_params =
+      if function_exported?(mod, :__query_params__, 0), do: mod.__query_params__(), else: []
+
+    fields = Map.from_struct(cmd)
+
+    %HTTPSpec{
+      method: mod.__http_method__(),
+      path: spec_path(mod.__http_path__(), path_params),
+      path_params: Map.take(fields, path_params),
+      query_params: Map.take(fields, query_params),
+      body: build_body(cmd)
+    }
+  end
+
   # ============================================================================
   # Helpers
   # ============================================================================
+
+  # Render an OpenAPI path template ("/kv/{key}") into the HTTPSpec :param
+  # form ("/kv/:key") for each path parameter.
+  defp spec_path(path, path_params) do
+    Enum.reduce(path_params, path, fn param, acc ->
+      String.replace(acc, "{" <> to_string(param) <> "}", ":" <> to_string(param))
+    end)
+  end
 
   defp build_url(base_url, path, cmd) do
     # Replace path parameters

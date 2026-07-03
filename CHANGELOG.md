@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mock third-party services are now reachable through `PropertyDamage.run/1`
+  (WP-C5).** A new `:mock_services` run option accepts a list of
+  `PropertyDamage.MockServiceAdapter` modules (or `{module, config}` tuples). Per
+  run the framework starts a `PropertyDamage.MockServiceRegistry`, registers and
+  `setup/1`s each mock (passing `%{registry: pid, event_queue: pid}` merged with
+  the entry's config), drives `on_command/2` before each command, folds the
+  events mocks push into projections (`source: :mock`) after each command, and
+  tears each mock down at run end. The registry pid is handed to the adapter on
+  the `PropertyDamage.Runtime` handle as a new `runtime.mock_registry` field, so
+  `execute/3` can drive the mock's `handle_request/2` for an in-process SUT (a
+  real HTTP mock drives it from the listener it started in `setup/1`). The same
+  registry is reused across a failure's shrink attempts and the reproduction
+  re-execution, so a mock-dependent failure keeps reproducing as it minimizes.
+  Previously the Executor accepted a `mock_registry` pid but `run/1` never
+  threaded one and `handle_request/2` had no caller in the framework, so the
+  whole mocking feature was unreachable through the public API. The
+  "Mocking Third-Party Services" guide now documents the wired path end to end.
+
 - **Live network fault injection is now reachable through the engine (DR-038).**
   The built-in network nemeses (`NetworkLatency`, `NetworkPartition`,
   `PacketLoss`) discover their Toxiproxy config from the adapter context: return

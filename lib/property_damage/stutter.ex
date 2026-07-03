@@ -93,13 +93,13 @@ defmodule PropertyDamage.Stutter do
       PropertyDamage.run(
         model: MyModel,
         adapter: MyAdapter,
-        stutter: %{
+        stutter: [
           probability: 0.1,      # 10% of commands stuttered
           max_repeats: 2,        # Up to 2 retries (3 total executions)
           delay_ms: {0, 100},    # Random delay between retries
           commands: :all,        # Or list of specific command modules
           comparison: :strict    # :strict, {:structural, fields}, {:custom, fn}
-        }
+        ]
       )
 
   ## Command Configuration

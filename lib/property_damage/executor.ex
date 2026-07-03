@@ -653,7 +653,12 @@ defmodule PropertyDamage.Executor do
           # explicit sink rather than being merged into the user's map.
           %Runtime{
             inject: fn event -> inject_event(sink, event) end,
-            start_poller: start_poller_fn
+            start_poller: start_poller_fn,
+            # The per-run mock registry (or nil) travels on the runtime handle so
+            # an adapter can reach a mocked third party's handle_request/2 during
+            # execute/3 (WP-C5); the framework flushes what the mock pushes after
+            # the command (source: :mock, step 7.5 below).
+            mock_registry: mock_registry
           }
         end
 

@@ -1,15 +1,18 @@
 # Parallel Testing and Linearization
 
-PropertyDamage can run commands concurrently across parallel branches to expose
-race conditions. After execution, the framework checks whether the observed
-results are linearizable -- explainable by some valid sequential ordering.
+PropertyDamage models concurrent operations as parallel branches to expose race
+conditions. It executes each branch over a shared adapter context, then checks
+whether the observed results are linearizable -- explainable by some valid
+sequential ordering. The concurrency is what the checker reasons about; the
+branches themselves are executed sequentially (see below).
 
 ## Why Parallel Testing
 
 Sequential tests miss timing-dependent bugs. A `Transfer` command that reads a
 balance, computes the new value, and writes it back may work perfectly in
-isolation but lose updates under concurrency. Parallel testing runs commands
-simultaneously to surface these defects.
+isolation but lose updates under concurrency. Parallel testing surfaces these
+defects by checking whether the observed results could have arisen only from an
+illegal interleaving.
 
 ## Branching Sequences
 
@@ -28,8 +31,12 @@ Suffix (optional sequential cleanup):
   CloseAccount{id: account_a} -> CloseAccount{id: account_b}
 ```
 
-The **prefix** runs first to establish state. **Branches** run concurrently.
-The **suffix** runs after all branches complete.
+The **prefix** runs first to establish state. Each **branch** then executes
+sequentially, forked from that same post-prefix state and sharing the adapter
+context -- the framework does not physically run branches at the same time.
+Concurrency is what the linearization checker *models* afterward (it asks whether
+the observed per-branch results are explainable by some interleaving), not how
+the branches are executed. The **suffix** runs after all branches complete.
 
 Here `account_a` and `account_b` are **placeholders**: stand-ins for the
 server-generated account ids that the prefix's `CreateAccount` commands produce.

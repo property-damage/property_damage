@@ -98,6 +98,23 @@ defmodule PropertyDamage.Options do
       default: [],
       doc: "List of InjectorAdapter modules for event injection."
     ],
+    mock_services: [
+      type: {:custom, __MODULE__, :validate_mock_services, []},
+      default: [],
+      doc: """
+      Mock third-party services the SUT calls, as a list where each entry is a
+      `PropertyDamage.MockServiceAdapter` module or a `{module, config}` tuple.
+
+      Per run the framework starts a `PropertyDamage.MockServiceRegistry`,
+      registers each mock (`init_state/0`) and calls its `setup/1` with the
+      entry's config merged with `%{registry: pid, event_queue: pid}`, drives
+      `on_command/2` before each command, folds the events mocks push
+      (`source: :mock`) into projections after each command, and tears each mock
+      down at the end. The registry pid is handed to the adapter on the
+      `PropertyDamage.Runtime` handle (`runtime.mock_registry`) so `execute/3`
+      can drive `handle_request/2`. See `PropertyDamage.MockServiceAdapter`.
+      """
+    ],
     external_markers: [
       type: {:list, :atom},
       default: [],
@@ -251,6 +268,12 @@ defmodule PropertyDamage.Options do
           type: :boolean,
           default: false,
           doc: "Print regression actions."
+        ],
+        adapter: [
+          type: :atom,
+          doc:
+            "Adapter module supplying `http_spec/2` for generated regression tests " <>
+              "(defaults to the run's adapter via the failure report)."
         ]
       ]
     ]
@@ -1201,6 +1224,35 @@ defmodule PropertyDamage.Options do
   # ============================================================================
 
   @valid_duration_units [:milliseconds, :seconds, :minutes, :hours]
+
+  @doc false
+  # Each mock service is a module or a {module, config-map} tuple. Config
+  # defaults to %{} and is later merged with the framework's :registry /
+  # :event_queue before reaching the mock's setup/1.
+  def validate_mock_services(value) when is_list(value) do
+    normalized =
+      Enum.map(value, fn
+        module when is_atom(module) and module != nil ->
+          {module, %{}}
+
+        {module, config} when is_atom(module) and module != nil and is_map(config) ->
+          {module, config}
+
+        other ->
+          throw({:invalid_mock_service, other})
+      end)
+
+    {:ok, normalized}
+  catch
+    {:invalid_mock_service, other} ->
+      {:error,
+       "expected each mock service to be a module or {module, config_map} tuple, " <>
+         "got: #{inspect(other)}"}
+  end
+
+  def validate_mock_services(value) do
+    {:error, "expected a list of mock services, got: #{inspect(value)}"}
+  end
 
   @doc false
   def validate_module(value) when is_atom(value) and value != nil do
