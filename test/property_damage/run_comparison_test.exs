@@ -8,6 +8,7 @@ defmodule PropertyDamage.RunComparisonTest do
   alias PropertyDamage.Sequence.Position
 
   defmodule Cmd, do: defstruct([:request_id])
+  defmodule CmdNested, do: defstruct([:opts])
   # Distinct event modules for LCS-by-module alignment tests.
   defmodule EA, do: defstruct([:v])
   defmodule EB, do: defstruct([:v])
@@ -156,6 +157,41 @@ defmodule PropertyDamage.RunComparisonTest do
       assert ref.provenance == :run_scoped
       assert ref.classification == :incidental
       refute Enum.any?(c.ranking, fn f -> elem(f.location, 4) == [:ref] end)
+    end
+
+    test "a nested minted command value is classified run-scoped at its leaf, not the container" do
+      # A mint marker nested inside a map field: per-leaf comparison must
+      # classify [:opts, :request_id] as run-scoped, not lump the whole [:opts]
+      # container as a differing plan-generated field (a comparability violation).
+      marker = Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:opts, :request_id])
+      plan = Sequence.linear([%CmdNested{opts: %{request_id: marker, kind: :x}}])
+      pos = %Position{section: :prefix, offset: 0}
+
+      t0 =
+        RunTrace.new(
+          plan: plan,
+          model: Model,
+          executed: %{pos => %CmdNested{opts: %{request_id: "mint-A", kind: :x}}},
+          outcome: :pass
+        )
+
+      t1 =
+        RunTrace.new(
+          plan: plan,
+          model: Model,
+          executed: %{pos => %CmdNested{opts: %{request_id: "mint-B", kind: :x}}},
+          outcome: {:fail, {:check_failed, :Inv, "x"}}
+        )
+
+      c = RunComparison.compare([t0, t1])
+
+      req = find_field(c, [:opts, :request_id])
+      assert req.provenance == :run_scoped
+      assert req.classification == :incidental
+
+      # The sibling plan-generated leaf is uniform (both :x) and never a violation.
+      assert find_field(c, [:opts, :kind]).classification == :uniform
+      refute Enum.any?(c.fields, &(&1.classification == :comparability_violation))
     end
 
     test "a differing plan-generated command field is a comparability violation" do
