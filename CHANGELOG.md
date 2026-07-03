@@ -250,6 +250,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **BREAKING:** removed `PropertyDamage.Flakiness` and its facade delegates
+  `check_determinism/4` and `discover_flaky_seeds/3`.
+  Flakiness detection is now part of run comparison (DR-035): a flaky run is
+  defined by multiple runs of one plan disagreeing, which is exactly what
+  `RunComparison` captures and localizes. Use `RunComparison.investigate/1` for a
+  single suspect seed (it also ranks *where* the passing and failing runs
+  diverge, which the old outcome-only detector could not), the new
+  `RunComparison.scan/1` for a corpus of seeds (the `discover_flaky` replacement:
+  per-seed `%RunComparison.Verdict{}` with bounded memory — a seed's traces are
+  discarded before the next, and only flaky seeds keep their full comparison), and
+  `RunComparison.outcome_summary/1` for the cheap pass/fail + failure-signature
+  view. The three `Options.validate_flakiness_*!` schemas are removed in favor of
+  `Options.validate_run_comparison_scan!/1`.
+
+- **BREAKING:** removed `PropertyDamage.Telemetry.Dashboard`. It was a LiveView
+  renderer sketched inside a library with no Phoenix dependency (it could not
+  actually render — the HEEx template was a placeholder string) and had no real
+  tests. The integration surface is unchanged and complete without it: attach to
+  the `[:property_damage, ...]` telemetry events directly, or subscribe
+  `PropertyDamage.Telemetry.Collector` for a live in-memory run/command/check
+  rollup, and render it with your own dashboard (Phoenix LiveView, an IEx loop, an
+  exporter, etc.).
+
 - **BREAKING (DR-038):** removed `NetworkPartition`'s `:asymmetric`
   `partition_type`. Its documentation ("requests go through, responses blocked")
   and its implementation were both exactly `:downstream` — duplicate vocabulary

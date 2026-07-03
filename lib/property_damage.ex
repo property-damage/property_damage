@@ -108,12 +108,17 @@ defmodule PropertyDamage do
 
   ## Flakiness Detection
 
-  Detect non-deterministic behavior in your SUT:
+  Detect non-deterministic behavior in your SUT by running one plan many times
+  and localizing where the passing and failing runs diverge:
 
-      PropertyDamage.check_determinism(Model, Adapter, seed, runs: 10)
-      flaky = PropertyDamage.discover_flaky_seeds(Model, Adapter, num_seeds: 20)
+      {_traces, comparison} =
+        PropertyDamage.RunComparison.investigate(
+          runs: 10,
+          capture: [model: Model, adapter: Adapter, seed: seed]
+        )
 
-  See `PropertyDamage.Flakiness` for details.
+  Scan a whole corpus of seeds with `PropertyDamage.RunComparison.scan/1`. See
+  `PropertyDamage.RunComparison` for details.
 
   ## Architecture
 
@@ -122,7 +127,7 @@ defmodule PropertyDamage do
   - **Tier 0 (Core Types)**: Ref, Command, Projection, Model behaviours
   - **Tier 1 (Execution)**: Adapter, EventQueue, InjectorAdapter, Executor
   - **Tier 2 (Shrinking)**: Sequence.Validator, Shrinker, dependency graph
-  - **Tier 3 (Analysis)**: Analysis, Replay, Coverage, Flakiness
+  - **Tier 3 (Analysis)**: Analysis, Replay, Coverage, RunComparison
   - **Utilities**: Persistence, SeedLibrary, mix tasks
 
   See the individual module documentation for detailed information on each component.
@@ -1763,69 +1768,6 @@ defmodule PropertyDamage do
           }
         ]
   defdelegate assertion_catalog(model), to: PropertyDamage.Model
-
-  # ============================================================================
-  # Flakiness Detection API
-  # ============================================================================
-
-  @doc """
-  Check if a seed produces deterministic results.
-
-  Runs the same seed multiple times to detect non-deterministic behavior
-  in the system under test.
-
-  ## Options
-
-  - `:runs` - Number of times to run (default: 5)
-  - `:adapter_config` - Adapter configuration
-  - `:max_commands` - Maximum commands per run (default: 50)
-  - `:verbose` - Print progress (default: false)
-
-  ## Returns
-
-  - `{:ok, :deterministic}` - Same result every time
-  - `{:ok, :flaky, stats}` - Different results, with statistics
-  - `{:error, reason}` - Check failed
-
-  ## Example
-
-      case PropertyDamage.check_determinism(M, A, 512902757, runs: 10) do
-        {:ok, :deterministic} ->
-          IO.puts("Seed is deterministic")
-
-        {:ok, :flaky, stats} ->
-          IO.puts("FLAKY: passed \#{stats.passes}/\#{stats.runs} times")
-      end
-  """
-  @spec check_determinism(module(), module(), integer(), keyword()) ::
-          PropertyDamage.Flakiness.result()
-  defdelegate check_determinism(model, adapter, seed, opts \\ []),
-    to: PropertyDamage.Flakiness,
-    as: :check
-
-  @doc """
-  Discover flaky seeds by testing random seeds.
-
-  ## Options
-
-  - `:num_seeds` - Number of random seeds to test (default: 10)
-  - `:runs_per_seed` - Runs per seed (default: 3)
-  - `:verbose` - Print progress (default: false)
-
-  ## Returns
-
-  List of `{seed, flaky_stats}` for seeds that are flaky.
-
-  ## Example
-
-      flaky_seeds = PropertyDamage.discover_flaky_seeds(M, A, num_seeds: 20)
-      IO.puts("Found \#{length(flaky_seeds)} flaky seeds")
-  """
-  @spec discover_flaky_seeds(module(), module(), keyword()) ::
-          [{integer(), PropertyDamage.Flakiness.flaky_stats()}]
-  defdelegate discover_flaky_seeds(model, adapter, opts \\ []),
-    to: PropertyDamage.Flakiness,
-    as: :discover_flaky
 
   # ============================================================================
   # Assertion Helpers
