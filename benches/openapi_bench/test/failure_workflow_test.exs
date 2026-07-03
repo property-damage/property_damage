@@ -2,7 +2,8 @@ defmodule OpenapiBench.FailureWorkflowTest do
   @moduledoc """
   End-to-end acceptance test for the failure-handling path, and specifically the
   honest proof of `PropertyDamage.Export.HTTPSpec`: a failure discovered by the
-  generated client is
+  generated client (via the scaffold-emitted `http_spec/2` on
+  `OpenapiBench.Generated.Adapter`, no hand-written glue) is
 
     1. persisted to a `.pd` file (+ a generated ExUnit regression test) by the
        `PropertyDamage.Regression` handler,
@@ -17,7 +18,7 @@ defmodule OpenapiBench.FailureWorkflowTest do
   """
   use ExUnit.Case, async: false
 
-  alias OpenapiBench.ExportAdapter
+  alias OpenapiBench.Generated.Adapter
   alias OpenapiBench.Generated.Commands.{GetValue, PutValue}
   alias OpenapiBench.Generated.Model
   alias OpenapiBench.Server
@@ -39,14 +40,16 @@ defmodule OpenapiBench.FailureWorkflowTest do
     assert {:error, _report} =
              PropertyDamage.run(
                model: Model,
-               adapter: ExportAdapter,
+               adapter: Adapter,
                adapter_config: %{base_url: Server.base_url(), bug: true},
-               # The generated ExUnit test defaults to report.adapter, which is
-               # ExportAdapter here (the run-level :regression schema has no
-               # :adapter key).
+               # The run-level :regression schema accepts :adapter, so the
+               # generated ExUnit test's HTTP-spec mapping is pinned explicitly
+               # to the generated adapter rather than falling back to
+               # report.adapter.
                regression: [
                  save_failures: failures_dir,
-                 generate_tests: tests_dir
+                 generate_tests: tests_dir,
+                 adapter: Adapter
                ],
                max_commands: 25,
                max_runs: 50,
@@ -88,7 +91,7 @@ defmodule OpenapiBench.FailureWorkflowTest do
     script =
       PropertyDamage.Export.to_script(loaded, :curl,
         base_url: Server.base_url(),
-        adapter: ExportAdapter
+        adapter: Adapter
       )
 
     File.write!(script_path, script)
