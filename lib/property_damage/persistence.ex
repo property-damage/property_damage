@@ -54,19 +54,19 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
-  @version 5
+  @version 6
   @extension ".pd"
   @trace_extension ".pdtrace"
 
   # Fields whose presence on a loaded report is expected (not struct drift) even
-  # though the current struct lacks them. Pre-v5 files are refused outright
-  # (DR-039), so there are no legacy shapes to whitelist: a v5 file carrying an
-  # unknown key IS drift and should be surfaced.
+  # though the current struct lacks them. Pre-v6 files are refused outright
+  # (DR-040, following the DR-039 precedent), so there are no legacy shapes to
+  # whitelist: a v6 file carrying an unknown key IS drift and should be surfaced.
   @removed_fields []
 
   # Fields whose absence on a loaded report is expected format evolution (not
-  # struct drift). Empty for the same reason as @removed_fields: only v5 files
-  # load, and a v5 file legitimately lacking a current field is a genuine shape
+  # struct drift). Empty for the same reason as @removed_fields: only v6 files
+  # load, and a v6 file legitimately lacking a current field is a genuine shape
   # change worth a warning.
   @added_fields []
 
@@ -409,12 +409,14 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
-  # V5 format (DR-039): positions are `%Sequence.Position{}` structs. The payload
-  # carries an explicit `kind`; the loader dispatches on it rather than the file
-  # extension. A report already embeds its trace, so it is returned as stored,
-  # with no legacy-field folding or trace synthesis. A standalone trace payload
-  # returns the trace.
-  defp decode(<<"PD", 5::8, stored_checksum::32, term_binary::binary>>) do
+  # V6 format (DR-040): event-log entries carry a `fold_index` and the trace
+  # carries `command_fold_ordinals` + `linearization`, so a run's real fold order
+  # is recorded and the per-step state timeline can be derived. Positions remain
+  # `%Sequence.Position{}` structs (DR-039). The payload carries an explicit
+  # `kind`; the loader dispatches on it rather than the file extension. A report
+  # already embeds its trace, so it is returned as stored, with no legacy-field
+  # folding or trace synthesis. A standalone trace payload returns the trace.
+  defp decode(<<"PD", 6::8, stored_checksum::32, term_binary::binary>>) do
     with_decoded_payload(stored_checksum, term_binary, fn payload ->
       metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
 
@@ -428,11 +430,11 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v5 files (format versions 1-4) are refused (DR-039). Their persisted
-  # terms carry tuple-encoded positions inside arbitrary user command/event
-  # structs; a deep-converting loader is exactly the encoding-interpretation
-  # logic this change deletes, kept alive for artifacts that do not exist.
-  # Re-capture the failure under the current version.
+  # Pre-v6 files (format versions 1-5) are refused (DR-040, following DR-039).
+  # A pre-v6 file predates the fold-order record (`fold_index` /
+  # `command_fold_ordinals`), so its per-step state timeline cannot be derived
+  # and its projection-purity check cannot run; there is no honest in-place
+  # upgrade. Re-capture the failure under the current version.
   defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
        when version < @version do
     {:error, {:unsupported_format_version, version, @version}}

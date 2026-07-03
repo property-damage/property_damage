@@ -39,9 +39,22 @@ defmodule PropertyDamage.Executor.Events do
     end
   end
 
-  # Process events from command execution
-  def process_events(events, source, command_index, event_log, projections, branch_id) do
-    Enum.reduce(events, {projections, event_log}, fn event, {projs, log} ->
+  # Process events from command execution.
+  #
+  # `fold_counter` is the next per-run fold ordinal (P8 / DR-040): each event
+  # folded here stamps its entry's `fold_index` with the current counter and
+  # advances it, so the faithful per-step timeline can replay the exact fold
+  # order. Returns `{projections, event_log, fold_counter}`.
+  def process_events(
+        events,
+        source,
+        command_index,
+        event_log,
+        projections,
+        branch_id,
+        fold_counter
+      ) do
+    Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
       entry = %Entry{
         timestamp: System.monotonic_time(:millisecond),
         command_index: command_index,
@@ -49,23 +62,39 @@ defmodule PropertyDamage.Executor.Events do
         source: source,
         injector_adapter: nil,
         nemesis_module: nil,
-        branch_id: branch_id
+        branch_id: branch_id,
+        fold_index: fc
       }
 
       new_projs = update_projections(projs, event)
-      {new_projs, [entry | log]}
+      {new_projs, [entry | log], fc + 1}
     end)
   end
 
-  def process_injector_events(event_queue, event_log, projections, branch_id, matchers \\ [])
+  def process_injector_events(
+        event_queue,
+        event_log,
+        projections,
+        branch_id,
+        fold_counter,
+        matchers \\ []
+      )
 
-  def process_injector_events(nil, event_log, projections, _branch_id, _matchers),
-    do: {projections, event_log}
+  def process_injector_events(nil, event_log, projections, _branch_id, fold_counter, _matchers),
+    do: {projections, event_log, fold_counter}
 
-  def process_injector_events(event_queue, event_log, projections, branch_id, matchers) do
+  def process_injector_events(
+        event_queue,
+        event_log,
+        projections,
+        branch_id,
+        fold_counter,
+        matchers
+      ) do
     entries = EventQueue.drain(event_queue)
 
-    Enum.reduce(entries, {projections, event_log}, fn queue_entry, {projs, log} ->
+    Enum.reduce(entries, {projections, event_log, fold_counter}, fn queue_entry,
+                                                                    {projs, log, fc} ->
       # Build entry based on source type
       entry =
         case queue_entry do
@@ -94,7 +123,7 @@ defmodule PropertyDamage.Executor.Events do
         end
 
       new_projs = update_projections(projs, queue_entry.event)
-      {new_projs, [entry | log]}
+      {new_projs, [%{entry | fold_index: fc} | log], fc + 1}
     end)
   end
 
@@ -134,13 +163,20 @@ defmodule PropertyDamage.Executor.Events do
   end
 
   # Flush and process events from mock service adapters
-  def process_mock_events(nil, _command_index, event_log, projections, _branch_id),
-    do: {projections, event_log}
+  def process_mock_events(nil, _command_index, event_log, projections, _branch_id, fold_counter),
+    do: {projections, event_log, fold_counter}
 
-  def process_mock_events(mock_registry, command_index, event_log, projections, branch_id) do
+  def process_mock_events(
+        mock_registry,
+        command_index,
+        event_log,
+        projections,
+        branch_id,
+        fold_counter
+      ) do
     events = MockServiceRegistry.flush_events(mock_registry)
 
-    Enum.reduce(events, {projections, event_log}, fn event, {projs, log} ->
+    Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
       entry = %Entry{
         timestamp: System.monotonic_time(:millisecond),
         command_index: command_index,
@@ -148,14 +184,15 @@ defmodule PropertyDamage.Executor.Events do
         source: :mock,
         injector_adapter: nil,
         nemesis_module: nil,
-        branch_id: branch_id
+        branch_id: branch_id,
+        fold_index: fc
       }
 
       # Notify mock registry of the event so mocks can react
       MockServiceRegistry.notify_event(mock_registry, event)
 
       new_projs = update_projections(projs, event)
-      {new_projs, [entry | log]}
+      {new_projs, [entry | log], fc + 1}
     end)
   end
 end

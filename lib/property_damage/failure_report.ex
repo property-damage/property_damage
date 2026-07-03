@@ -234,6 +234,10 @@ defmodule PropertyDamage.FailureReport do
         executed: Keyword.get(opts, :executed, %{}),
         event_log: event_log,
         command_labels: command_labels,
+        # P8 / DR-040: the fold-order record so the trace can derive the per-step
+        # state timeline and the report can run the projection-purity check.
+        command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
+        linearization: Keyword.get(opts, :linearization),
         outcome: {:fail, failure_reason}
       )
 
@@ -627,6 +631,68 @@ defmodule PropertyDamage.FailureReport do
       %Step{flattened_index: index} -> index
       nil -> report.failed_at_index
     end
+  end
+
+  @doc """
+  Projection-purity check: does the faithful per-step state derived from the
+  trace match the authoritative runtime snapshots? (P8 / DR-040.)
+
+  Re-derives the projection state at the failing step from the recorded fold
+  order (`RunTrace.state_before/2` / `state_at/2`) and compares it to the
+  runtime `state_before_failure` / `state_at_failure` snapshots. Pure
+  projections re-derive identically; a mismatch means a projection read
+  something outside its `(state, event)` inputs in `apply/2` (a clock, a
+  counter, the environment).
+
+  Because the derivation replays the run's *real* fold order, a pure-but-async
+  projection (late-settling events) re-derives correctly and does NOT
+  false-positive — that is the load-bearing property of this check.
+
+  This is a two-point sample (before + at the failing step), so it is partial
+  coverage: it proves purity at the failure boundary, not across the whole run.
+
+  Returns:
+
+    * `:ok` — the derived state matched both snapshots (or there was nothing to
+      check: no localized failure step, or empty snapshots).
+    * `{:non_pure_projections, [module()]}` — the projection modules whose
+      derived state diverged from a snapshot.
+  """
+  @spec verify_projections(t()) :: :ok | {:non_pure_projections, [module()]}
+  def verify_projections(%__MODULE__{trace: %RunTrace{} = trace} = report) do
+    case failure_step(report) do
+      %Step{position: position} ->
+        before_result =
+          RunTrace.verify_projections(
+            trace,
+            position,
+            report.state_before_failure || %{},
+            :before
+          )
+
+        at_result =
+          RunTrace.verify_projections(trace, position, report.state_at_failure || %{}, :at)
+
+        merge_purity_results([before_result, at_result])
+
+      nil ->
+        :ok
+    end
+  end
+
+  def verify_projections(%__MODULE__{trace: nil}), do: :ok
+
+  defp merge_purity_results(results) do
+    modules =
+      results
+      |> Enum.flat_map(fn
+        :ok -> []
+        {:non_pure_projections, mods} -> mods
+      end)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    if modules == [], do: :ok, else: {:non_pure_projections, modules}
   end
 
   # ============================================================================

@@ -30,6 +30,17 @@ defmodule PropertyDamage.RunComparison do
   on the event struct module. Entries with no command attribution (injector /
   telemetry) are excluded from comparison in this version.
 
+  Projection **state** also enters the ranking (P8 / DR-040): each projection's
+  per-step CANONICAL state (`RunTrace.canonical_state_timeline/1`) is flattened
+  into leaf-path fields (`{:state, position, projection, path}`) and classified
+  like any other field. Canonical state is fold-order-independent, so an
+  async-timing difference between two runs can never surface as a state
+  divergence — state findings are always attributable. Deeply nested / very wide
+  state is bounded (max depth 5, max fan-out 64); beyond either bound a
+  subtree compares as one opaque leaf. A projection whose state varies *within*
+  an outcome group is reported in `state_warnings` (a likely non-pure
+  projection): same plan, same outcome, different derived state.
+
   ## Classification
 
   Runs partition by outcome. For each aligned field difference: varies within a
@@ -48,6 +59,7 @@ defmodule PropertyDamage.RunComparison do
     @type location ::
             {:command, Sequence.Position.t(), [term()]}
             | {:event, Sequence.Position.t(), term(), non_neg_integer(), [term()]}
+            | {:state, Sequence.Position.t(), module(), [term()]}
 
     @type classification ::
             :uniform | :incidental | :discriminating | :weak | :comparability_violation
@@ -105,6 +117,7 @@ defmodule PropertyDamage.RunComparison do
           mixed_failure_signatures: [term()],
           fields: [Field.t()],
           ranking: [Field.t()],
+          state_warnings: [module()],
           header: map()
         }
 
@@ -115,6 +128,7 @@ defmodule PropertyDamage.RunComparison do
             mixed_failure_signatures: [],
             fields: [],
             ranking: [],
+            state_warnings: [],
             header: %{}
 
   @doc """
@@ -157,6 +171,7 @@ defmodule PropertyDamage.RunComparison do
           mixed_failure_signatures: mixed_failure_signatures(traces, groups),
           fields: classified,
           ranking: rank(classified),
+          state_warnings: state_warnings(classified, groups),
           header: header
         }
 
@@ -372,11 +387,21 @@ defmodule PropertyDamage.RunComparison do
     identity = Keyword.get(opts, :event_identity, & &1.__struct__)
     [reference | _] = traces
 
+    # Canonical (attribution-order) per-step state per trace, indexed by trace
+    # position (P8 / DR-040). Canonical is timing-immune, so an async fold-order
+    # difference between two runs can never manifest as a state divergence here:
+    # state divergence in the ranking is always attributable, never timing skew.
+    canonical_states =
+      traces
+      |> Enum.with_index()
+      |> Map.new(fn {trace, i} -> {i, Map.new(RunTrace.canonical_state_timeline(trace))} end)
+
     reference.plan
     |> indexed_positions()
     |> Enum.flat_map(fn {position, plan_command} ->
       command_fields(traces, position, plan_command) ++
-        event_fields(traces, position, identity, minted)
+        event_fields(traces, position, identity, minted) ++
+        state_fields(traces, position, canonical_states)
     end)
   end
 
@@ -528,6 +553,124 @@ defmodule PropertyDamage.RunComparison do
     _ -> []
   end
 
+  # ---- State fields (P8 / DR-040) -------------------------------------------
+
+  # Max nesting depth we flatten projection state into distinct leaf paths;
+  # deeper subtrees compare as a single opaque leaf. Bounds field count on deeply
+  # nested state.
+  @state_max_depth 5
+  # Max children of a single map/list we expand into per-key/index leaves; a
+  # wider container compares as one opaque leaf (a large collection is a poor
+  # per-element diff subject and would explode the field set).
+  @state_max_fanout 64
+
+  # One field per LEAF path of each projection's canonical state, valued by each
+  # trace's canonical state at this position. Provenance is always
+  # `:server_resolved`: derived state is the analysis subject, never a run-scoped
+  # correlation id or a plan-generated comparability violation.
+  defp state_fields(traces, position, canonical_states) do
+    reference_state = state_at(canonical_states, 0, position)
+
+    reference_state
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.flat_map(fn projection ->
+      reference_state
+      |> Map.fetch!(projection)
+      |> state_leaves([], @state_max_depth)
+      |> Enum.map(fn {path, _reference_value} ->
+        values =
+          traces
+          |> Enum.with_index()
+          |> Map.new(fn {_trace, i} ->
+            module_state = canonical_states |> state_at(i, position) |> Map.get(projection)
+            {i, state_value_at(module_state, path)}
+          end)
+
+        %Field{
+          location: {:state, position, projection, path},
+          provenance: :server_resolved,
+          values: values,
+          differs?: differs?(values)
+        }
+      end)
+    end)
+  end
+
+  defp state_at(canonical_states, trace_index, position) do
+    canonical_states |> Map.get(trace_index, %{}) |> Map.get(position, %{})
+  end
+
+  # Flatten a projection state value into {leaf_path, value} pairs, bounded by
+  # depth and fan-out; beyond either bound the subtree is one opaque leaf.
+  defp state_leaves(value, path, depth) when depth <= 0, do: [{Enum.reverse(path), value}]
+
+  defp state_leaves(%_{} = struct, path, depth),
+    do: struct |> Map.from_struct() |> state_leaves(path, depth)
+
+  defp state_leaves(map, path, depth) when is_map(map) do
+    if map_size(map) > @state_max_fanout do
+      [{Enum.reverse(path), map}]
+    else
+      map
+      |> Enum.sort_by(fn {k, _} -> inspect(k) end)
+      |> Enum.flat_map(fn {k, v} -> state_leaves(v, [k | path], depth - 1) end)
+    end
+  end
+
+  defp state_leaves(list, path, depth) when is_list(list) do
+    if length(list) > @state_max_fanout do
+      [{Enum.reverse(path), list}]
+    else
+      list
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {v, i} -> state_leaves(v, [i | path], depth - 1) end)
+    end
+  end
+
+  defp state_leaves(scalar, path, _depth), do: [{Enum.reverse(path), scalar}]
+
+  # Read a value at a flattened state path; `:absent` when the path is missing
+  # (state shapes can differ across runs). Mirrors `state_leaves` descent.
+  defp state_value_at(value, []), do: value
+  defp state_value_at(nil, _path), do: :absent
+
+  defp state_value_at(%_{} = struct, path),
+    do: struct |> Map.from_struct() |> state_value_at(path)
+
+  defp state_value_at(map, [key | rest]) when is_map(map) do
+    case Map.fetch(map, key) do
+      {:ok, v} -> state_value_at(v, rest)
+      :error -> :absent
+    end
+  end
+
+  defp state_value_at(list, [index | rest]) when is_list(list) and is_integer(index) do
+    case Enum.fetch(list, index) do
+      {:ok, v} -> state_value_at(v, rest)
+      :error -> :absent
+    end
+  end
+
+  defp state_value_at(_value, _path), do: :absent
+
+  # Advisory (not a comparability violation): a projection whose canonical state
+  # varies WITHIN an outcome group is a likely non-pure projection — same plan,
+  # same outcome, different derived state. `investigate/1` / `scan/1` surface it
+  # so a flaky "state divergence" is not mistaken for a real behavioral one.
+  defp state_warnings(fields, groups) do
+    group_index_lists = [groups.passing, groups.failing]
+
+    fields
+    |> Enum.filter(fn field ->
+      match?({:state, _, _, _}, field.location) and
+        Enum.any?(group_index_lists, fn indices -> varies?(present_at(field.values, indices)) end)
+    end)
+    |> Enum.map(fn %Field{location: {:state, _pos, projection, _path}} -> projection end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
   # ---- Classification -------------------------------------------------------
 
   defp differs?(values) do
@@ -586,6 +729,13 @@ defmodule PropertyDamage.RunComparison do
 
   defp location_sort_key({:event, %Sequence.Position{} = p, _key, row_index, path}),
     do: {section_rank(p.section), p.offset, 1 + row_index, inspect(path)}
+
+  # State findings sort after this step's commands and events (they are the
+  # consequence of them). The `:state` atom in the third slot sorts after any
+  # integer command/event rank (Erlang term order: number < atom), regardless of
+  # how many event rows a position has.
+  defp location_sort_key({:state, %Sequence.Position{} = p, projection, path}),
+    do: {section_rank(p.section), p.offset, :state, inspect({projection, path})}
 
   defp section_rank(:prefix), do: {0, 0}
   defp section_rank({:branch, b}), do: {1, b}

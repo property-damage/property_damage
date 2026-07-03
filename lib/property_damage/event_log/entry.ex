@@ -82,6 +82,12 @@ defmodule PropertyDamage.EventLog.Entry do
   - `stutter_attempt` - Attempt number for stutter retries (only for `:stutter` source)
   - `stutter_comparison` - Comparison result with original events (only for `:stutter` source)
   - `resource_poller_id` - Reference identifying the poller instance (only for `:resource_poller` source)
+  - `fold_index` - Monotonic per-run ordinal stamped when this entry's event was
+    folded into the projections (P8 / DR-040). It records the *actual* fold order,
+    which the faithful per-step state timeline (`PropertyDamage.RunTrace.state_at/2`)
+    replays. `nil` for entries that are recorded but never folded into projections
+    (`:stutter` retries, `:telemetry` spans), so a `nil` fold_index is itself the
+    signal "this event did not advance projection state".
   """
   @type t :: %__MODULE__{
           timestamp: integer(),
@@ -104,7 +110,8 @@ defmodule PropertyDamage.EventLog.Entry do
           branch_id: non_neg_integer() | nil,
           stutter_attempt: pos_integer() | nil,
           stutter_comparison: :match | {:mismatch, map()} | nil,
-          resource_poller_id: reference() | nil
+          resource_poller_id: reference() | nil,
+          fold_index: non_neg_integer() | nil
         }
 
   defstruct [
@@ -120,7 +127,8 @@ defmodule PropertyDamage.EventLog.Entry do
     :branch_id,
     :stutter_attempt,
     :stutter_comparison,
-    :resource_poller_id
+    :resource_poller_id,
+    :fold_index
   ]
 
   @doc """
