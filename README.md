@@ -959,9 +959,10 @@ Each ranked entry is a `%RunComparison.Field{}` with a `location`
 
 ### Flakiness Localization
 
-`RunComparison.investigate/1` captures the traces for you. Its capture options
-are nested under a `capture:` sub-keyword, and a fresh `run_nonce` is drawn per
-capture so client-minted values never collide on a shared SUT:
+Run comparison is also the flakiness tool. `RunComparison.investigate/1` captures
+the traces for you for a single suspect seed. Its capture options are nested under
+a `capture:` sub-keyword, and a fresh `run_nonce` is drawn per capture so
+client-minted values never collide on a shared SUT:
 
 ```elixir
 {_traces, comparison} =
@@ -969,6 +970,16 @@ capture so client-minted values never collide on a shared SUT:
     runs: 10,
     capture: [model: M, adapter: A, seed: 123]
   )
+```
+
+To scan a whole corpus of seeds, `RunComparison.scan/1` runs each seed N times
+and returns a per-seed `%RunComparison.Verdict{}` (bounded memory: a seed's
+traces are discarded before the next, and only flaky seeds keep their full
+comparison):
+
+```elixir
+verdicts = RunComparison.scan(seeds: Enum.to_list(1..100), runs: 5, capture: [model: M, adapter: A])
+flaky = for {seed, v} <- verdicts, v.flaky?, do: seed
 ```
 
 ### HTML Report
@@ -1452,8 +1463,8 @@ PropertyDamage
 > The codebase also ships several modules that are **work in progress and not
 > fully supported at this time**, intentionally left out of this README and the
 > docs front page: load testing, mutation testing, invariant suggestions,
-> failure intelligence (clustering/verification), production forensics,
-> flakiness detection, the telemetry dashboard, and Livebook visualization.
+> failure intelligence (clustering/verification), production forensics, and
+> Livebook visualization.
 > They compile and have moduledocs, but have not been validated against a real
 > SUT yet. Use them at your own risk.
 

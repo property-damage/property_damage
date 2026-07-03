@@ -7,7 +7,7 @@ defmodule PropertyDamage.TelemetryTest do
   use ExUnit.Case, async: false
 
   alias PropertyDamage.Telemetry
-  alias PropertyDamage.Telemetry.{Collector, Dashboard}
+  alias PropertyDamage.Telemetry.Collector
 
   # Module-level handler to avoid telemetry warnings about anonymous functions
   defmodule TestHandler do
@@ -205,56 +205,6 @@ defmodule PropertyDamage.TelemetryTest do
       assert_receive {:telemetry_update, :reset, _, state}
       assert state.runs == 0
       assert state.current_run == nil
-    end
-  end
-
-  describe "Dashboard" do
-    test "initial_assigns returns expected structure" do
-      # Start a collector first
-      {:ok, _pid} = Collector.start_link()
-
-      assigns = Dashboard.initial_assigns()
-
-      assert Keyword.has_key?(assigns, :page_title)
-      assert Keyword.has_key?(assigns, :state)
-      assert Keyword.has_key?(assigns, :view_mode)
-    end
-
-    test "render returns HTML string" do
-      assigns = %{
-        state: %{
-          runs: 10,
-          runs_completed: 8,
-          runs_failed: 2,
-          commands_executed: 100,
-          checks_passed: 50,
-          checks_failed: 5,
-          shrink_iterations: 3,
-          total_command_time_ms: 5000,
-          current_run: nil,
-          recent_events: [],
-          command_stats: %{},
-          check_stats: %{}
-        },
-        view_mode: :overview
-      }
-
-      html = Dashboard.render(assigns)
-
-      assert is_binary(html)
-      assert html =~ "pd-dashboard"
-      assert html =~ "10"
-      assert html =~ "8 passed"
-      assert html =~ "2 failed"
-    end
-
-    test "css returns valid CSS" do
-      css = Dashboard.css()
-
-      assert is_binary(css)
-      assert css =~ ".pd-dashboard"
-      assert css =~ ".pd-card"
-      assert css =~ ".pd-success"
     end
   end
 
