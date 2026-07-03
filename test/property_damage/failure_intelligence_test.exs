@@ -4,6 +4,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   alias PropertyDamage.FailureIntelligence
   alias PropertyDamage.FailureIntelligence.{Fingerprint, Patterns, Similarity}
   alias PropertyDamage.FailureReport
+  alias PropertyDamage.Test.FI
 
   # ============================================================================
   # Test Fixtures
@@ -87,6 +88,40 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   def create_similar_failure(base, changes \\ []) do
     base
     |> Map.merge(Map.new(changes))
+  end
+
+  # Cluster-A shaped failure: check failure in :balance_non_negative during
+  # DebitAccount (this is what create_failure_report/1 builds by default).
+  def cluster_a_failure(seed), do: create_failure_report(seed: seed)
+
+  # Cluster-B shaped failure: an exception during CreateAccount, no events. This
+  # is deliberately dissimilar to cluster A (different failure_type, check_name,
+  # command, events) so the two form distinct, non-overlapping clusters.
+  def cluster_b_failure(seed) do
+    create_failure_report(
+      seed: seed,
+      failure_type: :exception,
+      check_name: nil,
+      command: %TestCommand.CreateAccount{
+        account_ref: "acc_2",
+        initial_balance: 0,
+        currency: "EUR"
+      },
+      events: [],
+      message: "ArgumentError raised while creating account"
+    )
+  end
+
+  # A lone failure dissimilar to both clusters: a timeout during CreditAccount.
+  def singleton_failure(seed) do
+    create_failure_report(
+      seed: seed,
+      failure_type: :timeout,
+      check_name: nil,
+      command: %TestCommand.CreditAccount{account_ref: "acc_3", amount: 5, currency: "GBP"},
+      events: [%TestEvent.AccountCredited{account_ref: "acc_3", amount: 5, new_balance: 5}],
+      message: "timed out waiting for credit"
+    )
   end
 
   # ============================================================================
@@ -677,6 +712,265 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
       flaky = %{verified | status: :flaky}
       assert Verification.format_result(flaky) =~ "?"
+    end
+  end
+
+  # ============================================================================
+  # Untested submodule functions
+  # ============================================================================
+
+  describe "Similarity.find_most_similar/2" do
+    test "returns the closest fingerprint with its score" do
+      target = Fingerprint.from_failure_report(create_failure_report(seed: 1))
+
+      near = Fingerprint.from_failure_report(create_failure_report(seed: 2))
+      far = Fingerprint.from_failure_report(cluster_b_failure(3))
+
+      assert {matched, score} = Similarity.find_most_similar(target, [far, near])
+      assert matched == near
+      assert_in_delta score, 1.0, 0.0001
+    end
+
+    test "returns nil for an empty list" do
+      target = Fingerprint.from_failure_report(create_failure_report())
+      assert Similarity.find_most_similar(target, []) == nil
+    end
+  end
+
+  describe "Similarity.similarity_matrix/1" do
+    test "computes the upper-triangle scores for all pairs" do
+      fps =
+        [cluster_a_failure(1), cluster_a_failure(2), cluster_b_failure(3)]
+        |> Enum.map(&Fingerprint.from_failure_report/1)
+
+      matrix = Similarity.similarity_matrix(fps)
+
+      # Upper triangle only: n*(n-1)/2 entries for n = 3.
+      assert map_size(matrix) == 3
+      assert Map.has_key?(matrix, {0, 1})
+      assert Map.has_key?(matrix, {0, 2})
+      assert Map.has_key?(matrix, {1, 2})
+      refute Map.has_key?(matrix, {1, 0})
+
+      # Two cluster-A fingerprints are identical; A vs B is far below threshold.
+      assert_in_delta matrix[{0, 1}], 1.0, 0.0001
+      assert matrix[{0, 2}] < 0.5
+    end
+  end
+
+  describe "Patterns.find_best_match/2" do
+    test "returns the best-matching cluster and its score" do
+      clusters =
+        Patterns.cluster_failures([
+          cluster_a_failure(1),
+          cluster_a_failure(2),
+          cluster_b_failure(3),
+          cluster_b_failure(4)
+        ])
+
+      # A fresh cluster-A failure should map onto the cluster-A group with a
+      # perfect score.
+      assert {cluster, score} = Patterns.find_best_match(cluster_a_failure(99), clusters)
+      assert cluster.pattern.failure_type == :check_failed
+      assert_in_delta score, 1.0, 0.0001
+    end
+
+    test "returns nil when there are no clusters" do
+      assert Patterns.find_best_match(cluster_a_failure(1), []) == nil
+    end
+  end
+
+  describe "Patterns clustering with genuinely distinct clusters" do
+    setup do
+      # Two non-singleton clusters (A x3, B x2) plus one lone failure.
+      failures = [
+        cluster_a_failure(1),
+        cluster_a_failure(2),
+        cluster_a_failure(3),
+        cluster_b_failure(10),
+        cluster_b_failure(11),
+        singleton_failure(900)
+      ]
+
+      %{failures: failures}
+    end
+
+    test "cluster_fingerprints/2 separates distinct fingerprints into distinct clusters",
+         %{failures: failures} do
+      fingerprints = Enum.map(failures, &Fingerprint.from_failure_report/1)
+      clusters = Patterns.cluster_fingerprints(fingerprints)
+
+      # Sizes 3, 2, 1 (sorted desc); the singleton is its own size-1 cluster.
+      assert Enum.map(clusters, & &1.size) == [3, 2, 1]
+
+      # Each cluster's representative is a member of that cluster.
+      Enum.each(clusters, fn c ->
+        assert c.representative in c.fingerprints
+      end)
+
+      # The big cluster is the check-failure group; the mid cluster is the
+      # exception group.
+      [big, mid, _lone] = clusters
+      assert big.pattern.failure_type == :check_failed
+      assert big.pattern.command_types == [TestCommand.DebitAccount]
+      assert mid.pattern.failure_type == :exception
+    end
+
+    test "analyze/2 reports two clusters, one singleton, and the most common pattern",
+         %{failures: failures} do
+      analysis = Patterns.analyze(failures)
+
+      assert length(analysis.clusters) == 2
+      assert analysis.singleton_count == 1
+      assert analysis.total_failures == 6
+
+      # Most common pattern is the largest cluster (the 3 check failures).
+      assert analysis.most_common_pattern.failure_type == :check_failed
+      assert analysis.most_common_pattern.command_types == [TestCommand.DebitAccount]
+
+      # Membership: the two significant clusters cover 5 of the 6 failures.
+      clustered = analysis.clusters |> Enum.map(& &1.size) |> Enum.sum()
+      assert clustered == 5
+    end
+  end
+
+  describe "FailureIntelligence.match_pattern/3" do
+    setup do
+      clusters =
+        Patterns.cluster_failures([
+          cluster_a_failure(1),
+          cluster_a_failure(2),
+          cluster_b_failure(10),
+          cluster_b_failure(11)
+        ])
+
+      %{clusters: clusters}
+    end
+
+    test "returns the matching cluster for a failure like an existing pattern",
+         %{clusters: clusters} do
+      cluster = FailureIntelligence.match_pattern(cluster_a_failure(99), clusters)
+
+      refute is_nil(cluster)
+      assert cluster.pattern.failure_type == :check_failed
+    end
+
+    test "returns nil for a novel failure that matches no cluster", %{clusters: clusters} do
+      novel =
+        create_failure_report(
+          failure_type: :adapter_error,
+          check_name: nil,
+          command: %TestCommand.CreditAccount{account_ref: "x", amount: 1, currency: "JPY"},
+          events: [],
+          message: "unexpected adapter error"
+        )
+
+      assert FailureIntelligence.match_pattern(novel, clusters) == nil
+    end
+  end
+
+  # ============================================================================
+  # Fix verification (behavioral) — drives PropertyDamage.run against the
+  # seeded-bug fixture in test/support/failure_intelligence_support.ex.
+  # ============================================================================
+
+  describe "FailureIntelligence.Verification.verify_fix/3 (behavioral)" do
+    alias PropertyDamage.FailureIntelligence.Verification
+
+    # Minimal report: verify_fix keys only on the seed; the model and adapter
+    # come from the call, not the report.
+    defp fi_report(seed) do
+      %FailureReport{
+        seed: seed,
+        run_number: 0,
+        failure_type: :check_failed,
+        check_name: :balance_non_negative
+      }
+    end
+
+    test ":verified when the bug is fixed and every variation passes" do
+      result =
+        Verification.verify_fix(fi_report(100_000), FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: :off}
+        )
+
+      assert result.status == :verified
+      assert result.original_passes
+      assert result.variations_run == 10
+      assert result.variations_failed == 0
+      assert result.confidence == 1.0
+    end
+
+    test ":still_failing when the original seed still reproduces" do
+      result =
+        Verification.verify_fix(fi_report(100_000), FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: :always}
+        )
+
+      assert result.status == :still_failing
+      refute result.original_passes
+    end
+
+    test ":flaky when the original passes but a small fraction of variations fail" do
+      # amount(100_000) == 29, so the original passes at threshold 20; exactly one
+      # nearby variation seed draws amount <= 20 -> 1 failure (<= 25%).
+      result =
+        Verification.verify_fix(fi_report(100_000), FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: {:overdraw_when_amount_lte, 20}}
+        )
+
+      assert result.status == :flaky
+      assert result.original_passes
+      assert result.variations_failed == 1
+    end
+
+    test ":partially_fixed when the original passes but many variations fail" do
+      # amount(200_000) == 45, so the original passes at threshold 44 while 6 of
+      # its nearby variation seeds draw amount <= 44 -> > 25% failures.
+      result =
+        Verification.verify_fix(fi_report(200_000), FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: {:overdraw_when_amount_lte, 44}}
+        )
+
+      assert result.status == :partially_fixed
+      assert result.original_passes
+      assert result.variations_failed == 6
+      assert result.failed_variations != []
+    end
+  end
+
+  describe "FailureIntelligence.Verification.verify_fixes/3" do
+    alias PropertyDamage.FailureIntelligence.Verification
+
+    test "verifies each failure independently and pairs results with inputs" do
+      f1 = fi_report(100_000)
+      f2 = fi_report(200_000)
+
+      results =
+        Verification.verify_fixes([f1, f2], FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: :off}
+        )
+
+      assert [{^f1, r1}, {^f2, r2}] = results
+      assert r1.status == :verified
+      assert r2.status == :verified
+    end
+  end
+
+  describe "FailureIntelligence.Verification.still_fails?/4" do
+    alias PropertyDamage.FailureIntelligence.Verification
+
+    test "returns true when the seed still reproduces the failure" do
+      assert Verification.still_fails?(100_000, FI.Model, FI.Adapter, %{bug: :always})
+    end
+
+    test "returns false when the seed no longer fails" do
+      refute Verification.still_fails?(100_000, FI.Model, FI.Adapter, %{bug: :off})
     end
   end
 end
