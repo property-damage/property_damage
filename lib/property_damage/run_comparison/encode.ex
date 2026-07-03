@@ -29,6 +29,7 @@ defmodule PropertyDamage.RunComparison.Encode do
       "schema_version" => @schema_version,
       "comparable" => c.comparable?,
       "guard_violations" => c.guard_violations,
+      "state_warnings" => Enum.map(c.state_warnings, &inspect/1),
       "groups" => %{
         "passing" => c.groups.passing,
         "failing" => c.groups.failing
@@ -64,6 +65,15 @@ defmodule PropertyDamage.RunComparison.Encode do
       "position" => enc(position),
       "event_key" => enc(key),
       "row" => row_index,
+      "path" => Enum.map(path, &enc/1)
+    }
+  end
+
+  defp enc_location({:state, position, projection, path}) do
+    %{
+      "kind" => "state",
+      "position" => enc(position),
+      "projection" => inspect(projection),
       "path" => Enum.map(path, &enc/1)
     }
   end

@@ -689,15 +689,24 @@ defmodule PropertyDamage.RunTrace do
 
   defp plan_command_at(_trace, _position), do: nil
 
+  # Rebuild the run's projection set from the model, exactly as the executor
+  # does. Degrades to `%{}` for a model that declares no
+  # `command_sequence_projection/0` (e.g. a hand-built or synthetic trace), so
+  # derivation on such a trace is a no-op rather than a crash.
   defp init_projections(model) do
-    command_projection = model.command_sequence_projection()
+    if is_atom(model) and model != nil and Code.ensure_loaded?(model) and
+         function_exported?(model, :command_sequence_projection, 0) do
+      command_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0),
-        do: model.assertion_projections(),
-        else: []
+      assertion_projections =
+        if function_exported?(model, :assertion_projections, 0),
+          do: model.assertion_projections(),
+          else: []
 
-    Map.new([command_projection | assertion_projections], &{&1, &1.init()})
+      Map.new([command_projection | assertion_projections], &{&1, &1.init()})
+    else
+      %{}
+    end
   end
 
   defp resolve_position(%__MODULE__{}, %Sequence.Position{} = position), do: position
