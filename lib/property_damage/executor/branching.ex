@@ -420,6 +420,15 @@ defmodule PropertyDamage.Executor.Branching do
     merged_registry =
       merge_placeholder_registries(prefix_state.placeholder_registry, branch_results)
 
+    # Merge the executed-command maps (DR-033). Each branch forked from
+    # prefix_state, so its map is prefix ∪ that branch's `{:branch, id, i}`
+    # positions; branch keys are disjoint across branches and the shared prefix
+    # keys carry identical values, so unioning is conflict-free.
+    merged_executed =
+      Enum.reduce(branch_results, prefix_state.executed, fn {_, state, _}, acc ->
+        Map.merge(acc, state.executed)
+      end)
+
     # Update through the prefix state so every other key (stutter config, mock
     # registry, model, external markers, ...) is preserved instead of dropped
     %{
@@ -428,6 +437,7 @@ defmodule PropertyDamage.Executor.Branching do
         projections: merged_projections,
         projections_before: merged_projections,
         placeholder_registry: merged_registry,
+        executed: merged_executed,
         step_count: total_steps,
         assertion_counters: merged_counters,
         assertion_failures: merged_failures,

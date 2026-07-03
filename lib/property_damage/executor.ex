@@ -674,7 +674,15 @@ defmodule PropertyDamage.Executor do
         # (and shrinking re-runs failures many times).
         state_with_pollers = %{
           state
-          | active_resource_pollers: state.active_resource_pollers ++ started_resource_pollers
+          | active_resource_pollers: state.active_resource_pollers ++ started_resource_pollers,
+            # The command was resolved and sent to the adapter even on these
+            # error arms, so record it by position (DR-033) like the success path.
+            executed:
+              Map.put(
+                state.executed,
+                Sequence.Position.from_tuple(state.current_position),
+                resolved_command
+              )
         }
 
         # Lexical inputs the shared post-events pipeline closes over. Both
@@ -842,6 +850,14 @@ defmodule PropertyDamage.Executor do
             event_log: event_log,
             projections: projections,
             placeholder_registry: updated_registry,
+            # Record the concrete resolved command by its structured position
+            # (DR-033), on every outcome path (the failing command included).
+            executed:
+              Map.put(
+                state.executed,
+                Sequence.Position.from_tuple(state.current_position),
+                resolved_command
+              ),
             step_count: state.step_count + 1,
             active_resource_pollers:
               Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers

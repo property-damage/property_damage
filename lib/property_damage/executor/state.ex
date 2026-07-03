@@ -37,6 +37,9 @@ defmodule PropertyDamage.Executor.State do
     * `:projections` - `%{projection_module => state}`
     * `:projections_before` - snapshot of projections before the current command
     * `:current_position` - structured position of the executing command (DR-021)
+    * `:executed` - `%{Sequence.Position => command}` of the concrete resolved
+      commands actually sent to the adapter, keyed branch-aware (DR-033). Feeds
+      `RunTrace.executed`; always accumulated.
     * `:step_count` - number of commands executed
     * `:assertion_counters` - `%{step:, command:, event:, ...}` firing counts
     * `:assertion_failures` - accumulated `:record`-mode failures (newest-first)
@@ -77,6 +80,7 @@ defmodule PropertyDamage.Executor.State do
     projections: %{},
     projections_before: nil,
     current_position: nil,
+    executed: %{},
     step_count: 0,
     assertion_counters: %{step: 0, command: 0, event: 0},
     assertion_failures: [],
@@ -102,6 +106,7 @@ defmodule PropertyDamage.Executor.State do
           projections: map(),
           projections_before: map() | nil,
           current_position: term(),
+          executed: %{term() => struct()},
           step_count: non_neg_integer(),
           assertion_counters: map(),
           assertion_failures: list(),
