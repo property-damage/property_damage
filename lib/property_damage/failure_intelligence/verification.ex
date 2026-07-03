@@ -203,7 +203,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
         adapter_config: adapter_config,
         seed: seed,
         max_runs: 1,
-        quiet: true
+        verbose: false
       )
 
     case result do
