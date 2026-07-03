@@ -22,6 +22,7 @@ defmodule PropertyDamage.Executor.Branching do
   alias PropertyDamage.Placeholder
   alias PropertyDamage.PlaceholderRegistry
   alias PropertyDamage.Sequence
+  alias PropertyDamage.Sequence.Position
 
   def execute_branching(
         sequence,
@@ -94,7 +95,7 @@ defmodule PropertyDamage.Executor.Branching do
         state_with_before = %{
           state
           | projections_before: state.projections,
-            current_position: {:prefix, index}
+            current_position: Position.prefix(index)
         }
 
         case Executor.execute_command(
@@ -159,7 +160,7 @@ defmodule PropertyDamage.Executor.Branching do
                 state_with_before = %{
                   state
                   | projections_before: state.projections,
-                    current_position: {:suffix, index - suffix_start_index}
+                    current_position: Position.suffix(index - suffix_start_index)
                 }
 
                 case Executor.execute_command(
@@ -272,7 +273,7 @@ defmodule PropertyDamage.Executor.Branching do
             state_with_before = %{
               state
               | projections_before: state.projections,
-                current_position: {:branch, branch_id, index - start_index}
+                current_position: Position.branch(branch_id, index - start_index)
             }
 
             case Executor.execute_command(
@@ -423,7 +424,7 @@ defmodule PropertyDamage.Executor.Branching do
       merge_placeholder_registries(prefix_state.placeholder_registry, branch_results)
 
     # Merge the executed-command maps (DR-033). Each branch forked from
-    # prefix_state, so its map is prefix ∪ that branch's `{:branch, id, i}`
+    # prefix_state, so its map is prefix ∪ that branch's `{:branch, id}` section
     # positions; branch keys are disjoint across branches and the shared prefix
     # keys carry identical values, so unioning is conflict-free.
     merged_executed =

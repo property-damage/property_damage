@@ -1,6 +1,8 @@
 defmodule PropertyDamage.ExportTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{Export, FailureReport, Placeholder, Sequence}
   alias PropertyDamage.Export.HTTPSpec
 
@@ -266,7 +268,7 @@ defmodule PropertyDamage.ExportTest do
 
   describe "to_script/3 - placeholder wiring (DR-021)" do
     setup do
-      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      ph = Placeholder.new_at(Provisioned, [:id], Position.prefix(0), 0)
       commands = [%Provision{spec: nil}, %Consume{target: ph}]
 
       report = %FailureReport{
@@ -339,7 +341,7 @@ defmodule PropertyDamage.ExportTest do
 
   describe "to_script/3 - python placeholders in collections" do
     test "renders a placeholder nested in a list body field instead of raising" do
-      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      ph = Placeholder.new_at(Provisioned, [:id], Position.prefix(0), 0)
       commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
 
       report = %FailureReport{
@@ -373,7 +375,7 @@ defmodule PropertyDamage.ExportTest do
   # recursively, so all four now render the nested value as a variable ref.
   describe "to_script/3 - nested-collection placeholders resolve in every target" do
     setup do
-      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      ph = Placeholder.new_at(Provisioned, [:id], Position.prefix(0), 0)
       commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
 
       report = %FailureReport{
@@ -748,7 +750,7 @@ defmodule PropertyDamage.ExportTest do
     # A DR-021 producer/consumer report: placeholder consumed in a path param
     # (Consume) and produced by an upstream command (Provision).
     defp dr021_report do
-      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      ph = Placeholder.new_at(Provisioned, [:id], Position.prefix(0), 0)
       commands = [%Provision{spec: nil}, %Consume{target: ph}]
 
       %FailureReport{

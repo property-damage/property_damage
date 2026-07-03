@@ -50,6 +50,7 @@ defmodule PropertyDamage.Audit do
   """
 
   alias PropertyDamage.{Generator, Sequence}
+  alias PropertyDamage.Sequence.Position
 
   @default_seeds 100
 
@@ -144,9 +145,9 @@ defmodule PropertyDamage.Audit do
   # Flatten a sequence into ordered {position, command} pairs using the same
   # structured position scheme the generator mints against (DR-021).
   defp flatten(%Sequence{prefix: prefix, branches: branches, suffix: suffix}) do
-    with_positions(prefix, &{:prefix, &1}) ++
+    with_positions(prefix, &Position.prefix/1) ++
       branch_positions(branches) ++
-      with_positions(suffix, &{:suffix, &1})
+      with_positions(suffix, &Position.suffix/1)
   end
 
   defp branch_positions(nil), do: []
@@ -155,7 +156,7 @@ defmodule PropertyDamage.Audit do
     branches
     |> Enum.with_index()
     |> Enum.flat_map(fn {branch, b} ->
-      with_positions(branch, &{:branch, b, &1})
+      with_positions(branch, &Position.branch(b, &1))
     end)
   end
 
@@ -259,9 +260,7 @@ defmodule PropertyDamage.Audit do
       "unique values via mint_per_run/1; see guides/deterministic_generation.md."
   end
 
-  defp format_pos({:prefix, i}), do: "prefix position #{i}"
-  defp format_pos({:branch, b, i}), do: "branch #{b} position #{i}"
-  defp format_pos({:suffix, i}), do: "suffix position #{i}"
+  defp format_pos(%Position{} = pos), do: Position.describe(pos)
   defp format_pos(:sequence_length), do: "the end of the shorter sequence"
   defp format_pos(:registry), do: "the placeholder registry"
   defp format_pos(other), do: inspect(other)

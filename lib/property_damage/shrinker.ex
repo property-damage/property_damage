@@ -123,6 +123,7 @@ defmodule PropertyDamage.Shrinker do
     Stutter
   }
 
+  alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Sequence.Validator
 
   alias PropertyDamage.Shrinker.{Config, Graph}
@@ -294,7 +295,7 @@ defmodule PropertyDamage.Shrinker do
     shrink_state = %{
       commands: commands,
       # Parallel to `commands`: the original structured position of each command
-      # (DR-021). A linear sequence is all {:prefix, i}. Kept in lockstep with
+      # (DR-021). A linear sequence is all prefix positions. Kept in lockstep with
       # removals so the placeholder registry's producer_link can be remapped to
       # each candidate's positions before re-execution.
       positions: original_positions(commands),
@@ -371,7 +372,7 @@ defmodule PropertyDamage.Shrinker do
 
   # The original structured positions of a flat (linear) command list.
   defp original_positions(commands) do
-    commands |> Enum.with_index() |> Enum.map(fn {_cmd, i} -> {:prefix, i} end)
+    commands |> Enum.with_index() |> Enum.map(fn {_cmd, i} -> Position.prefix(i) end)
   end
 
   # Remap the placeholder registry's producer_link from original positions onto
@@ -380,23 +381,17 @@ defmodule PropertyDamage.Shrinker do
   # their entry (their placeholders simply won't resolve, which is correct: a
   # surviving consumer of a removed producer makes the candidate fail to
   # reproduce). Resolution of embedded placeholders stays by id and is unaffected.
+  # The producer_link rebuild itself is registry-internals, so it lives in
+  # PlaceholderRegistry.remap_positions/2 (DR-039).
   defp remap_registry(nil, _positions), do: nil
 
   defp remap_registry(registry, positions) do
     orig_to_new =
       positions
       |> Enum.with_index()
-      |> Map.new(fn {orig_position, new_i} -> {orig_position, {:prefix, new_i}} end)
+      |> Map.new(fn {orig_position, new_i} -> {orig_position, Position.prefix(new_i)} end)
 
-    new_link =
-      Enum.reduce(registry.producer_link, %{}, fn {orig_position, ids}, acc ->
-        case Map.get(orig_to_new, orig_position) do
-          nil -> acc
-          new_position -> Map.put(acc, new_position, ids)
-        end
-      end)
-
-    %{registry | producer_link: new_link}
+    PlaceholderRegistry.remap_positions(registry, orig_to_new)
   end
 
   # ============================================================================

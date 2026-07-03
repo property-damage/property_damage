@@ -2,6 +2,8 @@ defmodule PropertyDamage.ProvenanceTest do
   @moduledoc "DR-034 §4: value provenance classification, derived structurally."
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{Mint, Placeholder, Provenance, RunTrace, Sequence}
 
   defmodule Created do
@@ -40,7 +42,7 @@ defmodule PropertyDamage.ProvenanceTest do
   describe "mint_paths/1 and minted_value_set/1" do
     test "finds the field paths carrying mint markers" do
       command = %Send{
-        request_id: Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:request_id]),
+        request_id: Mint.reify(Mint.new(:uuid), Position.prefix(0), [:request_id]),
         amount: 5,
         target: %Placeholder{}
       }
@@ -49,7 +51,7 @@ defmodule PropertyDamage.ProvenanceTest do
     end
 
     test "collects resolved minted values from a trace by correlating plan + executed" do
-      marker = Mint.reify(Mint.new(:uuid), {:prefix, 0}, [:request_id])
+      marker = Mint.reify(Mint.new(:uuid), Position.prefix(0), [:request_id])
       plan_command = %Send{request_id: marker, amount: 1}
       exec_command = %Send{request_id: "resolved-uuid", amount: 1}
 

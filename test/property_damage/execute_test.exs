@@ -1,6 +1,8 @@
 defmodule PropertyDamage.ExecuteTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage
   alias PropertyDamage.EventQueue
 
@@ -320,7 +322,7 @@ defmodule PropertyDamage.ExecuteTest do
     alias PropertyDamage.Placeholder
 
     test "a consumer command receives the concrete value a producer generated" do
-      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 0}, 0)
+      ph = Placeholder.new_at(Provisioned, [:id], Position.prefix(0), 0)
 
       commands = [%Provision{}, %Consume{target: ph}]
 
@@ -336,8 +338,8 @@ defmodule PropertyDamage.ExecuteTest do
     end
 
     test "an unresolved placeholder (no producer) surfaces a resolution error" do
-      # Consume references a producer at {:prefix, 0}, but no command runs there.
-      ph = Placeholder.new_at(Provisioned, [:id], {:prefix, 5}, 0)
+      # Consume references a producer at Position.prefix(0), but no command runs there.
+      ph = Placeholder.new_at(Provisioned, [:id], Position.prefix(5), 0)
 
       result =
         PropertyDamage.execute([%Consume{target: ph}],
