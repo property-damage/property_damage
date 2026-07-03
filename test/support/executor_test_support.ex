@@ -394,7 +394,7 @@ end
 defmodule PropertyDamage.Test.LinkModel do
   @moduledoc """
   Model wiring Link commands to the cumulative-weight assertion, with a
-  simulator so the shrinker's validity check (`Validator.valid_sequence?/2`)
+  simulator so the shrinker's validity check (`Sequence.Validator.valid_sequence?/2`)
   has something to simulate.
   """
   @behaviour PropertyDamage.Model

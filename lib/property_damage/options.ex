@@ -475,11 +475,6 @@ defmodule PropertyDamage.Options do
       type: :string,
       default: "ReproductionTest",
       doc: "Module name for ExUnit tests."
-    ],
-    include_setup: [
-      type: :boolean,
-      default: true,
-      doc: "Include model/adapter setup code."
     ]
   ]
 
@@ -814,6 +809,463 @@ defmodule PropertyDamage.Options do
   @spec validate_execute!(keyword()) :: keyword()
   def validate_execute!(opts) do
     NimbleOptions.validate!(opts, @execute_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.Integration Schemas
+  # ============================================================================
+
+  @integration_run_schema_definition [
+    model: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Model module implementing `PropertyDamage.Model` behaviour."
+    ],
+    adapter: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
+    ],
+    adapter_config: [
+      type: :map,
+      required: true,
+      doc: "Configuration passed to `adapter.setup/1`."
+    ],
+    max_runs: [
+      type: :pos_integer,
+      default: 100,
+      doc: "Number of test runs."
+    ],
+    max_commands: [
+      type: :pos_integer,
+      default: 50,
+      doc: "Max commands per run."
+    ],
+    verbose: [
+      type: :boolean,
+      default: true,
+      doc: "Print progress."
+    ],
+    stop_on_failure: [
+      type: :boolean,
+      default: false,
+      doc: "Stop on first failure."
+    ],
+    save_failures: [
+      type: :string,
+      doc: "Directory to save failure files."
+    ],
+    reset_fn: [
+      type: {:fun, 0},
+      doc: "Zero-arity function to reset service state between runs."
+    ],
+    health_check: [
+      type: :any,
+      doc: "Health check configuration (keyword list or map); see `health_check/1`."
+    ],
+    report: [
+      type: :any,
+      doc: "Report configuration (keyword list or map); see `generate_report/2`."
+    ]
+  ]
+
+  @integration_run_schema NimbleOptions.new!(@integration_run_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Integration.run/1`.
+  """
+  @spec validate_integration_run!(keyword()) :: keyword()
+  def validate_integration_run!(opts) do
+    NimbleOptions.validate!(opts, @integration_run_schema)
+  end
+
+  @integration_hunt_bugs_schema_definition [
+    model: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Model module implementing `PropertyDamage.Model` behaviour."
+    ],
+    adapter: [
+      type: {:custom, __MODULE__, :validate_module, []},
+      required: true,
+      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
+    ],
+    adapter_config: [
+      type: :map,
+      required: true,
+      doc: "Configuration passed to `adapter.setup/1`."
+    ],
+    stop_after: [
+      type: :pos_integer,
+      default: 10,
+      doc: "Stop after finding this many unique bugs."
+    ],
+    max_runs: [
+      type: {:or, [:pos_integer, {:in, [:unlimited]}]},
+      default: :unlimited,
+      doc: "Maximum runs before giving up, or `:unlimited`."
+    ],
+    save_to: [
+      type: :string,
+      doc: "Directory to save discovered bugs."
+    ],
+    verbose: [
+      type: :boolean,
+      default: true,
+      doc: "Print progress."
+    ]
+  ]
+
+  @integration_hunt_bugs_schema NimbleOptions.new!(@integration_hunt_bugs_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Integration.hunt_bugs/1`.
+  """
+  @spec validate_integration_hunt_bugs!(keyword()) :: keyword()
+  def validate_integration_hunt_bugs!(opts) do
+    NimbleOptions.validate!(opts, @integration_hunt_bugs_schema)
+  end
+
+  @integration_health_check_schema_definition [
+    url: [
+      type: :string,
+      required: true,
+      doc: "Health check URL."
+    ],
+    timeout_ms: [
+      type: :pos_integer,
+      default: 30_000,
+      doc: "Total timeout in milliseconds."
+    ],
+    retries: [
+      type: :non_neg_integer,
+      default: 30,
+      doc: "Number of retries."
+    ],
+    interval_ms: [
+      type: :pos_integer,
+      default: 1000,
+      doc: "Interval between retries in milliseconds."
+    ]
+  ]
+
+  @integration_health_check_schema NimbleOptions.new!(@integration_health_check_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Integration.health_check/1`.
+  """
+  @spec validate_integration_health_check!(keyword()) :: keyword()
+  def validate_integration_health_check!(opts) do
+    NimbleOptions.validate!(opts, @integration_health_check_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.Flakiness Schemas
+  # ============================================================================
+
+  @flakiness_check_schema_definition [
+    runs: [
+      type: :pos_integer,
+      default: 5,
+      doc: "Number of times to replay the seed."
+    ],
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Configuration passed to `adapter.setup/1`."
+    ],
+    max_commands: [
+      type: :pos_integer,
+      default: 50,
+      doc: "Max commands per run."
+    ],
+    verbose: [
+      type: :boolean,
+      default: false,
+      doc: "Print progress."
+    ]
+  ]
+
+  @flakiness_check_schema NimbleOptions.new!(@flakiness_check_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Flakiness.check/4`.
+  """
+  @spec validate_flakiness_check!(keyword()) :: keyword()
+  def validate_flakiness_check!(opts) do
+    NimbleOptions.validate!(opts, @flakiness_check_schema)
+  end
+
+  @flakiness_check_batch_schema_definition [
+    runs_per_seed: [
+      type: :pos_integer,
+      default: 5,
+      doc: "Runs per seed."
+    ],
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Configuration passed to `adapter.setup/1`."
+    ],
+    max_commands: [
+      type: :pos_integer,
+      default: 50,
+      doc: "Max commands per run."
+    ],
+    verbose: [
+      type: :boolean,
+      default: false,
+      doc: "Print progress."
+    ]
+  ]
+
+  @flakiness_check_batch_schema NimbleOptions.new!(@flakiness_check_batch_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Flakiness.check_batch/4`.
+  """
+  @spec validate_flakiness_check_batch!(keyword()) :: keyword()
+  def validate_flakiness_check_batch!(opts) do
+    NimbleOptions.validate!(opts, @flakiness_check_batch_schema)
+  end
+
+  @flakiness_discover_flaky_schema_definition [
+    num_seeds: [
+      type: :pos_integer,
+      default: 10,
+      doc: "Number of random seeds to test."
+    ],
+    runs_per_seed: [
+      type: :pos_integer,
+      default: 3,
+      doc: "Runs per seed."
+    ],
+    adapter_config: [
+      type: :map,
+      default: %{},
+      doc: "Configuration passed to `adapter.setup/1`."
+    ],
+    max_commands: [
+      type: :pos_integer,
+      default: 50,
+      doc: "Max commands per run."
+    ],
+    verbose: [
+      type: :boolean,
+      default: false,
+      doc: "Print progress."
+    ]
+  ]
+
+  @flakiness_discover_flaky_schema NimbleOptions.new!(@flakiness_discover_flaky_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Flakiness.discover_flaky/3`.
+  """
+  @spec validate_flakiness_discover_flaky!(keyword()) :: keyword()
+  def validate_flakiness_discover_flaky!(opts) do
+    NimbleOptions.validate!(opts, @flakiness_discover_flaky_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.Audit.run/2 Schema (DR-037)
+  # ============================================================================
+
+  @audit_schema_definition [
+    seeds: [
+      type: {:or, [:pos_integer, {:list, :integer}]},
+      default: 100,
+      doc: "Seed count (audits `0..N-1`) or an explicit list of seeds."
+    ],
+    max_commands: [
+      type: :pos_integer,
+      doc: "Max commands per generated sequence."
+    ],
+    branching: [
+      type: :keyword_list,
+      doc: "Branching generation options (see `PropertyDamage.run/1`)."
+    ],
+    external_markers: [
+      type: {:list, :atom},
+      doc: "Additional atoms to treat as external markers."
+    ]
+  ]
+
+  @audit_schema NimbleOptions.new!(@audit_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Audit.run/2`.
+  """
+  @spec validate_audit!(keyword()) :: keyword()
+  def validate_audit!(opts) do
+    NimbleOptions.validate!(opts, @audit_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.RunComparison Schemas (DR-035)
+  # ============================================================================
+
+  @run_comparison_compare_schema_definition [
+    event_identity: [
+      type: {:fun, 1},
+      doc: "`(event -> term())` overriding the default struct-module identity."
+    ]
+  ]
+
+  @run_comparison_compare_schema NimbleOptions.new!(@run_comparison_compare_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.RunComparison.compare/2`.
+  """
+  @spec validate_run_comparison_compare!(keyword()) :: keyword()
+  def validate_run_comparison_compare!(opts) do
+    NimbleOptions.validate!(opts, @run_comparison_compare_schema)
+  end
+
+  @run_comparison_investigate_schema_definition [
+    runs: [
+      type: :pos_integer,
+      default: 5,
+      doc: "Number of times to capture the plan."
+    ],
+    event_identity: [
+      type: {:fun, 1},
+      doc: "`(event -> term())` forwarded to `compare/2`."
+    ],
+    capture: [
+      type: :keyword_list,
+      required: true,
+      doc: """
+      Options forwarded to `PropertyDamage.RunTrace.capture/1` (requires
+      `:model`, `:adapter`, `:seed`). Passed through rather than duplicated
+      here so `RunTrace`'s surface stays single-sourced; a fresh `:run_nonce`
+      is injected per capture.
+      """
+    ]
+  ]
+
+  @run_comparison_investigate_schema NimbleOptions.new!(
+                                       @run_comparison_investigate_schema_definition
+                                     )
+
+  @doc """
+  Validates options for `PropertyDamage.RunComparison.investigate/1`.
+  """
+  @spec validate_run_comparison_investigate!(keyword()) :: keyword()
+  def validate_run_comparison_investigate!(opts) do
+    NimbleOptions.validate!(opts, @run_comparison_investigate_schema)
+  end
+
+  # ============================================================================
+  # PropertyDamage.Regression Schemas
+  # ============================================================================
+
+  # Umbrella opts shared by handler/1, handle_failure/2, check_duplicate/2 and
+  # process_batch/2 — they all consume from the same regression_opts bag.
+  @regression_opts_schema_definition [
+    save_failures: [
+      type: :string,
+      doc: "Directory to save failure files (also the dedup comparison source)."
+    ],
+    seed_library: [
+      type: :string,
+      doc: "Path to the seed library JSON file."
+    ],
+    generate_tests: [
+      type: :string,
+      doc: "Directory for generated ExUnit regression tests."
+    ],
+    tags: [
+      type: {:list, :atom},
+      default: [:auto_detected],
+      doc: "Tags to add to seed library entries."
+    ],
+    description: [
+      type: :string,
+      doc: "Optional description for the seed library entry."
+    ],
+    dedup: [
+      type: :boolean,
+      default: false,
+      doc: "Skip if a similar failure already exists."
+    ],
+    dedup_threshold: [
+      type: :float,
+      default: 0.90,
+      doc: "Similarity threshold for deduplication (0.0-1.0)."
+    ],
+    dedup_source: [
+      type: {:in, [:failures]},
+      default: :failures,
+      doc: "Source of comparison material for dedup (saved failure files only)."
+    ],
+    verbose: [
+      type: :boolean,
+      default: false,
+      doc: "Print regression actions."
+    ],
+    adapter: [
+      type: :atom,
+      doc: "Adapter module for generated test HTTP-spec mapping."
+    ]
+  ]
+
+  @regression_opts_schema NimbleOptions.new!(@regression_opts_schema_definition)
+
+  @doc """
+  Validates the umbrella options for `PropertyDamage.Regression` handlers
+  (`handler/1`, `handle_failure/2`, `check_duplicate/2`, `process_batch/2`).
+  """
+  @spec validate_regression_opts!(keyword()) :: keyword()
+  def validate_regression_opts!(opts) do
+    NimbleOptions.validate!(opts, @regression_opts_schema)
+  end
+
+  @regression_save_failure_schema_definition [
+    filename: [
+      type: :string,
+      doc: "Explicit filename; defaults to an auto-generated name."
+    ],
+    overwrite: [
+      type: :boolean,
+      default: false,
+      doc: "Overwrite an existing file at the target path."
+    ]
+  ]
+
+  @regression_save_failure_schema NimbleOptions.new!(@regression_save_failure_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.Regression.save_failure/2` (forwarded to
+  `PropertyDamage.Persistence.save/3`).
+  """
+  @spec validate_regression_save_failure!(keyword()) :: keyword()
+  def validate_regression_save_failure!(opts) do
+    NimbleOptions.validate!(opts, @regression_save_failure_schema)
+  end
+
+  @regression_add_to_library_schema_definition [
+    tags: [
+      type: {:list, :atom},
+      default: [:auto_detected],
+      doc: "Tags to add to the entry."
+    ],
+    description: [
+      type: :string,
+      doc: "Optional description for the entry."
+    ]
+  ]
+
+  @regression_add_to_library_schema NimbleOptions.new!(
+                                      @regression_add_to_library_schema_definition
+                                    )
+
+  @doc """
+  Validates options for `PropertyDamage.Regression.add_to_library/2`.
+  """
+  @spec validate_regression_add_to_library!(keyword()) :: keyword()
+  def validate_regression_add_to_library!(opts) do
+    NimbleOptions.validate!(opts, @regression_add_to_library_schema)
   end
 
   # ============================================================================

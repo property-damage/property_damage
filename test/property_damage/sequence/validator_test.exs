@@ -1,7 +1,7 @@
-defmodule PropertyDamage.ValidatorTest do
+defmodule PropertyDamage.Sequence.ValidatorTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Validator
+  alias PropertyDamage.Sequence.Validator
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.ExecutorModel

@@ -92,6 +92,7 @@ defmodule PropertyDamage.Integration do
   """
   @spec run(keyword()) :: {:ok, map()} | {:error, map()}
   def run(opts) do
+    opts = PropertyDamage.Options.validate_integration_run!(opts)
     model = Keyword.fetch!(opts, :model)
     adapter = Keyword.fetch!(opts, :adapter)
     adapter_config = Keyword.fetch!(opts, :adapter_config)
@@ -167,6 +168,7 @@ defmodule PropertyDamage.Integration do
   """
   @spec hunt_bugs(keyword()) :: {:ok, [map()]}
   def hunt_bugs(opts) do
+    opts = PropertyDamage.Options.validate_integration_hunt_bugs!(opts)
     model = Keyword.fetch!(opts, :model)
     adapter = Keyword.fetch!(opts, :adapter)
     adapter_config = Keyword.fetch!(opts, :adapter_config)
@@ -217,6 +219,7 @@ defmodule PropertyDamage.Integration do
   """
   @spec health_check(keyword()) :: :ok | {:error, term()}
   def health_check(opts) do
+    opts = PropertyDamage.Options.validate_integration_health_check!(opts)
     url = Keyword.fetch!(opts, :url)
     timeout_ms = Keyword.get(opts, :timeout_ms, @default_health_check.timeout_ms)
     retries = Keyword.get(opts, :retries, @default_health_check.retries)
