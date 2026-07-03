@@ -76,7 +76,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bench: [cachex_bench, openapi_bench]
+        include:
+          - bench: cachex_bench
+            models: CachexBench.Model
+          - bench: openapi_bench
+            models: OpenapiBench.Generated.Model OpenapiBench.Idempotency.Model
     defaults:
       run:
         working-directory: benches/${{ matrix.bench }}
@@ -97,6 +101,11 @@ jobs:
           restore-keys: bench-${{ matrix.bench }}-
 
       - run: mix deps.get
+
+      # Determinism audit: generation must be a pure function of the seed
+      # (feature 3). Needs no service container.
+      - name: Audit generation determinism
+        run: for model in ${{ matrix.models }}; do mix pd.audit "$model"; done
 
       - run: mix test
 
@@ -142,6 +151,13 @@ jobs:
           restore-keys: bench-oban_bench-
 
       - run: mix deps.get
+
+      # Determinism audit (feature 3): generation-only, needs no Postgres.
+      - name: Audit generation determinism
+        run: |
+          for model in ObanBench.Model ObanBench.Retry.Model ObanBench.Uniqueness.Model; do
+            mix pd.audit "$model"
+          done
 
       - run: mix test
 
@@ -211,6 +227,10 @@ jobs:
 
       - run: mix deps.get
 
+      # Determinism audit (feature 3): generation-only, needs no Redis/Toxiproxy.
+      - name: Audit generation determinism
+        run: mix pd.audit RedisBench.Model
+
       - run: mix test
 
   # Gitea bench drives the SAME model against two transports (REST API and a
@@ -254,5 +274,12 @@ jobs:
       # `playwright.install` step in the bench's `test` alias a no-op.
       - name: Install Playwright Chromium (with OS deps)
         run: node deps/playwright/priv/static/driver.js install --with-deps chromium
+
+      # Determinism audit (feature 3): generation-only, needs no Gitea/browser.
+      - name: Audit generation determinism
+        run: |
+          for model in GiteaBench.Model GiteaBench.WebhookModel; do
+            mix pd.audit "$model"
+          done
 
       - run: mix test
