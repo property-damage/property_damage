@@ -1,0 +1,55 @@
+version: v1.3.1
+
+# In-memory store: no database sidecar. State lives only for the container's
+# lifetime; the bench's adapter resets it (admin API) at the start of each
+# sequence, so runs are isolated without a volume.
+dsn: memory
+
+serve:
+  public:
+    # Fixed internal listen port; the advertised base_url (below, overridable via
+    # SERVE_PUBLIC_BASE_URL) tracks the published host port so self-service flow
+    # action URLs are reachable from the host.
+    port: 4433
+    base_url: http://localhost:4433/
+    cors:
+      enabled: true
+  admin:
+    port: 4434
+    base_url: http://localhost:4434/
+
+selfservice:
+  default_browser_return_url: http://localhost:4455/
+  allowed_return_urls:
+    - http://localhost:4455
+  methods:
+    password:
+      enabled: true
+  flows:
+    registration:
+      enabled: true
+      after:
+        password:
+          hooks:
+            # The load-bearing hook: a BLOCKING web_hook with response parsing.
+            # Because `response.parse: true`, Kratos runs it PRE-persistence, so a
+            # non-2xx response aborts registration and NO identity is stored, and a
+            # 2xx JSON body can rewrite the identity's traits/metadata before it is
+            # stored. The mock (PropertyDamage's MockServiceAdapter) is the party
+            # answering here, which is what makes it genuinely steer SUT state.
+            - hook: web_hook
+              config:
+                url: http://host.docker.internal:4500/registration
+                method: POST
+                body: file:///etc/config/kratos/registration.body.jsonnet
+                response:
+                  parse: true
+            # Issue a session on success (kept after the web_hook so a rejected
+            # registration never reaches it).
+            - hook: session
+
+identity:
+  default_schema_id: default
+  schemas:
+    - id: default
+      url: file:///etc/config/kratos/identity.schema.json
