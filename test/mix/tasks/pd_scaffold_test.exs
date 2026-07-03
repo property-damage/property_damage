@@ -594,10 +594,15 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       code = generate_event(event, "PetStore")
 
       assert code =~ "defmodule PetStore.Events.PetCreated do"
-      # id field uses external() since it's server-generated
-      assert code =~ "defstruct [id: external(), :name]"
+      # id field uses external() since it's server-generated; keyword entries
+      # must come last in a list literal, so bare fields precede `id: external()`
+      assert code =~ "defstruct [:name, id: external()]"
       assert code =~ "import PropertyDamage, only: [external: 0]"
       assert code =~ "Generated from operation: createPet"
+
+      # The emitted struct must actually parse (a keyword-before-atom ordering
+      # is a SyntaxError that string matching alone would miss).
+      assert {:ok, _ast} = Code.string_to_quoted(code)
     end
   end
 

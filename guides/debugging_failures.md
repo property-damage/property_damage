@@ -179,33 +179,88 @@ diagram = PropertyDamage.Diagram.from_failure_report(failure, :plantuml)
 File.write!("failure.puml", diagram)
 ```
 
-### Diff Debugging
+### Comparing Runs
 
-Compare a passing run with the failing run:
+A `FailureReport` tells you *that* one run failed. When you have a passing run
+and a failing run of the **same plan**, run comparison tells you *where* the two
+executions diverge, and ranks the field differences by how strongly they
+discriminate the outcomes (DR-035). The two use cases:
+
+- **Regression localization** — a plan passed on one revision of the SUT and
+  fails on another. Where do the runs diverge?
+- **Flakiness localization** — a plan fails one time in N. What differs between
+  the passing and failing executions?
+
+Both need full, unshrunk runs of the same plan, which is exactly what a
+`FailureReport` is *not* (it holds a shrunk sequence). Capture those runs with
+`PropertyDamage.RunTrace.capture/1` and feed them to
+`PropertyDamage.RunComparison.compare/2`. Neither runs a SUT during comparison:
+capture records the runs, `compare/2` is pure data-in/data-out.
+
+For regression localization, capture one trace per revision of the SUT at the
+same seed (same seed and model ⇒ same plan ⇒ comparable):
 
 ```elixir
-# run/1 does not expose a `.trace` field; build a Trace for each run from its
-# commands, event-log entries, and per-command state snapshots:
-#   PropertyDamage.Diff.create_trace(commands, events, states, result)
-# where result is :pass or {:fail, reason}.
-passing_trace = PropertyDamage.Diff.create_trace(commands, events, states, :pass)
+alias PropertyDamage.{RunTrace, RunComparison}
 
-failing_trace =
-  PropertyDamage.Diff.create_trace(commands, events, states, {:fail, failure.failure_reason})
+# Same model and seed on both sides: identical plan, different SUT behavior.
+before = RunTrace.capture(model: MyModel, adapter: MyAdapter.Fixed, seed: failure.seed)
+after_ = RunTrace.capture(model: MyModel, adapter: MyAdapter.Buggy, seed: failure.seed)
 
-# Compare traces and print the divergence
-diff = PropertyDamage.Diff.compare_traces(passing_trace, failing_trace)
-IO.puts(PropertyDamage.Diff.format(diff, format: :terminal))
+comparison = RunComparison.compare([before, after_])
 ```
 
-Output highlights where traces diverge:
+`compare/2` refuses rather than emit a misleading diff when the traces are not
+the same plan (unequal plan fingerprint or model). Always check the guard, then
+read the ranking (most discriminating field first):
 
+```elixir
+if comparison.comparable? do
+  # Runs are partitioned by outcome into passing/failing groups (by index).
+  IO.inspect(comparison.groups, label: "groups")
+
+  Enum.each(comparison.ranking, fn field ->
+    IO.inspect(%{
+      where: field.location,          # {:command, position, path} | {:event, ...}
+      class: field.classification,    # :discriminating | :incidental | :weak | ...
+      values: field.values            # %{trace_index => value}
+    })
+  end)
+else
+  IO.inspect(comparison.guard_violations, label: "not comparable")
+end
 ```
-Step 2: CreateCapture
-  Passing: {:error, :exceeds_authorization}
-  Failing: {:ok, [%CaptureCreated{amount: 600}]}
-           ^^^^ BUG: Should have rejected
+
+A `:discriminating` field is stable within each outcome group but differs
+between groups: it is the ranking's subject, the difference most likely to
+explain the failure. `:incidental` fields (e.g. run-scoped correlation ids) vary
+even within the passing group and are down-ranked automatically.
+
+For flakiness, use `RunComparison.investigate/1`, which captures the traces for
+you. Its capture options are nested under a `capture:` sub-keyword; a fresh
+`run_nonce` is drawn per capture so client-minted values never collide on a
+shared SUT:
+
+```elixir
+{_traces, comparison} =
+  RunComparison.investigate(
+    runs: 10,
+    capture: [model: MyModel, adapter: MyAdapter, seed: failure.seed]
+  )
 ```
+
+Render any comparison as a single self-contained HTML report (inline CSS/JS, no
+external hosts) for sharing:
+
+```elixir
+File.write!("comparison.html", RunComparison.to_html(comparison))
+```
+
+> Run comparison needs a plan that is a **pure function of the seed**, so both
+> sides regenerate the identical plan. If the guard reports differing plan
+> fingerprints for what should be one plan, your generation is impure: see the
+> [deterministic generation guide](deterministic_generation.md) and
+> `mix pd.audit`.
 
 ## Step 7: Export for Sharing
 

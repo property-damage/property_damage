@@ -55,8 +55,10 @@ defmodule PropertyDamage.MixProject do
         "guides/quickstart.md",
         "guides/cheatsheet.md",
         "guides/writing_commands.md",
+        "guides/scaffolding.md",
         "guides/deterministic_generation.md",
         "guides/writing_invariants.md",
+        "guides/coverage_and_catalogs.md",
         "guides/debugging_failures.md",
         "guides/async_and_eventual_consistency.md",
         "guides/resource_polling.md",
@@ -122,10 +124,14 @@ defmodule PropertyDamage.MixProject do
         ],
         "Diagnostics & Reporting": [
           PropertyDamage.FailureReport,
+          PropertyDamage.Analysis,
           PropertyDamage.Replay,
           PropertyDamage.Coverage,
           PropertyDamage.Diagram,
-          PropertyDamage.Diff,
+          PropertyDamage.RunTrace,
+          PropertyDamage.RunTrace.Step,
+          PropertyDamage.RunComparison,
+          PropertyDamage.RunComparison.Html,
           PropertyDamage.Telemetry,
           PropertyDamage.Progress,
           PropertyDamage.Progress.RunUpdate,
@@ -171,7 +177,6 @@ defmodule PropertyDamage.MixProject do
         # this time (see the README note). Grouped last and clearly labelled so
         # the docs do not advertise them alongside the validated core.
         "Advanced (work in progress, not fully supported)": [
-          PropertyDamage.Analysis,
           PropertyDamage.Flakiness,
           PropertyDamage.Mutation,
           PropertyDamage.Mutation.Report,

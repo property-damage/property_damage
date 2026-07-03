@@ -53,6 +53,262 @@ automatically: PropertyDamage calls `restore/2` once a fault's `duration_ms` has
 elapsed during the run, and restores any still-active faults when the sequence
 ends, so a fault never leaks past the test that injected it.
 
+## Run it now: a complete chaos test
+
+Here is a full, self-contained chaos run you can paste into `cache_chaos.exs` and
+execute with `mix run cache_chaos.exs`. The SUT is a tiny in-process key/value
+cache (an `Agent`), the model mixes ordinary `SetKey`/`GetKey` operations with the
+`NetworkLatency` nemesis, and a projection both tracks active faults and asserts
+read consistency. Because `setup/1` returns **no** `:toxiproxy` key, this runs in
+**simulated mode** (see the section below for the live variant).
+
+```elixir
+defmodule Cache.Events do
+  defmodule KeySet do
+    defstruct [:key, :value]
+  end
+
+  defmodule KeyRead do
+    defstruct [:key, :value]
+  end
+end
+
+defmodule Cache.Commands.SetKey do
+  use PropertyDamage.Command
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+  defstruct [:key, :value]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{
+      key: StreamData.member_of(["a", "b", "c"]),
+      value: StreamData.integer(0..100)
+    }
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule Cache.Commands.GetKey do
+  use PropertyDamage.Command
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+  defstruct [:key]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    # key is filled in by the model from state (a key that was written).
+    %{key: nil}
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule Cache.Adapter do
+  use PropertyDamage.Adapter
+
+  alias Cache.Commands.{SetKey, GetKey}
+  alias Cache.Events.{KeySet, KeyRead}
+
+  @impl true
+  def setup(_config) do
+    {:ok, store} = Agent.start_link(fn -> %{} end)
+    # No :toxiproxy key here -> network nemeses run in simulated mode.
+    {:ok, %{store: store}}
+  end
+
+  @impl true
+  def teardown(%{store: store}), do: Agent.stop(store)
+
+  @impl true
+  def execute(%SetKey{key: key, value: value}, %{store: store}, _runtime) do
+    Agent.update(store, &Map.put(&1, key, value))
+    {:ok, [%KeySet{key: key, value: value}]}
+  end
+
+  def execute(%GetKey{key: key}, %{store: store}, _runtime) do
+    value = Agent.get(store, &Map.get(&1, key))
+    {:ok, [%KeyRead{key: key, value: value}]}
+  end
+end
+
+defmodule Cache.State do
+  use PropertyDamage.Model.Projection
+
+  alias Cache.Events.{KeySet, KeyRead}
+
+  @impl true
+  def init do
+    %{store: %{}, active_faults: %{}, simulated_faults: 0, real_faults: 0}
+  end
+
+  @impl true
+  def apply(state, %KeySet{key: key, value: value}) do
+    put_in(state, [:store, key], value)
+  end
+
+  # Nemesis emits its own injected/restored structs; match the ones you use.
+  def apply(state, %NetworkLatencyInjected{} = event) do
+    state
+    |> put_in([:active_faults, :network_latency], event)
+    |> bump_fault_counter(event)
+  end
+
+  def apply(state, %NetworkLatencyRestored{}) do
+    update_in(state, [:active_faults], &Map.delete(&1, :network_latency))
+  end
+
+  def apply(state, _), do: state
+
+  defp bump_fault_counter(state, event) do
+    if PropertyDamage.Nemesis.simulated_event?(event) do
+      update_in(state, [:simulated_faults], &(&1 + 1))
+    else
+      update_in(state, [:real_faults], &(&1 + 1))
+    end
+  end
+
+  # Consistency holds whether or not a fault is active: a read returns the last
+  # written value. (An in-memory cache is always fast, so there is no SLA to
+  # relax here; see "Relaxing Invariants During Faults" below for that pattern.)
+  @trigger every: Cache.Events.KeyRead
+  def assert_reads_are_consistent(state, %KeyRead{key: key, value: value}) do
+    expected = Map.get(state.store, key)
+
+    unless value == expected do
+      PropertyDamage.fail!("stale read", key: key, got: value, expected: expected)
+    end
+  end
+end
+
+defmodule Cache.ChaosModel do
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
+
+  alias Cache.Commands.{SetKey, GetKey}
+  alias Cache.Events.{KeySet, KeyRead}
+  alias PropertyDamage.Nemesis.NetworkLatency
+  alias Cache.State
+
+  @impl true
+  def commands do
+    [
+      {SetKey, weight: 4},
+      {GetKey,
+       weight: 4,
+       when: fn state -> map_size(state.store) > 0 end,
+       with: fn state -> %{key: StreamData.member_of(Map.keys(state.store))} end},
+      # Low weight = occasional faults.
+      {NetworkLatency, weight: 1}
+    ]
+  end
+
+  @impl true
+  def command_sequence_projection, do: State
+
+  @impl true
+  def assertion_projections, do: [State]
+
+  # The simulator predicts events during sequence generation so state-dependent
+  # commands (GetKey needs a key to exist) become eligible. The catch-all covers
+  # nemesis commands, which emit no domain events during generation.
+  @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%SetKey{key: key, value: value}, _state), do: [%KeySet{key: key, value: value}]
+  def simulate(%GetKey{key: key}, _state), do: [%KeyRead{key: key, value: nil}]
+  def simulate(_command, _state), do: []
+end
+
+result =
+  PropertyDamage.run(
+    model: Cache.ChaosModel,
+    adapter: Cache.Adapter,
+    max_commands: 12,
+    max_runs: 20,
+    seed: 7
+  )
+
+IO.inspect(result, label: "run result")
+```
+
+It prints a passing result (your `assertion_fires` count varies with the seed):
+
+```
+run result: {:ok,
+ %{
+   seed: 7,
+   assertion_fires: %{{Cache.State, :reads_are_consistent} => 212},
+   runs: 20,
+   total_commands: 240
+ }}
+```
+
+The run is green, but note what it did *not* prove: because no Toxiproxy was
+configured, every injected `NetworkLatency` was a no-op. The `Cache.State`
+projection counted those in its `simulated_faults` field via
+`simulated_event?/1` — a real fault run would land them in `real_faults` instead.
+The next section makes that distinction concrete.
+
+## Simulated vs real faults, side by side
+
+You can see the exact marker flip without a full run by calling a nemesis's
+`inject/2` directly. With no Toxiproxy in the context, the fault is simulated:
+
+```elixir
+alias PropertyDamage.Nemesis.NetworkLatency
+
+# No Toxiproxy configured -> nothing is sent anywhere.
+{:ok, [event]} = NetworkLatency.inject(%NetworkLatency{latency_ms: 100}, %{})
+event.simulated
+#=> true
+PropertyDamage.Nemesis.simulated_event?(event)
+#=> true
+```
+
+To make the fault real, point the nemesis at a running Toxiproxy. The repo ships a
+ready-made recipe at `benches/redis_bench/docker-compose.yml` (Redis behind a
+Toxiproxy on control port `8474`); bring it up with:
+
+```bash
+cd benches/redis_bench && docker compose up -d
+```
+
+Then create a proxy and inject with the Toxiproxy endpoint in the context. The
+same event now reports `simulated: false`, and the latency toxic really lands on
+the proxy:
+
+```elixir
+Application.ensure_all_started(:inets)
+api = "http://localhost:8474"
+
+# Create a proxy named "redis" forwarding to the container's Redis.
+body = Jason.encode!(%{
+  "name" => "redis",
+  "listen" => "0.0.0.0:6391",
+  "upstream" => "redis:6379",
+  "enabled" => true
+})
+
+:httpc.request(:post, {~c"#{api}/proxies", [], ~c"application/json", body}, [], [])
+
+# Inject WITH a discovered Toxiproxy config.
+ctx = %{toxiproxy: %{proxy_name: "redis", api_url: api}}
+{:ok, [event]} = NetworkLatency.inject(%NetworkLatency{latency_ms: 100, jitter_ms: 20}, ctx)
+event.simulated
+#=> false
+```
+
+In a full `PropertyDamage.run`, you reach the real path the same way: have your
+adapter's `setup/1` return `%{toxiproxy: %{proxy_name: ..., api_url: ...}}` (the
+proxy your SUT actually connects through), and route the SUT's traffic through that
+proxy. Every injected-latency event then carries `simulated: false` and the
+degradation is real. The `simulated: true` output above comes from the
+no-Toxiproxy run; the `simulated: false` output comes from a live Toxiproxy started
+via the compose file — do not mix them up when reading a report.
+
 ## Quick Start
 
 ### 1. Create a Chaos Model
