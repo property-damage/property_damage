@@ -383,6 +383,341 @@ defmodule PropertyDamage.RunTrace do
     event_log |> List.wrap() |> Enum.filter(&(&1.command_index == nil))
   end
 
+  # ============================================================================
+  # Per-step state timeline (P8 / DR-040)
+  # ============================================================================
+  #
+  # Projection state per step is DERIVED from the recorded fold order, never
+  # captured. Two modes:
+  #
+  #   * FAITHFUL (`state_at/2`, `state_before/2`, `state_timeline/1`) — the
+  #     human surface. Folds in the run's *real* fold order (entry `fold_index`
+  #     + `command_fold_ordinals`), so async / injected events land exactly where
+  #     they folded. This is the mode whose failure-step value must equal the
+  #     runtime `state_at_failure` snapshot (the projection-purity check).
+  #
+  #   * CANONICAL (`canonical_state_timeline/1`) — a timing-immune mode used by
+  #     `PropertyDamage.RunComparison` for cross-run state alignment. Folds each
+  #     step's executed command then its attributed events, in flattened order,
+  #     ignoring when async events actually folded. Two runs of the same plan
+  #     that differ only in async timing therefore derive identical canonical
+  #     states, so state divergence in a comparison never reduces to timing skew.
+
+  @doc """
+  Faithful projection state immediately AFTER the step at `position` (P8).
+
+  Folds every recorded item (command folds + folded event-log entries) up to and
+  including this step's own folds, in true fold order. `position` may be a
+  `%Sequence.Position{}` or a flattened (reading-order) index. Returns a
+  `%{projection_module => state}` map, or `%{}` for a trace with no plan/model.
+  """
+  @spec state_at(t(), Sequence.Position.t() | non_neg_integer()) :: %{module() => term()}
+  def state_at(%__MODULE__{} = trace, position),
+    do: faithful_state(trace, resolve_position(trace, position), :at)
+
+  @doc """
+  Faithful projection state immediately BEFORE the step at `position` (P8).
+
+  The pre-step state: folds every recorded item with a fold ordinal strictly
+  below this step's first fold. Equal to the runtime `state_before_failure`
+  snapshot when `position` is the failing step.
+  """
+  @spec state_before(t(), Sequence.Position.t() | non_neg_integer()) :: %{module() => term()}
+  def state_before(%__MODULE__{} = trace, position),
+    do: faithful_state(trace, resolve_position(trace, position), :before)
+
+  @doc """
+  The faithful post-step state for every command, in flattened (reading) order.
+
+  Returns `[{position, state}]`. Sugar over `state_at/2` computed in one pass.
+  """
+  @spec state_timeline(t()) :: [{Sequence.Position.t(), %{module() => term()}}]
+  def state_timeline(%__MODULE__{plan: nil}), do: []
+
+  def state_timeline(%__MODULE__{plan: %Sequence{} = plan} = trace) do
+    plan
+    |> Sequence.indexed()
+    |> Enum.map(fn {position, _idx, _cmd} -> {position, state_at(trace, position)} end)
+  end
+
+  @doc """
+  The canonical (timing-immune) post-step state for every command (P8).
+
+  Folds each step's executed command then its attributed, folded events, in
+  flattened order — never using async fold timing. This is the mode
+  `PropertyDamage.RunComparison` aligns on so state divergence is attributable,
+  not a timing artifact. Returns `[{position, state}]`.
+  """
+  @spec canonical_state_timeline(t()) :: [{Sequence.Position.t(), %{module() => term()}}]
+  def canonical_state_timeline(%__MODULE__{plan: nil}), do: []
+  def canonical_state_timeline(%__MODULE__{model: nil}), do: []
+
+  def canonical_state_timeline(%__MODULE__{plan: %Sequence{} = plan} = trace) do
+    init = init_projections(trace.model)
+
+    {timeline, _} =
+      plan
+      |> Sequence.indexed()
+      |> Enum.map_reduce(init, fn {position, _idx, plan_cmd}, projs ->
+        projs = fold_one(projs, executed_or_plan(trace, position, plan_cmd))
+
+        projs =
+          trace
+          |> folded_entries_at(position)
+          |> Enum.reduce(projs, fn entry, acc -> fold_one(acc, entry.event) end)
+
+        {{position, projs}, projs}
+      end)
+
+    timeline
+  end
+
+  @doc """
+  Verify the faithful-derived state at a step equals an authoritative snapshot
+  (the projection-purity check, P8 / DR-040).
+
+  Pure projections re-derive to the same state, so a mismatch means a projection
+  read something outside its `(state, event)` inputs (a clock, a counter, the
+  environment) in `apply/2`. Because faithful derivation replays the *real* fold
+  order, a pure-but-async projection re-derives correctly and does NOT
+  false-positive.
+
+  `boundary` is `:at` (compare `state_at/2`) or `:before` (compare
+  `state_before/2`). Returns `:ok`, or `{:non_pure_projections, [module()]}`
+  naming the projection modules whose derived state diverged. Returns `:ok` when
+  the snapshot is empty (nothing to check).
+  """
+  @spec verify_projections(
+          t(),
+          Sequence.Position.t() | non_neg_integer(),
+          %{module() => term()},
+          :at | :before
+        ) ::
+          :ok | {:non_pure_projections, [module()]}
+  def verify_projections(trace, position, snapshot, boundary \\ :at)
+
+  def verify_projections(_trace, _position, snapshot, _boundary) when snapshot == %{}, do: :ok
+
+  def verify_projections(%__MODULE__{} = trace, position, snapshot, boundary)
+      when is_map(snapshot) do
+    derived =
+      case boundary do
+        :before -> state_before(trace, position)
+        _ -> state_at(trace, position)
+      end
+
+    mismatched =
+      snapshot
+      |> Map.keys()
+      |> Enum.filter(fn module -> Map.get(derived, module) != Map.fetch!(snapshot, module) end)
+      |> Enum.sort()
+
+    if mismatched == [], do: :ok, else: {:non_pure_projections, mismatched}
+  end
+
+  # ---- Faithful derivation internals ----------------------------------------
+
+  defp faithful_state(%__MODULE__{model: nil}, _position, _boundary), do: %{}
+  defp faithful_state(%__MODULE__{plan: nil}, _position, _boundary), do: %{}
+  defp faithful_state(_trace, nil, _boundary), do: %{}
+
+  defp faithful_state(%__MODULE__{plan: plan} = trace, position, boundary) do
+    init = init_projections(trace.model)
+    items = fold_items(trace)
+    section = position.section
+
+    cond do
+      not branched?(plan) or section == :prefix ->
+        cutoff = boundary_ordinal(items, position, boundary)
+
+        items
+        |> Enum.filter(&section_in?(&1.position, sections_for(section, plan)))
+        |> keep_below(cutoff, boundary)
+        |> fold_in_order(init)
+
+      match?({:branch, _}, section) ->
+        cutoff = boundary_ordinal(items, position, boundary)
+
+        items
+        |> Enum.filter(&section_in?(&1.position, [:prefix, section]))
+        |> keep_below(cutoff, boundary)
+        |> fold_in_order(init)
+
+      section == :suffix ->
+        merged = merged_state(trace, init, items)
+        cutoff = boundary_ordinal(items, position, boundary)
+
+        items
+        |> Enum.filter(&(section_of(&1.position) == :suffix))
+        |> keep_below(cutoff, boundary)
+        |> fold_in_order(merged)
+    end
+  end
+
+  # For a linear plan, every position is in the prefix section, so we fold the
+  # whole item stream by ordinal; branched-plan prefix positions likewise only
+  # ever see prefix items (branch/suffix ordinals are strictly higher).
+  defp sections_for(:prefix, plan) do
+    if branched?(plan), do: [:prefix], else: [:prefix, :suffix, nil]
+  end
+
+  # Merge branch state exactly as `Executor.Branching.merge_branch_states` does:
+  # fold the prefix, then replay each branch's (command, observed events) in the
+  # verified linearization order when one exists, else branch order. Command
+  # first, then that command's folded events (attribution order within a branch).
+  defp merged_state(trace, init, items) do
+    prefix_state =
+      items
+      |> Enum.filter(&(section_of(&1.position) == :prefix))
+      |> fold_in_order(init)
+
+    trace
+    |> linearization_order()
+    |> Enum.reduce(prefix_state, fn position, projs ->
+      projs = fold_one(projs, executed_or_plan(trace, position, nil))
+
+      trace
+      |> folded_entries_at(position)
+      |> Enum.reduce(projs, fn entry, acc -> fold_one(acc, entry.event) end)
+    end)
+  end
+
+  # The branch replay order as `%Sequence.Position{}` values: the verified
+  # linearization when the trace recorded one (P8), otherwise plain branch order
+  # (branch 0 then branch 1 ..., each in offset order), which is itself a valid
+  # interleaving for independent branches.
+  defp linearization_order(%__MODULE__{linearization: [_ | _] = tagged}) do
+    Enum.map(tagged, fn {branch_id, offset, _cmd} ->
+      Sequence.Position.branch(branch_id, offset)
+    end)
+  end
+
+  defp linearization_order(%__MODULE__{plan: %Sequence{branches: branches}})
+       when is_list(branches) do
+    branches
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {commands, branch_id} ->
+      Enum.map(0..(length(commands) - 1)//1, &Sequence.Position.branch(branch_id, &1))
+    end)
+  end
+
+  defp linearization_order(_), do: []
+
+  # All folded items (commands + folded entries) tagged with their fold ordinal
+  # and structured position. Non-folded entries (stutter / telemetry, fold_index
+  # nil) are excluded: they never advanced projection state.
+  defp fold_items(%__MODULE__{plan: plan} = trace) do
+    command_items =
+      Enum.map(trace.command_fold_ordinals, fn {position, ordinal} ->
+        %{ordinal: ordinal, position: position, item: executed_or_plan(trace, position, nil)}
+      end)
+
+    entry_items =
+      trace.event_log
+      |> List.wrap()
+      |> Enum.filter(&(&1.fold_index != nil))
+      |> Enum.map(fn entry ->
+        position =
+          if entry.command_index != nil,
+            do: Sequence.position_at(plan, entry.command_index, entry.branch_id)
+
+        %{ordinal: entry.fold_index, position: position, item: entry.event}
+      end)
+
+    command_items ++ entry_items
+  end
+
+  defp boundary_ordinal(items, position, boundary) do
+    ordinals =
+      items
+      |> Enum.filter(&(&1.position == position))
+      |> Enum.map(& &1.ordinal)
+
+    case {boundary, ordinals} do
+      {_, []} -> nil
+      {:before, _} -> Enum.min(ordinals)
+      {:at, _} -> Enum.max(ordinals)
+    end
+  end
+
+  defp keep_below(_items, nil, _boundary), do: []
+
+  defp keep_below(items, cutoff, :before),
+    do: items |> Enum.filter(&(&1.ordinal < cutoff)) |> Enum.sort_by(& &1.ordinal)
+
+  defp keep_below(items, cutoff, :at),
+    do: items |> Enum.filter(&(&1.ordinal <= cutoff)) |> Enum.sort_by(& &1.ordinal)
+
+  defp fold_in_order(items, init) do
+    Enum.reduce_while(items, init, fn %{item: item}, projs ->
+      try do
+        {:cont, fold_one(projs, item)}
+      rescue
+        # A raising apply/2 is a transition-invariant signal; in the real run it
+        # halted the fold with the pre-raise state, so we stop here too.
+        _ -> {:halt, projs}
+      end
+    end)
+  end
+
+  defp fold_one(projections, item) do
+    Map.new(projections, fn {projection, state} -> {projection, projection.apply(state, item)} end)
+  end
+
+  defp folded_entries_at(%__MODULE__{plan: plan, event_log: event_log}, position) do
+    event_log
+    |> List.wrap()
+    |> Enum.filter(fn entry ->
+      entry.fold_index != nil and entry.command_index != nil and
+        Sequence.position_at(plan, entry.command_index, entry.branch_id) == position
+    end)
+    |> Enum.sort_by(& &1.fold_index)
+  end
+
+  defp executed_or_plan(%__MODULE__{executed: executed} = trace, position, fallback) do
+    case Map.get(executed, position) do
+      nil -> fallback || plan_command_at(trace, position)
+      command -> command
+    end
+  end
+
+  defp plan_command_at(%__MODULE__{plan: %Sequence{} = plan}, position) do
+    plan
+    |> Sequence.indexed()
+    |> Enum.find_value(fn {pos, _idx, cmd} -> if pos == position, do: cmd end)
+  end
+
+  defp plan_command_at(_trace, _position), do: nil
+
+  defp init_projections(model) do
+    command_projection = model.command_sequence_projection()
+
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0),
+        do: model.assertion_projections(),
+        else: []
+
+    Map.new([command_projection | assertion_projections], &{&1, &1.init()})
+  end
+
+  defp resolve_position(%__MODULE__{}, %Sequence.Position{} = position), do: position
+
+  defp resolve_position(%__MODULE__{plan: %Sequence{} = plan}, index) when is_integer(index) do
+    plan
+    |> Sequence.indexed()
+    |> Enum.find_value(fn {position, idx, _cmd} -> if idx == index, do: position end)
+  end
+
+  defp resolve_position(_trace, _position), do: nil
+
+  defp branched?(%Sequence{branches: branches}) when is_list(branches), do: true
+  defp branched?(_), do: false
+
+  defp section_of(nil), do: nil
+  defp section_of(%Sequence.Position{section: section}), do: section
+
+  defp section_in?(position, sections), do: section_of(position) in sections
+
   @doc """
   Best-effort working-tree revision at the moment of the call.
 
