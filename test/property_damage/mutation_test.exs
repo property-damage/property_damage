@@ -25,9 +25,11 @@ defmodule PropertyDamage.MutationTest do
     defstruct [:ref_id, :value]
   end
 
-  # A projection whose assertion always fails. Mutation testing harvests sample
-  # events from a baseline run, and PropertyDamage.run only carries an event_log
-  # on failure, so the fixture model below must fail to yield mutable events.
+  # A projection whose assertion always fails, used by the progress-projection
+  # tests below. Mutation testing harvests sample events from a baseline run via
+  # RunTrace.capture/1, which carries the full event log regardless of outcome,
+  # so a passing model yields mutable events just as well (see the passing-model
+  # regression test in "run/1 end-to-end").
   defmodule AlwaysFailAssertion do
     use PropertyDamage.Model.Projection
 
@@ -629,6 +631,36 @@ defmodule PropertyDamage.MutationTest do
     end
   end
 
+  # A model whose suite PASSES: the normal target of mutation testing. No
+  # failing assertion, so the baseline run succeeds. Before RunTrace-based event
+  # harvesting this produced zero sample events (PropertyDamage.run's success
+  # result carries no event log) and therefore zero mutations.
+  defmodule PassingModel do
+    @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
+
+    alias PropertyDamage.Test.Commands.CreateItem
+    alias PropertyDamage.Test.Events.ItemCreated
+    alias PropertyDamage.Test.Projections.ModelState
+
+    @impl true
+    def commands, do: [CreateItem]
+
+    @impl true
+    def command_sequence_projection, do: ModelState
+
+    @impl true
+    def assertion_projections, do: []
+
+    @impl true
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    def simulate(%CreateItem{name: name, quantity: quantity}, _state) do
+      [%ItemCreated{item_ref: nil, name: name, quantity: quantity}]
+    end
+  end
+
   describe "run/1 end-to-end" do
     test "returns a finalized report with recorded mutation results" do
       {:ok, report} =
@@ -642,6 +674,25 @@ defmodule PropertyDamage.MutationTest do
 
       assert %Report{} = report
       assert report.total > 0
+    end
+
+    test "generates mutations against a PASSING model (baseline events via RunTrace)" do
+      {:ok, report} =
+        Mutation.run(
+          model: PassingModel,
+          adapter: PropertyDamage.Test.TestAdapter,
+          operators: [:value],
+          mutations_per_command: 3,
+          max_runs: 2
+        )
+
+      # The regression: a model whose suite passes must still yield sample events
+      # (harvested via RunTrace.capture), so mutations are generated and tested.
+      assert %Report{} = report
+      assert report.total > 0
+
+      # Report shape stays internally consistent.
+      assert report.total == report.killed + report.survived + report.timeout
     end
   end
 

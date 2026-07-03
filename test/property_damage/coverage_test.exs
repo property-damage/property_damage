@@ -137,6 +137,33 @@ defmodule PropertyDamage.CoverageTest do
     end
   end
 
+  describe "Coverage.from_result/2 on aggregate run results (WP-C4 d)" do
+    test "returns the merged tracker carried by an aggregate {:ok, stats}" do
+      # A multi-run PropertyDamage.run(coverage: true) returns aggregate stats
+      # with a pre-merged :coverage tracker, not a single sequence result. RED
+      # against baseline: from_result called record/2 which read stats.sequence
+      # and raised KeyError. It must return the already-merged tracker.
+      tracker =
+        Coverage.new(TestModel)
+        |> Coverage.record(mock_result([%TestCommand.Create{id: "1"}]))
+
+      stats = %{runs: 100, coverage: tracker, assertion_fires: %{}}
+
+      assert Coverage.from_result({:ok, stats}, TestModel) == tracker
+    end
+
+    test "raises a clear ArgumentError naming stats.coverage when tracking was off" do
+      # Aggregate stats without :sequence and without :coverage (coverage: true
+      # was not requested). The error must point at the right accessor rather
+      # than surfacing a raw KeyError on :sequence.
+      stats = %{runs: 100, assertion_fires: %{}}
+
+      assert_raise ArgumentError, ~r/coverage/, fn ->
+        Coverage.from_result({:ok, stats}, TestModel)
+      end
+    end
+  end
+
   # ============================================================================
   # Coverage Metrics Tests
   # ============================================================================

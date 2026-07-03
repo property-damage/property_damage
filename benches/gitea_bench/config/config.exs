@@ -15,5 +15,4 @@ config :gitea_bench,
   # container reaches that listener (host-gateway alias from docker-compose).
   webhook_url: System.get_env("PD_GITEA_WEBHOOK_URL", "http://localhost:#{webhook_port}"),
   webhook_listen_port: String.to_integer(System.get_env("PD_GITEA_WEBHOOK_LISTEN_PORT", "4040")),
-  webhook_callback_host:
-    System.get_env("PD_GITEA_WEBHOOK_CALLBACK_HOST", "host.docker.internal")
+  webhook_callback_host: System.get_env("PD_GITEA_WEBHOOK_CALLBACK_HOST", "host.docker.internal")

@@ -55,7 +55,11 @@ defmodule GiteaBench.ApiAdapter do
     end
   end
 
-  def execute(%CreateLabel{repo: full_name, name: name, color: color}, %{client: client}, _runtime) do
+  def execute(
+        %CreateLabel{repo: full_name, name: name, color: color},
+        %{client: client},
+        _runtime
+      ) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
 
     with :ok <- Gitea.create_label(client, owner, repo, name, color) do
@@ -63,9 +67,13 @@ defmodule GiteaBench.ApiAdapter do
     end
   end
 
-  def execute(%AddLabelToIssue{assignment: %{repo: full_name, number: number, label: label}}, %{
-        client: client
-      }, _runtime) do
+  def execute(
+        %AddLabelToIssue{assignment: %{repo: full_name, number: number, label: label}},
+        %{
+          client: client
+        },
+        _runtime
+      ) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
 
     with :ok <- Gitea.assign_label(client, owner, repo, number, label) do
@@ -73,7 +81,11 @@ defmodule GiteaBench.ApiAdapter do
     end
   end
 
-  def execute(%CloseIssue{target: %{repo: full_name, number: number}}, %{client: client}, _runtime) do
+  def execute(
+        %CloseIssue{target: %{repo: full_name, number: number}},
+        %{client: client},
+        _runtime
+      ) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
 
     with :ok <- Gitea.close_issue(client, owner, repo, number) do

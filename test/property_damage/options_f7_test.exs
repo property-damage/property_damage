@@ -33,6 +33,37 @@ defmodule PropertyDamage.OptionsF7Test do
     end
   end
 
+  describe "Options.validate_run!/1 :mock_services (WP-C5)" do
+    test "defaults to an empty list" do
+      opts = Options.validate_run!(model: M, adapter: A)
+      assert opts[:mock_services] == []
+    end
+
+    test "normalizes bare modules to {module, %{}} tuples" do
+      opts = Options.validate_run!(model: M, adapter: A, mock_services: [PayMock])
+      assert opts[:mock_services] == [{PayMock, %{}}]
+    end
+
+    test "keeps {module, config} tuples and preserves config" do
+      opts =
+        Options.validate_run!(model: M, adapter: A, mock_services: [{PayMock, %{port: 4445}}])
+
+      assert opts[:mock_services] == [{PayMock, %{port: 4445}}]
+    end
+
+    test "rejects a malformed entry" do
+      assert_raise NimbleOptions.ValidationError, ~r/module or \{module, config_map\}/, fn ->
+        Options.validate_run!(model: M, adapter: A, mock_services: ["not-a-module"])
+      end
+    end
+
+    test "rejects a non-list value" do
+      assert_raise NimbleOptions.ValidationError, ~r/list of mock services/, fn ->
+        Options.validate_run!(model: M, adapter: A, mock_services: PayMock)
+      end
+    end
+  end
+
   describe "Options.validate_integration_hunt_bugs!/1" do
     test "accepts :unlimited for max_runs and defaults stop_after" do
       opts = Options.validate_integration_hunt_bugs!(model: M, adapter: A, adapter_config: %{})
@@ -150,6 +181,32 @@ defmodule PropertyDamage.OptionsF7Test do
       end
 
       assert is_function(Regression.add_to_library("path", tags: [:x]), 1)
+    end
+  end
+
+  # ---- regression: run-option :adapter parity (WP-C4 c) ---------------------
+
+  describe "run/1 :regression option accepts :adapter" do
+    test "the run schema validates regression: [adapter: ...] and preserves it" do
+      # RED against baseline: the run-level :regression keys omitted :adapter, so
+      # NimbleOptions rejected it as an unknown key and the generated regression
+      # test silently fell back to report.adapter. Regression.handler/1 accepts
+      # :adapter, so the run option must reach it.
+      opts =
+        Options.validate_run!(
+          model: __MODULE__,
+          adapter: __MODULE__,
+          regression: [generate_tests: "dir", adapter: __MODULE__]
+        )
+
+      assert get_in(opts, [:regression, :adapter]) == __MODULE__
+    end
+
+    test "the value survives Regression.handler/1's own validation" do
+      # The umbrella handler schema already accepts :adapter; prove the two
+      # schemas agree so the threaded value is not dropped on the way down.
+      handler = Regression.handler(generate_tests: "dir", adapter: __MODULE__)
+      assert is_function(handler, 1)
     end
   end
 

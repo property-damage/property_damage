@@ -221,6 +221,68 @@ defmodule PaymentInvariant do
 end
 ```
 
+## Wiring the Mock into a Run
+
+Declare the mock with the `:mock_services` option of `PropertyDamage.run/1`.
+Each entry is a mock module or a `{module, config}` tuple:
+
+```elixir
+PropertyDamage.run(
+  model: PaymentTestModel,
+  adapter: PaymentAdapter,
+  mock_services: [{MyTest.PaymentGatewayMock, %{port: 4445}}]
+)
+```
+
+For every run the framework:
+
+1. starts a `PropertyDamage.MockServiceRegistry`,
+2. registers the mock (`init_state/0`) and calls its `setup/1` with the entry's
+   config merged with `%{registry: pid, event_queue: pid}` -- this is where a
+   mock starts its HTTP listener,
+3. calls `on_command/2` on every command before it executes,
+4. after each command, flushes the events the mock pushed, folds them into
+   projections (recorded with `source: :mock`), and calls `on_event/2`,
+5. calls `teardown/1` and stops the registry at the end.
+
+The same registry is reused across a failure's shrink attempts, so a
+mock-dependent failure keeps reproducing as it minimizes.
+
+### Driving handle_request/2
+
+The framework never calls `handle_request/2` itself: only the SUT (or its
+stand-in) knows when it makes an outbound call. Whatever plays that transport
+reads the mock's state from the registry, calls `handle_request/2`, and pushes
+the returned events back so the framework can fold them:
+
+```elixir
+alias PropertyDamage.MockServiceRegistry
+
+{:ok, state} = MockServiceRegistry.get_handler_state(registry, MyTest.PaymentGatewayMock)
+{:ok, response, events} = MyTest.PaymentGatewayMock.handle_request(request, state)
+:ok = MockServiceRegistry.push_events(registry, MyTest.PaymentGatewayMock, events)
+```
+
+`get_handler_state/2` merges the mock's own state with the current projection
+states under a `:projections` key, so responses can reflect real test state.
+
+In a real HTTP mock this glue lives inside the listener the mock started in
+`setup/1`, which closed over the `registry` pid it was handed. For an in-process
+SUT, the adapter can reach the registry directly on the runtime handle:
+
+```elixir
+def execute(%SubmitPayment{} = cmd, ctx, %PropertyDamage.Runtime{mock_registry: registry}) do
+  {:ok, state} = MockServiceRegistry.get_handler_state(registry, MyTest.PaymentGatewayMock)
+  {:ok, resp, events} = MyTest.PaymentGatewayMock.handle_request(%{path: "/authorize", body: %{...}}, state)
+  :ok = MockServiceRegistry.push_events(registry, MyTest.PaymentGatewayMock, events)
+  {:ok, [%PaymentSubmitted{status: resp.status}]}
+end
+```
+
+Returning events from `handle_request/2` is not enough on its own -- the
+transport must `push_events/3` them into the registry for the framework to see
+them. `runtime.mock_registry` is `nil` when the run declared no `:mock_services`.
+
 ## Mock Patterns
 
 ### State-Based Responses

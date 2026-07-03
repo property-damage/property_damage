@@ -305,6 +305,10 @@ defmodule PropertyDamage.Shrinker do
       adapter_config: adapter_config,
       config: config,
       event_queue: event_queue,
+      # Per-run mock registry (WP-C5), reused across shrink attempts so a
+      # mock-dependent failure keeps reproducing while it minimizes. nil when the
+      # run declared no mock services.
+      mock_registry: Keyword.get(opts, :mock_registry),
       iterations: 0,
       start_time: start_time,
       original_signature: original_signature,
@@ -424,6 +428,8 @@ defmodule PropertyDamage.Shrinker do
       adapter_config: adapter_config,
       config: config,
       event_queue: event_queue,
+      # Per-run mock registry (WP-C5); see shrink_linear.
+      mock_registry: Keyword.get(opts, :mock_registry),
       iterations: 0,
       start_time: start_time,
       failed_at_index: failed_at_index,
@@ -493,6 +499,7 @@ defmodule PropertyDamage.Shrinker do
               adapter_config: state.adapter_config,
               config: state.config,
               event_queue: state.event_queue,
+              mock_registry: state.mock_registry,
               failure_reason: reconstruct_failure_reason(state.original_signature),
               # Carry stutter reproduction into the converted-linear shrink. The
               # config is already forced (re-forcing is idempotent).
@@ -962,6 +969,7 @@ defmodule PropertyDamage.Shrinker do
         case Executor.run(candidate_sequence, state.model, state.adapter,
                adapter_config: state.adapter_config,
                event_queue: state.event_queue,
+               mock_registry: state.mock_registry,
                stutter_config: state.stutter_config,
                rng_seed: state.rng_seed,
                run_nonce: state.run_nonce,
@@ -1003,6 +1011,7 @@ defmodule PropertyDamage.Shrinker do
         case Executor.run(sequence, state.model, state.adapter,
                adapter_config: state.adapter_config,
                event_queue: state.event_queue,
+               mock_registry: state.mock_registry,
                stutter_config: state.stutter_config,
                rng_seed: state.rng_seed,
                run_nonce: state.run_nonce,
@@ -1051,6 +1060,7 @@ defmodule PropertyDamage.Shrinker do
         case Executor.run(sequence, state.model, state.adapter,
                adapter_config: state.adapter_config,
                event_queue: state.event_queue,
+               mock_registry: state.mock_registry,
                stutter_config: state.stutter_config,
                rng_seed: state.rng_seed,
                run_nonce: state.run_nonce,
