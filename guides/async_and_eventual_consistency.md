@@ -27,6 +27,202 @@ Client                          API                         Backend
 
 PropertyDamage provides several mechanisms to handle these patterns.
 
+## A runnable probe example
+
+Before the reference material below, here is the smallest end-to-end example that
+actually settles: a `:probe` command that retries until an eventually-consistent
+store catches up. It has no external dependencies (the "store" is an in-process
+`Agent` that only reveals a shipped widget ~150ms later), so you can paste it into
+`warehouse_probe.exs` and run `mix run warehouse_probe.exs`.
+
+```elixir
+defmodule Warehouse.Events do
+  defmodule WidgetShipped do
+    defstruct [:sku]
+  end
+
+  defmodule WidgetArrived do
+    defstruct [:sku]
+  end
+end
+
+defmodule Warehouse.Commands.ShipWidget do
+  use PropertyDamage.Command
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+  defstruct [:sku]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{sku: StreamData.string(:alphanumeric, min_length: 3, max_length: 6)}
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule Warehouse.Commands.AwaitWidget do
+  # :probe = read-only, retried until it settles or times out.
+  use PropertyDamage.Command,
+    execution: :probe,
+    shrink: :prefer_remove,
+    settle: %{timeout_ms: 2_000, interval_ms: 50, backoff: :linear}
+
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+  defstruct [:sku]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    # sku is filled in by the model from state (a widget that was shipped).
+    %{sku: nil}
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+
+defmodule Warehouse.Adapter do
+  use PropertyDamage.Adapter
+
+  alias Warehouse.Commands.{ShipWidget, AwaitWidget}
+  alias Warehouse.Events.{WidgetShipped, WidgetArrived}
+
+  # The "warehouse" is eventually consistent: a shipped widget only becomes
+  # visible ~150ms later, so AwaitWidget must retry.
+  @delivery_ms 150
+
+  @impl true
+  def setup(_config) do
+    {:ok, store} = Agent.start_link(fn -> %{} end)
+    {:ok, %{store: store}}
+  end
+
+  @impl true
+  def teardown(%{store: store}), do: Agent.stop(store)
+
+  @impl true
+  def execute(%ShipWidget{sku: sku}, %{store: store}, _runtime) do
+    ready_at = System.monotonic_time(:millisecond) + @delivery_ms
+    Agent.update(store, &Map.put(&1, sku, ready_at))
+    {:ok, [%WidgetShipped{sku: sku}]}
+  end
+
+  def execute(%AwaitWidget{sku: sku}, %{store: store}, _runtime) do
+    ready_at = Agent.get(store, &Map.get(&1, sku))
+    now = System.monotonic_time(:millisecond)
+
+    cond do
+      is_nil(ready_at) -> {:retry, :unknown_sku}
+      now >= ready_at -> {:ok, [%WidgetArrived{sku: sku}]}
+      true -> {:retry, :in_transit}
+    end
+  end
+end
+
+defmodule Warehouse.State do
+  use PropertyDamage.Model.Projection
+
+  alias Warehouse.Events.{WidgetShipped, WidgetArrived}
+
+  @impl true
+  def init, do: %{shipped: MapSet.new(), arrived: MapSet.new()}
+
+  @impl true
+  def apply(state, %WidgetShipped{sku: sku}) do
+    %{state | shipped: MapSet.put(state.shipped, sku)}
+  end
+
+  def apply(state, %WidgetArrived{sku: sku}) do
+    %{state | arrived: MapSet.put(state.arrived, sku)}
+  end
+
+  def apply(state, _), do: state
+
+  # Safety: a widget can only arrive once the probe has settled, and it can only
+  # arrive if it was shipped. This fires once per settled AwaitWidget probe.
+  @trigger every: Warehouse.Events.WidgetArrived
+  def assert_arrivals_were_shipped(state, %WidgetArrived{sku: sku}) do
+    unless MapSet.member?(state.shipped, sku) do
+      PropertyDamage.fail!("widget arrived without being shipped",
+        sku: sku,
+        shipped: state.shipped
+      )
+    end
+  end
+end
+
+defmodule Warehouse.Model do
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
+
+  alias Warehouse.Commands.{ShipWidget, AwaitWidget}
+  alias Warehouse.Events.{WidgetShipped, WidgetArrived}
+  alias Warehouse.State
+
+  @impl true
+  def commands do
+    [
+      {ShipWidget, weight: 2},
+      {AwaitWidget,
+       weight: 3,
+       when: fn state -> MapSet.size(state.shipped) > 0 end,
+       with: fn state ->
+         %{sku: StreamData.member_of(MapSet.to_list(state.shipped))}
+       end}
+    ]
+  end
+
+  @impl true
+  def command_sequence_projection, do: State
+
+  @impl true
+  def assertion_projections, do: [State]
+
+  # The simulator predicts events during sequence generation, so AwaitWidget
+  # (which needs a shipped sku to exist) becomes eligible to be generated.
+  @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%ShipWidget{sku: sku}, _state), do: [%WidgetShipped{sku: sku}]
+  def simulate(%AwaitWidget{sku: sku}, _state), do: [%WidgetArrived{sku: sku}]
+end
+
+result =
+  PropertyDamage.run(
+    model: Warehouse.Model,
+    adapter: Warehouse.Adapter,
+    max_commands: 6,
+    max_runs: 20,
+    seed: 1
+  )
+
+IO.inspect(result, label: "run result")
+```
+
+Running it prints a passing result whose `assertion_fires` count is the number of
+`AwaitWidget` probes that actually settled (your exact count varies with the seed
+and command mix):
+
+```
+run result: {:ok,
+ %{
+   seed: 1,
+   assertion_fires: %{{Warehouse.State, :arrivals_were_shipped} => 116},
+   runs: 20,
+   total_commands: 120
+ }}
+```
+
+Two details make this work, both expanded on below:
+
+- **`execution: :probe`** tells the executor to wrap `AwaitWidget` in retry/settle
+  logic: the adapter returns `{:retry, reason}` until the widget is visible, then
+  `{:ok, events}`. See [Probe Commands](#probe-commands).
+- **`simulator/0` + `simulate/2`** predict events during the symbolic generation
+  phase (no SUT calls happen there), so `AwaitWidget`'s `when:` sees a shipped sku
+  and the command is actually generated. Without a simulator the state-dependent
+  command would never appear in a sequence.
+
 ## Command Semantics
 
 Commands declare their behavior via the `:execution` key of `command_spec/1`:
