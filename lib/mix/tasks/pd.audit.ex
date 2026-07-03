@@ -104,7 +104,7 @@ defmodule Mix.Tasks.Pd.Audit do
     case PropertyDamage.audit(model, audit_opts) do
       :ok ->
         print_color(:green, "AUDIT PASSED: generation is a pure function of the seed\n")
-        :ok
+        audit_projection_purity(model, audit_opts)
 
       {:error, %{seed: seed, divergence: divergence}} ->
         print_divergence(seed, divergence)
@@ -116,6 +116,35 @@ defmodule Mix.Tasks.Pd.Audit do
       print_color(:red, "AUDIT FAILED\n")
       IO.puts(Exception.message(e))
       :error
+  end
+
+  # P8 / DR-040: after generation purity, check that projection apply/2 is a pure
+  # function of its inputs (folds each plan twice and compares). Returns :ok /
+  # :error so the task's exit status gates CI on either failure.
+  defp audit_projection_purity(model, audit_opts) do
+    case PropertyDamage.audit_projections(model, audit_opts) do
+      :ok ->
+        print_color(:green, "PROJECTION AUDIT PASSED: apply/2 is a pure function of its inputs\n")
+        :ok
+
+      {:error, %{seed: seed, modules: modules}} ->
+        IO.puts("")
+        print_color(:red, "PROJECTION AUDIT FAILED at seed #{seed}\n")
+
+        IO.puts(
+          "These projections folded to different state on a second pass (non-pure apply/2):"
+        )
+
+        Enum.each(modules, fn module -> IO.puts("  - #{inspect(module)}") end)
+
+        print_hint(
+          "A projection's apply/2 must depend only on (state, event). Move any clock, " <>
+            "counter, or environment read behind an execution-time seam. See " <>
+            "guides/deterministic_generation.md."
+        )
+
+        :error
+    end
   end
 
   # Translate flat CLI flags into the keyword shape PropertyDamage.audit/2 wants.
