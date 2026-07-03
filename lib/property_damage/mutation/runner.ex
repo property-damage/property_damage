@@ -87,11 +87,15 @@ defmodule PropertyDamage.Mutation.Runner do
   # ============================================================================
 
   defp get_command_types(model) do
+    # Use the canonical normalizer so every command-spec shape ({module, opts},
+    # {module, weight}, bare module, map form) resolves to its module. The prior
+    # ad-hoc `{_weight, cmd}` match destructured the standard `{module, opts}`
+    # spec backwards, yielding the opts keyword list as the "command"; that
+    # invalid target then crashed the MutatingAdapter and every mutant was
+    # spuriously reported killed regardless of the model's invariants.
     model.commands()
-    |> Enum.map(fn
-      {_weight, cmd} -> cmd
-      cmd when is_atom(cmd) -> cmd
-    end)
+    |> PropertyDamage.Model.normalize_commands()
+    |> Enum.map(fn {_weight, module, _spec} -> module end)
     |> Enum.uniq()
   end
 
@@ -117,60 +121,31 @@ defmodule PropertyDamage.Mutation.Runner do
 
   defp get_sample_events(command, config) do
     # Run a single test to get sample events for this command type.
-    # This gives us realistic events to mutate; both passing and failing
-    # baseline runs yield events.
+    # This gives us realistic events to mutate.
     run_baseline_test(command, config)
   end
 
   defp run_baseline_test(_command, config) do
-    # Run PropertyDamage with the real adapter to collect events
-    result =
-      PropertyDamage.run(
+    # Harvest realistic events to mutate by capturing a full run trace (DR-033).
+    # The trace carries the complete event log regardless of outcome, so sample
+    # events are available for the normal case of mutation testing: a model
+    # whose suite PASSES. PropertyDamage.run's lean success result carries no
+    # event log, so relying on it yielded zero events (and thus zero mutations)
+    # for any passing model.
+    trace =
+      PropertyDamage.RunTrace.capture(
         model: config.model,
         adapter: config.adapter,
         adapter_config: config.adapter_config,
-        max_runs: 1,
+        seed: :erlang.unique_integer([:positive]),
         max_commands: 10
       )
 
-    case result do
-      {:ok, run_result} ->
-        extract_events_from_result(run_result)
-
-      {:error, failure} ->
-        # Even a failing run gives us events
-        extract_events_from_failure(failure)
-    end
-  end
-
-  defp extract_events_from_result(result) do
-    # Extract events from a successful run result
-    case result do
-      %{event_log: log} when is_list(log) ->
-        Enum.flat_map(log, fn entry ->
-          case entry do
-            %{event: event} -> [event]
-            _ -> []
-          end
-        end)
-
-      _ ->
-        []
-    end
-  end
-
-  defp extract_events_from_failure(%PropertyDamage.FailureReport{} = failure) do
-    # The event log lives on the embedded trace now (DR-033); reach it through
-    # the accessor rather than a struct-field match.
-    failure
-    |> PropertyDamage.FailureReport.event_log()
-    |> Enum.flat_map(fn
+    Enum.flat_map(trace.event_log, fn
       %{event: event} -> [event]
       _ -> []
     end)
   end
-
-  defp extract_events_from_failure(_), do: []
 
   defp generate_mutations_for_command(operator, events, config) do
     if events == [] do
