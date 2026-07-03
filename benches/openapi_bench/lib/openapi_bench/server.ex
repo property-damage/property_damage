@@ -25,20 +25,22 @@ defmodule OpenapiBench.Server do
   def base_url, do: Application.fetch_env!(:openapi_bench, :base_url)
 
   @doc """
-  Reset the SUT to an empty store and set its `bug` flag, for per-sequence
-  isolation. In-process this pokes the Agent directly; against an external URL
-  it calls the `POST /__reset__` admin endpoint over HTTP.
+  Reset the SUT to empty and set its seeded-bug flags, for per-sequence
+  isolation. `bug` seeds the dropped-write bug; `idempotency_bug` seeds the
+  ignored-Idempotency-Key double-create bug. In-process this pokes the Agent
+  directly; against an external URL it calls the `POST /__reset__` admin
+  endpoint over HTTP.
   """
-  def reset(bug) do
+  def reset(bug, idempotency_bug \\ false) do
     if url = external_url() do
       Application.ensure_all_started(:inets)
-      body = Jason.encode!(%{bug: bug})
+      body = Jason.encode!(%{bug: bug, idempotency_bug: idempotency_bug})
       headers = [{~c"content-type", ~c"application/json"}]
       target = String.to_charlist(url <> "/__reset__")
       {:ok, _} = :httpc.request(:post, {target, headers, ~c"application/json", body}, [], [])
       :ok
     else
-      OpenapiBench.Store.reset(bug)
+      OpenapiBench.Store.reset(bug, idempotency_bug)
     end
   end
 

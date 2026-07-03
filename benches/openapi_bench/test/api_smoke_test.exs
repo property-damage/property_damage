@@ -46,4 +46,44 @@ defmodule OpenapiBench.ApiSmokeTest do
 
     assert {404, %{"error" => "not_found"}} = HttpClient.request(:get, base <> "/kv/0")
   end
+
+  test "POST /values mints ids and dedupes on the Idempotency-Key" do
+    base = Server.base_url()
+
+    assert {201, %{"id" => id1, "value" => 10}} =
+             HttpClient.request(:post, base <> "/values", %{value: 10}, [
+               {~c"idempotency-key", ~c"k-a"}
+             ])
+
+    # A distinct key mints a new id.
+    assert {201, %{"id" => id2}} =
+             HttpClient.request(:post, base <> "/values", %{value: 20}, [
+               {~c"idempotency-key", ~c"k-b"}
+             ])
+
+    assert id2 != id1
+
+    # Repeating the first key returns the original id and value (retry-safe).
+    assert {201, %{"id" => ^id1, "value" => 10}} =
+             HttpClient.request(:post, base <> "/values", %{value: 999}, [
+               {~c"idempotency-key", ~c"k-a"}
+             ])
+  end
+
+  test "with idempotency_bug set, POST /values ignores the key and double-creates" do
+    base = Server.base_url()
+    {200, _} = HttpClient.request(:post, base <> "/__reset__", %{idempotency_bug: true})
+
+    assert {201, %{"id" => id1}} =
+             HttpClient.request(:post, base <> "/values", %{value: 5}, [
+               {~c"idempotency-key", ~c"same"}
+             ])
+
+    assert {201, %{"id" => id2}} =
+             HttpClient.request(:post, base <> "/values", %{value: 5}, [
+               {~c"idempotency-key", ~c"same"}
+             ])
+
+    assert id2 != id1, "the bug SUT must mint a new id even for a repeated key"
+  end
 end
