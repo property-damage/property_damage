@@ -86,6 +86,7 @@ defmodule MyApp.RegressionTest do
 
   alias PropertyDamage
   alias PropertyDamage.Placeholder
+  alias PropertyDamage.Sequence.Position
   alias MyApp.TestAdapter
   alias MyApp.WebhookInjectorAdapter
   alias MyApp.Commands.{CreatePayment, ConfirmPayment}
@@ -97,7 +98,7 @@ defmodule MyApp.RegressionTest do
       # `external()` (server-generated). Build a placeholder for that producer
       # (command 0, its first event) and reuse it downstream; execute/3 captures
       # the real value and resolves it.
-      payment_id = Placeholder.new_at(PaymentCreated, [:payment_id], {:prefix, 0}, 0)
+      payment_id = Placeholder.new_at(PaymentCreated, [:payment_id], Position.prefix(0), 0)
 
       commands = [
         %CreatePayment{amount: 1000, currency: "USD"},
