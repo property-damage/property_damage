@@ -709,9 +709,10 @@ defmodule PropertyDamage.ExportTest do
 
     defp golden_path(name), do: Path.join(@golden_dir, name)
 
-    # The reproduce filename embeds a hash of the report, and DR-021 reports
-    # carry a Placeholder whose id is make_ref/0, so that hash is non-deterministic
-    # across runs. Neutralize it so the golden captures everything else verbatim.
+    # The reproduce filename embeds a hash of the report. Post-DR-036 the
+    # Placeholder id is a deterministic function of coordinates, so the hash is
+    # now stable, but we still neutralize it (belt and braces) so an unrelated
+    # hash-input change can't silently drift every golden at once.
     defp normalize(output) do
       Regex.replace(~r/(reproduce_\d+_)[0-9a-f]+/, output, "\\1HASH")
     end
