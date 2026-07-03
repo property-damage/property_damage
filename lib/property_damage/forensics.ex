@@ -417,11 +417,6 @@ defmodule PropertyDamage.Forensics do
     "Assertion '#{assertion_name}' failed: #{inspect(reason)}"
   end
 
-  # Legacy support
-  defp format_failure_reason({:check_failed, check_name, reason}) do
-    "Assertion '#{check_name}' failed: #{inspect(reason)}"
-  end
-
   defp format_failure_reason(other), do: inspect(other)
 
   defp format_event_history(events) do
@@ -503,6 +498,5 @@ defmodule PropertyDamage.Forensics do
   defp event_to_code(event), do: inspect(event)
 
   defp format_check_name({:assertion_failed, name, _}), do: "#{name} failure"
-  defp format_check_name({:check_failed, name, _}), do: "#{name} failure"
   defp format_check_name(_), do: "unknown failure"
 end
