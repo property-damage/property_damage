@@ -1,5 +1,14 @@
 # Dual-Transport Testing
 
+> #### Builds on Differential Testing {: .info}
+>
+> This guide is the applied half of [Differential Testing](differential_testing.md):
+> it takes the `PropertyDamage.Differential.run/1` oracle from that guide and points
+> it at *two transports of one system* instead of two independent implementations.
+> Read [Differential Testing](differential_testing.md) first for the `run/1` API,
+> equivalence strategies, and `external()` capture. Everything here still reads
+> standalone, but the API details live there.
+
 Many systems expose the same operations through more than one transport: a REST
 API *and* a web UI, a gRPC service *and* a CLI, a v1 *and* a v2 endpoint. They are
 supposed to behave identically, but they drift: a form validates a field the API
@@ -12,9 +21,6 @@ the transports agree. This guide shows the pattern and the decisions that make i
 honest, using [Gitea](https://about.gitea.com) (a git forge with a REST API and an
 equivalent web UI) as the running example. A complete, runnable version lives in
 `benches/gitea_bench/`.
-
-This guide builds on [Differential Testing](differential_testing.md); read that
-first for the `PropertyDamage.Differential.run/1` API.
 
 ## The shape
 

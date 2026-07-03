@@ -228,7 +228,7 @@ Runner.start_link(
 )
 ```
 
-### 4. Reduce Command Latency
+### 3. Reduce Command Latency
 
 Faster commands mean workers become available sooner:
 
@@ -236,7 +236,7 @@ Faster commands mean workers become available sooner:
 - **Connection pooling**: Reuse HTTP connections in your adapter
 - **Reduce polling**: If commands poll for async results, reduce intervals
 
-### 5. Check Sequence Length
+### 4. Check Sequence Length
 
 If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
 ~1 command. Check your model's `terminate?/3` implementation:

@@ -98,6 +98,9 @@ end
 Note: The `user_id` is **not** in the command - it's server-generated and marked
 with `external()` in the `UserCreated` event struct.
 
+> The `UpdateUser` and `DeleteUser` commands (referenced by the model and adapter
+> below) follow the same pattern and are left as an exercise.
+
 ### Key Command Surface
 
 - **`generator/1`** - Generate command field values (returns `StreamData` of maps)
@@ -236,7 +239,8 @@ defmodule MyApp.TestAdapter do
     end
   end
 
-  # ... implement execute for other commands
+  # execute/3 clauses for UpdateUser and DeleteUser are left as an exercise;
+  # they follow the same shape as the CreateUser clause above.
 end
 ```
 
@@ -352,7 +356,7 @@ Run 42/100: 31 commands, FAILED!
 Shrinking...
 Minimal failing sequence (3 commands):
   [0] CreateUser{email: "test@example.com", name: "Alice"}
-      => user_ref: "user_123"
+      => user_id: "user_123"
   [1] CreateUser{email: "test@example.com", name: "Bob"}
       => FAILED: duplicate email
 

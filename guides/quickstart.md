@@ -139,25 +139,28 @@ PropertyDamage.run(
 )
 ```
 
-## Ref Flow
+## Placeholder Flow
 
-Refs are symbolic placeholders for server-generated IDs. They are created during
-generation and resolved during execution.
+Server-generated IDs are modeled with placeholders: stand-in values created
+during generation and resolved to real values during execution.
 
 ```
 Generation (symbolic phase):
-  CreateAccount{name: "alice"}  ->  AccountCreated{id: #Ref<0>, name: "alice"}
-  GetBalance{account: #Ref<0>}  (references the account created above)
+  CreateAccount{name: "alice"}  ->  AccountCreated{id: <Placeholder:id@pre0/evt0>, name: "alice"}
+  GetBalance{account: <Placeholder:id@pre0/evt0>}  (references the account created above)
 
 Execution (concrete phase):
   CreateAccount{name: "alice"}  ->  AccountCreated{id: "acc_123", name: "alice"}
-  GetBalance{account: "acc_123"} (ref resolved to real value)
+  GetBalance{account: "acc_123"} (placeholder resolved to real value)
 ```
 
 Fields marked with `external()` in event structs are automatically detected.
-During generation, the framework assigns a symbolic `#Ref<N>`. During execution,
-the real value from the SUT replaces the ref wherever it appears in subsequent
-commands.
+During generation, the framework mints a placeholder (rendered as
+`<Placeholder:field@position/evtN>`). During execution, the real value from the
+SUT replaces the placeholder wherever it appears in subsequent commands. You work
+with concrete values in your projections and generators; placeholders only surface
+in generated/inspected sequences. See [Writing Commands](writing_commands.md) for
+the full `external()` lifecycle.
 
 ## IEx Helpers
 
