@@ -249,6 +249,25 @@ shared SUT:
   )
 ```
 
+To sweep a whole corpus of seeds instead of one suspect, `RunComparison.scan/1`
+runs each seed N times and returns a per-seed `%RunComparison.Verdict{}` map. It
+keeps memory bounded by discarding a seed's traces before the next, retaining the
+full comparison only for the flaky ones:
+
+```elixir
+verdicts =
+  RunComparison.scan(
+    seeds: Enum.to_list(1..100),
+    runs: 5,
+    capture: [model: MyModel, adapter: MyAdapter]
+  )
+
+for {seed, v} <- verdicts, v.flaky? do
+  IO.puts("seed #{seed}: #{v.partition.passing} passed / #{v.partition.failing} failed")
+  # v.comparison is the ranked divergence for this flaky seed (nil when consistent).
+end
+```
+
 Render any comparison as a single self-contained HTML report (inline CSS/JS, no
 external hosts) for sharing:
 
@@ -458,22 +477,29 @@ IO.puts("#{original_len} -> #{shrunk_len} commands")
 
 ## Flakiness Detection
 
-If a failure doesn't reproduce consistently:
+If a failure doesn't reproduce consistently, run the plan many times and let run
+comparison tell you *whether* the seed is flaky and *where* the passing and
+failing runs diverge (see [Comparing Runs](#comparing-runs) above):
 
 ```elixir
-# check_determinism re-runs the seed and returns
-# {:ok, :deterministic} | {:ok, :flaky, stats} | {:error, reason}
-case PropertyDamage.check_determinism(MyModel, MyAdapter, failure.seed, runs: 10) do
-  {:ok, :deterministic} ->
-    IO.puts("Reproduces deterministically")
+{_traces, comparison} =
+  PropertyDamage.RunComparison.investigate(
+    runs: 10,
+    capture: [model: MyModel, adapter: MyAdapter, seed: failure.seed]
+  )
 
-  {:ok, :flaky, stats} ->
-    IO.puts("Flaky! #{inspect(stats)}")
+summary = PropertyDamage.RunComparison.outcome_summary(comparison)
 
-  {:error, reason} ->
-    IO.puts("Could not check: #{inspect(reason)}")
+if summary.passing > 0 and summary.failing > 0 do
+  IO.puts("Flaky: #{summary.passing} passed / #{summary.failing} failed")
+  IO.inspect(comparison.ranking, label: "most discriminating fields")
+else
+  IO.puts("Reproduces consistently (#{summary.failing}/#{comparison.traces |> length} failed)")
 end
 ```
+
+To sweep many seeds at once, use `PropertyDamage.RunComparison.scan/1` (per-seed
+verdicts, bounded memory).
 
 ## Common Issues
 

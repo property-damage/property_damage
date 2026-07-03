@@ -960,114 +960,6 @@ defmodule PropertyDamage.Options do
   end
 
   # ============================================================================
-  # PropertyDamage.Flakiness Schemas
-  # ============================================================================
-
-  @flakiness_check_schema_definition [
-    runs: [
-      type: :pos_integer,
-      default: 5,
-      doc: "Number of times to replay the seed."
-    ],
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Configuration passed to `adapter.setup/1`."
-    ],
-    max_commands: [
-      type: :pos_integer,
-      default: 50,
-      doc: "Max commands per run."
-    ],
-    verbose: [
-      type: :boolean,
-      default: false,
-      doc: "Print progress."
-    ]
-  ]
-
-  @flakiness_check_schema NimbleOptions.new!(@flakiness_check_schema_definition)
-
-  @doc """
-  Validates options for `PropertyDamage.Flakiness.check/4`.
-  """
-  @spec validate_flakiness_check!(keyword()) :: keyword()
-  def validate_flakiness_check!(opts) do
-    NimbleOptions.validate!(opts, @flakiness_check_schema)
-  end
-
-  @flakiness_check_batch_schema_definition [
-    runs_per_seed: [
-      type: :pos_integer,
-      default: 5,
-      doc: "Runs per seed."
-    ],
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Configuration passed to `adapter.setup/1`."
-    ],
-    max_commands: [
-      type: :pos_integer,
-      default: 50,
-      doc: "Max commands per run."
-    ],
-    verbose: [
-      type: :boolean,
-      default: false,
-      doc: "Print progress."
-    ]
-  ]
-
-  @flakiness_check_batch_schema NimbleOptions.new!(@flakiness_check_batch_schema_definition)
-
-  @doc """
-  Validates options for `PropertyDamage.Flakiness.check_batch/4`.
-  """
-  @spec validate_flakiness_check_batch!(keyword()) :: keyword()
-  def validate_flakiness_check_batch!(opts) do
-    NimbleOptions.validate!(opts, @flakiness_check_batch_schema)
-  end
-
-  @flakiness_discover_flaky_schema_definition [
-    num_seeds: [
-      type: :pos_integer,
-      default: 10,
-      doc: "Number of random seeds to test."
-    ],
-    runs_per_seed: [
-      type: :pos_integer,
-      default: 3,
-      doc: "Runs per seed."
-    ],
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Configuration passed to `adapter.setup/1`."
-    ],
-    max_commands: [
-      type: :pos_integer,
-      default: 50,
-      doc: "Max commands per run."
-    ],
-    verbose: [
-      type: :boolean,
-      default: false,
-      doc: "Print progress."
-    ]
-  ]
-
-  @flakiness_discover_flaky_schema NimbleOptions.new!(@flakiness_discover_flaky_schema_definition)
-
-  @doc """
-  Validates options for `PropertyDamage.Flakiness.discover_flaky/3`.
-  """
-  @spec validate_flakiness_discover_flaky!(keyword()) :: keyword()
-  def validate_flakiness_discover_flaky!(opts) do
-    NimbleOptions.validate!(opts, @flakiness_discover_flaky_schema)
-  end
-
-  # ============================================================================
   # PropertyDamage.Audit.run/2 Schema (DR-037)
   # ============================================================================
 
@@ -1154,6 +1046,42 @@ defmodule PropertyDamage.Options do
   @spec validate_run_comparison_investigate!(keyword()) :: keyword()
   def validate_run_comparison_investigate!(opts) do
     NimbleOptions.validate!(opts, @run_comparison_investigate_schema)
+  end
+
+  @run_comparison_scan_schema_definition [
+    seeds: [
+      type: {:list, :integer},
+      required: true,
+      doc: "The seeds to scan."
+    ],
+    runs: [
+      type: :pos_integer,
+      default: 5,
+      doc: "Number of captures per seed."
+    ],
+    event_identity: [
+      type: {:fun, 1},
+      doc: "`(event -> term())` forwarded to `compare/2`."
+    ],
+    capture: [
+      type: :keyword_list,
+      required: true,
+      doc: """
+      Options forwarded to `PropertyDamage.RunTrace.capture/1` (requires
+      `:model` and `:adapter`; `:seed` is supplied per scanned seed). A fresh
+      `:run_nonce` is injected per capture.
+      """
+    ]
+  ]
+
+  @run_comparison_scan_schema NimbleOptions.new!(@run_comparison_scan_schema_definition)
+
+  @doc """
+  Validates options for `PropertyDamage.RunComparison.scan/1`.
+  """
+  @spec validate_run_comparison_scan!(keyword()) :: keyword()
+  def validate_run_comparison_scan!(opts) do
+    NimbleOptions.validate!(opts, @run_comparison_scan_schema)
   end
 
   # ============================================================================
