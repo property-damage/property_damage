@@ -11,6 +11,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
   #   remapped through shrinking), never resolved against a stale generation key.
 
   alias PropertyDamage.External
+  alias PropertyDamage.Mint
   alias PropertyDamage.Placeholder
 
   @typedoc """
@@ -141,12 +142,13 @@ defmodule PropertyDamage.PlaceholderRegistry do
       # After placeholders are resolved in the registry:
       resolved_event = PlaceholderRegistry.deep_resolve(registry, event_with_placeholders)
   """
-  @spec deep_resolve(t(), term()) :: term()
-  def deep_resolve(%__MODULE__{} = reg, data) do
-    do_deep_resolve(reg, data)
+  @spec deep_resolve(t(), term(), {non_neg_integer() | nil, non_neg_integer()}) :: term()
+  def deep_resolve(%__MODULE__{} = reg, data, mint \\ {nil, 0}) do
+    {run_nonce, mint_epoch} = mint
+    do_deep_resolve({reg, run_nonce, mint_epoch}, data)
   end
 
-  defp do_deep_resolve(reg, %Placeholder{id: id}) do
+  defp do_deep_resolve({reg, _nonce, _epoch}, %Placeholder{id: id}) do
     case Map.get(reg.placeholders, id) do
       nil ->
         raise ArgumentError, "Unknown placeholder ID: #{inspect(id)}"
@@ -161,31 +163,38 @@ defmodule PropertyDamage.PlaceholderRegistry do
     end
   end
 
-  defp do_deep_resolve(reg, %{__struct__: mod} = struct) do
+  # Client-minted run-scoped value (DR-034), for the Differential/LoadTest
+  # resolution engine: a pure function of the caller's (nonce, epoch) and the
+  # marker's baked coordinates.
+  defp do_deep_resolve({_reg, run_nonce, mint_epoch}, %Mint{} = marker) do
+    Mint.resolve(marker, run_nonce, mint_epoch)
+  end
+
+  defp do_deep_resolve(ctx, %{__struct__: mod} = struct) do
     struct
     |> Map.from_struct()
-    |> Enum.map(fn {k, v} -> {k, do_deep_resolve(reg, v)} end)
+    |> Enum.map(fn {k, v} -> {k, do_deep_resolve(ctx, v)} end)
     |> then(&struct!(mod, &1))
   end
 
-  defp do_deep_resolve(reg, map) when is_map(map) do
+  defp do_deep_resolve(ctx, map) when is_map(map) do
     Map.new(map, fn {k, v} ->
-      {do_deep_resolve(reg, k), do_deep_resolve(reg, v)}
+      {do_deep_resolve(ctx, k), do_deep_resolve(ctx, v)}
     end)
   end
 
-  defp do_deep_resolve(reg, list) when is_list(list) do
-    Enum.map(list, &do_deep_resolve(reg, &1))
+  defp do_deep_resolve(ctx, list) when is_list(list) do
+    Enum.map(list, &do_deep_resolve(ctx, &1))
   end
 
-  defp do_deep_resolve(reg, tuple) when is_tuple(tuple) do
+  defp do_deep_resolve(ctx, tuple) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list()
-    |> Enum.map(&do_deep_resolve(reg, &1))
+    |> Enum.map(&do_deep_resolve(ctx, &1))
     |> List.to_tuple()
   end
 
-  defp do_deep_resolve(_reg, value), do: value
+  defp do_deep_resolve(_ctx, value), do: value
 
   @doc """
   Deep-resolve like `deep_resolve/2`, but return `{:ok, resolved}` or
@@ -195,9 +204,10 @@ defmodule PropertyDamage.PlaceholderRegistry do
   producer command that errored before capturing its external) into a graceful
   error result rather than crashing the run.
   """
-  @spec resolve_data(t(), term()) :: {:ok, term()} | {:error, String.t()}
-  def resolve_data(%__MODULE__{} = reg, data) do
-    {:ok, deep_resolve(reg, data)}
+  @spec resolve_data(t(), term(), {non_neg_integer() | nil, non_neg_integer()}) ::
+          {:ok, term()} | {:error, String.t()}
+  def resolve_data(%__MODULE__{} = reg, data, mint \\ {nil, 0}) do
+    {:ok, deep_resolve(reg, data, mint)}
   rescue
     e in ArgumentError -> {:error, Exception.message(e)}
   end

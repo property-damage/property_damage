@@ -33,7 +33,8 @@ defmodule PropertyDamage.Executor.Branching do
         mock_registry,
         assertion_mode,
         external_markers,
-        rng_seed \\ nil
+        rng_seed \\ nil,
+        mint \\ {nil, 0}
       ) do
     initial_state =
       Executor.build_initial_state(
@@ -44,7 +45,8 @@ defmodule PropertyDamage.Executor.Branching do
         assertion_mode,
         external_markers,
         sequence.registry,
-        rng_seed
+        rng_seed,
+        mint
       )
 
     # DR-024: @trigger at: :startup runs once on the shared initial state,

@@ -17,6 +17,10 @@ defmodule PropertyDamage.LoadTest.Worker do
     :metrics,
     :think_time_range,
     :assertion_mode,
+    # Run nonce for client-minted run-scoped values (DR-034); nil until the
+    # load-test harness threads one through. Each worker uses its worker_id as
+    # the mint_epoch, so workers send distinct minted values regardless.
+    :run_nonce,
     # Stats
     :sequences_executed,
     :commands_executed,
@@ -308,7 +312,12 @@ defmodule PropertyDamage.LoadTest.Worker do
   end
 
   defp execute_single_command(command, state, registry, index) do
-    case PlaceholderRegistry.resolve_data(registry, command) do
+    # Each worker is a separate execution, so it derives a distinct mint_epoch
+    # (its worker_id) from the run nonce (DR-034): workers send distinct
+    # client-minted values rather than colliding on the shared SUT.
+    mint = {state.run_nonce, state.worker_id}
+
+    case PlaceholderRegistry.resolve_data(registry, command, mint) do
       {:ok, resolved_command} ->
         # Get timeout from adapter
         timeout_ms = Timeout.normalize_timeout(state.adapter.timeout(resolved_command))

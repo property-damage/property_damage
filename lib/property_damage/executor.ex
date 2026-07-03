@@ -77,6 +77,7 @@ defmodule PropertyDamage.Executor do
 
   alias PropertyDamage.{
     EventQueue,
+    Mint,
     MockServiceRegistry,
     Nemesis,
     Placeholder,
@@ -162,6 +163,9 @@ defmodule PropertyDamage.Executor do
     assertion_mode = Keyword.get(opts, :assertion_mode, :halt)
     external_markers = Keyword.get(opts, :external_markers, [])
     rng_seed = Keyword.get(opts, :rng_seed)
+    # Client-minted run-scoped value inputs (DR-034): the run nonce and the
+    # mint epoch for this SUT execution (default epoch 0 = the recorded run).
+    mint = {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
 
     with {:ok, adapter_context} <- adapter.setup(adapter_config) do
       try do
@@ -176,7 +180,8 @@ defmodule PropertyDamage.Executor do
             mock_registry,
             assertion_mode,
             external_markers,
-            rng_seed
+            rng_seed,
+            mint
           )
 
         {:ok, result}
@@ -241,7 +246,8 @@ defmodule PropertyDamage.Executor do
           pid() | nil,
           assertion_mode(),
           [atom()],
-          integer() | nil
+          integer() | nil,
+          {non_neg_integer() | nil, non_neg_integer()}
         ) ::
           result()
   def execute_sequence(
@@ -254,7 +260,8 @@ defmodule PropertyDamage.Executor do
         mock_registry \\ nil,
         assertion_mode \\ :halt,
         external_markers \\ [],
-        rng_seed \\ nil
+        rng_seed \\ nil,
+        mint \\ {nil, 0}
       )
 
   def execute_sequence(
@@ -267,7 +274,8 @@ defmodule PropertyDamage.Executor do
         mock_registry,
         assertion_mode,
         external_markers,
-        rng_seed
+        rng_seed,
+        mint
       ) do
     # Linear sequence: just execute prefix ++ suffix
     commands = Sequence.to_list(sequence)
@@ -283,7 +291,8 @@ defmodule PropertyDamage.Executor do
       assertion_mode,
       external_markers,
       sequence.registry,
-      rng_seed
+      rng_seed,
+      mint
     )
   end
 
@@ -297,7 +306,8 @@ defmodule PropertyDamage.Executor do
         mock_registry,
         assertion_mode,
         external_markers,
-        rng_seed
+        rng_seed,
+        mint
       ) do
     # Branching sequence: execute prefix, branches, suffix
     Branching.execute_branching(
@@ -310,7 +320,8 @@ defmodule PropertyDamage.Executor do
       mock_registry,
       assertion_mode,
       external_markers,
-      rng_seed
+      rng_seed,
+      mint
     )
   end
 
@@ -325,7 +336,8 @@ defmodule PropertyDamage.Executor do
         mock_registry,
         assertion_mode,
         external_markers,
-        rng_seed
+        rng_seed,
+        mint
       )
       when is_list(commands) do
     execute_linear(
@@ -339,7 +351,8 @@ defmodule PropertyDamage.Executor do
       assertion_mode,
       external_markers,
       nil,
-      rng_seed
+      rng_seed,
+      mint
     )
   end
 
@@ -358,7 +371,8 @@ defmodule PropertyDamage.Executor do
          assertion_mode,
          external_markers,
          registry,
-         rng_seed
+         rng_seed,
+         mint
        ) do
     initial_state =
       build_initial_state(
@@ -369,7 +383,8 @@ defmodule PropertyDamage.Executor do
         assertion_mode,
         external_markers,
         registry,
-        rng_seed
+        rng_seed,
+        mint
       )
 
     # DR-024: @trigger at: :startup checks run on the initial init/0 state,
@@ -488,8 +503,11 @@ defmodule PropertyDamage.Executor do
         assertion_mode,
         external_markers,
         registry,
-        rng_seed \\ nil
+        rng_seed \\ nil,
+        mint \\ {nil, 0}
       ) do
+    {run_nonce, mint_epoch} = mint
+
     %State{
       event_log: [],
       projections: init_projections(model),
@@ -497,6 +515,10 @@ defmodule PropertyDamage.Executor do
       # Explicit stutter RNG base (DR-029); the per-command generator is derived
       # from {rng_seed, index} in PropertyDamage.Executor.Stutter.
       rng_seed: rng_seed,
+      # Client-minted run-scoped value inputs (DR-034); consulted only when a
+      # command carries a mint_per_run marker.
+      run_nonce: run_nonce,
+      mint_epoch: mint_epoch,
       # Seed the placeholder registry from the generated sequence (DR-021); the
       # id-indexed registry + producer_link transport from generation to here.
       placeholder_registry: registry || PlaceholderRegistry.new(),
@@ -581,8 +603,12 @@ defmodule PropertyDamage.Executor do
     # Get placeholder_registry from state (may not exist in older tests)
     placeholder_registry = Map.get(state, :placeholder_registry, PlaceholderRegistry.new())
 
-    # 1. Resolve placeholders in command
-    case resolve_command_placeholders(command, placeholder_registry) do
+    # 1. Resolve placeholders and mint markers in the command (DR-021/DR-034).
+    case resolve_command_placeholders(
+           command,
+           placeholder_registry,
+           {state.run_nonce, state.mint_epoch}
+         ) do
       {:ok, resolved_command} ->
         # 2. Per-command injection/poller sink (DR-027), opened via the shared
         # Runtime.InjectionWindow so the sink lifecycle lives in one place (the
@@ -1822,8 +1848,10 @@ defmodule PropertyDamage.Executor do
   # Resolve placeholders in a command before execution.
   # Shared with PropertyDamage.Executor.Nemesis (nemesis placeholder resolution). DR-029.
   @doc false
-  def resolve_command_placeholders(command, registry) do
-    resolved = deep_resolve_placeholders(command, registry)
+  def resolve_command_placeholders(command, registry, mint \\ {nil, 0}) do
+    {run_nonce, mint_epoch} = mint
+    ctx = {registry, run_nonce, mint_epoch}
+    resolved = deep_resolve_placeholders(command, ctx)
     {:ok, resolved}
   rescue
     e in ArgumentError ->
@@ -1831,7 +1859,7 @@ defmodule PropertyDamage.Executor do
       {:error, {e.message, stacktrace}}
   end
 
-  defp deep_resolve_placeholders(%Placeholder{} = p, registry) do
+  defp deep_resolve_placeholders(%Placeholder{} = p, {registry, _nonce, _epoch}) do
     case PlaceholderRegistry.get(registry, p.id) do
       nil ->
         raise ArgumentError, "Unknown placeholder: #{inspect(p)}"
@@ -1846,32 +1874,38 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  defp deep_resolve_placeholders(%{__struct__: mod} = struct, registry) do
+  # Client-minted run-scoped value (DR-034): a pure function of the run's
+  # (nonce, epoch) and the marker's baked coordinates.
+  defp deep_resolve_placeholders(%Mint{} = marker, {_registry, run_nonce, mint_epoch}) do
+    Mint.resolve(marker, run_nonce, mint_epoch)
+  end
+
+  defp deep_resolve_placeholders(%{__struct__: mod} = struct, ctx) do
     struct
     |> Map.from_struct()
-    |> Enum.map(fn {k, v} -> {k, deep_resolve_placeholders(v, registry)} end)
+    |> Enum.map(fn {k, v} -> {k, deep_resolve_placeholders(v, ctx)} end)
     |> Map.new()
     |> then(&struct(mod, &1))
   end
 
-  defp deep_resolve_placeholders(map, registry) when is_map(map) do
+  defp deep_resolve_placeholders(map, ctx) when is_map(map) do
     Map.new(map, fn {k, v} ->
-      {deep_resolve_placeholders(k, registry), deep_resolve_placeholders(v, registry)}
+      {deep_resolve_placeholders(k, ctx), deep_resolve_placeholders(v, ctx)}
     end)
   end
 
-  defp deep_resolve_placeholders(list, registry) when is_list(list) do
-    Enum.map(list, &deep_resolve_placeholders(&1, registry))
+  defp deep_resolve_placeholders(list, ctx) when is_list(list) do
+    Enum.map(list, &deep_resolve_placeholders(&1, ctx))
   end
 
-  defp deep_resolve_placeholders(tuple, registry) when is_tuple(tuple) do
+  defp deep_resolve_placeholders(tuple, ctx) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list()
-    |> Enum.map(&deep_resolve_placeholders(&1, registry))
+    |> Enum.map(&deep_resolve_placeholders(&1, ctx))
     |> List.to_tuple()
   end
 
-  defp deep_resolve_placeholders(other, _registry), do: other
+  defp deep_resolve_placeholders(other, _ctx), do: other
 
   # Capture real external values from a command's events into the registry
   # (DR-021). The command's structured `position` selects the placeholders it

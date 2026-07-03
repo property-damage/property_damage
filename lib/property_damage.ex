@@ -302,7 +302,17 @@ defmodule PropertyDamage do
     adapter = opts[:adapter]
     max_commands = opts[:max_commands]
     max_runs = opts[:max_runs]
-    seed = opts[:seed] || :rand.uniform(1_000_000_000)
+    # Resolution order (DR-034): explicit option, else environment variable
+    # (mix test cannot forward custom flags), else a random default.
+    seed = opts[:seed] || env_int("PD_SEED") || :rand.uniform(1_000_000_000)
+
+    # The run nonce seeds ONLY client-minted run-scoped values (mint_per_run).
+    # Its random default is drawn from crypto entropy, NEVER the process RNG:
+    # ExUnit pins :rand under `--seed N`, which would re-mint colliding values.
+    run_nonce =
+      opts[:run_nonce] || env_int("PD_RUN_NONCE") ||
+        :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
+
     injector_adapters = opts[:injector_adapters]
     adapter_config = opts[:adapter_config]
     shrink = opts[:shrink]
@@ -384,6 +394,7 @@ defmodule PropertyDamage do
               max_commands,
               max_runs,
               seed,
+              run_nonce,
               injector_adapters,
               adapter_config,
               shrink,
@@ -439,6 +450,7 @@ defmodule PropertyDamage do
          max_commands,
          max_runs,
          seed,
+         run_nonce,
          injector_adapters,
          adapter_config,
          shrink,
@@ -481,7 +493,8 @@ defmodule PropertyDamage do
       shrinker_config: shrinker_config,
       on_failure: on_failure,
       reporter: reporter,
-      stutter_config: stutter_config
+      stutter_config: stutter_config,
+      run_nonce: run_nonce
     }
 
     case replay_phase(seed_library, replay_ctx) do
@@ -504,6 +517,7 @@ defmodule PropertyDamage do
           adapter,
           max_runs,
           seed,
+          run_nonce,
           injector_adapters,
           adapter_config,
           shrink,
@@ -524,6 +538,7 @@ defmodule PropertyDamage do
          _adapter,
          max_runs,
          seed,
+         _run_nonce,
          _injector_adapters,
          _adapter_config,
          _shrink,
@@ -559,6 +574,7 @@ defmodule PropertyDamage do
          adapter,
          max_runs,
          seed,
+         run_nonce,
          injector_adapters,
          adapter_config,
          shrink,
@@ -623,7 +639,11 @@ defmodule PropertyDamage do
               # Explicit stutter RNG base (DR-029): per-run seed so stutter
               # decisions are decoupled from run count and seed-library replay
               # drift, yet reproduce on the same campaign seed.
-              rng_seed: run_seed
+              rng_seed: run_seed,
+              # Client-minted run-scoped values (DR-034): the exploration run is
+              # epoch 0; the nonce is constant across the campaign's runs.
+              run_nonce: run_nonce,
+              mint_epoch: 0
             )
 
           # Emit telemetry for sequence stop
@@ -646,6 +666,7 @@ defmodule PropertyDamage do
               adapter,
               max_runs,
               seed,
+              run_nonce,
               injector_adapters,
               adapter_config,
               shrink,
@@ -674,6 +695,7 @@ defmodule PropertyDamage do
               reporter,
               run_seed,
               run_number,
+              run_nonce,
               stutter_config,
               coverage_acc.fires
             )
@@ -931,6 +953,7 @@ defmodule PropertyDamage do
             ctx.reporter,
             seed,
             0,
+            ctx.run_nonce,
             ctx.stutter_config,
             # Replay is a pre-exploration phase; whole-run anti-vacuity coverage
             # is an exploration concern, so no firings are accumulated here.
@@ -973,7 +996,11 @@ defmodule PropertyDamage do
               event_queue: event_queue,
               stutter_config: ctx.stutter_config,
               # Replay derives run 0, whose effective seed is the replayed seed.
-              rng_seed: seed
+              rng_seed: seed,
+              # Mint run-scoped values against the campaign nonce (DR-034);
+              # epoch 0 for this replay's exploration-equivalent execution.
+              run_nonce: ctx.run_nonce,
+              mint_epoch: 0
             )
 
           fun.(sequence, result, event_queue)
@@ -1045,6 +1072,22 @@ defmodule PropertyDamage do
 
   defp maybe_append_failure_seed(_result, _path), do: :ok
 
+  # Read a non-negative integer from an environment variable (DR-034 ad-hoc CLI
+  # channel for seed/nonce, since `mix test` cannot forward custom flags).
+  # Returns nil when unset or not a valid non-negative integer.
+  defp env_int(var) do
+    case System.get_env(var) do
+      nil ->
+        nil
+
+      str ->
+        case Integer.parse(str) do
+          {n, ""} when n >= 0 -> n
+          _ -> nil
+        end
+    end
+  end
+
   defp emit_and_print_seed(reporter, seed, outcome, verbose) do
     Reporter.emit(reporter, fn -> %ReplayUpdate{phase: :seed, seed: seed, outcome: outcome} end)
     if verbose, do: print_replay_seed_line(seed, outcome)
@@ -1109,6 +1152,7 @@ defmodule PropertyDamage do
          reporter,
          seed,
          run_number,
+         run_nonce,
          stutter_config,
          assertion_fires
        ) do
@@ -1116,6 +1160,12 @@ defmodule PropertyDamage do
     # with stutter forced on (probability 1.0), so they minimize to the offending
     # command rather than being skipped. `seed` is the run's effective seed,
     # reused as the stutter RNG base so reproduction tracks the original run.
+    # One mint-epoch source for this whole logical run (DR-034): shrink attempts
+    # and the reproduction re-execution below all draw from it, so no two SUT
+    # executions in this run send the same client-minted values on a
+    # non-resettable SUT. Epoch 0 was the exploration run.
+    mint_epoch_counter = :atomics.new(1, signed: false)
+
     {shrunk_sequence, shrink_iterations, shrink_time_ms} =
       if shrink do
         shrink_result =
@@ -1128,7 +1178,9 @@ defmodule PropertyDamage do
             config: shrinker_config,
             event_queue: event_queue,
             stutter_config: stutter_config,
-            rng_seed: seed
+            rng_seed: seed,
+            run_nonce: run_nonce,
+            mint_epoch_counter: mint_epoch_counter
           )
 
         {shrink_result.sequence, shrink_result.iterations, shrink_result.time_ms}
@@ -1140,8 +1192,18 @@ defmodule PropertyDamage do
     # (the original result has state from before shrinking). For a stutter
     # failure, force stutter on (prob 1.0) with the run's seed so the report's
     # fresh state actually carries the reproduced violation (DR-029).
+    # The reproduction re-execution is a fresh SUT execution: give it its own
+    # mint epoch from the shared counter (DR-034), distinct from every shrink
+    # attempt and from the exploration run.
+    fresh_epoch = :atomics.add_get(mint_epoch_counter, 1, 1)
+
     fresh_opts =
-      [adapter_config: adapter_config, event_queue: event_queue] ++
+      [
+        adapter_config: adapter_config,
+        event_queue: event_queue,
+        run_nonce: run_nonce,
+        mint_epoch: fresh_epoch
+      ] ++
         stutter_repro_run_opts(result.failure_reason, stutter_config, seed)
 
     {:ok, fresh_result} = Executor.run(shrunk_sequence, model, adapter, fresh_opts)
@@ -1175,6 +1237,11 @@ defmodule PropertyDamage do
         # else the original generated run.
         plan_source: if(reproduced?, do: :shrunk, else: :generated),
         source_revision: RunTrace.source_revision(),
+        # Record the run inputs of the execution the report describes (DR-034):
+        # the reproduction re-execution's epoch when it reproduced, else the
+        # exploration run's epoch 0.
+        run_nonce: run_nonce,
+        mint_epoch: if(reproduced?, do: fresh_epoch, else: 0),
         executed: Map.get(report_result, :executed, %{}),
         failed_at_index: report_result.failed_at_index,
         failure_reason: report_result.failure_reason,
@@ -1336,6 +1403,12 @@ defmodule PropertyDamage do
       try do
         start_time = System.monotonic_time(:millisecond)
 
+        # Carry the original run's nonce (DR-034) so re-shrinking mints the same
+        # class of run-scoped values; a shared epoch counter keeps every SUT
+        # execution in this re-shrink distinct.
+        run_nonce = report.trace && report.trace.run_nonce
+        mint_epoch_counter = :atomics.new(1, signed: false)
+
         # Perform shrinking on the already-shrunk sequence
         shrink_result =
           Shrinker.shrink(FailureReport.shrunk_sequence(report),
@@ -1345,14 +1418,20 @@ defmodule PropertyDamage do
             adapter: adapter,
             adapter_config: adapter_config,
             config: shrinker_config,
-            event_queue: event_queue
+            event_queue: event_queue,
+            run_nonce: run_nonce,
+            mint_epoch_counter: mint_epoch_counter
           )
+
+        fresh_epoch = :atomics.add_get(mint_epoch_counter, 1, 1)
 
         # Re-execute to get fresh state
         {:ok, fresh_result} =
           Executor.run(shrink_result.sequence, model, adapter,
             adapter_config: adapter_config,
-            event_queue: event_queue
+            event_queue: event_queue,
+            run_nonce: run_nonce,
+            mint_epoch: fresh_epoch
           )
 
         end_time = System.monotonic_time(:millisecond)
@@ -1382,6 +1461,8 @@ defmodule PropertyDamage do
               # reproduction, so its plan is a shrinker product (DR-033).
               plan_source: :shrunk,
               source_revision: RunTrace.source_revision(),
+              run_nonce: run_nonce,
+              mint_epoch: fresh_epoch,
               projections: fresh_result.projections,
               projections_before: fresh_result.projections_before,
               model: model,
@@ -2004,6 +2085,40 @@ defmodule PropertyDamage do
   """
   @spec external() :: PropertyDamage.External.t()
   defdelegate external(), to: PropertyDamage.External
+
+  @doc """
+  Mark a command field as a client-minted, run-scoped value (DR-034).
+
+  Use inside a command generator to send a value that must be **unique per run
+  yet reproducible** — a request UUID or idempotency key sent to a System Under
+  Test you cannot reset between runs:
+
+      def generator(overrides) do
+        StreamData.fixed_map(%{
+          request_id: StreamData.constant(PropertyDamage.mint_per_run(:uuid)),
+          amount: StreamData.integer(1..100)
+        })
+      end
+
+  The field holds a marker during generation (so the plan stays a pure function
+  of the seed and is positionally identical across runs), and resolves at
+  execution to a value derived from the run's `run_nonce`/`mint_epoch` and the
+  field's coordinates. Hold `(seed, run_number)` and vary the nonce to re-run
+  the identical plan with fresh minted values on a shared SUT.
+
+  Contrast with `external/0`, which captures a value the SUT *returns*;
+  `mint_per_run` mints a value the client *sends*.
+
+  ## Kinds
+
+  - `:uuid` - an RFC 4122 (version 4) UUID string.
+  - `{:hex, n}` - `n` lowercase hex characters.
+  - `{module, function}` - escape hatch; `function` receives the derived bytes
+    (a binary) and returns the value. Anonymous functions are rejected: markers
+    persist inside plans/traces and must survive `binary_to_term`.
+  """
+  @spec mint_per_run(PropertyDamage.Mint.kind()) :: PropertyDamage.Mint.t()
+  defdelegate mint_per_run(kind), to: PropertyDamage.Mint, as: :new
 
   @doc false
   defmacro __using__(_opts) do
