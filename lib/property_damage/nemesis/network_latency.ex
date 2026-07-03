@@ -14,14 +14,21 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
 
   ## Usage with Toxiproxy
 
-  When using Toxiproxy, set `:toxiproxy` in the adapter context:
+  Live injection needs Toxiproxy configured in the adapter context. Return it
+  from your adapter's `setup/1` (DR-038):
 
-      context = %{toxiproxy: %{proxy_name: "my_service", api_url: "http://localhost:8474"}}
+      def setup(_config) do
+        {:ok, %{toxiproxy: %{proxy_name: "my_service", api_url: "http://localhost:8474"}}}
+      end
+
+  A top-level `:toxiproxy` key on the context is also honored for direct
+  `inject/2` calls.
 
   ## Simulated Mode
 
-  Without Toxiproxy, operates in simulated mode where latency is tracked
-  in state but not actually injected. Useful for testing nemesis logic.
+  Without Toxiproxy, operates in simulated mode: no latency is injected and the
+  emitted event is tagged `simulated: true` so a no-op can never masquerade as a
+  real fault. See `PropertyDamage.Nemesis.simulated_event?/1`.
 
   ## Example
 
@@ -40,6 +47,8 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   """
 
   @behaviour PropertyDamage.Nemesis
+
+  alias PropertyDamage.Nemesis.Toxiproxy
 
   defstruct latency_ms: 100,
             jitter_ms: 0,
@@ -62,14 +71,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
     now = System.monotonic_time(:millisecond)
     command = %{command | injected_at: now}
 
-    {result, simulated?} =
-      case get_toxiproxy(context) do
-        {:ok, proxy_config} ->
-          {inject_toxiproxy(command, proxy_config), false}
-
-        :not_configured ->
-          {inject_simulated(command, context), true}
-      end
+    {result, simulated?} = Toxiproxy.inject_toxics(context, toxics(command))
 
     case result do
       :ok ->
@@ -93,14 +95,7 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   def restore(%__MODULE__{} = command, context) do
     now = System.monotonic_time(:millisecond)
 
-    {result, simulated?} =
-      case get_toxiproxy(context) do
-        {:ok, proxy_config} ->
-          {restore_toxiproxy(command, proxy_config), false}
-
-        :not_configured ->
-          {restore_simulated(command, context), true}
-      end
+    {result, simulated?} = Toxiproxy.restore_toxics(context, toxic_names(command))
 
     case result do
       :ok ->
@@ -146,98 +141,30 @@ defmodule PropertyDamage.Nemesis.NetworkLatency do
   def duration_ms(%__MODULE__{duration_ms: d}), do: d
 
   # ============================================================================
-  # Toxiproxy Integration
+  # Toxic spec (pure)
   # ============================================================================
 
-  defp get_toxiproxy(%{toxiproxy: config}) when is_map(config), do: {:ok, config}
-  defp get_toxiproxy(_), do: :not_configured
+  @doc """
+  The Toxiproxy toxics this command injects, as pure JSON-encodable maps.
 
-  defp inject_toxiproxy(command, config) do
-    proxy_name = config[:proxy_name] || "default"
-    api_url = config[:api_url] || "http://localhost:8474"
-
-    toxic = %{
-      "name" => "pd_latency",
-      "type" => "latency",
-      "attributes" => %{
-        "latency" => command.latency_ms,
-        "jitter" => command.jitter_ms
+  A latency command is a single `latency` toxic carrying the base latency and
+  jitter (in milliseconds).
+  """
+  @spec toxics(%__MODULE__{}) :: [Toxiproxy.toxic()]
+  def toxics(%__MODULE__{} = command) do
+    [
+      %{
+        "name" => "pd_latency",
+        "type" => "latency",
+        "attributes" => %{
+          "latency" => command.latency_ms,
+          "jitter" => command.jitter_ms
+        }
       }
-    }
-
-    url = "#{api_url}/proxies/#{proxy_name}/toxics"
-
-    case http_post(url, toxic) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, {:toxiproxy_error, reason}}
-    end
+    ]
   end
 
-  defp restore_toxiproxy(_command, config) do
-    proxy_name = config[:proxy_name] || "default"
-    api_url = config[:api_url] || "http://localhost:8474"
-
-    url = "#{api_url}/proxies/#{proxy_name}/toxics/pd_latency"
-
-    case http_delete(url) do
-      {:ok, _} -> :ok
-      {:error, :not_found} -> :ok
-      {:error, reason} -> {:error, {:toxiproxy_error, reason}}
-    end
-  end
-
-  # ============================================================================
-  # Simulated Mode
-  # ============================================================================
-
-  defp inject_simulated(_command, _context) do
-    # In simulated mode, just record that latency is active
-    # The adapter can check state.active_faults[:network_latency] and add delay
-    :ok
-  end
-
-  defp restore_simulated(_command, _context) do
-    :ok
-  end
-
-  # ============================================================================
-  # HTTP Helpers (minimal implementation)
-  # ============================================================================
-
-  defp http_post(url, body) do
-    if Code.ensure_loaded?(:httpc) do
-      uri = String.to_charlist(url)
-      json_body = if Code.ensure_loaded?(Jason), do: Jason.encode!(body), else: inspect(body)
-
-      case :httpc.request(
-             :post,
-             {uri, [], ~c"application/json", json_body},
-             [],
-             []
-           ) do
-        {:ok, {{_, status, _}, _, _}} when status in 200..299 -> {:ok, :created}
-        {:ok, {{_, status, _}, _, _}} -> {:error, {:http_error, status}}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      {:error, :httpc_not_available}
-    end
-  end
-
-  defp http_delete(url) do
-    if Code.ensure_loaded?(:httpc) do
-      uri = String.to_charlist(url)
-
-      case :httpc.request(:delete, {uri, []}, [], []) do
-        {:ok, {{_, status, _}, _, _}} when status in 200..299 -> {:ok, :deleted}
-        {:ok, {{_, 404, _}, _, _}} -> {:error, :not_found}
-        {:ok, {{_, status, _}, _, _}} -> {:error, {:http_error, status}}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      {:error, :httpc_not_available}
-    end
-  end
+  defp toxic_names(command), do: Enum.map(toxics(command), & &1["name"])
 end
 
 # Event structs
