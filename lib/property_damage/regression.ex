@@ -78,8 +78,7 @@ defmodule PropertyDamage.Regression do
           dedup_threshold: float(),
           dedup_source: :failures,
           verbose: boolean(),
-          adapter: module() | nil,
-          base_url: String.t() | nil
+          adapter: module() | nil
         ]
 
   @default_dedup_threshold 0.90
@@ -106,8 +105,7 @@ defmodule PropertyDamage.Regression do
   - `:dedup_source` - Where to check for duplicates. Only `:failures` (saved
     failure files) is supported.
   - `:verbose` - Print actions taken (default: false)
-  - `:adapter` - Adapter module for script generation (required for generate_tests with scripts)
-  - `:base_url` - Base URL for script generation
+  - `:adapter` - Adapter module for generated-test HTTP-spec mapping
 
   ## Example
 
@@ -122,6 +120,10 @@ defmodule PropertyDamage.Regression do
   """
   @spec handler(regression_opts()) :: handler()
   def handler(opts \\ []) do
+    # Validate at factory time so a typo'd option raises here, not silently
+    # hours into a run when the handler first fires.
+    opts = PropertyDamage.Options.validate_regression_opts!(opts)
+
     fn failure_report ->
       handle_failure(failure_report, opts)
     end
@@ -149,6 +151,7 @@ defmodule PropertyDamage.Regression do
   """
   @spec handle_failure(FailureReport.t(), regression_opts()) :: map()
   def handle_failure(%FailureReport{} = failure, opts \\ []) do
+    opts = PropertyDamage.Options.validate_regression_opts!(opts)
     verbose = Keyword.get(opts, :verbose, false)
     dedup = Keyword.get(opts, :dedup, false)
 
@@ -206,6 +209,8 @@ defmodule PropertyDamage.Regression do
   """
   @spec save_failure(Path.t(), keyword()) :: handler()
   def save_failure(directory, opts \\ []) do
+    opts = PropertyDamage.Options.validate_regression_save_failure!(opts)
+
     fn failure_report ->
       Persistence.save(failure_report, directory, opts)
     end
@@ -231,6 +236,8 @@ defmodule PropertyDamage.Regression do
   """
   @spec add_to_library(Path.t(), keyword()) :: handler()
   def add_to_library(path, opts \\ []) do
+    opts = PropertyDamage.Options.validate_regression_add_to_library!(opts)
+
     fn failure_report ->
       do_add_to_library(failure_report, path, opts)
     end
@@ -239,10 +246,9 @@ defmodule PropertyDamage.Regression do
   @doc """
   Creates a handler that generates ExUnit regression tests.
 
-  ## Options
-
-  - `:adapter` - Adapter module (for HTTP spec generation)
-  - `:base_url` - Base URL for HTTP calls
+  Options are the ExUnit export options (validated at factory time via the same
+  schema as `PropertyDamage.Export.to_exunit/2`): `:adapter`, `:model`,
+  `:module_name`, `:test_name`, `:adapter_config`, `:expect_fixed`.
 
   ## Example
 
@@ -256,6 +262,11 @@ defmodule PropertyDamage.Regression do
   """
   @spec generate_test(Path.t(), keyword()) :: handler()
   def generate_test(directory, opts \\ []) do
+    # generate_test only produces :exunit; validate against that surface at
+    # factory time (reusing Export's schema) so bad options fail fast instead
+    # of being swallowed by compose/1 when the handler eventually fires.
+    opts = PropertyDamage.Options.validate_export_exunit!(opts)
+
     fn failure_report ->
       Export.save(failure_report, directory, :exunit, opts)
     end
@@ -308,6 +319,7 @@ defmodule PropertyDamage.Regression do
   """
   @spec check_duplicate(FailureReport.t(), keyword()) :: {boolean(), term()}
   def check_duplicate(%FailureReport{} = failure, opts) do
+    opts = PropertyDamage.Options.validate_regression_opts!(opts)
     threshold = Keyword.get(opts, :dedup_threshold, @default_dedup_threshold)
 
     existing_failures = load_existing_failures(opts)
@@ -356,6 +368,7 @@ defmodule PropertyDamage.Regression do
   """
   @spec process_batch([FailureReport.t()], regression_opts()) :: [map()]
   def process_batch(failures, opts \\ []) do
+    opts = PropertyDamage.Options.validate_regression_opts!(opts)
     dedup = Keyword.get(opts, :dedup, false)
     threshold = Keyword.get(opts, :dedup_threshold, @default_dedup_threshold)
 
@@ -486,9 +499,9 @@ defmodule PropertyDamage.Regression do
         nil
 
       directory ->
-        export_opts =
-          opts
-          |> Keyword.take([:adapter, :base_url])
+        # Only :adapter applies to :exunit generation; :base_url is a
+        # script/livebook concern and is not part of the regression surface.
+        export_opts = Keyword.take(opts, [:adapter])
 
         result = Export.save(failure, directory, :exunit, export_opts)
 

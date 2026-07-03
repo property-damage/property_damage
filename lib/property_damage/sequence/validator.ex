@@ -1,4 +1,4 @@
-defmodule PropertyDamage.Validator do
+defmodule PropertyDamage.Sequence.Validator do
   @moduledoc false
 
   alias PropertyDamage.Model

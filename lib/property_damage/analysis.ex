@@ -25,7 +25,8 @@ defmodule PropertyDamage.Analysis do
       PropertyDamage.Analysis.generate_test(failure, format: :exunit)
   """
 
-  alias PropertyDamage.{Executor, FailureReport, Placeholder, RunTrace, Sequence, Validator}
+  alias PropertyDamage.{Executor, FailureReport, Placeholder, RunTrace, Sequence}
+  alias PropertyDamage.Sequence.Validator
   alias PropertyDamage.Shrinker.Graph
 
   # ============================================================================
@@ -505,7 +506,6 @@ defmodule PropertyDamage.Analysis do
 
   - `:format` - Output format (`:exunit`, `:script`, `:markdown`). Default: `:exunit`
   - `:module_name` - Module name for ExUnit tests. Default: "ReproductionTest"
-  - `:include_setup` - Include model/adapter setup code. Default: true
 
   ## Example
 
@@ -514,6 +514,7 @@ defmodule PropertyDamage.Analysis do
   """
   @spec generate_test(FailureReport.t(), keyword()) :: String.t()
   def generate_test(%FailureReport{} = report, opts \\ []) do
+    opts = PropertyDamage.Options.validate_generate_test!(opts)
     format = Keyword.get(opts, :format, :exunit)
 
     case format do

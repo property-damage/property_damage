@@ -182,13 +182,21 @@ defmodule Mix.Tasks.Pd.Integration do
 
   defp run_tests_or_hunt(integration_opts, opts) do
     if opts[:hunt] do
-      PropertyDamage.Integration.hunt_bugs(
-        Keyword.merge(integration_opts,
-          stop_after: opts[:hunt],
-          max_runs: :unlimited,
-          save_to: opts[:save_failures]
-        )
-      )
+      # hunt_bugs consumes a narrower option set than run/1; pass only the keys
+      # it accepts (its schema is strict) rather than the full integration_opts.
+      hunt_opts =
+        integration_opts
+        |> Keyword.take([:model, :adapter, :adapter_config, :verbose])
+        |> Keyword.merge(stop_after: opts[:hunt], max_runs: :unlimited)
+
+      # Only set :save_to when a directory was given; the schema rejects nil.
+      hunt_opts =
+        case opts[:save_failures] do
+          nil -> hunt_opts
+          dir -> Keyword.put(hunt_opts, :save_to, dir)
+        end
+
+      PropertyDamage.Integration.hunt_bugs(hunt_opts)
     else
       PropertyDamage.Integration.run(integration_opts)
     end
