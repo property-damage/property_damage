@@ -51,6 +51,7 @@ defmodule PropertyDamage.MixProject do
         "guides/quickstart.md",
         "guides/cheatsheet.md",
         "guides/writing_commands.md",
+        "guides/deterministic_generation.md",
         "guides/writing_invariants.md",
         "guides/debugging_failures.md",
         "guides/async_and_eventual_consistency.md",

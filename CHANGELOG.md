@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Generation determinism audit (DR-037).** `PropertyDamage.audit/2` and the
+  `mix pd.audit` task prove a model's generation is a pure function of the seed:
+  they realize the model's generated sequence twice at each of N seeds through
+  the seeded path and assert the two are structurally equal (honest raw equality
+  post-DR-036, including `external/0`- and `mint_per_run`-using models). Impurity
+  in a generator, `when:`/`with:` predicate, `command_sequence_projection`, or
+  simulator (reading the clock, `:rand`, `System.unique_integer/1`, or
+  `UUID.uuid4/0`) is caught at dev/CI time before it breaks `seed: N`
+  reproduction and `RunComparison`'s fingerprint guard. The audit is
+  generation-only (no adapter/SUT, never resolves markers/placeholders), threads
+  `max_commands`/`branching`, and on divergence localizes the first differing
+  command position and fields; `mix pd.audit` exits non-zero so CI gates on it. A
+  new `guides/deterministic_generation.md` documents the three deterministic
+  seams: a seeded relative time offset reified in the adapter (for
+  timeliness-dependent values), `mint_per_run/1` for client-minted uniqueness,
+  and `external/0` for server-assigned output.
 - **Structural failure-query interface (Phase A).** `FailureReport` gains
   `steps/1`, `event_entries_at/2`, and `failure_step/1` so callers ask the report
   about a failed run's timeline instead of re-walking `shrunk_sequence` /

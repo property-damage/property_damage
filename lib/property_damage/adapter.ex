@@ -6,6 +6,12 @@ defmodule PropertyDamage.Adapter do
   They translate command structs into real operations (HTTP calls, function
   calls, message sends, etc.) and return the resulting events.
 
+  The adapter is also the execution-time seam for nondeterminism kept out of
+  generation: reify a seeded relative time offset into an absolute `DateTime`
+  here (the one wall-clock read), rather than baking `DateTime.utc_now/0` into a
+  generator. See the
+  [deterministic generation guide](deterministic_generation.md).
+
   ## Lifecycle
 
   During each test run (including shrink attempts), the adapter lifecycle is:
