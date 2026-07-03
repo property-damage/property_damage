@@ -85,6 +85,8 @@ defmodule PropertyDamage.Executor.Stepping do
     * `:external_markers` - external value markers (default `[]`)
     * `:placeholder_registry` - registry seeded from the generated sequence (DR-021)
     * `:rng_seed` - explicit stutter RNG base (DR-029)
+    * `:run_nonce` - run nonce seeding `mint_per_run` resolution (DR-034)
+    * `:mint_epoch` - SUT-execution epoch for minted values (DR-034, default 0)
   """
   @spec init_state(module(), keyword()) :: map()
   def init_state(model, opts \\ []) do
@@ -96,7 +98,8 @@ defmodule PropertyDamage.Executor.Stepping do
       Keyword.get(opts, :assertion_mode, :halt),
       Keyword.get(opts, :external_markers, []),
       Keyword.get(opts, :placeholder_registry),
-      Keyword.get(opts, :rng_seed)
+      Keyword.get(opts, :rng_seed),
+      {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
     )
   end
 

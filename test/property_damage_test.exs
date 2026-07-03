@@ -167,7 +167,7 @@ defmodule PropertyDamageTest do
       assert is_integer(report.failed_at_index)
 
       # With shrink: false the shrunk sequence is the original
-      assert report.shrunk_sequence == report.original_sequence
+      assert PropertyDamage.FailureReport.shrunk_sequence(report) == report.original_sequence
     end
 
     test "invokes on_failure callback" do
@@ -211,7 +211,9 @@ defmodule PropertyDamageTest do
       assert {:error, report} = result
 
       original = PropertyDamage.Sequence.to_list(report.original_sequence)
-      shrunk = PropertyDamage.Sequence.to_list(report.shrunk_sequence)
+
+      shrunk =
+        PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 
       assert length(shrunk) <= length(original)
 

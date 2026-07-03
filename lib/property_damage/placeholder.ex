@@ -26,10 +26,20 @@ defmodule PropertyDamage.Placeholder do
           | {:suffix, non_neg_integer()}
 
   @typedoc """
+  A placeholder's resolution identity (DR-021, DR-036).
+
+  A deterministic, opaque, comparable term derived from the placeholder's
+  generation-time coordinates. Callers may treat it only as something with
+  equality and hashability; its shape is not part of the contract.
+  """
+  @type id :: {position() | nil, non_neg_integer(), [atom() | non_neg_integer()]}
+
+  @typedoc """
   A placeholder for an external (server-generated) value.
 
   Fields:
-  - `id` - Unique identity from `make_ref/0`; the resolution identity (DR-021)
+  - `id` - Deterministic resolution identity derived from `(position,
+    event_index, path)` (DR-021, DR-036). Opaque comparable term.
   - `event_module` - The event struct module this belongs to
   - `path` - Path to the external field within the event (e.g., [:ids, :order])
   - `position` - Structured position of the producing command (DR-021)
@@ -37,7 +47,7 @@ defmodule PropertyDamage.Placeholder do
   - `resolved` - The resolved concrete value (nil until resolved)
   """
   @type t :: %__MODULE__{
-          id: reference(),
+          id: id(),
           event_module: module(),
           path: [atom() | non_neg_integer()],
           position: position() | nil,
@@ -59,11 +69,17 @@ defmodule PropertyDamage.Placeholder do
   - `path` - Path to the external field within the event
   - `position` - Structured position of the producing command
   - `event_index` - Index of the event within the command's event list
+
+  The id is a pure function of `(position, event_index, path)` (DR-036), so
+  two generations of the same plan produce `==` placeholders. These
+  coordinates uniquely name one external field of one simulated event of one
+  command within a plan, so ids do not collide within a plan (the same
+  uniqueness DR-021's capture keying already relies on).
   """
   @spec new_at(module(), [atom() | non_neg_integer()], position(), non_neg_integer()) :: t()
   def new_at(event_module, path, position, event_index) do
     %__MODULE__{
-      id: make_ref(),
+      id: {position, event_index, path},
       event_module: event_module,
       path: path,
       position: position,

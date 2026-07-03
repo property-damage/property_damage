@@ -197,7 +197,7 @@ defmodule Mix.Tasks.Pd.Replay do
 
   defp print_summary(failure) do
     command_count =
-      case failure.shrunk_sequence do
+      case PropertyDamage.FailureReport.shrunk_sequence(failure) do
         nil -> 0
         seq -> length(Sequence.to_list(seq))
       end

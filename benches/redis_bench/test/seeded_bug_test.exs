@@ -56,7 +56,7 @@ defmodule RedisBench.SeededBugTest do
                verbose: false
              )
 
-    shrunk = PropertyDamage.Sequence.to_list(report.shrunk_sequence)
+    shrunk = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 
     assert [%Increment{}, %ReadValue{}] = shrunk,
            "expected minimal Increment -> ReadValue, got #{inspect(shrunk)}"

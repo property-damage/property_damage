@@ -44,7 +44,7 @@ defmodule CachexBench.SeededBugTest do
     # Note: PD strips the assert_ prefix from check names
     assert failure.check_name == :read_consistent
 
-    shrunk = failure.shrunk_sequence
+    shrunk = PropertyDamage.FailureReport.shrunk_sequence(failure)
     commands = PropertyDamage.Sequence.to_list(shrunk)
 
     # Minimal repro is put -> del -> get on one key. Allow a little slack,

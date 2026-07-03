@@ -37,4 +37,24 @@ defmodule PropertyDamage.Sequence.Position do
 
   @enforce_keys [:section, :offset]
   defstruct [:section, :offset]
+
+  @typedoc "The executor's raw `current_position` tuple form (DR-021)."
+  @type tuple_form ::
+          {:prefix, non_neg_integer()}
+          | {:suffix, non_neg_integer()}
+          | {:branch, non_neg_integer(), non_neg_integer()}
+
+  @doc """
+  Reify the executor's raw `current_position` tuple as a `Position`.
+
+  Inverse of the tuple encoding the executor uses internally. `nil` (no
+  position set) passes through as `nil`.
+  """
+  @spec from_tuple(tuple_form() | nil) :: t() | nil
+  def from_tuple(nil), do: nil
+  def from_tuple({:prefix, offset}), do: %__MODULE__{section: :prefix, offset: offset}
+  def from_tuple({:suffix, offset}), do: %__MODULE__{section: :suffix, offset: offset}
+
+  def from_tuple({:branch, branch_id, offset}),
+    do: %__MODULE__{section: {:branch, branch_id}, offset: offset}
 end

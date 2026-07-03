@@ -39,6 +39,7 @@ defmodule PropertyDamage.Generator do
   """
 
   alias PropertyDamage.External
+  alias PropertyDamage.Mint
   alias PropertyDamage.Nemesis
   alias PropertyDamage.{Placeholder, PlaceholderRegistry, Sequence}
 
@@ -251,8 +252,10 @@ defmodule PropertyDamage.Generator do
           generator = get_command_generator(cmd_module, opts, state)
 
           StreamData.bind(generator, fn command ->
+            position = pos_fun.(length(acc))
+            command = reify_command_mints(command, position)
             events = simulate_command(model, state, command)
-            {events, minted} = instantiate_placeholders(events, pos_fun.(length(acc)), markers)
+            {events, minted} = instantiate_placeholders(events, position, markers)
             new_state = update_state(state, command, events, projection)
             new_acc = [command | acc]
             new_acc_ph = acc_ph ++ minted
@@ -377,8 +380,10 @@ defmodule PropertyDamage.Generator do
             generator = get_command_generator(cmd_module, opts, state)
 
             StreamData.bind(generator, fn command ->
+              position = {:prefix, length(acc)}
+              command = reify_command_mints(command, position)
               events = simulate_command(model, state, command)
-              {events, minted} = instantiate_placeholders(events, {:prefix, length(acc)}, markers)
+              {events, minted} = instantiate_placeholders(events, position, markers)
               new_state = update_state(state, command, events, projection)
               new_acc = [command | acc]
               new_acc_ph = acc_ph ++ minted
@@ -562,10 +567,12 @@ defmodule PropertyDamage.Generator do
               generator = get_command_generator(cmd_module, opts, state)
 
               StreamData.bind(generator, fn command ->
+                position = pos_fun.(length(acc))
+                command = reify_command_mints(command, position)
                 events = simulate_command(model, state, command)
 
                 {events, minted} =
-                  instantiate_placeholders(events, pos_fun.(length(acc)), markers)
+                  instantiate_placeholders(events, position, markers)
 
                 new_state = update_state(state, command, events, projection)
                 new_acc = [command | acc]
@@ -774,6 +781,47 @@ defmodule PropertyDamage.Generator do
   end
 
   defp instantiate_placeholders(events, _position, _markers), do: {events, []}
+
+  # Reify any mint_per_run markers in a generated command with their generation
+  # coordinates (DR-034/DR-036): the command's structured `position` and the
+  # field path. Baking coordinates in here (rather than keying on the flat
+  # executor index) keeps sibling branches distinct and makes the minted value
+  # stable under shrinking, since the marker travels inside the command struct.
+  defp reify_command_mints(command, position) when is_struct(command) do
+    reify_mints(command, position, [])
+  end
+
+  defp reify_command_mints(command, _position), do: command
+
+  defp reify_mints(%Mint{} = marker, position, path), do: Mint.reify(marker, position, path)
+  defp reify_mints(%Placeholder{} = p, _position, _path), do: p
+
+  defp reify_mints(%{__struct__: mod} = struct, position, path) do
+    struct
+    |> Map.from_struct()
+    |> Map.new(fn {k, v} -> {k, reify_mints(v, position, path ++ [k])} end)
+    |> then(&struct(mod, &1))
+  end
+
+  defp reify_mints(map, position, path) when is_map(map) do
+    Map.new(map, fn {k, v} -> {k, reify_mints(v, position, path ++ [k])} end)
+  end
+
+  defp reify_mints(list, position, path) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.map(fn {v, i} -> reify_mints(v, position, path ++ [i]) end)
+  end
+
+  defp reify_mints(tuple, position, path) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.with_index()
+    |> Enum.map(fn {v, i} -> reify_mints(v, position, path ++ [i]) end)
+    |> List.to_tuple()
+  end
+
+  defp reify_mints(other, _position, _path), do: other
 
   defp mint_event_placeholders(event, event_index, position, markers, minted)
        when is_struct(event) do

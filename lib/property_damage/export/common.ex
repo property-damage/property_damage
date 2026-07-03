@@ -13,8 +13,8 @@ defmodule PropertyDamage.Export.Common do
   Returns the shrunk sequence as a list of command structs.
   """
   @spec extract_commands(FailureReport.t()) :: [struct()]
-  def extract_commands(%FailureReport{shrunk_sequence: sequence}) do
-    Sequence.to_list(sequence)
+  def extract_commands(%FailureReport{} = report) do
+    Sequence.to_list(FailureReport.shrunk_sequence(report))
   end
 
   @doc """
@@ -269,7 +269,8 @@ defmodule PropertyDamage.Export.Common do
   # share a seed (across models, or a randomly-seeded run) don't silently
   # overwrite each other, while an identical failure maps to the same file.
   defp failure_signature(%FailureReport{} = report) do
-    {report.failure_type, report.check_name, report.failure_reason, report.shrunk_sequence}
+    {report.failure_type, report.check_name, report.failure_reason,
+     FailureReport.shrunk_sequence(report)}
     |> :erlang.phash2()
     |> Integer.to_string(16)
     |> String.downcase()

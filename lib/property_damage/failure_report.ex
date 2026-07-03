@@ -50,8 +50,8 @@ defmodule PropertyDamage.FailureReport do
   - `{:ref_resolution_error, reason}` - Symbolic ref couldn't be resolved
   """
 
-  alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Sequence}
-  alias PropertyDamage.FailureReport.Step
+  alias PropertyDamage.{ErrorOrigin, EventLog.Entry, RunTrace, Sequence}
+  alias PropertyDamage.RunTrace.Step
 
   @type failure_type ::
           :check_failed
@@ -70,9 +70,15 @@ defmodule PropertyDamage.FailureReport do
           failed_at_index: non_neg_integer() | nil,
           failure_type: failure_type(),
 
-          # Sequences
+          # The execution record of the run this report describes (DR-033). The
+          # deep structures (plan, event_log, executed) live here once;
+          # `shrunk_sequence/1` and `event_log/1` are accessors over it.
+          trace: RunTrace.t(),
+
+          # The generated plan of the failing exploration run (before shrinking).
+          # Distinct from `trace.plan`, which is the shrunk minimal reproduction
+          # (or the original run when it didn't reproduce; see DR-033).
           original_sequence: Sequence.t(),
-          shrunk_sequence: Sequence.t(),
 
           # Failure details
           failure_reason: term(),
@@ -82,9 +88,6 @@ defmodule PropertyDamage.FailureReport do
           # State snapshots
           state_before_failure: %{atom() => any()} | nil,
           state_at_failure: %{atom() => any()} | nil,
-
-          # Event trail
-          event_log: [Entry.t()],
 
           # Idempotency-specific (for stutter failures)
           idempotency_violation: map() | nil,
@@ -127,14 +130,13 @@ defmodule PropertyDamage.FailureReport do
             run_number: nil,
             failed_at_index: nil,
             failure_type: nil,
+            trace: nil,
             original_sequence: nil,
-            shrunk_sequence: nil,
             failure_reason: nil,
             check_name: nil,
             failure_message: nil,
             state_before_failure: nil,
             state_at_failure: nil,
-            event_log: [],
             idempotency_violation: nil,
             poll_timeout_info: nil,
             branch_id: nil,
@@ -211,19 +213,42 @@ defmodule PropertyDamage.FailureReport do
     # nothing.
     command_labels = build_command_labels(shrunk_sequence, Keyword.get(opts, :model))
 
+    timestamp = DateTime.utc_now()
+
+    # Compose the execution record of the run this report describes (DR-033). The
+    # plan is the shrunk minimal reproduction when it reproduced, else the
+    # original failing run; the caller signals which via `:plan_source`
+    # (defaults to `:shrunk`, the common case).
+    trace =
+      RunTrace.new(
+        seed: seed,
+        run_number: run_number,
+        run_nonce: Keyword.get(opts, :run_nonce),
+        mint_epoch: Keyword.get(opts, :mint_epoch),
+        model: Keyword.get(opts, :model),
+        adapter: Keyword.get(opts, :adapter),
+        timestamp: timestamp,
+        source_revision: Keyword.get(opts, :source_revision),
+        plan: shrunk_sequence,
+        plan_source: Keyword.get(opts, :plan_source, :shrunk),
+        executed: Keyword.get(opts, :executed, %{}),
+        event_log: event_log,
+        command_labels: command_labels,
+        outcome: {:fail, failure_reason}
+      )
+
     %__MODULE__{
       seed: seed,
       run_number: run_number,
       failed_at_index: failed_at_index,
       failure_type: failure_type,
+      trace: trace,
       original_sequence: original_sequence,
-      shrunk_sequence: shrunk_sequence,
       failure_reason: failure_reason,
       check_name: check_name,
       failure_message: failure_message,
       state_before_failure: projections_before,
       state_at_failure: projections,
-      event_log: event_log,
       idempotency_violation: idempotency_violation,
       poll_timeout_info: poll_timeout_info,
       branch_id: branch_id,
@@ -233,7 +258,7 @@ defmodule PropertyDamage.FailureReport do
       shrink_time_ms: Keyword.get(opts, :shrink_time_ms, 0),
       model: Keyword.get(opts, :model),
       adapter: Keyword.get(opts, :adapter),
-      timestamp: DateTime.utc_now(),
+      timestamp: timestamp,
       error_origin: classification.origin,
       error_origin_details: classification.details,
       stacktrace: stacktrace,
@@ -379,13 +404,44 @@ defmodule PropertyDamage.FailureReport do
       seed: report.seed,
       run_number: report.run_number,
       original_sequence: report.original_sequence,
-      shrunk_sequence: report.shrunk_sequence,
+      shrunk_sequence: shrunk_sequence(report),
       failed_at_index: report.failed_at_index,
       failure_reason: report.failure_reason,
       shrink_iterations: report.shrink_iterations,
       shrink_time_ms: report.shrink_time_ms
     }
   end
+
+  @doc """
+  The plan the report describes: the shrunk minimal reproduction (or the
+  original failing run when it did not reproduce; see DR-033).
+
+  Accessor over the embedded `RunTrace` (DR-033: the deep structure lives once,
+  on the trace). Returns `nil` for a report with no trace.
+  """
+  @spec shrunk_sequence(t()) :: Sequence.t() | nil
+  def shrunk_sequence(%__MODULE__{trace: %RunTrace{plan: plan}}), do: plan
+  def shrunk_sequence(%__MODULE__{trace: nil}), do: nil
+
+  @doc """
+  The complete event log of the run the report describes.
+
+  Accessor over the embedded `RunTrace` (DR-033). Returns `[]` for a report with
+  no trace.
+  """
+  @spec event_log(t()) :: [Entry.t()]
+  def event_log(%__MODULE__{trace: %RunTrace{event_log: log}}), do: log
+  def event_log(%__MODULE__{trace: nil}), do: []
+
+  @doc """
+  The event-log entries with no command attribution (`command_index: nil`).
+
+  Delegates to `RunTrace.async_entries/1`. Injector / telemetry / async-source
+  events that belong to no command; renderers show them separately.
+  """
+  @spec async_entries(t()) :: [Entry.t()]
+  def async_entries(%__MODULE__{trace: %RunTrace{} = trace}), do: RunTrace.async_entries(trace)
+  def async_entries(%__MODULE__{trace: nil}), do: []
 
   @doc """
   Classify a raw `failure_reason` into its `{failure_type, check_name}`.
@@ -513,100 +569,34 @@ defmodule PropertyDamage.FailureReport do
   struct).
   """
   @spec steps(t()) :: [Step.t()]
-  def steps(%__MODULE__{shrunk_sequence: nil}), do: []
+  def steps(%__MODULE__{trace: nil}), do: []
+  def steps(%__MODULE__{trace: %RunTrace{plan: nil}}), do: []
 
-  def steps(%__MODULE__{shrunk_sequence: %Sequence{} = sequence} = report) do
-    build_steps(sequence, report.event_log, report.command_labels, report.failed_at_index,
-      branch_id: report.branch_id
+  def steps(%__MODULE__{trace: %RunTrace{plan: %Sequence{} = plan} = trace} = report) do
+    # Delegate to the trace's data and the shared grouping core (DR-033), adding
+    # the report's failure-localization overlay (`failed_at_index` / `branch_id`
+    # stay report-level). Output is identical to the pre-move behavior.
+    RunTrace.build_steps(plan, trace.event_log, trace.command_labels, report.failed_at_index,
+      branch_id: report.branch_id,
+      executed: trace.executed
     )
-  end
-
-  @doc """
-  Builds the `Step` timeline from raw pieces, without a full `FailureReport`.
-
-  This is the grouping core shared by `steps/1` and consumers that hold a
-  sequence and event log but no report (e.g. `PropertyDamage.Diagram`'s
-  report-less entry point). `command_labels` may be `%{}` and `failed_at_index`
-  may be `nil` when those facts are unavailable.
-
-  ## Options
-
-    * `:branch_id` - the failing branch, used with `failed_at_index` to resolve
-      the failing command's position (defaults to `nil`).
-  """
-  @spec build_steps(
-          Sequence.t(),
-          [Entry.t()],
-          %{non_neg_integer() => String.t()},
-          non_neg_integer() | nil,
-          keyword()
-        ) :: [Step.t()]
-  def build_steps(%Sequence{} = sequence, event_log, command_labels, failed_at_index, opts \\ []) do
-    branch_id = Keyword.get(opts, :branch_id)
-
-    # Group the command-attributed log entries by the position of the command
-    # that produced them. Injector/telemetry entries carry no command_index and
-    # so belong to no step. `(command_index, branch_id)` resolves uniquely to a
-    # position, so this is the branch-aware equivalent of grouping by
-    # command_index alone. Full entries (not bare events) are kept so each step
-    # preserves per-event provenance (source, branch_id) for the event timeline.
-    entries_by_position =
-      event_log
-      |> List.wrap()
-      |> Enum.filter(&(&1.command_index != nil))
-      |> Enum.group_by(fn entry ->
-        Sequence.position_at(sequence, entry.command_index, entry.branch_id)
-      end)
-
-    # The failing command's position (nil for a non-localized failure). Resolved
-    # via position_at, NOT by comparing flattened_index to failed_at_index: the
-    # latter is an executor index and diverges from the flattened ordinal for
-    # branch failures.
-    failed_position =
-      if failed_at_index != nil do
-        Sequence.position_at(sequence, failed_at_index, branch_id)
-      end
-
-    sequence
-    |> Sequence.indexed()
-    |> Enum.map(fn {position, flattened_index, command} ->
-      %Step{
-        position: position,
-        flattened_index: flattened_index,
-        command: command,
-        entries: Map.get(entries_by_position, position, []),
-        label: Map.get(command_labels, flattened_index),
-        failed?: failed_position != nil and position == failed_position
-      }
-    end)
   end
 
   @doc """
   The `EventLog.Entry` structs observed for a single command, addressed by
   flattened index or `Sequence.Position`.
 
-  Sugar over `steps/1`. Each entry carries its per-event provenance (`source`,
-  `branch_id`); the bare event struct is `entry.event`. Returns `[]` when nothing
-  matches.
+  Delegates to `RunTrace.event_entries_at/2` (entries are independent of failure
+  localization). Each entry carries its per-event provenance (`source`,
+  `branch_id`); the bare event struct is `entry.event`. Returns `[]` when
+  nothing matches.
   """
   @spec event_entries_at(t(), non_neg_integer() | Sequence.Position.t()) :: [Entry.t()]
-  def event_entries_at(%__MODULE__{} = report, %Sequence.Position{} = position) do
-    report
-    |> steps()
-    |> Enum.find(&(&1.position == position))
-    |> step_entries()
+  def event_entries_at(%__MODULE__{trace: %RunTrace{} = trace}, index_or_position) do
+    RunTrace.event_entries_at(trace, index_or_position)
   end
 
-  def event_entries_at(%__MODULE__{} = report, flattened_index)
-      when is_integer(flattened_index) do
-    report
-    |> steps()
-    |> Enum.find(&(&1.flattened_index == flattened_index))
-    |> step_entries()
-  end
-
-  defp step_entries(nil), do: []
-  defp step_entries(%Step{entries: entries}), do: entries
+  def event_entries_at(%__MODULE__{trace: nil}, _index_or_position), do: []
 
   @doc """
   The `Step` where the failure was localized, or `nil`.

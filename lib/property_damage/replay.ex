@@ -193,7 +193,7 @@ defmodule PropertyDamage.Replay do
       is_nil(adapter) ->
         {:error, :missing_adapter}
 
-      branching?(failure.shrunk_sequence) ->
+      branching?(FailureReport.shrunk_sequence(failure)) ->
         {:error, :branching_replay_unsupported}
 
       true ->
@@ -203,7 +203,8 @@ defmodule PropertyDamage.Replay do
 
   defp do_start(failure, model, adapter, opts) do
     adapter_config = opts[:adapter_config] || %{}
-    commands = Sequence.to_list(failure.shrunk_sequence)
+    sequence = FailureReport.shrunk_sequence(failure)
+    commands = Sequence.to_list(sequence)
 
     # Mirror the run loop: model.setup_each runs before adapter setup so the
     # SUT starts in the same per-run state the original failure observed.
@@ -220,7 +221,11 @@ defmodule PropertyDamage.Replay do
             event_queue: event_queue,
             stutter_config: opts[:stutter_config],
             external_markers: opts[:external_markers] || [],
-            assertion_mode: :halt
+            assertion_mode: :halt,
+            # Seed the placeholder registry from the failing sequence (DR-021),
+            # so replaying a failure whose commands consume `external()` values
+            # resolves them instead of raising "Unknown placeholder".
+            placeholder_registry: sequence.registry
           )
 
         session = %__MODULE__{

@@ -3,7 +3,7 @@ defmodule PropertyDamage.FailureReport.StepTest do
 
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.FailureReport
-  alias PropertyDamage.FailureReport.Step
+  alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence
   alias PropertyDamage.Sequence.Position
 

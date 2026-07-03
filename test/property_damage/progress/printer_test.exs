@@ -132,7 +132,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
         failed_at_index: 2,
         failure_reason: {:check_failed, :test_check, "Test failed"},
         original_sequence: Sequence.linear([%TestCommand{id: 1}, %TestCommand{id: 2}]),
-        shrunk_sequence: Sequence.linear([%TestCommand{id: 1}]),
+        trace: PropertyDamage.RunTrace.new(plan: Sequence.linear([%TestCommand{id: 1}])),
         shrink_iterations: 10,
         shrink_time_ms: 100
       }
@@ -160,7 +160,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
         failed_at_index: 2,
         failure_reason: {:check_failed, :test_check, "Test failed"},
         original_sequence: original_sequence,
-        shrunk_sequence: shrunk_sequence,
+        trace: PropertyDamage.RunTrace.new(plan: shrunk_sequence),
         shrink_iterations: 10,
         shrink_time_ms: 100
       }

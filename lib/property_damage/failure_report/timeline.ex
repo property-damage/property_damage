@@ -1,7 +1,7 @@
 defmodule PropertyDamage.FailureReport.Timeline do
   @moduledoc false
 
-  alias PropertyDamage.{FailureReport, Sequence}
+  alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
   @default_column_width 20
 
@@ -16,7 +16,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
   """
   @spec format(FailureReport.t(), keyword()) :: String.t()
   def format(%FailureReport{} = report, opts \\ []) do
-    sequence = report.shrunk_sequence
+    sequence = FailureReport.shrunk_sequence(report)
     color = Keyword.get(opts, :color, true)
     column_width = Keyword.get(opts, :column_width, @default_column_width)
 
@@ -61,7 +61,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
   # that is false everywhere.
   defp failed_position_predicate(%FailureReport{} = report) do
     case FailureReport.failure_step(report) do
-      %FailureReport.Step{position: position} -> &(&1 == position)
+      %RunTrace.Step{position: position} -> &(&1 == position)
       nil -> fn _position -> false end
     end
   end
@@ -354,7 +354,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
 
     # Events from injectors and other async sources carry command_index: nil;
     # they belong to no command but must still appear rather than vanish.
-    async_entries = Enum.filter(report.event_log, &(&1.command_index == nil))
+    async_entries = FailureReport.async_entries(report)
     async_section = format_async_events(async_entries, max_events, color)
 
     header <> body <> async_section
