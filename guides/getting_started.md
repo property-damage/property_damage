@@ -370,4 +370,4 @@ Seed: 987654321 (use this to reproduce)
 - [Writing Effective Invariants](writing_invariants.md)
 - [Debugging Failures](debugging_failures.md)
 - [Chaos Engineering with Nemesis](chaos_engineering.md)
-- See `example_tests/` for complete working examples
+- See `benches/` for complete, CI-gated working examples against real software

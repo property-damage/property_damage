@@ -1332,41 +1332,61 @@ end
 
 See [Differential Testing Guide](guides/differential_testing.md) for complete documentation.
 
-## Example Projects
+## Benches
 
-Complete working examples are available in the `example_tests/` directory:
+The `benches/` directory holds self-contained mix projects that drive
+PropertyDamage against real third-party software. Each is a standalone project
+(`{:property_damage, path: "../.."}`) with its own README, and every bench is
+CI-gated. They double as runnable, end-to-end examples:
 
-### Counter (Hello World)
+### cachex_bench
 
-The simplest PropertyDamage example - a counter with an intentional bug.
-Start here if you're new to stateful property-based testing.
-
-```
-example_tests/counter/
-```
-
-### ToyBank (Payment Authorization)
-
-A banking API with 12 intentional bugs. Demonstrates:
-- Multiple entity types (accounts, authorizations, captures)
-- Complex state machines and cross-entity invariants
-- Parallel testing for race conditions
-- Bug detection and regression testing
+PropertyDamage against [Cachex](https://hex.pm/packages/cachex) in-process (no
+external infra). A good first read: consistency invariants + shrinking on an
+in-BEAM SUT.
 
 ```
-example_tests/toy_bank/
+benches/cachex_bench/
 ```
 
-### TravelBooking (Chaos Engineering)
+### openapi_bench
 
-A travel booking service demonstrating chaos engineering:
-- Multi-provider coordination (flights, hotels)
-- Fault injection with nemesis operations
-- Certificate failure simulation
-- Partial failure rollback testing
+A `mix pd.scaffold`-generated HTTP client driving a tiny in-process REST API (no
+Docker). Demonstrates the scaffold codegen path, stutter/idempotency, and the
+integration-testing workflow (see the [Integration Testing
+guide](guides/integration_testing.md)).
 
 ```
-example_tests/travel_booking/
+benches/openapi_bench/
+```
+
+### oban_bench
+
+[Oban](https://hex.pm/packages/oban) on real Postgres: the eventual-consistency
+rung (`@poll_state`, pollers, `external()` job ids). Provisions Postgres via
+Docker.
+
+```
+benches/oban_bench/
+```
+
+### redis_bench
+
+[Redis](https://redis.io) over the network with live [Toxiproxy](https://github.com/Shopify/toxiproxy)
+fault injection: the external-SUT + nemesis rung. Provisions via Docker.
+
+```
+benches/redis_bench/
+```
+
+### gitea_bench
+
+[Gitea](https://about.gitea.com) driven two ways (REST + Playwright UI) and
+compared by a differential oracle: the dual-transport rung. Provisions via
+Docker.
+
+```
+benches/gitea_bench/
 ```
 
 ## Guides
