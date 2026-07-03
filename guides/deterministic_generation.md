@@ -64,6 +64,26 @@ The audit is generation-only: no adapter, no SUT, no execution. It never
 resolves `mint_per_run` markers or `external()` placeholders (those are
 deterministic symbolic structs and part of the plan).
 
+### Projection purity, too
+
+`mix pd.audit` also checks that your projections' `apply/2` is a pure function of
+`(state, event)`. The determinism contract covers projections as well: an
+`apply/2` that reads the clock, a counter, or the environment makes derived state
+non-reproducible and breaks the per-step state timeline and run comparison. For
+each seed the audit folds the generated plan through every projection twice and
+names any projection whose two folds disagree:
+
+```text
+PROJECTION AUDIT FAILED at seed 7
+These projections folded to different state on a second pass (non-pure apply/2):
+  - MyApp.ClockReadingProjection
+```
+
+The programmatic form is `PropertyDamage.audit_projections/2`. At debug time, the
+runtime counterpart is `PropertyDamage.FailureReport.verify_projections/1`, which
+re-derives the failing step's state and compares it to the run's snapshot (see
+the [debugging failures guide](debugging_failures.md)).
+
 ## The three seams
 
 Real systems need time, per-run uniqueness, and server-assigned ids. Each has a
