@@ -17,18 +17,27 @@ A parallel test sequence has three parts:
 
 ```
 Prefix (sequential setup):
-  CreateAccount{id: "a"} -> CreateAccount{id: "b"}
+  CreateAccount{name: "a"} -> CreateAccount{name: "b"}
+    (produce account_a, account_b as server-generated ids)
 
 Branches (parallel execution):
-  Branch 1: Deposit{acc: ref0, amount: 100} -> Withdraw{acc: ref0, amount: 30}
-  Branch 2: Deposit{acc: ref1, amount: 200} -> Transfer{from: ref0, to: ref1, amount: 50}
+  Branch 1: Deposit{acc: account_a, amount: 100} -> Withdraw{acc: account_a, amount: 30}
+  Branch 2: Deposit{acc: account_b, amount: 200} -> Transfer{from: account_a, to: account_b, amount: 50}
 
 Suffix (optional sequential cleanup):
-  CloseAccount{id: ref0} -> CloseAccount{id: ref1}
+  CloseAccount{id: account_a} -> CloseAccount{id: account_b}
 ```
 
 The **prefix** runs first to establish state. **Branches** run concurrently.
 The **suffix** runs after all branches complete.
+
+Here `account_a` and `account_b` are **placeholders**: stand-ins for the
+server-generated account ids that the prefix's `CreateAccount` commands produce.
+Fields marked with `external()` in an event struct become placeholders during
+generation and are resolved to real values during execution (see
+[Writing Commands](writing_commands.md) for the full `external()` lifecycle).
+Which placeholders a command may consume depends on where it sits in the
+prefix/branch/suffix structure.
 
 This maps directly to the `PropertyDamage.Sequence` struct:
 
@@ -43,11 +52,19 @@ This maps directly to the `PropertyDamage.Sequence` struct:
 }
 ```
 
-### Ref Constraints
+### Placeholder Scoping
 
-- Refs created in the prefix can be used in any branch.
-- Refs created in one branch CANNOT be used in another branch.
-- Refs created in branches CAN be used in the suffix (after merge).
+The generator enforces placeholder isolation across the three sections, so a
+command can only consume placeholders that are actually in scope at its position:
+
+- Placeholders produced in the **prefix** can be used in **any branch** (every
+  branch is generated from the post-prefix state).
+- Placeholders produced in **one branch** CANNOT be used in **another branch**
+  (branches are generated independently from the same post-prefix snapshot, so
+  they never see each other's values).
+- Placeholders produced in **branches** CAN be used in the **suffix**, which runs
+  after all branches merge (the suffix is generated from the merged post-branch
+  state).
 
 ## Enabling Parallel Execution
 
