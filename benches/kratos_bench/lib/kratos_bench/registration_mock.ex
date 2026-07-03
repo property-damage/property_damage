@@ -16,13 +16,13 @@ defmodule KratosBench.RegistrationMock do
 
   ## How the mock reaches a run
 
-  The framework's Executor can drive a `MockServiceRegistry` directly, but the
-  public `PropertyDamage.run/1` does not yet thread a registry through (see
-  README, "Wiring note"). So `KratosBench.Adapter` owns the registry lifecycle
-  using the registry's documented public API, and this listener is the glue the
-  Executor would otherwise be: on each inbound web_hook it reads the mock's state
-  from the registry (`get_handler_state/2`), calls `handle_request/2`, and pushes
-  the returned events back (`push_events/3`) for the adapter to flush into the run.
+  `PropertyDamage.run/1` can own the registry lifecycle via its `:mock_services`
+  option (see README, "Wiring note"); this bench predates that option and has
+  `KratosBench.Adapter` own the registry lifecycle using the registry's documented
+  public API. This listener is the transport glue: on each inbound web_hook it
+  reads the mock's state from the registry (`get_handler_state/2`), calls
+  `handle_request/2`, and pushes the returned events back (`push_events/3`) for the
+  adapter to flush into the run.
 
   A single Bandit listener is started once and kept up across sequences (the run
   process owns it); each sequence points `Hub` at its own registry, so a request
