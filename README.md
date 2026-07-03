@@ -749,7 +749,7 @@ PropertyDamage includes ready-to-use nemesis operations for common fault injecti
 | Operation | Description |
 |-----------|-------------|
 | `NetworkLatency` | Add latency (50-500ms) with optional jitter |
-| `NetworkPartition` | Block traffic (full, upstream, downstream, asymmetric) |
+| `NetworkPartition` | Block traffic (full, upstream, downstream) |
 | `PacketLoss` | Drop percentage of packets (5-50%) |
 
 ```elixir
