@@ -24,7 +24,11 @@ defmodule PropertyDamage.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      # :inets provides :httpc, which the built-in network nemeses use to drive
+      # the Toxiproxy control API; :ssl is listed so its modules (public_key et
+      # al.) are on the code path, since httpc computes SSL verify defaults when
+      # building request options even for a plain-HTTP request.
+      extra_applications: [:logger, :inets, :ssl]
     ]
   end
 
