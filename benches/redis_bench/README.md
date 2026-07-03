@@ -31,6 +31,24 @@ What it validates:
   PropertyDamage surfaces the fault honestly as a connection error rather than a
   false consistency violation. This is the oracle the nemesis audit builds on.
 
+- **Branching + linearization** (`test/parallel_linearization_test.exs`): the
+  parallel-execution rung. A non-atomic `GetThenSet` (`GET`, compute `+1`, `SET`
+  -- two round-trips) is the racing command; atomic `INCR` is the safe contrast.
+  Two layers: (1) a *physical* race over two real connections with a barrier
+  that releases both writes only after both reads, so the non-atomic
+  read-modify-write leaves the register at 1 after two increments (a lost
+  update) while `INCR` under the identical schedule leaves it at 2; (2) the
+  framework's own detection under `branching:` -- atomic `Increment` branches
+  and faithful `GetThenSet` branches are never falsely flagged (across seeds),
+  while a `LostUpdateAdapter` that reports every write from a stale snapshot
+  produces lost-update events `PropertyDamage.Linearization` refutes, surfacing
+  a `:linearization_failed` failure that shrinks to the minimal two-`GetThenSet`
+  race. Note: the executor runs branches sequentially over one shared context
+  and checks linearizability of the observed events *analytically* (it does not
+  run branches concurrently), so the lost update is injected at the adapter
+  level -- the same technique as the framework's `ets_linearization_test.exs`;
+  layer (1) supplies the genuine physical race that grounds it.
+
 - **Nemesis audit** (`test/nemesis_audit_test.exs`): proves each built-in
   nemesis either REALLY injects its fault (an observable differential) or is
   honestly reported as `simulated: true`. The network trio (`NetworkLatency` /
@@ -94,10 +112,13 @@ fault-injection suites additionally need Toxiproxy; see their own setup.)
 - `docker-compose.yml` — the dedicated Redis + Toxiproxy stack
 - `config/config.exs` — endpoint resolution (reads the env vars above)
 - `lib/redis_bench.ex` — top module + `RedisBench.Conn` (connection helper)
-- `lib/redis_bench/commands.ex` — events + the `Increment` / `ReadValue` commands
+- `lib/redis_bench/commands.ex` — events + the `Increment` / `ReadValue` /
+  `GetThenSet` commands
 - `lib/redis_bench/model.ex` — projection with the read-consistency invariant,
-  simulator, model
-- `lib/redis_bench/adapter.ex` — the faithful adapter (drives `INCR` / `GET`)
+  simulator, the atomic `RedisBench.Model`, and `RedisBench.RmwModel` (the
+  read-modify-write model for the branching + linearization suite)
+- `lib/redis_bench/adapter.ex` — the faithful adapter (drives `INCR` / `GET` /
+  `GET`+`SET`)
 - `lib/redis_bench/toxiproxy.ex` — Toxiproxy control-API client + latency probe
 - `lib/redis_bench/proxy_adapter.ex` — adapter that drives Redis *through* the
   proxy and reports connection failures honestly
