@@ -139,6 +139,7 @@ defmodule PropertyDamage do
     Executor,
     FailureReport,
     Generator,
+    MockServiceRegistry,
     Options,
     Progress.Printer,
     Progress.ReplayUpdate,
@@ -201,6 +202,14 @@ defmodule PropertyDamage do
   - `:max_runs` - Number of test sequences to run (default: 100)
   - `:seed` - Random seed for reproducibility (default: random)
   - `:injector_adapters` - List of InjectorAdapter modules (default: [])
+  - `:mock_services` - Mock third-party services the SUT calls (default: []).
+    A list of `PropertyDamage.MockServiceAdapter` modules or `{module, config}`
+    tuples. Per run the framework starts a `PropertyDamage.MockServiceRegistry`,
+    registers and sets up each mock, drives `on_command/2` before each command,
+    folds mock-injected events after, and tears each mock down. The registry pid
+    is handed to the adapter on the `PropertyDamage.Runtime` handle
+    (`runtime.mock_registry`) so `execute/3` can drive `handle_request/2`. See
+    the "Mocking Third-Party Services" guide.
   - `:adapter_config` - Config passed to adapter.setup/1 (default: %{})
   - `:shrink` - Whether to shrink failing sequences (default: true)
   - `:seed_library` - Ephemeral replay working set (DR-023): `false` (default,
@@ -319,6 +328,9 @@ defmodule PropertyDamage do
         :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
 
     injector_adapters = opts[:injector_adapters]
+    # Declared mock third-party services (WP-C5), already normalized by the
+    # options validator to a list of {module, config} tuples. Empty when unused.
+    mock_services = opts[:mock_services]
     adapter_config = opts[:adapter_config]
     shrink = opts[:shrink]
     shrinker_config = opts[:shrinker_config] || ShrinkerConfig.new()
@@ -401,6 +413,7 @@ defmodule PropertyDamage do
               seed,
               run_nonce,
               injector_adapters,
+              mock_services,
               adapter_config,
               shrink,
               shrinker_config,
@@ -457,6 +470,7 @@ defmodule PropertyDamage do
          seed,
          run_nonce,
          injector_adapters,
+         mock_services,
          adapter_config,
          shrink,
          shrinker_config,
@@ -494,6 +508,7 @@ defmodule PropertyDamage do
       adapter: adapter,
       adapter_config: adapter_config,
       injector_adapters: injector_adapters,
+      mock_services: mock_services,
       shrink: shrink,
       shrinker_config: shrinker_config,
       on_failure: on_failure,
@@ -524,6 +539,7 @@ defmodule PropertyDamage do
           seed,
           run_nonce,
           injector_adapters,
+          mock_services,
           adapter_config,
           shrink,
           shrinker_config,
@@ -545,6 +561,7 @@ defmodule PropertyDamage do
          seed,
          _run_nonce,
          _injector_adapters,
+         _mock_services,
          _adapter_config,
          _shrink,
          _shrinker_config,
@@ -581,6 +598,7 @@ defmodule PropertyDamage do
          seed,
          run_nonce,
          injector_adapters,
+         mock_services,
          adapter_config,
          shrink,
          shrinker_config,
@@ -634,12 +652,18 @@ defmodule PropertyDamage do
         # Setup injector adapters
         setup_injectors(injector_adapters, event_queue)
 
+        # Setup declared mock services (WP-C5): a per-run registry, one per run
+        # like the event queue, reused across this run's shrink attempts and the
+        # reproduction re-execution (mock_registry is nil when none declared).
+        {mock_registry, mock_contexts} = setup_mocks(mock_services, event_queue)
+
         try do
           # Execute the sequence
           {:ok, result} =
             Executor.run(sequence, model, adapter,
               adapter_config: adapter_config,
               event_queue: event_queue,
+              mock_registry: mock_registry,
               stutter_config: stutter_config,
               # Explicit stutter RNG base (DR-029): per-run seed so stutter
               # decisions are decoupled from run count and seed-library replay
@@ -673,6 +697,7 @@ defmodule PropertyDamage do
               seed,
               run_nonce,
               injector_adapters,
+              mock_services,
               adapter_config,
               shrink,
               shrinker_config,
@@ -694,6 +719,7 @@ defmodule PropertyDamage do
               adapter,
               adapter_config,
               event_queue,
+              mock_registry,
               shrink,
               shrinker_config,
               on_failure,
@@ -706,7 +732,8 @@ defmodule PropertyDamage do
             )
           end
         after
-          # Teardown injectors
+          # Teardown declared mock services, then injectors and the event queue.
+          teardown_mocks(mock_registry, mock_contexts)
           teardown_injectors(injector_adapters)
           EventQueue.stop(event_queue)
 
@@ -809,6 +836,56 @@ defmodule PropertyDamage do
   end
 
   # ============================================================================
+  # Mock Service Lifecycle (WP-C5)
+  # ============================================================================
+
+  # Start a per-run MockServiceRegistry and bring up each declared mock: register
+  # it (init_state/0) and call its setup/1 with the entry's config merged with
+  # the framework channels (:registry and :event_queue). Returns the registry pid
+  # (or nil when no mocks are declared) plus the per-mock setup contexts, which
+  # teardown_mocks/2 later hands back to each mock's teardown/1. Mirrors the event
+  # queue's per-run lifecycle; the pid is reused across this run's shrink attempts.
+  defp setup_mocks([], _event_queue), do: {nil, []}
+
+  defp setup_mocks(mock_services, event_queue) do
+    {:ok, registry} = MockServiceRegistry.start_link([])
+
+    contexts =
+      for {module, config} <- mock_services do
+        :ok = MockServiceRegistry.register(registry, module)
+
+        context =
+          if function_exported?(module, :setup, 1) do
+            case module.setup(Map.merge(config, %{registry: registry, event_queue: event_queue})) do
+              {:ok, ctx} -> ctx
+              :ok -> %{}
+            end
+          else
+            %{}
+          end
+
+        {module, context}
+      end
+
+    {registry, contexts}
+  end
+
+  # Tear each mock down (best-effort, in reverse setup order) then stop the
+  # registry. A nil registry means no mocks were declared, so this is a no-op.
+  defp teardown_mocks(nil, _contexts), do: :ok
+
+  defp teardown_mocks(registry, contexts) do
+    for {module, context} <- Enum.reverse(contexts) do
+      if function_exported?(module, :teardown, 1) do
+        module.teardown(context)
+      end
+    end
+
+    MockServiceRegistry.stop(registry)
+    :ok
+  end
+
+  # ============================================================================
   # Seed Library Replay Phase (DR-023)
   # ============================================================================
 
@@ -904,8 +981,8 @@ defmodule PropertyDamage do
     build_rep? = is_nil(rep)
 
     execution =
-      with_sequence_execution(seed, ctx, fn sequence, exec_result, event_queue ->
-        replay_outcome(sequence, exec_result, event_queue, seed, ctx, build_rep?)
+      with_sequence_execution(seed, ctx, fn sequence, exec_result, event_queue, mock_registry ->
+        replay_outcome(sequence, exec_result, event_queue, mock_registry, seed, ctx, build_rep?)
       end)
 
     case execution do
@@ -928,11 +1005,19 @@ defmodule PropertyDamage do
   # Classify one replay execution. On failure (and when this is the
   # representative), shrink into a full report via the shared `handle_failure`
   # while the event queue is still alive.
-  defp replay_outcome(_sequence, %{success: true}, _event_queue, _seed, _ctx, _build_rep?) do
+  defp replay_outcome(
+         _sequence,
+         %{success: true},
+         _event_queue,
+         _mock_registry,
+         _seed,
+         _ctx,
+         _build_rep?
+       ) do
     {:pass}
   end
 
-  defp replay_outcome(sequence, exec_result, event_queue, seed, ctx, build_rep?) do
+  defp replay_outcome(sequence, exec_result, event_queue, mock_registry, seed, ctx, build_rep?) do
     {failure_type, check_name} = FailureReport.classify_reason(exec_result.failure_reason)
 
     # Refresh descriptive metadata from the new failure. Keep the prior
@@ -952,6 +1037,7 @@ defmodule PropertyDamage do
             ctx.adapter,
             ctx.adapter_config,
             event_queue,
+            mock_registry,
             ctx.shrink,
             ctx.shrinker_config,
             ctx.on_failure,
@@ -993,12 +1079,14 @@ defmodule PropertyDamage do
       :ok ->
         {:ok, event_queue} = EventQueue.start_link()
         setup_injectors(ctx.injector_adapters, event_queue)
+        {mock_registry, mock_contexts} = setup_mocks(ctx.mock_services, event_queue)
 
         try do
           {:ok, result} =
             Executor.run(sequence, ctx.model, ctx.adapter,
               adapter_config: ctx.adapter_config,
               event_queue: event_queue,
+              mock_registry: mock_registry,
               stutter_config: ctx.stutter_config,
               # Replay derives run 0, whose effective seed is the replayed seed.
               rng_seed: seed,
@@ -1008,8 +1096,9 @@ defmodule PropertyDamage do
               mint_epoch: 0
             )
 
-          fun.(sequence, result, event_queue)
+          fun.(sequence, result, event_queue, mock_registry)
         after
+          teardown_mocks(mock_registry, mock_contexts)
           teardown_injectors(ctx.injector_adapters)
           EventQueue.stop(event_queue)
 
@@ -1151,6 +1240,7 @@ defmodule PropertyDamage do
          adapter,
          adapter_config,
          event_queue,
+         mock_registry,
          shrink,
          shrinker_config,
          on_failure,
@@ -1182,6 +1272,7 @@ defmodule PropertyDamage do
             adapter_config: adapter_config,
             config: shrinker_config,
             event_queue: event_queue,
+            mock_registry: mock_registry,
             stutter_config: stutter_config,
             rng_seed: seed,
             run_nonce: run_nonce,
@@ -1206,6 +1297,7 @@ defmodule PropertyDamage do
       [
         adapter_config: adapter_config,
         event_queue: event_queue,
+        mock_registry: mock_registry,
         run_nonce: run_nonce,
         mint_epoch: fresh_epoch
       ] ++

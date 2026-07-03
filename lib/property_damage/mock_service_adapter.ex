@@ -152,6 +152,42 @@ defmodule PropertyDamage.MockServiceAdapter do
 
   The mock adapter's `on_command/2` callback receives all commands, allowing
   it to react to configuration commands and update its internal state.
+
+  ## Wiring a mock into a run
+
+  Declare mocks with the `:mock_services` option of `PropertyDamage.run/1`:
+
+      PropertyDamage.run(
+        model: PaymentTestModel,
+        adapter: PaymentAdapter,
+        mock_services: [MyTest.PaymentMock]
+        # or, with config: mock_services: [{MyTest.PaymentMock, %{port: 4445}}]
+      )
+
+  For each run the framework:
+
+  1. starts a `PropertyDamage.MockServiceRegistry`,
+  2. registers each mock (calling `init_state/0`) and calls its `setup/1` with
+     the entry's config merged with `%{registry: pid, event_queue: pid}`,
+  3. calls `on_command/2` on every command before it executes,
+  4. after each command, flushes the events mocks pushed into the registry,
+     folds them into projections (`source: :mock`), and calls `on_event/2`,
+  5. calls `teardown/1` and stops the registry at the end.
+
+  The registry pid also travels to the adapter on the `PropertyDamage.Runtime`
+  handle as `runtime.mock_registry`. When the SUT makes an outbound call to the
+  mocked service, whatever plays the transport drives `handle_request/2` through
+  the registry and pushes the returned events back:
+
+      # In the mock's HTTP listener (started in setup/1), or directly in the
+      # adapter's execute/3 for an in-process SUT:
+      {:ok, state} = MockServiceRegistry.get_handler_state(registry, MyTest.PaymentMock)
+      {:ok, response, events} = MyTest.PaymentMock.handle_request(request, state)
+      :ok = MockServiceRegistry.push_events(registry, MyTest.PaymentMock, events)
+
+  The framework never calls `handle_request/2` itself: only the SUT (or its
+  stand-in) knows when an outbound call happens, so the transport drives it while
+  the framework owns the surrounding lifecycle.
   """
 
   @doc """
