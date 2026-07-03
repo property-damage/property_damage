@@ -74,9 +74,17 @@
    per capture (collision-free on a shared SUT), returning the traces (and
    their comparison). Salt policy by use case: flakiness = distinct nonces;
    regression across versions with a fresh SUT per side may share a nonce
-   for the cleanest like-for-like. The existing `PropertyDamage.Flakiness`
-   stays as the cheap outcome-level detector; deepening it onto traces is
-   future work, not this campaign.
+   for the cleanest like-for-like.
+
+   > **Superseded (2026-07-03).** This DR originally kept
+   > `PropertyDamage.Flakiness` as a separate cheap outcome-level detector,
+   > with "deepening it onto traces" left as future work. That module has since
+   > been removed and its capability folded into `RunComparison`: `investigate/1`
+   > is the single-seed flakiness tool, `scan/1` is the corpus scan (the
+   > `discover_flaky` replacement, per-seed verdicts with bounded memory), and
+   > `outcome_summary/1` is the cheap outcome-level view (pass/fail counts +
+   > distinct failure signatures) both are built on. There is no longer a
+   > separate flakiness module.
 
 6. **One self-contained HTML artifact.** `RunComparison.to_html/1` renders a
    single HTML file: inline CSS/JS, no external hosts (repo self-sufficiency

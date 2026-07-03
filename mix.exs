@@ -177,7 +177,6 @@ defmodule PropertyDamage.MixProject do
         # this time (see the README note). Grouped last and clearly labelled so
         # the docs do not advertise them alongside the validated core.
         "Advanced (work in progress, not fully supported)": [
-          PropertyDamage.Flakiness,
           PropertyDamage.Mutation,
           PropertyDamage.Mutation.Report,
           PropertyDamage.Mutation.Analysis,

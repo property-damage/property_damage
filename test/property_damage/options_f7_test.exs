@@ -66,30 +66,6 @@ defmodule PropertyDamage.OptionsF7Test do
     end
   end
 
-  # ---- Flakiness ------------------------------------------------------------
-
-  describe "Options flakiness schemas" do
-    test "check/4 defaults and unknown-key rejection" do
-      assert Options.validate_flakiness_check!([])[:runs] == 5
-
-      assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:bogus\]/, fn ->
-        Options.validate_flakiness_check!(bogus: 1)
-      end
-    end
-
-    test "check_batch/4 rejects a type violation" do
-      assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
-        Options.validate_flakiness_check_batch!(runs_per_seed: 0)
-      end
-    end
-
-    test "discover_flaky/3 defaults" do
-      opts = Options.validate_flakiness_discover_flaky!([])
-      assert opts[:num_seeds] == 10
-      assert opts[:runs_per_seed] == 3
-    end
-  end
-
   # ---- Audit ----------------------------------------------------------------
 
   describe "Options.validate_audit!/1" do
@@ -121,6 +97,21 @@ defmodule PropertyDamage.OptionsF7Test do
 
       opts =
         Options.validate_run_comparison_investigate!(capture: [model: M, adapter: A, seed: 1])
+
+      assert opts[:runs] == 5
+    end
+
+    test "scan/1 requires :seeds and :capture and defaults :runs" do
+      assert_raise NimbleOptions.ValidationError, ~r/required :seeds option not found/, fn ->
+        Options.validate_run_comparison_scan!(capture: [model: M, adapter: A])
+      end
+
+      assert_raise NimbleOptions.ValidationError, ~r/required :capture option not found/, fn ->
+        Options.validate_run_comparison_scan!(seeds: [1, 2])
+      end
+
+      opts =
+        Options.validate_run_comparison_scan!(seeds: [1, 2], capture: [model: M, adapter: A])
 
       assert opts[:runs] == 5
     end

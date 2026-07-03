@@ -14,10 +14,14 @@ defmodule PropertyDamage.RunComparison do
       traces = for _ <- 1..5, do: RunTrace.capture(model: M, adapter: A, seed: 1)
       comparison = RunComparison.compare(traces)
 
-  `investigate/1` is flakiness sugar that captures the traces for you (a fresh
-  recorded nonce per run, so client-minted values never collide on a shared
-  SUT). It complements `PropertyDamage.Flakiness`, which stays the cheap
-  outcome-level detector; deepening that onto traces is future work.
+  This is the flakiness tool. `investigate/1` handles a single known seed:
+  captures the traces for you (a fresh recorded nonce per run, so client-minted
+  values never collide on a shared SUT) and ranks where the passing and failing
+  runs diverge. `scan/1` is its corpus counterpart: run a whole list of seeds, N
+  captures each, and get back a per-seed `Verdict`, discarding a seed's traces
+  before moving to the next so memory stays bounded. `outcome_summary/1` is the
+  cheap outcome-level view (pass/fail counts + distinct failure signatures) both
+  are built on.
 
   ## What it aligns
 
@@ -66,6 +70,30 @@ defmodule PropertyDamage.RunComparison do
             # Set when the difference is a same-module repetition-count artifact
             # (settle/probe polling): timing-dependent noise, forced incidental.
             incidental_override: boolean()
+          }
+  end
+
+  defmodule Verdict do
+    @moduledoc """
+    One seed's flakiness verdict from a corpus `scan/1` (DR-035).
+
+    Carries the cheap, always-retained outcome view (`flaky?`, `partition`,
+    `failure_signatures`) plus, for flaky seeds only, the full `%RunComparison{}`
+    so the field-by-field divergence is one hop away. `comparison` is `nil` for a
+    consistent seed, which is what keeps a scan's memory bounded: only the
+    interesting minority retains its traces.
+    """
+    @type partition :: %{passing: non_neg_integer(), failing: non_neg_integer()}
+
+    defstruct [:seed, :runs, :flaky?, :partition, :failure_signatures, :comparison]
+
+    @type t :: %__MODULE__{
+            seed: integer(),
+            runs: non_neg_integer(),
+            flaky?: boolean(),
+            partition: partition(),
+            failure_signatures: [term()],
+            comparison: PropertyDamage.RunComparison.t() | nil
           }
   end
 
@@ -192,6 +220,107 @@ defmodule PropertyDamage.RunComparison do
       end
 
     {traces, compare(traces, Keyword.take(opts, [:event_identity]))}
+  end
+
+  @doc """
+  Scan a corpus of seeds for flakiness (DR-035).
+
+  For each seed, captures `:runs` traces of that seed's plan (a fresh
+  `run_nonce` per capture) and returns a `%{seed => Verdict.t()}` map. Memory is
+  bounded: a seed's traces are reduced to a `Verdict` before the next seed is
+  captured, and only flaky seeds retain their `%RunComparison{}` (a consistent
+  seed keeps just the outcome counts, so its traces are freed).
+
+  This is the corpus counterpart to `investigate/1`, which deep-localizes a
+  single already-suspect seed.
+
+  ## Options
+
+  - `:seeds` (required) - the list of seeds to scan.
+  - `:runs` - captures per seed (default 5).
+  - `:capture` (required) - options forwarded to `RunTrace.capture/1` (must
+    include `:model` and `:adapter`; the `:seed` is supplied per scanned seed,
+    so any `:seed` here is ignored). A fresh `:run_nonce` is injected per
+    capture.
+  - `:event_identity` - forwarded to `compare/2`.
+
+  ## Example
+
+      RunComparison.scan(
+        seeds: Enum.to_list(1..100),
+        runs: 5,
+        capture: [model: MyModel, adapter: MyAdapter]
+      )
+  """
+  @spec scan(keyword()) :: %{integer() => Verdict.t()}
+  def scan(opts) do
+    opts = PropertyDamage.Options.validate_run_comparison_scan!(opts)
+    seeds = Keyword.fetch!(opts, :seeds)
+    runs = Keyword.fetch!(opts, :runs)
+    capture_opts = opts |> Keyword.fetch!(:capture) |> Keyword.delete(:seed)
+    compare_opts = Keyword.take(opts, [:event_identity])
+
+    Map.new(seeds, fn seed -> {seed, scan_seed(seed, runs, capture_opts, compare_opts)} end)
+  end
+
+  # One seed: capture N traces, reduce to a verdict, keep the comparison only
+  # when flaky so consistent seeds' traces are released before the next seed.
+  defp scan_seed(seed, runs, capture_opts, compare_opts) do
+    traces =
+      for _ <- 1..runs do
+        nonce = :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
+
+        RunTrace.capture(
+          capture_opts
+          |> Keyword.put(:seed, seed)
+          |> Keyword.put(:run_nonce, nonce)
+        )
+      end
+
+    comparison = compare(traces, compare_opts)
+    summary = outcome_summary(comparison)
+    flaky? = flaky_summary?(summary)
+
+    %Verdict{
+      seed: seed,
+      runs: runs,
+      flaky?: flaky?,
+      partition: %{passing: summary.passing, failing: summary.failing},
+      failure_signatures: summary.failure_signatures,
+      comparison: if(flaky?, do: comparison, else: nil)
+    }
+  end
+
+  # Flaky iff the runs disagree on pass/fail, or the failing runs disagree on
+  # why they failed (same-signature repeated failures are consistent, not flaky).
+  defp flaky_summary?(%{passing: passing, failing: failing, failure_signatures: sigs}) do
+    (passing > 0 and failing > 0) or length(sigs) > 1
+  end
+
+  @doc """
+  Summarize a comparison's runs by outcome (DR-035).
+
+  The cheap outcome-level view — passing/failing run counts and the distinct
+  failure signatures observed — that flakiness detection is built on, so callers
+  read a summary instead of digging into `groups` and re-deriving signatures.
+  """
+  @spec outcome_summary(t()) :: %{
+          passing: non_neg_integer(),
+          failing: non_neg_integer(),
+          failure_signatures: [term()]
+        }
+  def outcome_summary(%__MODULE__{groups: groups} = comparison) do
+    %{
+      passing: length(groups.passing),
+      failing: length(groups.failing),
+      failure_signatures: distinct_failure_signatures(comparison)
+    }
+  end
+
+  defp distinct_failure_signatures(%__MODULE__{traces: traces, groups: %{failing: failing}}) do
+    failing
+    |> Enum.map(fn i -> failure_signature(Enum.at(traces, i).outcome) end)
+    |> Enum.uniq()
   end
 
   # ---- Guard ----------------------------------------------------------------
