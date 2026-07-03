@@ -24,7 +24,9 @@ defmodule PropertyDamage.Executor.Nemesis do
     # command's output injects against the real value, not a sentinel
     placeholder_registry = Map.get(state, :placeholder_registry, PlaceholderRegistry.new())
 
-    case Executor.resolve_command_placeholders(command, placeholder_registry) do
+    mint = {Map.get(state, :run_nonce), Map.get(state, :mint_epoch, 0)}
+
+    case Executor.resolve_command_placeholders(command, placeholder_registry, mint) do
       {:ok, resolved_command} ->
         do_execute_nemesis_command(
           command,
