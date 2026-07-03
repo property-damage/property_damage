@@ -281,6 +281,50 @@ File.write!("comparison.html", RunComparison.to_html(comparison))
 > [deterministic generation guide](deterministic_generation.md) and
 > `mix pd.audit`.
 
+### Projection state over time
+
+A failure report keeps two authoritative state snapshots
+(`state_before_failure`, `state_at_failure`). For every *other* step, projection
+state is **derived** from the run — nothing is captured per command. Ask a
+`RunTrace` (a report embeds one as `failure.trace`) for the state at any step:
+
+```elixir
+alias PropertyDamage.RunTrace
+
+# The projection state after each command, in reading order.
+RunTrace.state_timeline(failure.trace)
+#=> [{%Sequence.Position{...}, %{MyProjection => %{...}, ...}}, ...]
+
+# The state right after (or right before) one command.
+step = PropertyDamage.FailureReport.failure_step(failure)
+RunTrace.state_at(failure.trace, step.position)
+RunTrace.state_before(failure.trace, step.position)
+```
+
+This is the *faithful* timeline: it replays the run's real fold order, so
+late-settling async events land exactly where they folded.
+
+### Checking projection purity
+
+A projection's `apply/2` must be a pure function of `(state, event)`. If it reads
+a clock, a counter, or the environment, re-deriving the state no longer matches
+what the run actually had. `verify_projections/1` catches exactly that — it
+re-derives the state at the failing step and compares it to the runtime
+snapshot:
+
+```elixir
+PropertyDamage.FailureReport.verify_projections(failure)
+#=> :ok
+#=> {:non_pure_projections, [MyApp.ImpureProjection]}
+```
+
+Because it replays the real fold order, a *pure* projection whose events settle
+asynchronously does not false-positive. For an ahead-of-time (no failure needed)
+check across many seeds, `mix pd.audit` also runs
+`PropertyDamage.audit_projections/2`, which folds each generated plan twice and
+names any projection that disagrees with itself. See the
+[deterministic generation guide](deterministic_generation.md).
+
 ## Step 7: Export for Sharing
 
 ### Generate ExUnit Test

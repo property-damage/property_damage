@@ -256,6 +256,25 @@ The framework SHALL model the complete record of a single run as a `PropertyDama
 - **THEN** the framework SHALL NOT retain a full `RunTrace` for every exploration run
 - **AND** it SHALL capture a full `RunTrace` only for runs on an explicit capture path and for the failing run that produces a report
 
+### Requirement: Per-Step State Timeline and Projection Purity (DR-040)
+
+Per-command projection state SHALL be DERIVED from a `RunTrace`, never captured per step. The executor SHALL record the run's real fold order additively — each `EventLog.Entry` SHALL carry a `fold_index` stamped when its event folds into projections (`nil` for entries that are recorded but never folded, i.e. `:stutter` retries and `:telemetry` spans), and the trace SHALL carry `command_fold_ordinals` (each command's own fold ordinal by position) and the verified branch `linearization`. From this record the framework SHALL derive two state views: a FAITHFUL view (`RunTrace.state_at/2`, `state_before/2`, `state_timeline/1`) that replays the real fold order so async / injected events land where they folded, and a CANONICAL view (`RunTrace.canonical_state_timeline/1`) that folds each step's command then its attributed events in flattened order and is therefore fold-order-independent. Branching faithful derivation SHALL mirror the executor's branch merge: branch steps fold branch-locally from the post-prefix state, and suffix steps fold the merged state (branches replayed in verified `linearization` order when recorded, else branch order) then the suffix. The framework SHALL provide a projection-purity check (`FailureReport.verify_projections/1`, `RunTrace.verify_projections/4`): the faithful-derived state at the failing step MUST equal the runtime `state_at_failure` snapshot (and `state_before_failure` at its step), and a mismatch SHALL be reported as `{:non_pure_projections, [module]}` naming the projection module(s) whose `apply/2` is not a pure function of `(state, event)`. Because faithful derivation replays the real fold order, a pure-but-async projection SHALL NOT be reported as non-pure. This is a two-point sample (before + at the failing step), an explicitly partial coverage. A generation-side companion (`PropertyDamage.audit_projections/2`, run by `mix pd.audit`) SHALL fold each generated plan twice and name any projection whose two folds disagree.
+
+#### Scenario: Faithful state matches the runtime snapshot
+
+- **WHEN** the faithful per-step state is derived at the failing step of a report built from a real run
+- **THEN** it SHALL equal the runtime `state_at_failure` snapshot (and `state_before_failure` at that step) for a model whose projections are pure, on both linear and branching runs
+
+#### Scenario: Impure projection is detected
+
+- **WHEN** a projection's `apply/2` reads a value outside `(state, event)` (a clock, a counter, the environment)
+- **THEN** the projection-purity check SHALL report `{:non_pure_projections, modules}` naming that projection, and SHALL NOT accuse a pure projection folded in the same run
+
+#### Scenario: Pure-but-async projection does not false-positive
+
+- **WHEN** an event folds outside command attribution (an async injector/queue event) but every projection is pure
+- **THEN** the faithful-derived state SHALL still equal the runtime snapshot, so the projection-purity check SHALL return `:ok`
+
 ### Requirement: Run Comparison Supersedes Trace Diffing (DR-035)
 
 The passing/failing trace-diff surface previously provided by `PropertyDamage.Diff` (`compare_reports/2`, `compare_traces/2`, hand-built trace maps) SHALL be removed. Comparing runs SHALL instead be served by the Run Comparison subsystem specified in the differential-testing domain (DR-035), which aligns full `RunTrace` records (DR-033) rather than shrunk reports, classifies value provenance (DR-034), and renders a self-contained report.

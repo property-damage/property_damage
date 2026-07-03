@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-step projection-state timeline + projection-purity check (P8, DR-040).**
+  Projection state at any command is now *derived* from the run (no snapshot is
+  captured). `PropertyDamage.RunTrace.state_at/2`, `state_before/2`, and
+  `state_timeline/1` re-fold the recorded fold order to give the faithful state
+  the run actually had (async / injected events land where they folded);
+  `canonical_state_timeline/1` is a timing-immune variant used by run comparison.
+  The executor records the real fold order additively: `EventLog.Entry` gains a
+  `fold_index`, and `RunTrace` gains `command_fold_ordinals` and the verified
+  branch `linearization`. `PropertyDamage.FailureReport.verify_projections/1`
+  (and `RunTrace.verify_projections/4`) are the projection-purity check — the
+  faithful-derived state at the failing step must equal the runtime snapshot; a
+  mismatch names the non-pure projection module(s). Because it replays the real
+  fold order, a pure-but-async projection does not false-positive.
+  `PropertyDamage.audit_projections/2` (run by `mix pd.audit`) is the
+  generation-side companion: it folds each generated plan twice and names any
+  projection whose `apply/2` is non-deterministic.
+- **Projection-state divergence now enters `PropertyDamage.RunComparison`
+  ranking (DR-040).** Each projection's canonical per-step state is flattened
+  into leaf-path fields and classified alongside command/event fields, so a
+  regression or flake that manifests only in derived state is localized and
+  ranked. Canonical states are timing-immune, so async fold-order skew can never
+  masquerade as a state finding. A new `state_warnings` field (surfaced in the
+  HTML report and JSON) flags projections whose state varies within an outcome
+  group — a likely non-pure `apply/2`.
+
 - **Mock third-party services are now reachable through `PropertyDamage.run/1`
   (WP-C5).** A new `:mock_services` run option accepts a list of
   `PropertyDamage.MockServiceAdapter` modules (or `{module, config}` tuples). Per
@@ -127,6 +152,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing the report.
 
 ### Changed
+
+- **Persisted-file format bumps to version `6`; pre-v6 files are refused
+  (BREAKING, DR-040).** V6 records the per-run fold order (`EventLog.Entry`
+  `fold_index` + `RunTrace` `command_fold_ordinals` + verified `linearization`)
+  so the per-step state timeline and the projection-purity check can be derived.
+  A `.pd` / `.pdtrace` file written under format version `1`–`5` now returns
+  `{:error, {:unsupported_format_version, version, 6}}`; a pre-v6 file carries no
+  fold-order record, so no honest in-place upgrade exists. Re-capture the failure
+  under the current version (the framework is unpublished; no persisted artifacts
+  exist outside test fixtures).
 
 - **Command positions are now `%PropertyDamage.Sequence.Position{}` everywhere
   (BREAKING, DR-039).** The raw position tuples `{:prefix, i}` / `{:branch, b,
