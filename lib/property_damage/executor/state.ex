@@ -58,6 +58,15 @@ defmodule PropertyDamage.Executor.State do
       `Command.awaits/2`. Persists for the rest of the run (a matcher outlives
       the command that declared it) so late injector events still correlate.
       First-registered wins when several match one event.
+    * `:fold_counter` - the next per-run fold ordinal (P8 / DR-040). Every event
+      folded into projections stamps its `EventLog.Entry.fold_index` with the
+      current value and advances it; every command fold records the current value
+      in `:command_fold_ordinals` before advancing. Monotonic across the whole
+      run so the faithful per-step state timeline can replay the true fold order.
+    * `:command_fold_ordinals` - `%{Sequence.Position => fold ordinal}` recording
+      the ordinal at which each command was itself folded into projections (the
+      command fold has no `EventLog.Entry` of its own, so its ordinal is homed
+      here). Feeds `RunTrace.command_fold_ordinals`.
   """
 
   @enforce_keys [
@@ -95,7 +104,9 @@ defmodule PropertyDamage.Executor.State do
     active_resource_pollers: [],
     active_faults: %{},
     async_halt: nil,
-    await_matchers: []
+    await_matchers: [],
+    fold_counter: 0,
+    command_fold_ordinals: %{}
   ]
 
   @type t :: %__MODULE__{
@@ -123,6 +134,8 @@ defmodule PropertyDamage.Executor.State do
           active_resource_pollers: list(),
           active_faults: map(),
           async_halt: term(),
-          await_matchers: [map()]
+          await_matchers: [map()],
+          fold_counter: non_neg_integer(),
+          command_fold_ordinals: %{term() => non_neg_integer()}
         }
 end

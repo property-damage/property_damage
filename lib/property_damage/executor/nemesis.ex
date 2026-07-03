@@ -66,6 +66,15 @@ defmodule PropertyDamage.Executor.Nemesis do
 
     case nemesis_module.inject(resolved_command, nemesis_context) do
       {:ok, events} ->
+        # Record the nemesis command's own fold ordinal (P8 / DR-040), then fold
+        # it. A nemesis command has no injection window, so the counter starts at
+        # the run counter carried on the state.
+        command_fold_ordinal = state.fold_counter
+        fold_counter = command_fold_ordinal + 1
+
+        command_fold_ordinals =
+          Map.put(state.command_fold_ordinals, state.current_position, command_fold_ordinal)
+
         # Update projections with nemesis command
         projections = Executor.Events.update_projections(state.projections, resolved_command)
 
@@ -75,23 +84,25 @@ defmodule PropertyDamage.Executor.Nemesis do
         log_before_async = state.event_log
 
         # Process nemesis events with source: :nemesis
-        {projections, event_log} =
+        {projections, event_log, fold_counter} =
           process_nemesis_events(
             events,
             nemesis_module,
             index,
             state.event_log,
             projections,
-            state.branch_id
+            state.branch_id,
+            fold_counter
           )
 
         # Drain and process injector events
-        {projections, event_log} =
+        {projections, event_log, fold_counter} =
           Executor.Events.process_injector_events(
             event_queue,
             event_log,
             projections,
             state.branch_id,
+            fold_counter,
             Map.get(state, :await_matchers, [])
           )
 
@@ -127,7 +138,9 @@ defmodule PropertyDamage.Executor.Nemesis do
                 projections: projections,
                 step_count: state.step_count + 1,
                 assertion_counters: async_counters,
-                active_faults: active_faults
+                active_faults: active_faults,
+                fold_counter: fold_counter,
+                command_fold_ordinals: command_fold_ordinals
               })
 
             {:error, {:assertion_failed, async_name, async_reason}, failed_state}
@@ -160,7 +173,9 @@ defmodule PropertyDamage.Executor.Nemesis do
                     step_count: state.step_count + 1,
                     assertion_counters: assertion_counters,
                     assertion_failures: updated_failures,
-                    active_faults: active_faults
+                    active_faults: active_faults,
+                    fold_counter: fold_counter,
+                    command_fold_ordinals: command_fold_ordinals
                   })
 
                 {:ok, new_state}
@@ -172,7 +187,9 @@ defmodule PropertyDamage.Executor.Nemesis do
                     projections: projections,
                     step_count: state.step_count + 1,
                     assertion_counters: assertion_counters,
-                    active_faults: active_faults
+                    active_faults: active_faults,
+                    fold_counter: fold_counter,
+                    command_fold_ordinals: command_fold_ordinals
                   })
 
                 {:error, {:assertion_failed, assertion_name, reason}, failed_state}
@@ -253,18 +270,23 @@ defmodule PropertyDamage.Executor.Nemesis do
           # against @trigger every: assertions. The nemesis command-injection
           # path (execute_nemesis_command) is where injected-fault events are
           # asserted. This reduce is best-effort cleanup with no failure channel.
-          {projections, event_log} =
+          {projections, event_log, fold_counter} =
             process_nemesis_events(
               events,
               nemesis_module,
               index,
               acc.event_log,
               acc.projections,
-              acc.branch_id
+              acc.branch_id,
+              acc.fold_counter
             )
 
           acc
-          |> Executor.put_state(%{projections: projections, event_log: event_log})
+          |> Executor.put_state(%{
+            projections: projections,
+            event_log: event_log,
+            fold_counter: fold_counter
+          })
           |> drop_active_fault(key)
 
         {:error, _reason} ->
@@ -280,20 +302,24 @@ defmodule PropertyDamage.Executor.Nemesis do
     Executor.put_state(state, %{active_faults: faults})
   end
 
-  # Fold nemesis events (source: :nemesis) into projections and the event log.
+  # Fold nemesis events (source: :nemesis) into projections and the event log,
+  # stamping each entry's fold ordinal (P8 / DR-040) from the threaded counter.
   defp process_nemesis_events(
          events,
          nemesis_module,
          command_index,
          event_log,
          projections,
-         branch_id
+         branch_id,
+         fold_counter
        ) do
-    Enum.reduce(events, {projections, event_log}, fn event, {projs, log} ->
-      entry = Entry.from_nemesis(event, command_index, nemesis_module, branch_id: branch_id)
+    Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
+      entry =
+        Entry.from_nemesis(event, command_index, nemesis_module, branch_id: branch_id)
+        |> Map.put(:fold_index, fc)
 
       new_projs = Executor.Events.update_projections(projs, event)
-      {new_projs, [entry | log]}
+      {new_projs, [entry | log], fc + 1}
     end)
   end
 end
