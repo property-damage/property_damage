@@ -1463,8 +1463,8 @@ PropertyDamage
 > The codebase also ships several modules that are **work in progress and not
 > fully supported at this time**, intentionally left out of this README and the
 > docs front page: load testing, mutation testing, invariant suggestions,
-> failure intelligence (clustering/verification), production forensics, the
-> telemetry dashboard, and Livebook visualization.
+> failure intelligence (clustering/verification), production forensics, and
+> Livebook visualization.
 > They compile and have moduledocs, but have not been validated against a real
 > SUT yet. Use them at your own risk.
 

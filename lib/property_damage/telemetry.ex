@@ -122,7 +122,10 @@ defmodule PropertyDamage.Telemetry do
         nil
       )
 
-  Or use `PropertyDamage.Telemetry.Dashboard` for a pre-built LiveView dashboard.
+  For a live in-memory rollup of these events, `PropertyDamage.Telemetry.Collector`
+  subscribes to them and maintains run/command/check counters you can read or push
+  to your own dashboard; the framework does not ship a renderer, so bring your own
+  (Phoenix LiveView, an IEx loop, an exporter, etc.).
   """
 
   alias PropertyDamage.Progress

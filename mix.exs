@@ -190,8 +190,7 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.LoadTest,
           PropertyDamage.Forensics,
           PropertyDamage.Integration,
-          PropertyDamage.Telemetry.Collector,
-          PropertyDamage.Telemetry.Dashboard
+          PropertyDamage.Telemetry.Collector
         ]
       ],
       source_url: @source_url,
