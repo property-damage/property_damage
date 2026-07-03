@@ -352,3 +352,23 @@ Symbolic identity SHALL be deterministic so that two generations of the same pla
 
 - **WHEN** traces are captured on two commits between which generators, command structs, or event structs changed such that the generated plan differs
 - **THEN** their plan fingerprints SHALL differ, and run comparison SHALL refuse rather than misalign
+
+### Requirement: Generation Determinism Audit (DR-037)
+
+Generation SHALL be a pure function of `(seed, model, generation options)`, including user code: command generators, `when:`/`with:` predicates, the `command_sequence_projection`, and the simulator. All nondeterminism — the wall clock, `:rand`, `System.unique_integer/1`, client-minted identifiers, and environment — SHALL be reified at execution (adapter reification of a seeded relative offset, or `mint_per_run/1`, DR-034), never during generation. The framework SHALL provide an audit (`PropertyDamage.audit/2`, wrapped by `mix pd.audit`) that, for a deterministically chosen set of seeds, realizes a model's generated sequence twice at the same seed through the seeded path and asserts the two are structurally equal per the Deterministic Symbolic Identity requirement (DR-036); the audit SHALL be generation-only and SHALL NOT resolve mint markers or placeholders. On divergence the audit SHALL localize the first differing command position and its differing fields with actionable guidance, and `mix pd.audit` SHALL exit non-zero so CI gates on it. An impure model that fails this audit is exactly a model whose captured runs the run-comparison comparability guard (DR-035) will refuse.
+
+#### Scenario: A pure model passes the audit
+
+- **WHEN** `PropertyDamage.audit/2` runs against a model whose generation is a pure function of the seed, including one using `external/0` or `mint_per_run/1`
+- **THEN** it SHALL return `:ok` for every audited seed, under both linear and branching generation options
+
+#### Scenario: An impure generator is rejected
+
+- **WHEN** a generator, `when:`/`with:` predicate, or projection reads process-varying state (the clock, `:rand`, `System.unique_integer/1`) so two same-seed generations differ
+- **THEN** `PropertyDamage.audit/2` SHALL return `{:error, %{seed: seed, divergence: divergence}}` naming the first diverging seed and the first differing command position/fields
+- **AND** `mix pd.audit` SHALL exit non-zero
+
+#### Scenario: Time and client-minted values are reified at execution, not generation
+
+- **WHEN** a model needs a timeliness-dependent value (a JWT `exp`) or a per-run-unique identifier
+- **THEN** it SHALL carry a seeded relative offset (reified to absolute time in the adapter) or a `mint_per_run/1` marker in the plan, so the plan stays a pure function of the seed and the audit passes

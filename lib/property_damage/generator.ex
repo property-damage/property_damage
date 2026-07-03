@@ -132,6 +132,11 @@ defmodule PropertyDamage.Generator do
   Consuming a generator via `Enum`/`Enumerable` seeds from the wall clock
   (see `StreamData` docs), which silently breaks seed reproducibility.
   All framework code MUST realize generated values through this function.
+
+  Generation being a pure function of the seed also depends on user code
+  (generators, `when:`/`with:`, the projection/simulator) being pure; enforce
+  that with `PropertyDamage.audit/2` (`mix pd.audit`). See the
+  [deterministic generation guide](deterministic_generation.md).
   """
   @spec generate_value(StreamData.t(val), integer(), keyword()) :: val when val: var
   def generate_value(generator, seed, opts \\ []) when is_integer(seed) do

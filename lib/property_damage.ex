@@ -2120,6 +2120,25 @@ defmodule PropertyDamage do
   @spec mint_per_run(PropertyDamage.Mint.kind()) :: PropertyDamage.Mint.t()
   defdelegate mint_per_run(kind), to: PropertyDamage.Mint, as: :new
 
+  @doc """
+  Audit that a model's generation is a pure function of the seed (DR-037).
+
+  Generation MUST be deterministic in `(seed, model, generation opts)`: all
+  nondeterminism (clock, `:rand`, client-minted ids, environment) belongs
+  behind an execution-time seam, never in a generator / `when:` / `with:` /
+  projection. This realizes the model's generated sequence twice at each of N
+  seeds and asserts the two are structurally equal, catching impurity at
+  dev/CI time before it breaks `seed: N` reproduction and
+  `PropertyDamage.RunComparison`'s fingerprint guard.
+
+  Returns `:ok`, or `{:error, %{seed: seed, divergence: divergence}}` for the
+  first diverging seed. See `PropertyDamage.Audit` for options and
+  `guides/deterministic_generation.md` for the deterministic patterns; `mix
+  pd.audit` wraps this for CI gating.
+  """
+  @spec audit(module(), keyword()) :: PropertyDamage.Audit.result()
+  def audit(model, opts \\ []), do: PropertyDamage.Audit.run(model, opts)
+
   @doc false
   defmacro __using__(_opts) do
     quote do
