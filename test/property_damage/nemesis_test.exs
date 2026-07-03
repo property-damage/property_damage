@@ -180,15 +180,15 @@ defmodule PropertyDamage.NemesisTest do
 
   describe "nemesis workflow" do
     test "full inject -> restore cycle" do
-      cmd = %TestPartition{partition_type: :asymmetric, duration_ms: 2000}
+      cmd = %TestPartition{partition_type: :downstream, duration_ms: 2000}
 
       # Inject fault
       {:ok, inject_events} = TestPartition.inject(cmd, %{adapter_context: %{}})
-      assert [%{type: :partitioned, partition_type: :asymmetric}] = inject_events
+      assert [%{type: :partitioned, partition_type: :downstream}] = inject_events
 
       # Restore after duration
       {:ok, restore_events} = TestPartition.restore(cmd, %{adapter_context: %{}})
-      assert [%{type: :restored, partition_type: :asymmetric}] = restore_events
+      assert [%{type: :restored, partition_type: :downstream}] = restore_events
     end
 
     test "non-auto-restore nemesis requires explicit restore" do

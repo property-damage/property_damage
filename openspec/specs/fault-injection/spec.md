@@ -171,4 +171,24 @@ The framework SHALL provide built-in Nemesis implementations that fault the Syst
 
 - **WHEN** testing network resilience
 - **THEN** the framework SHALL provide `NetworkPartition`, `NetworkLatency`, and `PacketLoss` Nemesis modules
-- **AND** these SHALL inject through Toxiproxy when configured in the adapter context, tagging events `simulated: true` otherwise
+- **AND** these SHALL inject through Toxiproxy when configured, tagging events `simulated: true` otherwise
+
+#### Scenario: Toxiproxy config source (DR-038)
+
+- **WHEN** a built-in network nemesis injects a fault
+- **THEN** it SHALL discover its Toxiproxy config (`%{proxy_name: ..., api_url: ...}`) from the execution context, checking the top-level `:toxiproxy` key first and the adapter context (`context.adapter_context[:toxiproxy]`) second
+- **AND** an adapter MAY supply that config by returning `toxiproxy: %{...}` from `setup/1`, which is the path that makes live injection reachable through `PropertyDamage.run`
+- **AND** the framework SHALL NOT provide a separate run-level option for the config
+
+#### Scenario: Simulated fallback (DR-038)
+
+- **WHEN** no Toxiproxy config is discovered in either location
+- **THEN** the nemesis SHALL NOT contact the SUT (no HTTP call)
+- **AND** the emitted event SHALL be tagged `simulated: true` so a no-op fault cannot masquerade as a real one
+
+#### Scenario: Full bidirectional partition (DR-038)
+
+- **WHEN** `NetworkPartition` injects a `:full` partition against a configured Toxiproxy
+- **THEN** it SHALL install two `bandwidth` toxics at rate `0`, one on the upstream and one on the downstream, so traffic is blocked in both directions
+- **AND** restoration SHALL remove both toxics
+- **AND** the framework SHALL support `partition_type` values `:full`, `:upstream`, and `:downstream` only (`:asymmetric` was a duplicate of `:downstream` and is removed)
