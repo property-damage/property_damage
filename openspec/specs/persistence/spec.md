@@ -17,7 +17,7 @@ The system SHALL save and load failure reports to `.pd` files using Erlang term 
 - **WHEN** a failure report is saved to a directory
 - **THEN** the system SHALL write a `.pd` file containing a version header, the Erlang term-encoded `FailureReport` struct, and a checksum for integrity verification
 - **AND** the filename SHALL follow the pattern `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
-- **AND** the version header SHALL record the current format version (`5`, since positions are `%Sequence.Position{}` structs — DR-039; the report composes a `RunTrace` — DR-033), which tracks the `FailureReport` struct shape
+- **AND** the version header SHALL record the current format version (`6`, since event-log entries carry a `fold_index` and the trace carries `command_fold_ordinals` + verified `linearization` for the derived per-step state timeline — DR-040; positions are `%Sequence.Position{}` structs — DR-039; the report composes a `RunTrace` — DR-033), which tracks the `FailureReport` struct shape
 
 #### Scenario: Save with custom filename
 
@@ -63,13 +63,13 @@ The system SHALL include version metadata in persisted files and warn when loadi
 - **WHEN** a `.pd` file references a dependency not present in the current environment
 - **THEN** the system SHALL return a `{:dependency_missing, dep, saved_version}` warning
 
-#### Scenario: Pre-v5 format versions are refused
+#### Scenario: Pre-v6 format versions are refused
 
-- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1`, `2`, `3`, or `4`) is loaded
-- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 5}}` without attempting to decode the payload
-- **AND** the system SHALL NOT deep-convert the stored terms: a pre-v5 file encodes command positions as raw tuples inside arbitrary user command/event structs, and rewriting them is the encoding-interpretation logic DR-039 removes (the framework is unpublished and such files exist only as regenerable test fixtures), so the user re-captures the failure under the current version instead
+- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1`, `2`, `3`, `4`, or `5`) is loaded
+- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 6}}` without attempting to decode the payload
+- **AND** the system SHALL NOT synthesize the missing data: a pre-v6 file carries no per-run fold order (`fold_index` / `command_fold_ordinals`), so its per-step state timeline and projection-purity check cannot be derived; there is no honest in-place upgrade, so the user re-captures the failure under the current version instead (the framework is unpublished and such files exist only as regenerable test fixtures)
 
-> This supersedes the pre-DR-039 requirement that older format versions (`1`–`3`) still load and that a pre-v4 file's legacy `event_log` / `shrunk_sequence` be synthesized into a `RunTrace` on load; that synthesis path is deleted.
+> This supersedes the DR-039 requirement that named format version `5` and refused versions `1`–`4`; version `6` (DR-040) is now current and versions `1`–`5` are refused. It also carries forward DR-039's supersession of the pre-DR-039 tolerant-loading / trace-synthesis rules.
 
 ### Requirement: Seed Library
 

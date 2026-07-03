@@ -78,10 +78,6 @@ defmodule PropertyDamage.MixProject do
         "CHANGELOG.md"
       ],
       groups_for_extras: [
-        # Matched first: keep the deferred load-testing and mutation-testing
-        # guides out of the main Guides group so they are not advertised
-        # alongside the validated surface.
-        "Advanced (deferred)": ~r/guides\/(load_testing|mutation_testing)/,
         Guides: ~r/guides\/.*/
       ],
       groups_for_modules: [
@@ -153,6 +149,14 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Differential,
           PropertyDamage.Differential.Result
         ],
+        "Load Testing": [
+          PropertyDamage.LoadTest
+        ],
+        "Mutation Testing": [
+          PropertyDamage.Mutation,
+          PropertyDamage.Mutation.Report,
+          PropertyDamage.Mutation.Analysis
+        ],
         "Persistence & Regression": [
           PropertyDamage.Persistence,
           PropertyDamage.SeedLibrary,
@@ -177,9 +181,6 @@ defmodule PropertyDamage.MixProject do
         # this time (see the README note). Grouped last and clearly labelled so
         # the docs do not advertise them alongside the validated core.
         "Advanced (work in progress, not fully supported)": [
-          PropertyDamage.Mutation,
-          PropertyDamage.Mutation.Report,
-          PropertyDamage.Mutation.Analysis,
           PropertyDamage.Suggestions,
           PropertyDamage.Suggestions.Patterns,
           PropertyDamage.FailureIntelligence,
@@ -187,7 +188,6 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.FailureIntelligence.Patterns,
           PropertyDamage.FailureIntelligence.Similarity,
           PropertyDamage.FailureIntelligence.Verification,
-          PropertyDamage.LoadTest,
           PropertyDamage.Forensics,
           PropertyDamage.Integration,
           PropertyDamage.Telemetry.Collector

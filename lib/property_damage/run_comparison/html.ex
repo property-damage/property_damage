@@ -27,6 +27,7 @@ defmodule PropertyDamage.RunComparison.Html do
     <body>
     <h1>Run Comparison</h1>
     #{guard_banner(c)}
+    #{state_warning_banner(c)}
     #{header_section(c)}
     #{runs_section(c)}
     #{ranking_section(c)}
@@ -50,6 +51,22 @@ defmodule PropertyDamage.RunComparison.Html do
     """
     <div class="banner incomparable">
     <strong>Runs are not comparable.</strong>
+    <ul>#{items}</ul>
+    </div>
+    """
+  end
+
+  defp state_warning_banner(%RunComparison{state_warnings: []}), do: ""
+
+  defp state_warning_banner(%RunComparison{state_warnings: modules}) do
+    items = Enum.map_join(modules, "", &"<li class=\"mono\">#{esc(inspect(&1))}</li>")
+
+    """
+    <div class="banner incomparable">
+    <strong>Possible non-pure projection(s).</strong>
+    These projections' derived state varied within an outcome group (same plan,
+    same outcome), which usually means an <code>apply/2</code> read a clock,
+    counter, or the environment:
     <ul>#{items}</ul>
     </div>
     """
@@ -184,6 +201,10 @@ defmodule PropertyDamage.RunComparison.Html do
 
   defp location_label({:event, position, key, _row, path}) do
     "#{position_label(position)} <span class=\"mono\">#{esc(inspect(key))}#{path_label(path)}</span>"
+  end
+
+  defp location_label({:state, position, projection, path}) do
+    "#{position_label(position)} <span class=\"mono\">state #{esc(inspect(projection))}#{path_label(path)}</span>"
   end
 
   defp position_label(%Position{section: :prefix, offset: o}), do: "prefix[#{o}]"

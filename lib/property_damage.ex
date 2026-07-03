@@ -1347,6 +1347,7 @@ defmodule PropertyDamage do
         event_log: report_result.event_log,
         projections: report_result.projections,
         projections_before: report_result.projections_before,
+        command_fold_ordinals: Map.get(report_result, :command_fold_ordinals, %{}),
         model: model,
         adapter: adapter,
         linearization: report_result.linearization,
@@ -1562,6 +1563,7 @@ defmodule PropertyDamage do
               mint_epoch: fresh_epoch,
               projections: fresh_result.projections,
               projections_before: fresh_result.projections_before,
+              command_fold_ordinals: Map.get(fresh_result, :command_fold_ordinals, %{}),
               model: model,
               adapter: adapter,
               linearization: fresh_result.linearization,
@@ -2177,6 +2179,25 @@ defmodule PropertyDamage do
   """
   @spec audit(module(), keyword()) :: PropertyDamage.Audit.result()
   def audit(model, opts \\ []), do: PropertyDamage.Audit.run(model, opts)
+
+  @doc """
+  Audit that a model's projection `apply/2` is a pure function of its inputs
+  (P8 / DR-040).
+
+  Companion to `audit/2`: folds each seed's generated plan through every
+  projection twice (using the model's simulator to predict events) and names any
+  projection whose two folds disagree — i.e. one that read a clock, a counter,
+  or the environment in `apply/2`. Generation-only (no adapter/SUT), the dev/CI
+  early warning for the runtime projection-purity check
+  (`PropertyDamage.FailureReport.verify_projections/1`). `mix pd.audit` runs it
+  alongside the generation audit.
+
+  Returns `:ok`, or `{:error, %{seed: seed, modules: [module()]}}`.
+  """
+  @spec audit_projections(module(), keyword()) ::
+          :ok | {:error, %{seed: integer(), modules: [module()]}}
+  def audit_projections(model, opts \\ []),
+    do: PropertyDamage.Audit.projection_purity(model, opts)
 
   @doc false
   defmacro __using__(_opts) do

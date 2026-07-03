@@ -64,6 +64,33 @@ concrete value and resolves it into the later commands in the same sequence,
 exactly as in `PropertyDamage.run/1`. Capture is per worker, so concurrent
 arrivals never share or clobber each other's ids.
 
+## Invariants under sustained load
+
+A load test drives your invariants against a SUT that is *never reset between a
+worker's sequences*: each worker keeps its adapter context for the whole run (by
+design, so connections and sessions are reused the way a real client would reuse
+them). This is unlike `PropertyDamage.run/1`, where each sequence starts from a
+fresh `setup/1`. Two consequences for the invariants you check under load:
+
+- **Accumulation-robust.** A worker's later sequence sees state left behind by
+  its earlier sequences. An invariant that assumes it starts from an empty store
+  will get false failures. Assert only on facts the *current* sequence
+  established, and treat pre-existing state as legitimate.
+- **Concurrency-robust.** Many workers hit the shared SUT at once. An invariant
+  that assumes it is the only writer of a key will see interference. Either
+  namespace the state each worker touches so workers cannot collide, or write the
+  invariant so cross-worker writes cannot violate it.
+
+`benches/openapi_bench` demonstrates the pattern against a live HTTP KV API. Its
+load adapter (`OpenapiBench.LoadAdapter`) mints a unique namespace in `setup/1`
+and maps every model key into that namespace, so concurrent workers never share a
+server key. Its projection (`OpenapiBench.LoadConsistency`) is a read-your-own-write
+check that only asserts on reads of keys the *current sequence* wrote — a read of
+a key this sequence never wrote may legitimately observe leftover state from an
+earlier sequence and is skipped. Together those two moves keep the invariant
+meaningful under sustained concurrent load while still catching a genuine dropped
+write.
+
 ## Configuration Options
 
 ### Required Options

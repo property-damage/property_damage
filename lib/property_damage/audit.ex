@@ -102,6 +102,88 @@ defmodule PropertyDamage.Audit do
     audit_seeds(generator, seeds)
   end
 
+  @doc """
+  Audit that a model's projection `apply/2` is a pure function of its inputs
+  (P8 / DR-040).
+
+  Generation-only companion to `run/2`: for each seed it generates the plan and
+  folds it through **every** projection (the `command_sequence_projection` plus
+  the `assertion_projections`) twice, using the model's simulator to predict
+  events, then compares the two resulting states. A projection that reads a
+  clock, a counter, or the environment inside `apply/2` folds to different state
+  on the second pass and is named.
+
+  This is the dev/CI-time early warning for the same projection impurity the
+  runtime projection-purity check (`PropertyDamage.FailureReport.verify_projections/1`)
+  catches at a failure. It needs no adapter or SUT: it folds the simulated
+  events, exactly as generation does.
+
+  Returns `:ok`, or `{:error, %{seed: seed, modules: [module()]}}` for the first
+  seed whose fold is non-deterministic, naming the diverging projection modules.
+  """
+  @spec projection_purity(module(), keyword()) ::
+          :ok | {:error, %{seed: integer(), modules: [module()]}}
+  def projection_purity(model, opts \\ []) do
+    opts = PropertyDamage.Options.validate_audit!(opts)
+    seeds = normalize_seeds(Keyword.get(opts, :seeds, @default_seeds))
+    gen_opts = Keyword.take(opts, [:max_commands, :branching, :external_markers])
+    generator = Generator.generate_sequence(model, gen_opts)
+
+    Enum.reduce_while(seeds, :ok, fn seed, :ok ->
+      plan = Generator.generate_value(generator, seed)
+
+      case diverging_projections(model, plan) do
+        [] -> {:cont, :ok}
+        modules -> {:halt, {:error, %{seed: seed, modules: modules}}}
+      end
+    end)
+  end
+
+  # Fold the plan through all projections twice and return the modules whose two
+  # folds disagree (pure projections agree). The fold mirrors generation's
+  # update_state: apply the command, then each simulated event.
+  defp diverging_projections(model, plan) do
+    state1 = fold_plan(model, plan)
+    state2 = fold_plan(model, plan)
+
+    state1
+    |> Map.keys()
+    |> Enum.filter(fn module -> Map.get(state1, module) != Map.get(state2, module) end)
+    |> Enum.sort()
+  end
+
+  defp fold_plan(model, plan) do
+    commands = Sequence.to_list(plan)
+    command_projection = model.command_sequence_projection()
+    simulate? = Code.ensure_loaded?(model) and function_exported?(model, :simulator, 0)
+
+    Enum.reduce(commands, projection_states(model), fn command, projections ->
+      # The simulator predicts against the command-sequence projection's state,
+      # which generation uses as the model state (mirrors FailureReport label
+      # reconstruction).
+      model_state = Map.get(projections, command_projection, %{})
+      events = if simulate?, do: model.simulator().simulate(command, model_state), else: []
+
+      projections = fold_item(projections, command)
+      Enum.reduce(events, projections, &fold_item(&2, &1))
+    end)
+  end
+
+  defp fold_item(projections, item) do
+    Map.new(projections, fn {projection, state} -> {projection, projection.apply(state, item)} end)
+  end
+
+  defp projection_states(model) do
+    command_projection = model.command_sequence_projection()
+
+    assertion_projections =
+      if function_exported?(model, :assertion_projections, 0),
+        do: model.assertion_projections(),
+        else: []
+
+    Map.new([command_projection | assertion_projections], &{&1, &1.init()})
+  end
+
   defp normalize_seeds(count) when is_integer(count) and count > 0,
     do: Enum.to_list(0..(count - 1))
 
