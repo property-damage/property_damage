@@ -78,6 +78,35 @@ defmodule PropertyDamage.ForensicsTest do
     def assertion_projections, do: [OrderInvariants]
   end
 
+  # Assertion projection that only checks the most-recent event's amount, so each
+  # violating event produces exactly one violation tied to that event (unlike
+  # OrderInvariants, whose accumulated state keeps failing once any amount is negative).
+  defmodule LastAmountInvariant do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{last_amount: nil}
+
+    @impl true
+    def apply(state, %OrderCreated{amount: amount}), do: %{state | last_amount: amount}
+    def apply(state, _), do: state
+
+    @trigger every: 1
+    def assert_last_non_negative(%{last_amount: amount}, _cmd_or_event) do
+      if is_number(amount) and amount < 0 do
+        PropertyDamage.fail!("Negative amount", amount: amount)
+      end
+    end
+  end
+
+  defmodule PerEventModel do
+    @behaviour PropertyDamage.Model
+
+    def commands, do: []
+    def command_sequence_projection, do: OrderState
+    def assertion_projections, do: [LastAmountInvariant]
+  end
+
   # Test event mapping
   defmodule TestEventMapping do
     @behaviour PropertyDamage.Forensics.EventMapping
@@ -123,6 +152,8 @@ defmodule PropertyDamage.ForensicsTest do
       assert success.events_processed == 3
       assert success.final_state.orders["order1"].status == :shipped
       assert success.final_state.total_revenue == 100
+      # A clean run records no violations.
+      assert success.violations == []
     end
 
     test "detects invariant violations" do
@@ -160,7 +191,7 @@ defmodule PropertyDamage.ForensicsTest do
       assert Map.has_key?(failure.state_after[OrderInvariants].order_amounts, "order2")
     end
 
-    test "continues past failures when stop_on_first_failure is false" do
+    test "collects every violation when stop_on_first_failure is false" do
       events = [
         %OrderCreated{order_id: "order1", amount: -10, currency: "USD"},
         %OrderCreated{order_id: "order2", amount: 100, currency: "USD"},
@@ -170,13 +201,43 @@ defmodule PropertyDamage.ForensicsTest do
       result =
         Forensics.analyze(
           events: events,
-          model: TestModel,
+          model: PerEventModel,
           stop_on_first_failure: false
         )
 
       # Should process all events despite failures
       assert {:ok, success} = result
       assert success.events_processed == 3
+
+      # Both violating events are recorded (events 0 and 2; event 1 is valid).
+      assert length(success.violations) == 2
+      [v0, v1] = success.violations
+
+      # Each violation carries the same detail shape as a stop-early failure.
+      assert v0.failure_step == 0
+      assert {:assertion_failed, :last_non_negative, _reason} = v0.failure_reason
+
+      assert v0.event_at_failure == %OrderCreated{
+               order_id: "order1",
+               amount: -10,
+               currency: "USD"
+             }
+
+      assert Map.has_key?(v0, :state_before)
+      assert Map.has_key?(v0, :state_after)
+
+      assert v0.events_leading_to_failure == [
+               %OrderCreated{order_id: "order1", amount: -10, currency: "USD"}
+             ]
+
+      assert v1.failure_step == 2
+      assert {:assertion_failed, :last_non_negative, _reason} = v1.failure_reason
+
+      assert v1.event_at_failure == %OrderCreated{
+               order_id: "order3",
+               amount: -20,
+               currency: "USD"
+             }
     end
 
     test "uses event mapping to translate production events" do
@@ -276,6 +337,49 @@ defmodule PropertyDamage.ForensicsTest do
       assert test_code =~ "test \"regression:"
       assert test_code =~ "PropertyDamage.Forensics.analyze"
       assert test_code =~ "failure.failure_step == 2"
+    end
+
+    test "generated code compiles clean" do
+      failure = %{
+        failure_reason: {:assertion_failed, :some_check, "failed"},
+        failure_step: 2,
+        event_at_failure: %OrderCreated{order_id: "test", amount: 100, currency: "USD"},
+        state_before: %{},
+        state_after: %{},
+        events_leading_to_failure: [
+          %OrderCreated{order_id: "o1", amount: 50, currency: "EUR"},
+          %OrderCreated{order_id: "test", amount: 100, currency: "USD"}
+        ]
+      }
+
+      code = Forensics.generate_regression_test(failure, TestModel)
+
+      # Compile the generated body as a plain module rather than an ExUnit test,
+      # so we get its compiler diagnostics (syntax errors, bad literals) without
+      # the `use ExUnit.Case` module being registered and run by the suite.
+      compilable =
+        code
+        |> String.replace("use ExUnit.Case", "import ExUnit.Assertions")
+        |> String.replace(~r/test "[^"]+" do/, "def __regression_check__ do")
+
+      {result, diagnostics} =
+        Code.with_diagnostics(fn ->
+          try do
+            Code.compile_string(compilable)
+          rescue
+            e -> {:error, e}
+          end
+        end)
+
+      refute match?({:error, _}, result),
+             "generated regression test failed to compile: #{inspect(result)}"
+
+      assert diagnostics == [],
+             "generated regression test emitted compiler diagnostics:\n" <>
+               Enum.map_join(diagnostics, "\n", &inspect/1)
+
+      :code.purge(TestModel.RegressionTest)
+      :code.delete(TestModel.RegressionTest)
     end
   end
 end

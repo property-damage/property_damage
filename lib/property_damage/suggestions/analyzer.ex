@@ -50,17 +50,20 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   # ============================================================================
 
   defp get_commands(model) do
-    if function_exported?(model, :commands, 0) do
+    # A model passed as a bare atom may not be loaded yet; reflecting with
+    # function_exported?/3 before loading would silently yield an empty command
+    # list (and thus an empty, useless analysis). Load first.
+    if Code.ensure_loaded?(model) and function_exported?(model, :commands, 0) do
       model.commands()
       |> Model.normalize_commands()
-      |> Enum.map(fn {_weight, cmd} -> cmd end)
+      |> Enum.map(fn {_weight, module, _spec} -> module end)
     else
       []
     end
   end
 
   defp get_assertion_projections(model) do
-    if function_exported?(model, :assertion_projections, 0) do
+    if Code.ensure_loaded?(model) and function_exported?(model, :assertion_projections, 0) do
       model.assertion_projections()
     else
       []
@@ -77,7 +80,10 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   end
 
   defp get_emitted_events(cmd_module) do
-    if function_exported?(cmd_module, :__info__, 1) do
+    # Load the command before reflecting: the @emits attribute is only readable
+    # via __info__/1 on a loaded module, so an unloaded command would skip the
+    # @emits path entirely and fall through to name inference.
+    if Code.ensure_loaded?(cmd_module) and function_exported?(cmd_module, :__info__, 1) do
       # Check for @emits module attribute
       attrs = cmd_module.__info__(:attributes)
 
@@ -155,6 +161,8 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   defp extract_existing_checks(assertion_projections) do
     assertion_projections
     |> Enum.flat_map(fn projection ->
+      Code.ensure_loaded?(projection)
+
       # Check for __assertions__/0 (new) or __checks__/0 (legacy)
       cond do
         function_exported?(projection, :__assertions__, 0) ->

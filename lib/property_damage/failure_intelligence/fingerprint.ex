@@ -5,11 +5,16 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   A fingerprint captures the essential characteristics of a failure that can be
   used to compare it with other failures. This enables pattern detection and
   clustering of similar failures.
+
+  The fingerprint also carries the originating `seed` (when known). Similarity and
+  clustering ignore the seed, but it lets `Verification.verify_cluster/3` re-run a
+  clustered failure to confirm whether a fix actually resolves it.
   """
 
   alias PropertyDamage.{FailureReport, Sequence}
 
   @type t :: %__MODULE__{
+          seed: integer() | nil,
           failure_type: atom(),
           check_name: atom() | nil,
           command_type: atom() | nil,
@@ -26,6 +31,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
         }
 
   defstruct [
+    :seed,
     :failure_type,
     :check_name,
     :command_type,
@@ -59,6 +65,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
     events = Enum.map((step && step.entries) || [], & &1.event)
 
     %__MODULE__{
+      seed: report.seed,
       failure_type: report.failure_type,
       check_name: report.check_name,
       command_type: extract_command_type(command),
@@ -81,6 +88,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   @spec from_raw_failure(map()) :: t()
   def from_raw_failure(failure) when is_map(failure) do
     %__MODULE__{
+      seed: Map.get(failure, :seed),
       failure_type: Map.get(failure, :failure_type, :unknown),
       check_name: Map.get(failure, :check_name),
       command_type: extract_command_type(Map.get(failure, :command)),
