@@ -17,8 +17,8 @@ defmodule PropertyDamage.PlaceholderRegistry do
   Registry for tracking placeholders throughout sequence execution.
   """
   @type t :: %__MODULE__{
-          placeholders: %{reference() => Placeholder.t()},
-          producer_link: %{Placeholder.position() => [reference()]}
+          placeholders: %{Placeholder.id() => Placeholder.t()},
+          producer_link: %{Placeholder.position() => [Placeholder.id()]}
         }
 
   defstruct placeholders: %{}, producer_link: %{}

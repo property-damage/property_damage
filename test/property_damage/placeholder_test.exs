@@ -8,18 +8,24 @@ defmodule PropertyDamage.PlaceholderTest do
   end
 
   describe "new_at/4" do
-    test "creates a placeholder with unique ID" do
+    test "id is a deterministic function of (position, event_index, path) (DR-036)" do
       p = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
 
       assert %Placeholder{} = p
-      assert is_reference(p.id)
+      assert p.id == {{:prefix, 0}, 0, [:id]}
     end
 
-    test "each call creates distinct placeholder" do
+    test "same coordinates produce equal ids; distinct coordinates produce distinct ids (DR-036)" do
+      # DR-036: two placeholders naming the same field of the same event of the
+      # same command are the same placeholder (they cannot coexist in a plan).
       p1 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
       p2 = Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 0)
+      assert p1.id == p2.id
 
-      assert p1.id != p2.id
+      # Any differing coordinate yields a distinct id.
+      assert p1.id != Placeholder.new_at(TestEvent, [:id], {:prefix, 1}, 0).id
+      assert p1.id != Placeholder.new_at(TestEvent, [:id], {:prefix, 0}, 1).id
+      assert p1.id != Placeholder.new_at(TestEvent, [:amount], {:prefix, 0}, 0).id
     end
 
     test "stores event module" do
