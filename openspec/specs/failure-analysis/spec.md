@@ -252,7 +252,16 @@ The system SHALL replay production event logs through model projections to detec
 #### Scenario: Event replay with violation
 
 - **WHEN** production events are replayed and an invariant violation is detected
-- **THEN** the system SHALL return `{:error, failure}` with the failure step and violation details
+- **AND** `stop_on_first_failure` is `true` (the default)
+- **THEN** the system SHALL halt at the first violation and return `{:error, failure}` with the failure step and violation details
+
+#### Scenario: Collecting every violation
+
+- **WHEN** production events are replayed with `stop_on_first_failure: false`
+- **THEN** the system SHALL replay every event to completion and return `{:ok, success}`
+- **AND** `success.violations` SHALL contain one violation record per violating event, in replay order
+- **AND** each violation record SHALL carry the same detail shape as the `{:error, failure}` result (failure reason, failure step, event at failure, state before/after, events leading to failure)
+- **AND** `success.violations` SHALL be an empty list when no invariant was violated
 
 #### Scenario: Event mapping
 
