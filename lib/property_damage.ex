@@ -121,7 +121,7 @@ defmodule PropertyDamage do
 
   - **Tier 0 (Core Types)**: Ref, Command, Projection, Model behaviours
   - **Tier 1 (Execution)**: Adapter, EventQueue, InjectorAdapter, Executor
-  - **Tier 2 (Shrinking)**: Validator, Shrinker, dependency graph
+  - **Tier 2 (Shrinking)**: Sequence.Validator, Shrinker, dependency graph
   - **Tier 3 (Analysis)**: Analysis, Replay, Coverage, Flakiness
   - **Utilities**: Persistence, SeedLibrary, mix tasks
 

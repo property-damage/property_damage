@@ -90,6 +90,7 @@ defmodule PropertyDamage.Audit do
   """
   @spec run(module(), keyword()) :: result()
   def run(model, opts \\ []) do
+    opts = PropertyDamage.Options.validate_audit!(opts)
     seeds = normalize_seeds(Keyword.get(opts, :seeds, @default_seeds))
     gen_opts = Keyword.take(opts, [:max_commands, :branching, :external_markers])
 

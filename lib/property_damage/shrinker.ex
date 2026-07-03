@@ -120,9 +120,10 @@ defmodule PropertyDamage.Shrinker do
     PlaceholderRegistry,
     Sequence,
     Settle,
-    Stutter,
-    Validator
+    Stutter
   }
+
+  alias PropertyDamage.Sequence.Validator
 
   alias PropertyDamage.Shrinker.{Config, Graph}
 

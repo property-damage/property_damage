@@ -92,6 +92,7 @@ defmodule PropertyDamage.Flakiness do
   """
   @spec check(module(), module(), integer(), check_opts()) :: result()
   def check(model, adapter, seed, opts \\ []) do
+    opts = PropertyDamage.Options.validate_flakiness_check!(opts)
     runs = Keyword.get(opts, :runs, 5)
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     max_commands = Keyword.get(opts, :max_commands, 50)
@@ -141,8 +142,15 @@ defmodule PropertyDamage.Flakiness do
   """
   @spec check_batch(module(), module(), [integer()], keyword()) :: %{integer() => result()}
   def check_batch(model, adapter, seeds, opts \\ []) do
+    opts = PropertyDamage.Options.validate_flakiness_check_batch!(opts)
     runs_per_seed = Keyword.get(opts, :runs_per_seed, 5)
-    check_opts = Keyword.put(opts, :runs, runs_per_seed)
+
+    # Translate to check/4's option surface (runs, not runs_per_seed) so the
+    # delegated call passes check/4's strict schema.
+    check_opts =
+      opts
+      |> Keyword.delete(:runs_per_seed)
+      |> Keyword.put(:runs, runs_per_seed)
 
     seeds
     |> Enum.map(fn seed ->
@@ -169,6 +177,7 @@ defmodule PropertyDamage.Flakiness do
   """
   @spec discover_flaky(module(), module(), keyword()) :: [{integer(), flaky_stats()}]
   def discover_flaky(model, adapter, opts \\ []) do
+    opts = PropertyDamage.Options.validate_flakiness_discover_flaky!(opts)
     num_seeds = Keyword.get(opts, :num_seeds, 10)
     runs_per_seed = Keyword.get(opts, :runs_per_seed, 3)
     verbose = Keyword.get(opts, :verbose, false)
@@ -177,8 +186,11 @@ defmodule PropertyDamage.Flakiness do
 
     seeds = for _ <- 1..num_seeds, do: :rand.uniform(1_000_000_000)
 
+    # Translate to check/4's option surface so the delegated call passes its
+    # strict schema (drop discover-only keys; force verbose off per-seed).
     check_opts =
       opts
+      |> Keyword.drop([:num_seeds, :runs_per_seed])
       |> Keyword.put(:runs, runs_per_seed)
       |> Keyword.put(:verbose, false)
 
