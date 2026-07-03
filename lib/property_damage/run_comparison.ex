@@ -36,7 +36,7 @@ defmodule PropertyDamage.RunComparison do
   `:plan_generated` differences are comparability violations.
   """
 
-  alias PropertyDamage.{External, Provenance, RunTrace, Sequence}
+  alias PropertyDamage.{External, Mint, Placeholder, Provenance, RunTrace, Sequence}
   alias PropertyDamage.RunComparison.{Align, Html}
 
   defmodule Field do
@@ -246,22 +246,26 @@ defmodule PropertyDamage.RunComparison do
 
   defp indexed_positions(_), do: []
 
-  # One field per top-level key of the command struct, valued by each trace's
-  # resolved (executed) command, classified by the plan's marker at that key.
+  # One field per LEAF path of the command struct, valued by each trace's
+  # resolved (executed) command, classified by the plan's value at that leaf
+  # (mint marker -> run-scoped, placeholder -> server-resolved, else
+  # plan-generated). Leaf granularity means a mint nested inside a map is
+  # classified run-scoped at its own path rather than the whole container being
+  # lumped as a differing plan-generated field.
   defp command_fields(traces, position, plan_command) when is_struct(plan_command) do
     plan_command
-    |> Map.from_struct()
-    |> Enum.map(fn {key, plan_value} ->
+    |> command_leaves([])
+    |> Enum.map(fn {path, plan_value} ->
       values =
         traces
         |> Enum.with_index()
         |> Map.new(fn {trace, i} ->
           command = Map.get(trace.executed, position, plan_command)
-          {i, Map.get(command, key, :absent)}
+          {i, External.get_at_path(command, path)}
         end)
 
       %Field{
-        location: {:command, position, [key]},
+        location: {:command, position, path},
         provenance: Provenance.command_field(plan_value),
         values: values,
         differs?: differs?(values)
@@ -270,6 +274,25 @@ defmodule PropertyDamage.RunComparison do
   end
 
   defp command_fields(_traces, _position, _plan_command), do: []
+
+  # Leaf paths of a command's plan value. Markers are terminal (their provenance
+  # is what matters); containers are recursed. Path built in reading order.
+  defp command_leaves(%Mint{} = m, path), do: [{Enum.reverse(path), m}]
+  defp command_leaves(%Placeholder{} = p, path), do: [{Enum.reverse(path), p}]
+
+  defp command_leaves(%{__struct__: _} = struct, path) do
+    struct |> Map.from_struct() |> Enum.flat_map(fn {k, v} -> command_leaves(v, [k | path]) end)
+  end
+
+  defp command_leaves(map, path) when is_map(map) do
+    Enum.flat_map(map, fn {k, v} -> command_leaves(v, [k | path]) end)
+  end
+
+  defp command_leaves(list, path) when is_list(list) do
+    list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> command_leaves(v, [i | path]) end)
+  end
+
+  defp command_leaves(scalar, path), do: [{Enum.reverse(path), scalar}]
 
   defp event_fields(traces, position, identity, minted) do
     event_lists = Enum.map(traces, &events_at(&1, position))
