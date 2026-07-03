@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   masquerade as a state finding. A new `state_warnings` field (surfaced in the
   HTML report and JSON) flags projections whose state varies within an outcome
   group — a likely non-pure `apply/2`.
+- **Load testing and mutation testing are now supported features.** Both were
+  previously shipped as work-in-progress modules held out of the docs front page;
+  they have now been validated against live SUTs (via the openapi and cachex
+  benches) and are promoted to the supported tier. Their guides
+  (`guides/load_testing.md`, `guides/mutation_testing.md`) join the main Guides
+  group, and `PropertyDamage.LoadTest` and the `PropertyDamage.Mutation` modules
+  move out of the "Advanced (work in progress)" documentation group into
+  dedicated "Load Testing" and "Mutation Testing" groups. The load-testing guide
+  gains a note on writing invariants that stay valid under a shared, never-reset
+  SUT.
 
 - **Mock third-party services are now reachable through `PropertyDamage.run/1`
   (WP-C5).** A new `:mock_services` run option accepts a list of

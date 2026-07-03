@@ -1,8 +1,8 @@
 # Mutation Testing
 
-> **Status: work in progress.** Mutation testing runs end to end, but the
-> operator set and scoring heuristics are still evolving. Treat the mutation
-> score as a directional signal, not a precise gate.
+> **Note:** the operator set and scoring heuristics continue to evolve, so read
+> the mutation score as a directional signal about test strength rather than a
+> hard pass/fail gate.
 
 Property-based tests can pass for the wrong reason: a weak invariant, an adapter
 that swallows errors, or a check that never really exercises the interesting
