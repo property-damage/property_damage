@@ -958,11 +958,14 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
     defstruct_line =
       if has_id_field do
-        # Use external() for id field (server-generated)
+        # Use external() for id field (server-generated). Keyword entries must be
+        # last in a list literal, so the bare atom fields come first and
+        # `id: external()` closes the list; otherwise the struct will not compile.
         non_id_fields = Enum.reject(field_atoms, &(&1 == :id))
 
-        "[id: external()" <>
-          if(non_id_fields != [], do: ", " <> inspect_fields(non_id_fields), else: "") <> "]"
+        if non_id_fields != [],
+          do: "[" <> inspect_fields(non_id_fields) <> ", id: external()]",
+          else: "[id: external()]"
       else
         inspect(field_atoms)
       end
