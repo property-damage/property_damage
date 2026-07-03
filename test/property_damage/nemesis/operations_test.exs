@@ -100,7 +100,7 @@ defmodule PropertyDamage.Nemesis.OperationsTest do
       assert length(partition_types) > 1
 
       for type <- partition_types do
-        assert type in [:full, :upstream, :downstream, :asymmetric],
+        assert type in [:full, :upstream, :downstream],
                "unexpected partition type: #{inspect(type)}"
       end
     end
