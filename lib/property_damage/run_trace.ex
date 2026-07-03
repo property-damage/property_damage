@@ -41,6 +41,7 @@ defmodule PropertyDamage.RunTrace do
   """
 
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.{EventQueue, Executor, Generator}
   alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence
 
@@ -134,6 +135,88 @@ defmodule PropertyDamage.RunTrace do
   """
   @spec plan_fingerprint(Sequence.t()) :: String.t()
   def plan_fingerprint(%Sequence{} = plan), do: Sequence.fingerprint(plan)
+
+  @doc """
+  Run ONE full, unshrunk plan and return its trace, pass or fail (DR-035).
+
+  This is the input to `PropertyDamage.RunComparison`. Unlike the exploration
+  loop it never shrinks and never stops early on failure: it captures the whole
+  execution record of a single run. `plan_source` is always `:generated` (the
+  plan is a pure function of the effective seed).
+
+  ## Options
+
+  Required: `:model`, `:adapter`, `:seed`.
+
+  Optional: `:run_number` (default 0), `:run_nonce` (default fresh crypto
+  entropy, DR-034), `:mint_epoch` (default 0), `:adapter_config`,
+  `:max_commands` (default 50), `:branching`, `:source_revision` (default
+  detected).
+  """
+  @spec capture(keyword()) :: t()
+  def capture(opts) do
+    model = Keyword.fetch!(opts, :model)
+    adapter = Keyword.fetch!(opts, :adapter)
+    seed = Keyword.fetch!(opts, :seed)
+    run_number = Keyword.get(opts, :run_number, 0)
+
+    run_nonce =
+      Keyword.get(opts, :run_nonce) ||
+        :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
+
+    mint_epoch = Keyword.get(opts, :mint_epoch, 0)
+    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    max_commands = Keyword.get(opts, :max_commands, 50)
+    branching = Keyword.get(opts, :branching)
+
+    gen_opts =
+      [max_commands: max_commands] ++ if(branching, do: [branching: branching], else: [])
+
+    run_seed = Generator.run_seed(seed, run_number)
+    plan = model |> Generator.generate_sequence(gen_opts) |> Generator.generate_value(run_seed)
+
+    if function_exported?(model, :setup_each, 1) do
+      model.setup_each(%{adapter_config: adapter_config, run_number: run_number, capture: true})
+    end
+
+    {:ok, event_queue} = EventQueue.start_link()
+
+    try do
+      {:ok, result} =
+        Executor.run(plan, model, adapter,
+          adapter_config: adapter_config,
+          event_queue: event_queue,
+          rng_seed: run_seed,
+          run_nonce: run_nonce,
+          mint_epoch: mint_epoch
+        )
+
+      new(
+        seed: seed,
+        run_number: run_number,
+        run_nonce: run_nonce,
+        mint_epoch: mint_epoch,
+        model: model,
+        adapter: adapter,
+        source_revision: Keyword.get_lazy(opts, :source_revision, &source_revision/0),
+        plan: plan,
+        plan_source: :generated,
+        executed: Map.get(result, :executed, %{}),
+        event_log: result.event_log,
+        command_labels: %{},
+        outcome: outcome_of(result)
+      )
+    after
+      EventQueue.stop(event_queue)
+
+      if function_exported?(model, :teardown_each, 1) do
+        model.teardown_each(%{adapter_config: adapter_config, run_number: run_number})
+      end
+    end
+  end
+
+  defp outcome_of(%{success: true}), do: :pass
+  defp outcome_of(%{failure_reason: reason}), do: {:fail, reason}
 
   @doc """
   The run as a timeline of `Step` structs, in flattened (reading) order.
