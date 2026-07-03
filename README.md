@@ -22,7 +22,8 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Seed Library**: Replay recently-failing seeds first; a self-pruning working set
 - **Coverage Metrics**: Know how thoroughly your model is being exercised
 - **Visual Diagrams**: Sequence diagrams in Mermaid, PlantUML, WebSequence formats
-- **Diff Debugging**: Compare passing vs failing runs to find divergence
+- **Run Comparison**: Compare full traces of the same plan to localize where passing and failing runs diverge
+- **Failure Bisection**: `mix pd.bisect` drives `git bisect` to find the commit where a saved failure first reproduces
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 - **Fault Injection (Nemesis)**: Built-in operations for network, resource, time, and process faults
@@ -298,14 +299,14 @@ For complex failures, PropertyDamage provides visual tools to understand executi
 diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
 IO.puts(diagram)  # Paste into GitHub markdown, Notion, etc.
 
-# Compare a passing run against a failing run to find the divergence
-passing_trace = PropertyDamage.Diff.create_trace(passing_commands, passing_events, [], :pass)
-failing_trace = PropertyDamage.Diff.create_trace(failing_commands, failing_events, [], {:fail, :test})
-diff = PropertyDamage.Diff.compare_traces(passing_trace, failing_trace)
-IO.puts(PropertyDamage.Diff.format(diff, format: :terminal))
+# Compare full traces of the same plan to localize where the runs diverge
+before = PropertyDamage.RunTrace.capture(model: MyModel, adapter: MyAdapter.Fixed, seed: failure.seed)
+after_ = PropertyDamage.RunTrace.capture(model: MyModel, adapter: MyAdapter.Buggy, seed: failure.seed)
+comparison = PropertyDamage.RunComparison.compare([before, after_])
+IO.inspect(comparison.ranking)  # most discriminating field first
 ```
 
-See [Visual Sequence Diagrams](#visual-sequence-diagrams) and [Diff-Based Debugging](#diff-based-debugging) for detailed documentation.
+See [Visual Sequence Diagrams](#visual-sequence-diagrams) and [Run Comparison](#run-comparison) for detailed documentation.
 
 ## Failure Persistence
 
@@ -907,62 +908,81 @@ sequenceDiagram
 - `:max_value_length` - Truncate long values (default: 50)
 - `:highlight_failure` - Visual failure markers (default: true)
 
-## Diff-Based Debugging
+## Run Comparison
 
-Compare passing and failing test runs to identify exactly what changed.
+Compare full traces of the **same plan** and localize where their executions
+diverge, ranking field differences by how strongly they discriminate the
+outcomes. This targets two use cases: **regression localization** (a plan passed
+on one revision of the SUT and fails on another) and **flakiness localization**
+(a plan fails one time in N). Both need full, unshrunk, same-plan runs, which is
+what `PropertyDamage.RunTrace.capture/1` produces and a `FailureReport` (a shrunk
+sequence) is not.
+
+Capture is `RunTrace`'s job; comparison is `RunComparison`'s. The comparator is
+pure data-in/data-out and never runs a SUT.
 
 ### Comparing Traces
 
 ```elixir
-# Compare two failure reports
-passing = PropertyDamage.run(model: M, adapter: A, seed: 123) |> elem(1)
-failing = PropertyDamage.run(model: M, adapter: A, seed: 456) |> elem(1)
+alias PropertyDamage.{RunTrace, RunComparison}
 
-diff = PropertyDamage.Diff.compare_reports(passing, failing)
-IO.puts(PropertyDamage.Diff.format(diff))
+# Same model and seed on both sides ⇒ identical plan (comparable by fingerprint).
+before = RunTrace.capture(model: M, adapter: A.Fixed, seed: 123)
+after_ = RunTrace.capture(model: M, adapter: A.Buggy, seed: 123)
+
+comparison = RunComparison.compare([before, after_])
+
+if comparison.comparable? do
+  IO.inspect(comparison.groups)   # %{passing: [...], failing: [...]} (by index)
+  IO.inspect(comparison.ranking)  # ranked %Field{}s, most discriminating first
+else
+  IO.inspect(comparison.guard_violations)
+end
 ```
 
-### Output Formats
+`compare/2` refuses (returns `comparable?: false` with `guard_violations`) rather
+than emit a misleading diff when the traces are not the same plan (unequal plan
+fingerprint or model).
+
+### Reading the Ranking
+
+Each ranked entry is a `%RunComparison.Field{}` with a `location`
+(`{:command, position, path}` or `{:event, ...}`), a `classification`, a
+`provenance`, and `values` (a `%{trace_index => value}` map):
+
+| Classification | Meaning |
+|----------------|---------|
+| `:discriminating` | Stable within each outcome group but different between groups — the likely cause |
+| `:incidental` | Varies even within the passing group (e.g. run-scoped correlation ids) — down-ranked |
+| `:weak` | Differs, but does not cleanly separate the groups |
+| `:comparability_violation` | A plan-generated field differs where the plan should be identical |
+
+### Flakiness Localization
+
+`RunComparison.investigate/1` captures the traces for you. Its capture options
+are nested under a `capture:` sub-keyword, and a fresh `run_nonce` is drawn per
+capture so client-minted values never collide on a shared SUT:
 
 ```elixir
-# Terminal (default) - ASCII boxes
-PropertyDamage.Diff.format(diff, format: :terminal)
-
-# Markdown - tables for documentation
-PropertyDamage.Diff.format(diff, format: :markdown)
-
-# JSON - for programmatic analysis
-PropertyDamage.Diff.format(diff, format: :json)
+{_traces, comparison} =
+  RunComparison.investigate(
+    runs: 10,
+    capture: [model: M, adapter: A, seed: 123]
+  )
 ```
 
-### Example Terminal Output
+### HTML Report
 
-```
-╔══════════════════════════════════════════════════════════════════════╗
-║                         EXECUTION DIFF                               ║
-╚══════════════════════════════════════════════════════════════════════╝
-
-Summary: Divergence at command 2: Withdraw. Events differ.
-
-┌─ Event Differences ─────────────────────────────────────────────────┐
-│ Cmd 2 ≠: LEFT: [WithdrawSucceeded]                                  │
-│         RIGHT: [WithdrawFailed]                                     │
-└──────────────────────────────────────────────────────────────────────┘
-
-┌─ State Differences ─────────────────────────────────────────────────┐
-│ After command 2:                                                    │
-│   balance: -50 → 100                                                │
-└──────────────────────────────────────────────────────────────────────┘
+```elixir
+File.write!("comparison.html", RunComparison.to_html(comparison))
 ```
 
-### What It Detects
+A single self-contained HTML file: inline CSS/JS, no external hosts, readable
+with JavaScript disabled, carrying an embedded machine-readable JSON blob.
 
-| Difference | Description |
-|------------|-------------|
-| Command divergence | Different commands in sequence |
-| Event differences | Different events produced |
-| State changes | Field values that differ |
-| Missing commands | Commands present in one trace but not other |
+Run comparison requires generation to be a pure function of the seed so both
+sides regenerate the identical plan; see the
+[deterministic generation guide](guides/deterministic_generation.md).
 
 ## Failure Export Hub
 
@@ -1351,13 +1371,11 @@ example_tests/travel_booking/
 
 ## Guides
 
-- [Getting Started](guides/getting_started.md) - First steps with PropertyDamage
-- [Writing Invariants](guides/writing_invariants.md) - Projections and assertions
-- [Debugging Failures](guides/debugging_failures.md) - Analyzing and fixing test failures
-- [Async and Eventual Consistency](guides/async_and_eventual_consistency.md) - Probes, bridges, and Adapter.Injector
-- [Chaos Engineering](guides/chaos_engineering.md) - Nemesis fault injection
-- [Integration Testing](guides/integration_testing.md) - Testing against live services
-- [Differential Testing](guides/differential_testing.md) - Comparing implementations
+The full set of guides (getting started, writing commands and invariants,
+debugging, chaos engineering, differential and dual-transport testing, and more)
+is browsable in the `guides/` directory and rendered on
+[HexDocs](https://hexdocs.pm/property_damage). New here? Start with
+[Getting Started](guides/getting_started.md).
 
 ## Architecture
 
@@ -1390,7 +1408,8 @@ PropertyDamage
 │   ├── Replay       - Step-by-step execution
 │   ├── Coverage     - Metrics tracking
 │   ├── Diagram      - Visual sequence diagrams
-│   └── Diff         - Trace comparison and diffing
+│   ├── RunTrace     - Full outcome-neutral record of one run
+│   └── RunComparison - Same-plan trace comparison and divergence ranking
 │
 ├── Export
 │   ├── Export       - Main API (to_exunit, to_script)
