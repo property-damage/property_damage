@@ -81,7 +81,8 @@ defmodule ObanBench.UniquenessTest do
               %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}} =
                report.failure_reason
 
-      commands = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
+      commands =
+        PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 
       assert [%UniqueIncrement{counter: c, key: k}, %UniqueIncrement{counter: c, key: k}] =
                commands,

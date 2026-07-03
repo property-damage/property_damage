@@ -84,7 +84,8 @@ defmodule ObanBench.RetryTest do
               %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}} =
                report.failure_reason
 
-      commands = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
+      commands =
+        PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
 
       assert [%Increment{}] = commands,
              "a single retried increment double-applies, so one command suffices: #{inspect(commands)}"

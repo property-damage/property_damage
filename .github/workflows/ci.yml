@@ -102,6 +102,8 @@ jobs:
 
       - run: mix deps.get
 
+      - run: mix format --check-formatted
+
       # Determinism audit: generation must be a pure function of the seed
       # (feature 3). Needs no service container.
       - name: Audit generation determinism
@@ -151,6 +153,8 @@ jobs:
           restore-keys: bench-oban_bench-
 
       - run: mix deps.get
+
+      - run: mix format --check-formatted
 
       # Determinism audit (feature 3): generation-only, needs no Postgres.
       - name: Audit generation determinism
@@ -227,9 +231,14 @@ jobs:
 
       - run: mix deps.get
 
+      - run: mix format --check-formatted
+
       # Determinism audit (feature 3): generation-only, needs no Redis/Toxiproxy.
       - name: Audit generation determinism
-        run: mix pd.audit RedisBench.Model
+        run: |
+          for model in RedisBench.Model RedisBench.RmwModel; do
+            mix pd.audit "$model"
+          done
 
       - run: mix test
 
@@ -267,6 +276,8 @@ jobs:
           restore-keys: bench-gitea_bench-
 
       - run: mix deps.get
+
+      - run: mix format --check-formatted
 
       # Install the Chromium the UI adapter drives, with its OS dependencies
       # (the runner has passwordless sudo). Uses the driver bundled with the
@@ -313,6 +324,8 @@ jobs:
           restore-keys: bench-kratos_bench-
 
       - run: mix deps.get
+
+      - run: mix format --check-formatted
 
       # Determinism audit (feature 3): generation-only, needs no Kratos.
       - name: Audit generation determinism
