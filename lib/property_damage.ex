@@ -1681,9 +1681,14 @@ defmodule PropertyDamage do
   @doc """
   Get coverage statistics from a test result.
 
+  Accepts both a single sequence/failure result and an aggregate `{:ok, stats}`
+  from a multi-run `run/1` invoked with `coverage: true` (the latter returns the
+  pre-merged `stats.coverage` tracker). An aggregate result produced without
+  `coverage: true` raises `ArgumentError`.
+
   ## Example
 
-      result = PropertyDamage.run(model: M, adapter: A)
+      result = PropertyDamage.run(model: M, adapter: A, coverage: true)
       coverage = PropertyDamage.coverage(result, M)
       IO.puts(PropertyDamage.Coverage.format(coverage))
   """
