@@ -140,11 +140,16 @@ defmodule PropertyDamage.Stutter do
   @doc """
   Parse stutter configuration from options.
 
-  Accepts either a map of options or `false` to disable.
+  Accepts a keyword list (the `run/1` `:stutter` option shape), a map, or
+  `false`/`nil` to disable.
   """
-  @spec parse_config(map() | false | nil) :: Config.t() | nil
+  @spec parse_config(keyword() | map() | false | nil) :: Config.t() | nil
   def parse_config(nil), do: nil
   def parse_config(false), do: nil
+
+  # The run/1 `:stutter` option validates as a keyword list; normalize to the
+  # map path so both the documented keyword-list and map shapes work.
+  def parse_config(opts) when is_list(opts), do: parse_config(Map.new(opts))
 
   def parse_config(opts) when is_map(opts) do
     %Config{

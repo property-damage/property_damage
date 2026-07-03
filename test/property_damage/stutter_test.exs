@@ -77,4 +77,41 @@ defmodule PropertyDamage.StutterTest do
       assert count >= 1 and count <= 3
     end
   end
+
+  describe "parse_config/1" do
+    test "nil and false disable stutter" do
+      assert Stutter.parse_config(nil) == nil
+      assert Stutter.parse_config(false) == nil
+    end
+
+    test "accepts the run/1 keyword-list shape (the documented + schema-validated form)" do
+      config =
+        Stutter.parse_config(
+          probability: 1.0,
+          max_repeats: 3,
+          delay_ms: {10, 100},
+          commands: [Cmd],
+          comparison: :strict
+        )
+
+      assert %Config{
+               probability: 1.0,
+               max_repeats: 3,
+               delay_ms: {10, 100},
+               commands: [Cmd],
+               comparison: :strict,
+               enabled: true
+             } = config
+    end
+
+    test "keyword list and equivalent map parse identically" do
+      kw = [probability: 0.5, max_repeats: 2]
+      assert Stutter.parse_config(kw) == Stutter.parse_config(Map.new(kw))
+    end
+
+    test "an empty keyword list uses defaults" do
+      assert %Config{probability: 0.1, max_repeats: 2, commands: :all, enabled: true} =
+               Stutter.parse_config([])
+    end
+  end
 end
