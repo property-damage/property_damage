@@ -38,6 +38,29 @@ defmodule PropertyDamage.Sequence.Position do
   @enforce_keys [:section, :offset]
   defstruct [:section, :offset]
 
+  @doc "A prefix position at `offset` (DR-039)."
+  @spec prefix(non_neg_integer()) :: t()
+  def prefix(offset), do: %__MODULE__{section: :prefix, offset: offset}
+
+  @doc "A position in branch `branch_id` at `offset` (DR-039)."
+  @spec branch(non_neg_integer(), non_neg_integer()) :: t()
+  def branch(branch_id, offset), do: %__MODULE__{section: {:branch, branch_id}, offset: offset}
+
+  @doc "A suffix position at `offset` (DR-039)."
+  @spec suffix(non_neg_integer()) :: t()
+  def suffix(offset), do: %__MODULE__{section: :suffix, offset: offset}
+
+  @doc """
+  Human-readable prose for a position (DR-039).
+
+  The shared phrasing used by the determinism audit and `mix pd.audit`:
+  `"prefix position 0"`, `"branch 1 position 2"`, `"suffix position 0"`.
+  """
+  @spec describe(t()) :: String.t()
+  def describe(%__MODULE__{section: :prefix, offset: i}), do: "prefix position #{i}"
+  def describe(%__MODULE__{section: {:branch, b}, offset: i}), do: "branch #{b} position #{i}"
+  def describe(%__MODULE__{section: :suffix, offset: i}), do: "suffix position #{i}"
+
   @typedoc "The executor's raw `current_position` tuple form (DR-021)."
   @type tuple_form ::
           {:prefix, non_neg_integer()}
@@ -52,9 +75,7 @@ defmodule PropertyDamage.Sequence.Position do
   """
   @spec from_tuple(tuple_form() | nil) :: t() | nil
   def from_tuple(nil), do: nil
-  def from_tuple({:prefix, offset}), do: %__MODULE__{section: :prefix, offset: offset}
-  def from_tuple({:suffix, offset}), do: %__MODULE__{section: :suffix, offset: offset}
-
-  def from_tuple({:branch, branch_id, offset}),
-    do: %__MODULE__{section: {:branch, branch_id}, offset: offset}
+  def from_tuple({:prefix, offset}), do: prefix(offset)
+  def from_tuple({:suffix, offset}), do: suffix(offset)
+  def from_tuple({:branch, branch_id, offset}), do: branch(branch_id, offset)
 end
