@@ -234,6 +234,10 @@ defmodule PropertyDamage.FailureReport do
         executed: Keyword.get(opts, :executed, %{}),
         event_log: event_log,
         command_labels: command_labels,
+        # P8 / DR-040: the fold-order record so the trace can derive the per-step
+        # state timeline and the report can run the projection-purity check.
+        command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
+        linearization: Keyword.get(opts, :linearization),
         outcome: {:fail, failure_reason}
       )
 

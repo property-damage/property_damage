@@ -623,7 +623,10 @@ defmodule PropertyDamage.Executor do
           injected_events: [],
           command_index: index,
           branch_id: state.branch_id,
-          command: command
+          command: command,
+          # P8 / DR-040: seed the fold counter so injected events folded during
+          # adapter execution take real fold ordinals ahead of the command fold.
+          fold_counter: state.fold_counter
         }
 
         # Capture the run process now: `runtime.start_poller` is invoked from
@@ -736,7 +739,10 @@ defmodule PropertyDamage.Executor do
           base_event_log: base_event_log,
           assertion_mode: assertion_mode,
           assertion_failures: assertion_failures,
-          started_resource_pollers: started_resource_pollers
+          started_resource_pollers: started_resource_pollers,
+          # P8 / DR-040: the fold counter after any injected events folded during
+          # adapter execution; the command fold continues from here.
+          base_fold_counter: final_injection_ctx.fold_counter
         }
 
         case result do
@@ -803,7 +809,8 @@ defmodule PropertyDamage.Executor do
       base_event_log: base_event_log,
       assertion_mode: assertion_mode,
       assertion_failures: assertion_failures,
-      started_resource_pollers: started_resource_pollers
+      started_resource_pollers: started_resource_pollers,
+      base_fold_counter: base_fold_counter
     } = ctx
 
     # 4b. Capture external values from real events (DR-021): resolve the
@@ -816,18 +823,29 @@ defmodule PropertyDamage.Executor do
         placeholder_registry
       )
 
-    # 5. Update projections with command
+    # 5. Update projections with command. Record the command's own fold ordinal
+    #    (P8 / DR-040) keyed by its position, then advance the run counter. Any
+    #    injected events (`runtime.inject.(event)`) already folded during adapter
+    #    execution took earlier ordinals, so `base_fold_counter` is the ordinal
+    #    of the command fold itself.
+    command_fold_ordinal = base_fold_counter
+    fold_counter = base_fold_counter + 1
+
+    command_fold_ordinals =
+      Map.put(state.command_fold_ordinals, state.current_position, command_fold_ordinal)
+
     projections = Events.update_projections(base_projections, resolved_command)
 
     # 6. Update projections with returned events and record in log
-    {projections, event_log} =
+    {projections, event_log, fold_counter} =
       Events.process_events(
         events,
         :command,
         index,
         base_event_log,
         projections,
-        state.branch_id
+        state.branch_id,
+        fold_counter
       )
 
     # 6.5. DR-030: register this command's awaits matchers (post-capture,
@@ -843,23 +861,25 @@ defmodule PropertyDamage.Executor do
     projs_before_async = projections
     log_before_async = event_log
 
-    {projections, event_log} =
+    {projections, event_log, fold_counter} =
       Events.process_injector_events(
         event_queue,
         event_log,
         projections,
         state.branch_id,
+        fold_counter,
         state.await_matchers
       )
 
     # 7.5. Flush and process mock-injected events
-    {projections, event_log} =
+    {projections, event_log, fold_counter} =
       Events.process_mock_events(
         mock_registry,
         index,
         event_log,
         projections,
-        state.branch_id
+        state.branch_id,
+        fold_counter
       )
 
     # 7.6. Update mock projections
@@ -892,7 +912,11 @@ defmodule PropertyDamage.Executor do
               ),
             step_count: state.step_count + 1,
             active_resource_pollers:
-              Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers
+              Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers,
+            # P8 / DR-040: persist the advanced fold counter and this command's
+            # recorded fold ordinal on every outcome path.
+            fold_counter: fold_counter,
+            command_fold_ordinals: command_fold_ordinals
           },
           fields
         )
@@ -1013,8 +1037,11 @@ defmodule PropertyDamage.Executor do
         # before, rather than crashing the sink's Agent.
         projections = Events.update_projections(ctx.projections, event)
 
-        # 2. Create entry with source :injected
-        entry = Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
+        # 2. Create entry with source :injected, stamping its fold ordinal
+        #    (P8 / DR-040) from the sink's threaded counter.
+        entry =
+          Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
+          |> Map.put(:fold_index, ctx.fold_counter)
 
         # 3. Store the accumulated state. Injected events are accumulated in
         # injection order so external() values they carry can be captured
@@ -1026,7 +1053,8 @@ defmodule PropertyDamage.Executor do
             ctx
             | projections: projections,
               injected_events: ctx.injected_events ++ [event],
-              event_log: [entry | ctx.event_log]
+              event_log: [entry | ctx.event_log],
+              fold_counter: ctx.fold_counter + 1
           }
         end)
 

@@ -432,6 +432,21 @@ defmodule PropertyDamage.Executor.Branching do
         Map.merge(acc, state.executed)
       end)
 
+    # Merge the per-command fold ordinals (P8 / DR-040). Each branch forked from
+    # the prefix, so it carries the prefix ordinals plus its own disjoint
+    # `{:branch, id}` positions; unioning is conflict-free. The suffix then
+    # continues folding from a counter past every branch's, so its ordinals never
+    # collide with a branch's.
+    merged_command_fold_ordinals =
+      Enum.reduce(branch_results, prefix_state.command_fold_ordinals, fn {_, state, _}, acc ->
+        Map.merge(acc, state.command_fold_ordinals)
+      end)
+
+    merged_fold_counter =
+      Enum.reduce(branch_results, prefix_state.fold_counter, fn {_, state, _}, acc ->
+        max(acc, state.fold_counter)
+      end)
+
     # Update through the prefix state so every other key (stutter config, mock
     # registry, model, external markers, ...) is preserved instead of dropped
     %{
@@ -446,7 +461,9 @@ defmodule PropertyDamage.Executor.Branching do
         assertion_failures: merged_failures,
         branch_id: nil,
         active_pollers: merged_pollers,
-        active_resource_pollers: merged_resource_pollers
+        active_resource_pollers: merged_resource_pollers,
+        command_fold_ordinals: merged_command_fold_ordinals,
+        fold_counter: merged_fold_counter
     }
   end
 

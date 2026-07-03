@@ -57,7 +57,8 @@ defmodule PropertyDamage.Executor.Finalization do
       stacktrace: stacktrace,
       linearization: linearization,
       assertion_failures: assertion_failures,
-      assertion_counters: Map.get(state, :assertion_counters, %{})
+      assertion_counters: Map.get(state, :assertion_counters, %{}),
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
     }
   end
 
@@ -202,7 +203,8 @@ defmodule PropertyDamage.Executor.Finalization do
               stacktrace: nil,
               linearization: linearization,
               assertion_failures: all_failures,
-              assertion_counters: teardown_counters
+              assertion_counters: teardown_counters,
+              command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
             }
         end
     end
@@ -225,7 +227,8 @@ defmodule PropertyDamage.Executor.Finalization do
       stacktrace: nil,
       linearization: linearization,
       assertion_failures: failures,
-      assertion_counters: Map.get(state, :assertion_counters, %{})
+      assertion_counters: Map.get(state, :assertion_counters, %{}),
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
     }
   end
 
@@ -252,7 +255,8 @@ defmodule PropertyDamage.Executor.Finalization do
       stacktrace: stacktrace,
       linearization: linearization,
       assertion_failures: failures,
-      assertion_counters: Map.get(state, :assertion_counters, %{})
+      assertion_counters: Map.get(state, :assertion_counters, %{}),
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
     }
   end
 
@@ -280,7 +284,8 @@ defmodule PropertyDamage.Executor.Finalization do
       stacktrace: stacktrace,
       linearization: linearization,
       assertion_failures: failures,
-      assertion_counters: Map.get(state, :assertion_counters, %{})
+      assertion_counters: Map.get(state, :assertion_counters, %{}),
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
     }
   end
 
@@ -332,16 +337,17 @@ defmodule PropertyDamage.Executor.Finalization do
     log_before = state.event_log
     mode = Map.get(state, :assertion_mode, :halt)
 
-    {projections, event_log} =
+    {projections, event_log, fold_counter} =
       Executor.Events.process_injector_events(
         Map.get(state, :event_queue),
         log_before,
         projs_before,
         Map.get(state, :branch_id),
+        Map.get(state, :fold_counter, 0),
         Map.get(state, :await_matchers, [])
       )
 
-    state = %{state | projections: projections, event_log: event_log}
+    state = %{state | projections: projections, event_log: event_log, fold_counter: fold_counter}
 
     case Executor.check_async(
            Map.fetch!(state, :model),
@@ -469,12 +475,13 @@ defmodule PropertyDamage.Executor.Finalization do
     log_before = state.event_log
     mode = Map.get(state, :assertion_mode, :halt)
 
-    {projections, event_log} =
+    {projections, event_log, fold_counter} =
       Executor.Events.process_injector_events(
         Map.get(state, :event_queue),
         log_before,
         projs_before,
         nil,
+        Map.get(state, :fold_counter, 0),
         Map.get(state, :await_matchers, [])
       )
 
@@ -498,7 +505,8 @@ defmodule PropertyDamage.Executor.Finalization do
           | projections: projections,
             event_log: event_log,
             assertion_counters: counters,
-            async_halt: {name, reason, idx}
+            async_halt: {name, reason, idx},
+            fold_counter: fold_counter
         }
 
         {results, halted_state}
@@ -509,7 +517,8 @@ defmodule PropertyDamage.Executor.Finalization do
           | projections: projections,
             event_log: event_log,
             assertion_counters: counters,
-            assertion_failures: failures
+            assertion_failures: failures,
+            fold_counter: fold_counter
         }
 
         # 2. Refresh each poller's getter to read the freshly-updated projections

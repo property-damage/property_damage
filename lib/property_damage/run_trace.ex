@@ -36,7 +36,18 @@ defmodule PropertyDamage.RunTrace do
   - `executed` — the concrete commands actually sent, post placeholder/mint
     resolution, keyed branch-aware by `%Sequence.Position{}`.
   - `event_log` — the complete `EventLog.Entry` list with per-entry provenance.
+    Each entry's `fold_index` records the run's real fold order (P8 / DR-040).
   - `command_labels` — flattened index → label (as the report computes it).
+  - `command_fold_ordinals` — `%{Sequence.Position => fold ordinal}`: the ordinal
+    at which each command was itself folded into projections (P8 / DR-040). With
+    the entries' `fold_index` this is enough to replay the run's true fold order,
+    which is what the faithful per-step state timeline (`state_at/2`,
+    `state_timeline/1`) does.
+  - `linearization` — the verified branch linearization (a tagged
+    `[{branch_id, offset, command}]` list) when one was found, else `nil`
+    (linear runs, or a branching run with no verified order). Recorded so the
+    per-step timeline can fold merged-branch state in the same order the executor
+    did (P8 / DR-040).
   - `outcome` — `:pass` or `{:fail, reason}`.
   """
 
@@ -64,6 +75,8 @@ defmodule PropertyDamage.RunTrace do
           executed: %{Sequence.Position.t() => struct()},
           event_log: [Entry.t()],
           command_labels: %{non_neg_integer() => String.t()},
+          command_fold_ordinals: %{Sequence.Position.t() => non_neg_integer()},
+          linearization: [{non_neg_integer(), non_neg_integer(), struct()}] | nil,
           outcome: outcome() | nil
         }
 
@@ -81,6 +94,8 @@ defmodule PropertyDamage.RunTrace do
             executed: %{},
             event_log: [],
             command_labels: %{},
+            command_fold_ordinals: %{},
+            linearization: nil,
             outcome: nil
 
   @doc """
@@ -122,6 +137,8 @@ defmodule PropertyDamage.RunTrace do
       executed: Keyword.get(opts, :executed, %{}),
       event_log: Keyword.get(opts, :event_log, []),
       command_labels: Keyword.get(opts, :command_labels, %{}),
+      command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
+      linearization: Keyword.get(opts, :linearization),
       outcome: Keyword.get(opts, :outcome)
     }
   end
@@ -207,6 +224,8 @@ defmodule PropertyDamage.RunTrace do
         executed: Map.get(result, :executed, %{}),
         event_log: result.event_log,
         command_labels: %{},
+        command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+        linearization: linearization_of(result),
         outcome: outcome_of(result)
       )
     after
@@ -235,6 +254,11 @@ defmodule PropertyDamage.RunTrace do
 
   defp outcome_of(%{success: true}), do: :pass
   defp outcome_of(%{failure_reason: reason}), do: {:fail, reason}
+
+  # Keep only a verified linearization (a tagged list) on the trace; the
+  # `:indeterminate` / `:no_linearization` executor tags are not a fold order.
+  defp linearization_of(%{linearization: [_ | _] = tagged}), do: tagged
+  defp linearization_of(_), do: nil
 
   @doc """
   The run as a timeline of `Step` structs, in flattened (reading) order.
