@@ -19,6 +19,23 @@ What it validates:
   completes its job without performing the increment. The observed value never
   catches up, so PropertyDamage catches it via the `@poll_state` timeout and
   shrinks it to the minimal reproduction (a single `Increment`).
+- **Server-generated identifiers (`external()`)** (`lib/oban_bench/job_refs.ex`):
+  `Oban.insert` returns a database-generated integer job id, exactly the shape
+  `external()` models. `EnqueueJob` produces a `JobEnqueued` event whose `job_id`
+  is declared `external()`; two distinct consumers, `CancelJob` and
+  `ReadJobState`, each receive that id resolved to the real value. Jobs are
+  inserted far in the future (`schedule_in`) so they sit `scheduled` and never
+  run, which makes cancellation deterministic. The `cancelled_jobs_not_runnable`
+  invariant asserts a cancelled job is never left runnable.
+  - The load-bearing claim (`test/job_refs_shrink_test.exs`): **shrinking
+    preserves the producer of a consumed placeholder.** A seeded-bug adapter
+    whose `CancelJob` silently no-ops leaves the job `scheduled`; PropertyDamage
+    catches the violation and shrinks it to exactly `[EnqueueJob, CancelJob]`,
+    keeping the producing insert before the failing consumer (if the producer
+    were dropped, the consumer's id could not resolve and the failure would not
+    reproduce). `test/job_refs_test.exs` is the paired control (faithful cancel
+    is green) and proves the `when:`-gated consumers actually ran via coverage
+    counts.
 
 ## Postgres
 
@@ -78,6 +95,8 @@ any Postgres you provide; the container step is then skipped entirely.
 - `lib/oban_bench/commands.ex` — events + the `Increment` command
 - `lib/oban_bench/model.ex` — projection with the `@poll_state` invariant,
   simulator, model
+- `lib/oban_bench/job_refs.ex` — the `external()` server-generated-id bench
+  (producer/consumer commands, projection, simulator, model, adapter)
 - `lib/oban_bench.ex` — the adapter (enqueues jobs, starts resource pollers)
 
 ## Note: the invariant checked here

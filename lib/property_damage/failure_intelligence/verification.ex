@@ -116,39 +116,53 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   @doc """
   Runs verification against a cluster of similar failures.
 
-  If the fix addresses the root cause, all similar failures should pass.
+  Each clustered fingerprint that carries a `seed` is re-run against `model` and
+  the adapter given in `opts` (reusing the same single-run machinery as
+  `verify_fix/3`). A member is `fixed` when its seed no longer reproduces a
+  failure, `remaining` when it still fails, and `unknown` when the fingerprint
+  carries no seed (nothing to re-run) or no adapter was supplied.
+
+  If the fix addresses the root cause, every seeded member should now pass and the
+  status is `:fully_fixed`.
+
+  ## Options
+
+  - `:adapter` - The adapter module to use (required to re-run members)
+  - `:adapter_config` - Configuration for the adapter (default: `%{}`)
   """
   @spec verify_cluster(Patterns.cluster(), module(), options()) :: %{
           cluster_id: String.t(),
           total: non_neg_integer(),
           fixed: non_neg_integer(),
           remaining: non_neg_integer(),
-          status: :fully_fixed | :partially_fixed | :not_fixed,
+          unknown: non_neg_integer(),
+          status: :fully_fixed | :partially_fixed | :not_fixed | :unknown,
           remaining_failures: [Fingerprint.t()]
         }
-  def verify_cluster(cluster, _model, _opts) do
-    # Note: Full cluster verification requires seeds associated with fingerprints.
-    # This is a placeholder that reports cluster status without re-running.
-    # In production usage, cluster fingerprints would include seed references.
+  def verify_cluster(cluster, model, opts \\ []) do
+    adapter = Keyword.get(opts, :adapter)
+    adapter_config = Keyword.get(opts, :adapter_config, %{})
+
     results =
       Enum.map(cluster.fingerprints, fn fp ->
-        {fp, :unknown}
+        {fp, verify_member(fp, model, adapter, adapter_config)}
       end)
 
-    # Count results
-    fixed = Enum.count(results, fn {_, status} -> status == :ok end)
-    remaining = Enum.count(results, fn {_, status} -> status != :ok end)
+    fixed = Enum.count(results, fn {_, status} -> status == :fixed end)
+    remaining = Enum.count(results, fn {_, status} -> status == :remaining end)
+    unknown = Enum.count(results, fn {_, status} -> status == :unknown end)
 
     status =
       cond do
-        remaining == 0 -> :fully_fixed
-        fixed > 0 -> :partially_fixed
-        true -> :not_fixed
+        fixed == 0 and remaining == 0 -> :unknown
+        remaining == 0 and unknown == 0 -> :fully_fixed
+        fixed == 0 -> :not_fixed
+        true -> :partially_fixed
       end
 
     remaining_fps =
       results
-      |> Enum.filter(fn {_, status} -> status != :ok end)
+      |> Enum.filter(fn {_, status} -> status == :remaining end)
       |> Enum.map(fn {fp, _} -> fp end)
 
     %{
@@ -156,9 +170,18 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
       total: cluster.size,
       fixed: fixed,
       remaining: remaining,
+      unknown: unknown,
       status: status,
       remaining_failures: remaining_fps
     }
+  end
+
+  # A member can only be re-run when it carries a seed and an adapter was given.
+  defp verify_member(%Fingerprint{seed: nil}, _model, _adapter, _config), do: :unknown
+  defp verify_member(_fp, _model, nil, _config), do: :unknown
+
+  defp verify_member(%Fingerprint{seed: seed}, model, adapter, config) do
+    if still_fails?(seed, model, adapter, config), do: :remaining, else: :fixed
   end
 
   @doc """
@@ -203,7 +226,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
         adapter_config: adapter_config,
         seed: seed,
         max_runs: 1,
-        quiet: true
+        verbose: false
       )
 
     case result do

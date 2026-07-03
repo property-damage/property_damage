@@ -62,16 +62,10 @@ defmodule PropertyDamage.Forensics do
   """
 
   @typedoc """
-  Successful analysis result.
-  """
-  @type success_result :: %{
-          final_state: map(),
-          events_processed: non_neg_integer(),
-          projections: %{module() => term()}
-        }
-
-  @typedoc """
   Failed analysis result.
+
+  When `stop_on_first_failure: false`, each collected violation is a value of
+  this same shape (see `t:success_result/0`'s `:violations`).
   """
   @type failure_result :: %{
           failure_reason: term(),
@@ -80,6 +74,22 @@ defmodule PropertyDamage.Forensics do
           state_before: map(),
           state_after: map(),
           events_leading_to_failure: [struct() | map()]
+        }
+
+  @typedoc """
+  Successful analysis result.
+
+  `:violations` lists every invariant violation encountered during the replay.
+  It is always empty when `stop_on_first_failure: true` (the default), because
+  the first violation short-circuits to an `{:error, failure_result()}`. When
+  `stop_on_first_failure: false`, the replay runs to completion and `:violations`
+  holds one `t:failure_result/0` per violating event, in replay order.
+  """
+  @type success_result :: %{
+          final_state: map(),
+          events_processed: non_neg_integer(),
+          projections: %{module() => term()},
+          violations: [failure_result()]
         }
 
   @typedoc """
@@ -102,8 +112,13 @@ defmodule PropertyDamage.Forensics do
 
   ## Returns
 
-  - `{:ok, success_result}` - All events processed without violations
-  - `{:error, failure_result}` - An invariant was violated
+  - `{:ok, success_result}` - The replay completed. With the default
+    `stop_on_first_failure: true` this means no violations occurred. With
+    `stop_on_first_failure: false` the replay always completes, and every
+    violation encountered is collected in `success_result.violations` (one
+    `t:failure_result/0` per violating event, in replay order; empty when clean).
+  - `{:error, failure_result}` - Only returned when `stop_on_first_failure: true`;
+    the replay halted at the first invariant violation.
 
   ## Examples
 
@@ -117,12 +132,17 @@ defmodule PropertyDamage.Forensics do
         event_mapping: MyMapper
       )
 
-      # Continue past failures
-      Forensics.analyze(
-        events: events,
-        model: MyModel,
-        stop_on_first_failure: false
-      )
+      # Continue past failures, collecting every violation
+      {:ok, %{violations: violations}} =
+        Forensics.analyze(
+          events: events,
+          model: MyModel,
+          stop_on_first_failure: false
+        )
+
+      for v <- violations do
+        IO.puts("Violation at event \#{v.failure_step}: \#{inspect(v.failure_reason)}")
+      end
   """
   @spec analyze(keyword()) :: analysis_result()
   def analyze(opts) do
@@ -158,23 +178,46 @@ defmodule PropertyDamage.Forensics do
     # Map events if mapping provided
     mapped_events = maybe_map_events(events, mapping)
 
-    # Process events sequentially
+    # Process events sequentially. The accumulator carries the running state, the
+    # event history, and every violation collected so far (only populated when
+    # stop_early is false; otherwise the first violation halts the reduce).
     result =
       mapped_events
       |> Enum.with_index()
-      |> Enum.reduce_while({:ok, initial_state, []}, fn {event, index}, {:ok, state, history} ->
-        # Skip nil events (from mapping)
-        if is_nil(event) do
-          {:cont, {:ok, state, history}}
-        else
-          process_event(event, index, state, history, model, assertion_projections, stop_early)
+      |> Enum.reduce_while(
+        {:ok, initial_state, [], []},
+        fn {event, index}, {:ok, state, history, violations} ->
+          # Skip nil events (from mapping)
+          if is_nil(event) do
+            {:cont, {:ok, state, history, violations}}
+          else
+            process_event(
+              event,
+              index,
+              state,
+              history,
+              violations,
+              model,
+              assertion_projections,
+              stop_early
+            )
+          end
         end
-      end)
+      )
 
     finalize_result(result)
   end
 
-  defp process_event(event, index, state, history, model, assertion_projections, stop_early) do
+  defp process_event(
+         event,
+         index,
+         state,
+         history,
+         violations,
+         model,
+         assertion_projections,
+         stop_early
+       ) do
     # Apply event to all projections
     new_projections =
       for {projection, projection_state} <- state.projections, into: %{} do
@@ -198,27 +241,37 @@ defmodule PropertyDamage.Forensics do
 
     case run_checks(model, assertion_projections, new_projections, check_ctx) do
       :ok ->
-        {:cont, {:ok, new_state, history ++ [event]}}
+        {:cont, {:ok, new_state, history ++ [event], violations}}
 
       {:error, assertion_name, reason} when stop_early ->
-        {:halt,
-         {:error,
-          %{
-            failure_reason: {:assertion_failed, assertion_name, reason},
-            failure_step: index,
-            event_at_failure: event,
-            state_before: state.projections,
-            state_after: new_projections,
-            events_leading_to_failure: history ++ [event]
-          }}}
+        failure =
+          build_failure(assertion_name, reason, index, event, state, new_projections, history)
 
-      {:error, _assertion_name, _reason} ->
-        # Continue past failure if stop_early is false
-        {:cont, {:ok, new_state, history ++ [event]}}
+        {:halt, {:error, failure}}
+
+      {:error, assertion_name, reason} ->
+        # Collect the violation and continue when stop_early is false.
+        failure =
+          build_failure(assertion_name, reason, index, event, state, new_projections, history)
+
+        {:cont, {:ok, new_state, history ++ [event], violations ++ [failure]}}
     end
   end
 
-  defp finalize_result({:ok, state, _history}) do
+  # A single violation record, shared by the stop-early failure and the
+  # collected-violations path so both carry the same detail shape.
+  defp build_failure(assertion_name, reason, index, event, state, new_projections, history) do
+    %{
+      failure_reason: {:assertion_failed, assertion_name, reason},
+      failure_step: index,
+      event_at_failure: event,
+      state_before: state.projections,
+      state_after: new_projections,
+      events_leading_to_failure: history ++ [event]
+    }
+  end
+
+  defp finalize_result({:ok, state, _history, violations}) do
     command_sequence_projection_key =
       Enum.find(Map.keys(state.projections), fn mod ->
         not function_exported?(mod, :__assertions__, 0)
@@ -228,7 +281,8 @@ defmodule PropertyDamage.Forensics do
      %{
        final_state: Map.get(state.projections, command_sequence_projection_key),
        events_processed: state.events_processed,
-       projections: state.projections
+       projections: state.projections,
+       violations: violations
      }}
   end
 
@@ -363,11 +417,6 @@ defmodule PropertyDamage.Forensics do
     "Assertion '#{assertion_name}' failed: #{inspect(reason)}"
   end
 
-  # Legacy support
-  defp format_failure_reason({:check_failed, check_name, reason}) do
-    "Assertion '#{check_name}' failed: #{inspect(reason)}"
-  end
-
   defp format_failure_reason(other), do: inspect(other)
 
   defp format_event_history(events) do
@@ -449,6 +498,5 @@ defmodule PropertyDamage.Forensics do
   defp event_to_code(event), do: inspect(event)
 
   defp format_check_name({:assertion_failed, name, _}), do: "#{name} failure"
-  defp format_check_name({:check_failed, name, _}), do: "#{name} failure"
   defp format_check_name(_), do: "unknown failure"
 end

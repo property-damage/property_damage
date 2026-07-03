@@ -3,6 +3,7 @@ defmodule PropertyDamage.SuggestionsTest do
 
   alias PropertyDamage.Suggestions
   alias PropertyDamage.Suggestions.{Analyzer, Formatter, Patterns}
+  alias PropertyDamage.SuggestionsFixtures, as: Fixtures
 
   # ============================================================================
   # Test Fixtures
@@ -629,6 +630,191 @@ defmodule PropertyDamage.SuggestionsTest do
 
       assert analysis.model == MinimalModel
       assert analysis.existing_checks == []
+    end
+  end
+
+  # ============================================================================
+  # analyze/2 pipeline (behavioral coverage, C1c-S)
+  #
+  # The tests above analyze models whose `commands/0` return `[]`, so the whole
+  # event-resolution + suggestion-generation pipeline runs against an empty
+  # event list and every generator vacuously returns []. These tests drive the
+  # pipeline with a model whose commands actually resolve to event structs
+  # (PropertyDamage.SuggestionsFixtures) and assert on the concrete suggestions
+  # that come out.
+  # ============================================================================
+
+  describe "analyze/2 with commands that resolve to events" do
+    setup do
+      %{analysis: Suggestions.analyze(Fixtures.FullModel)}
+    end
+
+    test "resolves events via both @emits and name inference", %{analysis: analysis} do
+      # Regression lock: a model with a non-empty command list used to crash the
+      # pipeline (Analyzer.get_commands matched a {weight, cmd} 2-tuple while
+      # Model.normalize_commands returns {weight, module, spec} 3-tuples), which
+      # is why every other suggestions test declared `commands, do: []`.
+      assert analysis.events_analyzed == 5
+
+      # OrderCreated is only reachable through PlaceOrder's persisted @emits
+      # attribute ("PlaceOrder" matches no verb transform), so a suggestion
+      # carrying it proves the @emits path.
+      assert Suggestions.for_event(analysis, Fixtures.Events.OrderCreated) != []
+
+      # AccountCreated has no @emits anywhere; it can only come from inferring
+      # CreateAccount -> Events.AccountCreated, so this proves the inference path.
+      assert Suggestions.for_event(analysis, Fixtures.Events.AccountCreated) != []
+    end
+
+    test "numeric field yields a high-priority non-negative check", %{analysis: analysis} do
+      suggestion =
+        Enum.find(
+          analysis.suggestions,
+          &(&1.type == :non_negative_check and &1.field == :balance)
+        )
+
+      assert suggestion, "expected a non_negative_check suggestion for :balance"
+      assert suggestion.priority == :high
+      assert suggestion.event == Fixtures.Events.AccountCreated
+    end
+
+    test "currency field yields a currency-consistency suggestion", %{analysis: analysis} do
+      suggestion =
+        Enum.find(
+          analysis.suggestions,
+          &(&1.type == :currency_consistency and &1.field == :currency)
+        )
+
+      assert suggestion, "expected a currency_consistency suggestion for :currency"
+      assert suggestion.priority == :high
+    end
+
+    test "reference field yields an existence-check suggestion", %{analysis: analysis} do
+      suggestion =
+        Enum.find(
+          analysis.suggestions,
+          &(&1.type == :reference_exists and &1.field == :account_ref)
+        )
+
+      assert suggestion, "expected a reference_exists suggestion for :account_ref"
+      assert suggestion.priority == :medium
+    end
+
+    test "status field yields a transition-validation suggestion", %{analysis: analysis} do
+      suggestion =
+        Enum.find(
+          analysis.suggestions,
+          &(&1.type == :valid_status_transition and &1.field == :status)
+        )
+
+      assert suggestion, "expected a valid_status_transition suggestion for :status"
+      assert suggestion.priority == :medium
+    end
+
+    test "cross-event fields yield consistency suggestions", %{analysis: analysis} do
+      # :amount appears in both AccountCredited and AccountDebited.
+      suggestion =
+        Enum.find(
+          analysis.suggestions,
+          &(&1.type == :cross_event_consistency and &1.field == :amount)
+        )
+
+      assert suggestion, "expected a cross_event_consistency suggestion for :amount"
+      assert suggestion.description =~ "amount"
+    end
+
+    test "include_low_priority: false removes low-priority suggestions", %{analysis: analysis} do
+      without_low = Suggestions.analyze(Fixtures.FullModel, include_low_priority: false)
+
+      # The default analysis genuinely contains low-priority suggestions...
+      assert Enum.any?(analysis.suggestions, &(&1.priority == :low))
+      # ...and the filtered analysis drops all of them while keeping the rest.
+      refute Enum.any?(without_low.suggestions, &(&1.priority == :low))
+      assert Enum.any?(without_low.suggestions, &(&1.priority == :high))
+    end
+
+    test "focus: narrows the real output to the focused area", %{analysis: analysis} do
+      numeric = Suggestions.analyze(Fixtures.FullModel, focus: :numeric)
+
+      types = numeric.suggestions |> Enum.map(& &1.type) |> Enum.uniq()
+
+      # Numeric suggestions survive the focus...
+      assert :non_negative_check in types
+      # ...while suggestions from other focus areas are excluded.
+      refute :reference_exists in types
+      refute :valid_status_transition in types
+      refute :currency_consistency in types
+
+      # Sanity: the unfocused analysis really did contain those other types.
+      unfocused_types = analysis.suggestions |> Enum.map(& &1.type) |> Enum.uniq()
+      assert :reference_exists in unfocused_types
+    end
+
+    test "max_suggestions truncates the real output", %{analysis: analysis} do
+      assert length(analysis.suggestions) > 2
+
+      limited = Suggestions.analyze(Fixtures.FullModel, max_suggestions: 2)
+      assert length(limited.suggestions) == 2
+    end
+
+    test "generate_check_code/1 renders code for a real suggestion", %{analysis: analysis} do
+      balance_suggestion =
+        Enum.find(
+          analysis.suggestions,
+          &(&1.type == :non_negative_check and &1.field == :balance)
+        )
+
+      code = Suggestions.generate_check_code(balance_suggestion)
+
+      assert is_binary(code)
+      assert code =~ "balance_non_negative"
+      assert code =~ "balance"
+
+      # A suggestion with no pre-baked example_code falls back to the formatter.
+      cross_suggestion =
+        Enum.find(analysis.suggestions, &(&1.type == :cross_event_consistency))
+
+      assert cross_suggestion.example_code == nil
+      fallback = Suggestions.generate_check_code(cross_suggestion)
+      assert fallback =~ "Add a check"
+    end
+
+    test "an existing check suppresses the matching suggestion" do
+      full = Suggestions.analyze(Fixtures.FullModel)
+      checked = Suggestions.analyze(Fixtures.CheckedModel)
+
+      full_nn_fields =
+        full.suggestions
+        |> Enum.filter(&(&1.type == :non_negative_check))
+        |> Enum.map(& &1.field)
+
+      checked_nn_fields =
+        checked.suggestions
+        |> Enum.filter(&(&1.type == :non_negative_check))
+        |> Enum.map(& &1.field)
+
+      # FullModel has no balance check, so it is suggested.
+      assert :balance in full_nn_fields
+
+      # CheckedModel's assert_balance_non_negative check suppresses exactly the
+      # :balance suggestion, while unrelated numeric fields are still suggested.
+      refute :balance in checked_nn_fields
+      assert :amount in checked_nn_fields
+    end
+  end
+
+  describe "analyze/2 empty degradation" do
+    test "a model whose commands resolve to no events yields no suggestions" do
+      analysis = Suggestions.analyze(Fixtures.NoEventsModel)
+
+      assert analysis.events_analyzed == 0
+      assert analysis.suggestions == []
+      assert analysis.detected_patterns == []
+
+      # Formatting empty output must not crash.
+      assert is_binary(Suggestions.format(analysis, :terminal))
+      assert is_binary(Suggestions.format(analysis, :markdown))
+      assert is_binary(Suggestions.format(analysis, :json))
     end
   end
 end
