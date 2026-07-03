@@ -1,0 +1,40 @@
+name: pd_kratos_bench
+
+# A single, dedicated, ephemeral Ory Kratos instance, independent of anything on
+# the host. It uses an in-memory DSN (no database container), so the whole SUT is
+# one small Go process. Config (kratos.yml + identity schema + the web_hook body
+# jsonnet) is mounted read-only from ./config/kratos. State lives only in memory,
+# so `docker compose down` is a full reset; per-run isolation is done at the
+# application layer (the adapter purges identities via the admin API in setup/1).
+#
+# Host ports (overridable):
+#   PD_KRATOS_PUBLIC_PORT (default 4433) -> Kratos public (self-service) API
+#   PD_KRATOS_ADMIN_PORT  (default 4434) -> Kratos admin API
+#
+# `--dev` relaxes the local-only security requirements (e.g. HTTPS). `extra_hosts`
+# maps host.docker.internal to the host gateway so Kratos can call the mock
+# web_hook the bench serves on the host (see config/kratos/kratos.yml).
+
+services:
+  kratos:
+    image: oryd/kratos:v1.3.1
+    command: serve -c /etc/config/kratos/kratos.yml --dev
+    environment:
+      SERVE_PUBLIC_BASE_URL: "http://localhost:${PD_KRATOS_PUBLIC_PORT:-4433}/"
+      SERVE_ADMIN_BASE_URL: "http://localhost:${PD_KRATOS_ADMIN_PORT:-4434}/"
+    volumes:
+      - ./config/kratos:/etc/config/kratos:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PD_KRATOS_PUBLIC_PORT:-4433}:4433"
+      - "${PD_KRATOS_ADMIN_PORT:-4434}:4434"
+    # NOTE: the container always listens on 4433/4434 (serve.*.port); the left
+    # side is the host port. Keep them equal, or the flow action URLs Kratos
+    # advertises (from SERVE_PUBLIC_BASE_URL) won't match the published port.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4434/admin/health/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
