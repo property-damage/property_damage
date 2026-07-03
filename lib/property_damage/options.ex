@@ -251,6 +251,12 @@ defmodule PropertyDamage.Options do
           type: :boolean,
           default: false,
           doc: "Print regression actions."
+        ],
+        adapter: [
+          type: :atom,
+          doc:
+            "Adapter module supplying `http_spec/2` for generated regression tests " <>
+              "(defaults to the run's adapter via the failure report)."
         ]
       ]
     ]
