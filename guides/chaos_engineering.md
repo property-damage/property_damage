@@ -168,9 +168,9 @@ alias PropertyDamage.Nemesis.NetworkPartition
   duration_ms: 5000
 }
 
-# Asymmetric - one direction degraded
+# Directional - block one direction only
 %NetworkPartition{
-  partition_type: :asymmetric,
+  partition_type: :downstream,
   duration_ms: 5000
 }
 ```
@@ -219,16 +219,20 @@ For network operations, PropertyDamage can integrate with
 [Toxiproxy](https://github.com/Shopify/toxiproxy):
 
 ```elixir
-# Configure in adapter
-adapter_config: %{
-  toxiproxy: %{
-    proxy_name: "my_service",
-    api_url: "http://localhost:8474"
-  }
-}
+# Return the Toxiproxy endpoint from your adapter's setup/1 so it lands in the
+# adapter context the engine hands to the nemeses (DR-038).
+def setup(_config) do
+  {:ok,
+   %{
+     toxiproxy: %{
+       proxy_name: "my_service",
+       api_url: "http://localhost:8474"
+     }
+   }}
+end
 
-# Nemesis operations will use Toxiproxy automatically
-# Falls back to simulated mode if not configured
+# Nemesis operations will use Toxiproxy automatically.
+# Falls back to simulated mode (events tagged simulated: true) if not configured.
 ```
 
 ## Example: Complete Chaos Model

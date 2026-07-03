@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Live network fault injection is now reachable through the engine (DR-038).**
+  The built-in network nemeses (`NetworkLatency`, `NetworkPartition`,
+  `PacketLoss`) discover their Toxiproxy config from the adapter context: return
+  `toxiproxy: %{proxy_name: ..., api_url: ...}` from your adapter's `setup/1` and
+  the fault injects for real against that proxy. Previously the executor built
+  the nemesis context with only `:adapter_context` (never a top-level
+  `:toxiproxy`), so through `PropertyDamage.run` these nemeses *always* ran
+  simulated no matter how the SUT was proxied; live injection was reachable only
+  by hand-calling `inject/2`. Config discovery now checks `context[:toxiproxy]`
+  (top-level, still honored for direct calls) then
+  `context.adapter_context[:toxiproxy]`. The simulated fallback (no config found
+  ⇒ `simulated: true`, no HTTP) is unchanged. The shared plumbing moved to a new
+  `PropertyDamage.Nemesis.Toxiproxy` module (config discovery, `:httpc`
+  post/delete, URL building, status dispatch, live-vs-simulated decision); the
+  three nemeses shrank to a generator, a pure `toxics/1` toxic-spec, and event
+  construction.
+
 - **Generation determinism audit (DR-037).** `PropertyDamage.audit/2` and the
   `mix pd.audit` task prove a model's generation is a pure function of the seed:
   they realize the model's generated sequence twice at each of N seeds through
@@ -93,6 +110,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`NetworkPartition` `:full` now cuts both directions (DR-038).** A full
+  partition installs two `bandwidth` toxics at rate `0` (`pd_partition_up` on the
+  upstream, `pd_partition_down` on the downstream); restore removes both.
+  Previously it sent one unqualified `bandwidth` toxic, which Toxiproxy defaults
+  to downstream only, so requests still flowed and only responses were blocked.
+
 - **Structural failure-query interface (Phase B): callers migrated.** Every
   renderer, exporter, and forensic analyzer that previously re-walked
   `shrunk_sequence` / `event_log` / `failed_at_index` to reconstruct "the command
@@ -172,6 +195,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeouts report `failed_at_index: nil` must update.
 
 ### Removed
+
+- **BREAKING (DR-038):** removed `NetworkPartition`'s `:asymmetric`
+  `partition_type`. Its documentation ("requests go through, responses blocked")
+  and its implementation were both exactly `:downstream` — duplicate vocabulary
+  for one behavior. Models overriding `partition_type: :asymmetric` must switch
+  to `:downstream`.
 
 - **BREAKING (Phase B):** `FailureReport` no longer carries the materialized
   `command_at_failure` / `events_at_failure` fields. They were redundant with the

@@ -13,7 +13,15 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
 
   ## Usage with Toxiproxy
 
-      context = %{toxiproxy: %{proxy_name: "api", api_url: "http://localhost:8474"}}
+  Live injection needs Toxiproxy configured in the adapter context. Return it
+  from your adapter's `setup/1` (DR-038):
+
+      def setup(_config) do
+        {:ok, %{toxiproxy: %{proxy_name: "api", api_url: "http://localhost:8474"}}}
+      end
+
+  A top-level `:toxiproxy` key on the context is also honored for direct
+  `inject/2` calls.
 
   ## Example
 
@@ -34,6 +42,8 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
 
   @behaviour PropertyDamage.Nemesis
 
+  alias PropertyDamage.Nemesis.Toxiproxy
+
   defstruct loss_percent: 10,
             duration_ms: 5000,
             target: :all,
@@ -53,14 +63,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
     now = System.monotonic_time(:millisecond)
     command = %{command | injected_at: now}
 
-    {result, simulated?} =
-      case get_toxiproxy(context) do
-        {:ok, proxy_config} ->
-          {inject_toxiproxy(command, proxy_config), false}
-
-        :not_configured ->
-          {:ok, true}
-      end
+    {result, simulated?} = Toxiproxy.inject_toxics(context, toxics(command))
 
     case result do
       :ok ->
@@ -83,14 +86,7 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
   def restore(%__MODULE__{} = command, context) do
     now = System.monotonic_time(:millisecond)
 
-    {result, simulated?} =
-      case get_toxiproxy(context) do
-        {:ok, proxy_config} ->
-          {restore_toxiproxy(proxy_config), false}
-
-        :not_configured ->
-          {:ok, true}
-      end
+    {result, simulated?} = Toxiproxy.restore_toxics(context, toxic_names(command))
 
     case result do
       :ok ->
@@ -133,79 +129,30 @@ defmodule PropertyDamage.Nemesis.PacketLoss do
   def duration_ms(%__MODULE__{duration_ms: d}), do: d
 
   # ============================================================================
-  # Toxiproxy Integration
+  # Toxic spec (pure)
   # ============================================================================
 
-  defp get_toxiproxy(%{toxiproxy: config}) when is_map(config), do: {:ok, config}
-  defp get_toxiproxy(_), do: :not_configured
+  @doc """
+  The Toxiproxy toxics this command injects, as pure JSON-encodable maps.
 
-  defp inject_toxiproxy(command, config) do
-    proxy_name = config[:proxy_name] || "default"
-    api_url = config[:api_url] || "http://localhost:8474"
-
-    # Toxiproxy doesn't have direct packet loss, use timeout toxic
-    # to simulate dropped connections
-    toxic = %{
-      "name" => "pd_packet_loss",
-      "type" => "timeout",
-      "toxicity" => command.loss_percent / 100,
-      "attributes" => %{"timeout" => 0}
-    }
-
-    url = "#{api_url}/proxies/#{proxy_name}/toxics"
-
-    case http_post(url, toxic) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, {:toxiproxy_error, reason}}
-    end
+  Toxiproxy has no direct packet-loss toxic, so loss is modeled with a `timeout`
+  toxic at `timeout: 0` (drop the connection) whose `toxicity` is the loss
+  fraction (`loss_percent / 100`), i.e. the probability the toxic fires per
+  connection.
+  """
+  @spec toxics(%__MODULE__{}) :: [Toxiproxy.toxic()]
+  def toxics(%__MODULE__{} = command) do
+    [
+      %{
+        "name" => "pd_packet_loss",
+        "type" => "timeout",
+        "toxicity" => command.loss_percent / 100,
+        "attributes" => %{"timeout" => 0}
+      }
+    ]
   end
 
-  defp restore_toxiproxy(config) do
-    proxy_name = config[:proxy_name] || "default"
-    api_url = config[:api_url] || "http://localhost:8474"
-
-    url = "#{api_url}/proxies/#{proxy_name}/toxics/pd_packet_loss"
-
-    case http_delete(url) do
-      {:ok, _} -> :ok
-      {:error, :not_found} -> :ok
-      {:error, reason} -> {:error, {:toxiproxy_error, reason}}
-    end
-  end
-
-  # ============================================================================
-  # HTTP Helpers
-  # ============================================================================
-
-  defp http_post(url, body) do
-    if Code.ensure_loaded?(:httpc) do
-      uri = String.to_charlist(url)
-      json_body = if Code.ensure_loaded?(Jason), do: Jason.encode!(body), else: inspect(body)
-
-      case :httpc.request(:post, {uri, [], ~c"application/json", json_body}, [], []) do
-        {:ok, {{_, status, _}, _, _}} when status in 200..299 -> {:ok, :created}
-        {:ok, {{_, status, _}, _, _}} -> {:error, {:http_error, status}}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      {:error, :httpc_not_available}
-    end
-  end
-
-  defp http_delete(url) do
-    if Code.ensure_loaded?(:httpc) do
-      uri = String.to_charlist(url)
-
-      case :httpc.request(:delete, {uri, []}, [], []) do
-        {:ok, {{_, status, _}, _, _}} when status in 200..299 -> {:ok, :deleted}
-        {:ok, {{_, 404, _}, _, _}} -> {:error, :not_found}
-        {:ok, {{_, status, _}, _, _}} -> {:error, {:http_error, status}}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      {:error, :httpc_not_available}
-    end
-  end
+  defp toxic_names(command), do: Enum.map(toxics(command), & &1["name"])
 end
 
 # Event structs

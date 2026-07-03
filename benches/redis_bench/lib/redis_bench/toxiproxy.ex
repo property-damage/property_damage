@@ -64,6 +64,14 @@ defmodule RedisBench.Toxiproxy do
     delete("/proxies/#{@proxy}/toxics/#{name}")
   end
 
+  @doc "List the toxics currently installed on the proxy (decoded JSON list)."
+  def list_toxics do
+    case get("/proxies/#{@proxy}/toxics") do
+      {:ok, body} -> {:ok, Jason.decode!(body)}
+      other -> other
+    end
+  end
+
   @doc "Enable or disable the whole proxy (disabled = full partition)."
   def set_enabled(enabled?) when is_boolean(enabled?) do
     post("/proxies/#{@proxy}", %{enabled: enabled?})
@@ -107,12 +115,16 @@ defmodule RedisBench.Toxiproxy do
     request(:delete, path, nil)
   end
 
+  defp get(path) do
+    request(:get, path, nil)
+  end
+
   defp request(method, path, body) do
     url = String.to_charlist(api_url() <> path)
 
     req =
       case method do
-        :delete -> {url, []}
+        m when m in [:delete, :get] -> {url, []}
         _ -> {url, [], ~c"application/json", Jason.encode!(body)}
       end
 

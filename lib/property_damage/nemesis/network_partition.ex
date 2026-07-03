@@ -11,7 +11,6 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
   - `:full` - Complete bidirectional partition (no traffic in either direction)
   - `:upstream` - Block traffic from client to server
   - `:downstream` - Block traffic from server to client
-  - `:asymmetric` - Requests go through, responses blocked
 
   ## Configuration
 
@@ -21,7 +20,15 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
 
   ## Usage with Toxiproxy
 
-      context = %{toxiproxy: %{proxy_name: "database", api_url: "http://localhost:8474"}}
+  Live injection needs Toxiproxy configured in the adapter context. Return it
+  from your adapter's `setup/1` (DR-038):
+
+      def setup(_config) do
+        {:ok, %{toxiproxy: %{proxy_name: "database", api_url: "http://localhost:8474"}}}
+      end
+
+  A top-level `:toxiproxy` key on the context is also honored for direct
+  `inject/2` calls.
 
   ## Example
 
@@ -43,12 +50,14 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
 
   @behaviour PropertyDamage.Nemesis
 
+  alias PropertyDamage.Nemesis.Toxiproxy
+
   defstruct partition_type: :full,
             duration_ms: 5000,
             target: :all,
             injected_at: nil
 
-  @partition_types [:full, :upstream, :downstream, :asymmetric]
+  @partition_types [:full, :upstream, :downstream]
 
   # ============================================================================
   # Nemesis Callbacks
@@ -64,14 +73,7 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
     now = System.monotonic_time(:millisecond)
     command = %{command | injected_at: now}
 
-    {result, simulated?} =
-      case get_toxiproxy(context) do
-        {:ok, proxy_config} ->
-          {inject_toxiproxy(command, proxy_config), false}
-
-        :not_configured ->
-          {inject_simulated(command, context), true}
-      end
+    {result, simulated?} = Toxiproxy.inject_toxics(context, toxics(command))
 
     case result do
       :ok ->
@@ -94,14 +96,7 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
   def restore(%__MODULE__{} = command, context) do
     now = System.monotonic_time(:millisecond)
 
-    {result, simulated?} =
-      case get_toxiproxy(context) do
-        {:ok, proxy_config} ->
-          {restore_toxiproxy(command, proxy_config), false}
-
-        :not_configured ->
-          {restore_simulated(command, context), true}
-      end
+    {result, simulated?} = Toxiproxy.restore_toxics(context, toxic_names(command))
 
     case result do
       :ok ->
@@ -144,114 +139,42 @@ defmodule PropertyDamage.Nemesis.NetworkPartition do
   def duration_ms(%__MODULE__{duration_ms: d}), do: d
 
   # ============================================================================
-  # Toxiproxy Integration
+  # Toxic spec (pure)
   # ============================================================================
 
-  defp get_toxiproxy(%{toxiproxy: config}) when is_map(config), do: {:ok, config}
-  defp get_toxiproxy(_), do: :not_configured
+  @doc """
+  The Toxiproxy toxics this command injects, as pure JSON-encodable maps.
 
-  defp inject_toxiproxy(command, config) do
-    proxy_name = config[:proxy_name] || "default"
-    api_url = config[:api_url] || "http://localhost:8474"
+  A partition is modeled with `bandwidth` toxics at `rate: 0`:
 
-    # For full partition, we use bandwidth toxic with rate=0
-    # For directional, we'd need upstream/downstream specific toxics
-    toxic =
-      case command.partition_type do
-        :full ->
-          %{
-            "name" => "pd_partition",
-            "type" => "bandwidth",
-            "attributes" => %{"rate" => 0}
-          }
-
-        :upstream ->
-          %{
-            "name" => "pd_partition",
-            "type" => "bandwidth",
-            "stream" => "upstream",
-            "attributes" => %{"rate" => 0}
-          }
-
-        :downstream ->
-          %{
-            "name" => "pd_partition",
-            "type" => "bandwidth",
-            "stream" => "downstream",
-            "attributes" => %{"rate" => 0}
-          }
-
-        :asymmetric ->
-          # Requests go through (upstream), responses blocked (downstream)
-          %{
-            "name" => "pd_partition",
-            "type" => "bandwidth",
-            "stream" => "downstream",
-            "attributes" => %{"rate" => 0}
-          }
-      end
-
-    url = "#{api_url}/proxies/#{proxy_name}/toxics"
-
-    case http_post(url, toxic) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, {:toxiproxy_error, reason}}
-    end
+    * `:full` — **two** toxics (`pd_partition_up` on the upstream + `pd_partition_down`
+      on the downstream), so traffic is blocked in *both* directions. A single
+      unqualified bandwidth toxic defaults to downstream only, which would leave
+      requests flowing — hence the pair.
+    * `:upstream` / `:downstream` — one `pd_partition` toxic with `"stream"` set.
+  """
+  @spec toxics(%__MODULE__{}) :: [Toxiproxy.toxic()]
+  def toxics(%__MODULE__{partition_type: :full}) do
+    [
+      bandwidth_toxic("pd_partition_up", "upstream"),
+      bandwidth_toxic("pd_partition_down", "downstream")
+    ]
   end
 
-  defp restore_toxiproxy(_command, config) do
-    proxy_name = config[:proxy_name] || "default"
-    api_url = config[:api_url] || "http://localhost:8474"
-
-    url = "#{api_url}/proxies/#{proxy_name}/toxics/pd_partition"
-
-    case http_delete(url) do
-      {:ok, _} -> :ok
-      {:error, :not_found} -> :ok
-      {:error, reason} -> {:error, {:toxiproxy_error, reason}}
-    end
+  def toxics(%__MODULE__{partition_type: stream}) when stream in [:upstream, :downstream] do
+    [bandwidth_toxic("pd_partition", Atom.to_string(stream))]
   end
 
-  # ============================================================================
-  # Simulated Mode
-  # ============================================================================
-
-  defp inject_simulated(_command, _context), do: :ok
-  defp restore_simulated(_command, _context), do: :ok
-
-  # ============================================================================
-  # HTTP Helpers
-  # ============================================================================
-
-  defp http_post(url, body) do
-    if Code.ensure_loaded?(:httpc) do
-      uri = String.to_charlist(url)
-      json_body = if Code.ensure_loaded?(Jason), do: Jason.encode!(body), else: inspect(body)
-
-      case :httpc.request(:post, {uri, [], ~c"application/json", json_body}, [], []) do
-        {:ok, {{_, status, _}, _, _}} when status in 200..299 -> {:ok, :created}
-        {:ok, {{_, status, _}, _, _}} -> {:error, {:http_error, status}}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      {:error, :httpc_not_available}
-    end
+  defp bandwidth_toxic(name, stream) do
+    %{
+      "name" => name,
+      "type" => "bandwidth",
+      "stream" => stream,
+      "attributes" => %{"rate" => 0}
+    }
   end
 
-  defp http_delete(url) do
-    if Code.ensure_loaded?(:httpc) do
-      uri = String.to_charlist(url)
-
-      case :httpc.request(:delete, {uri, []}, [], []) do
-        {:ok, {{_, status, _}, _, _}} when status in 200..299 -> {:ok, :deleted}
-        {:ok, {{_, 404, _}, _, _}} -> {:error, :not_found}
-        {:ok, {{_, status, _}, _, _}} -> {:error, {:http_error, status}}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      {:error, :httpc_not_available}
-    end
-  end
+  defp toxic_names(command), do: Enum.map(toxics(command), & &1["name"])
 end
 
 # Event structs

@@ -95,6 +95,33 @@ defmodule RedisBench.NemesisAuditTest do
       assert {:ok, _} = Toxiproxy.probe_ping_ms(), "restore did not heal the partition"
     end
 
+    test "NetworkPartition :full cuts BOTH directions (DR-038: two directional toxics)" do
+      cmd = %NetworkPartition{partition_type: :full}
+      {:ok, [injected]} = NetworkPartition.inject(cmd, toxiproxy_ctx())
+      assert injected.simulated == false
+
+      # The pre-DR-038 :full sent ONE unqualified bandwidth toxic (downstream by
+      # Toxiproxy default), leaving the upstream open. A real full partition
+      # installs a rate-0 bandwidth toxic on EACH stream.
+      {:ok, toxics} = Toxiproxy.list_toxics()
+      streams = toxics |> Enum.map(& &1["stream"]) |> Enum.sort()
+      assert streams == ["downstream", "upstream"], "full partition must block both directions"
+
+      for toxic <- toxics do
+        assert toxic["type"] == "bandwidth"
+        assert toxic["attributes"]["rate"] == 0
+      end
+
+      # Restore removes both toxics (two DELETEs), leaving the proxy clean.
+      {:ok, [_restored]} =
+        NetworkPartition.restore(
+          %{cmd | injected_at: System.monotonic_time(:millisecond)},
+          toxiproxy_ctx()
+        )
+
+      assert {:ok, []} = Toxiproxy.list_toxics(), "restore must remove both partition toxics"
+    end
+
     test "NetworkPartition without Toxiproxy: a no-op that masquerades as a real fault" do
       # Reports success with a real-looking partition event...
       {:ok, [injected]} = NetworkPartition.inject(%NetworkPartition{partition_type: :full}, %{})
