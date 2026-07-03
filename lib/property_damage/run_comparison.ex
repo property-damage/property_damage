@@ -109,6 +109,7 @@ defmodule PropertyDamage.RunComparison do
   def compare([], _opts), do: %__MODULE__{comparable?: false, guard_violations: ["no traces"]}
 
   def compare(traces, opts) do
+    opts = PropertyDamage.Options.validate_run_comparison_compare!(opts)
     header = build_header(traces)
 
     case guard(traces) do
@@ -164,14 +165,24 @@ defmodule PropertyDamage.RunComparison do
 
   ## Options
 
-  Required `:model`, `:adapter`, `:seed`. Optional `:run_number` (default 0),
-  `:runs` (default 5), plus any `RunTrace.capture/1` option and `compare/2`'s
-  `:event_identity`.
+  - `:capture` (required) - options forwarded to `RunTrace.capture/1` (must
+    include `:model`, `:adapter`, `:seed`; may include `:run_number`, etc.). A
+    fresh `:run_nonce` is injected per capture.
+  - `:runs` - number of captures (default 5).
+  - `:event_identity` - forwarded to `compare/2`.
+
+  ## Example
+
+      RunComparison.investigate(
+        runs: 5,
+        capture: [model: MyModel, adapter: MyAdapter, seed: 3]
+      )
   """
   @spec investigate(keyword()) :: {[RunTrace.t()], t()}
   def investigate(opts) do
-    runs = Keyword.get(opts, :runs, 5)
-    capture_opts = Keyword.drop(opts, [:runs, :event_identity])
+    opts = PropertyDamage.Options.validate_run_comparison_investigate!(opts)
+    runs = Keyword.fetch!(opts, :runs)
+    capture_opts = Keyword.fetch!(opts, :capture)
 
     traces =
       for _ <- 1..runs do

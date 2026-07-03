@@ -281,7 +281,10 @@ defmodule PropertyDamage.RunComparisonTest do
   describe "investigate/1" do
     test "captures N same-plan traces with distinct nonces and compares them" do
       {traces, comparison} =
-        RunComparison.investigate(model: RealModel, adapter: RealAdapter, seed: 3, runs: 3)
+        RunComparison.investigate(
+          runs: 3,
+          capture: [model: RealModel, adapter: RealAdapter, seed: 3]
+        )
 
       assert length(traces) == 3
       assert comparison.comparable?

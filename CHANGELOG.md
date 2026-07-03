@@ -110,6 +110,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`PropertyDamage.Validator` renamed to `PropertyDamage.Sequence.Validator`.**
+  The sequence-data validity check (`valid_sequence?/2`, run by the shrinker and
+  by `Analysis`) now lives under the `Sequence` namespace, next to
+  `Sequence.Position`, resolving the collision with `PropertyDamage.Validation`
+  (config/model-adapter setup validation, unchanged). Both were `@moduledoc
+  false` internals; clean break, no forwarding module.
+
+- **Stricter option validation on more entry points (BREAKING-ish).** The
+  up-front NimbleOptions validation convention now covers every public
+  option-taking entry point: `Integration.run/1`, `hunt_bugs/1`,
+  `health_check/1`; `Flakiness.check/4`, `check_batch/4`, `discover_flaky/3`;
+  `Audit.run/2` (DR-037); `RunComparison.compare/2` and `investigate/1`
+  (DR-035); and the `Regression` handler factories. Unknown or mistyped options
+  that were previously ignored (or deferred until a handler fired) now raise
+  `NimbleOptions.ValidationError` immediately. In particular:
+    - **`Regression` factories validate at factory time.** `generate_test/2`,
+      `save_failure/2`, `add_to_library/2` (and `handler/1`, `handle_failure/2`,
+      `check_duplicate/2`, `process_batch/2`) validate their options when built,
+      not when the failure handler later fires. Previously a typo'd option was
+      swallowed by `compose/1`'s per-handler rescue and the regression artifact
+      was silently lost. `:base_url` is no longer accepted in the regression
+      surface (it never applied to the `:exunit`-only generated tests).
+    - **`RunComparison.investigate/1` takes `capture:` as a sub-keyword.**
+      `RunTrace.capture/1` options are now nested under `:capture` (e.g.
+      `investigate(runs: 5, capture: [model: M, adapter: A, seed: 3])`) rather
+      than passed flat, so `RunTrace`'s option surface stays single-sourced.
+    - **`Analysis.generate_test/2` now validates its options** (the previously
+      orphaned `format`/`module_name` schema is wired in); the dead
+      `:include_setup` option was removed.
+
 - **`NetworkPartition` `:full` now cuts both directions (DR-038).** A full
   partition installs two `bandwidth` toxics at rate `0` (`pd_partition_up` on the
   upstream, `pd_partition_down` on the downstream); restore removes both.
