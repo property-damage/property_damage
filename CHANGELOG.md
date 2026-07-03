@@ -110,6 +110,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Command positions are now `%PropertyDamage.Sequence.Position{}` everywhere
+  (BREAKING, DR-039).** The raw position tuples `{:prefix, i}` / `{:branch, b,
+  i}` / `{:suffix, i}` are gone; the whole pipeline (generator minting, executor
+  `current_position`, placeholder registry keys, shrinker remap, mint markers,
+  the determinism audit, and the export step plan) speaks the struct. This
+  finishes the single-position-vocabulary intent of DR-021. Placeholder ids stay
+  deterministic and opaque, and the plan fingerprint is still
+  `sha256(term_to_binary(canonical, minor_version: 2))`; DR-036's determinism,
+  id-opacity, and plan-identity guarantees are unchanged (only the encoding
+  changes). Impact:
+    - **Persisted-file format bumps to version `5`; pre-v5 files are refused.** A
+      `.pd`/`.pdtrace` file written under format version `1`–`4` now returns
+      `{:error, {:unsupported_format_version, version, 5}}`; re-capture the
+      failure under the current version. There is no deep-converting loader (it
+      would resurrect exactly the tuple-encoding interpretation this change
+      deletes), and the pre-v4 `RunTrace` synthesis path is removed.
+    - **Plan fingerprints and client-minted (`mint_per_run`) values differ
+      across this boundary.** Both are pure functions of the position, which is
+      now a struct, so their bytes change. This has no runtime consumers today
+      (fingerprint continuity and minted-value stability had no dependents).
+    - If you construct placeholders or mint markers by hand (e.g. in a static
+      regression test), use the new `Position.prefix/1`, `Position.branch/2`, and
+      `Position.suffix/1` constructors instead of raw tuples.
+
 - **`PropertyDamage.Validator` renamed to `PropertyDamage.Sequence.Validator`.**
   The sequence-data validity check (`valid_sequence?/2`, run by the shrinker and
   by `Analysis`) now lives under the `Sequence` namespace, next to

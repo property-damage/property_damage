@@ -54,25 +54,21 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
-  @version 4
+  @version 5
   @extension ".pd"
   @trace_extension ".pdtrace"
 
-  # Fields removed from FailureReport after a given format version. A file
-  # written by an older version carries them; binary_to_term faithfully
-  # reconstructs the stored shape, so a loaded pre-vN report has these as
-  # *extra* keys. Their presence is expected and benign, so they are not
-  # reported as struct drift:
-  #   - v3 removed command_at_failure/events_at_failure (recomputed via
-  #     FailureReport.failure_step/1).
-  #   - v4 (DR-033) removed event_log/shrunk_sequence, folded into the embedded
-  #     RunTrace; a pre-v4 file's values are synthesized into a trace on load.
-  @removed_fields [:command_at_failure, :events_at_failure, :event_log, :shrunk_sequence]
+  # Fields whose presence on a loaded report is expected (not struct drift) even
+  # though the current struct lacks them. Pre-v5 files are refused outright
+  # (DR-039), so there are no legacy shapes to whitelist: a v5 file carrying an
+  # unknown key IS drift and should be surfaced.
+  @removed_fields []
 
-  # Fields ADDED to FailureReport in a later format version. A pre-vN file
-  # legitimately lacks them (they are synthesized on load), so their absence is
-  # expected format evolution, not struct drift. v4 (DR-033) added :trace.
-  @added_fields [:trace]
+  # Fields whose absence on a loaded report is expected format evolution (not
+  # struct drift). Empty for the same reason as @removed_fields: only v5 files
+  # load, and a v5 file legitimately lacking a current field is a genuine shape
+  # change worth a warning.
+  @added_fields []
 
   # Upper bound on the term size we are willing to reconstruct from a file.
   # Compressed external term format declares its uncompressed size in the
@@ -413,33 +409,12 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
-  # V1 format - no metadata, no warnings. Pre-trace: synthesize the trace.
-  defp decode(<<"PD", 1::8, stored_checksum::32, term_binary::binary>>) do
-    with_decoded_payload(stored_checksum, term_binary, fn payload ->
-      # Drift is measured on the RAW stored shape (before synthesis normalizes
-      # it), so a genuinely-drifted file is still detected.
-      warnings = check_struct_drift(payload.report)
-      {:ok, synthesize_trace(payload.report), warnings}
-    end)
-  end
-
-  # V2/V3 format - metadata payload, pre-trace: synthesize the trace from the
-  # legacy event_log/shrunk_sequence fields (DR-033).
-  defp decode(<<"PD", version::8, stored_checksum::32, term_binary::binary>>)
-       when version in [2, 3] do
-    with_decoded_payload(stored_checksum, term_binary, fn payload ->
-      warnings =
-        check_version_compatibility(payload[:metadata] || %{}) ++
-          check_struct_drift(payload.report)
-
-      {:ok, synthesize_trace(payload.report), warnings}
-    end)
-  end
-
-  # V4 format (DR-033): payload carries an explicit `kind`; the loader dispatches
-  # on it rather than the file extension. A report already embeds its trace; a
-  # standalone trace payload returns the trace.
-  defp decode(<<"PD", 4::8, stored_checksum::32, term_binary::binary>>) do
+  # V5 format (DR-039): positions are `%Sequence.Position{}` structs. The payload
+  # carries an explicit `kind`; the loader dispatches on it rather than the file
+  # extension. A report already embeds its trace, so it is returned as stored,
+  # with no legacy-field folding or trace synthesis. A standalone trace payload
+  # returns the trace.
+  defp decode(<<"PD", 5::8, stored_checksum::32, term_binary::binary>>) do
     with_decoded_payload(stored_checksum, term_binary, fn payload ->
       metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
 
@@ -448,10 +423,19 @@ defmodule PropertyDamage.Persistence do
           {:ok, payload.trace, metadata_warnings ++ check_trace_drift(payload.trace)}
 
         _ ->
-          {:ok, synthesize_trace(payload.report),
-           metadata_warnings ++ check_struct_drift(payload.report)}
+          {:ok, payload.report, metadata_warnings ++ check_struct_drift(payload.report)}
       end
     end)
+  end
+
+  # Pre-v5 files (format versions 1-4) are refused (DR-039). Their persisted
+  # terms carry tuple-encoded positions inside arbitrary user command/event
+  # structs; a deep-converting loader is exactly the encoding-interpretation
+  # logic this change deletes, kept alive for artifacts that do not exist.
+  # Re-capture the failure under the current version.
+  defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
+       when version < @version do
+    {:error, {:unsupported_format_version, version, @version}}
   end
 
   defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
@@ -479,43 +463,6 @@ defmodule PropertyDamage.Persistence do
           ArgumentError -> {:error, :unsafe_terms}
         end
     end
-  end
-
-  # Reconstruct a current %FailureReport{} from a loaded pre-v4 report map,
-  # folding the legacy event_log/shrunk_sequence into an embedded RunTrace
-  # (DR-033). plan_source is :shrunk (a report describes the shrunk run) and
-  # plan_fingerprint stays nil: a pre-DR-036 plan carries make_ref placeholder
-  # ids whose fingerprint is not meaningful, so an honest nil beats a fabricated
-  # digest. A payload that already carries a trace (a current report round-tripped
-  # through an older-tagged fixture) is returned untouched.
-  defp synthesize_trace(%{__struct__: FailureReport} = loaded) do
-    trace = Map.get(loaded, :trace) || legacy_trace(loaded)
-
-    # Normalize to a current struct: drop the __struct__ tag and any
-    # later-removed keys, let struct/2 fill defaults for anything absent, then
-    # install the (existing or synthesized) trace.
-    loaded
-    |> Map.drop([:__struct__ | @removed_fields])
-    |> then(&struct(FailureReport, &1))
-    |> Map.put(:trace, trace)
-  end
-
-  defp legacy_trace(loaded) do
-    RunTrace.new(
-      seed: Map.get(loaded, :seed),
-      run_number: Map.get(loaded, :run_number),
-      model: Map.get(loaded, :model),
-      adapter: Map.get(loaded, :adapter),
-      timestamp: Map.get(loaded, :timestamp),
-      plan: Map.get(loaded, :shrunk_sequence),
-      plan_source: :shrunk,
-      # A pre-DR-036 plan carries make_ref placeholder ids whose fingerprint is
-      # not meaningful; an honest nil beats a fabricated digest (DR-033).
-      plan_fingerprint: nil,
-      event_log: Map.get(loaded, :event_log) || [],
-      command_labels: Map.get(loaded, :command_labels) || %{},
-      outcome: {:fail, Map.get(loaded, :failure_reason)}
-    )
   end
 
   # The external term format declares its uncompressed size in the header for

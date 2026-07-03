@@ -43,7 +43,7 @@ defmodule PropertyDamage.PersistenceTest do
     end
 
     @tag :tmp_dir
-    test "saves and loads report with v2 format", %{tmp_dir: dir} do
+    test "saves and loads a report round-trip", %{tmp_dir: dir} do
       report = create_test_report()
       {:ok, path} = Persistence.save(report, dir)
 
@@ -62,7 +62,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Read raw binary to verify format
       {:ok, <<"PD", version::8, _checksum::32, _rest::binary>>} = File.read(path)
-      assert version == 4
+      assert version == 5
     end
   end
 
@@ -85,7 +85,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Read the file and manually modify the metadata to simulate version mismatch
       {:ok, binary} = File.read(path)
-      <<"PD", 4::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 5::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       # Add a fake dependency that will be missing (guaranteed to trigger warning)
@@ -94,7 +94,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 4::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 5::8, new_checksum::32, new_term_binary::binary>>)
 
       # Now load should return warnings about missing dependency
       {:ok, _report, warnings} = Persistence.load(path)
@@ -123,7 +123,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Modify file to add fake missing dependency (guaranteed to trigger warning)
       {:ok, binary} = File.read(path)
-      <<"PD", 4::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 5::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       modified_metadata = %{payload.metadata | dependency_versions: %{fake_missing_app: "1.0.0"}}
@@ -131,7 +131,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 4::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 5::8, new_checksum::32, new_term_binary::binary>>)
 
       assert_raise ArgumentError, ~r/Version compatibility warnings/, fn ->
         Persistence.load!(path)
@@ -145,71 +145,32 @@ defmodule PropertyDamage.PersistenceTest do
     end
   end
 
-  describe "v1 backward compatibility" do
+  describe "pre-v5 format refusal (DR-039)" do
     @tag :tmp_dir
-    test "loads v1 files without warnings", %{tmp_dir: dir} do
-      report = create_test_report()
-
-      # Create a v1 format file manually
-      payload = %{version: 1, report: report}
+    test "a v4 file is refused with a clear unsupported-version error", %{tmp_dir: dir} do
+      # A pre-v5 file carries tuple-encoded positions inside its persisted terms;
+      # rather than deep-convert arbitrary user structs, the loader refuses it and
+      # asks the user to re-capture. Frame a valid v4-shaped payload and confirm
+      # the version byte alone triggers the refusal (no decode is attempted).
+      payload = %{format_version: 4, kind: :failure_report, report: create_test_report()}
       term_binary = :erlang.term_to_binary(payload, [:compressed])
       checksum = :erlang.crc32(term_binary)
-      v1_binary = <<"PD", 1::8, checksum::32, term_binary::binary>>
+      path = Path.join(dir, "v4-legacy.pd")
+      File.write!(path, <<"PD", 4::8, checksum::32, term_binary::binary>>)
 
-      path = Path.join(dir, "v1-test.pd")
-      File.write!(path, v1_binary)
-
-      # Should load without warnings
-      {:ok, loaded} = Persistence.load(path)
-      assert loaded.seed == report.seed
+      assert {:error, {:unsupported_format_version, 4, 5}} = Persistence.load(path)
     end
-  end
 
-  describe "v2 → v3 field removal backward compatibility" do
     @tag :tmp_dir
-    test "loads a pre-v3 file carrying the removed fields without data loss or drift",
-         %{tmp_dir: dir} do
-      command = %TestCommand{id: "1", amount: 100}
-      event = %TestEvent{id: "1", amount: 100, status: :failed}
+    test "v1, v2, and v3 files are all refused", %{tmp_dir: dir} do
+      for version <- [1, 2, 3] do
+        term_binary = :erlang.term_to_binary(%{report: create_test_report()}, [:compressed])
+        checksum = :erlang.crc32(term_binary)
+        path = Path.join(dir, "v#{version}-legacy.pd")
+        File.write!(path, <<"PD", version::8, checksum::32, term_binary::binary>>)
 
-      report =
-        create_test_report(
-          commands: [command],
-          events: [
-            %PropertyDamage.EventLog.Entry{
-              timestamp: 0,
-              command_index: 0,
-              branch_id: nil,
-              event: event,
-              source: :command
-            }
-          ]
-        )
-
-      # Simulate a file written BEFORE command_at_failure/events_at_failure were
-      # removed: a struct-tagged map that still carries those keys, framed as v2.
-      old_report =
-        report
-        |> Map.from_struct()
-        |> Map.put(:__struct__, FailureReport)
-        |> Map.put(:command_at_failure, command)
-        |> Map.put(:events_at_failure, [event])
-
-      payload = %{format_version: 2, report: old_report, metadata: %{}}
-      term_binary = :erlang.term_to_binary(payload, [:compressed])
-      checksum = :erlang.crc32(term_binary)
-      path = Path.join(dir, "pre-v3.pd")
-      File.write!(path, <<"PD", 2::8, checksum::32, term_binary::binary>>)
-
-      # The intentionally-removed keys are recognized (not drift), so the file
-      # loads clean: a 2-tuple means zero warnings, including no struct drift.
-      assert {:ok, loaded} = Persistence.load(path)
-
-      # No data loss: the failing command and its events are recomputed on demand
-      # from the untouched event_log + shrunk_sequence.
-      step = FailureReport.failure_step(loaded)
-      assert step.command == command
-      assert Enum.map(step.entries, & &1.event) == [event]
+        assert {:error, {:unsupported_format_version, ^version, 5}} = Persistence.load(path)
+      end
     end
   end
 
@@ -217,7 +178,7 @@ defmodule PropertyDamage.PersistenceTest do
     @tag :tmp_dir
     test "a valid-checksum file referencing an unknown atom is reported as unsafe terms, not corruption",
          %{tmp_dir: dir} do
-      # Build a v1 payload whose value is an atom that does NOT exist in this VM.
+      # Build a v5 payload whose value is an atom that does NOT exist in this VM.
       # The name is assembled as raw bytes so it is never interned by the test
       # itself; :erlang.binary_to_term/[:safe] refuses to create it. The bytes
       # are intact (checksum matches), so this is an environment mismatch
@@ -229,7 +190,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       checksum = :erlang.crc32(term_binary)
       path = Path.join(dir, "unknown-atom.pd")
-      File.write!(path, <<"PD", 1::8, checksum::32, term_binary::binary>>)
+      File.write!(path, <<"PD", 5::8, checksum::32, term_binary::binary>>)
 
       assert {:error, :unsafe_terms} = Persistence.load(path)
     end
@@ -242,11 +203,11 @@ defmodule PropertyDamage.PersistenceTest do
       # reconstructs the stored shape verbatim, so a silent shape mismatch can
       # otherwise slip through.
       drifted = %{__struct__: FailureReport, seed: 7, run_number: 0}
-      payload = %{version: 2, report: drifted, metadata: %{}}
+      payload = %{kind: :failure_report, report: drifted, metadata: %{}}
       term_binary = :erlang.term_to_binary(payload, [:compressed])
       checksum = :erlang.crc32(term_binary)
       path = Path.join(dir, "drifted.pd")
-      File.write!(path, <<"PD", 2::8, checksum::32, term_binary::binary>>)
+      File.write!(path, <<"PD", 5::8, checksum::32, term_binary::binary>>)
 
       assert {:ok, _report, warnings} = Persistence.load(path)
       assert Enum.any?(warnings, &match?({:struct_shape_drift, _, _}, &1))
@@ -281,7 +242,7 @@ defmodule PropertyDamage.PersistenceTest do
       term_binary = <<131, 80, huge_size::unsigned-32, "compressed-bytes-do-not-matter">>
       checksum = :erlang.crc32(term_binary)
       path = Path.join(dir, "bomb.pd")
-      File.write!(path, <<"PD", 2::8, checksum::32, term_binary::binary>>)
+      File.write!(path, <<"PD", 5::8, checksum::32, term_binary::binary>>)
 
       assert {:error, :term_too_large} = Persistence.load(path)
     end
@@ -348,7 +309,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Modify to cause version mismatch
       {:ok, binary} = File.read(path)
-      <<"PD", 4::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 5::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       modified_metadata =
@@ -358,7 +319,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 4::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 5::8, new_checksum::32, new_term_binary::binary>>)
 
       # Still valid even with warnings
       assert Persistence.valid?(path)
@@ -377,9 +338,9 @@ defmodule PropertyDamage.PersistenceTest do
     end
   end
 
-  describe "v4 trace composition (DR-033)" do
+  describe "trace composition (DR-033)" do
     @tag :tmp_dir
-    test "a v4 report round-trips with a working steps/1 and accessors", %{tmp_dir: dir} do
+    test "a report round-trips with a working steps/1 and accessors", %{tmp_dir: dir} do
       command = %TestCommand{id: "1", amount: 100}
 
       event = %PropertyDamage.EventLog.Entry{
@@ -432,45 +393,6 @@ defmodule PropertyDamage.PersistenceTest do
     test "load_trace refuses a report file", %{tmp_dir: dir} do
       {:ok, path} = Persistence.save(create_test_report(), dir)
       assert {:error, :not_a_trace} = Persistence.load_trace(path)
-    end
-
-    @tag :tmp_dir
-    test "a genuine pre-v4 file (no trace) synthesizes one and loads clean", %{tmp_dir: dir} do
-      command = %TestCommand{id: "1", amount: 100}
-
-      event = %PropertyDamage.EventLog.Entry{
-        timestamp: 0,
-        command_index: 0,
-        branch_id: nil,
-        event: %TestEvent{id: "1", amount: 100, status: :failed},
-        source: :command
-      }
-
-      # Simulate a file written before DR-033: a FailureReport-tagged map with
-      # the legacy event_log/shrunk_sequence fields and NO trace, framed as v3.
-      legacy =
-        create_test_report(commands: [command], events: [event])
-        |> Map.from_struct()
-        |> Map.delete(:trace)
-        |> Map.put(:shrunk_sequence, Sequence.linear([command]))
-        |> Map.put(:event_log, [event])
-        |> Map.put(:__struct__, FailureReport)
-
-      payload = %{format_version: 3, report: legacy, metadata: %{}}
-      term_binary = :erlang.term_to_binary(payload, [:compressed])
-      checksum = :erlang.crc32(term_binary)
-      path = Path.join(dir, "pre-v4.pd")
-      File.write!(path, <<"PD", 3::8, checksum::32, term_binary::binary>>)
-
-      # Loads clean (no struct drift: trace absent is expected format evolution,
-      # event_log/shrunk_sequence present is a removed field), and steps/1 works
-      # off the synthesized trace.
-      assert {:ok, loaded} = Persistence.load(path)
-      assert %RunTrace{plan_source: :shrunk, plan_fingerprint: nil} = loaded.trace
-      assert FailureReport.event_log(loaded) == [event]
-      assert [step] = FailureReport.steps(loaded)
-      assert step.command == command
-      assert step.failed?
     end
   end
 end
