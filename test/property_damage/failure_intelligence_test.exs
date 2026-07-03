@@ -973,4 +973,85 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       refute Verification.still_fails?(100_000, FI.Model, FI.Adapter, %{bug: :off})
     end
   end
+
+  describe "FailureIntelligence.Verification.verify_cluster/3" do
+    alias PropertyDamage.FailureIntelligence.Verification
+
+    # A cluster of similar failures carrying real seeds. Clustering ignores the
+    # seed, but each fingerprint retains it so the cluster can be re-run.
+    defp seeded_cluster do
+      [cluster] =
+        Patterns.cluster_failures([
+          fi_report(100_000),
+          fi_report(200_000),
+          fi_report(300_000)
+        ])
+
+      cluster
+    end
+
+    test ":fully_fixed when every seeded member now passes (RED against the old stub)" do
+      # The pre-fix stub mapped every fingerprint to :unknown and reported
+      # fixed: 0 / status: :not_fixed regardless of the actual outcome. With the
+      # bug fixed, real verification must report all three members fixed.
+      result =
+        Verification.verify_cluster(seeded_cluster(), FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: :off}
+        )
+
+      assert result.status == :fully_fixed
+      assert result.total == 3
+      assert result.fixed == 3
+      assert result.remaining == 0
+      assert result.unknown == 0
+      assert result.remaining_failures == []
+    end
+
+    test ":not_fixed when every seeded member still fails" do
+      result =
+        Verification.verify_cluster(seeded_cluster(), FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: :always}
+        )
+
+      assert result.status == :not_fixed
+      assert result.fixed == 0
+      assert result.remaining == 3
+      assert length(result.remaining_failures) == 3
+    end
+
+    test ":partially_fixed when only some seeded members still fail" do
+      # amount: 100_000 -> 29 (fails at t=44), 200_000 -> 45, 300_000 -> 54 (pass).
+      result =
+        Verification.verify_cluster(seeded_cluster(), FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: {:overdraw_when_amount_lte, 44}}
+        )
+
+      assert result.status == :partially_fixed
+      assert result.fixed == 2
+      assert result.remaining == 1
+      assert length(result.remaining_failures) == 1
+    end
+
+    test ":unknown for members that carry no seed" do
+      [cluster] =
+        Patterns.cluster_failures([
+          create_failure_report(seed: nil),
+          create_failure_report(seed: nil)
+        ])
+
+      result =
+        Verification.verify_cluster(cluster, FI.Model,
+          adapter: FI.Adapter,
+          adapter_config: %{bug: :off}
+        )
+
+      assert result.status == :unknown
+      assert result.unknown == 2
+      assert result.fixed == 0
+      assert result.remaining == 0
+    end
+  end
 end

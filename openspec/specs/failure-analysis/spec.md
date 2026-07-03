@@ -87,6 +87,33 @@ The system SHALL verify that a fix is robust by re-running the original failing 
 - **WHEN** the original seed intermittently passes and fails across variations
 - **THEN** the verification result status SHALL be `:flaky`
 
+### Requirement: Cluster Fix Verification
+
+The system SHALL verify a fix against a cluster of similar failures by re-running each clustered member that carries a seed against the model and adapter, reporting how many members are now fixed, how many still fail, and how many cannot be re-run.
+
+#### Scenario: Fully fixed cluster
+
+- **WHEN** every clustered failure carries a seed and none of them reproduce after the fix
+- **THEN** the cluster verification status SHALL be `:fully_fixed`
+- **AND** the fixed count SHALL equal the cluster size and the remaining count SHALL be zero
+
+#### Scenario: Partially fixed cluster
+
+- **WHEN** some seeded members pass and at least one still reproduces
+- **THEN** the cluster verification status SHALL be `:partially_fixed`
+- **AND** the fingerprints that still reproduce SHALL be listed as remaining failures
+
+#### Scenario: Not fixed cluster
+
+- **WHEN** every seeded member still reproduces the failure
+- **THEN** the cluster verification status SHALL be `:not_fixed`
+
+#### Scenario: Members without a seed
+
+- **WHEN** a clustered fingerprint carries no seed, or no adapter is supplied to re-run it
+- **THEN** that member SHALL be counted as `unknown` rather than fixed or remaining
+- **AND** when no member can be re-run the cluster verification status SHALL be `:unknown`
+
 ### Requirement: Error Origin Classification
 
 The system SHALL classify each failure as originating from the SUT, the test code, or unknown, along with a confidence level (high, medium, low).
