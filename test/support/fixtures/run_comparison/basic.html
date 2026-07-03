@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PropertyDamage Run Comparison</title>
+<style>:root { color-scheme: light dark; }
+body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.4; }
+h1 { font-size: 1.6rem; } h2 { font-size: 1.2rem; margin-top: 2rem; }
+.mono { font-family: ui-monospace, monospace; font-size: 0.85em; }
+.hint { color: #666; font-size: 0.9em; }
+.warn { color: #b45309; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
+th, td { border: 1px solid #ccc; padding: 0.3rem 0.5rem; text-align: left; vertical-align: top; }
+th { background: rgba(127,127,127,0.12); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 1rem; }
+dt { font-weight: 600; }
+.banner.incomparable { background: #fee2e2; color: #991b1b; padding: 1rem; border-radius: 6px; }
+tr.pass td { background: rgba(34,197,94,0.10); }
+tr.fail td { background: rgba(239,68,68,0.10); }
+tr.diff-discriminating td { background: rgba(245,158,11,0.18); }
+tr.diff-violation td { background: rgba(239,68,68,0.18); }
+.corr { font-weight: 600; }
+.prov { font-size: 0.75em; padding: 0.05rem 0.4rem; border-radius: 999px; border: 1px solid currentColor; }
+.prov-run_scoped { color: #2563eb; }
+.prov-server_resolved { color: #b45309; }
+.prov-plan_generated { color: #6b7280; }
+</style>
+</head>
+<body>
+<h1>Run Comparison</h1>
+
+<section class="repro">
+<h2>Reproducibility</h2>
+<dl>
+<dt>Model</dt><dd>PropertyDamage.RunComparisonHtmlTest.Model</dd>
+<dt>Adapter</dt><dd>PropertyDamage.RunComparisonHtmlTest.Adapter</dd>
+<dt>Plan fingerprint</dt><dd class="mono">6eb55d55fec2a9fb5792098c8bd2c6acaf6effcb976932ef9c55421b4c498626</dd>
+<dt>Source revision</dt><dd class="mono">abc1234</dd>
+<dt>Timestamp (UTC)</dt><dd>2026-07-03T12:00:00Z</dd>
+</dl>
+</section>
+
+<section class="runs">
+<h2>Runs</h2>
+<p class="hint">The per-run <span class="corr">nonce</span> is the join key
+into your SUT logs for the client-minted correlation ids.</p>
+<table>
+<thead><tr>
+<th>Run</th><th>Outcome</th><th>Seed</th><th>Run #</th>
+<th>Nonce</th><th>Epoch</th><th>Plan source</th>
+</tr></thead>
+<tbody><tr class="pass">
+<td>#0</td>
+<td>pass</td>
+<td>1</td>
+<td>0</td>
+<td class="mono corr">111</td>
+<td>0</td>
+<td>generated</td>
+</tr>
+<tr class="fail">
+<td>#1</td>
+<td>fail</td>
+<td>1</td>
+<td>0</td>
+<td class="mono corr">222</td>
+<td>0</td>
+<td>generated</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section class="ranking">
+<h2>Ranked differences</h2>
+<p class="hint">Most discriminating first: fields stable within each outcome
+group but different between groups.</p>
+<ol><li>prefix[0] <span class="mono">PropertyDamage.RunComparisonHtmlTest.Result.status</span> <span class="prov prov-server_resolved">server_resolved</span></li></ol>
+
+</section>
+
+<section class="fields">
+<h2>Aligned field differences</h2>
+<table>
+<thead><tr><th>Location</th><th>Provenance</th><th>Class</th><th>#0</th><th>#1</th></tr></thead>
+<tbody><tr class="diff-discriminating">
+<td>prefix[0] <span class="mono">PropertyDamage.RunComparisonHtmlTest.Result.status</span></td>
+<td><span class="prov prov-server_resolved">server_resolved</span></td>
+<td>discriminating</td>
+<td class="mono">:ok</td><td class="mono">:error</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<script type="application/json" id="run-comparison-data">
+{"comparable":true,"fields":[{"classification":"uniform","differs":false,"location":{"kind":"command","path":["n"],"position":{"offset":0,"section":"prefix"}},"provenance":"plan_generated","values":{"0":1,"1":1}},{"classification":"discriminating","differs":true,"location":{"event_key":"Elixir.PropertyDamage.RunComparisonHtmlTest.Result","kind":"event","path":["status"],"position":{"offset":0,"section":"prefix"},"row":0},"provenance":"server_resolved","values":{"0":"ok","1":"error"}}],"groups":{"failing":[1],"passing":[0]},"guard_violations":[],"header":{"adapter":"Elixir.PropertyDamage.RunComparisonHtmlTest.Adapter","model":"Elixir.PropertyDamage.RunComparisonHtmlTest.Model","plan_fingerprint":"6eb55d55fec2a9fb5792098c8bd2c6acaf6effcb976932ef9c55421b4c498626","runs":[{"mint_epoch":0,"outcome":"pass","plan_source":"generated","run_nonce":111,"run_number":0,"seed":1},{"mint_epoch":0,"outcome":"fail","plan_source":"generated","run_nonce":222,"run_number":0,"seed":1}],"source_revision":{"tuple":["abc1234",false]},"timestamp":"2026-07-03T12:00:00Z"},"mixed_failure_signatures":[],"ranking":[{"classification":"discriminating","differs":true,"location":{"event_key":"Elixir.PropertyDamage.RunComparisonHtmlTest.Result","kind":"event","path":["status"],"position":{"offset":0,"section":"prefix"},"row":0},"provenance":"server_resolved","values":{"0":"ok","1":"error"}}],"schema_version":1}
+</script>
+<script>// Progressive enhancement only; the report is fully readable without JS.
+document.querySelectorAll('h2').forEach(function (h) {
+  h.style.cursor = 'pointer';
+  h.addEventListener('click', function () {
+    var next = h.nextElementSibling;
+    while (next && next.tagName !== 'H2') {
+      next.hidden = !next.hidden;
+      next = next.nextElementSibling;
+    }
+  });
+});
+</script>
+</body>
+</html>

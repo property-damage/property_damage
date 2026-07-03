@@ -312,7 +312,13 @@ defmodule PropertyDamage.Shrinker do
       # nil for non-stutter failures, leaving normal shrinking unperturbed.
       stutter_config:
         stutter_repro_config(original_signature, Keyword.get(opts, :stutter_config)),
-      rng_seed: Keyword.get(opts, :rng_seed)
+      rng_seed: Keyword.get(opts, :rng_seed),
+      # Client-minted run-scoped values (DR-034): each shrink attempt is a fresh
+      # SUT execution, so it draws a distinct mint_epoch from this monotonic
+      # counter. On a non-resettable SUT that keeps attempts from re-sending the
+      # exploration run's (epoch 0) minted values and colliding with it.
+      run_nonce: Keyword.get(opts, :run_nonce),
+      mint_epoch_counter: Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false)
     }
 
     # Truncating at the failure point is an optimization, not an assumption
@@ -429,7 +435,10 @@ defmodule PropertyDamage.Shrinker do
       # See shrink_linear: forced-stutter reproduction for stutter failures.
       stutter_config:
         stutter_repro_config(original_signature, Keyword.get(opts, :stutter_config)),
-      rng_seed: Keyword.get(opts, :rng_seed)
+      rng_seed: Keyword.get(opts, :rng_seed),
+      # Distinct mint_epoch per attempt (DR-034); see shrink_linear.
+      run_nonce: Keyword.get(opts, :run_nonce),
+      mint_epoch_counter: Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false)
     }
 
     # Strategy 1: Try converting to linear (maybe race isn't needed)
@@ -492,7 +501,10 @@ defmodule PropertyDamage.Shrinker do
               # Carry stutter reproduction into the converted-linear shrink. The
               # config is already forced (re-forcing is idempotent).
               stutter_config: state.stutter_config,
-              rng_seed: state.rng_seed
+              rng_seed: state.rng_seed,
+              # Carry the run nonce so the nested linear shrink mints too (it
+              # allocates its own per-attempt epoch counter).
+              run_nonce: state.run_nonce
             )
 
           %{
@@ -928,6 +940,11 @@ defmodule PropertyDamage.Shrinker do
     Validator.valid_sequence?(commands, state.model)
   end
 
+  # A fresh mint epoch for the next shrink attempt (DR-034). Monotonic across
+  # this shrink's attempts (and never 0, the exploration run's epoch), so each
+  # re-execution sends distinct client-minted values on a non-resettable SUT.
+  defp next_mint_epoch(state), do: :atomics.add_get(state.mint_epoch_counter, 1, 1)
+
   defp still_fails?(commands, positions, state) do
     # Call setup_each to reset SUT state before each shrink attempt
     setup_each_result = call_setup_each(state.model, state.adapter_config)
@@ -950,7 +967,9 @@ defmodule PropertyDamage.Shrinker do
                adapter_config: state.adapter_config,
                event_queue: state.event_queue,
                stutter_config: state.stutter_config,
-               rng_seed: state.rng_seed
+               rng_seed: state.rng_seed,
+               run_nonce: state.run_nonce,
+               mint_epoch: next_mint_epoch(state)
              ) do
           {:ok, result} ->
             if result.success do
@@ -989,7 +1008,9 @@ defmodule PropertyDamage.Shrinker do
                adapter_config: state.adapter_config,
                event_queue: state.event_queue,
                stutter_config: state.stutter_config,
-               rng_seed: state.rng_seed
+               rng_seed: state.rng_seed,
+               run_nonce: state.run_nonce,
+               mint_epoch: next_mint_epoch(state)
              ) do
           {:ok, result} ->
             cond do
@@ -1035,7 +1056,9 @@ defmodule PropertyDamage.Shrinker do
                adapter_config: state.adapter_config,
                event_queue: state.event_queue,
                stutter_config: state.stutter_config,
-               rng_seed: state.rng_seed
+               rng_seed: state.rng_seed,
+               run_nonce: state.run_nonce,
+               mint_epoch: next_mint_epoch(state)
              ) do
           {:ok, result} ->
             if result.success do

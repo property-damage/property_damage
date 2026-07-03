@@ -15,6 +15,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     :metrics,
     :think_time_range,
     :assertion_mode,
+    :run_nonce,
     # Pool state
     :available,
     :in_use,
@@ -109,6 +110,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
       metrics: metrics,
       think_time_range: think_time_range,
       assertion_mode: assertion_mode,
+      run_nonce: Keyword.get(opts, :run_nonce),
       available: :queue.new(),
       in_use: MapSet.new(),
       total_created: 0,
@@ -275,7 +277,8 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
            adapter_config: state.adapter_config,
            metrics: state.metrics,
            think_time_range: state.think_time_range,
-           assertion_mode: state.assertion_mode
+           assertion_mode: state.assertion_mode,
+           run_nonce: state.run_nonce
          ) do
       {:ok, worker} ->
         Process.monitor(worker)

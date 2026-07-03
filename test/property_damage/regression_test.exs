@@ -53,8 +53,11 @@ defmodule PropertyDamage.RegressionTest do
       failure_message: Keyword.get(opts, :message, "Test failure"),
       failed_at_index: 1,
       original_sequence: Sequence.linear([%TestCommand.Create{id: "1"}]),
-      shrunk_sequence: Sequence.linear([%TestCommand.Create{id: "1"}]),
-      event_log: [],
+      trace:
+        PropertyDamage.RunTrace.new(
+          plan: Sequence.linear([%TestCommand.Create{id: "1"}]),
+          event_log: []
+        ),
       state_before_failure: %{TestProjection => %{}},
       state_at_failure: %{TestProjection => %{}},
       model: TestModel,

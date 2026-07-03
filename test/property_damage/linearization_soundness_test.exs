@@ -241,7 +241,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
                    branching: @branching
                  )
 
-        commands = Sequence.to_list(failure.shrunk_sequence)
+        commands = Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(failure))
 
         assert [%PutKey{key: key}, %DelKey{key: key}, %GetKey{key: key}] = commands,
                "expected the genuine 3-command repro, got: #{inspect(commands)}"

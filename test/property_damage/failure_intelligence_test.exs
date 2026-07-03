@@ -76,9 +76,8 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       failure_type: Keyword.get(opts, :failure_type, :check_failed),
       check_name: Keyword.get(opts, :check_name, :balance_non_negative),
       failure_message: Keyword.get(opts, :message, "Balance -100 is negative"),
-      shrunk_sequence: sequence,
+      trace: PropertyDamage.RunTrace.new(plan: sequence, event_log: event_log),
       failed_at_index: failed_at,
-      event_log: event_log,
       state_at_failure: Keyword.get(opts, :state, %{accounts: %{"acc_1" => %{balance: -100}}}),
       model: Keyword.get(opts, :model, nil),
       adapter: Keyword.get(opts, :adapter, nil)

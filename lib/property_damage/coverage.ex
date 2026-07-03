@@ -152,8 +152,8 @@ defmodule PropertyDamage.Coverage do
   def record(tracker, {:error, failure}) do
     record_from_data(
       tracker,
-      failure.shrunk_sequence,
-      failure.event_log,
+      PropertyDamage.FailureReport.shrunk_sequence(failure),
+      PropertyDamage.FailureReport.event_log(failure),
       failure.state_at_failure || %{},
       Map.get(failure, :assertion_fires, %{}),
       true

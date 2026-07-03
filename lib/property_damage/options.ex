@@ -33,6 +33,14 @@ defmodule PropertyDamage.Options do
       type: :pos_integer,
       doc: "Random seed for reproducibility. Defaults to random."
     ],
+    run_nonce: [
+      type: :non_neg_integer,
+      doc:
+        "64-bit nonce seeding client-minted run-scoped values (DR-034). " <>
+          "Defaults to strong random entropy (never the process RNG). Hold " <>
+          "(seed, run_number) and vary this to re-run the same plan with fresh " <>
+          "minted values on a shared SUT."
+    ],
     verbose: [
       type: :boolean,
       default: false,
@@ -311,6 +319,13 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
     ],
+    run_nonce: [
+      type: :non_neg_integer,
+      doc:
+        "Nonce seeding client-minted run-scoped values (DR-034). One per load " <>
+          "test; each worker derives a distinct mint_epoch from its worker id. " <>
+          "Defaults to strong random entropy."
+    ],
     arrival_rate: [
       type: {:custom, __MODULE__, :validate_arrival_rate, []},
       required: true,
@@ -553,6 +568,13 @@ defmodule PropertyDamage.Options do
       type: {:custom, __MODULE__, :validate_module, []},
       required: true,
       doc: "Model module implementing `PropertyDamage.Model` behaviour."
+    ],
+    run_nonce: [
+      type: :non_neg_integer,
+      doc:
+        "Nonce seeding client-minted run-scoped values (DR-034), shared by all " <>
+          "targets so each receives byte-identical minted requests. Defaults to " <>
+          "strong random entropy."
     ],
     targets: [
       type: {:custom, __MODULE__, :validate_non_empty_list, []},

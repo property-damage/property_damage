@@ -37,6 +37,13 @@ defmodule PropertyDamage.Executor.State do
     * `:projections` - `%{projection_module => state}`
     * `:projections_before` - snapshot of projections before the current command
     * `:current_position` - structured position of the executing command (DR-021)
+    * `:executed` - `%{Sequence.Position => command}` of the concrete resolved
+      commands actually sent to the adapter, keyed branch-aware (DR-033). Feeds
+      `RunTrace.executed`; always accumulated.
+    * `:run_nonce` - the 64-bit run nonce (DR-034) seeding `mint_per_run`
+      resolution; `nil` when the run declared no minted values.
+    * `:mint_epoch` - which SUT execution within a logical run this is (DR-034);
+      `0` for the recorded run, incremented per shrink attempt / replay.
     * `:step_count` - number of commands executed
     * `:assertion_counters` - `%{step:, command:, event:, ...}` firing counts
     * `:assertion_failures` - accumulated `:record`-mode failures (newest-first)
@@ -77,6 +84,9 @@ defmodule PropertyDamage.Executor.State do
     projections: %{},
     projections_before: nil,
     current_position: nil,
+    executed: %{},
+    run_nonce: nil,
+    mint_epoch: 0,
     step_count: 0,
     assertion_counters: %{step: 0, command: 0, event: 0},
     assertion_failures: [],
@@ -102,6 +112,9 @@ defmodule PropertyDamage.Executor.State do
           projections: map(),
           projections_before: map() | nil,
           current_position: term(),
+          executed: %{term() => struct()},
+          run_nonce: non_neg_integer() | nil,
+          mint_epoch: non_neg_integer(),
           step_count: non_neg_integer(),
           assertion_counters: map(),
           assertion_failures: list(),
