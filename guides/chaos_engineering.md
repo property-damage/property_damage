@@ -592,6 +592,6 @@ usage.
 
 ## Next Steps
 
-- See `example_tests/travel_booking/` for a complete chaos engineering example
+- See `benches/redis_bench/` for a complete, CI-gated chaos/fault-injection example (live Toxiproxy)
 - Read about [Writing Invariants](writing_invariants.md) for fault-aware checks
 - Use `PropertyDamage.Mutation` to verify your chaos tests catch bugs

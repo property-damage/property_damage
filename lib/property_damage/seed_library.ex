@@ -143,7 +143,7 @@ defmodule PropertyDamage.SeedLibrary do
   ## Example
 
       {:ok, library} = SeedLibrary.add_seed(library, 512902757,
-        model: "ToyBankTest.Model",
+        model: "MyApp.Model",
         tags: [:currency_mismatch],
         description: "Captures with mismatched currencies"
       )
