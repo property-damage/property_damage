@@ -7,6 +7,8 @@ defmodule PropertyDamage.AuditTest do
   """
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.Audit
 
   alias PropertyDamage.Test.Audit.{
@@ -24,7 +26,7 @@ defmodule PropertyDamage.AuditTest do
 
       assert is_integer(seed)
       # The impure field is named and the message is actionable.
-      assert divergence.position == {:prefix, 0}
+      assert divergence.position == Position.prefix(0)
       assert Map.has_key?(divergence.fields, :nonce)
       assert divergence.message =~ "nonce"
       assert divergence.message =~ "guides/deterministic_generation.md"

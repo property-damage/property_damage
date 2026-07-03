@@ -11,11 +11,11 @@ defmodule PropertyDamage.Sequence.Position do
       %Sequence.Position{section: {:branch, 1}, offset: 2}
       %Sequence.Position{section: :suffix, offset: 0}
 
-  It reifies the executor's raw `current_position` tuples
-  (`{:prefix, i}` / `{:branch, b, i}` / `{:suffix, i}`, DR-021) as a first-class
-  type, and is intended to be the single position vocabulary shared across the
-  failure-query interface and the placeholder registry rather than each
-  re-encoding the tuple.
+  This is *the* position vocabulary (DR-039): the whole framework speaks it, from
+  the generator's minting and the executor's `current_position` through the
+  placeholder registry, the shrinker's remap, the determinism audit, and the
+  failure-query interface. There is no raw-tuple encoding to reify anymore; use
+  the `prefix/1`, `branch/2`, and `suffix/1` constructors to mint one.
 
   Distinct from a command's *flattened index* (its `Sequence.to_list/1`
   reading-order ordinal): a position is not derivable from a lone flattened
@@ -60,22 +60,4 @@ defmodule PropertyDamage.Sequence.Position do
   def describe(%__MODULE__{section: :prefix, offset: i}), do: "prefix position #{i}"
   def describe(%__MODULE__{section: {:branch, b}, offset: i}), do: "branch #{b} position #{i}"
   def describe(%__MODULE__{section: :suffix, offset: i}), do: "suffix position #{i}"
-
-  @typedoc "The executor's raw `current_position` tuple form (DR-021)."
-  @type tuple_form ::
-          {:prefix, non_neg_integer()}
-          | {:suffix, non_neg_integer()}
-          | {:branch, non_neg_integer(), non_neg_integer()}
-
-  @doc """
-  Reify the executor's raw `current_position` tuple as a `Position`.
-
-  Inverse of the tuple encoding the executor uses internally. `nil` (no
-  position set) passes through as `nil`.
-  """
-  @spec from_tuple(tuple_form() | nil) :: t() | nil
-  def from_tuple(nil), do: nil
-  def from_tuple({:prefix, offset}), do: prefix(offset)
-  def from_tuple({:suffix, offset}), do: suffix(offset)
-  def from_tuple({:branch, branch_id, offset}), do: branch(branch_id, offset)
 end

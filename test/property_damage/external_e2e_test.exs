@@ -10,6 +10,8 @@ defmodule PropertyDamage.ExternalE2ETest do
   """
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.{Executor, Generator, Placeholder, PlaceholderRegistry, Sequence}
 
   defmodule Created do
@@ -111,7 +113,7 @@ defmodule PropertyDamage.ExternalE2ETest do
 
   describe "deterministic capture (hand-built sequence)" do
     test "consumer receives the concrete server value captured from the producer" do
-      ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+      ph = Placeholder.new_at(Created, [:id], Position.prefix(0), 0)
       reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
 
       seq =
@@ -167,10 +169,10 @@ defmodule PropertyDamage.ExternalE2ETest do
   describe "branching identity" do
     test "two parallel producers resolve to distinct concrete values" do
       # The legacy flat command_index gave both branches the same key
-      # (length(prefix)); the structured {:branch, b, i} positions keep them
+      # (length(prefix)); the structured Position.branch(b, i) positions keep them
       # distinct, so each branch's external resolves independently.
-      ph0 = Placeholder.new_at(Created, [:id], {:branch, 0, 0}, 0)
-      ph1 = Placeholder.new_at(Created, [:id], {:branch, 1, 0}, 0)
+      ph0 = Placeholder.new_at(Created, [:id], Position.branch(0, 0), 0)
+      ph1 = Placeholder.new_at(Created, [:id], Position.branch(1, 0), 0)
 
       reg =
         PlaceholderRegistry.new()
@@ -197,7 +199,7 @@ defmodule PropertyDamage.ExternalE2ETest do
 
     test "generation mints branch-positioned placeholders that resolve on execution" do
       # Find a seed that produces a branching sequence whose branches contain a
-      # producer (so the registry carries a {:branch, _, _} placeholder).
+      # producer (so the registry carries a Position.branch(_, _) placeholder).
       seq =
         Enum.find_value(1..400, fn seed ->
           s =
@@ -210,7 +212,10 @@ defmodule PropertyDamage.ExternalE2ETest do
 
           with %Sequence{branches: [_ | _], registry: %PlaceholderRegistry{} = reg} <- s,
                true <-
-                 Enum.any?(PlaceholderRegistry.all(reg), &match?({:branch, _, _}, &1.position)) do
+                 Enum.any?(
+                   PlaceholderRegistry.all(reg),
+                   &match?(%Position{section: {:branch, _}}, &1.position)
+                 ) do
             s
           else
             _ -> nil
@@ -219,11 +224,11 @@ defmodule PropertyDamage.ExternalE2ETest do
 
       assert seq, "no seed produced a branching sequence with a branch-positioned placeholder"
 
-      # The generator minted at least one {:branch, _, _} placeholder.
+      # The generator minted at least one Position.branch(_, _) placeholder.
       branch_phs =
         seq.registry
         |> PlaceholderRegistry.all()
-        |> Enum.filter(&match?({:branch, _, _}, &1.position))
+        |> Enum.filter(&match?(%Position{section: {:branch, _}}, &1.position))
 
       assert branch_phs != []
 
@@ -264,7 +269,7 @@ defmodule PropertyDamage.ExternalE2ETest do
 
   describe "capture from injected events (DR-021)" do
     test "an external() carried on an injected event reaches a downstream consumer" do
-      ph = Placeholder.new_at(Created, [:id], {:prefix, 0}, 0)
+      ph = Placeholder.new_at(Created, [:id], Position.prefix(0), 0)
       reg = PlaceholderRegistry.new() |> PlaceholderRegistry.register(ph)
 
       seq =

@@ -1,6 +1,8 @@
 defmodule PropertyDamage.Executor.SteppingTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Sequence.Position
+
   alias PropertyDamage.Executor.Stepping
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.ItemCreated
@@ -54,12 +56,12 @@ defmodule PropertyDamage.Executor.SteppingTest do
       assert names == ["a", "b"]
     end
 
-    test "positions the command at {:prefix, index}" do
+    test "positions the command at Position.prefix(index)" do
       ctx = context()
       state = Stepping.init_state(MinimalModel)
 
       {:ok, state} = Stepping.step(%CreateItem{name: "a", quantity: 1}, 3, state, ctx)
-      assert state.current_position == {:prefix, 3}
+      assert state.current_position == Position.prefix(3)
     end
   end
 

@@ -36,6 +36,8 @@ defmodule Mix.Tasks.Pd.Audit do
 
   use Mix.Task
 
+  alias PropertyDamage.Sequence.Position
+
   @shortdoc "Audit that a model's generation is a pure function of the seed"
 
   @impl true
@@ -164,9 +166,7 @@ defmodule Mix.Tasks.Pd.Audit do
     print_color(:yellow, divergence.message <> "\n")
   end
 
-  defp format_position({:prefix, i}), do: "prefix position #{i}"
-  defp format_position({:branch, b, i}), do: "branch #{b} position #{i}"
-  defp format_position({:suffix, i}), do: "suffix position #{i}"
+  defp format_position(%Position{} = pos), do: Position.describe(pos)
   defp format_position(other), do: inspect(other)
 
   defp halt_on_error(:error), do: System.halt(1)
