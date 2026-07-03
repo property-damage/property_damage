@@ -2,6 +2,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
   use ExUnit.Case, async: true
 
   alias Mix.Tasks.Pd.Scaffold
+  alias PropertyDamage.Export.HTTPSpec
 
   @sample_openapi_spec %{
     "openapi" => "3.0.0",
@@ -312,6 +313,49 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       # response through the command's events/3 and return {:ok, events}.
       assert adapter_code =~ "{:ok, cmd.__struct__.events(cmd, status, response)}"
       refute adapter_code =~ "{:ok, response} -> {:ok, response}"
+    end
+
+    test "the generated adapter exposes a correct, compilable http_spec/2 for export" do
+      ns = "PdScaffoldRealTest.HttpSpec"
+      ops = Scaffold.extract_operations(@kv_spec, nil)
+      api_info = Scaffold.extract_api_info(@kv_spec, nil)
+
+      ordered =
+        Enum.map(ops, &Scaffold.generate_command(&1, ns)) ++
+          [Scaffold.generate_adapter(ops, ns, api_info, [])]
+
+      {_, diagnostics} =
+        Code.with_diagnostics(fn -> Enum.each(ordered, &Code.compile_string/1) end)
+
+      assert diagnostics == [],
+             "generated code emitted compiler diagnostics:\n" <>
+               Enum.map_join(diagnostics, "\n", &inspect/1)
+
+      adapter = Module.concat(ns, "Adapter")
+
+      # Export (StepPlan) detects the mapping via function_exported?/3, so the
+      # generated adapter must expose http_spec/2 with no hand-written glue.
+      assert function_exported?(adapter, :http_spec, 2)
+
+      put = Module.concat(ns, "Commands.PutValue")
+      spec = adapter.http_spec(struct(put, key: 3, value: 7), %{})
+
+      # OpenAPI path template ({key}) rendered to the HTTPSpec :param form; the
+      # path param split out of the JSON body; the body carries the rest.
+      assert %HTTPSpec{
+               method: :put,
+               path: "/kv/:key",
+               path_params: %{key: 3},
+               body: %{value: 7}
+             } = spec
+
+      # A read command with only a path param renders the same path and no body.
+      get = Module.concat(ns, "Commands.GetValue")
+      get_spec = adapter.http_spec(struct(get, key: 2), %{})
+      assert get_spec.method == :get
+      assert get_spec.path == "/kv/:key"
+      assert get_spec.path_params == %{key: 2}
+      refute HTTPSpec.has_body?(get_spec)
     end
   end
 
