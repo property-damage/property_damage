@@ -6,6 +6,13 @@ Commands are semantic operations that can be executed against the System Under T
 
 Commands follow a pure generator pattern - they are decoupled from state shape and reusable across different Models.
 
+> **Generators must be a pure function of the seed.** A generator that reads the
+> clock, `:rand`, `System.unique_integer/1`, or `UUID.uuid4/0` breaks `seed: N`
+> reproduction and run comparison. Model time, client-minted ids, and
+> server-assigned ids with the three seams in the
+> [deterministic generation guide](deterministic_generation.md), and enforce it
+> with `mix pd.audit`.
+
 ### Command Responsibilities
 
 Commands define:
