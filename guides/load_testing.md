@@ -337,9 +337,9 @@ alias PropertyDamage.LoadTest.{Runner, Report}
 
 # Configuration
 config = [
-  model: ToyBankTest.Model,
-  adapter: ToyBankTest.Adapters.HTTPAdapter,
-  adapter_config: %{base_url: "http://localhost:4555"},
+  model: MyApp.Model,
+  adapter: MyApp.HTTPAdapter,
+  adapter_config: %{base_url: "http://localhost:4000"},
   arrival_rate: 50,
   duration: {5, :minutes},
   ramp_up: {:linear, {30, :seconds}},
