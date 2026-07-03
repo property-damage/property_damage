@@ -1175,6 +1175,7 @@ defmodule PropertyDamage do
         # else the original generated run.
         plan_source: if(reproduced?, do: :shrunk, else: :generated),
         source_revision: RunTrace.source_revision(),
+        executed: Map.get(report_result, :executed, %{}),
         failed_at_index: report_result.failed_at_index,
         failure_reason: report_result.failure_reason,
         shrink_iterations: shrink_iterations,
@@ -1376,6 +1377,11 @@ defmodule PropertyDamage do
               shrink_iterations: report.shrink_iterations + shrink_result.iterations,
               shrink_time_ms: report.shrink_time_ms + (end_time - start_time),
               event_log: fresh_result.event_log,
+              executed: Map.get(fresh_result, :executed, %{}),
+              # A further-shrunk report only reaches here on a genuine
+              # reproduction, so its plan is a shrinker product (DR-033).
+              plan_source: :shrunk,
+              source_revision: RunTrace.source_revision(),
               projections: fresh_result.projections,
               projections_before: fresh_result.projections_before,
               model: model,

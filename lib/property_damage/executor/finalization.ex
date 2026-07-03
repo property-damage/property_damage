@@ -49,6 +49,7 @@ defmodule PropertyDamage.Executor.Finalization do
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
+      executed: state.executed,
       projections: state.projections,
       projections_before: state.projections_before,
       failed_at_index: index,
@@ -193,6 +194,7 @@ defmodule PropertyDamage.Executor.Finalization do
             %{
               success: success,
               event_log: Enum.reverse(state.event_log),
+              executed: state.executed,
               projections: state.projections,
               projections_before: Map.get(state, :projections_before),
               failed_at_index: nil,
@@ -213,6 +215,7 @@ defmodule PropertyDamage.Executor.Finalization do
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
+      executed: state.executed,
       projections: state.projections,
       projections_before: Map.get(state, :projections_before),
       # DR-030: a @poll_state liveness timeout reports at the command whose event
@@ -241,6 +244,7 @@ defmodule PropertyDamage.Executor.Finalization do
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
+      executed: state.executed,
       projections: state.projections,
       projections_before: Map.get(state, :projections_before),
       failed_at_index: nil,
@@ -268,6 +272,7 @@ defmodule PropertyDamage.Executor.Finalization do
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
+      executed: state.executed,
       projections: state.projections,
       projections_before: Map.get(state, :projections_before),
       failed_at_index: command_index,
