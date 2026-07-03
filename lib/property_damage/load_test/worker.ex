@@ -104,6 +104,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     metrics = Keyword.fetch!(opts, :metrics)
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
     assertion_mode = Keyword.get(opts, :assertion_mode, :disabled)
+    run_nonce = Keyword.get(opts, :run_nonce)
 
     # Setup adapter ONCE - this context will be reused for all sequences
     case adapter.setup(adapter_config) do
@@ -117,6 +118,7 @@ defmodule PropertyDamage.LoadTest.Worker do
           metrics: metrics,
           think_time_range: think_time_range,
           assertion_mode: assertion_mode,
+          run_nonce: run_nonce,
           sequences_executed: 0,
           commands_executed: 0,
           errors: 0,
