@@ -11,8 +11,8 @@ defmodule Mix.Tasks.Pd.Integration do
 
   ## Required Options
 
-      --model     The model module (e.g., ToyBankTest.Model)
-      --adapter   The adapter module (e.g., ToyBankTest.Adapters.HTTPAdapter)
+      --model     The model module (e.g., MyApp.Model)
+      --adapter   The adapter module (e.g., MyApp.HTTPAdapter)
       --url       Base URL of the service under test
 
   ## Optional Options
@@ -32,14 +32,14 @@ defmodule Mix.Tasks.Pd.Integration do
 
       # Basic integration test
       mix pd.integration \\
-        --model ToyBankTest.Model \\
-        --adapter ToyBankTest.Adapters.HTTPAdapter \\
+        --model MyApp.Model \\
+        --adapter MyApp.HTTPAdapter \\
         --url http://localhost:4555
 
       # With JUnit report for CI
       mix pd.integration \\
-        --model ToyBankTest.Model \\
-        --adapter ToyBankTest.Adapters.HTTPAdapter \\
+        --model MyApp.Model \\
+        --adapter MyApp.HTTPAdapter \\
         --url http://localhost:4555 \\
         --runs 500 \\
         --report junit \\
@@ -47,16 +47,16 @@ defmodule Mix.Tasks.Pd.Integration do
 
       # Bug hunting mode
       mix pd.integration \\
-        --model ToyBankTest.Model \\
-        --adapter ToyBankTest.Adapters.HTTPAdapter \\
+        --model MyApp.Model \\
+        --adapter MyApp.HTTPAdapter \\
         --url http://localhost:4555 \\
         --hunt 10 \\
         --save-failures discovered_bugs/
 
       # Quick smoke test
       mix pd.integration \\
-        --model ToyBankTest.Model \\
-        --adapter ToyBankTest.Adapters.HTTPAdapter \\
+        --model MyApp.Model \\
+        --adapter MyApp.HTTPAdapter \\
         --url http://localhost:4555 \\
         --runs 10 \\
         --stop-on-fail
@@ -297,8 +297,8 @@ defmodule Mix.Tasks.Pd.Integration do
     Usage: mix pd.integration --model MODEL --adapter ADAPTER --url URL [OPTIONS]
 
     Required:
-      --model       Model module (e.g., ToyBankTest.Model)
-      --adapter     Adapter module (e.g., ToyBankTest.Adapters.HTTPAdapter)
+      --model       Model module (e.g., MyApp.Model)
+      --adapter     Adapter module (e.g., MyApp.HTTPAdapter)
       --url         Base URL of service (e.g., http://localhost:4555)
 
     Options:
@@ -313,13 +313,13 @@ defmodule Mix.Tasks.Pd.Integration do
       --quiet           Suppress progress output
 
     Examples:
-      mix pd.integration --model ToyBankTest.Model \\
-                         --adapter ToyBankTest.Adapters.HTTPAdapter \\
+      mix pd.integration --model MyApp.Model \\
+                         --adapter MyApp.HTTPAdapter \\
                          --url http://localhost:4555 \\
                          --runs 100
 
-      mix pd.integration --model ToyBankTest.Model \\
-                         --adapter ToyBankTest.Adapters.HTTPAdapter \\
+      mix pd.integration --model MyApp.Model \\
+                         --adapter MyApp.HTTPAdapter \\
                          --url http://localhost:4555 \\
                          --hunt 10 --save-failures bugs/
     """)

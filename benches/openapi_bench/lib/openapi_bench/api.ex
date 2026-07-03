@@ -9,7 +9,15 @@ defmodule OpenapiBench.Api do
 
       PUT  /kv/:key   {"value": int}  -> 200 {"key": int, "value": int}
       GET  /kv/:key                   -> 200 {"key": int, "value": int} | 404
-      POST /__reset__ {"bug": bool}   -> 200 {"ok": true}   (test harness only)
+      POST /values    {"value": int}  -> 201 {"id": int, "value": int}
+                      (honors an `Idempotency-Key` header; see below)
+      POST /__reset__ {"bug": bool, "idempotency_bug": bool} -> 200 {"ok": true}
+                      (test harness only)
+
+  `POST /values` is a non-idempotent create: each call mints a fresh id. It
+  honors an `Idempotency-Key` request header so retries are safe, which is what
+  the framework's stutter testing exercises. Under the `idempotency_bug` flag it
+  ignores the header and double-creates.
 
   `/__reset__` is intentionally NOT in the OpenAPI spec: it is harness
   infrastructure (per-sequence isolation + bug seeding), not part of the public
@@ -47,9 +55,22 @@ defmodule OpenapiBench.Api do
     end
   end
 
+  post "/values" do
+    case fetch_value(conn.body_params) do
+      {:ok, value} ->
+        key = idempotency_key(conn)
+        %{id: id, value: stored} = Store.create(value, key)
+        send_json(conn, 201, %{id: id, value: stored})
+
+      :bad_value ->
+        send_json(conn, 422, %{error: "invalid_value"})
+    end
+  end
+
   post "/__reset__" do
     bug = conn.body_params |> Map.get("bug", false) |> truthy?()
-    Store.reset(bug)
+    idempotency_bug = conn.body_params |> Map.get("idempotency_bug", false) |> truthy?()
+    Store.reset(bug, idempotency_bug)
     send_json(conn, 200, %{ok: true})
   end
 
@@ -66,6 +87,13 @@ defmodule OpenapiBench.Api do
 
   defp fetch_value(%{"value" => value}) when is_integer(value), do: {:ok, value}
   defp fetch_value(_), do: :bad_value
+
+  defp idempotency_key(conn) do
+    case get_req_header(conn, "idempotency-key") do
+      [key | _] -> key
+      [] -> nil
+    end
+  end
 
   defp truthy?(true), do: true
   defp truthy?("true"), do: true

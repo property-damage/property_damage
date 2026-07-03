@@ -1,51 +1,130 @@
 # Integration Testing with PropertyDamage
 
-This guide covers running PropertyDamage tests against live services using
-the integration testing tools and scripts.
+This guide covers running PropertyDamage against a **live service** over HTTP,
+using `PropertyDamage.Integration` and the `mix pd.integration` task.
 
 ## Overview
 
 Integration testing runs your PropertyDamage model and adapter against a real
-running service instead of mocks. This finds issues that only appear when
-interacting with real infrastructure:
+running service instead of an in-memory fake. This finds issues that only appear
+when interacting with real infrastructure:
 
 - Network timing issues
 - Database constraints and race conditions
 - Serialization/deserialization bugs
 - Service startup and shutdown behavior
 
+The core loop is simple: `PropertyDamage.Integration.run/1` runs your model
+against the SUT `max_runs` times, optionally waits for a health endpoint first,
+saves any failures, and produces a report. `mix pd.integration` is a thin CLI
+wrapper over the same function.
+
 ## Prerequisites
 
-- Docker and Docker Compose (for containerized testing)
-- Elixir 1.14+ with Mix
-- Your service running or ability to start it
+- Elixir 1.17+ with Mix (general Elixir knowledge only)
+- A running HTTP service to test against
+
+This guide is runnable end to end against an in-repo bench: **`openapi_bench`**.
+Its System Under Test is a tiny REST key/value register served **in-process**
+(Bandit/Plug) inside the bench VM, so there is **no Docker and nothing to
+install** beyond the bench's own deps. That makes it the lowest-friction way to
+exercise the integration workflow; everything shown here applies unchanged to a
+service running on another host (set the base URL accordingly).
 
 ## Quick Start
 
-### Using the Mix Task
+Everything below runs from the bench project:
 
 ```bash
-# Run integration tests against a running service
-mix pd.integration \
-  --model MyApp.Model \
-  --adapter MyApp.HTTPAdapter \
-  --url http://localhost:4000 \
-  --runs 100
+cd benches/openapi_bench
+mix deps.get
 ```
 
-### Using Test Scripts
-
-PropertyDamage includes ready-to-use test scripts for example services:
+Start an IEx session. From there, boot the in-process SUT and run the
+integration workflow against it:
 
 ```bash
-# ToyBank integration tests
-./scripts/test_toybank.sh --runs 100
-
-# TravelBooking integration tests
-./scripts/test_travelbooking.sh --runs 100
+iex -S mix
 ```
+
+```elixir
+# Boot the in-process REST server (idempotent). It listens on
+# http://localhost:4010 by default; OpenapiBench.Server.base_url/0 returns it.
+OpenapiBench.Server.ensure_started()
+
+{:ok, result} =
+  PropertyDamage.Integration.run(
+    model: OpenapiBench.Generated.Model,
+    adapter: OpenapiBench.Generated.Adapter,
+    adapter_config: %{base_url: OpenapiBench.Server.base_url()},
+    max_runs: 20,
+    max_commands: 25
+  )
+```
+
+You get a live progress readout and a summary:
+
+```
+═════════════════════════════════════════════════════════════════
+                 PROPERTYDAMAGE INTEGRATION TEST
+═════════════════════════════════════════════════════════════════
+
+Model:      OpenapiBench.Generated.Model
+Adapter:    OpenapiBench.Generated.Adapter
+Target:     http://localhost:4010
+Runs:       20
+
+Run   1/20:  25 commands ✓
+Run   2/20:  25 commands ✓
+...
+Run  20/20:  25 commands ✓
+
+─────────────────────────────────────────────────────────────────
+✓ All 20 runs passed! (230ms)
+```
+
+`result` is a map: `%{success: true, total_runs: 20, passed: 20, failed: 0,
+failures: [], duration_ms: ..., model: ..., adapter: ...}`.
+
+### Seeing it catch a real bug
+
+The bench's SUT has a seedable defect: pass `bug: true` in `adapter_config` and
+`PUT` answers `200` but silently drops the write, so a later `GET` on the same
+key comes back `404`. The generated client's read-consistency invariant catches
+it, and `run/1` returns `{:error, result}`:
+
+```elixir
+{:error, result} =
+  PropertyDamage.Integration.run(
+    model: OpenapiBench.Generated.Model,
+    adapter: OpenapiBench.Generated.Adapter,
+    adapter_config: %{base_url: OpenapiBench.Server.base_url(), bug: true},
+    max_runs: 5,
+    max_commands: 25
+  )
+```
+
+```
+Run   1/5: failed at command 1 ✗ (seed 352687743)
+Run   2/5: failed at command 1 ✗ (seed 518096484)
+...
+─────────────────────────────────────────────────────────────────
+✗ 5/5 runs failed (471ms)
+
+First failure:
+  Seed: 352687743
+  Invariant: :read_consistent
+```
+
+(Seeds are random per run, so yours will differ.) Each entry in
+`result.failures` is a `PropertyDamage.FailureReport` you can inspect, replay, or
+save; see [Debugging Failures](debugging_failures.md).
 
 ## The `mix pd.integration` Task
+
+`mix pd.integration` runs the same workflow from the shell. Unlike the
+programmatic quick start above, the task runs in its **own** VM, so the service
+must already be running **separately** and be reachable over the network.
 
 ### Required Options
 
@@ -69,432 +148,186 @@ PropertyDamage includes ready-to-use test scripts for example services:
 | `--hunt N` | Bug hunt mode: run until N unique bugs found | - |
 | `--quiet` | Suppress progress output | false |
 
+### About the health check
+
+`mix pd.integration` **always** performs a health check before the first run and
+has no flag to skip it: it polls `--health` (defaulting to `{url}/api/health`)
+until it answers with a `2xx` status. Point `--health` at any endpoint your
+service answers with `2xx`. If your service has no health route, use the
+programmatic `PropertyDamage.Integration.run/1` shown above instead: there the
+`:health_check` option is optional.
+
+### Running the task against the bench
+
+The bench SUT is a pure REST resource with no `/api/health` route, so this
+example points `--health` at a key we seed first. Because the task runs in a
+separate VM (with no in-process store of its own), we also set `PD_OPENAPI_URL`
+so the bench routes its per-sequence reset to the running server over HTTP.
+
+In one terminal, start the server and leave it running:
+
+```bash
+cd benches/openapi_bench
+iex -S mix
+```
+
+```elixir
+OpenapiBench.Server.ensure_started()
+```
+
+In a second terminal, seed a key for the health check, then run the task:
+
+```bash
+cd benches/openapi_bench
+
+# Give the health check a URL that returns 200.
+curl -s -X PUT http://localhost:4010/kv/0 \
+  -H 'content-type: application/json' -d '{"value": 1}'
+
+PD_OPENAPI_URL=http://localhost:4010 mix pd.integration \
+  --model OpenapiBench.Generated.Model \
+  --adapter OpenapiBench.Generated.Adapter \
+  --url http://localhost:4010 \
+  --health http://localhost:4010/kv/0 \
+  --runs 10
+```
+
+```
+Health check (http://localhost:4010/kv/0)... ✓ OK
+Run   1/10:  50 commands ✓
+...
+Run  10/10:  50 commands ✓
+
+─────────────────────────────────────────────────────────────────
+✓ All 10 runs passed! (205ms)
+```
+
+The task exits `0` when all runs pass and `1` on any failure (or `2` on a usage
+error), so it drops straight into a CI gate.
+
 ### Examples
 
 ```bash
-# Basic test run
+# Generate a JUnit report for CI
 mix pd.integration \
-  --model ToyBankTest.Model \
-  --adapter ToyBankTest.Adapters.HTTPAdapter \
-  --url http://localhost:4555
-
-# Generate JUnit report for CI
-mix pd.integration \
-  --model ToyBankTest.Model \
-  --adapter ToyBankTest.Adapters.HTTPAdapter \
-  --url http://localhost:4555 \
+  --model MyApp.Model \
+  --adapter MyApp.HTTPAdapter \
+  --url http://localhost:4000 \
   --runs 500 \
   --report junit \
   --report-path reports/integration.xml
 
-# Bug hunting mode - find 10 unique bugs
+# Bug hunting mode - run until 10 unique bugs are found
 mix pd.integration \
-  --model ToyBankTest.Model \
-  --adapter ToyBankTest.Adapters.HTTPAdapter \
-  --url http://localhost:4555 \
+  --model MyApp.Model \
+  --adapter MyApp.HTTPAdapter \
+  --url http://localhost:4000 \
   --hunt 10 \
   --save-failures bugs/
 
 # Quick smoke test - stop on first failure
 mix pd.integration \
-  --model ToyBankTest.Model \
-  --adapter ToyBankTest.Adapters.HTTPAdapter \
-  --url http://localhost:4555 \
+  --model MyApp.Model \
+  --adapter MyApp.HTTPAdapter \
+  --url http://localhost:4000 \
   --runs 10 \
   --stop-on-fail
 ```
 
-## ToyBank Integration Testing
-
-ToyBank is a banking service with accounts, authorizations, and captures.
-
-### Starting ToyBank
-
-```bash
-cd /path/to/toy_bank
-
-# Using Docker Compose (recommended for testing)
-docker compose -f docker-compose.test.yml up -d
-
-# Or start manually
-docker compose -f docker-compose.dev.yml up -d  # Database only
-mix ecto.setup
-mix phx.server
-```
-
-### Running Tests
-
-```bash
-# Use the test script (handles startup/teardown)
-./scripts/test_toybank.sh --runs 100
-
-# Or run manually with mix
-mix pd.integration \
-  --model ToyBankTest.Model \
-  --adapter ToyBankTest.Adapters.HTTPAdapter \
-  --url http://localhost:4555
-```
-
-### Test Script Options
-
-```bash
-./scripts/test_toybank.sh --help
-
-Options:
-  --runs N          Number of test runs (default: 100)
-  --hunt N          Bug hunt mode: find N unique bugs
-  --chaos           Enable chaos testing with ChaosModel
-  --report FORMAT   Generate report: markdown, junit, json
-  --keep-running    Don't stop ToyBank after tests
-  --skip-start      Assume ToyBank is already running
-  --verbose         Show detailed output
-```
-
-### Chaos Testing
-
-The ToyBank docker-compose.test.yml includes Toxiproxy for fault injection:
-
-```bash
-# Start with chaos testing support
-cd /path/to/toy_bank
-docker compose -f docker-compose.test.yml --profile chaos up -d
-
-# Run chaos tests through Toxiproxy (port 4556)
-./scripts/test_toybank.sh --chaos --runs 50
-```
-
-## TravelBooking Integration Testing
-
-TravelBooking is an in-memory travel booking service with flights, hotels, and bookings.
-
-### Starting TravelBooking
-
-```bash
-cd /path/to/travel_booking
-
-# Using Docker Compose
-docker compose -f docker-compose.test.yml up -d
-
-# Or run locally (simpler - no database required)
-mix deps.get
-mix run --no-halt
-```
-
-### Running Tests
-
-```bash
-# Use the test script
-./scripts/test_travelbooking.sh --runs 100
-
-# Or run manually
-mix pd.integration \
-  --model TravelBookingTest.Model \
-  --adapter TravelBookingTest.Adapters.HTTPAdapter \
-  --url http://localhost:4445
-```
-
-### Test Script Options
-
-```bash
-./scripts/test_travelbooking.sh --help
-
-Options:
-  --runs N          Number of test runs (default: 100)
-  --commands N      Max commands per run (default: 50)
-  --hunt N          Bug hunt mode: find N unique bugs
-  --chaos           Enable chaos testing with ChaosModel
-  --lifecycle       Use BookingLifecycleModel (state transitions)
-  --report FORMAT   Generate report: markdown, junit, json
-  --keep-running    Don't stop TravelBooking after tests
-  --skip-start      Assume TravelBooking is already running
-  --local           Run TravelBooking locally (no Docker)
-  --verbose         Show detailed output
-```
-
-### Different Models
-
-TravelBooking has multiple models for different testing scenarios:
-
-```bash
-# Full model - all commands
-./scripts/test_travelbooking.sh --runs 100
-
-# Lifecycle model - focuses on booking state transitions
-./scripts/test_travelbooking.sh --lifecycle --runs 100
-
-# Chaos model - includes fault injection
-./scripts/test_travelbooking.sh --chaos --runs 50
-```
-
-## Docker Compose Test Configurations
-
-Both example services include `docker-compose.test.yml` files optimized for testing:
-
-### ToyBank docker-compose.test.yml
-
-```yaml
-services:
-  db:
-    # PostgreSQL with no persistent volume (ephemeral)
-    # Uses port 5433 to avoid conflicts with dev
-
-  app:
-    # ToyBank with health check
-    # Includes database migration on startup
-
-  toxiproxy:
-    # Optional chaos testing proxy
-    # Activated with: --profile chaos
-
-  db-reset:
-    # Helper to reset database between runs
-    # Usage: docker compose run --rm db-reset
-```
-
-### TravelBooking docker-compose.test.yml
-
-```yaml
-services:
-  app:
-    # TravelBooking with health check
-    # In-memory storage (no database needed)
-
-  toxiproxy:
-    # Optional chaos testing proxy
-
-  data-reset:
-    # Reset in-memory data
-    # Usage: docker compose run --rm data-reset
-
-  enable-fixes:
-    # Enable all bug fixes
-
-  disable-fixes:
-    # Disable all bug fixes (for bug hunting)
-```
-
-## CI/CD Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Integration Tests
-
-on: [push, pull_request]
-
-jobs:
-  integration:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Start services
-        run: docker compose -f docker-compose.test.yml up -d
-
-      - name: Wait for services
-        run: |
-          timeout 60 bash -c 'until curl -s http://localhost:4555/api/health; do sleep 1; done'
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: '1.16'
-          otp-version: '26'
-
-      - name: Run integration tests
-        run: |
-          mix deps.get
-          mix pd.integration \
-            --model ToyBankTest.Model \
-            --adapter ToyBankTest.Adapters.HTTPAdapter \
-            --url http://localhost:4555 \
-            --runs 200 \
-            --report junit \
-            --report-path reports/integration.xml
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results
-          path: reports/
-
-      - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always()
-        with:
-          files: reports/*.xml
-
-      - name: Stop services
-        if: always()
-        run: docker compose -f docker-compose.test.yml down -v
-```
-
-### Makefile Example
-
-```makefile
-.PHONY: test-integration test-chaos test-hunt
-
-# Start test services
-test-services-up:
-	docker compose -f docker-compose.test.yml up -d
-	@echo "Waiting for services..."
-	@timeout 60 bash -c 'until curl -s http://localhost:4555/api/health; do sleep 1; done'
-
-# Stop test services
-test-services-down:
-	docker compose -f docker-compose.test.yml down -v
-
-# Run integration tests
-test-integration: test-services-up
-	mix pd.integration \
-		--model ToyBankTest.Model \
-		--adapter ToyBankTest.Adapters.HTTPAdapter \
-		--url http://localhost:4555 \
-		--runs 100 \
-		--report markdown \
-		--report-path reports/integration.md
-	$(MAKE) test-services-down
-
-# Run chaos tests
-test-chaos:
-	docker compose -f docker-compose.test.yml --profile chaos up -d
-	@timeout 60 bash -c 'until curl -s http://localhost:4555/api/health; do sleep 1; done'
-	mix pd.integration \
-		--model ToyBankTest.ChaosModel \
-		--adapter ToyBankTest.Adapters.HTTPAdapter \
-		--url http://localhost:4556 \
-		--runs 50
-	docker compose -f docker-compose.test.yml down -v
-
-# Bug hunting
-test-hunt: test-services-up
-	mix pd.integration \
-		--model ToyBankTest.Model \
-		--adapter ToyBankTest.Adapters.HTTPAdapter \
-		--url http://localhost:4555 \
-		--hunt 10 \
-		--save-failures bugs/
-	$(MAKE) test-services-down
-```
-
 ## Programmatic API
 
-You can also use the integration testing API directly in Elixir:
+The quick start already used `PropertyDamage.Integration.run/1`. Its full option
+set:
 
 ```elixir
-# Run integration tests
-{:ok, result} = PropertyDamage.Integration.run(
-  model: ToyBankTest.Model,
-  adapter: ToyBankTest.Adapters.HTTPAdapter,
-  adapter_config: %{base_url: "http://localhost:4555"},
-  max_runs: 100,
-  max_commands: 50,
-  health_check: %{
-    url: "http://localhost:4555/api/health",
-    timeout_ms: 30_000,
-    retries: 30
-  },
-  report: %{
-    format: :markdown,
-    path: "reports/integration.md"
-  },
-  save_failures: "bugs/"
-)
+{:ok, result} =
+  PropertyDamage.Integration.run(
+    model: OpenapiBench.Generated.Model,
+    adapter: OpenapiBench.Generated.Adapter,
+    adapter_config: %{base_url: "http://localhost:4010"},
+    max_runs: 100,
+    max_commands: 50,
+    # Optional: wait for the service to become healthy before the first run.
+    health_check: %{
+      url: "http://localhost:4010/kv/0",
+      timeout_ms: 30_000,
+      retries: 30
+    },
+    # Optional: write a report file.
+    report: %{format: :markdown, path: "reports/integration.md"},
+    # Optional: save each failing sequence as JSON here.
+    save_failures: "bugs/"
+  )
 
-# Check results
 if result.success do
-  IO.puts("All tests passed!")
-  IO.puts("Runs: #{result.total_runs}")
+  IO.puts("All #{result.total_runs} runs passed!")
 else
-  IO.puts("Tests failed!")
-  IO.puts("Failures: #{result.failed}")
+  IO.puts("#{result.failed} runs failed")
 end
 ```
 
 ### Bug Hunting
 
-```elixir
-# Run until we find 5 unique bugs
-{:ok, bugs} = PropertyDamage.Integration.hunt_bugs(
-  model: ToyBankTest.Model,
-  adapter: ToyBankTest.Adapters.HTTPAdapter,
-  adapter_config: %{base_url: "http://localhost:4555"},
-  stop_after: 5,
-  max_runs: :unlimited,
-  save_to: "discovered_bugs/"
-)
+`hunt_bugs/1` keeps running until it collects a target number of *unique*
+failures (deduplicated by fingerprint), rather than a fixed number of runs:
 
-# Analyze findings. Each bug is %{fingerprint, failure, occurrences, first_seen_run}
+```elixir
+{:ok, bugs} =
+  PropertyDamage.Integration.hunt_bugs(
+    model: OpenapiBench.Generated.Model,
+    adapter: OpenapiBench.Generated.Adapter,
+    adapter_config: %{base_url: "http://localhost:4010", bug: true},
+    stop_after: 3,
+    max_runs: :unlimited,
+    save_to: "discovered_bugs/"
+  )
+
+# Each bug is %{fingerprint, failure, occurrences, first_seen_run}.
 for bug <- bugs do
-  IO.puts("Fingerprint: #{bug.fingerprint}")
-  IO.puts("Seed: #{bug.failure.seed}")
-  IO.puts("Occurrences: #{bug.occurrences} (first seen on run #{bug.first_seen_run})")
+  IO.puts("#{inspect(bug.fingerprint.check_name)}: " <>
+          "seed #{bug.failure.seed}, seen #{bug.occurrences}x " <>
+          "(first on run #{bug.first_seen_run})")
 end
 ```
 
 ## Report Formats
 
-### Terminal (Default)
+`--report` (CLI) or the `:report` option (programmatic) supports four formats.
 
-Real-time progress with colored output:
+### Terminal (default)
 
-```
-PropertyDamage Integration Test
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Progress: ████████████████████████████░░░░░░░░░░░░░░░░░░░░  56%
-Runs: 56/100 | Passed: 54 | Failed: 2 | Duration: 23.4s
-
-Recent failures:
-  • Seed 12345678: Balance went negative after debit
-  • Seed 87654321: Authorization not found after creation
-```
+Real-time progress plus a summary block, as shown in the quick start.
 
 ### Markdown
 
-Detailed report for documentation:
+A summary table plus a failures section, written to `--report-path`:
 
 ```markdown
-# Integration Test Report
-
-**Date**: 2024-12-27 15:30:00 UTC
-**Model**: ToyBankTest.Model
-**Runs**: 100
+# PropertyDamage Integration Test Report
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Passed | 98 |
-| Failed | 2 |
-| Duration | 45.2s |
-
-## Failures
-
-### Failure 1: Balance went negative
-
-**Seed**: 12345678
-**Commands**: 5
-
-...
+| Model | `OpenapiBench.Generated.Model` |
+| Adapter | `OpenapiBench.Generated.Adapter` |
+| Duration | 205ms |
+| Total Runs | 10 |
+| Passed | 10 |
+| Failed | 0 |
+| Pass Rate | 100.0% |
 ```
 
 ### JUnit XML
 
-For CI systems:
+For CI systems that ingest test results:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites>
-  <testsuite name="PropertyDamage" tests="100" failures="2" time="45.2">
-    <testcase name="Seed_12345678" time="0.45">
-      <failure message="Balance went negative">...</failure>
-    </testcase>
-    ...
-  </testsuite>
-</testsuites>
+<testsuite name="PropertyDamage Integration" tests="10" failures="0" errors="0" time="0.205">
+  <testcase name="run_1" classname="OpenapiBench.Generated.Model" time="0"/>
+  ...
+</testsuite>
 ```
 
 ### JSON
@@ -503,123 +336,142 @@ For programmatic analysis:
 
 ```json
 {
-  "success": false,
-  "total_runs": 100,
-  "passed": 98,
-  "failed": 2,
-  "model": "Elixir.MyApp.Model",
-  "adapter": "Elixir.MyApp.Adapter",
-  "failures": [
-    {
-      "seed": 12345678,
-      "failure_reason": "Balance went negative",
-      "shrunk_sequence": "..."
-    }
-  ]
+  "success": true,
+  "total_runs": 10,
+  "passed": 10,
+  "failed": 0,
+  "model": "Elixir.OpenapiBench.Generated.Model",
+  "adapter": "Elixir.OpenapiBench.Generated.Adapter",
+  "failures": []
 }
 ```
 
 ## Best Practices
 
-### 1. Use Ephemeral Data
+### 1. Reset state between runs
 
-Configure your test database/storage to reset between runs:
+Each run should start from a clean SUT so failures reproduce independently. The
+bench does this in its model's `setup_each/1`, which resets the register before
+every sequence. For your own service, either expose a reset endpoint or pass a
+`:reset_fn` to `PropertyDamage.Integration.run/1`.
 
-```bash
-# Reset before each run
-docker compose run --rm db-reset
-mix pd.integration ...
-```
-
-### 2. Start Small, Scale Up
+### 2. Start small, scale up
 
 ```bash
 # Quick smoke test first
-mix pd.integration --runs 10 --stop-on-fail
+mix pd.integration --model MyApp.Model --adapter MyApp.HTTPAdapter \
+  --url http://localhost:4000 --runs 10 --stop-on-fail
 
-# Then comprehensive testing
-mix pd.integration --runs 500
+# Then a comprehensive run
+mix pd.integration --model MyApp.Model --adapter MyApp.HTTPAdapter \
+  --url http://localhost:4000 --runs 500
 ```
 
-### 3. Save Failures for Regression
+### 3. Save failures for regression
 
 ```bash
-# Save all failures (written as bugs/failure_<timestamp>_run<N>.json)
-mix pd.integration --save-failures bugs/
+# Failures are written as bugs/failure_<timestamp>_run<N>.json
+mix pd.integration --model MyApp.Model --adapter MyApp.HTTPAdapter \
+  --url http://localhost:4000 --save-failures bugs/
 ```
 
-Replay a saved `.pd` failure with the mix task:
+To keep a shrunk, replayable `.pd` failure instead, save it from a
+`PropertyDamage.run` failure report (see [Static Regression
+Tests](static_regression_tests.md)), then replay it:
 
 ```bash
-# Re-run the failing sequence against the SUT and print a verdict.
-# Exit code answers "does the bug still reproduce?": non-zero = yes, zero = fixed.
-mix pd.replay bugs/2025-12-26T14-30-00-check_failed-NonNegativeBalance-seed512902757.pd
+# Re-run the failing sequence against the SUT and print a verdict. The exit code
+# answers "does the bug still reproduce?": non-zero = yes, zero = fixed.
+mix pd.replay bugs/read_consistent-seed352687743.pd
 
 # Show per-step events and projection state
-mix pd.replay bugs/currency-bug.pd --verbose
+mix pd.replay bugs/read_consistent-seed352687743.pd --verbose
 ```
 
-The failure file already records its model and adapter, so no `--model` /
-`--adapter` flags are needed; those modules just have to be compiled in the
-current project. Because the exit code is a regression signal (non-zero while the
-bug reproduces), `mix pd.replay` drops straight into a CI gate or a `git bisect`.
+The `.pd` file records its own model and adapter, so no `--model` / `--adapter`
+flags are needed; those modules just have to be compiled in the current project.
+Because the exit code is a regression signal, `mix pd.replay` drops straight into
+a CI gate or a `git bisect`.
 
-For custom adapter config or stutter (not exposed on the CLI), replay
-programmatically instead:
+For custom adapter config (e.g. a different base URL) or stutter, replay
+programmatically:
 
 ```elixir
-{:ok, failure} = PropertyDamage.load_failure("bugs/currency-bug.pd")
-PropertyDamage.replay(failure, adapter_config: %{base_url: "http://localhost:4555"})
+{:ok, failure} = PropertyDamage.load_failure("bugs/read_consistent-seed352687743.pd")
+PropertyDamage.replay(failure, adapter_config: %{base_url: "http://localhost:4010"})
 ```
 
-### 4. Use Appropriate Models
+## CI/CD Integration
 
-- **Standard Model**: Normal operations
-- **Lifecycle Model**: Focus on state transitions
-- **Chaos Model**: Include fault injection
-- **Mock Model**: In-memory testing (fast)
+Every in-repo bench is CI-gated: its `mix test` boots the SUT (in-process for
+`openapi_bench`, via Docker for the others) and runs the property suite, so the
+integration path is exercised on each push. Use the same shape for your own
+service. A minimal GitHub Actions job for a service with a health endpoint:
 
-### 5. Monitor in CI
+```yaml
+name: Integration Tests
+on: [push, pull_request]
 
-- Generate JUnit reports for test result tracking
-- Archive failure files as artifacts
-- Set appropriate timeouts
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start service
+        run: docker compose up -d
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.17'
+          otp-version: '27'
+
+      - name: Run integration tests
+        run: |
+          mix deps.get
+          mix pd.integration \
+            --model MyApp.Model \
+            --adapter MyApp.HTTPAdapter \
+            --url http://localhost:4000 \
+            --runs 200 \
+            --report junit \
+            --report-path reports/integration.xml
+
+      - name: Publish results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: reports/*.xml
+```
 
 ## Troubleshooting
 
-### Service Not Ready
+### Service not ready
 
 ```
-ERROR: Service did not become ready within 60 seconds
+Health check (...)... ✗ FAILED
+** (RuntimeError) Health check failed: :max_retries_exceeded
 ```
 
-**Solutions**:
-- Increase health check timeout
-- Check service logs: `docker compose logs app`
-- Verify health endpoint is correct
+- Confirm the service is running and reachable: `curl http://localhost:4010/kv/0`
+- Point `--health` at an endpoint that returns a `2xx` status
+- Increase the health-check timeout / retries (programmatic `:health_check`)
 
-### Connection Refused
+### Connection refused
 
 ```
 ** (Mint.TransportError) connection refused
 ```
 
-**Solutions**:
-- Verify service is running: `curl http://localhost:4555/api/health`
-- Check port mappings in docker-compose
-- Ensure no firewall blocking
+- Verify the service is listening on the expected host and port
+- For the bench, make sure `OpenapiBench.Server.ensure_started()` ran in a
+  session that is still alive
 
-### Flaky Tests
+### Flaky results (passes sometimes, fails others)
 
-```
-Test passes sometimes, fails other times with same seed
-```
-
-**Solutions**:
-- Look for time-dependent behavior
-- Check for external dependencies
-- Use `--verbose` to see timing details
-- Consider chaos testing to find race conditions
+- Look for time-dependent behavior or shared state not reset between runs
+- Use a `:reset_fn` (or a per-sequence reset like the bench's `setup_each/1`)
+- See [Chaos Engineering](chaos_engineering.md) to deliberately surface races
 
 ## Next Steps
 

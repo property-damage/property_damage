@@ -29,9 +29,14 @@ defmodule CachexBench.Projection do
 
   def apply(state, _event), do: state
 
+  # DR-026 invariant catalog: the property the assertion below upholds. Enables
+  # anti-vacuity (assertion) coverage reporting for this bench.
+  @invariant id: :read_consistent,
+             description: "Every read returns the value the model expects for that key"
+
   # After every read, the value the SUT returned must equal what the
   # model expects for that key (nil when the key should be absent).
-  @trigger every: CachexBench.Commands.GetKey
+  @trigger every: CachexBench.Commands.GetKey, validates: :read_consistent
   def assert_read_consistent(state, _command) do
     {key, actual} = state.last_read
     expected = Map.get(state.expected, key)

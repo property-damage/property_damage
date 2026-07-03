@@ -170,18 +170,18 @@ defmodule PropertyDamage.LoadTest do
 
       # Basic load test
       {:ok, report} = PropertyDamage.LoadTest.run(
-        model: ToyBankTest.Model,
-        adapter: ToyBankTest.HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4444"},
+        model: MyApp.Model,
+        adapter: MyApp.HTTPAdapter,
+        adapter_config: %{base_url: "http://localhost:4000"},
         concurrent_users: 50,
         duration: {2, :minutes}
       )
 
       # With ramping and callbacks
       {:ok, report} = PropertyDamage.LoadTest.run(
-        model: TravelBookingTest.Model,
-        adapter: TravelBookingTest.HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4445"},
+        model: MyApp.Model,
+        adapter: MyApp.HTTPAdapter,
+        adapter_config: %{base_url: "http://localhost:4000"},
         concurrent_users: 100,
         duration: {5, :minutes},
         ramp_up: {:linear, {60, :seconds}},

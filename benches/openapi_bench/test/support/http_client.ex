@@ -4,8 +4,8 @@ defmodule OpenapiBench.HttpClient do
   uses its own HTTP path). Returns `{status, decoded_body}`.
   """
 
-  def request(method, url, body \\ nil) do
-    headers = [{~c"content-type", ~c"application/json"}]
+  def request(method, url, body \\ nil, extra_headers \\ []) do
+    headers = [{~c"content-type", ~c"application/json"} | extra_headers]
 
     request =
       case method do

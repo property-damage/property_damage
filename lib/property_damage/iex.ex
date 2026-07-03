@@ -34,10 +34,10 @@ defmodule PropertyDamage.IEx do
 
   ## Examples
 
-      iex> PropertyDamage.IEx.explain(ToyBankTest.Model)
+      iex> PropertyDamage.IEx.explain(MyApp.Model)
 
       ═══════════════════════════════════════════════════════════════
-                            ToyBankTest.Model
+                            MyApp.Model
       ═══════════════════════════════════════════════════════════════
 
       COMMANDS (6 total)
