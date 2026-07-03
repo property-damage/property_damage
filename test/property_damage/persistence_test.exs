@@ -1,7 +1,7 @@
 defmodule PropertyDamage.PersistenceTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{FailureReport, Persistence, Sequence}
+  alias PropertyDamage.{FailureReport, Persistence, RunTrace, Sequence}
 
   # Test command/event structs for version capture
   defmodule TestCommand do
@@ -62,7 +62,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Read raw binary to verify format
       {:ok, <<"PD", version::8, _checksum::32, _rest::binary>>} = File.read(path)
-      assert version == 3
+      assert version == 4
     end
   end
 
@@ -85,7 +85,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Read the file and manually modify the metadata to simulate version mismatch
       {:ok, binary} = File.read(path)
-      <<"PD", 3::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 4::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       # Add a fake dependency that will be missing (guaranteed to trigger warning)
@@ -94,7 +94,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 3::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 4::8, new_checksum::32, new_term_binary::binary>>)
 
       # Now load should return warnings about missing dependency
       {:ok, _report, warnings} = Persistence.load(path)
@@ -123,7 +123,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Modify file to add fake missing dependency (guaranteed to trigger warning)
       {:ok, binary} = File.read(path)
-      <<"PD", 3::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 4::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       modified_metadata = %{payload.metadata | dependency_versions: %{fake_missing_app: "1.0.0"}}
@@ -131,7 +131,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 3::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 4::8, new_checksum::32, new_term_binary::binary>>)
 
       assert_raise ArgumentError, ~r/Version compatibility warnings/, fn ->
         Persistence.load!(path)
@@ -348,7 +348,7 @@ defmodule PropertyDamage.PersistenceTest do
 
       # Modify to cause version mismatch
       {:ok, binary} = File.read(path)
-      <<"PD", 3::8, _checksum::32, term_binary::binary>> = binary
+      <<"PD", 4::8, _checksum::32, term_binary::binary>> = binary
       payload = :erlang.binary_to_term(term_binary, [:safe])
 
       modified_metadata =
@@ -358,7 +358,7 @@ defmodule PropertyDamage.PersistenceTest do
       new_term_binary = :erlang.term_to_binary(modified_payload, [:compressed])
       new_checksum = :erlang.crc32(new_term_binary)
 
-      File.write!(path, <<"PD", 3::8, new_checksum::32, new_term_binary::binary>>)
+      File.write!(path, <<"PD", 4::8, new_checksum::32, new_term_binary::binary>>)
 
       # Still valid even with warnings
       assert Persistence.valid?(path)
@@ -374,6 +374,103 @@ defmodule PropertyDamage.PersistenceTest do
       File.write!(path, "not a valid pd file")
 
       refute Persistence.valid?(path)
+    end
+  end
+
+  describe "v4 trace composition (DR-033)" do
+    @tag :tmp_dir
+    test "a v4 report round-trips with a working steps/1 and accessors", %{tmp_dir: dir} do
+      command = %TestCommand{id: "1", amount: 100}
+
+      event = %PropertyDamage.EventLog.Entry{
+        timestamp: 0,
+        command_index: 0,
+        branch_id: nil,
+        event: %TestEvent{id: "1", amount: 100, status: :failed},
+        source: :command
+      }
+
+      report = create_test_report(commands: [command], events: [event])
+
+      {:ok, path} = Persistence.save(report, dir)
+      assert {:ok, loaded} = Persistence.load(path)
+
+      # The embedded trace survives: accessors and the step interface work.
+      assert FailureReport.shrunk_sequence(loaded) == Sequence.linear([command])
+      assert FailureReport.event_log(loaded) == [event]
+      assert [step] = FailureReport.steps(loaded)
+      assert step.command == command
+      assert Enum.map(step.entries, & &1.event) == [event.event]
+      assert step.failed?
+    end
+
+    @tag :tmp_dir
+    test "a standalone RunTrace round-trips via save_trace/load_trace", %{tmp_dir: dir} do
+      command = %TestCommand{id: "1", amount: 5}
+
+      trace =
+        RunTrace.new(
+          seed: 42,
+          run_number: 0,
+          model: TestModel,
+          adapter: TestAdapter,
+          plan: Sequence.linear([command]),
+          plan_source: :generated,
+          event_log: [],
+          outcome: :pass
+        )
+
+      {:ok, path} = Persistence.save_trace(trace, dir)
+      assert String.ends_with?(path, ".pdtrace")
+      assert {:ok, loaded} = Persistence.load_trace(path)
+      assert %RunTrace{} = loaded
+      assert loaded == trace
+      assert RunTrace.steps(loaded) |> Enum.map(& &1.command) == [command]
+    end
+
+    @tag :tmp_dir
+    test "load_trace refuses a report file", %{tmp_dir: dir} do
+      {:ok, path} = Persistence.save(create_test_report(), dir)
+      assert {:error, :not_a_trace} = Persistence.load_trace(path)
+    end
+
+    @tag :tmp_dir
+    test "a genuine pre-v4 file (no trace) synthesizes one and loads clean", %{tmp_dir: dir} do
+      command = %TestCommand{id: "1", amount: 100}
+
+      event = %PropertyDamage.EventLog.Entry{
+        timestamp: 0,
+        command_index: 0,
+        branch_id: nil,
+        event: %TestEvent{id: "1", amount: 100, status: :failed},
+        source: :command
+      }
+
+      # Simulate a file written before DR-033: a FailureReport-tagged map with
+      # the legacy event_log/shrunk_sequence fields and NO trace, framed as v3.
+      legacy =
+        create_test_report(commands: [command], events: [event])
+        |> Map.from_struct()
+        |> Map.delete(:trace)
+        |> Map.put(:shrunk_sequence, Sequence.linear([command]))
+        |> Map.put(:event_log, [event])
+        |> Map.put(:__struct__, FailureReport)
+
+      payload = %{format_version: 3, report: legacy, metadata: %{}}
+      term_binary = :erlang.term_to_binary(payload, [:compressed])
+      checksum = :erlang.crc32(term_binary)
+      path = Path.join(dir, "pre-v4.pd")
+      File.write!(path, <<"PD", 3::8, checksum::32, term_binary::binary>>)
+
+      # Loads clean (no struct drift: trace absent is expected format evolution,
+      # event_log/shrunk_sequence present is a removed field), and steps/1 works
+      # off the synthesized trace.
+      assert {:ok, loaded} = Persistence.load(path)
+      assert %RunTrace{plan_source: :shrunk, plan_fingerprint: nil} = loaded.trace
+      assert FailureReport.event_log(loaded) == [event]
+      assert [step] = FailureReport.steps(loaded)
+      assert step.command == command
+      assert step.failed?
     end
   end
 end
