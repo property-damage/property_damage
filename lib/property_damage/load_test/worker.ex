@@ -423,18 +423,25 @@ defmodule PropertyDamage.LoadTest.Worker do
     model = state.model
     command_module = command.__struct__
 
-    # Update projections with command
+    # Fold the command AND all of its events into the projections BEFORE running
+    # any assertion, mirroring the main Executor (which asserts against the
+    # post-events state; see Executor.run_checks, invoked with projections that
+    # already have both the command and its events applied). A command-level
+    # `@trigger every: Cmd` therefore observes this command's own events — e.g. a
+    # read-consistency check sees the value just retrieved. Folding events one at
+    # a time and asserting in between (the prior behavior) made such checks read
+    # stale state and misfire.
     projections = update_projections(projections, command)
+    projections = Enum.reduce(events, projections, &update_projections(&2, &1))
 
-    # Update counters for command
+    # Command counters + command assertions
     counters =
       counters
       |> Map.update(:step, 1, &(&1 + 1))
       |> Map.update(:command, 1, &(&1 + 1))
       |> Map.update(command_module, 1, &(&1 + 1))
 
-    # Run command assertions
-    {counters, failure_count} =
+    {counters, command_failures} =
       run_assertions(
         model,
         projections,
@@ -446,11 +453,11 @@ defmodule PropertyDamage.LoadTest.Worker do
         state
       )
 
-    # Update projections and run assertions for each event
-    {projections, counters, event_failures} =
-      Enum.reduce(events, {projections, counters, 0}, fn event, {projs, ctrs, failures} ->
+    # Per-event counters + event assertions, all against the fully-folded
+    # projections (again matching the Executor's event-assertion pass).
+    {counters, event_failures} =
+      Enum.reduce(events, {counters, 0}, fn event, {ctrs, failures} ->
         event_module = get_module(event)
-        projs = update_projections(projs, event)
 
         ctrs =
           ctrs
@@ -461,7 +468,7 @@ defmodule PropertyDamage.LoadTest.Worker do
         {ctrs, event_failure_count} =
           run_assertions(
             model,
-            projs,
+            projections,
             :event,
             event_module,
             ctrs,
@@ -470,10 +477,10 @@ defmodule PropertyDamage.LoadTest.Worker do
             state
           )
 
-        {projs, ctrs, failures + event_failure_count}
+        {ctrs, failures + event_failure_count}
       end)
 
-    {projections, counters, failure_count + event_failures}
+    {projections, counters, command_failures + event_failures}
   end
 
   defp update_projections(projections, command_or_event) do

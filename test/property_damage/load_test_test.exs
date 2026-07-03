@@ -479,11 +479,109 @@ defmodule PropertyDamage.LoadTestTest do
     end
   end
 
+  # Ordering-regression fixtures: a command whose event sets state the command's
+  # own `@trigger` reads back. Under load-test assertions this must observe the
+  # command's own event (matching the main Executor), so `last` is set when the
+  # command-level assertion fires. If the worker asserted before folding the
+  # command's events, `last` would still be nil and every command would fail.
+  defmodule OrderingEvent do
+    defstruct [:n]
+  end
+
+  defmodule OrderingCommand do
+    defstruct [:n]
+
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{n: 1})
+  end
+
+  defmodule OrderingProjection do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{last: nil}
+
+    @impl true
+    def apply(state, %OrderingEvent{n: n}), do: %{state | last: n}
+    def apply(state, _), do: state
+
+    @trigger every: PropertyDamage.LoadTestTest.OrderingCommand
+    def assert_sees_own_event(state, _cmd) do
+      if state.last == nil do
+        PropertyDamage.fail!(
+          "command-level assertion ran before the command's own event was folded"
+        )
+      end
+    end
+  end
+
+  defmodule OrderingModel do
+    @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
+
+    @impl PropertyDamage.Model
+    def commands, do: [PropertyDamage.LoadTestTest.OrderingCommand]
+
+    @impl PropertyDamage.Model
+    def command_sequence_projection, do: PropertyDamage.LoadTestTest.OrderingProjection
+
+    @impl PropertyDamage.Model
+    def assertion_projections, do: [PropertyDamage.LoadTestTest.OrderingProjection]
+
+    @impl PropertyDamage.Model
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    def simulate(%PropertyDamage.LoadTestTest.OrderingCommand{}, _state),
+      do: [%PropertyDamage.LoadTestTest.OrderingEvent{n: 1}]
+  end
+
+  defmodule OrderingAdapter do
+    use PropertyDamage.Adapter, default_timeout: 30
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(_cmd, _ctx, _runtime),
+      do: {:ok, [%PropertyDamage.LoadTestTest.OrderingEvent{n: 1}]}
+  end
+
   # ============================================================================
   # Worker Tests
   # ============================================================================
 
   describe "Worker" do
+    test "command-level assertions observe the command's own events (ordering regression)" do
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, worker} =
+        Worker.start_link(
+          worker_id: 1,
+          model: OrderingModel,
+          adapter: OrderingAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :record
+        )
+
+      assert {:ok, stats} = Worker.execute_sequence(worker)
+      assert stats.commands_run >= 1
+
+      # The command's `@trigger` read its own event, so nothing failed. Before the
+      # worker folded events before command assertions, each command failed here.
+      assert stats.assertion_failures == 0
+
+      Process.sleep(20)
+      assert Metrics.snapshot(metrics).assertion_failures == 0
+
+      Worker.stop(worker)
+      Metrics.stop(metrics)
+    end
+
     test "starts with persistent adapter context" do
       {:ok, metrics} = Metrics.start_link()
 
