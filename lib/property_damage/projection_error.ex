@@ -6,7 +6,7 @@ defmodule PropertyDamage.ProjectionError do
   A raising `apply/2` is a legitimate way for a projection to signal a
   transition invariant violation (see `PropertyDamage.Model.Projection`).
   The executor catches this and turns it into a reported failure
-  (`{:projection_violation, projection, exception}`) rather than letting it
+  (a `%PropertyDamage.Failure{}` of kind `:projection_violation`) rather than letting it
   crash the whole run.
   """
   defexception [:projection, :item, :original, :original_stacktrace]

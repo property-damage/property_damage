@@ -233,7 +233,7 @@ defmodule PropertyDamage.Export.ExUnit do
             Bug has resurfaced!
 
             Expected the bug to be fixed, but PropertyDamage found a failure:
-            \#{failure.failure_message}
+            \#{PropertyDamage.FailureReport.failure_message(failure)}
 
             Seed: \#{failure.seed}
             \"\"\")
@@ -242,12 +242,12 @@ defmodule PropertyDamage.Export.ExUnit do
   end
 
   defp generate_expect_fail_assertion(report) do
-    failure_type = report.failure_type
+    failure_type = FailureReport.failure_type(report)
 
     check_match =
-      case report.check_name do
+      case FailureReport.check_name(report) do
         nil -> ""
-        check -> "\n          assert failure.check_name == #{inspect(check)}"
+        check -> "\n          assert PropertyDamage.FailureReport.check_name(failure) == #{inspect(check)}"
       end
 
     """
@@ -260,7 +260,7 @@ defmodule PropertyDamage.Export.ExUnit do
 
           {:error, failure} ->
             # Confirm we get the same type of failure
-            assert failure.failure_type == #{inspect(failure_type)}#{check_match}
+            assert PropertyDamage.FailureReport.failure_type(failure) == #{inspect(failure_type)}#{check_match}
         end
     """
   end

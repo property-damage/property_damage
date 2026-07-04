@@ -88,9 +88,9 @@ defmodule PropertyDamage.Analysis do
       summary: build_summary(command_explanations, report),
       commands: command_explanations,
       failure: %{
-        type: report.failure_type,
-        check: report.check_name,
-        message: report.failure_message,
+        type: FailureReport.failure_type(report),
+        check: FailureReport.check_name(report),
+        message: FailureReport.failure_message(report),
         command_index: failed_at
       },
       dependency_chain: build_dependency_chain(failed_at, graph, commands)
@@ -158,7 +158,7 @@ defmodule PropertyDamage.Analysis do
     {role, reason} =
       cond do
         step.failed? ->
-          {:trigger, "Triggers #{report.check_name || report.failure_type} failure"}
+          {:trigger, "Triggers #{FailureReport.check_name(report) || FailureReport.failure_type(report)} failure"}
 
         MapSet.member?(ancestors, idx) ->
           # Ancestor in the dependency graph: produces state or values the
@@ -530,7 +530,7 @@ defmodule PropertyDamage.Analysis do
     commands = Sequence.to_list(FailureReport.shrunk_sequence(report))
 
     command_code = generate_command_code(commands)
-    check_name = report.check_name || report.failure_type
+    check_name = FailureReport.check_name(report) || FailureReport.failure_type(report)
 
     """
     defmodule #{module_name} do
@@ -556,7 +556,7 @@ defmodule PropertyDamage.Analysis do
 
         # This should fail with the same error
         assert {:error, failure} = result
-        assert failure.check_name == #{inspect(report.check_name)}
+        assert PropertyDamage.FailureReport.check_name(failure) == #{inspect(FailureReport.check_name(report))}
       end
 
       @tag :reproduction
@@ -566,7 +566,7 @@ defmodule PropertyDamage.Analysis do
     #{command_code}
 
         # The failure occurs at command index #{FailureReport.failure_index(report)}
-        # Failure message: #{String.slice(report.failure_message || "", 0, 100)}
+        # Failure message: #{String.slice(FailureReport.failure_message(report) || "", 0, 100)}
       end
     end
     """
@@ -577,7 +577,7 @@ defmodule PropertyDamage.Analysis do
     command_code = generate_command_code(commands)
 
     """
-    # Reproduction script for #{report.check_name || report.failure_type} failure
+    # Reproduction script for #{FailureReport.check_name(report) || FailureReport.failure_type(report)} failure
     # Original seed: #{report.seed}
     # Run with: mix run reproduction.exs
 
@@ -603,7 +603,7 @@ defmodule PropertyDamage.Analysis do
     explanation = explain(report)
 
     """
-    # Bug Report: #{report.check_name || report.failure_type}
+    # Bug Report: #{FailureReport.check_name(report) || FailureReport.failure_type(report)}
 
     ## Summary
 
@@ -626,9 +626,9 @@ defmodule PropertyDamage.Analysis do
 
     ## Failure Details
 
-    - **Type**: #{report.failure_type}
-    - **Check**: #{report.check_name || "N/A"}
-    - **Message**: #{report.failure_message || "N/A"}
+    - **Type**: #{FailureReport.failure_type(report)}
+    - **Check**: #{FailureReport.check_name(report) || "N/A"}
+    - **Message**: #{FailureReport.failure_message(report) || "N/A"}
     - **Command Index**: #{FailureReport.failure_index(report)}
 
     ## Analysis

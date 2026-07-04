@@ -512,7 +512,7 @@ defmodule PropertyDamage.Integration do
         IO.puts("First failure:")
         failure = hd(result.failures)
         IO.puts("  Seed: #{failure.seed}")
-        IO.puts("  Invariant: #{inspect(failure.check_name || failure.failure_reason)}")
+        IO.puts("  Invariant: #{inspect(PropertyDamage.FailureReport.check_name(failure) || failure.failure_reason)}")
       end
     end
 
@@ -646,7 +646,7 @@ defmodule PropertyDamage.Integration do
       |> Enum.take(5)
       |> Enum.with_index(1)
       |> Enum.each(fn {failure, idx} ->
-        IO.puts("  #{idx}. Seed: #{failure.seed}, Check: #{inspect(failure.check_name)}")
+        IO.puts("  #{idx}. Seed: #{failure.seed}, Check: #{inspect(PropertyDamage.FailureReport.check_name(failure))}")
       end)
 
       if length(result.failures) > 5 do
@@ -692,8 +692,8 @@ defmodule PropertyDamage.Integration do
         ### Failure #{idx}
 
         - **Seed**: `#{failure.seed}`
-        - **Check**: `#{inspect(failure.check_name)}`
-        - **Error**: #{failure.failure_message || "N/A"}
+        - **Check**: `#{inspect(PropertyDamage.FailureReport.check_name(failure))}`
+        - **Error**: #{PropertyDamage.FailureReport.failure_message(failure) || "N/A"}
         """
       end)
 
@@ -710,8 +710,8 @@ defmodule PropertyDamage.Integration do
       |> Enum.map_join("", fn failure ->
         """
             <testcase name="seed_#{failure.seed}" classname="#{inspect(result.model)}" time="0">
-              <failure message="#{escape_xml(inspect(failure.check_name))}">
-                #{escape_xml(failure.failure_message || "Check failed")}
+              <failure message="#{escape_xml(inspect(PropertyDamage.FailureReport.check_name(failure)))}">
+                #{escape_xml(PropertyDamage.FailureReport.failure_message(failure) || "Check failed")}
               </failure>
             </testcase>
         """

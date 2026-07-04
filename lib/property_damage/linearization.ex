@@ -84,7 +84,7 @@ defmodule PropertyDamage.Linearization do
       end
   """
 
-  alias PropertyDamage.{External, Placeholder, Sequence}
+  alias PropertyDamage.{External, Failure, Placeholder, Sequence}
 
   @default_max_candidates 1000
 
@@ -292,8 +292,8 @@ defmodule PropertyDamage.Linearization do
   # events, mirroring the executor's run_checks counter/trigger scheme so a
   # branch position is judged exactly as the equivalent linear position would
   # be. Returns {:ok, counters} or {:refuted, check_name, reason}; `reason`
-  # is the `{:assertion_failed, name, {exception, stacktrace}}` shape the
-  # executor's linear path produces, so downstream reporting is identical.
+  # is the `%Failure{}` assertion_failed value the executor's linear path
+  # produces, so downstream reporting is identical.
   defp run_position_assertions(projections, all_projections, command, observed_events, counters) do
     command_module = command.__struct__
 
@@ -357,7 +357,7 @@ defmodule PropertyDamage.Linearization do
           {:cont, :ok}
         rescue
           e ->
-            reason = {:assertion_failed, assertion.name, {e, __STACKTRACE__}}
+            reason = Failure.assertion_failed(assertion.name, {e, __STACKTRACE__})
             {:halt, {:refuted, assertion.name, reason}}
         end
       else

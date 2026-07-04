@@ -106,7 +106,7 @@ defmodule PropertyDamage.Shrinker do
   shrunk = Shrinker.shrink(
     sequence,
     failed_at_index: 5,
-    failure_reason: {:check_failed, :balance_invariant, "..."},
+    failure_reason: PropertyDamage.Failure.assertion_failed(:balance_invariant, "..."),
     model: MyModel,
     adapter: MyAdapter,
     config: config
@@ -116,6 +116,7 @@ defmodule PropertyDamage.Shrinker do
 
   alias PropertyDamage.{
     Executor,
+    Failure,
     Placeholder,
     PlaceholderRegistry,
     Sequence,
@@ -129,15 +130,20 @@ defmodule PropertyDamage.Shrinker do
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """
-  Failure signature for equivalence checking.
+  Failure signature for equivalence checking: `{kind, name}`.
 
-  Contains the essential properties that must match for a shrunk
-  sequence to be considered as reproducing the "same" failure.
+  The two properties that must match for a shrunk sequence to be considered as
+  reproducing the "same" failure. `kind` is the failure's globally-unique kind
+  (so two failures of different *classes* can never collide), and `name` is the
+  assertion/check/projection name where one is meaningful (`nil` otherwise).
+
+  Keying on `kind` rather than the coarser class is load-bearing: a
+  `:poll_timeout` of assertion `:x` and an `:assertion_failed` of `:x` share a
+  name but are different bugs, so their signatures must differ. A class-based
+  signature (`{:assertion, :x}` for both) would let the shrinker swap one bug's
+  identity for the other's.
   """
-  @type failure_signature :: %{
-          type: atom(),
-          check_name: atom() | nil
-        }
+  @type failure_signature :: {Failure.kind(), atom() | nil}
 
   @typedoc """
   Result of shrinking.
@@ -153,52 +159,20 @@ defmodule PropertyDamage.Shrinker do
 
   The signature captures the essential properties for equivalence checking.
   """
-  @spec failure_signature(term()) :: failure_signature()
-  def failure_signature({:check_failed, check_name, _message}) do
-    %{type: :check_failed, check_name: check_name}
-  end
-
-  def failure_signature({:idempotency_violation, _details}) do
-    %{type: :idempotency_violation, check_name: nil}
-  end
-
-  def failure_signature({:linearization_failed, _message}) do
-    %{type: :linearization_failed, check_name: nil}
-  end
-
-  def failure_signature({:branch_failure, _branch_id, inner_reason}) do
-    # Unwrap branch failures to get the actual failure type
-    failure_signature(inner_reason)
-  end
-
-  def failure_signature({:adapter_error, _reason}) do
-    %{type: :adapter_error, check_name: nil}
-  end
-
-  def failure_signature({:ref_resolution_error, _reason}) do
-    %{type: :ref_resolution_error, check_name: nil}
-  end
-
-  def failure_signature({:stutter_execution_failed, _reason}) do
-    %{type: :stutter_execution_failed, check_name: nil}
-  end
-
-  # A named assertion failure (@trigger / @trigger at:, including async ones
-  # observed via DR-025). Record the assertion name as the check name so the
-  # shrinker does not conflate distinct assertions as the same bug, and so an
-  # async-observed failure stays equivalent to a teardown failure of the same
-  # assertion. Must precede the generic tuple clause below.
-  def failure_signature({:assertion_failed, name, _}) do
-    %{type: :assertion_failed, check_name: name}
-  end
-
-  def failure_signature(other) when is_tuple(other) do
-    # Extract first element as type for unknown tuple formats
-    %{type: elem(other, 0), check_name: nil}
+  #
+  # A `%Failure{}` already carries its (globally-unique) kind and, for named
+  # kinds, its name; the envelope's `branch_id` is deliberately NOT part of the
+  # signature, so a branch failure is equivalent to the same failure on the
+  # linear path (matching the old branch-unwrapping behaviour). The `name` keeps
+  # distinct assertions from being conflated, and keeps an async-observed
+  # assertion failure equivalent to a teardown failure of the same assertion.
+  @spec failure_signature(Failure.t() | term()) :: failure_signature()
+  def failure_signature(%Failure{} = failure) do
+    {Failure.kind(failure), Failure.name(failure)}
   end
 
   def failure_signature(_other) do
-    %{type: :unknown, check_name: nil}
+    {:unknown, nil}
   end
 
   @doc """
@@ -209,10 +183,7 @@ defmodule PropertyDamage.Shrinker do
   """
   @spec equivalent_failures?(term(), term()) :: boolean()
   def equivalent_failures?(reason1, reason2) do
-    sig1 = failure_signature(reason1)
-    sig2 = failure_signature(reason2)
-
-    sig1.type == sig2.type and sig1.check_name == sig2.check_name
+    failure_signature(reason1) == failure_signature(reason2)
   end
 
   # Stutter reproduction config for shrinking (DR-029). A stutter failure
@@ -223,8 +194,8 @@ defmodule PropertyDamage.Shrinker do
   # max_repeats) makes every eligible command stutter on every reproduction, so
   # the violation reproduces regardless of position. Non-stutter failures return
   # nil so the shrinker re-runs without stutter, exactly as before P4.
-  defp stutter_repro_config(%{type: type}, %Stutter.Config{} = config)
-       when type in [:idempotency_violation, :stutter_execution_failed] do
+  defp stutter_repro_config({kind, _name}, %Stutter.Config{} = config)
+       when kind in [:idempotency_violation, :stutter_execution_failed] do
     %{config | probability: 1.0, enabled: true}
   end
 
@@ -985,7 +956,7 @@ defmodule PropertyDamage.Shrinker do
 
           {:error, _} ->
             # Execution errors are only equivalent if original was also an error
-            state.original_signature == nil or state.original_signature.type == :adapter_error
+            state.original_signature == nil or match?({:adapter_error, _}, state.original_signature)
         end
 
       {:error, _reason} ->
@@ -1035,7 +1006,7 @@ defmodule PropertyDamage.Shrinker do
             # signal reproduction with a nil index (shrink_linear skips the
             # truncation when the index is not an integer).
             if state.original_signature == nil or
-                 state.original_signature.type == :adapter_error do
+                 match?({:adapter_error, _}, state.original_signature) do
               {:reproduces, nil}
             else
               :no_reproduce
@@ -1076,7 +1047,7 @@ defmodule PropertyDamage.Shrinker do
 
           {:error, _} ->
             # Execution errors are only equivalent if original was also an error
-            state.original_signature == nil or state.original_signature.type == :adapter_error
+            state.original_signature == nil or match?({:adapter_error, _}, state.original_signature)
         end
 
       {:error, _reason} ->
@@ -1103,37 +1074,26 @@ defmodule PropertyDamage.Shrinker do
     # different bug as the "minimal repro". (When a signature IS present, the
     # type check below already rejects these unless the original was itself a
     # ref-resolution error.)
-    failure_signature(failure_reason).type != :ref_resolution_error
+    elem(failure_signature(failure_reason), 0) != :placeholder_resolution
   end
 
   defp check_failure_equivalence(failure_reason, original_signature) do
-    new_signature = failure_signature(failure_reason)
-
-    # Must have same type
-    if new_signature.type != original_signature.type do
-      false
-    else
-      # For check failures, must have same check name
-      case original_signature.type do
-        :check_failed ->
-          new_signature.check_name == original_signature.check_name
-
-        _ ->
-          true
-      end
-    end
+    # Same signature (kind + name) means the same bug. The kind carries whatever
+    # the old per-type/check-name logic needed: named kinds compare names,
+    # nameless kinds both carry nil.
+    failure_signature(failure_reason) == original_signature
   end
 
-  # Reconstruct a minimal failure_reason from a signature for passing through
-  # This is used when we need to pass failure_reason to nested shrink calls
+  # Reconstruct a minimal %Failure{} from a signature for passing to nested
+  # shrink calls, which only consult its signature (kind + name) for equivalence.
   defp reconstruct_failure_reason(nil), do: nil
 
-  defp reconstruct_failure_reason(%{type: :check_failed, check_name: check_name}) do
-    {:check_failed, check_name, ""}
+  defp reconstruct_failure_reason({:assertion_failed, name}) do
+    Failure.assertion_failed(name, "")
   end
 
-  defp reconstruct_failure_reason(%{type: type}) do
-    {type, nil}
+  defp reconstruct_failure_reason({kind, name}) do
+    Failure.from_signature(kind, name)
   end
 
   defp exceeded_limits?(state) do
