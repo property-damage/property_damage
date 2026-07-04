@@ -2,6 +2,7 @@ defmodule PropertyDamage.AnalysisTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Analysis
+  alias PropertyDamage.Failure
   alias PropertyDamage.FailureReport
   alias PropertyDamage.Sequence
 
@@ -26,7 +27,7 @@ defmodule PropertyDamage.AnalysisTest do
           original_sequence: seq,
           shrunk_sequence: seq,
           failed_at_index: 1,
-          failure_reason: {:branch_failure, 1, {:check_failed, :TestCheck, "boom"}}
+          failure_reason: Failure.in_branch(Failure.assertion_failed(:TestCheck, "boom"), 1)
         )
 
       %{report: report}

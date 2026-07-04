@@ -24,7 +24,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # update_poller_state_getters) remain in PropertyDamage.Executor and are called
   # back here; this module owns only the finalize-exclusive logic.
 
-  alias PropertyDamage.{Executor, ResourcePoller, StatePoller}
+  alias PropertyDamage.{Executor, Failure, ResourcePoller, StatePoller}
 
   # ============================================================================
   # Result Finalization
@@ -76,7 +76,7 @@ defmodule PropertyDamage.Executor.Finalization do
       {name, reason, command_index} ->
         resource_pollers = Map.get(state, :active_resource_pollers, [])
         Enum.each(resource_pollers, &ResourcePoller.stop/1)
-        {normalized, stacktrace} = extract_stacktrace({:assertion_failed, name, reason})
+        {normalized, stacktrace} = extract_stacktrace(Failure.assertion_failed(name, reason))
 
         async_failure_result(
           state,
@@ -100,12 +100,24 @@ defmodule PropertyDamage.Executor.Finalization do
       {:timeout, _id, info} ->
         resource_pollers = Map.get(state, :active_resource_pollers, [])
         Enum.each(resource_pollers, &ResourcePoller.stop/1)
-        poller_failure_result(state, {:poll_timeout, info}, linearization, assertion_failures)
+
+        poller_failure_result(
+          state,
+          Failure.poll_timeout(info),
+          linearization,
+          assertion_failures
+        )
 
       {:error, reason} ->
         resource_pollers = Map.get(state, :active_resource_pollers, [])
         Enum.each(resource_pollers, &ResourcePoller.stop/1)
-        poller_failure_result(state, {:poll_error, reason}, linearization, assertion_failures)
+
+        poller_failure_result(
+          state,
+          Failure.poll_error(reason),
+          linearization,
+          assertion_failures
+        )
 
       _ ->
         # Finalize resource pollers
@@ -123,7 +135,7 @@ defmodule PropertyDamage.Executor.Finalization do
           # DR-025: an async every: assertion tripped on a drained event under
           # :halt mode — report it at the observing event's command_index.
           {:halt, name, reason, command_index, state, failures} ->
-            {normalized, stacktrace} = extract_stacktrace({:assertion_failed, name, reason})
+            {normalized, stacktrace} = extract_stacktrace(Failure.assertion_failed(name, reason))
             combined_failures = Enum.reverse(failures) ++ resource_failures
 
             async_failure_result(
@@ -159,7 +171,7 @@ defmodule PropertyDamage.Executor.Finalization do
       {:error, _id, reason} ->
         poller_failure_result(
           state,
-          {:resource_poller_error, reason},
+          Failure.resource_poller_error(reason),
           linearization,
           combined_failures
         )
@@ -174,7 +186,7 @@ defmodule PropertyDamage.Executor.Finalization do
         case Executor.run_phase_assertions(state, :teardown) do
           {:halt, name, reason, teardown_counters} ->
             {normalized, stacktrace} =
-              extract_stacktrace({:assertion_failed, name, reason})
+              extract_stacktrace(Failure.assertion_failed(name, reason))
 
             teardown_failure_result(
               %{state | assertion_counters: teardown_counters},
@@ -232,8 +244,10 @@ defmodule PropertyDamage.Executor.Finalization do
     }
   end
 
-  defp poller_failure_index({:poll_timeout, info}),
-    do: Map.get(info.triggered_by, :command_index)
+  defp poller_failure_index(%Failure{
+         type: %Failure.Assertion{kind: :poll_timeout, detail: info}
+       }),
+       do: Map.get(info.triggered_by, :command_index)
 
   defp poller_failure_index(_), do: nil
 
@@ -293,25 +307,37 @@ defmodule PropertyDamage.Executor.Finalization do
   # Stacktrace Extraction
   # ============================================================================
 
-  # Extract stacktrace from failure reasons that contain embedded stacktraces
-  defp extract_stacktrace({:adapter_error, {exception, stacktrace}})
+  # Split an embedded {exception, stacktrace} out of a %Failure{}'s detail,
+  # returning the failure with a bare-exception (or bare-message) detail plus the
+  # separated stacktrace. The envelope's `branch_id` rides along untouched, so a
+  # branch failure is normalized by the same clauses as a linear one.
+  defp extract_stacktrace(
+         %Failure{
+           type: %Failure.Execution{kind: :adapter_error, detail: {exception, stacktrace}} = t
+         } =
+           f
+       )
        when is_exception(exception) and is_list(stacktrace) do
-    {{:adapter_error, exception}, stacktrace}
+    {%{f | type: %{t | detail: exception}}, stacktrace}
   end
 
-  defp extract_stacktrace({:assertion_failed, name, {exception, stacktrace}})
+  defp extract_stacktrace(
+         %Failure{
+           type: %Failure.Assertion{kind: :assertion_failed, detail: {exception, stacktrace}} = t
+         } = f
+       )
        when is_exception(exception) and is_list(stacktrace) do
-    {{:assertion_failed, name, exception}, stacktrace}
+    {%{f | type: %{t | detail: exception}}, stacktrace}
   end
 
-  defp extract_stacktrace({:ref_resolution_error, {message, stacktrace}})
+  defp extract_stacktrace(
+         %Failure{
+           type:
+             %Failure.Framework{kind: :placeholder_resolution, detail: {message, stacktrace}} = t
+         } = f
+       )
        when is_binary(message) and is_list(stacktrace) do
-    {{:ref_resolution_error, message}, stacktrace}
-  end
-
-  defp extract_stacktrace({:branch_failure, branch_id, inner_reason}) do
-    {inner_normalized, stacktrace} = extract_stacktrace(inner_reason)
-    {{:branch_failure, branch_id, inner_normalized}, stacktrace}
+    {%{f | type: %{t | detail: message}}, stacktrace}
   end
 
   # No embedded stacktrace
@@ -623,7 +649,7 @@ defmodule PropertyDamage.Executor.Finalization do
   defp resource_poller_result_to_failure({:error, id, reason}) do
     %{
       assertion_name: :resource_poller,
-      reason: {:resource_poller_error, reason},
+      reason: Failure.resource_poller_error(reason),
       command: nil,
       command_index: nil,
       step_type: :resource_poll,
@@ -662,7 +688,7 @@ defmodule PropertyDamage.Executor.Finalization do
   defp timeout_to_failure({:timeout, _id, info}) do
     %{
       assertion_name: info.triggered_by.assertion_name,
-      reason: {:poll_timeout, info},
+      reason: Failure.poll_timeout(info),
       command: nil,
       # DR-030: attribute the liveness timeout to the command whose event opened
       # the @poll_state window, so the shrinker keeps locality (nil for older
@@ -678,7 +704,7 @@ defmodule PropertyDamage.Executor.Finalization do
   defp timeout_to_failure({:error, reason}) do
     %{
       assertion_name: :unknown,
-      reason: {:poll_error, reason},
+      reason: Failure.poll_error(reason),
       command: nil,
       command_index: nil,
       step_type: :event,

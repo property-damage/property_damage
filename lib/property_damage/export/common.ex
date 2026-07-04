@@ -24,9 +24,9 @@ defmodule PropertyDamage.Export.Common do
   def extract_metadata(%FailureReport{} = report) do
     %{
       seed: report.seed,
-      failure_type: report.failure_type,
-      failure_message: report.failure_message,
-      check_name: report.check_name,
+      failure_type: FailureReport.failure_type(report),
+      failure_message: FailureReport.failure_message(report),
+      check_name: FailureReport.check_name(report),
       failed_at_index: report.failed_at_index,
       timestamp: report.timestamp,
       model: report.model,
@@ -269,7 +269,7 @@ defmodule PropertyDamage.Export.Common do
   # share a seed (across models, or a randomly-seeded run) don't silently
   # overwrite each other, while an identical failure maps to the same file.
   defp failure_signature(%FailureReport{} = report) do
-    {report.failure_type, report.check_name, report.failure_reason,
+    {FailureReport.failure_type(report), FailureReport.check_name(report), report.failure_reason,
      FailureReport.shrunk_sequence(report)}
     |> :erlang.phash2()
     |> Integer.to_string(16)

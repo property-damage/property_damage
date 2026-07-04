@@ -77,6 +77,7 @@ defmodule PropertyDamage.Executor do
 
   alias PropertyDamage.{
     EventQueue,
+    Failure,
     Mint,
     MockServiceRegistry,
     Nemesis,
@@ -394,7 +395,7 @@ defmodule PropertyDamage.Executor do
     case run_phase_assertions(initial_state, :startup) do
       {:halt, name, reason, _counters} ->
         Finalization.finalize_result(
-          {:failed, nil, {:assertion_failed, name, reason}, initial_state}
+          {:failed, nil, Failure.assertion_failed(name, reason), initial_state}
         )
 
       {:ok, startup_recorded, startup_counters} ->
@@ -581,7 +582,7 @@ defmodule PropertyDamage.Executor do
         # A projection signalled a transition invariant violation by raising.
         # Report it as a failure (with the pre-command state) rather than
         # letting it crash the run.
-        {:error, {:projection_violation, e.projection, e.original}, state}
+        {:error, Failure.projection_violation(e.projection, e.original), state}
     end
   end
 
@@ -758,10 +759,10 @@ defmodule PropertyDamage.Executor do
             handle_command_events(events, event_ctx)
 
           {:timeout, last_reason} ->
-            {:error, {:settle_timeout, last_reason}, state_with_pollers}
+            {:error, Failure.settle_timeout(last_reason), state_with_pollers}
 
           {:error, reason} ->
-            {:error, {:adapter_error, reason}, state_with_pollers}
+            {:error, Failure.adapter_error(reason), state_with_pollers}
 
           {:retry, reason} ->
             # {:retry, _} is the probe/async settle protocol: only :probe/:async
@@ -770,7 +771,7 @@ defmodule PropertyDamage.Executor do
             # case means a :sync command returned {:retry, _}, which it must not.
             command_module = if is_struct(resolved_command), do: resolved_command.__struct__
 
-            {:error, {:retry_from_sync_command, %{command: command_module, reason: reason}},
+            {:error, Failure.retry_from_sync_command(%{command: command_module, reason: reason}),
              state_with_pollers}
 
           # Adapter returned something other than {:ok, list} / {:error, _} /
@@ -778,11 +779,11 @@ defmodule PropertyDamage.Executor do
           # crashing the run with a CaseClauseError (this clause sits outside
           # the execute rescue).
           other ->
-            {:error, {:malformed_adapter_return, other}, state_with_pollers}
+            {:error, Failure.malformed_adapter_return(other), state_with_pollers}
         end
 
       {:error, reason} ->
-        {:error, {:ref_resolution_error, reason}, state}
+        {:error, Failure.placeholder_resolution(reason), state}
     end
   end
 
@@ -936,7 +937,7 @@ defmodule PropertyDamage.Executor do
          ) do
       {:halt, async_name, async_reason, _idx, async_counters} ->
         failed_state = pack.(%{assertion_counters: async_counters})
-        {:error, {:assertion_failed, async_name, async_reason}, failed_state}
+        {:error, Failure.assertion_failed(async_name, async_reason), failed_state}
 
       {:ok, async_counters, async_failures} ->
         # 8. Run checks
@@ -990,7 +991,7 @@ defmodule PropertyDamage.Executor do
                     assertion_failures: updated_failures
                   })
 
-                {:error, {:idempotency_violation, violation}, failed_state}
+                {:error, Failure.idempotency_violation(violation), failed_state}
 
               {:error, :stutter_execution_failed, details} ->
                 failed_state =
@@ -999,12 +1000,12 @@ defmodule PropertyDamage.Executor do
                     assertion_failures: updated_failures
                   })
 
-                {:error, {:stutter_execution_failed, details}, failed_state}
+                {:error, Failure.stutter_execution_failed(details), failed_state}
             end
 
           {:error, assertion_name, reason, assertion_counters} ->
             failed_state = pack.(%{assertion_counters: assertion_counters})
-            {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+            {:error, Failure.assertion_failed(assertion_name, reason), failed_state}
         end
     end
   end
@@ -1727,7 +1728,7 @@ defmodule PropertyDamage.Executor do
   ## Returns
 
   - `{:ok, event_log}` - List of EventLog.Entry structs
-  - `{:error, {:adapter_error, reason, partial_events}}` - Adapter failed
+  - `{:error, %PropertyDamage.Failure{}}` - a `:adapter_error` (with `partial_events`)
 
   ## Example
 
@@ -1782,7 +1783,7 @@ defmodule PropertyDamage.Executor do
             {:cont, %{events: [new_events | state.events], registry: new_registry}}
 
           {:error, reason} ->
-            {:halt, {:error, {:adapter_error, reason, flatten_event_chunks(state.events)}}}
+            {:halt, {:error, Failure.adapter_error(reason, flatten_event_chunks(state.events))}}
         end
       end)
 
@@ -1871,7 +1872,7 @@ defmodule PropertyDamage.Executor do
         end
 
       {:error, reason} ->
-        {:error, {:ref_resolution_error, reason}}
+        {:error, Failure.placeholder_resolution(reason)}
     end
   end
 

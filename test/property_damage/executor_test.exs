@@ -3,7 +3,7 @@ defmodule PropertyDamage.ExecutorTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{EventQueue, Executor, Placeholder}
+  alias PropertyDamage.{EventQueue, Executor, Failure, Placeholder}
 
   alias PropertyDamage.Test.{
     ErrorAdapter,
@@ -93,7 +93,7 @@ defmodule PropertyDamage.ExecutorTest do
       {:ok, result} = Executor.run([command], ExecutorModel, SimpleAdapter)
 
       assert result.success == false
-      assert {:ref_resolution_error, _} = result.failure_reason
+      assert Failure.kind(result.failure_reason) == :placeholder_resolution
     end
   end
 
@@ -139,7 +139,9 @@ defmodule PropertyDamage.ExecutorTest do
 
       assert result.success == false
       assert result.failed_at_index == 0
-      assert {:assertion_failed, :quantity_limit, _reason} = result.failure_reason
+
+      assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :quantity_limit}} =
+               result.failure_reason
     end
 
     test "successful checks continue execution" do
@@ -160,7 +162,16 @@ defmodule PropertyDamage.ExecutorTest do
       {:ok, result} = Executor.run(commands, FailingModel, SimpleAdapter)
 
       assert result.success == false
-      {:assertion_failed, :quantity_limit, exception} = result.failure_reason
+
+      %Failure{
+        type: %Failure.Assertion{
+          kind: :assertion_failed,
+          name: :quantity_limit,
+          detail: exception
+        }
+      } =
+        result.failure_reason
+
       assert %PropertyDamage.AssertionFailed{} = exception
       assert exception.message =~ "exceeds limit"
     end
@@ -216,7 +227,9 @@ defmodule PropertyDamage.ExecutorTest do
       {:ok, result} = Executor.run([command], ExecutorModel, ErrorAdapter)
 
       assert result.success == false
-      assert result.failure_reason == {:adapter_error, :command_failed}
+
+      assert %Failure{type: %Failure.Execution{kind: :adapter_error, detail: :command_failed}} =
+               result.failure_reason
     end
   end
 
@@ -347,8 +360,9 @@ defmodule PropertyDamage.ExecutorTest do
 
       # Should fail due to exceeding 100 quantity limit
       assert result.success == false
-      # Branch failures are wrapped with branch_id
-      assert {:branch_failure, 0, {:assertion_failed, _, _}} = result.failure_reason
+      # Branch failures carry the branch_id on the envelope; the type is the inner kind
+      assert %Failure{type: %Failure.Assertion{kind: :assertion_failed}, branch_id: 0} =
+               result.failure_reason
     end
 
     test "merges projections from all branches" do

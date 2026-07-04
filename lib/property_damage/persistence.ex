@@ -54,19 +54,19 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
-  @version 6
+  @version 7
   @extension ".pd"
   @trace_extension ".pdtrace"
 
   # Fields whose presence on a loaded report is expected (not struct drift) even
-  # though the current struct lacks them. Pre-v6 files are refused outright
-  # (DR-040, following the DR-039 precedent), so there are no legacy shapes to
-  # whitelist: a v6 file carrying an unknown key IS drift and should be surfaced.
+  # though the current struct lacks them. Pre-v7 files are refused outright
+  # (DR-041, following the DR-039/DR-040 precedent), so there are no legacy shapes
+  # to whitelist: a v7 file carrying an unknown key IS drift and should be surfaced.
   @removed_fields []
 
   # Fields whose absence on a loaded report is expected format evolution (not
-  # struct drift). Empty for the same reason as @removed_fields: only v6 files
-  # load, and a v6 file legitimately lacking a current field is a genuine shape
+  # struct drift). Empty for the same reason as @removed_fields: only v7 files
+  # load, and a v7 file legitimately lacking a current field is a genuine shape
   # change worth a warning.
   @added_fields []
 
@@ -340,9 +340,9 @@ defmodule PropertyDamage.Persistence do
       seed: report.seed,
       run_number: report.run_number,
       failed_at_index: report.failed_at_index,
-      failure_type: report.failure_type,
-      check_name: report.check_name,
-      failure_message: report.failure_message,
+      failure_type: FailureReport.failure_type(report),
+      check_name: FailureReport.check_name(report),
+      failure_message: FailureReport.failure_message(report),
       shrink_iterations: report.shrink_iterations,
       shrink_time_ms: report.shrink_time_ms,
       timestamp: DateTime.to_iso8601(report.timestamp),
@@ -409,14 +409,16 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
-  # V6 format (DR-040): event-log entries carry a `fold_index` and the trace
-  # carries `command_fold_ordinals` + `linearization`, so a run's real fold order
-  # is recorded and the per-step state timeline can be derived. Positions remain
+  # V7 format (DR-041): a report's `failure_reason` is a `%PropertyDamage.Failure{}`
+  # (nested class struct), and the six denormalized failure fields
+  # (`failure_type` / `check_name` / `failure_message` / `invariant_name` /
+  # `idempotency_violation` / `poll_timeout_info`) are gone, replaced by accessors.
+  # V6's fold-order record (DR-040) is unchanged. Positions remain
   # `%Sequence.Position{}` structs (DR-039). The payload carries an explicit
   # `kind`; the loader dispatches on it rather than the file extension. A report
   # already embeds its trace, so it is returned as stored, with no legacy-field
   # folding or trace synthesis. A standalone trace payload returns the trace.
-  defp decode(<<"PD", 6::8, stored_checksum::32, term_binary::binary>>) do
+  defp decode(<<"PD", 7::8, stored_checksum::32, term_binary::binary>>) do
     with_decoded_payload(stored_checksum, term_binary, fn payload ->
       metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
 
@@ -430,11 +432,11 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v6 files (format versions 1-5) are refused (DR-040, following DR-039).
-  # A pre-v6 file predates the fold-order record (`fold_index` /
-  # `command_fold_ordinals`), so its per-step state timeline cannot be derived
-  # and its projection-purity check cannot run; there is no honest in-place
-  # upgrade. Re-capture the failure under the current version.
+  # Pre-v7 files (format versions 1-6) are refused (DR-041, following DR-039/DR-040).
+  # A pre-v7 file stores `failure_reason` as a raw `{:tag, ...}` tuple and carries
+  # the six denormalized failure fields that the current struct no longer has, so
+  # there is no honest in-place upgrade. Re-capture the failure under the current
+  # version.
   defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
        when version < @version do
     {:error, {:unsupported_format_version, version, @version}}
@@ -650,8 +652,8 @@ defmodule PropertyDamage.Persistence do
       |> String.replace(":", "-")
       |> String.slice(0, 15)
 
-    type = report.failure_type || "unknown"
-    check = report.check_name || "none"
+    type = FailureReport.failure_type(report) || "unknown"
+    check = FailureReport.check_name(report) || "none"
     seed = report.seed
 
     "#{timestamp}-#{type}-#{check}-seed#{seed}#{@extension}"
@@ -690,8 +692,8 @@ defmodule PropertyDamage.Persistence do
           {:ok, report} ->
             %{
               seed: report.seed,
-              failure_type: report.failure_type,
-              check_name: report.check_name,
+              failure_type: FailureReport.failure_type(report),
+              check_name: FailureReport.check_name(report),
               timestamp: report.timestamp,
               shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
             }
@@ -699,8 +701,8 @@ defmodule PropertyDamage.Persistence do
           {:ok, report, _warnings} ->
             %{
               seed: report.seed,
-              failure_type: report.failure_type,
-              check_name: report.check_name,
+              failure_type: FailureReport.failure_type(report),
+              check_name: FailureReport.check_name(report),
               timestamp: report.timestamp,
               shrunk_size: length(Sequence.to_list(FailureReport.shrunk_sequence(report)))
             }

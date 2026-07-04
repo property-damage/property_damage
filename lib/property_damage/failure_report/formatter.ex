@@ -158,7 +158,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   # itself rendered as secondary detail just below. Empty when the failure has no
   # resolved invariant (e.g. a non-assertion failure).
   defp invariant_section(report, color) do
-    case report.invariant_name do
+    case FailureReport.invariant_name(report) do
       nil ->
         ""
 
@@ -177,14 +177,14 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp terminal_failure_explanation(report, color) do
     # Build the "Why It Failed" explanation
     {reason_text, why_text} =
-      case report.failure_type do
-        :check_failed ->
+      case FailureReport.failure_type(report) do
+        kind when kind in [:assertion_failed, :projection_violation] ->
           reason =
             invariant_section(report, color) <>
               """
-              #{label("Check", color)}         #{cyan(color)}#{report.check_name}#{reset()}
+              #{label("Check", color)}         #{cyan(color)}#{FailureReport.check_name(report)}#{reset()}
               #{label("Message", color)}
-              #{indent_text(report.failure_message, "    ")}
+              #{indent_text(FailureReport.failure_message(report), "    ")}
               """
 
           why = build_check_explanation(report, color)
@@ -193,11 +193,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
         :idempotency_violation ->
           {format_idempotency_terminal(report, color), nil}
 
-        :linearization_failed ->
+        :linearization ->
           reason = """
           #{label("Type", color)}          Linearization Failed
           #{label("Details", color)}
-          #{indent_text(report.failure_message, "    ")}
+          #{indent_text(FailureReport.failure_message(report), "    ")}
           """
 
           why = """
@@ -206,16 +206,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
           """
 
           {reason, why}
-
-        :branch_failure ->
-          reason = """
-          #{label("Type", color)}          Branch Execution Failed
-          #{label("Branch ID", color)}     #{report.branch_id}
-          #{label("Details", color)}
-          #{indent_text(report.failure_message, "    ")}
-          """
-
-          {reason, nil}
 
         :poll_timeout ->
           {format_poll_timeout_terminal(report, color), nil}
@@ -246,7 +236,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
         """
         #{yellow(color)}Why it failed:#{reset()} Command #{cyan(color)}#{cmd_name}#{reset()} at index #{index}
-        violated the #{cyan(color)}#{report.check_name}#{reset()} invariant.
+        violated the #{cyan(color)}#{FailureReport.check_name(report)}#{reset()} invariant.
         """
 
       nil ->
@@ -255,7 +245,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp format_idempotency_terminal(report, color) do
-    violation = report.idempotency_violation
+    violation = FailureReport.idempotency_violation(report)
 
     if violation do
       attempts_text =
@@ -282,7 +272,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       """
       #{label("Type", color)}          Idempotency Violation
       #{label("Details", color)}
-      #{indent_text(report.failure_message, "    ")}
+      #{indent_text(FailureReport.failure_message(report), "    ")}
       """
     end
   end
@@ -297,7 +287,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp format_comparison_diff(result, _color), do: "  #{inspect(result)}"
 
   defp format_poll_timeout_terminal(report, color) do
-    info = report.poll_timeout_info
+    info = FailureReport.poll_timeout_info(report)
 
     if info do
       trigger_event = info.triggered_by.event
@@ -327,7 +317,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       """
       #{label("Type", color)}          Poll Timeout
       #{label("Details", color)}
-      #{indent_text(report.failure_message, "    ")}
+      #{indent_text(FailureReport.failure_message(report), "    ")}
       """
     end
   end
@@ -627,7 +617,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp markdown_invariant_section(report) do
-    case report.invariant_name do
+    case FailureReport.invariant_name(report) do
       nil ->
         ""
 
@@ -641,15 +631,15 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp markdown_failure_reason(report) do
     reason_text =
-      case report.failure_type do
-        :check_failed ->
+      case FailureReport.failure_type(report) do
+        kind when kind in [:assertion_failed, :projection_violation] ->
           markdown_invariant_section(report) <>
             """
-            **Check:** `#{report.check_name}`
+            **Check:** `#{FailureReport.check_name(report)}`
 
             **Message:**
             ```
-            #{report.failure_message}
+            #{FailureReport.failure_message(report)}
             ```
             """
 
@@ -663,7 +653,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
           """
           **Details:**
           ```
-          #{report.failure_message || inspect(report.failure_reason, pretty: true)}
+          #{FailureReport.failure_message(report) || inspect(report.failure_reason, pretty: true)}
           ```
           """
       end
@@ -676,7 +666,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp format_poll_timeout_markdown(report) do
-    info = report.poll_timeout_info
+    info = FailureReport.poll_timeout_info(report)
 
     if info do
       trigger_event = info.triggered_by.event
@@ -716,13 +706,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
       """
       **Type:** Poll Timeout
 
-      #{report.failure_message}
+      #{FailureReport.failure_message(report)}
       """
     end
   end
 
   defp format_idempotency_markdown(report) do
-    violation = report.idempotency_violation
+    violation = FailureReport.idempotency_violation(report)
 
     if violation do
       attempts_text =
@@ -754,7 +744,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       """
       **Type:** Idempotency Violation
 
-      #{report.failure_message}
+      #{FailureReport.failure_message(report)}
       """
     end
   end
@@ -893,9 +883,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
         "seed" => report.seed
       },
       "failure" => %{
-        "type" => to_string(report.failure_type),
-        "check_name" => report.check_name && to_string(report.check_name),
-        "message" => report.failure_message,
+        "type" => to_string(FailureReport.failure_type(report)),
+        "check_name" =>
+          FailureReport.check_name(report) && to_string(FailureReport.check_name(report)),
+        "message" => FailureReport.failure_message(report),
         "summary" => FailureReport.failure_type_summary(report)
       },
       "error_origin" => %{
@@ -933,11 +924,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
       end
 
     data =
-      if report.idempotency_violation do
+      if FailureReport.idempotency_violation(report) do
         Map.put(
           data,
           "idempotency_violation",
-          serialize_idempotency(report.idempotency_violation)
+          serialize_idempotency(FailureReport.idempotency_violation(report))
         )
       else
         data

@@ -71,7 +71,7 @@ defmodule PropertyDamage.ExUnit do
            [%CreateItem{quantity: 101}]
 
          Failed at command #0:
-           {:check_failed, :quantity_limit, "Quantity 101 exceeds limit"}
+           #PropertyDamage.Failure<assertion_failed :quantity_limit "Quantity 101 exceeds limit">
 
          Reproduce with: seed: 12345
   """
@@ -225,16 +225,21 @@ defmodule PropertyDamage.ExUnit do
     |> Enum.map_join("\n", fn {cmd, idx} -> "  #{idx}. #{inspect(cmd)}" end)
   end
 
-  defp format_failure_reason({:check_failed, name, reason}) do
-    "Check #{inspect(name)} failed: #{reason}"
-  end
+  defp format_failure_reason(%PropertyDamage.Failure{} = failure) do
+    case PropertyDamage.Failure.kind(failure) do
+      kind when kind in [:assertion_failed, :projection_violation] ->
+        "Check #{inspect(PropertyDamage.Failure.name(failure))} failed: " <>
+          "#{inspect(PropertyDamage.Failure.detail(failure))}"
 
-  defp format_failure_reason({:adapter_error, reason}) do
-    "Adapter error: #{inspect(reason)}"
-  end
+      :adapter_error ->
+        "Adapter error: #{inspect(PropertyDamage.Failure.detail(failure))}"
 
-  defp format_failure_reason({:ref_resolution_error, reason}) do
-    "Ref resolution error: #{reason}"
+      :placeholder_resolution ->
+        "Placeholder resolution error: #{inspect(PropertyDamage.Failure.detail(failure))}"
+
+      _ ->
+        inspect(failure)
+    end
   end
 
   defp format_failure_reason(other) do

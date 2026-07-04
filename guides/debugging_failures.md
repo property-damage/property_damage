@@ -22,9 +22,46 @@ The report includes:
 - **original_sequence** - Full command sequence that failed
 - **shrunk_sequence** - Minimal reproduction (after shrinking)
 - **shrink_iterations** / **shrink_time_ms** - How much shrinking it took
-- **check_name** - Which assertion failed
-- **failure_message** / **failure_reason** - Description of the failure
+- **failure_reason** - a `%PropertyDamage.Failure{}` describing what failed (see below)
+- **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over `failure_reason`: which assertion failed and a human-readable description
 - **state_at_failure** - Model state when failure occurred
+
+### The `%Failure{}` reason
+
+`report.failure_reason` is a `%PropertyDamage.Failure{}` — one structured type
+for *why* the run stopped. It nests a class struct under `type` and records the
+branch (if any) on the envelope:
+
+```elixir
+%PropertyDamage.Failure{
+  type: %PropertyDamage.Failure.Assertion{kind: :assertion_failed, name: :balance_non_negative, detail: ...},
+  branch_id: nil
+}
+```
+
+There are three **classes** (`PropertyDamage.Failure.class/1` returns the atom):
+
+- `:assertion` — a property or invariant did not hold (`:assertion_failed`,
+  `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`,
+  `:projection_violation`). This is the class you usually want: it means the SUT
+  misbehaved.
+- `:execution` — the machinery around the SUT failed to run a command
+  (`:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`,
+  `:resource_poller_error`, `:poll_error`, ...). Often a test-harness or
+  infrastructure problem rather than a SUT bug.
+- `:framework` — PropertyDamage itself could not proceed
+  (`:placeholder_resolution`, `:unknown`).
+
+Read a failure with the accessors rather than matching the struct by hand:
+`PropertyDamage.Failure.kind/1`, `name/1`, `detail/1`, `class/1`, `branch_id/1`,
+`partial_events/1`. `FailureReport.failure_type/1` returns the kind and
+`FailureReport.check_name/1` the name.
+
+> **Triage note — tuning vs. bug.** A `kind in [:poll_timeout, :settle_timeout]`
+> failure means the system did not reach the expected state *in time*. That is
+> often a tuning question (the timeout is too tight, or the operation is slower
+> than modeled), not necessarily a bug. Widen the timeout and re-run before
+> assuming the SUT is broken.
 
 ## Step 1: Reproduce the Failure
 

@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Pd.Replay
-  alias PropertyDamage.{Executor, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.{Executor, Failure, FailureReport, Persistence, Sequence}
 
   # Success paths and decision logic are exercised through `exec/1`, the
   # halt-free seam: `run/1` only translates `exec/1`'s status into a
@@ -217,7 +217,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
           original_sequence: branching,
           shrunk_sequence: branching,
           failed_at_index: 1,
-          failure_reason: {:assertion_failed, :count_bounded, %RuntimeError{message: "x"}},
+          failure_reason: Failure.assertion_failed(:count_bounded, %RuntimeError{message: "x"}),
           model: FailingModel,
           adapter: FailingAdapter
         )
@@ -240,7 +240,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
           original_sequence: sequence,
           shrunk_sequence: sequence,
           failed_at_index: 2,
-          failure_reason: {:assertion_failed, :count_bounded, %RuntimeError{message: "x"}},
+          failure_reason: Failure.assertion_failed(:count_bounded, %RuntimeError{message: "x"}),
           model: nil,
           adapter: FailingAdapter
         )

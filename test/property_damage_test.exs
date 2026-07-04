@@ -163,7 +163,7 @@ defmodule PropertyDamageTest do
         )
 
       assert {:error, %PropertyDamage.FailureReport{} = report} = result
-      assert report.check_name == :quantity_limit
+      assert PropertyDamage.FailureReport.check_name(report) == :quantity_limit
       assert is_integer(report.failed_at_index)
 
       # With shrink: false the shrunk sequence is the original
@@ -191,7 +191,8 @@ defmodule PropertyDamageTest do
 
       assert {:error, _report} = result
       assert_received {:failure_report, report}
-      assert %PropertyDamage.FailureReport{check_name: :quantity_limit} = report
+      assert %PropertyDamage.FailureReport{} = report
+      assert PropertyDamage.FailureReport.check_name(report) == :quantity_limit
     end
   end
 

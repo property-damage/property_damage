@@ -105,7 +105,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
 
     test "discovered, and shrinks to the minimal put -> del -> get on one key" do
       assert {:error, failure} = run_seeded(LyingDeleteAdapter, @seed)
-      assert failure.check_name == :read_consistent
+      assert PropertyDamage.FailureReport.check_name(failure) == :read_consistent
 
       commands = Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(failure))
 
@@ -139,7 +139,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
 
     test "discovered, and shrinks to the minimal put -> put -> get with distinct values" do
       assert {:error, failure} = run_seeded(InsertOnlyAdapter, @seed)
-      assert failure.check_name == :read_consistent
+      assert PropertyDamage.FailureReport.check_name(failure) == :read_consistent
 
       commands = Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(failure))
 

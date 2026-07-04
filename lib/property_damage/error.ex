@@ -29,23 +29,8 @@ defmodule PropertyDamage.Error do
   @spec format(term(), error_context()) :: String.t()
   def format(reason, context \\ %{})
 
-  def format({:check_failed, check_name, message}, context) do
-    cmd_info = format_command_info(context)
-
-    """
-    Check Failed: #{inspect(check_name)}
-    #{cmd_info}
-    Reason: #{format_message(message)}
-
-    The check returned an error after the command was executed.
-    This usually indicates the system under test violated an expected invariant.
-
-    Suggestions:
-      - Review the check's logic in #{inspect(check_name)}
-      - Examine the command that triggered the failure
-      - Check if the system state is as expected
-    """
-    |> String.trim()
+  def format(%PropertyDamage.Failure{} = failure, context) do
+    format_failure(PropertyDamage.Failure.kind(failure), failure, context)
   end
 
   def format({:precondition_failed, command_module}, context) do
@@ -68,7 +53,45 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  def format({:adapter_error, reason}, context) do
+  def format(reason, context) do
+    cmd_info = format_command_info(context)
+
+    """
+    Error
+    #{cmd_info}
+    Reason: #{format_message(reason)}
+
+    An unexpected error occurred during test execution.
+    """
+    |> String.trim()
+  end
+
+  # ============================================================================
+  # %Failure{} Formatting (keyed by kind)
+  # ============================================================================
+
+  defp format_failure(kind, failure, context)
+       when kind in [:assertion_failed, :projection_violation] do
+    check_name = PropertyDamage.Failure.name(failure)
+    cmd_info = format_command_info(context)
+
+    """
+    Check Failed: #{inspect(check_name)}
+    #{cmd_info}
+    Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
+
+    The check returned an error after the command was executed.
+    This usually indicates the system under test violated an expected invariant.
+
+    Suggestions:
+      - Review the check's logic in #{inspect(check_name)}
+      - Examine the command that triggered the failure
+      - Check if the system state is as expected
+    """
+    |> String.trim()
+  end
+
+  defp format_failure(:adapter_error, failure, context) do
     adapter = Map.get(context, :adapter, "adapter")
     cmd_info = format_command_info(context)
 
@@ -76,7 +99,7 @@ defmodule PropertyDamage.Error do
     Adapter Error
     #{cmd_info}
     Adapter: #{inspect(adapter)}
-    Error: #{format_message(reason)}
+    Error: #{format_message(PropertyDamage.Failure.detail(failure))}
 
     The adapter's execute/3 function returned an error or raised an exception.
     This usually indicates a problem communicating with the system under test.
@@ -90,13 +113,13 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  def format({:settle_timeout, last_reason}, context) do
+  defp format_failure(:settle_timeout, failure, context) do
     cmd_info = format_command_info(context)
 
     """
     Settle Timeout
     #{cmd_info}
-    Last error: #{format_message(last_reason)}
+    Last error: #{format_message(PropertyDamage.Failure.detail(failure))}
 
     A probe or bridge command timed out waiting for eventual consistency.
     The system did not reach the expected state within the timeout period.
@@ -110,8 +133,9 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  def format({:idempotency_violation, violation}, context) do
+  defp format_failure(:idempotency_violation, failure, context) do
     cmd_info = format_command_info(context)
+    violation = PropertyDamage.Failure.detail(failure)
 
     original = Map.get(violation, :original_events, [])
     retry = Map.get(violation, :retry_events, [])
@@ -134,8 +158,9 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  def format({:stutter_execution_failed, details}, context) do
+  defp format_failure(:stutter_execution_failed, failure, context) do
     cmd_info = format_command_info(context)
+    details = PropertyDamage.Failure.detail(failure)
     retry_number = Map.get(details, :retry_number, "?")
     error = Map.get(details, :error, "unknown")
 
@@ -155,14 +180,13 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  def format({:linearization_failed, branches}, context) do
+  defp format_failure(:linearization, failure, context) do
     cmd_info = format_command_info(context)
-    branch_count = length(branches)
 
     """
     Linearization Failed
     #{cmd_info}
-    Branches: #{branch_count}
+    Details: #{format_message(PropertyDamage.Failure.detail(failure))}
 
     The parallel execution results cannot be explained by any sequential ordering.
     This indicates a race condition or concurrency bug in the SUT.
@@ -176,13 +200,13 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  def format({:nemesis_error, reason}, context) do
+  defp format_failure(:nemesis_error, failure, context) do
     cmd_info = format_command_info(context)
 
     """
     Nemesis Error
     #{cmd_info}
-    Error: #{format_message(reason)}
+    Error: #{format_message(PropertyDamage.Failure.detail(failure))}
 
     A fault injection (nemesis) command failed to inject or restore.
     This is usually an infrastructure issue, not a SUT bug.
@@ -195,17 +219,13 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  def format({:invariant_violated, check_name, reason}, context) do
-    format({:check_failed, check_name, reason}, context)
-  end
-
-  def format(reason, context) do
+  defp format_failure(_kind, failure, context) do
     cmd_info = format_command_info(context)
 
     """
     Error
     #{cmd_info}
-    Reason: #{format_message(reason)}
+    Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
 
     An unexpected error occurred during test execution.
     """

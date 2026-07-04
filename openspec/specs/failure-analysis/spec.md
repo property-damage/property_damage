@@ -6,14 +6,39 @@ Failure analysis provides intelligent post-mortem tooling for PropertyDamage tes
 
 ## Requirements
 
+### Requirement: Structured Failure Reason
+
+A run's `failure_reason` SHALL be a single structured type,
+`%PropertyDamage.Failure{}` (DR-041), not a loose family of `{:tag, ...}` tuples.
+It SHALL nest one class struct under `type` — `Failure.Assertion`,
+`Failure.Execution`, or `Failure.Framework` — so that illegal class/kind
+combinations are unrepresentable, and SHALL record the producing branch (if any)
+as `branch_id` on the envelope (absorbing the former `{:branch_failure, id,
+inner}` wrapper). Each class struct SHALL own a `kind` from a closed, documented
+set; kinds SHALL be globally unique atoms across the three classes. The framework
+SHALL expose `Failure.class/1`, `kind/1`, `name/1`, `detail/1`, `branch_id/1`,
+and `partial_events/1` accessors.
+
+#### Scenario: Kinds partition into three classes
+
+- **WHEN** a run fails
+- **THEN** `Failure.class/1` SHALL return `:assertion` for a property/invariant violation (`:assertion_failed`, `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`, `:projection_violation`)
+- **AND** `:execution` for a command-execution failure (`:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`, `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`, `:malformed_adapter_return`)
+- **AND** `:framework` for a framework-level failure (`:placeholder_resolution`, `:unknown`)
+
+#### Scenario: Report views derive from the failure reason
+
+- **WHEN** a `FailureReport` is built from a `%Failure{}` reason
+- **THEN** `FailureReport.failure_type/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload — all derived from `report.failure_reason` rather than stored as denormalized fields
+
 ### Requirement: Failure Fingerprinting
 
 The system SHALL extract comparable features from each failure report, producing a fingerprint that captures the failure type, check name, triggering command type, command shape, event types, sequence length, sequence shape, state keys, error category, and error pattern.
 
 #### Scenario: Fingerprint from a check failure
 
-- **WHEN** a failure report has `failure_type: :check_failed` and `check_name: :NonNegativeBalance`
-- **THEN** the fingerprint SHALL contain `failure_type: :check_failed` and `check_name: :NonNegativeBalance`
+- **WHEN** a failure report's `failure_reason` is a `%PropertyDamage.Failure{}` of kind `:assertion_failed` naming `:NonNegativeBalance` (so `FailureReport.failure_type/1` is `:assertion_failed` and `check_name/1` is `:NonNegativeBalance`)
+- **THEN** the fingerprint SHALL contain `failure_type: :assertion_failed` and `check_name: :NonNegativeBalance`
 - **AND** the fingerprint SHALL include the command type that triggered the failure
 - **AND** the fingerprint SHALL include the event types produced before failure
 
@@ -120,7 +145,7 @@ The system SHALL classify each failure as originating from the SUT, the test cod
 
 #### Scenario: SUT error with high confidence
 
-- **WHEN** the failure reason is `:check_failed`, `:poll_timeout`, `:idempotency_violation`, or `:linearization_failed`
+- **WHEN** the failure reason is a `%PropertyDamage.Failure{}` of kind `:assertion_failed`, `:poll_timeout`, `:idempotency_violation`, or `:linearization`
 - **THEN** the origin SHALL be classified as `:sut_error` with confidence `:high`
 
 #### Scenario: Test code error with high confidence

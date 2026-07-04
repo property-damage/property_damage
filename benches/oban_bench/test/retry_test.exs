@@ -80,9 +80,13 @@ defmodule ObanBench.RetryTest do
 
       # A clean exactly-once safety violation: the @trigger at: :teardown check
       # on the settled state saw the counter overshoot its expected value.
-      assert {:assertion_failed, :exactly_once,
-              %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}} =
-               report.failure_reason
+      assert %PropertyDamage.Failure{
+               type: %PropertyDamage.Failure.Assertion{
+                 kind: :assertion_failed,
+                 name: :exactly_once,
+                 detail: %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}
+               }
+             } = report.failure_reason
 
       commands =
         PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))

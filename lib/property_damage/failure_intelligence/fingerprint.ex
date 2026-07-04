@@ -66,8 +66,8 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
 
     %__MODULE__{
       seed: report.seed,
-      failure_type: report.failure_type,
-      check_name: report.check_name,
+      failure_type: FailureReport.failure_type(report),
+      check_name: FailureReport.check_name(report),
       command_type: extract_command_type(command),
       command_shape: extract_command_shape(command),
       event_types: extract_event_types(events),
@@ -76,7 +76,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
       sequence_shape: extract_sequence_shape(FailureReport.shrunk_sequence(report)),
       state_keys: extract_state_keys(report.state_at_failure),
       error_category: categorize_error(report),
-      error_pattern: extract_error_pattern(report.failure_message),
+      error_pattern: extract_error_pattern(FailureReport.failure_message(report)),
       error_origin: report.error_origin,
       error_origin_reason: get_in(report.error_origin_details || %{}, [:reason])
     }
@@ -239,26 +239,19 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
   # ============================================================================
 
   defp categorize_error(%FailureReport{} = report) do
+    kind = FailureReport.failure_type(report)
+
     cond do
-      report.failure_type == :check_failed and report.check_name != nil ->
+      kind == :assertion_failed and FailureReport.check_name(report) != nil ->
         :check_violation
 
-      report.failure_type == :invariant_violated ->
+      kind == :projection_violation ->
         :invariant_violation
 
-      report.failure_type == :precondition_failed ->
-        :precondition_failure
-
-      report.failure_type == :postcondition_failed ->
-        :postcondition_failure
-
-      report.failure_type == :exception ->
-        categorize_exception(report.failure_message)
-
-      report.failure_type == :adapter_error ->
+      kind == :adapter_error ->
         :adapter_error
 
-      report.failure_type == :timeout ->
+      kind in [:poll_timeout, :settle_timeout] ->
         :timeout
 
       true ->

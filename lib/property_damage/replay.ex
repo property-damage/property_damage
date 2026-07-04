@@ -73,7 +73,7 @@ defmodule PropertyDamage.Replay do
     definitions, which are reachable from the persisted model.)
   """
 
-  alias PropertyDamage.{EventQueue, FailureReport, Options, Sequence}
+  alias PropertyDamage.{EventQueue, Failure, FailureReport, Options, Sequence}
   alias PropertyDamage.Executor.Stepping
 
   defstruct [
@@ -503,13 +503,19 @@ defmodule PropertyDamage.Replay do
     |> Enum.map(& &1.event)
   end
 
-  # Preserve the documented step.result shape: an assertion failure surfaces as
-  # {:check_failed, name, exception}; everything else as {:error, reason}.
-  defp normalize_result({:assertion_failed, name, {exception, _stacktrace}}),
-    do: {:check_failed, name, exception}
+  # Preserve the documented per-step `result` shape: an assertion failure (now
+  # carried in a %Failure{}) surfaces as {:check_failed, name, exception} — a
+  # replay-local outcome vocabulary distinct from the run-level failure_reason —
+  # while everything else surfaces as {:error, reason}.
+  defp normalize_result(%Failure{type: %Failure.Assertion{kind: :assertion_failed} = t}) do
+    exception =
+      case t.detail do
+        {exception, stacktrace} when is_list(stacktrace) -> exception
+        other -> other
+      end
 
-  defp normalize_result({:assertion_failed, name, exception}),
-    do: {:check_failed, name, exception}
+    {:check_failed, t.name, exception}
+  end
 
   defp normalize_result(reason), do: {:error, reason}
 
