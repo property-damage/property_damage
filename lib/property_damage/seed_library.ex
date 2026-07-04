@@ -122,8 +122,8 @@ defmodule PropertyDamage.SeedLibrary do
     entry = %{
       seed: failure.seed,
       model: inspect(failure.model),
-      failure_type: failure.failure_type,
-      check_name: failure.check_name,
+      failure_type: PropertyDamage.FailureReport.failure_type(failure),
+      check_name: PropertyDamage.FailureReport.check_name(failure),
       tags: Keyword.get(opts, :tags, []),
       description: Keyword.get(opts, :description),
       discovered_at: now_iso8601(),

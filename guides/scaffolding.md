@@ -362,11 +362,16 @@ produces:
 ]
 
 # report.failure_reason:
-{:assertion_failed, :read_consistent,
- %PropertyDamage.AssertionFailed{
-   message: "GET key=3 returned :unset, model expects 71",
-   data: %{key: 3, actual: :unset, expected: 71}
- }}
+%PropertyDamage.Failure{
+  type: %PropertyDamage.Failure.Assertion{
+    kind: :assertion_failed,
+    name: :read_consistent,
+    detail: %PropertyDamage.AssertionFailed{
+      message: "GET key=3 returned :unset, model expects 71",
+      data: %{key: 3, actual: :unset, expected: 71}
+    }
+  }
+}
 ```
 
 Two commands, one key: write a value, read it back, and the read disagrees.

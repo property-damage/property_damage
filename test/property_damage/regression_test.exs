@@ -1,6 +1,7 @@
 defmodule PropertyDamage.RegressionTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Failure
   alias PropertyDamage.FailureReport
   alias PropertyDamage.Regression
   alias PropertyDamage.Sequence
@@ -46,11 +47,17 @@ defmodule PropertyDamage.RegressionTest do
   end
 
   def make_failure(seed, opts \\ []) do
+    failure_reason =
+      Keyword.get_lazy(opts, :failure_reason, fn ->
+        Failure.assertion_failed(
+          Keyword.get(opts, :check_name, :test_check),
+          Keyword.get(opts, :message, "Test failure")
+        )
+      end)
+
     %FailureReport{
       seed: seed,
-      failure_type: Keyword.get(opts, :failure_type, :check_failed),
-      check_name: Keyword.get(opts, :check_name, :test_check),
-      failure_message: Keyword.get(opts, :message, "Test failure"),
+      failure_reason: failure_reason,
       failed_at_index: 1,
       original_sequence: Sequence.linear([%TestCommand.Create{id: "1"}]),
       trace:
@@ -290,11 +297,11 @@ defmodule PropertyDamage.RegressionTest do
 
     @tag :tmp_dir
     test "respects dedup_threshold", %{tmp_dir: tmp_dir} do
-      failure1 = make_failure(12_345, failure_type: :check_failed, check_name: :check_a)
+      failure1 = make_failure(12_345, check_name: :check_a)
       {:ok, _path} = PropertyDamage.Persistence.save(failure1, tmp_dir)
 
       # Different failure type - should be less similar
-      failure2 = make_failure(12_346, failure_type: :invariant_violated, check_name: :check_b)
+      failure2 = make_failure(12_346, failure_reason: Failure.adapter_error(:check_b))
 
       # With high threshold, should not be duplicate
       {is_dup, _} =

@@ -51,8 +51,8 @@ defmodule KratosBench.InvariantsTest do
       report = first_failure(%{reject_leaks: true})
       assert report, "expected the reject_leaks bug to be caught on some seed"
 
-      assert report.check_name == :identity_set,
-             "expected identity-set assertion, got #{inspect(report.check_name)}"
+      assert PropertyDamage.FailureReport.check_name(report) == :identity_set,
+             "expected identity-set assertion, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
     end
 
     test "control: no false positive without the bug" do
@@ -67,8 +67,8 @@ defmodule KratosBench.InvariantsTest do
       report = first_failure(%{modify_ignored: true})
       assert report, "expected the modify_ignored bug to be caught on some seed"
 
-      assert report.check_name == :traits,
-             "expected traits assertion, got #{inspect(report.check_name)}"
+      assert PropertyDamage.FailureReport.check_name(report) == :traits,
+             "expected traits assertion, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
     end
   end
 
@@ -77,8 +77,8 @@ defmodule KratosBench.InvariantsTest do
       report = first_failure(%{login_broken: true})
       assert report, "expected the login_broken bug to be caught on some seed"
 
-      assert report.check_name == :login,
-             "expected login assertion, got #{inspect(report.check_name)}"
+      assert PropertyDamage.FailureReport.check_name(report) == :login,
+             "expected login assertion, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
     end
   end
 end

@@ -277,7 +277,7 @@ defmodule PropertyDamage.Adapter do
   The framework owns the retry loop: an adapter returns `{:retry, _}` to ask to
   be called again, it does not sleep/poll inside `execute/3`. Returning
   `{:retry, _}` from a `:sync` command is a contract violation and is reported
-  as `{:retry_from_sync_command, _}`.
+  as a `%PropertyDamage.Failure{}` of kind `:retry_from_sync_command`.
   """
   @callback execute(
               command :: struct(),

@@ -20,7 +20,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{EventLog.Entry, Linearization, Sequence}
+  alias PropertyDamage.{EventLog.Entry, Failure, Linearization, Sequence}
 
   alias PropertyDamage.Test.EtsRegister
   alias PropertyDamage.Test.EtsRegister.Commands.Increment
@@ -118,7 +118,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
 
       # The lost update is refuted on the increment events alone (no read
       # needed), so it surfaces as a linearization failure, not an assertion.
-      assert {:linearization_failed, _} = failure.failure_reason
+      assert %Failure{type: %Failure.Assertion{kind: :linearization}} = failure.failure_reason
     end
 
     test "the shrunk reproduction still fails" do

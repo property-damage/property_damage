@@ -1,7 +1,7 @@
 #!/usr/bin/env elixir
 # Failure Reproduction Script
 # Generated: 2025-01-01T00:00:00Z
-# Failure: check_failed
+# Failure: assertion_failed
 # Seed: 1
 #
 # Run with: elixir reproduce_1_HASH.exs

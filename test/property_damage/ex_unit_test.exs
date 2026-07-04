@@ -1,6 +1,8 @@
 defmodule PropertyDamage.ExUnitTest do
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Failure
+
   describe "format_failure/1" do
     test "formats basic failure report" do
       report = %{
@@ -9,7 +11,7 @@ defmodule PropertyDamage.ExUnitTest do
         original_commands: [%{type: :create}, %{type: :view}],
         shrunk_commands: [%{type: :create}],
         failed_at_index: 0,
-        failure_reason: {:check_failed, :invariant, "Value too large"},
+        failure_reason: Failure.assertion_failed(:invariant, "Value too large"),
         shrink_iterations: 5,
         shrink_time_ms: 10
       }
@@ -34,7 +36,7 @@ defmodule PropertyDamage.ExUnitTest do
         original_commands: [],
         shrunk_commands: [],
         failed_at_index: 0,
-        failure_reason: {:adapter_error, :connection_failed},
+        failure_reason: Failure.adapter_error(:connection_failed),
         shrink_iterations: 0,
         shrink_time_ms: 0
       }
@@ -51,14 +53,14 @@ defmodule PropertyDamage.ExUnitTest do
         original_commands: [],
         shrunk_commands: [],
         failed_at_index: 0,
-        failure_reason: {:ref_resolution_error, "Missing ref :foo"},
+        failure_reason: Failure.placeholder_resolution("Missing ref :foo"),
         shrink_iterations: 0,
         shrink_time_ms: 0
       }
 
       output = PropertyDamage.ExUnit.format_failure(report)
 
-      assert output =~ "Ref resolution error: Missing ref :foo"
+      assert output =~ ~s(Placeholder resolution error: "Missing ref :foo")
     end
 
     test "formats empty command sequences" do

@@ -17,7 +17,7 @@ defmodule PropertyDamage.AwaitsTest do
 
   import ExUnit.CaptureLog
 
-  alias PropertyDamage.{Await, EventQueue, Executor, Sequence}
+  alias PropertyDamage.{Await, EventQueue, Executor, Failure, Sequence}
 
   # --- Events -----------------------------------------------------------------
 
@@ -205,7 +205,11 @@ defmodule PropertyDamage.AwaitsTest do
         end)
 
       refute result.success
-      assert {:assertion_failed, :at_most_one_webhook, _} = result.failure_reason
+
+      assert %Failure{
+               type: %Failure.Assertion{kind: :assertion_failed, name: :at_most_one_webhook}
+             } =
+               result.failure_reason
 
       # Both deliveries are attributed to the command that owns the issue.
       indices =
@@ -293,7 +297,10 @@ defmodule PropertyDamage.AwaitsTest do
       result = run([%CloseIssue{issue_id: "i1"}], fn _queue -> [] end)
 
       refute result.success
-      assert {:poll_timeout, info} = result.failure_reason
+
+      assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+               result.failure_reason
+
       assert info.triggered_by.assertion_name == :webhook_eventually_arrives
 
       # RED before P5: poll timeouts report failed_at_index: nil, losing the

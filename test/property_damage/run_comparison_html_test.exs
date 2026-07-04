@@ -3,7 +3,7 @@ defmodule PropertyDamage.RunComparisonHtmlTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{RunComparison, RunTrace, Sequence}
+  alias PropertyDamage.{Failure, RunComparison, RunTrace, Sequence}
   alias PropertyDamage.RunComparison.Encode
 
   defmodule Cmd, do: defstruct([:n])
@@ -45,7 +45,7 @@ defmodule PropertyDamage.RunComparisonHtmlTest do
         source_revision: {"abc1234", false},
         plan_source: :generated,
         event_log: [entry(%Result{status: :error})],
-        outcome: {:fail, {:check_failed, :Inv, "boom"}}
+        outcome: {:fail, Failure.assertion_failed(:Inv, "boom")}
       )
 
     RunComparison.compare([t0, t1])

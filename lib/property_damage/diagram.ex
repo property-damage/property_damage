@@ -105,8 +105,8 @@ defmodule PropertyDamage.Diagram do
     opts =
       @default_options
       |> Keyword.merge(opts)
-      |> Keyword.put(:failure_message, report.failure_message)
-      |> Keyword.put(:failure_type, report.failure_type)
+      |> Keyword.put(:failure_message, FailureReport.failure_message(report))
+      |> Keyword.put(:failure_type, FailureReport.failure_type(report))
 
     title =
       Keyword.get(opts, :title) ||

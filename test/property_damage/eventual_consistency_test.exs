@@ -13,6 +13,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
   use ExUnit.Case, async: false
 
   alias PropertyDamage.Executor
+  alias PropertyDamage.Failure
 
   defmodule Events do
     defmodule PaymentInitiated, do: defstruct([:id])
@@ -137,7 +138,10 @@ defmodule PropertyDamage.EventualConsistencyTest do
     {:ok, result} = run_executor(SilentAdapter)
 
     refute result.success
-    assert {:poll_timeout, info} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+             result.failure_reason
+
     assert info.triggered_by.assertion_name == :payment_eventually_confirmed
     # The crash these fixes prevent was a missing :projections_before key
     assert Map.has_key?(result, :projections_before)
@@ -230,7 +234,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
       )
 
     assert {:error, %PropertyDamage.FailureReport{} = report} = result
-    assert {:poll_timeout, _info} = report.failure_reason
+    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout}} = report.failure_reason
 
     # DR-030: a @poll_state liveness timeout is now attributed to the command
     # whose event opened the poll window (InitiatePayment at index 0), so the

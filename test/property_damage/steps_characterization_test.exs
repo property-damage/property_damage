@@ -12,6 +12,7 @@ defmodule PropertyDamage.StepsCharacterizationTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.Failure
   alias PropertyDamage.FailureReport
   alias PropertyDamage.Sequence
   alias PropertyDamage.Sequence.Position
@@ -26,7 +27,7 @@ defmodule PropertyDamage.StepsCharacterizationTest do
       original_sequence: Sequence.linear([%Cmd{id: 0}, %Cmd{id: 1}, %Cmd{id: 2}]),
       shrunk_sequence: Sequence.linear([%Cmd{id: 0}, %Cmd{id: 1}, %Cmd{id: 2}]),
       failed_at_index: 1,
-      failure_reason: {:check_failed, :Inv, "boom"},
+      failure_reason: Failure.assertion_failed(:Inv, "boom"),
       event_log: [
         %Entry{timestamp: 1, command_index: 0, event: %Ev{tag: :e0}, source: :command},
         %Entry{timestamp: 2, command_index: 1, event: %Ev{tag: :e1}, source: :command},
@@ -56,7 +57,7 @@ defmodule PropertyDamage.StepsCharacterizationTest do
       original_sequence: seq,
       shrunk_sequence: seq,
       failed_at_index: 2,
-      failure_reason: {:branch_failure, 1, {:check_failed, :Inv, "boom"}},
+      failure_reason: Failure.in_branch(Failure.assertion_failed(:Inv, "boom"), 1),
       event_log: [
         %Entry{timestamp: 1, command_index: 0, event: %Ev{tag: :p0}, source: :command},
         %Entry{
@@ -99,7 +100,7 @@ defmodule PropertyDamage.StepsCharacterizationTest do
       original_sequence: Sequence.linear([%Cmd{id: 0}, %Cmd{id: 1}]),
       shrunk_sequence: Sequence.linear([%Cmd{id: 0}, %Cmd{id: 1}]),
       failed_at_index: nil,
-      failure_reason: {:check_failed, :SettledInvariant, "whole-run"},
+      failure_reason: Failure.assertion_failed(:SettledInvariant, "whole-run"),
       event_log: [
         %Entry{timestamp: 1, command_index: 0, event: %Ev{tag: :e0}, source: :command},
         %Entry{timestamp: 2, command_index: 1, event: %Ev{tag: :e1}, source: :command}

@@ -15,6 +15,7 @@ defmodule PropertyDamage.Executor.Nemesis do
 
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Executor
+  alias PropertyDamage.Failure
   alias PropertyDamage.Nemesis
   alias PropertyDamage.PlaceholderRegistry
 
@@ -39,7 +40,7 @@ defmodule PropertyDamage.Executor.Nemesis do
         )
 
       {:error, reason} ->
-        {:error, {:ref_resolution_error, reason}, state}
+        {:error, Failure.placeholder_resolution(reason), state}
     end
   end
 
@@ -143,7 +144,7 @@ defmodule PropertyDamage.Executor.Nemesis do
                 command_fold_ordinals: command_fold_ordinals
               })
 
-            {:error, {:assertion_failed, async_name, async_reason}, failed_state}
+            {:error, Failure.assertion_failed(async_name, async_reason), failed_state}
 
           {:ok, async_counters, async_failures} ->
             # Run checks
@@ -192,12 +193,12 @@ defmodule PropertyDamage.Executor.Nemesis do
                     command_fold_ordinals: command_fold_ordinals
                   })
 
-                {:error, {:assertion_failed, assertion_name, reason}, failed_state}
+                {:error, Failure.assertion_failed(assertion_name, reason), failed_state}
             end
         end
 
       {:error, reason} ->
-        {:error, {:nemesis_error, reason}, state}
+        {:error, Failure.nemesis_error(reason), state}
     end
   end
 

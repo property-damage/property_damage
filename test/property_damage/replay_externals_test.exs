@@ -13,7 +13,14 @@ defmodule PropertyDamage.ReplayExternalsTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{FailureReport, Placeholder, PlaceholderRegistry, Replay, Sequence}
+  alias PropertyDamage.{
+    Failure,
+    FailureReport,
+    Placeholder,
+    PlaceholderRegistry,
+    Replay,
+    Sequence
+  }
 
   defmodule Created do
     import PropertyDamage, only: [external: 0]
@@ -90,7 +97,7 @@ defmodule PropertyDamage.ReplayExternalsTest do
       original_sequence: seq,
       shrunk_sequence: seq,
       failed_at_index: 1,
-      failure_reason: {:check_failed, :Dummy, "for replay"},
+      failure_reason: Failure.assertion_failed(:Dummy, "for replay"),
       model: Model,
       adapter: Adapter
     )

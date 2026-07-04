@@ -137,6 +137,7 @@ defmodule PropertyDamage do
     Coverage,
     EventQueue,
     Executor,
+    Failure,
     FailureReport,
     Generator,
     MockServiceRegistry,
@@ -1388,8 +1389,9 @@ defmodule PropertyDamage do
   end
 
   # Check if a failure reason is stutter-related (idempotency violation or execution failure)
-  defp stutter_failure?({:idempotency_violation, _}), do: true
-  defp stutter_failure?({:stutter_execution_failed, _}), do: true
+  defp stutter_failure?(%Failure{} = failure),
+    do: Failure.kind(failure) in [:idempotency_violation, :stutter_execution_failed]
+
   defp stutter_failure?(_), do: false
 
   # Extra Executor.run opts for the post-shrink re-execution (DR-029). For a
@@ -1939,7 +1941,7 @@ defmodule PropertyDamage do
   ## Returns
 
   - `{:ok, event_log}` - List of `EventLog.Entry` structs containing all events
-  - `{:error, {:adapter_error, reason, partial_events}}` - Adapter failed
+  - `{:error, %PropertyDamage.Failure{}}` - a `:adapter_error` (with `partial_events`)
 
   ## Example
 
