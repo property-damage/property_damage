@@ -512,7 +512,10 @@ defmodule PropertyDamage.Integration do
         IO.puts("First failure:")
         failure = hd(result.failures)
         IO.puts("  Seed: #{failure.seed}")
-        IO.puts("  Invariant: #{inspect(PropertyDamage.FailureReport.check_name(failure) || failure.failure_reason)}")
+
+        IO.puts(
+          "  Invariant: #{inspect(PropertyDamage.FailureReport.check_name(failure) || failure.failure_reason)}"
+        )
       end
     end
 
@@ -646,7 +649,9 @@ defmodule PropertyDamage.Integration do
       |> Enum.take(5)
       |> Enum.with_index(1)
       |> Enum.each(fn {failure, idx} ->
-        IO.puts("  #{idx}. Seed: #{failure.seed}, Check: #{inspect(PropertyDamage.FailureReport.check_name(failure))}")
+        IO.puts(
+          "  #{idx}. Seed: #{failure.seed}, Check: #{inspect(PropertyDamage.FailureReport.check_name(failure))}"
+        )
       end)
 
       if length(result.failures) > 5 do

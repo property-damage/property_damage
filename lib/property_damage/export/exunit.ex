@@ -246,8 +246,11 @@ defmodule PropertyDamage.Export.ExUnit do
 
     check_match =
       case FailureReport.check_name(report) do
-        nil -> ""
-        check -> "\n          assert PropertyDamage.FailureReport.check_name(failure) == #{inspect(check)}"
+        nil ->
+          ""
+
+        check ->
+          "\n          assert PropertyDamage.FailureReport.check_name(failure) == #{inspect(check)}"
       end
 
     """

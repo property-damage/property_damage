@@ -884,7 +884,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       },
       "failure" => %{
         "type" => to_string(FailureReport.failure_type(report)),
-        "check_name" => FailureReport.check_name(report) && to_string(FailureReport.check_name(report)),
+        "check_name" =>
+          FailureReport.check_name(report) && to_string(FailureReport.check_name(report)),
         "message" => FailureReport.failure_message(report),
         "summary" => FailureReport.failure_type_summary(report)
       },

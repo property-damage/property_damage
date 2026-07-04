@@ -205,7 +205,11 @@ defmodule Mix.Tasks.Pd.Replay do
     IO.puts("Model:    #{inspect(failure.model)}")
     IO.puts("Adapter:  #{inspect(failure.adapter)}")
     IO.puts("Seed:     #{inspect(failure.seed)}")
-    IO.puts("Failure:  #{PropertyDamage.FailureReport.failure_type(failure)}#{check_suffix(PropertyDamage.FailureReport.check_name(failure))}")
+
+    IO.puts(
+      "Failure:  #{PropertyDamage.FailureReport.failure_type(failure)}#{check_suffix(PropertyDamage.FailureReport.check_name(failure))}"
+    )
+
     IO.puts("Commands: #{command_count}")
   end
 

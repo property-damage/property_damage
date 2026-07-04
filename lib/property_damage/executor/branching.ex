@@ -15,10 +15,10 @@ defmodule PropertyDamage.Executor.Branching do
   # finalization from Executor.Finalization, and auto-restore from Executor.Nemesis.
 
   alias PropertyDamage.Executor
-  alias PropertyDamage.Failure
   alias PropertyDamage.Executor.Events
   alias PropertyDamage.Executor.Finalization
   alias PropertyDamage.Executor.Nemesis
+  alias PropertyDamage.Failure
   alias PropertyDamage.Linearization
   alias PropertyDamage.Placeholder
   alias PropertyDamage.PlaceholderRegistry
