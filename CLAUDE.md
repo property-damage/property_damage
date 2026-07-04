@@ -73,9 +73,40 @@ All user-facing contracts are defined as behaviours:
 
 Test support modules live in `test/support/` and are compiled during test via `elixirc_paths(:test)` in mix.exs. Key files: `test_commands.ex`, `test_model.ex`, `test_projections.ex`, `test_adapter.ex`.
 
+## Verification gauntlet
+
+Run before declaring any change done, and again before any merge:
+
+1. `mix test`
+2. `mix format --check-formatted` — root AND each touched bench under `benches/*`
+   (the root formatter does not cover bench projects)
+3. `mix credo --strict` (CI gates on it)
+
+Never pipe a gating command (`cmd | tail` makes tail's exit code the gate).
+Redirect long output to a file instead. Judge `gh pr checks` by its own exit code.
+
+## Evidence standards
+
+- A defect fix or behavior-change claim ships with a test proven RED against the
+  pre-change code.
+- Detection-shaped features (assertions, coverage, mutation, forensics) need a
+  control proving the test can fail: a seeded bug, a removed invariant, or a
+  non-reproduction control. Empty command lists and always-true assertions are
+  vacuous fixtures, not evidence.
+- Before trusting an untested module, grep for callers of its public entry points
+  and drive its headline documented path end-to-end with non-trivial fixtures.
+
+## Conventions
+
+- Pre-v1: clean breaking changes over deprecations and shims.
+- Persistence format changes bump the version; loaders refuse older versions.
+- Consequential design choices get a Decision Record in `docs/decisions/`
+  (keep the DR index current).
+- Every guide snippet is executed before commit.
+
 ## Specs and documentation
 
-- **OpenSpec** (`openspec/`) — Behavioral specifications across 14 domains (command, model, projection, execution-engine, shrinking, etc.) under `openspec/specs/`. Requirements use RFC 2119 keywords (SHALL, MUST, SHOULD, MAY) with Given/When/Then scenarios, and reference Decision Records (DR-001 through DR-020). Conventions are in `openspec/config.yaml`. When changing observable behavior, check whether the affected domain spec needs updating.
+- **OpenSpec** (`openspec/`) — Behavioral specifications across 14 domains (command, model, projection, execution-engine, shrinking, etc.) under `openspec/specs/`. Requirements use RFC 2119 keywords (SHALL, MUST, SHOULD, MAY) with Given/When/Then scenarios, and reference Decision Records in `docs/decisions/`. Conventions are in `openspec/config.yaml`. When changing observable behavior, check whether the affected domain spec needs updating.
 - **Guides** (`guides/`) — User-facing guides wired into ex_doc via the `extras` in mix.exs. New features or behavior changes often need a corresponding guide update.
 
 ## Dependencies
