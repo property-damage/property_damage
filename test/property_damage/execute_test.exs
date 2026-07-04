@@ -5,6 +5,7 @@ defmodule PropertyDamage.ExecuteTest do
 
   alias PropertyDamage
   alias PropertyDamage.EventQueue
+  alias PropertyDamage.Failure
 
   # Simple test adapter that tracks calls and returns configurable events
   defmodule TestAdapter do
@@ -188,7 +189,14 @@ defmodule PropertyDamage.ExecuteTest do
     test "returns error when adapter execution fails" do
       commands = [%{action: :fail}]
 
-      assert {:error, {:adapter_error, :intentional_failure, []}} =
+      assert {:error,
+              %Failure{
+                type: %Failure.Execution{
+                  kind: :adapter_error,
+                  detail: :intentional_failure,
+                  partial_events: []
+                }
+              }} =
                PropertyDamage.execute(commands, adapter: TestAdapter)
     end
 
@@ -199,7 +207,14 @@ defmodule PropertyDamage.ExecuteTest do
         %{action: :create, id: 2}
       ]
 
-      assert {:error, {:adapter_error, :intentional_failure, partial_events}} =
+      assert {:error,
+              %Failure{
+                type: %Failure.Execution{
+                  kind: :adapter_error,
+                  detail: :intentional_failure,
+                  partial_events: partial_events
+                }
+              }} =
                PropertyDamage.execute(commands, adapter: TestAdapter)
 
       # Should have events from the first successful command
@@ -217,7 +232,14 @@ defmodule PropertyDamage.ExecuteTest do
     test "includes custom error reason from adapter" do
       commands = [%{action: :fail_with_reason, reason: {:custom_error, "details"}}]
 
-      assert {:error, {:adapter_error, {:custom_error, "details"}, []}} =
+      assert {:error,
+              %Failure{
+                type: %Failure.Execution{
+                  kind: :adapter_error,
+                  detail: {:custom_error, "details"},
+                  partial_events: []
+                }
+              }} =
                PropertyDamage.execute(commands, adapter: TestAdapter)
     end
   end
@@ -347,7 +369,12 @@ defmodule PropertyDamage.ExecuteTest do
           adapter_config: %{test_pid: self()}
         )
 
-      assert {:error, {:adapter_error, {:ref_resolution_error, _}, _partial}} = result
+      # The unresolved placeholder surfaces as a placeholder_resolution framework
+      # failure, wrapped by the raw path's adapter_error envelope.
+      assert {:error, %Failure{type: %Failure.Execution{kind: :adapter_error, detail: inner}}} =
+               result
+
+      assert %Failure{type: %Failure.Framework{kind: :placeholder_resolution}} = inner
     end
   end
 end

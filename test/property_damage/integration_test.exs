@@ -95,7 +95,7 @@ defmodule PropertyDamage.IntegrationTest do
       # failures are %FailureReport{} structs.
       failure = hd(result.failures)
       assert %PropertyDamage.FailureReport{} = failure
-      assert failure.check_name == :quantity_limit
+      assert PropertyDamage.FailureReport.check_name(failure) == :quantity_limit
       assert is_integer(failure.seed)
     end
 

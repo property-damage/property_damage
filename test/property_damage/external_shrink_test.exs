@@ -13,7 +13,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Executor, Placeholder, PlaceholderRegistry, Sequence, Shrinker}
+  alias PropertyDamage.{Executor, Failure, Placeholder, PlaceholderRegistry, Sequence, Shrinker}
 
   defmodule Created do
     import PropertyDamage, only: [external: 0]
@@ -108,7 +108,13 @@ defmodule PropertyDamage.ExternalShrinkTest do
     # Establish the original failure (adapter error at the Use command).
     {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
     assert result.failed_at_index == 4
-    assert match?({:adapter_error, :consumer_saw_real_id}, result.failure_reason)
+
+    assert match?(
+             %Failure{
+               type: %Failure.Execution{kind: :adapter_error, detail: :consumer_saw_real_id}
+             },
+             result.failure_reason
+           )
 
     shrunk =
       Shrinker.shrink(full,
@@ -129,7 +135,13 @@ defmodule PropertyDamage.ExternalShrinkTest do
     # only possible if its consumer's external resolved against the remapped
     # producer position.
     {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
-    assert match?({:adapter_error, :consumer_saw_real_id}, replay.failure_reason)
+
+    assert match?(
+             %Failure{
+               type: %Failure.Execution{kind: :adapter_error, detail: :consumer_saw_real_id}
+             },
+             replay.failure_reason
+           )
   end
 
   test "hierarchical shrinking (long sequence) preserves the producer->consumer dependency" do
@@ -148,7 +160,13 @@ defmodule PropertyDamage.ExternalShrinkTest do
       |> Sequence.with_registry(reg)
 
     {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
-    assert match?({:adapter_error, :consumer_saw_real_id}, result.failure_reason)
+
+    assert match?(
+             %Failure{
+               type: %Failure.Execution{kind: :adapter_error, detail: :consumer_saw_real_id}
+             },
+             result.failure_reason
+           )
 
     shrunk =
       Shrinker.shrink(full,
@@ -163,7 +181,13 @@ defmodule PropertyDamage.ExternalShrinkTest do
     assert [%Create{}, %Use{}] = commands
 
     {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
-    assert match?({:adapter_error, :consumer_saw_real_id}, replay.failure_reason)
+
+    assert match?(
+             %Failure{
+               type: %Failure.Execution{kind: :adapter_error, detail: :consumer_saw_real_id}
+             },
+             replay.failure_reason
+           )
   end
 
   test "an async producer whose external is consumed downstream is retained when shrinking" do
@@ -181,7 +205,13 @@ defmodule PropertyDamage.ExternalShrinkTest do
 
     {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
     assert result.failed_at_index == 1
-    assert match?({:adapter_error, :consumer_saw_real_id}, result.failure_reason)
+
+    assert match?(
+             %Failure{
+               type: %Failure.Execution{kind: :adapter_error, detail: :consumer_saw_real_id}
+             },
+             result.failure_reason
+           )
 
     shrunk =
       Shrinker.shrink(full,
@@ -199,6 +229,12 @@ defmodule PropertyDamage.ExternalShrinkTest do
     assert [%AsyncCreate{}, %Use{}] = commands
 
     {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
-    assert match?({:adapter_error, :consumer_saw_real_id}, replay.failure_reason)
+
+    assert match?(
+             %Failure{
+               type: %Failure.Execution{kind: :adapter_error, detail: :consumer_saw_real_id}
+             },
+             replay.failure_reason
+           )
   end
 end

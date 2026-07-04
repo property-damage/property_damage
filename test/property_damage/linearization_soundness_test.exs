@@ -27,7 +27,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{Executor, Linearization, Sequence}
+  alias PropertyDamage.{Executor, Failure, Linearization, Sequence}
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.{FailingModel, SimpleAdapter}
@@ -181,8 +181,13 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
 
       assert refutation.check_name == :quantity_limit
 
-      assert {:assertion_failed, :quantity_limit, {%PropertyDamage.AssertionFailed{}, _st}} =
-               refutation.reason
+      assert %Failure{
+               type: %Failure.Assertion{
+                 kind: :assertion_failed,
+                 name: :quantity_limit,
+                 detail: {%PropertyDamage.AssertionFailed{}, _st}
+               }
+             } = refutation.reason
     end
 
     test "executor reports the cross-branch violation as a branch_failure (old code missed it)" do
@@ -200,8 +205,10 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
 
       refute result.success
 
-      assert {:branch_failure, _bid, {:assertion_failed, :quantity_limit, _}} =
-               result.failure_reason
+      assert %Failure{
+               type: %Failure.Assertion{kind: :assertion_failed, name: :quantity_limit},
+               branch_id: _bid
+             } = result.failure_reason
     end
 
     test "a read no ordering can explain is refuted on event incompatibility (refutation is nil)" do

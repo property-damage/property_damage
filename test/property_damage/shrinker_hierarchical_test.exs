@@ -3,7 +3,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Executor, Placeholder, PlaceholderRegistry, Sequence, Shrinker}
+  alias PropertyDamage.{Executor, Failure, Placeholder, PlaceholderRegistry, Sequence, Shrinker}
   alias PropertyDamage.Shrinker.Config
 
   alias PropertyDamage.Test.Commands.Link
@@ -114,7 +114,11 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
 
       {:ok, replayed} = Executor.run(result.sequence, LinkModel, LinkAdapter)
       refute replayed.success
-      assert match?({:assertion_failed, :weight_limit, _}, replayed.failure_reason)
+
+      assert match?(
+               %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :weight_limit}},
+               replayed.failure_reason
+             )
     end
   end
 
@@ -158,8 +162,16 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
 
       {:ok, replayed} = Executor.run(shrunk.sequence, LinkModel, LinkAdapter)
       refute replayed.success
-      refute match?({:ref_resolution_error, _}, replayed.failure_reason)
-      assert match?({:assertion_failed, :weight_limit, _}, replayed.failure_reason)
+
+      refute match?(
+               %Failure{type: %Failure.Framework{kind: :placeholder_resolution}},
+               replayed.failure_reason
+             )
+
+      assert match?(
+               %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :weight_limit}},
+               replayed.failure_reason
+             )
     end
   end
 end

@@ -7,7 +7,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Executor, Sequence}
+  alias PropertyDamage.{Executor, Failure, Sequence}
 
   defmodule Cmd do
     use PropertyDamage.Command
@@ -80,19 +80,33 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   test "a raising adapter becomes a graceful adapter_error, not a crash" do
     assert {:ok, result} = run(NoopModel, :raise)
     assert result.failed_at_index == 0
-    assert match?({:adapter_error, %RuntimeError{message: "adapter boom"}}, result.failure_reason)
+
+    assert match?(
+             %Failure{
+               type: %Failure.Execution{
+                 kind: :adapter_error,
+                 detail: %RuntimeError{message: "adapter boom"}
+               }
+             },
+             result.failure_reason
+           )
   end
 
   test "a malformed atom return is reported, not a CaseClauseError" do
     assert {:ok, result} = run(NoopModel, :malformed_atom)
     assert result.failed_at_index == 0
-    assert result.failure_reason == {:malformed_adapter_return, :garbage}
+
+    assert %Failure{type: %Failure.Execution{kind: :malformed_adapter_return, detail: :garbage}} =
+             result.failure_reason
   end
 
   test "an {:ok, non-list} return is reported as malformed" do
     assert {:ok, result} = run(NoopModel, :malformed_ok)
     assert result.failed_at_index == 0
-    assert result.failure_reason == {:malformed_adapter_return, {:ok, :not_a_list}}
+
+    assert %Failure{
+             type: %Failure.Execution{kind: :malformed_adapter_return, detail: {:ok, :not_a_list}}
+           } = result.failure_reason
   end
 
   test "a sync command returning {:retry, _} is reported as a clear contract error, not a CaseClauseError" do
@@ -100,19 +114,29 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     assert result.failed_at_index == 0
     # {:retry, _} is the probe/async settle protocol; a :sync command must not
     # return it. Surface a specific contract error, not generic :malformed.
-    assert {:retry_from_sync_command, details} = result.failure_reason
+    assert %Failure{type: %Failure.Execution{kind: :retry_from_sync_command, detail: details}} =
+             result.failure_reason
+
     assert details.reason == :not_ready
   end
 
   test "a plain {:error, reason} is reported as adapter_error" do
     assert {:ok, result} = run(NoopModel, :error)
     assert result.failed_at_index == 0
-    assert result.failure_reason == {:adapter_error, :nope}
+
+    assert %Failure{type: %Failure.Execution{kind: :adapter_error, detail: :nope}} =
+             result.failure_reason
   end
 
   test "a raising projection becomes a projection_violation, not a crash" do
     assert {:ok, result} = run(RaisingProjectionModel, :ok)
     assert result.failed_at_index == 0
-    assert match?({:projection_violation, RaisingProjection, _}, result.failure_reason)
+
+    assert match?(
+             %Failure{
+               type: %Failure.Assertion{kind: :projection_violation, name: RaisingProjection}
+             },
+             result.failure_reason
+           )
   end
 end

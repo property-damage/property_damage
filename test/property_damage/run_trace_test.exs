@@ -6,7 +6,7 @@ defmodule PropertyDamage.RunTraceTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
   alias PropertyDamage.Sequence.Position
 
   defmodule Cmd, do: defstruct([:id])
@@ -78,7 +78,7 @@ defmodule PropertyDamage.RunTraceTest do
         original_sequence: Sequence.linear([%Cmd{id: 0}, %Cmd{id: 1}]),
         shrunk_sequence: Sequence.linear([%Cmd{id: 0}, %Cmd{id: 1}]),
         failed_at_index: 1,
-        failure_reason: {:check_failed, :Inv, "boom"},
+        failure_reason: Failure.assertion_failed(:Inv, "boom"),
         event_log: [
           %Entry{timestamp: 1, command_index: 0, event: %Ev{tag: :e0}, source: :command},
           %Entry{

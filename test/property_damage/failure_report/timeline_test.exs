@@ -2,6 +2,7 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.Failure
   alias PropertyDamage.FailureReport
   alias PropertyDamage.FailureReport.Timeline
   alias PropertyDamage.Sequence
@@ -33,7 +34,7 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
       shrunk_sequence: Sequence.branching([%Alpha{}], [[%Beta{}], [%Gamma{}]], [%Delta{}]),
       failed_at_index: 1,
       branch_id: 1,
-      failure_reason: {:branch_failure, 1, {:check_failed, :TestCheck, "boom"}},
+      failure_reason: Failure.in_branch(Failure.assertion_failed(:TestCheck, "boom"), 1),
       model: TestModel,
       adapter: TestAdapter
     )
@@ -46,7 +47,7 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
       original_sequence: Sequence.linear([%CreateOrder{id: 1}]),
       shrunk_sequence: Sequence.linear([%CreateOrder{id: 1}]),
       failed_at_index: 0,
-      failure_reason: {:check_failed, :TestCheck, "boom"},
+      failure_reason: Failure.assertion_failed(:TestCheck, "boom"),
       event_log: [
         %Entry{timestamp: 1, command_index: 0, event: %CreateOrder{id: 1}, source: :command},
         # Injector events carry command_index: nil; they must not vanish.
@@ -80,7 +81,7 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
           original_sequence: Sequence.linear([%CreateOrder{id: 1}]),
           shrunk_sequence: Sequence.linear([%CreateOrder{id: 1}]),
           failed_at_index: 0,
-          failure_reason: {:check_failed, :TestCheck, "boom"},
+          failure_reason: Failure.assertion_failed(:TestCheck, "boom"),
           event_log: [
             %Entry{timestamp: 1, command_index: 0, event: %CreateOrder{id: 1}, source: :command},
             # A nemesis event recorded against command 0 (non-nil command_index):

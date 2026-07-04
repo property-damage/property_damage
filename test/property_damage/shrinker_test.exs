@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ShrinkerTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Sequence, Shrinker}
+  alias PropertyDamage.{Failure, Sequence, Shrinker}
   alias PropertyDamage.Shrinker.Config
 
   alias PropertyDamage.Test.Commands.CreateItem
@@ -12,147 +12,121 @@ defmodule PropertyDamage.ShrinkerTest do
   # ============================================================================
 
   describe "failure_signature/1" do
-    test "extracts signature from check_failed" do
-      reason = {:check_failed, :balance_invariant, "Balance negative"}
-
-      assert Shrinker.failure_signature(reason) == %{
-               type: :check_failed,
-               check_name: :balance_invariant
-             }
+    test "extracts {kind, name} from an assertion failure" do
+      reason = Failure.assertion_failed(:balance_invariant, "Balance negative")
+      assert Shrinker.failure_signature(reason) == {:assertion_failed, :balance_invariant}
     end
 
     test "extracts signature from idempotency_violation" do
-      reason = {:idempotency_violation, %{command: %{}, events: []}}
-
-      assert Shrinker.failure_signature(reason) == %{
-               type: :idempotency_violation,
-               check_name: nil
-             }
+      reason = Failure.idempotency_violation(%{command: %{}, events: []})
+      assert Shrinker.failure_signature(reason) == {:idempotency_violation, nil}
     end
 
-    test "extracts signature from linearization_failed" do
-      reason = {:linearization_failed, "No valid ordering found"}
-
-      assert Shrinker.failure_signature(reason) == %{
-               type: :linearization_failed,
-               check_name: nil
-             }
+    test "extracts signature from linearization" do
+      reason = Failure.linearization("No valid ordering found")
+      assert Shrinker.failure_signature(reason) == {:linearization, nil}
     end
 
-    test "unwraps branch_failure to get inner signature" do
-      inner_reason = {:check_failed, :consistency, "Mismatch"}
-      reason = {:branch_failure, 2, inner_reason}
-
-      assert Shrinker.failure_signature(reason) == %{
-               type: :check_failed,
-               check_name: :consistency
-             }
+    test "a branch failure carries the inner kind + name (branch_id not in the signature)" do
+      inner = Failure.assertion_failed(:consistency, "Mismatch")
+      reason = Failure.in_branch(inner, 2)
+      assert Shrinker.failure_signature(reason) == {:assertion_failed, :consistency}
     end
 
     test "extracts signature from adapter_error" do
-      reason = {:adapter_error, :connection_refused}
-
-      assert Shrinker.failure_signature(reason) == %{
-               type: :adapter_error,
-               check_name: nil
-             }
+      reason = Failure.adapter_error(:connection_refused)
+      assert Shrinker.failure_signature(reason) == {:adapter_error, nil}
     end
 
-    test "extracts signature from ref_resolution_error" do
-      reason = {:ref_resolution_error, :unknown_ref}
-
-      assert Shrinker.failure_signature(reason) == %{
-               type: :ref_resolution_error,
-               check_name: nil
-             }
+    test "extracts signature from placeholder_resolution" do
+      reason = Failure.placeholder_resolution(:unknown_placeholder)
+      assert Shrinker.failure_signature(reason) == {:placeholder_resolution, nil}
     end
 
     test "extracts signature from stutter_execution_failed" do
-      reason = {:stutter_execution_failed, :timeout}
-
-      assert Shrinker.failure_signature(reason) == %{
-               type: :stutter_execution_failed,
-               check_name: nil
-             }
+      reason = Failure.stutter_execution_failed(:timeout)
+      assert Shrinker.failure_signature(reason) == {:stutter_execution_failed, nil}
     end
 
-    test "handles unknown tuple reasons" do
-      reason = {:custom_error, :some_details, "extra"}
-
-      assert Shrinker.failure_signature(reason) == %{
-               type: :custom_error,
-               check_name: nil
-             }
+    test "handles non-Failure reasons" do
+      assert Shrinker.failure_signature(:error) == {:unknown, nil}
+      assert Shrinker.failure_signature("string") == {:unknown, nil}
+      assert Shrinker.failure_signature(123) == {:unknown, nil}
     end
 
-    test "handles non-tuple reasons" do
-      assert Shrinker.failure_signature(:error) == %{type: :unknown, check_name: nil}
-      assert Shrinker.failure_signature("string") == %{type: :unknown, check_name: nil}
-      assert Shrinker.failure_signature(123) == %{type: :unknown, check_name: nil}
+    test "named assertion failures carry the assertion name (DR-025)" do
+      reason = Failure.assertion_failed(:counter_never_exceeds, {%RuntimeError{}, []})
+      assert Shrinker.failure_signature(reason) == {:assertion_failed, :counter_never_exceeds}
     end
 
-    test "named assertion failures carry the assertion name as the check name (DR-025)" do
-      reason = {:assertion_failed, :counter_never_exceeds, {%RuntimeError{}, []}}
+    test "a poll_timeout and an assertion failure of the SAME name are NOT equivalent" do
+      # Load-bearing (DR-041 D4): both name themselves :ledger_settles, but they
+      # are different bugs. Keying the signature on the globally-unique KIND (not
+      # the coarser class) keeps them distinct; a class-based signature
+      # ({:assertion, :ledger_settles} for both) would merge them and let the
+      # shrinker swap a poll-timeout for an invariant violation of the same name.
+      name = :ledger_settles
 
-      assert Shrinker.failure_signature(reason) == %{
-               type: :assertion_failed,
-               check_name: :counter_never_exceeds
-             }
+      poll =
+        Failure.poll_timeout(%{
+          triggered_by: %{assertion_name: name},
+          elapsed_ms: 10,
+          poll_count: 1
+        })
+
+      assertion = Failure.assertion_failed(name, {%RuntimeError{}, []})
+
+      assert Shrinker.failure_signature(poll) == {:poll_timeout, name}
+      assert Shrinker.failure_signature(assertion) == {:assertion_failed, name}
+      refute Shrinker.equivalent_failures?(poll, assertion)
     end
   end
 
   describe "equivalent_failures?/2" do
-    test "same check_failed with same check name are equivalent" do
-      reason1 = {:check_failed, :balance, "Balance is -50"}
-      reason2 = {:check_failed, :balance, "Balance is -100"}
-
+    test "same assertion failure with same name are equivalent" do
+      reason1 = Failure.assertion_failed(:balance, "Balance is -50")
+      reason2 = Failure.assertion_failed(:balance, "Balance is -100")
       assert Shrinker.equivalent_failures?(reason1, reason2)
     end
 
-    test "same check_failed with different check names are not equivalent" do
-      reason1 = {:check_failed, :balance, "Error"}
-      reason2 = {:check_failed, :consistency, "Error"}
-
+    test "same assertion failure with different names are not equivalent" do
+      reason1 = Failure.assertion_failed(:balance, "Error")
+      reason2 = Failure.assertion_failed(:consistency, "Error")
       refute Shrinker.equivalent_failures?(reason1, reason2)
     end
 
     test "distinct assertion failures are not equivalent, same one is (DR-025)" do
-      a = {:assertion_failed, :counter_never_exceeds, {%RuntimeError{}, []}}
-      b = {:assertion_failed, :other_invariant, {%RuntimeError{}, []}}
+      a = Failure.assertion_failed(:counter_never_exceeds, {%RuntimeError{}, []})
+      b = Failure.assertion_failed(:other_invariant, {%RuntimeError{}, []})
       # An async-observed failure and a teardown failure of the SAME assertion
       # carry the same name, so they remain equivalent for shrinking.
       a_again =
-        {:assertion_failed, :counter_never_exceeds, {%ArgumentError{}, [{:mod, :f, 1, []}]}}
+        Failure.assertion_failed(:counter_never_exceeds, {%ArgumentError{}, [{:mod, :f, 1, []}]})
 
       refute Shrinker.equivalent_failures?(a, b)
       assert Shrinker.equivalent_failures?(a, a_again)
     end
 
-    test "different failure types are not equivalent" do
-      check = {:check_failed, :balance, "Error"}
-      idempotency = {:idempotency_violation, %{}}
-      adapter = {:adapter_error, :timeout}
+    test "different failure kinds are not equivalent" do
+      check = Failure.assertion_failed(:balance, "Error")
+      idempotency = Failure.idempotency_violation(%{})
+      adapter = Failure.adapter_error(:timeout)
 
       refute Shrinker.equivalent_failures?(check, idempotency)
       refute Shrinker.equivalent_failures?(check, adapter)
       refute Shrinker.equivalent_failures?(idempotency, adapter)
     end
 
-    test "same non-check failure types are equivalent" do
-      reason1 = {:idempotency_violation, %{first: 1}}
-      reason2 = {:idempotency_violation, %{second: 2}}
-
+    test "same non-assertion failure kinds are equivalent" do
+      reason1 = Failure.idempotency_violation(%{first: 1})
+      reason2 = Failure.idempotency_violation(%{second: 2})
       assert Shrinker.equivalent_failures?(reason1, reason2)
     end
 
-    test "branch_failure is equivalent based on inner reason" do
-      inner1 = {:check_failed, :balance, "Error 1"}
-      inner2 = {:check_failed, :balance, "Error 2"}
-      inner3 = {:check_failed, :other_check, "Error 3"}
-
-      branch1 = {:branch_failure, 0, inner1}
-      branch2 = {:branch_failure, 1, inner2}
-      branch3 = {:branch_failure, 0, inner3}
+    test "branch failures are equivalent based on the inner kind + name" do
+      branch1 = Failure.in_branch(Failure.assertion_failed(:balance, "Error 1"), 0)
+      branch2 = Failure.in_branch(Failure.assertion_failed(:balance, "Error 2"), 1)
+      branch3 = Failure.in_branch(Failure.assertion_failed(:other_check, "Error 3"), 0)
 
       assert Shrinker.equivalent_failures?(branch1, branch2)
       refute Shrinker.equivalent_failures?(branch1, branch3)
@@ -171,7 +145,8 @@ defmodule PropertyDamage.ShrinkerTest do
       ]
 
       # The failure at index 1 is for high_limit (quantity 250 > 200)
-      failure_reason = {:check_failed, :high_limit, "Quantity 250 exceeds high limit of 200"}
+      failure_reason =
+        Failure.assertion_failed(:high_limit, "Quantity 250 exceeds high limit of 200")
 
       result =
         Shrinker.shrink(commands,
@@ -562,7 +537,7 @@ defmodule PropertyDamage.ShrinkerTest do
       result =
         Shrinker.shrink(seq,
           failed_at_index: 1,
-          failure_reason: {:check_failed, :quantity_limit, "exceeds limit"},
+          failure_reason: Failure.assertion_failed(:quantity_limit, "exceeds limit"),
           model: FailingModel,
           adapter: SimpleAdapter,
           config: Config.new(shrink_arguments: false)
@@ -752,8 +727,8 @@ defmodule PropertyDamage.ShrinkerTest do
   describe "branching with branch_failure reasons" do
     test "branch_failure is unwrapped for equivalence checking" do
       # This verifies the failure_signature function handles branch_failure
-      inner = {:check_failed, :quantity_limit, "exceeded"}
-      wrapped = {:branch_failure, 0, inner}
+      inner = Failure.assertion_failed(:quantity_limit, "exceeded")
+      wrapped = Failure.in_branch(inner, 0)
 
       # Both should have same signature
       assert Shrinker.failure_signature(inner) == Shrinker.failure_signature(wrapped)
@@ -770,7 +745,7 @@ defmodule PropertyDamage.ShrinkerTest do
         )
 
       # Failure in branch 0
-      failure_reason = {:branch_failure, 0, {:check_failed, :quantity_limit, "exceeded"}}
+      failure_reason = Failure.in_branch(Failure.assertion_failed(:quantity_limit, "exceeded"), 0)
 
       result =
         Shrinker.shrink(seq,
