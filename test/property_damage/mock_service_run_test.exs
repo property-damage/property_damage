@@ -31,7 +31,19 @@ defmodule PropertyDamage.MockServiceRunTest do
     use Agent
 
     def start, do: Agent.start_link(fn -> 0 end, name: __MODULE__)
-    def stop, do: if(pid = Process.whereis(__MODULE__), do: Agent.stop(pid))
+    # Linked to the test process, so by the time on_exit runs the agent may
+    # already be terminating: whereis can still return a pid whose stop then
+    # exits :noproc. Tolerate that race.
+    def stop do
+      if pid = Process.whereis(__MODULE__) do
+        try do
+          Agent.stop(pid)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+    end
+
     def bump, do: Agent.update(__MODULE__, &(&1 + 1))
     def count, do: Agent.get(__MODULE__, & &1)
   end
