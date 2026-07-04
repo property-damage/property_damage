@@ -262,7 +262,7 @@ defmodule PropertyDamage.Forensics do
   # collected-violations path so both carry the same detail shape.
   defp build_failure(assertion_name, reason, index, event, state, new_projections, history) do
     %{
-      failure_reason: {:assertion_failed, assertion_name, reason},
+      failure_reason: PropertyDamage.Failure.assertion_failed(assertion_name, reason),
       failure_step: index,
       event_at_failure: event,
       state_before: state.projections,
@@ -413,8 +413,8 @@ defmodule PropertyDamage.Forensics do
     """
   end
 
-  defp format_failure_reason({:assertion_failed, assertion_name, reason}) do
-    "Assertion '#{assertion_name}' failed: #{inspect(reason)}"
+  defp format_failure_reason(%PropertyDamage.Failure{type: %PropertyDamage.Failure.Assertion{kind: :assertion_failed, name: name, detail: reason}}) do
+    "Assertion '#{name}' failed: #{inspect(reason)}"
   end
 
   defp format_failure_reason(other), do: inspect(other)
@@ -497,6 +497,6 @@ defmodule PropertyDamage.Forensics do
 
   defp event_to_code(event), do: inspect(event)
 
-  defp format_check_name({:assertion_failed, name, _}), do: "#{name} failure"
+  defp format_check_name(%PropertyDamage.Failure{type: %PropertyDamage.Failure.Assertion{kind: :assertion_failed, name: name}}), do: "#{name} failure"
   defp format_check_name(_), do: "unknown failure"
 end

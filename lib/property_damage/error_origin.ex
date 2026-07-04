@@ -16,10 +16,10 @@ defmodule PropertyDamage.ErrorOrigin do
 
   These failures almost certainly indicate bugs in the SUT:
 
-  - `:check_failed` / `:assertion_failed` - Invariant violations
+  - `:assertion_failed` - Invariant violations
   - `:poll_timeout` - Temporal assertion timeout
   - `:idempotency_violation` - SUT not idempotent
-  - `:linearization_failed` - Race condition detected
+  - `:linearization` - Race condition detected
 
   ### Test Code Errors (High Confidence)
 
@@ -58,31 +58,55 @@ defmodule PropertyDamage.ErrorOrigin do
 
   ## Examples
 
-      iex> ErrorOrigin.classify({:check_failed, :NonNegativeBalance, "Balance is -50"})
-      %{origin: :sut_error, details: %{reason: "Invariant violation", ...}}
+      iex> ErrorOrigin.classify(Failure.assertion_failed(:NonNegativeBalance, "Balance is -50"))
+      %{origin: :sut_error, details: %{reason: "Assertion '...' failed", ...}}
 
-      iex> ErrorOrigin.classify({:adapter_error, %UndefinedFunctionError{...}}, stacktrace)
+      iex> ErrorOrigin.classify(Failure.adapter_error(%UndefinedFunctionError{...}), stacktrace)
       %{origin: :test_code_error, details: %{reason: "Missing callback", ...}}
   """
+  alias PropertyDamage.Failure
+
   @spec classify(term(), list() | nil) :: classification()
   def classify(failure_reason, stacktrace \\ nil)
 
-  # ============================================================================
-  # SUT Errors (High Confidence)
-  # ============================================================================
+  # Branch failures: classify the underlying failure, then note the branch.
+  def classify(%Failure{branch_id: branch_id} = failure, stacktrace)
+      when not is_nil(branch_id) do
+    inner = classify(%{failure | branch_id: nil}, stacktrace)
 
-  def classify({:check_failed, check_name, message}, _stacktrace) do
     %{
-      origin: :sut_error,
+      inner
+      | details:
+          Map.merge(inner.details, %{
+            branch_id: branch_id,
+            context: "Failure occurred in branch #{branch_id}"
+          })
+    }
+  end
+
+  def classify(%Failure{} = failure, stacktrace) do
+    classify_kind(Failure.kind(failure), failure, stacktrace)
+  end
+
+  def classify(other, _stacktrace) do
+    %{
+      origin: :unknown,
       details: %{
-        reason: "Invariant '#{check_name}' violated",
-        evidence: %{check_name: check_name, message: message},
-        confidence: :high
+        reason: "Unclassified failure",
+        evidence: %{raw: inspect(other)},
+        confidence: :low
       }
     }
   end
 
-  def classify({:assertion_failed, assertion_name, reason}, _stacktrace) do
+  # ============================================================================
+  # Per-kind classification
+  # ============================================================================
+
+  defp classify_kind(:assertion_failed, failure, _stacktrace) do
+    assertion_name = Failure.name(failure)
+    reason = Failure.detail(failure)
+
     if assertion_code_crash?(reason) do
       # The assertion function itself raised an unexpected exception (e.g. a
       # KeyError on a missing field) rather than calling fail!/raising
@@ -113,7 +137,9 @@ defmodule PropertyDamage.ErrorOrigin do
     end
   end
 
-  def classify({:poll_timeout, info}, _stacktrace) do
+  defp classify_kind(:poll_timeout, failure, _stacktrace) do
+    info = Failure.detail(failure)
+
     %{
       origin: :sut_error,
       details: %{
@@ -128,7 +154,9 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
-  def classify({:idempotency_violation, violation}, _stacktrace) do
+  defp classify_kind(:idempotency_violation, failure, _stacktrace) do
+    violation = Failure.detail(failure)
+
     %{
       origin: :sut_error,
       details: %{
@@ -143,137 +171,115 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
-  def classify({:linearization_failed, message}, _stacktrace) do
+  defp classify_kind(:linearization, failure, _stacktrace) do
     %{
       origin: :sut_error,
       details: %{
         reason: "Race condition - no valid linearization exists",
-        evidence: %{message: message},
+        evidence: %{message: Failure.detail(failure)},
         confidence: :high
       }
     }
   end
 
-  # ============================================================================
-  # Test Code Errors (High Confidence)
-  # ============================================================================
-
-  def classify({:adapter_error, %UndefinedFunctionError{} = error}, stacktrace) do
-    classify_undefined_function_error(error, stacktrace, :adapter_error)
+  defp classify_kind(:adapter_error, failure, stacktrace) do
+    classify_adapter_error(Failure.detail(failure), stacktrace)
   end
 
-  def classify({:adapter_error, %FunctionClauseError{} = error}, stacktrace) do
-    classify_function_clause_error(error, stacktrace, :adapter_error)
-  end
-
-  def classify({:adapter_error, %ArgumentError{} = error}, stacktrace) do
-    classify_argument_error(error, stacktrace, :adapter_error)
-  end
-
-  def classify({:ref_resolution_error, reason}, _stacktrace) do
-    # Ref resolution errors are almost always test code errors
+  defp classify_kind(:placeholder_resolution, failure, _stacktrace) do
+    # Placeholder resolution errors are almost always test code errors
     %{
       origin: :test_code_error,
       details: %{
-        reason: "Ref resolution failed - check command dependencies",
-        evidence: %{reason: reason},
+        reason: "Placeholder resolution failed - check command dependencies",
+        evidence: %{reason: Failure.detail(failure)},
         confidence: :high
       }
     }
   end
 
-  # Check for wrapped exceptions in generic adapter errors
-  # (UndefinedFunctionError, FunctionClauseError, and ArgumentError are already
-  # handled by the dedicated clauses above)
-  def classify({:adapter_error, reason}, stacktrace) when is_exception(reason) do
-    case reason do
-      %KeyError{} = e ->
-        # KeyError during adapter execution - likely test code error
-        %{
-          origin: :test_code_error,
-          details: %{
-            reason: "Missing key '#{e.key}' in adapter code",
-            evidence: %{key: e.key, term: inspect(e.term, limit: 3)},
-            confidence: :medium
-          }
-        }
-
-      _ ->
-        classify_generic_exception(reason, stacktrace)
-    end
-  end
-
-  # ============================================================================
-  # Branch Failures - Recurse into inner reason
-  # ============================================================================
-
-  def classify({:branch_failure, branch_id, inner_reason}, stacktrace) do
-    inner = classify(inner_reason, stacktrace)
-
-    %{
-      inner
-      | details:
-          Map.merge(inner.details, %{
-            branch_id: branch_id,
-            context: "Failure occurred in branch #{branch_id}"
-          })
-    }
-  end
-
-  # ============================================================================
-  # Generic/Ambiguous Cases
-  # ============================================================================
-
-  def classify({:adapter_error, reason}, _stacktrace) do
-    %{
-      origin: :unknown,
-      details: %{
-        reason: "Adapter error - could be SUT or test code",
-        evidence: %{reason: inspect(reason)},
-        confidence: :low
-      }
-    }
-  end
-
-  def classify({:settle_timeout, reason}, _stacktrace) do
+  defp classify_kind(:settle_timeout, failure, _stacktrace) do
     %{
       origin: :unknown,
       details: %{
         reason: "Command timed out waiting to settle",
-        evidence: %{last_reason: inspect(reason)},
+        evidence: %{last_reason: inspect(Failure.detail(failure))},
         confidence: :low
       }
     }
   end
 
-  def classify({:nemesis_error, reason}, _stacktrace) do
+  defp classify_kind(:nemesis_error, failure, _stacktrace) do
     %{
       origin: :test_code_error,
       details: %{
         reason: "Nemesis (fault injection) command failed",
-        evidence: %{reason: inspect(reason)},
+        evidence: %{reason: inspect(Failure.detail(failure))},
         confidence: :medium
       }
     }
   end
 
-  def classify({:stutter_execution_failed, details}, _stacktrace) do
+  defp classify_kind(:stutter_execution_failed, failure, _stacktrace) do
     %{
       origin: :unknown,
       details: %{
         reason: "Stutter retry execution failed",
-        evidence: details,
+        evidence: Failure.detail(failure),
         confidence: :low
       }
     }
   end
 
-  def classify(other, _stacktrace) do
+  defp classify_kind(_kind, failure, _stacktrace) do
     %{
       origin: :unknown,
       details: %{
         reason: "Unclassified failure",
-        evidence: %{raw: inspect(other)},
+        evidence: %{raw: inspect(Failure.detail(failure))},
+        confidence: :low
+      }
+    }
+  end
+
+  # ============================================================================
+  # Adapter-error detail classification
+  # ============================================================================
+
+  defp classify_adapter_error(%UndefinedFunctionError{} = error, stacktrace) do
+    classify_undefined_function_error(error, stacktrace, :adapter_error)
+  end
+
+  defp classify_adapter_error(%FunctionClauseError{} = error, stacktrace) do
+    classify_function_clause_error(error, stacktrace, :adapter_error)
+  end
+
+  defp classify_adapter_error(%ArgumentError{} = error, stacktrace) do
+    classify_argument_error(error, stacktrace, :adapter_error)
+  end
+
+  defp classify_adapter_error(%KeyError{} = e, _stacktrace) do
+    # KeyError during adapter execution - likely test code error
+    %{
+      origin: :test_code_error,
+      details: %{
+        reason: "Missing key '#{e.key}' in adapter code",
+        evidence: %{key: e.key, term: inspect(e.term, limit: 3)},
+        confidence: :medium
+      }
+    }
+  end
+
+  defp classify_adapter_error(reason, stacktrace) when is_exception(reason) do
+    classify_generic_exception(reason, stacktrace)
+  end
+
+  defp classify_adapter_error(reason, _stacktrace) do
+    %{
+      origin: :unknown,
+      details: %{
+        reason: "Adapter error - could be SUT or test code",
+        evidence: %{reason: inspect(reason)},
         confidence: :low
       }
     }

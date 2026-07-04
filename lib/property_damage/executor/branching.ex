@@ -15,6 +15,7 @@ defmodule PropertyDamage.Executor.Branching do
   # finalization from Executor.Finalization, and auto-restore from Executor.Nemesis.
 
   alias PropertyDamage.Executor
+  alias PropertyDamage.Failure
   alias PropertyDamage.Executor.Events
   alias PropertyDamage.Executor.Finalization
   alias PropertyDamage.Executor.Nemesis
@@ -55,7 +56,7 @@ defmodule PropertyDamage.Executor.Branching do
     case Executor.run_phase_assertions(initial_state, :startup) do
       {:halt, name, reason, _counters} ->
         Finalization.finalize_result(
-          {:failed, nil, {:assertion_failed, name, reason}, initial_state}
+          {:failed, nil, Failure.assertion_failed(name, reason), initial_state}
         )
 
       {:ok, startup_recorded, startup_counters} ->
@@ -191,7 +192,7 @@ defmodule PropertyDamage.Executor.Branching do
 
           {:error, branch_id, index, reason, state} ->
             Finalization.finalize_result(
-              {:failed, index, {:branch_failure, branch_id, reason}, state}
+              {:failed, index, Failure.in_branch(reason, branch_id), state}
             )
 
           {:linearization_failed, branch_results, branch_event_logs, refutation} ->
@@ -214,19 +215,19 @@ defmodule PropertyDamage.Executor.Branching do
 
   # Translate a Linearization refutation into the {failed_index, reason} the
   # report expects. When the cause is a specific synchronous assertion, mirror
-  # the linear path's shape exactly ({:branch_failure, branch_id,
-  # {:assertion_failed, name, {exception, stacktrace}}}) so the report,
-  # shrinker, and formatter behave identically to a real assertion failure. A
-  # nil refutation means every ordering failed purely on event compatibility
-  # (a classic race, e.g. a lost update): report it as a linearization failure.
+  # the linear path's shape exactly (a `%Failure{}` assertion_failed carrying the
+  # branch_id) so the report, shrinker, and formatter behave identically to a
+  # real assertion failure. A nil refutation means every ordering failed purely
+  # on event compatibility (a classic race, e.g. a lost update): report it as a
+  # linearization failure.
   defp linearization_failure(nil, branch_start_index) do
     {branch_start_index,
-     {:linearization_failed, "No valid linearization found for branch execution"}}
+     Failure.linearization("No valid linearization found for branch execution")}
   end
 
   defp linearization_failure(refutation, branch_start_index) do
     %{branch_id: branch_id, position: position, reason: reason} = refutation
-    {branch_start_index + position, {:branch_failure, branch_id, reason}}
+    {branch_start_index + position, Failure.in_branch(reason, branch_id)}
   end
 
   defp execute_all_branches(
