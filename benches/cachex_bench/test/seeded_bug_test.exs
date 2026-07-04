@@ -42,7 +42,7 @@ defmodule CachexBench.SeededBugTest do
 
     assert {:error, failure} = result
     # Note: PD strips the assert_ prefix from check names
-    assert failure.check_name == :read_consistent
+    assert PropertyDamage.FailureReport.check_name(failure) == :read_consistent
 
     shrunk = PropertyDamage.FailureReport.shrunk_sequence(failure)
     commands = PropertyDamage.Sequence.to_list(shrunk)

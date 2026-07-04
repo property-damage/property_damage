@@ -48,10 +48,10 @@ defmodule OpenapiBench.StutterTest do
              )
 
     assert PropertyDamage.FailureReport.idempotency_failure?(report),
-           "expected an idempotency violation, got #{inspect(report.failure_type)}"
+           "expected an idempotency violation, got #{inspect(PropertyDamage.FailureReport.failure_type(report))}"
 
     # The violation must record more than one attempt (the retry actually ran).
-    assert length(report.idempotency_violation.attempts) >= 2
+    assert length(PropertyDamage.FailureReport.idempotency_violation(report).attempts) >= 2
   end
 
   test "stutter passes when the SUT honors the idempotency key (no false positive)" do

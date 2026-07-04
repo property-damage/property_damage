@@ -157,7 +157,9 @@ defmodule RedisBench.ParallelLinearizationTest do
       test "seed #{seed}: detected as a linearization failure" do
         assert {:error, failure} = run_lost_update(unquote(seed))
 
-        assert {:linearization_failed, _} = failure.failure_reason,
+        assert %PropertyDamage.Failure{
+                 type: %PropertyDamage.Failure.Assertion{kind: :linearization}
+               } = failure.failure_reason,
                "expected a linearization failure, got #{inspect(failure.failure_reason)}"
 
         assert FailureReport.parallel_failure?(failure)
@@ -174,7 +176,9 @@ defmodule RedisBench.ParallelLinearizationTest do
       assert [%GetThenSet{}, %GetThenSet{}] = commands,
              "expected the minimal two-write lost update, got: #{inspect(commands)}"
 
-      assert {:linearization_failed, _} = failure.failure_reason
+      assert %PropertyDamage.Failure{
+               type: %PropertyDamage.Failure.Assertion{kind: :linearization}
+             } = failure.failure_reason
     end
 
     test "the shrunk reproduction still fails" do
