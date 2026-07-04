@@ -956,7 +956,8 @@ defmodule PropertyDamage.Shrinker do
 
           {:error, _} ->
             # Execution errors are only equivalent if original was also an error
-            state.original_signature == nil or match?({:adapter_error, _}, state.original_signature)
+            state.original_signature == nil or
+              match?({:adapter_error, _}, state.original_signature)
         end
 
       {:error, _reason} ->
@@ -1047,7 +1048,8 @@ defmodule PropertyDamage.Shrinker do
 
           {:error, _} ->
             # Execution errors are only equivalent if original was also an error
-            state.original_signature == nil or match?({:adapter_error, _}, state.original_signature)
+            state.original_signature == nil or
+              match?({:adapter_error, _}, state.original_signature)
         end
 
       {:error, _reason} ->

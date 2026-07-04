@@ -413,7 +413,13 @@ defmodule PropertyDamage.Forensics do
     """
   end
 
-  defp format_failure_reason(%PropertyDamage.Failure{type: %PropertyDamage.Failure.Assertion{kind: :assertion_failed, name: name, detail: reason}}) do
+  defp format_failure_reason(%PropertyDamage.Failure{
+         type: %PropertyDamage.Failure.Assertion{
+           kind: :assertion_failed,
+           name: name,
+           detail: reason
+         }
+       }) do
     "Assertion '#{name}' failed: #{inspect(reason)}"
   end
 
@@ -497,6 +503,10 @@ defmodule PropertyDamage.Forensics do
 
   defp event_to_code(event), do: inspect(event)
 
-  defp format_check_name(%PropertyDamage.Failure{type: %PropertyDamage.Failure.Assertion{kind: :assertion_failed, name: name}}), do: "#{name} failure"
+  defp format_check_name(%PropertyDamage.Failure{
+         type: %PropertyDamage.Failure.Assertion{kind: :assertion_failed, name: name}
+       }),
+       do: "#{name} failure"
+
   defp format_check_name(_), do: "unknown failure"
 end

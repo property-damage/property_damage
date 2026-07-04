@@ -749,8 +749,10 @@ defmodule PropertyDamage.FailureReport do
   defp message_for(%Failure{type: %Failure.Execution{kind: :nemesis_error, detail: reason}}),
     do: "Fault injection failed: #{inspect(reason)}"
 
-  defp message_for(%Failure{type: %Failure.Execution{kind: :resource_poller_error, detail: reason}}),
-    do: "Resource poller error: #{inspect(reason)}"
+  defp message_for(%Failure{
+         type: %Failure.Execution{kind: :resource_poller_error, detail: reason}
+       }),
+       do: "Resource poller error: #{inspect(reason)}"
 
   defp message_for(%Failure{
          type: %Failure.Execution{kind: :stutter_execution_failed, detail: details}
@@ -760,8 +762,10 @@ defmodule PropertyDamage.FailureReport do
   defp message_for(%Failure{type: %Failure.Execution{kind: :poll_error, detail: reason}}),
     do: "Poll predicate error: #{inspect(reason)}"
 
-  defp message_for(%Failure{type: %Failure.Framework{kind: :placeholder_resolution, detail: reason}}),
-    do: inspect(reason)
+  defp message_for(%Failure{
+         type: %Failure.Framework{kind: :placeholder_resolution, detail: reason}
+       }),
+       do: inspect(reason)
 
   defp message_for(%Failure{type: type}), do: inspect(type.detail)
 

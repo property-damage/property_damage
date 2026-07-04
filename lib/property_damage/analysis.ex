@@ -158,7 +158,8 @@ defmodule PropertyDamage.Analysis do
     {role, reason} =
       cond do
         step.failed? ->
-          {:trigger, "Triggers #{FailureReport.check_name(report) || FailureReport.failure_type(report)} failure"}
+          {:trigger,
+           "Triggers #{FailureReport.check_name(report) || FailureReport.failure_type(report)} failure"}
 
         MapSet.member?(ancestors, idx) ->
           # Ancestor in the dependency graph: produces state or values the

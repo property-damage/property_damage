@@ -100,12 +100,24 @@ defmodule PropertyDamage.Executor.Finalization do
       {:timeout, _id, info} ->
         resource_pollers = Map.get(state, :active_resource_pollers, [])
         Enum.each(resource_pollers, &ResourcePoller.stop/1)
-        poller_failure_result(state, Failure.poll_timeout(info), linearization, assertion_failures)
+
+        poller_failure_result(
+          state,
+          Failure.poll_timeout(info),
+          linearization,
+          assertion_failures
+        )
 
       {:error, reason} ->
         resource_pollers = Map.get(state, :active_resource_pollers, [])
         Enum.each(resource_pollers, &ResourcePoller.stop/1)
-        poller_failure_result(state, Failure.poll_error(reason), linearization, assertion_failures)
+
+        poller_failure_result(
+          state,
+          Failure.poll_error(reason),
+          linearization,
+          assertion_failures
+        )
 
       _ ->
         # Finalize resource pollers
@@ -232,8 +244,10 @@ defmodule PropertyDamage.Executor.Finalization do
     }
   end
 
-  defp poller_failure_index(%Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}}),
-    do: Map.get(info.triggered_by, :command_index)
+  defp poller_failure_index(%Failure{
+         type: %Failure.Assertion{kind: :poll_timeout, detail: info}
+       }),
+       do: Map.get(info.triggered_by, :command_index)
 
   defp poller_failure_index(_), do: nil
 
@@ -298,7 +312,9 @@ defmodule PropertyDamage.Executor.Finalization do
   # separated stacktrace. The envelope's `branch_id` rides along untouched, so a
   # branch failure is normalized by the same clauses as a linear one.
   defp extract_stacktrace(
-         %Failure{type: %Failure.Execution{kind: :adapter_error, detail: {exception, stacktrace}} = t} =
+         %Failure{
+           type: %Failure.Execution{kind: :adapter_error, detail: {exception, stacktrace}} = t
+         } =
            f
        )
        when is_exception(exception) and is_list(stacktrace) do
@@ -316,7 +332,8 @@ defmodule PropertyDamage.Executor.Finalization do
 
   defp extract_stacktrace(
          %Failure{
-           type: %Failure.Framework{kind: :placeholder_resolution, detail: {message, stacktrace}} = t
+           type:
+             %Failure.Framework{kind: :placeholder_resolution, detail: {message, stacktrace}} = t
          } = f
        )
        when is_binary(message) and is_list(stacktrace) do
