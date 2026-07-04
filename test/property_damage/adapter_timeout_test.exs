@@ -9,7 +9,7 @@ defmodule PropertyDamage.AdapterTimeoutTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{CommandTimeoutError, Executor, Sequence}
+  alias PropertyDamage.{CommandTimeoutError, Executor, Failure, Sequence}
 
   defmodule Cmd do
     defstruct [:value]
@@ -81,7 +81,12 @@ defmodule PropertyDamage.AdapterTimeoutTest do
     elapsed = System.monotonic_time(:millisecond) - start
 
     refute result.success
-    assert {:adapter_error, %CommandTimeoutError{} = err} = result.failure_reason
+
+    assert %Failure{
+             type: %Failure.Execution{kind: :adapter_error, detail: %CommandTimeoutError{} = err}
+           } =
+             result.failure_reason
+
     assert err.timeout_ms == 50
 
     # The run returns near the timeout, not the 2s sleep.

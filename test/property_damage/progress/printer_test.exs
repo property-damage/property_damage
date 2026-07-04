@@ -1,7 +1,7 @@
 defmodule PropertyDamage.Progress.PrinterTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{FailureReport, Progress, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, Progress, Sequence}
   alias PropertyDamage.Progress.{Printer, RunResult, RunUpdate}
 
   import ExUnit.CaptureIO
@@ -130,7 +130,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
         seed: 12_345,
         run_number: 5,
         failed_at_index: 2,
-        failure_reason: {:check_failed, :test_check, "Test failed"},
+        failure_reason: Failure.assertion_failed(:test_check, "Test failed"),
         original_sequence: Sequence.linear([%TestCommand{id: 1}, %TestCommand{id: 2}]),
         trace: PropertyDamage.RunTrace.new(plan: Sequence.linear([%TestCommand{id: 1}])),
         shrink_iterations: 10,
@@ -158,7 +158,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
         seed: 12_345,
         run_number: 5,
         failed_at_index: 2,
-        failure_reason: {:check_failed, :test_check, "Test failed"},
+        failure_reason: Failure.assertion_failed(:test_check, "Test failed"),
         original_sequence: original_sequence,
         trace: PropertyDamage.RunTrace.new(plan: shrunk_sequence),
         shrink_iterations: 10,

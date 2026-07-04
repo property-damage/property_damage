@@ -6,7 +6,7 @@ defmodule PropertyDamage.RunComparisonStateTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{RunComparison, RunTrace, Sequence}
+  alias PropertyDamage.{Failure, RunComparison, RunTrace, Sequence}
   alias PropertyDamage.RunComparison.Field
   alias PropertyDamage.Sequence.Position
 
@@ -48,7 +48,7 @@ defmodule PropertyDamage.RunComparisonStateTest do
 
   test "a state-only divergence produces a ranked, classified :state finding" do
     passing = trace(1, :pass)
-    failing = trace(2, {:fail, {:check_failed, :Inv, "boom"}})
+    failing = trace(2, {:fail, Failure.assertion_failed(:Inv, "boom")})
 
     comparison = RunComparison.compare([passing, failing])
     assert comparison.comparable?

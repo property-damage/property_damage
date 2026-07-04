@@ -5,7 +5,7 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{FailureReport, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
   defmodule CreateAccount do
@@ -19,10 +19,7 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
       seed: 512_902_757,
       run_number: 3,
       failed_at_index: 0,
-      failure_type: :check_failed,
-      check_name: :NonNegativeBalance,
-      failure_message: "Balance cannot be negative",
-      failure_reason: {:check_failed, :NonNegativeBalance, "Balance cannot be negative"},
+      failure_reason: Failure.assertion_failed(:NonNegativeBalance, "Balance cannot be negative"),
       original_sequence: seq,
       shrunk_sequence: seq
     )
@@ -47,7 +44,7 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
       out = Formatter.format(sut_failure(), :json)
       assert {:ok, decoded} = Jason.decode(out)
       assert decoded["location"]["seed"] == 512_902_757
-      assert decoded["failure"]["type"] == "check_failed"
+      assert decoded["failure"]["type"] == "assertion_failed"
     end
 
     test ":compact renders a single concise line/string" do

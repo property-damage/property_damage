@@ -1,7 +1,7 @@
 defmodule PropertyDamage.ErrorTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Error
+  alias PropertyDamage.{Error, Failure}
 
   # ============================================================================
   # Error Formatting Tests
@@ -10,7 +10,7 @@ defmodule PropertyDamage.ErrorTest do
   describe "Error.format/2 for check_failed" do
     test "formats check failure with context" do
       result =
-        Error.format({:check_failed, :balance_valid, "Balance is negative"}, %{
+        Error.format(Failure.assertion_failed(:balance_valid, "Balance is negative"), %{
           command_index: 3,
           seed: 12_345
         })
@@ -23,7 +23,7 @@ defmodule PropertyDamage.ErrorTest do
     end
 
     test "formats check failure without context" do
-      result = Error.format({:check_failed, :test_check, "error"}, %{})
+      result = Error.format(Failure.assertion_failed(:test_check, "error"), %{})
 
       assert result =~ "Check Failed: :test_check"
       assert result =~ "error"
@@ -42,7 +42,7 @@ defmodule PropertyDamage.ErrorTest do
 
   describe "Error.format/2 for adapter_error" do
     test "formats adapter error with adapter info" do
-      result = Error.format({:adapter_error, :timeout}, %{adapter: MyAdapter})
+      result = Error.format(Failure.adapter_error(:timeout), %{adapter: MyAdapter})
 
       assert result =~ "Adapter Error"
       assert result =~ "MyAdapter"
@@ -51,7 +51,7 @@ defmodule PropertyDamage.ErrorTest do
     end
 
     test "formats adapter error with nested reason" do
-      result = Error.format({:adapter_error, {:http_error, 500}}, %{})
+      result = Error.format(Failure.adapter_error({:http_error, 500}), %{})
 
       assert result =~ "Adapter Error"
       assert result =~ "http_error"
@@ -61,7 +61,7 @@ defmodule PropertyDamage.ErrorTest do
 
   describe "Error.format/2 for settle_timeout" do
     test "formats settle timeout" do
-      result = Error.format({:settle_timeout, :still_pending}, %{})
+      result = Error.format(Failure.settle_timeout(:still_pending), %{})
 
       assert result =~ "Settle Timeout"
       assert result =~ "still_pending"
@@ -73,11 +73,10 @@ defmodule PropertyDamage.ErrorTest do
     test "formats idempotency violation" do
       result =
         Error.format(
-          {:idempotency_violation,
-           %{
-             original_events: [:event1],
-             retry_events: [:event2]
-           }},
+          Failure.idempotency_violation(%{
+            original_events: [:event1],
+            retry_events: [:event2]
+          }),
           %{}
         )
 
@@ -89,10 +88,10 @@ defmodule PropertyDamage.ErrorTest do
 
   describe "Error.format/2 for linearization_failed" do
     test "formats linearization failure" do
-      result = Error.format({:linearization_failed, [[cmd1: 1], [cmd2: 2]]}, %{})
+      result = Error.format(Failure.linearization("No valid ordering for 2 branches"), %{})
 
       assert result =~ "Linearization Failed"
-      assert result =~ "Branches: 2"
+      assert result =~ "No valid ordering for 2 branches"
       assert result =~ "race condition"
     end
   end

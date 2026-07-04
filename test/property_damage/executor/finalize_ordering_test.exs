@@ -25,7 +25,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{EventQueue, Executor, Sequence}
+  alias PropertyDamage.{EventQueue, Executor, Failure, Sequence}
 
   # --- events -----------------------------------------------------------------
   defmodule Bumped, do: defstruct([])
@@ -56,7 +56,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   #
   # The chain checks `state.async_halt` (set inside finalize_pollers' drain)
   # BEFORE it inspects the poll timeout `halt_failure`. Reorder those two and
-  # this scenario reports {:poll_timeout, _} instead.
+  # this scenario reports a `%Failure{}` of kind `:poll_timeout` instead.
   # ===========================================================================
   defmodule DrainHaltProjection do
     use PropertyDamage.Model.Projection
@@ -121,10 +121,13 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
     {:ok, result} = run_seq(Sequence.linear([%Trigger{}]), DrainHaltModel, DrainHaltAdapter)
 
     refute result.success
-    assert {:assertion_failed, :count_at_most_one, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+             result.failure_reason
+
     assert result.failed_at_index == 0
 
-    refute match?({:poll_timeout, _}, result.failure_reason),
+    refute match?(%Failure{type: %Failure.Assertion{kind: :poll_timeout}}, result.failure_reason),
            "async-halt must win over the poll timeout"
   end
 
@@ -178,10 +181,16 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
       run_seq(Sequence.linear([%Trigger{}]), PollVsResourceModel, PollVsResourceAdapter)
 
     refute result.success
-    assert {:poll_timeout, info} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+             result.failure_reason
+
     assert info.triggered_by.assertion_name == :confirm_eventually
 
-    refute match?({:resource_poller_error, _}, result.failure_reason),
+    refute match?(
+             %Failure{type: %Failure.Execution{kind: :resource_poller_error}},
+             result.failure_reason
+           ),
            "the poll timeout must preempt the resource-poller error"
   end
 
@@ -259,10 +268,16 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
       run_seq(Sequence.linear([%Trigger{}]), SettleVsResourceModel, SettleVsResourceAdapter)
 
     refute result.success
-    assert {:assertion_failed, :count_at_most_one, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+             result.failure_reason
+
     assert result.failed_at_index == 0
 
-    refute match?({:resource_poller_error, _}, result.failure_reason),
+    refute match?(
+             %Failure{type: %Failure.Execution{kind: :resource_poller_error}},
+             result.failure_reason
+           ),
            "the settle-halt must preempt the resource-poller error"
   end
 
@@ -321,9 +336,16 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
       run_seq(Sequence.linear([%Trigger{}]), ResourceVsTeardownModel, ResourceVsTeardownAdapter)
 
     refute result.success
-    assert {:resource_poller_error, :resource_boom} = result.failure_reason
 
-    refute match?({:assertion_failed, _, _}, result.failure_reason),
+    assert %Failure{
+             type: %Failure.Execution{kind: :resource_poller_error, detail: :resource_boom}
+           } =
+             result.failure_reason
+
+    refute match?(
+             %Failure{type: %Failure.Assertion{kind: :assertion_failed}},
+             result.failure_reason
+           ),
            "the resource-poller error must preempt the teardown assertion"
   end
 end

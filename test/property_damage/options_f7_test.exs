@@ -5,7 +5,7 @@ defmodule PropertyDamage.OptionsF7Test do
   # newly-wired Analysis.generate_test orphan schema.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Analysis, FailureReport, Options, Regression, Sequence}
+  alias PropertyDamage.{Analysis, Failure, FailureReport, Options, Regression, Sequence}
 
   defmodule TestCmd, do: defstruct(id: nil)
 
@@ -221,7 +221,7 @@ defmodule PropertyDamage.OptionsF7Test do
           original_sequence: Sequence.linear([%TestCmd{id: "1"}]),
           shrunk_sequence: Sequence.linear([%TestCmd{id: "1"}]),
           failed_at_index: 0,
-          failure_reason: {:check_failed, :SomeCheck, "boom"}
+          failure_reason: Failure.assertion_failed(:SomeCheck, "boom")
         )
 
       {:ok, report: report}

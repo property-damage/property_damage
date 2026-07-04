@@ -13,7 +13,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{EventQueue, Executor, Sequence, Shrinker}
+  alias PropertyDamage.{EventQueue, Executor, Failure, Sequence, Shrinker}
 
   defmodule Bumped, do: defstruct([])
 
@@ -109,7 +109,9 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     refute result.success,
            "expected the poller-injected overshoot to trip every: count_at_most_one"
 
-    assert {:assertion_failed, :count_at_most_one, _exception} = result.failure_reason
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+             result.failure_reason
+
     assert result.failed_at_index == 0, "the failure should be located at the injecting command"
     assert result.projections[MaxCountProjection].max == 2
   end
@@ -122,7 +124,10 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     {:ok, result} = run_seq(seq, Model, PollerOvershootAdapter)
 
     refute result.success, "expected the async overshoot to fail the run"
-    assert {:assertion_failed, :count_at_most_one, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+             result.failure_reason
+
     assert result.failed_at_index == 2
 
     {:ok, queue} = EventQueue.start_link()

@@ -19,7 +19,7 @@ defmodule PropertyDamage.CommandLabelTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Export, FailureReport, Sequence}
+  alias PropertyDamage.{Export, Failure, FailureReport, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
   # --- Fixtures ---------------------------------------------------------------
@@ -95,7 +95,7 @@ defmodule PropertyDamage.CommandLabelTest do
         original_sequence: sequence,
         shrunk_sequence: sequence,
         failed_at_index: Keyword.get(opts, :failed_at_index, 0),
-        failure_reason: {:check_failed, :SomeInvariant, "boom"},
+        failure_reason: Failure.assertion_failed(:SomeInvariant, "boom"),
         model: LabelModel
       ] ++ Keyword.delete(opts, :failed_at_index)
     )

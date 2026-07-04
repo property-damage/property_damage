@@ -11,7 +11,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Sequence}
+  alias PropertyDamage.{Executor, Failure, Sequence}
 
   defmodule Bumped, do: defstruct([])
 
@@ -97,7 +97,10 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     {:ok, result} = run_seq(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter)
 
     refute result.success
-    assert {:assertion_failed, :count_at_most_one, _exception} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+             result.failure_reason
+
     assert result.failed_at_index == nil
     assert is_list(result.stacktrace)
   end
@@ -144,8 +147,14 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     {:ok, result} = run_seq(Sequence.linear([%Bump{}]), NeverModel, ErroringAdapter)
 
     refute result.success
-    assert {:adapter_error, :boom} = result.failure_reason
-    refute match?({:assertion_failed, :never, _}, result.failure_reason)
+
+    assert %Failure{type: %Failure.Execution{kind: :adapter_error, detail: :boom}} =
+             result.failure_reason
+
+    refute match?(
+             %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :never}},
+             result.failure_reason
+           )
   end
 
   # ===========================================================================
@@ -182,7 +191,9 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     refute result.success,
            "expected the late poller bump to be folded into the settled state and trip the check"
 
-    assert {:assertion_failed, :count_at_most_one, _} = result.failure_reason
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+             result.failure_reason
+
     assert result.projections[MaxCountProjection].max == 2
   end
 
@@ -244,9 +255,16 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     {:ok, result} = run_seq(Sequence.linear([%Initiate{}]), LivenessSafetyModel, SilentAdapter)
 
     refute result.success
-    assert {:poll_timeout, info} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+             result.failure_reason
+
     assert info.triggered_by.assertion_name == :confirmed_eventually
-    refute match?({:assertion_failed, :would_fail, _}, result.failure_reason)
+
+    refute match?(
+             %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :would_fail}},
+             result.failure_reason
+           )
   end
 
   defmodule Confirmed, do: defstruct([])
@@ -305,7 +323,9 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     {:ok, result} = run_seq(Sequence.linear([%Initiate{}]), ConfirmableModel, ConfirmingAdapter)
 
     refute result.success
-    assert {:assertion_failed, :teardown_reached, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :teardown_reached}} =
+             result.failure_reason
   end
 
   # ===========================================================================
@@ -374,7 +394,10 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
       end
 
     refute result.success
-    assert {:assertion_failed, :ready, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :ready}} =
+             result.failure_reason
+
     assert result.failed_at_index == nil
     assert RecordingAdapter.executions(ctx) == 0, "command 1 must not run after a startup halt"
   end
@@ -416,7 +439,9 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     {:ok, result} = run_seq(seq, MaxCountModel, SingleBumpAdapter)
 
     refute result.success
-    assert {:assertion_failed, :count_at_most_one, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+             result.failure_reason
   end
 
   # ===========================================================================
@@ -438,7 +463,9 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
       run_seq_mode(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter, :halt)
 
     refute result.success
-    assert {:assertion_failed, :count_at_most_one, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+             result.failure_reason
   end
 
   test ":record mode accumulates a teardown violation into assertion_failures" do
@@ -573,7 +600,10 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     {:ok, result} = run_seq(Sequence.linear([%Bump{}]), AccumulatorModel, SelfHealingAdapter)
 
     refute result.success
-    assert {:assertion_failed, :never_exceeded_one, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :never_exceeded_one}} =
+             result.failure_reason
+
     assert result.projections[AccumulatorProjection].max == 2
   end
 

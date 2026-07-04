@@ -7,7 +7,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{ErrorOrigin, FailureReport}
+  alias PropertyDamage.{ErrorOrigin, Failure, FailureReport}
   alias PropertyDamage.FailureReport.Formatter
 
   defmodule SomeEvent, do: defstruct([:id])
@@ -36,7 +36,8 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
         }
       }
 
-      rep = report(failure_reason: {:check_failed, :bal, "bad"}, projections: projections)
+      rep =
+        report(failure_reason: Failure.assertion_failed(:bal, "bad"), projections: projections)
 
       json = Formatter.format(rep, :json)
       assert is_binary(json)
@@ -46,7 +47,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
 
     test "preserves nil and booleans as native JSON values" do
       projections = %{SomeEvent => %{active: true, deleted: false, note: nil, n: 3}}
-      rep = report(failure_reason: {:check_failed, :x, "m"}, projections: projections)
+      rep = report(failure_reason: Failure.assertion_failed(:x, "m"), projections: projections)
 
       assert {:ok, decoded} = Jason.decode(Formatter.format(rep, :json))
       fields = decoded["state_at_failure"]["SomeEvent"]["_fields"] || decoded
@@ -63,7 +64,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
       # third element (not an integer arity), and :erlang is not an Elixir module
       stacktrace = [{:erlang, :binary_to_term, [<<131, 100>>], []}]
 
-      classification = ErrorOrigin.classify({:adapter_error, %ArgumentError{}}, stacktrace)
+      classification = ErrorOrigin.classify(Failure.adapter_error(%ArgumentError{}), stacktrace)
       assert is_map(classification)
       assert Map.has_key?(classification, :origin)
     end
@@ -71,7 +72,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
     test "FailureReport.new survives an adapter error with an Erlang stack frame" do
       rep =
         report(
-          failure_reason: {:adapter_error, %ArgumentError{message: "argument error"}},
+          failure_reason: Failure.adapter_error(%ArgumentError{message: "argument error"}),
           stacktrace: [{:erlang, :binary_to_term, [<<>>], []}]
         )
 
@@ -81,14 +82,14 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
 
     test "an intentional fail!/2 assertion is a SUT error" do
       reason = %PropertyDamage.AssertionFailed{message: "balance negative"}
-      assert ErrorOrigin.classify({:assertion_failed, :balance, reason}).origin == :sut_error
+      assert ErrorOrigin.classify(Failure.assertion_failed(:balance, reason)).origin == :sut_error
     end
 
     test "an assertion whose code crashes is a TEST CODE error, not a SUT bug" do
       # The assertion function itself raised (e.g. KeyError on a missing field)
       # rather than calling fail!/2 -- that is a broken test, not a SUT bug.
       for reason <- [%KeyError{key: :foo}, {%KeyError{key: :foo}, []}] do
-        classification = ErrorOrigin.classify({:assertion_failed, :x, reason})
+        classification = ErrorOrigin.classify(Failure.assertion_failed(:x, reason))
         assert classification.origin == :test_code_error
       end
     end
@@ -102,7 +103,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
       stacktrace = [{Acme.CommandBus, :dispatch, 1, [file: ~c"lib/acme/command_bus.ex", line: 9]}]
 
       classification =
-        ErrorOrigin.classify({:adapter_error, %RuntimeError{message: "boom"}}, stacktrace)
+        ErrorOrigin.classify(Failure.adapter_error(%RuntimeError{message: "boom"}), stacktrace)
 
       assert classification.origin == :unknown
     end
@@ -114,7 +115,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
         stacktrace = [{module, :run, 1, [file: ~c"x.ex", line: 1]}]
 
         classification =
-          ErrorOrigin.classify({:adapter_error, %RuntimeError{message: "boom"}}, stacktrace)
+          ErrorOrigin.classify(Failure.adapter_error(%RuntimeError{message: "boom"}), stacktrace)
 
         assert classification.origin == :test_code_error,
                "expected #{inspect(module)} to be test code"
@@ -130,7 +131,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
         original_sequence: PropertyDamage.Sequence.linear([%SomeEvent{id: 1}]),
         shrunk_sequence: PropertyDamage.Sequence.linear([%SomeEvent{id: 1}]),
         failed_at_index: 0,
-        failure_reason: {:adapter_error, %RuntimeError{message: "boom"}},
+        failure_reason: Failure.adapter_error(%RuntimeError{message: "boom"}),
         shrink_iterations: 0,
         shrink_time_ms: 0
       }
@@ -158,7 +159,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
     end
 
     test "the compact (non-pretty) inspect path is also crash-safe" do
-      out = inspect(%FailureReport{failure_type: nil}, limit: 5)
+      out = inspect(%FailureReport{}, limit: 5)
 
       assert out =~ "#FailureReport<"
       refute out =~ "Inspect.Error"
@@ -171,10 +172,12 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
       # matching %{message: msg} first produced an empty failure_message
       key_error = %KeyError{key: :missing, term: %{}}
 
-      rep = report(failure_reason: {:assertion_failed, :my_check, key_error})
+      rep = report(failure_reason: Failure.assertion_failed(:my_check, key_error))
 
-      assert rep.failure_message != ""
-      assert rep.failure_message =~ "missing" or rep.failure_message =~ "key"
+      assert FailureReport.failure_message(rep) != ""
+
+      assert FailureReport.failure_message(rep) =~ "missing" or
+               FailureReport.failure_message(rep) =~ "key"
     end
   end
 
@@ -185,11 +188,11 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
 
     test "renders the new failure types" do
       for reason <- [
-            {:poll_error, :boom},
-            {:settle_timeout, :nope},
-            {:nemesis_error, :down},
-            {:resource_poller_error, :x},
-            {:projection_violation, SomeEvent, %RuntimeError{message: "bad transition"}}
+            Failure.poll_error(:boom),
+            Failure.settle_timeout(:nope),
+            Failure.nemesis_error(:down),
+            Failure.resource_poller_error(:x),
+            Failure.projection_violation(SomeEvent, %RuntimeError{message: "bad transition"})
           ] do
         rep = report(failure_reason: reason)
         assert is_binary(FailureReport.failure_type_summary(rep))

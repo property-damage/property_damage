@@ -12,11 +12,12 @@ defmodule PropertyDamage.FlakyFailureReportTest do
   to the original failing run's reason and index.
 
   This is the exact shape of the gitea_bench UI `CreateLabel` timeout flake: run 1
-  fails with `{:adapter_error, ...}`; the confirmation re-run intermittently
+  fails with a `%Failure{}` `:adapter_error`; the confirmation re-run intermittently
   passes.
   """
   use ExUnit.Case, async: false
 
+  alias PropertyDamage.Failure
   alias PropertyDamage.FailureReport
 
   defmodule Cmd do
@@ -46,7 +47,7 @@ defmodule PropertyDamage.FlakyFailureReportTest do
 
   # Fails (adapter error) on the very first command execution across the whole
   # run/1 lifecycle, then succeeds forever. So run 1 (exploration) fails at
-  # index 0 with a real {:adapter_error, :flaky_boom}; the post-shrink re-run
+  # index 0 with a real `:adapter_error` (detail `:flaky_boom`); the post-shrink re-run
   # passes -- the fresh result is success/nil, the shape that used to render as
   # "Unknown Failure". The execution counter lives in adapter_config so it
   # survives across the exploration run and the confirmation re-run.
@@ -88,11 +89,11 @@ defmodule PropertyDamage.FlakyFailureReportTest do
 
     # The confirmation re-run passed (the counter advanced past 0), so a naive
     # report built from the fresh result would be a nil-reason "Unknown Failure".
-    refute report.failure_type == :unknown,
+    refute FailureReport.failure_type(report) == :unknown,
            "expected the observed adapter error, got a contentless Unknown Failure"
 
-    assert report.failure_type == :adapter_error
-    assert report.failure_reason == {:adapter_error, :flaky_boom}
+    assert FailureReport.failure_type(report) == :adapter_error
+    assert report.failure_reason == Failure.adapter_error(:flaky_boom)
     assert report.failed_at_index == 0
   end
 end

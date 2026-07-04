@@ -18,7 +18,7 @@ defmodule PropertyDamage.StutterShrinkTest do
   """
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.{Executor, Sequence, Shrinker}
+  alias PropertyDamage.{Executor, Failure, Sequence, Shrinker}
   alias PropertyDamage.Stutter.Config
 
   # --- Commands ---------------------------------------------------------------
@@ -125,7 +125,10 @@ defmodule PropertyDamage.StutterShrinkTest do
     # Sanity: the original sequence fails with an idempotency violation at the
     # Charge index.
     refute result.success
-    assert {:idempotency_violation, _} = result.failure_reason
+
+    assert %Failure{type: %Failure.Assertion{kind: :idempotency_violation}} =
+             result.failure_reason
+
     assert result.failed_at_index == 3
 
     shrink_result =

@@ -3,7 +3,7 @@ defmodule PropertyDamage.ExportTest do
 
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Export, FailureReport, Placeholder, Sequence}
+  alias PropertyDamage.{Export, Failure, FailureReport, Placeholder, Sequence}
   alias PropertyDamage.Export.HTTPSpec
 
   # ============================================================================
@@ -129,9 +129,7 @@ defmodule PropertyDamage.ExportTest do
       seed: 512_902_757,
       run_number: 1,
       failed_at_index: 2,
-      failure_type: :check_failed,
-      failure_message: "Balance cannot be negative",
-      check_name: :NonNegativeBalance,
+      failure_reason: Failure.assertion_failed(:NonNegativeBalance, "Balance cannot be negative"),
       original_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
       trace:
         PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands, branches: nil, suffix: []}),
@@ -274,7 +272,7 @@ defmodule PropertyDamage.ExportTest do
       report = %FailureReport{
         seed: 1,
         failed_at_index: 1,
-        failure_type: :check_failed,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
         trace:
           PropertyDamage.RunTrace.new(
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
@@ -347,7 +345,7 @@ defmodule PropertyDamage.ExportTest do
       report = %FailureReport{
         seed: 1,
         failed_at_index: 1,
-        failure_type: :check_failed,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
         trace:
           PropertyDamage.RunTrace.new(
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
@@ -381,7 +379,7 @@ defmodule PropertyDamage.ExportTest do
       report = %FailureReport{
         seed: 1,
         failed_at_index: 1,
-        failure_type: :check_failed,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
         trace:
           PropertyDamage.RunTrace.new(
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
@@ -491,9 +489,7 @@ defmodule PropertyDamage.ExportTest do
 
       failure = %FailureReport{
         seed: 123,
-        failure_type: :check_failed,
-        check_name: :NonNegativeBalance,
-        failure_message: "boom",
+        failure_reason: Failure.assertion_failed(:NonNegativeBalance, "boom"),
         original_sequence: %Sequence{prefix: commands, branches: nil, suffix: []},
         trace:
           PropertyDamage.RunTrace.new(
@@ -690,7 +686,7 @@ defmodule PropertyDamage.ExportTest do
       assert Common.generate_filename(failure, :exunit) ==
                Common.generate_filename(failure, :exunit)
 
-      other = %{failure | failure_reason: {:check_failed, :Other, "different"}}
+      other = %{failure | failure_reason: Failure.assertion_failed(:Other, "different")}
 
       refute Common.generate_filename(other, :exunit) ==
                Common.generate_filename(failure, :exunit)
@@ -756,7 +752,7 @@ defmodule PropertyDamage.ExportTest do
       %FailureReport{
         seed: 1,
         failed_at_index: 1,
-        failure_type: :check_failed,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
         trace:
           PropertyDamage.RunTrace.new(
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}

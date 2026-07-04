@@ -265,7 +265,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
       )
 
     assert {:error, report} = result
-    assert report.invariant_name == :never_negative
+    assert PropertyDamage.FailureReport.invariant_name(report) == :never_negative
     assert report.invariant_description == "The counter is never negative"
 
     rendered = Formatter.format(report)

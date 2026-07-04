@@ -1,7 +1,7 @@
 defmodule PropertyDamage.DiagramTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Diagram, EventLog.Entry, FailureReport, Sequence}
+  alias PropertyDamage.{Diagram, EventLog.Entry, Failure, FailureReport, Sequence}
 
   # Test event/command structs
   defmodule TestCommand do
@@ -190,11 +190,8 @@ defmodule PropertyDamage.DiagramTest do
         seed: 12_345,
         run_number: 1,
         failed_at_index: 1,
-        failure_type: :check_failed,
         original_sequence: sequence,
-        failure_reason: {:check_failed, :NonNegativeBalance, "Balance is -50"},
-        check_name: :NonNegativeBalance,
-        failure_message: "Balance is -50",
+        failure_reason: Failure.assertion_failed(:NonNegativeBalance, "Balance is -50"),
         trace: PropertyDamage.RunTrace.new(plan: sequence, event_log: event_log),
         timestamp: DateTime.utc_now()
       }
@@ -345,11 +342,8 @@ defmodule PropertyDamage.DiagramTest do
         seed: 12_345,
         run_number: 1,
         failed_at_index: 1,
-        failure_type: :check_failed,
         original_sequence: sequence,
-        failure_reason: {:check_failed, :NonNegativeBalance, "Balance is -50"},
-        check_name: :NonNegativeBalance,
-        failure_message: "Balance is -50",
+        failure_reason: Failure.assertion_failed(:NonNegativeBalance, "Balance is -50"),
         trace: PropertyDamage.RunTrace.new(plan: sequence, event_log: event_log),
         timestamp: ~U[2025-01-01 00:00:00Z]
       }

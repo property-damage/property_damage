@@ -19,7 +19,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
 
   import ExUnit.CaptureLog
 
-  alias PropertyDamage.{EventQueue, Executor}
+  alias PropertyDamage.{EventQueue, Executor, Failure}
 
   # credo's AliasOrder sorts a multi-alias by its first member, so
   # PropertyDamage.Test.{FailingModel, ...} sorts as ...Test.FailingModel and
@@ -129,7 +129,15 @@ defmodule PropertyDamage.ExecutorSettledTest do
         Executor.run([%CreateItem{name: "Big", quantity: 150}], FailingModel, SimpleAdapter)
 
       assert sync_result.success == false
-      assert {:assertion_failed, :quantity_limit, sync_exception} = sync_result.failure_reason
+
+      assert %Failure{
+               type: %Failure.Assertion{
+                 kind: :assertion_failed,
+                 name: :quantity_limit,
+                 detail: sync_exception
+               }
+             } = sync_result.failure_reason
+
       assert %PropertyDamage.AssertionFailed{} = sync_exception
 
       # Settled path: the probe command's settled event drives the same
@@ -144,8 +152,13 @@ defmodule PropertyDamage.ExecutorSettledTest do
       assert settled_result.success == false
       assert settled_result.failed_at_index == 0
 
-      assert {:assertion_failed, :quantity_limit, settled_exception} =
-               settled_result.failure_reason
+      assert %Failure{
+               type: %Failure.Assertion{
+                 kind: :assertion_failed,
+                 name: :quantity_limit,
+                 detail: settled_exception
+               }
+             } = settled_result.failure_reason
 
       assert %PropertyDamage.AssertionFailed{} = settled_exception
     end
