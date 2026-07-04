@@ -225,7 +225,7 @@ Execute a fixed command sequence without a model.
 **Returns:**
 
 - `{:ok, event_log}` - List of `EventLog.Entry` structs
-- `{:error, {:adapter_error, reason, partial_events}}` - Adapter execution failed
+- `{:error, %PropertyDamage.Failure{}}` - Adapter execution failed (an `:adapter_error`, whose `partial_events` hold the events captured before the error)
 - `{:error, {:adapter_setup_failed, reason}}` - Adapter setup failed
 
 **Example:**

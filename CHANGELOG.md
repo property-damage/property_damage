@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Structured failure vocabulary: `%PropertyDamage.Failure{}` (DR-041).** A run's
+  `failure_reason` is now one nested, public type instead of a loose family of
+  `{:tag, ...}` tuples. It carries a class struct under `type`
+  (`Failure.Assertion` / `Failure.Execution` / `Failure.Framework`) so illegal
+  class/kind combinations are unrepresentable, plus a `branch_id` on the envelope
+  that absorbs the old `{:branch_failure, id, inner}` wrapper. Kinds are globally
+  unique atoms; `Failure.class/1`, `kind/1`, `name/1`, `detail/1`, `branch_id/1`,
+  and `partial_events/1` read a failure. See DR-041 for the full class/kind table
+  and the `kind in [:poll_timeout, :settle_timeout]` "possibly tuning, not a bug"
+  triage note (documented in `guides/debugging_failures.md`).
+
 - **Per-step projection-state timeline + projection-purity check (P8, DR-040).**
   Projection state at any command is now *derived* from the run (no snapshot is
   captured). `PropertyDamage.RunTrace.state_at/2`, `state_before/2`, and
@@ -162,6 +173,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing the report.
 
 ### Changed
+
+- **`failure_reason` is a `%PropertyDamage.Failure{}` everywhere it flowed as a
+  raw tuple (BREAKING, DR-041).** Every producer (the executor, branching,
+  nemesis, finalization, linearization) now constructs a `%Failure{}`, and every
+  consumer reads one: `Shrinker.failure_signature/1` returns a `{kind, name}`
+  tuple (was a `%{type:, check_name:}` map) and accepts only a `%Failure{}`;
+  `FailureReport.classify_reason/1`, `ErrorOrigin.classify/2`, `Error.format/2`,
+  the formatter titles, and `FailureIntelligence` fingerprinting all key on the
+  kind. Two renames of note: `:ref_resolution_error` → `:placeholder_resolution`
+  (the old name referred to the long-deleted `%Ref{}` system), and the
+  trigger/check failures unify under `:assertion_failed` (so
+  `FailureReport.failure_type/1` returns `:assertion_failed`, not `:check_failed`,
+  and linearization failures report `:linearization`, not `:linearization_failed`).
+  The shrinker's failure-equivalence granularity is unchanged — the `{kind, name}`
+  signature keeps a `:poll_timeout` of `:x` distinct from an `:assertion_failed`
+  of `:x` (a class-based signature would have merged them).
+
+- **Persisted-file format bumps to version `7`; pre-v7 files are refused
+  (BREAKING, DR-041).** A report's persisted shape changed (its `failure_reason`
+  is a nested `%Failure{}` and the six denormalized failure fields are gone), so
+  `@version` goes 6 → 7. A `.pd` / `.pdtrace` file written under format version
+  `1`–`6` now returns `{:error, {:unsupported_format_version, version, 7}}`; there
+  is no honest in-place upgrade. Re-capture the failure under the current version
+  (the framework is unpublished; no persisted artifacts exist outside test
+  fixtures).
 
 - **Persisted-file format bumps to version `6`; pre-v6 files are refused
   (BREAKING, DR-040).** V6 records the per-run fold order (`EventLog.Entry`
@@ -341,6 +377,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and its implementation were both exactly `:downstream` — duplicate vocabulary
   for one behavior. Models overriding `partition_type: :asymmetric` must switch
   to `:downstream`.
+
+- **BREAKING (DR-041):** `FailureReport` no longer carries the six denormalized
+  failure fields `failure_type`, `check_name`, `failure_message`,
+  `invariant_name`, `idempotency_violation`, and `poll_timeout_info`. They were
+  projections of `failure_reason`; use the accessor functions of the same names
+  (`FailureReport.failure_type/1`, `check_name/1`, `failure_message/1`,
+  `invariant_name/1`, `idempotency_violation/1`, `poll_timeout_info/1`), all
+  derived from the `%Failure{}` reason. (Downstream structs that keep their own
+  descriptive `failure_type` / `check_name` — `FailureIntelligence.Fingerprint`,
+  `SeedLibrary` entries, persistence metadata — are unchanged; they now populate
+  those from the accessors.)
 
 - **BREAKING (Phase B):** `FailureReport` no longer carries the materialized
   `command_at_failure` / `events_at_failure` fields. They were redundant with the
