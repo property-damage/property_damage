@@ -64,8 +64,13 @@ defmodule ObanBench.JobRefsShrinkTest do
              )
 
     # A clean invariant violation: a cancelled job was observed still runnable.
-    assert {:assertion_failed, name, %PropertyDamage.AssertionFailed{} = failure} =
-             report.failure_reason
+    assert %PropertyDamage.Failure{
+             type: %PropertyDamage.Failure.Assertion{
+               kind: :assertion_failed,
+               name: name,
+               detail: %PropertyDamage.AssertionFailed{} = failure
+             }
+           } = report.failure_reason
 
     assert name == :cancelled_jobs_not_runnable
     assert failure.data.state in JobRefs.runnable_states()

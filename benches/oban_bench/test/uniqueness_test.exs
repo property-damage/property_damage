@@ -77,9 +77,13 @@ defmodule ObanBench.UniquenessTest do
       # A clean exactly-once safety violation: the @trigger at: :teardown check
       # saw the counter overshoot its deduplicated expected value (the duplicate
       # job ran a second time).
-      assert {:assertion_failed, :exactly_once,
-              %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}} =
-               report.failure_reason
+      assert %PropertyDamage.Failure{
+               type: %PropertyDamage.Failure.Assertion{
+                 kind: :assertion_failed,
+                 name: :exactly_once,
+                 detail: %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}
+               }
+             } = report.failure_reason
 
       commands =
         PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report))
