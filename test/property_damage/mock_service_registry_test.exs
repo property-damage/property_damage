@@ -39,6 +39,18 @@ defmodule PropertyDamage.MockServiceRegistryTest do
     def handle_request(_request, _state), do: {:reply, %{}, []}
   end
 
+  defmodule RaisingInitStateMock do
+    use PropertyDamage.MockServiceAdapter
+    def init_state, do: raise("init_state boom")
+    def handle_request(_request, _state), do: {:reply, %{}, []}
+  end
+
+  defmodule ExitingInitStateMock do
+    use PropertyDamage.MockServiceAdapter
+    def init_state, do: exit(:init_state_boom)
+    def handle_request(_request, _state), do: {:reply, %{}, []}
+  end
+
   @tag :capture_log
   test "a raising on_command surfaces an error and leaves the registry alive" do
     {:ok, reg} = MockServiceRegistry.start_link([])
@@ -67,6 +79,30 @@ defmodule PropertyDamage.MockServiceRegistryTest do
     :ok = MockServiceRegistry.register(reg, RaisingOnEventMock)
 
     assert {:error, _reason} = MockServiceRegistry.notify_event(reg, %Evt{tag: :x})
+    assert Process.alive?(reg)
+
+    MockServiceRegistry.stop(reg)
+  end
+
+  @tag :capture_log
+  test "a raising init_state surfaces an error and leaves the registry alive" do
+    {:ok, reg} = MockServiceRegistry.start_link([])
+
+    assert {:error, {RaisingInitStateMock, :init_state, _reason}} =
+             MockServiceRegistry.register(reg, RaisingInitStateMock)
+
+    assert Process.alive?(reg)
+
+    MockServiceRegistry.stop(reg)
+  end
+
+  @tag :capture_log
+  test "an exiting init_state surfaces an error and leaves the registry alive" do
+    {:ok, reg} = MockServiceRegistry.start_link([])
+
+    assert {:error, {ExitingInitStateMock, :init_state, _reason}} =
+             MockServiceRegistry.register(reg, ExitingInitStateMock)
+
     assert Process.alive?(reg)
 
     MockServiceRegistry.stop(reg)
