@@ -34,6 +34,14 @@ defmodule PropertyDamage.Executor.Timeout do
           {:returned, adapter.execute(command, user_context, runtime)}
         rescue
           e -> {:raised, e, __STACKTRACE__}
+        catch
+          # A BEAM exit/throw from user code inside `execute/3` bypasses `rescue`
+          # and would otherwise kill this Task and, through its link, the whole
+          # run. Capture it here and route it through the same `{:error, _}`
+          # channel a returned error uses, so the executor reports an
+          # `:adapter_error` and the shrinker engages identically (A1).
+          :exit, reason -> {:caught, :exit, reason}
+          :throw, value -> {:caught, :throw, value}
         end
       end)
 
@@ -45,6 +53,12 @@ defmodule PropertyDamage.Executor.Timeout do
       # be rescued in execute_regular_command into `{:error, {e, stacktrace}}`.
       {:ok, {:raised, exception, stacktrace}} ->
         {:error, {exception, stacktrace}}
+
+      # An exit/throw from `execute/3` is surfaced as an ordinary adapter error
+      # (tagged with how it escaped), exactly as if the adapter had returned
+      # `{:error, {:exit, reason}}` / `{:error, {:throw, value}}`.
+      {:ok, {:caught, kind, reason}} ->
+        {:error, {kind, reason}}
 
       _timed_out_or_exited ->
         {:error, CommandTimeoutError.exception(command: command, timeout_ms: timeout_ms)}
