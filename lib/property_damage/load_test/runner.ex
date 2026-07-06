@@ -345,10 +345,22 @@ defmodule PropertyDamage.LoadTest.Runner do
   end
 
   @impl true
-  def handle_info({:arrival_completed, ref, _result}, state) do
-    new_in_flight = MapSet.delete(state.in_flight, ref)
-    Metrics.arrival_completed(state.metrics)
-    {:noreply, %{state | in_flight: new_in_flight}}
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    # Each arrival is spawned with a monitor (see spawn_arrival/1) and tracked in
+    # in_flight by its monitor ref. Whether the arrival finished cleanly or
+    # crashed, its :DOWN reaps the ref so the drain loop can terminate; an
+    # unmonitored crash used to leak the ref and wedge `await :infinity`.
+    if MapSet.member?(state.in_flight, ref) do
+      # Only a clean run counts as a completed arrival; a crash is not a
+      # completion (matching the previous success-path accounting).
+      if reason == :normal do
+        Metrics.arrival_completed(state.metrics)
+      end
+
+      {:noreply, %{state | in_flight: MapSet.delete(state.in_flight, ref)}}
+    else
+      {:noreply, state}
+    end
   end
 
   @impl true
@@ -428,20 +440,22 @@ defmodule PropertyDamage.LoadTest.Runner do
   # ============================================================================
 
   defp spawn_arrival(state) do
-    runner_pid = self()
-    ref = make_ref()
+    pool = state.pool
 
     # Checkout a worker (dynamic pool - always succeeds or creates new worker)
-    case WorkerPool.checkout(state.pool) do
+    case WorkerPool.checkout(pool) do
       {:ok, worker} ->
         Metrics.arrival_spawned(state.metrics)
 
-        # Execute sequence in a task
-        Task.start(fn ->
-          result = Worker.execute_sequence(worker)
-          WorkerPool.checkin(state.pool, worker)
-          send(runner_pid, {:arrival_completed, ref, result})
-        end)
+        # Execute the sequence in a *monitored* task. spawn_monitor (unlike the
+        # former unlinked Task.start) guarantees a :DOWN even when the arrival
+        # crashes, so the runner always reaps its in_flight ref and the drain
+        # loop terminates. We key in_flight by the monitor ref.
+        {_pid, ref} =
+          spawn_monitor(fn ->
+            Worker.execute_sequence(worker)
+            WorkerPool.checkin(pool, worker)
+          end)
 
         %{state | in_flight: MapSet.put(state.in_flight, ref)}
 
