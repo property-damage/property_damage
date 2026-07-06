@@ -3,6 +3,10 @@ defmodule PropertyDamage.Validation do
 
   alias PropertyDamage.Error
 
+  # Callbacks every command module must implement. Single source of truth shared
+  # by validate_command_callbacks!/1 and the validate!/3 command check.
+  @required_command_callbacks [{:generator, 1}]
+
   @doc """
   Validate test configuration.
 
@@ -133,11 +137,7 @@ defmodule PropertyDamage.Validation do
   @spec validate_command_callbacks!(module()) :: :ok
   def validate_command_callbacks!(cmd) do
     # generator/1 is the only required callback in the new pattern
-    required = [
-      {:generator, 1}
-    ]
-
-    for {callback, arity} <- required do
+    for {callback, arity} <- @required_command_callbacks do
       unless function_exported?(cmd, callback, arity) do
         raise ArgumentError,
               Error.format_config_error(:command_missing_callback, {cmd, callback, arity})
@@ -333,11 +333,33 @@ defmodule PropertyDamage.Validation do
     commands = model.commands()
     normalized = PropertyDamage.Model.normalize_commands(commands)
 
-    for {_weight, cmd, _spec} <- normalized,
-        not Code.ensure_loaded?(cmd),
-        reduce: [] do
-      acc -> ["Command module #{inspect(cmd)} does not exist" | acc]
+    for {_weight, cmd, _spec} <- normalized, reduce: [] do
+      acc ->
+        cond do
+          not Code.ensure_loaded?(cmd) ->
+            ["Command module #{inspect(cmd)} does not exist" | acc]
+
+          missing = missing_command_callback(cmd) ->
+            {callback, arity} = missing
+
+            [
+              "Command #{inspect(cmd)} is missing required callback #{callback}/#{arity}"
+              | acc
+            ]
+
+          true ->
+            acc
+        end
     end
+  end
+
+  # First missing required command callback ({callback, arity}), or nil when the
+  # command implements them all. Mirrors validate_command_callbacks!/1 but
+  # accumulates rather than raising, matching the validate!/3 error-collection.
+  defp missing_command_callback(cmd) do
+    Enum.find(@required_command_callbacks, fn {callback, arity} ->
+      not function_exported?(cmd, callback, arity)
+    end)
   end
 
   defp validate_projections(model) do

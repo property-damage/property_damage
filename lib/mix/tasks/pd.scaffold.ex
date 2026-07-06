@@ -384,11 +384,15 @@ defmodule Mix.Tasks.Pd.Scaffold do
         {method, op} <- methods,
         is_map(op),
         Enum.member?(["get", "post", "put", "patch", "delete"], method),
-        operation_id = Map.get(op, "operationId"),
-        filter == nil or MapSet.member?(filter, operation_id) do
+        # NOTE: do not bind `operation_id = Map.get(...)` as a comprehension
+        # clause — a nil result (missing operationId) is falsy and would silently
+        # drop the operation. Compute it in the body and filter explicitly.
+        operation_included?(filter, Map.get(op, "operationId")) do
+      operation_id = Map.get(op, "operationId")
+
       %{
         operation_id: operation_id,
-        module_name: to_module_name(operation_id),
+        module_name: operation_module_name(operation_id, method, path),
         method: String.upcase(method),
         method_atom: String.to_atom(method),
         path: path,
@@ -403,6 +407,20 @@ defmodule Mix.Tasks.Pd.Scaffold do
     end
     |> Enum.sort_by(& &1.operation_id)
   end
+
+  # Whether an operation passes the --operations filter. A nil filter keeps
+  # everything (including operations without an operationId); an explicit filter
+  # matches by operationId, so unnamed operations are excluded when filtering.
+  defp operation_included?(nil, _operation_id), do: true
+  defp operation_included?(filter, operation_id), do: MapSet.member?(filter, operation_id)
+
+  # Module name for an operation. Uses the operationId when present; otherwise
+  # derives a name from the HTTP method and path so two operations that both omit
+  # operationId get distinct names (and thus distinct output files) instead of
+  # colliding on "UnnamedOperation".
+  @spec operation_module_name(String.t() | nil, String.t(), String.t()) :: String.t()
+  defp operation_module_name(nil, method, path), do: to_module_name(method <> "_" <> path)
+  defp operation_module_name(operation_id, _method, _path), do: to_module_name(operation_id)
 
   @spec to_module_name(String.t() | nil) :: String.t()
   @doc false
@@ -708,7 +726,12 @@ defmodule Mix.Tasks.Pd.Scaffold do
           end)
       end
 
-    param_fields ++ body_fields
+    # A path/query parameter and a request-body property can share a name (e.g.
+    # `id`). They map to a single struct/generator key, so collapse duplicates by
+    # field name to avoid `defstruct [:id, :id]` (which fails compilation under
+    # --warnings-as-errors). Parameters win over body fields since they are part
+    # of the request line.
+    Enum.uniq_by(param_fields ++ body_fields, & &1.name)
   end
 
   @spec to_field_name(String.t()) :: String.t()
