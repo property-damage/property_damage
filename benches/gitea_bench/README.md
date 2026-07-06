@@ -61,12 +61,14 @@ lib/gitea_bench/
 ## Running
 
 ```bash
-mix test          # brings up two Gitea instances + installs Chromium, then runs
+mix deps.get      # fetch deps (first run)
+mix test          # brings up three Gitea instances + installs Chromium, then runs
 mix bench.db.down # explicit teardown
 ```
 
-`mix test` runs `bench.db.up` (two ephemeral `gitea/gitea` containers on ports
-3101/3102, each with a known admin) and `playwright.install` (Chromium) before the
+`mix test` runs `bench.db.up` (three ephemeral `gitea/gitea` containers on ports
+3101/3102/3103, each with a known admin — the 3103 instance runs gitea 1.24 for
+the webhook-injector demo) and `playwright.install` (Chromium) before the
 suite. Set `PD_GITEA_API_URL` / `PD_GITEA_UI_URL` to point at external instances
 (CI service containers / BYO); then no containers are started. Requires Docker and
 Node on the host.
