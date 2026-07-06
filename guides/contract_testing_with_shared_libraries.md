@@ -246,7 +246,13 @@ end
 Use a seed library to track known-interesting seeds:
 
 ```elixir
-{:ok, library} = PropertyDamage.SeedLibrary.load("seeds.json")
+# load/1 returns {:error, :enoent} when the file does not exist yet, so start a
+# fresh library on the first run:
+library =
+  case PropertyDamage.SeedLibrary.load("seeds.json") do
+    {:ok, lib} -> lib
+    {:error, :enoent} -> PropertyDamage.SeedLibrary.new()
+  end
 
 # Add a new failure (captures dependency versions automatically)
 {:ok, library} = PropertyDamage.SeedLibrary.add(library, failure,
@@ -398,8 +404,9 @@ defmodule OrderTest do
 end
 
 # lib/order_http_adapter.ex
+# Uses HTTPoison as the HTTP client; add {:httpoison, "~> 2.0"} to your deps.
 defmodule OrderHttpAdapter do
-  @behaviour PropertyDamage.Adapter
+  use PropertyDamage.Adapter
 
   def setup(_config) do
     {:ok, %{base_url: "http://localhost:4000"}}

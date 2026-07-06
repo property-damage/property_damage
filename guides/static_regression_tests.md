@@ -152,12 +152,12 @@ Here's how to extract it for a regression test:
   on_failure: fn report ->
     # Log the shrunk sequence for later use
     IO.puts("Shrunk sequence:")
-    IO.inspect(Sequence.to_list(report.shrunk_sequence))
+    IO.inspect(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report)))
   end
 )
 
 # Or programmatically extract the sequence
-commands = PropertyDamage.Sequence.to_list(failure.shrunk_sequence)
+commands = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(failure))
 ```
 
 ### From Generated Test Code

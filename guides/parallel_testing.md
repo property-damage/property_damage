@@ -162,6 +162,11 @@ Parallel testing with linearization checking catches:
 
 ## Example: Concurrent Account Operations
 
+> This example highlights only the branching wiring. The `CreateAccount` /
+> `Deposit` / `Withdraw` / `Transfer` commands, their events, and
+> `AccountApiAdapter` are assumed; define them following
+> [Writing Commands](writing_commands.md) and [Getting Started](getting_started.md).
+
 Two branches both deposit to and withdraw from a shared account:
 
 ```elixir
