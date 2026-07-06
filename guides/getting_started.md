@@ -161,9 +161,9 @@ defmodule MyApp.Projections.UserInvariants do
   # Assertions use @trigger to specify when to run
   # and assert_* naming convention
   @trigger every: 1
-  def assert_emails_unique(state, _cmd_or_event) do
-    # In a real system, duplicate emails would be caught at creation time
-    # This is just an example of the pattern
+  def assert_emails_unique(_state, _cmd_or_event) do
+    # In a real system, duplicate emails would be caught at creation time.
+    # This is just an example of the pattern (see writing_invariants.md).
     :ok
   end
 end
@@ -177,15 +177,15 @@ The model ties everything together:
 defmodule MyApp.TestModel do
   @behaviour PropertyDamage.Model
 
-  alias MyApp.Commands.{CreateUser, UpdateUser, DeleteUser}
+  alias MyApp.Commands.CreateUser
   alias MyApp.Projections.{ModelState, UserInvariants}
 
   @impl true
   def commands do
     [
-      {CreateUser, weight: 5},   # Higher weight = more likely
-      {UpdateUser, weight: 2},
-      {DeleteUser, weight: 1}
+      {CreateUser, weight: 5}
+      # Add {UpdateUser, weight: 2} and {DeleteUser, weight: 1} once you define
+      # those command modules and their adapter clauses (left as an exercise).
     ]
   end
 
@@ -206,37 +206,24 @@ The adapter executes commands against your actual system:
 
 ```elixir
 defmodule MyApp.TestAdapter do
-  @behaviour PropertyDamage.Adapter
+  use PropertyDamage.Adapter
 
-  alias MyApp.Commands.{CreateUser, UpdateUser, DeleteUser}
-  alias MyApp.Events.{UserCreated, UserUpdated, UserDeleted}
+  alias MyApp.Commands.CreateUser
+  alias MyApp.Events.UserCreated
 
   @impl true
-  def setup(config) do
-    base_url = Map.get(config, :base_url, "http://localhost:4000")
-    {:ok, %{base_url: base_url}}
-  end
+  def setup(_config), do: {:ok, %{}}
 
   @impl true
   def teardown(_ctx), do: :ok
 
+  # In-memory SUT: mints a server-side user_id so this guide runs with no
+  # external service. To drive a real system, call it here instead -- see the
+  # "Adapter Variations" section below for HTTP/gRPC shapes.
   @impl true
-  def execute(%CreateUser{email: email, name: name}, ctx, _runtime) do
-    case post(ctx.base_url, "/users", %{email: email, name: name}) do
-      {:ok, %{status: 201, body: body}} ->
-        events = [%UserCreated{
-          user_id: body["id"],
-          email: body["email"],
-          name: body["name"]
-        }]
-        {:ok, events}
-
-      {:ok, %{status: status, body: body}} ->
-        {:error, {:unexpected_status, status, body}}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  def execute(%CreateUser{email: email, name: name}, _ctx, _runtime) do
+    user_id = "user_#{System.unique_integer([:positive])}"
+    {:ok, [%UserCreated{user_id: user_id, email: email, name: name}]}
   end
 
   # execute/3 clauses for UpdateUser and DeleteUser are left as an exercise;
@@ -298,7 +285,6 @@ See the [Cheatsheet](cheatsheet.md) for complete adapter templates.
 PropertyDamage.run(
   model: MyApp.TestModel,
   adapter: MyApp.TestAdapter,
-  adapter_config: %{base_url: "http://localhost:4000"},
   max_runs: 100,
   max_commands: 50
 )
@@ -315,7 +301,6 @@ defmodule MyApp.PropertyTest do
              PropertyDamage.run(
                model: MyApp.TestModel,
                adapter: MyApp.TestAdapter,
-               adapter_config: %{base_url: "http://localhost:4000"},
                max_runs: 100
              )
   end
@@ -329,13 +314,13 @@ To see what PropertyDamage generates, add `verbose: true`:
     PropertyDamage.run(
       model: OrderModel,
       adapter: OrderAdapter,
-      adapter_config: %{base_url: "http://localhost:4000"},
       verbose: true
     )
 
-This prints each generated command, execution result, and assertion check — useful for
-understanding the test flow. See the [Debugging Failures](debugging_failures.md) guide
-for more.
+This prints a run-configuration summary and a per-run progress line (commands
+executed, pass/fail). For per-command detail (each command, its result, and the
+assertion checks) use step-by-step replay; see the
+[Debugging Failures](debugging_failures.md) guide.
 
 ## Understanding Results
 

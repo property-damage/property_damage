@@ -36,10 +36,13 @@ Add `property_damage` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:property_damage, "~> 0.2"}
+    {:property_damage, "~> 0.2"},
+    {:stream_data, "~> 1.0"}
   ]
 end
 ```
+
+(Your command generators call `StreamData` directly, so add it as a dependency too.)
 
 ## Quick Start
 
@@ -108,13 +111,13 @@ defmodule MyApp.Projections.Users do
 
   def apply(state, _event), do: state
 
-  # Checked after every command
+  # Checked after every command. Assert a property your SUT must never violate.
+  # (Don't assert uniqueness of a client-supplied field like emails -- the
+  # generator can legitimately repeat them; assert on what the SUT guarantees.)
   @trigger every: 1
-  def assert_unique_emails(state, _cmd_or_event) do
-    emails = state.users |> Map.values() |> Enum.map(& &1.email)
-
-    if length(emails) != length(Enum.uniq(emails)) do
-      PropertyDamage.fail!("Duplicate emails found", emails: emails)
+  def assert_emails_present(state, _cmd_or_event) do
+    if Enum.any?(state.users, fn {_id, u} -> u.email in [nil, ""] end) do
+      PropertyDamage.fail!("user with missing email", users: state.users)
     end
   end
 end
@@ -194,15 +197,23 @@ defmodule MyApp.TestAdapter do
   @impl true
   def teardown(_context), do: :ok
 
+  # In-memory SUT: mints a server-side id so the Quick Start runs with no
+  # external service. To drive a real system, call it here (see below).
   @impl true
-  def execute(%CreateUser{} = cmd, context) do
-    response =
-      Req.post!("#{context.base_url}/users",
-        json: %{name: cmd.name, email: cmd.email}
-      ).body
-
-    {:ok, [%UserCreated{id: response["id"], name: cmd.name, email: cmd.email}]}
+  def execute(%CreateUser{} = cmd, _context, _runtime) do
+    id = "user_#{System.unique_integer([:positive])}"
+    {:ok, [%UserCreated{id: id, name: cmd.name, email: cmd.email}]}
   end
+end
+```
+
+To drive a **real HTTP service** instead, add an HTTP client (e.g. `{:req, "~> 0.5"}`)
+and call it from `execute/3`:
+
+```elixir
+def execute(%CreateUser{} = cmd, context, _runtime) do
+  body = Req.post!("#{context.base_url}/users", json: %{name: cmd.name, email: cmd.email}).body
+  {:ok, [%UserCreated{id: body["id"], name: cmd.name, email: cmd.email}]}
 end
 ```
 
@@ -212,7 +223,6 @@ end
 case PropertyDamage.run(
        model: MyApp.TestModel,
        adapter: MyApp.TestAdapter,
-       adapter_config: %{base_url: "http://localhost:4000"},
        max_commands: 50,
        max_runs: 100
      ) do
@@ -507,8 +517,8 @@ PropertyDamage.run(
   shrink_timeout_ms: 30_000,
   max_shrink_iterations: 1000,
 
-  # Idempotency
-  stutter_probability: 0.1,  # Retry probability
+  # Idempotency (see the idempotency guide)
+  stutter: [probability: 0.1],
 
   # Adapter
   adapter_config: %{base_url: "http://localhost:4000"}
@@ -1413,7 +1423,6 @@ is browsable in the `guides/` directory and rendered on
 ```
 PropertyDamage
 ├── Core Types (Tier 0)
-│   ├── Ref          - Symbolic references
 │   ├── Command      - Operation behaviour
 │   ├── Model        - Test model behaviour
 │   │   ├── Projection   - State reducer behaviour

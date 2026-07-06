@@ -74,11 +74,15 @@ defmodule AccountState do
   end
   def apply(state, _), do: state
 
+  # Invariants run after each command. Assert a property your SUT must never
+  # violate -- not uniqueness of a client-supplied field like names, which the
+  # generator can legitimately repeat. This one holds for the in-memory adapter
+  # below (every stored account keeps a non-empty name), so the run passes; see
+  # writing_invariants.md for invariants that catch real bugs.
   @trigger every: 1
-  def assert_no_duplicate_names(state, _) do
-    names = state.accounts |> Map.values() |> Enum.map(& &1.name)
-    if length(names) != length(Enum.uniq(names)) do
-      PropertyDamage.fail!("duplicate account names", names: names)
+  def assert_names_present(state, _) do
+    if Enum.any?(state.accounts, fn {_id, acc} -> acc.name in [nil, ""] end) do
+      PropertyDamage.fail!("account with empty name", accounts: state.accounts)
     end
   end
 end
@@ -187,6 +191,9 @@ check_preconditions(%{accounts: %{"1" => %{name: "alice"}}}, AccountModel)
 
 ## Run Configurations
 
+In these snippets `M` and `A` are your model and adapter modules -- e.g.
+`AccountModel` and `AccountAdapter` from the Minimal Example above.
+
 ```elixir
 # Basic
 PropertyDamage.run(model: M, adapter: A)
@@ -205,15 +212,18 @@ PropertyDamage.run(
   ]
 )
 
-# Stutter / idempotency testing
+# Stutter / idempotency testing. NOTE: this needs an *idempotent* SUT. The
+# in-memory AccountAdapter above mints a fresh id per call, so re-execution is
+# not idempotent and this run reports an idempotency violation -- that is
+# stutter working, not a framework bug. Point it at an idempotent SUT for a pass.
 PropertyDamage.run(
   model: M,
   adapter: A,
-  stutter: %{
+  stutter: [
     probability: 0.2,
     max_repeats: 3,
     delay_ms: {10, 200}
-  }
+  ]
 )
 
 # Load test

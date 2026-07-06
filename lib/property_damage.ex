@@ -224,7 +224,7 @@ defmodule PropertyDamage do
   - `:verbose` - Print progress and configuration (default: false)
   - `:validate` - Run configuration validation first (default: true)
   - `:branching` - Keyword list for parallel branching (see below)
-  - `:stutter` - Map for idempotency testing (see below)
+  - `:stutter` - Keyword list for idempotency testing (see below)
 
   ## Branching Options
 
@@ -240,7 +240,7 @@ defmodule PropertyDamage do
 
   ## Stutter Options (Idempotency Testing)
 
-  Pass `stutter: %{...}` to enable idempotency testing:
+  Pass `stutter: [...]` to enable idempotency testing:
 
   - `:probability` - Probability of stuttering each command (default: 0.1)
   - `:max_repeats` - Maximum retry attempts per stuttered command (default: 2)
