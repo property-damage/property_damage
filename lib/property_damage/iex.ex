@@ -187,19 +187,26 @@ defmodule PropertyDamage.IEx do
         hints
       end
 
-    # Check for unbalanced weights
+    # Check for unbalanced weights (skip when the model declares no commands)
     weights = Enum.map(commands, fn {w, _cmd, _spec} -> w end)
-    max_weight = Enum.max(weights)
-    min_weight = Enum.min(weights)
 
     hints =
-      if max_weight > min_weight * 10 do
-        [
-          "Large weight variance (#{min_weight}-#{max_weight}) may skew command distribution"
-          | hints
-        ]
-      else
-        hints
+      case weights do
+        [] ->
+          hints
+
+        _ ->
+          max_weight = Enum.max(weights)
+          min_weight = Enum.min(weights)
+
+          if max_weight > min_weight * 10 do
+            [
+              "Large weight variance (#{min_weight}-#{max_weight}) may skew command distribution"
+              | hints
+            ]
+          else
+            hints
+          end
       end
 
     # Check for no probe commands
