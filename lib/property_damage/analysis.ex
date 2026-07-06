@@ -25,7 +25,15 @@ defmodule PropertyDamage.Analysis do
       PropertyDamage.Analysis.generate_test(failure, format: :exunit)
   """
 
-  alias PropertyDamage.{Executor, FailureReport, Placeholder, RunTrace, Sequence}
+  alias PropertyDamage.{
+    Executor,
+    FailureReport,
+    Placeholder,
+    PlaceholderRegistry,
+    RunTrace,
+    Sequence
+  }
+
   alias PropertyDamage.Sequence.Validator
   alias PropertyDamage.Shrinker.Graph
 
@@ -69,8 +77,16 @@ defmodule PropertyDamage.Analysis do
     # (nil for a non-localized failure).
     failed_at = Enum.find_value(steps, fn step -> step.failed? && step.flattened_index end)
 
+    # Build the authoritative producer map from the report's plan registry.
+    # The plan carried here is the shrunk sequence, whose embedded placeholder
+    # positions are stale original offsets (the shrinker remaps the registry's
+    # producer_link, not the embedded structs). Deriving producers from those
+    # positions would key edges to the wrong node or a node past the end of the
+    # shrunk list, so build the map from the current registry positions instead.
+    producers = plan_producers(FailureReport.shrunk_sequence(report))
+
     # Build dependency graph
-    graph = Graph.build(commands)
+    graph = Graph.build(commands, producers)
 
     # Find which commands are ancestors of the failing command. A non-localized
     # failure (failed_at nil) has no failing node to trace ancestors from.
@@ -221,6 +237,10 @@ defmodule PropertyDamage.Analysis do
     |> String.trim()
   end
 
+  # A non-localized failure (teardown / whole-run / linearization check) has no
+  # failing node to trace a chain from, so there is nothing to build.
+  defp build_dependency_chain(nil, _graph, _commands), do: []
+
   defp build_dependency_chain(failed_at, graph, commands) do
     # Build chain from root to failure
     chain = build_chain_recursive(failed_at, graph, [])
@@ -251,6 +271,35 @@ defmodule PropertyDamage.Analysis do
       end
     end
   end
+
+  # Build the graph's producer map from the plan's registry (DR-021). The
+  # registry's `producer_link` maps each CURRENT producer position to the
+  # placeholder ids it produces (already remapped by the shrinker), and
+  # `Sequence.indexed/1` is the single owner of the position -> flattened-index
+  # mapping (branching-aware). Positions absent from the plan (dropped
+  # producers) contribute nothing. Returns nil when there is no registry (an
+  # unshrunk report, or a model without placeholders), so `Graph.build/2` falls
+  # back to the embedded-position derivation, which is correct in that case.
+  defp plan_producers(
+         %Sequence{registry: %PlaceholderRegistry{producer_link: producer_link}} = plan
+       ) do
+    position_to_index =
+      plan
+      |> Sequence.indexed()
+      |> Map.new(fn {position, flattened_index, _command} -> {position, flattened_index} end)
+
+    Enum.reduce(producer_link, %{}, fn {position, ids}, acc ->
+      case Map.fetch(position_to_index, position) do
+        {:ok, index} ->
+          Enum.reduce(ids, acc, fn id, inner -> Map.put(inner, {:placeholder, id}, index) end)
+
+        :error ->
+          acc
+      end
+    end)
+  end
+
+  defp plan_producers(_plan), do: nil
 
   # ============================================================================
   # Trigger Isolation
