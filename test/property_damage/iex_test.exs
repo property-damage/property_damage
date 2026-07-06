@@ -40,7 +40,24 @@ defmodule PropertyDamage.IExTest do
     def execute(_command, _context, _runtime), do: {:ok, %ItemCreated{}}
   end
 
+  defmodule EmptyModel do
+    @moduledoc false
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: []
+
+    @impl true
+    def command_sequence_projection, do: ModelState
+  end
+
   describe "explain/1" do
+    test "does not crash on a model with zero commands (I3)" do
+      output = capture_io(fn -> assert IEx.explain(EmptyModel) == :ok end)
+
+      assert output =~ "COMMANDS (0 total)"
+    end
+
     test "prints model name, command table, and projections; returns :ok" do
       output = capture_io(fn -> assert IEx.explain(ExecutorModel) == :ok end)
 

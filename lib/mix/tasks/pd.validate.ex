@@ -397,7 +397,11 @@ defmodule Mix.Tasks.Pd.Validate do
   end
 
   defp print_color(color, text) do
-    IO.puts([color_code(color), text, IO.ANSI.reset()])
+    if IO.ANSI.enabled?() do
+      IO.puts([color_code(color), text, IO.ANSI.reset()])
+    else
+      IO.puts(text)
+    end
   end
 
   defp color_code(:red), do: IO.ANSI.red()

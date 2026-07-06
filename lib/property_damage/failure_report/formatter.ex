@@ -72,9 +72,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
       if color do
         """
         #{yellow(true)}╔══════════════════════════════════════════════════════════════════════╗
-        ║#{reset()}#{bold()}#{yellow(true)}                      TEST CODE ERROR                               #{reset()}#{yellow(true)}║
-        ║#{reset()}#{dim(true)}              (Not a bug in your SUT - fix your test!)              #{reset()}#{yellow(true)}║
-        ╚══════════════════════════════════════════════════════════════════════╝#{reset()}
+        ║#{reset(color)}#{bold()}#{yellow(true)}                      TEST CODE ERROR                               #{reset(color)}#{yellow(true)}║
+        ║#{reset(color)}#{dim(true)}              (Not a bug in your SUT - fix your test!)              #{reset(color)}#{yellow(true)}║
+        ╚══════════════════════════════════════════════════════════════════════╝#{reset(color)}
         """
       else
         """
@@ -86,7 +86,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       end
 
     header <>
-      "\n#{dim(color)}#{type_summary}#{reset()}\n" <>
+      "\n#{dim(color)}#{type_summary}#{reset(color)}\n" <>
       terminal_test_code_error_hint(report, color)
   end
 
@@ -95,8 +95,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       if color do
         """
         #{red()}╔══════════════════════════════════════════════════════════════════════╗
-        ║#{reset()}#{bold()}#{red()}                         BUG DETECTED!                              #{reset()}#{red()}║
-        ╚══════════════════════════════════════════════════════════════════════╝#{reset()}
+        ║#{reset(color)}#{bold()}#{red()}                         BUG DETECTED!                              #{reset(color)}#{red()}║
+        ╚══════════════════════════════════════════════════════════════════════╝#{reset(color)}
         """
       else
         """
@@ -106,7 +106,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         """
       end
 
-    header <> "\n#{dim(color)}#{type_summary}#{reset()}\n"
+    header <> "\n#{dim(color)}#{type_summary}#{reset(color)}\n"
   end
 
   defp terminal_test_code_error_hint(report, color) do
@@ -118,10 +118,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
         hint_text =
           cond do
             hint != nil ->
-              "\n#{yellow(color)}Hint:#{reset()} #{hint}"
+              "\n#{yellow(color)}Hint:#{reset(color)} #{hint}"
 
             stacktrace_hint != nil ->
-              "\n#{yellow(color)}Location:#{reset()} #{stacktrace_hint}"
+              "\n#{yellow(color)}Location:#{reset(color)} #{stacktrace_hint}"
 
             true ->
               ""
@@ -130,13 +130,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
         confidence_text =
           case confidence do
             :high -> ""
-            :medium -> " #{dim(color)}(medium confidence)#{reset()}"
-            :low -> " #{dim(color)}(low confidence - could be SUT bug)#{reset()}"
+            :medium -> " #{dim(color)}(medium confidence)#{reset(color)}"
+            :low -> " #{dim(color)}(low confidence - could be SUT bug)#{reset(color)}"
           end
 
         """
 
-        #{yellow(color)}What went wrong:#{reset()} #{reason}#{confidence_text}#{hint_text}
+        #{yellow(color)}What went wrong:#{reset(color)} #{reason}#{confidence_text}#{hint_text}
         """
 
       _ ->
@@ -170,7 +170,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
             ""
           end
 
-        "#{label("Invariant", color)}   #{cyan(color)}#{name}#{reset()}#{description}\n"
+        "#{label("Invariant", color)}   #{cyan(color)}#{name}#{reset(color)}#{description}\n"
     end
   end
 
@@ -182,7 +182,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
           reason =
             invariant_section(report, color) <>
               """
-              #{label("Check", color)}         #{cyan(color)}#{FailureReport.check_name(report)}#{reset()}
+              #{label("Check", color)}         #{cyan(color)}#{FailureReport.check_name(report)}#{reset(color)}
               #{label("Message", color)}
               #{indent_text(FailureReport.failure_message(report), "    ")}
               """
@@ -201,7 +201,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
           """
 
           why = """
-          #{yellow(color)}Why it failed:#{reset()} No sequential ordering of the parallel commands
+          #{yellow(color)}Why it failed:#{reset(color)} No sequential ordering of the parallel commands
           could explain the observed results. The system behavior is non-linearizable.
           """
 
@@ -235,8 +235,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
         cmd_name = module_name(command.__struct__)
 
         """
-        #{yellow(color)}Why it failed:#{reset()} Command #{cyan(color)}#{cmd_name}#{reset()} at index #{index}
-        violated the #{cyan(color)}#{FailureReport.check_name(report)}#{reset()} invariant.
+        #{yellow(color)}Why it failed:#{reset(color)} Command #{cyan(color)}#{cmd_name}#{reset(color)} at index #{index}
+        violated the #{cyan(color)}#{FailureReport.check_name(report)}#{reset(color)} invariant.
         """
 
       nil ->
@@ -262,10 +262,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
       #{label("Type", color)}          Idempotency Violation
       #{label("Command", color)}       #{module_name(violation.command.__struct__)}
 
-      #{yellow(color)}Attempts:#{reset()}
+      #{yellow(color)}Attempts:#{reset(color)}
       #{attempts_text}
 
-      #{yellow(color)}Difference:#{reset()}
+      #{yellow(color)}Difference:#{reset(color)}
       #{diff_text}
       """
     else
@@ -280,7 +280,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp format_comparison_diff(result, color) when is_map(result) do
     result
     |> Enum.map_join("\n", fn {key, value} ->
-      "  #{yellow(color)}#{key}:#{reset()} #{inspect(value)}"
+      "  #{yellow(color)}#{key}:#{reset(color)} #{inspect(value)}"
     end)
   end
 
@@ -295,21 +295,21 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
       """
       #{label("Type", color)}          Poll Timeout
-      #{label("Assertion", color)}     #{cyan(color)}#{info.triggered_by.assertion_name}#{reset()}
+      #{label("Assertion", color)}     #{cyan(color)}#{info.triggered_by.assertion_name}#{reset(color)}
       #{label("Timeout", color)}       #{info.elapsed_ms}ms
       #{label("Poll Attempts", color)} #{info.poll_count}
 
-      #{yellow(color)}Trigger Event:#{reset()}
-        #{cyan(color)}#{event_name}#{reset()}
-        #{dim(color)}#{inspect(trigger_event, pretty: true, limit: 5)}#{reset()}
+      #{yellow(color)}Trigger Event:#{reset(color)}
+        #{cyan(color)}#{event_name}#{reset(color)}
+        #{dim(color)}#{inspect(trigger_event, pretty: true, limit: 5)}#{reset(color)}
 
-      #{yellow(color)}Predicate:#{reset()}
-        #{cyan(color)}#{info.predicate_source || "unknown"}#{reset()}
+      #{yellow(color)}Predicate:#{reset(color)}
+        #{cyan(color)}#{info.predicate_source || "unknown"}#{reset(color)}
 
-      #{yellow(color)}Final State:#{reset()}
-        #{dim(color)}#{inspect(info.final_state, pretty: true, limit: 10)}#{reset()}
+      #{yellow(color)}Final State:#{reset(color)}
+        #{dim(color)}#{inspect(info.final_state, pretty: true, limit: 10)}#{reset(color)}
 
-      #{yellow(color)}Why it failed:#{reset()} The predicate never returned true within the
+      #{yellow(color)}Why it failed:#{reset(color)} The predicate never returned true within the
       timeout period. The temporal assertion expected the state to eventually
       satisfy the condition, but it did not.
       """
@@ -333,7 +333,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     """
     #{section_header("Shrinking Statistics", color)}
     #{label("Original Commands", color)}  #{original_count}
-    #{label("Shrunk Commands", color)}    #{shrunk_count} #{dim(color)}(#{reduction_pct}% reduction)#{reset()}
+    #{label("Shrunk Commands", color)}    #{shrunk_count} #{dim(color)}(#{reduction_pct}% reduction)#{reset(color)}
     #{label("Shrink Iterations", color)}  #{report.shrink_iterations}
     #{label("Shrink Time", color)}        #{report.shrink_time_ms}ms
     """
@@ -349,17 +349,17 @@ defmodule PropertyDamage.FailureReport.Formatter do
       steps
       |> Enum.take(max_commands)
       |> Enum.map_join("\n", fn step ->
-        marker = if step.failed?, do: "#{red(color)}►#{reset()}", else: " "
+        marker = if step.failed?, do: "#{red(color)}►#{reset(color)}", else: " "
         idx_color = if step.failed?, do: red(color), else: dim(color)
-        failure_label = if step.failed?, do: " #{red(color)}◄── FAILURE#{reset()}", else: ""
+        failure_label = if step.failed?, do: " #{red(color)}◄── FAILURE#{reset(color)}", else: ""
         label = command_label_suffix(step.label, color)
 
-        "#{marker} #{idx_color}[#{step.flattened_index}]#{reset()} #{format_command(step.command, color)}#{label}#{failure_label}"
+        "#{marker} #{idx_color}[#{step.flattened_index}]#{reset(color)} #{format_command(step.command, color)}#{label}#{failure_label}"
       end)
 
     truncated =
       if total > max_commands do
-        "\n#{dim(color)}  ... and #{total - max_commands} more commands#{reset()}"
+        "\n#{dim(color)}  ... and #{total - max_commands} more commands#{reset(color)}"
       else
         ""
       end
@@ -373,7 +373,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   # The step's human-readable `Command.label/2` (P7), rendered as a dim trailing
   # `# <label>` comment. Empty when the command produced no label.
   defp command_label_suffix(label, color) when is_binary(label),
-    do: "  #{dim(color)}# #{label}#{reset()}"
+    do: "  #{dim(color)}# #{label}#{reset(color)}"
 
   defp command_label_suffix(_label, _color), do: ""
 
@@ -396,19 +396,19 @@ defmodule PropertyDamage.FailureReport.Formatter do
         |> Enum.take(max_commands)
         |> Enum.with_index()
         |> Enum.map_join("\n", fn {cmd, idx} ->
-          "  #{dim(color)}[#{idx}]#{reset()} #{format_command(cmd, color)}"
+          "  #{dim(color)}[#{idx}]#{reset(color)} #{format_command(cmd, color)}"
         end)
 
       truncated =
         if length(commands) > max_commands do
-          "\n#{dim(color)}  ... and #{length(commands) - max_commands} more commands#{reset()}"
+          "\n#{dim(color)}  ... and #{length(commands) - max_commands} more commands#{reset(color)}"
         else
           ""
         end
 
       """
       #{section_header("Original Sequence (#{length(commands)} commands)", color)}
-      #{dim(color)}For reference - the full sequence before shrinking#{reset()}
+      #{dim(color)}For reference - the full sequence before shrinking#{reset(color)}
 
       #{commands_text}#{truncated}
       """
@@ -418,7 +418,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp format_command(cmd, color) do
     name = module_name(cmd.__struct__)
     fields = cmd |> Map.from_struct() |> format_fields()
-    "#{cyan(color)}#{name}#{reset()} #{dim(color)}#{fields}#{reset()}"
+    "#{cyan(color)}#{name}#{reset(color)} #{dim(color)}#{fields}#{reset(color)}"
   end
 
   defp format_fields(fields) do
@@ -447,14 +447,15 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
             change_text =
               if changes != "",
-                do: "\n    #{yellow(color)}Changes:#{reset()}\n#{indent_text(changes, "      ")}",
+                do:
+                  "\n    #{yellow(color)}Changes:#{reset(color)}\n#{indent_text(changes, "      ")}",
                 else: ""
 
             """
-              #{cyan(color)}#{proj_name}#{reset()}
-                #{dim(color)}Before:#{reset()}
+              #{cyan(color)}#{proj_name}#{reset(color)}
+                #{dim(color)}Before:#{reset(color)}
             #{indent_text(before_summary, "      ")}
-                #{dim(color)}After:#{reset()}
+                #{dim(color)}After:#{reset(color)}
             #{indent_text(after_summary, "      ")}#{change_text}
             """
           end)
@@ -471,7 +472,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
           |> Enum.map_join("\n\n", fn {projection, state} ->
             proj_name = module_name(projection)
             state_summary = summarize_state(state)
-            "  #{cyan(color)}#{proj_name}#{reset()}\n#{indent_text(state_summary, "    ")}"
+            "  #{cyan(color)}#{proj_name}#{reset(color)}\n#{indent_text(state_summary, "    ")}"
           end)
 
         """
@@ -512,12 +513,12 @@ defmodule PropertyDamage.FailureReport.Formatter do
           event_name = module_name(entry.event.__struct__)
           branch = if entry.branch_id, do: " B#{entry.branch_id}", else: ""
 
-          "  #{dim(color)}#{String.pad_leading("#{idx}", 3)}#{reset()} #{source_badge} #{dim(color)}#{cmd_idx}#{branch}#{reset()} #{event_name}"
+          "  #{dim(color)}#{String.pad_leading("#{idx}", 3)}#{reset(color)} #{source_badge} #{dim(color)}#{cmd_idx}#{branch}#{reset(color)} #{event_name}"
         end)
 
       truncated =
         if length(FailureReport.event_log(report)) > max_events do
-          "\n#{dim(color)}  ... and #{length(FailureReport.event_log(report)) - max_events} more events#{reset()}"
+          "\n#{dim(color)}  ... and #{length(FailureReport.event_log(report)) - max_events} more events#{reset(color)}"
         else
           ""
         end
@@ -533,12 +534,12 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp source_badge(source, color) do
     case source do
-      :command -> "#{green(color)}CMD#{reset()}"
-      :injector -> "#{yellow(color)}INJ#{reset()}"
-      :nemesis -> "#{red(color)}NEM#{reset()}"
-      :mock -> "#{magenta(color)}MOC#{reset()}"
-      :stutter -> "#{blue(color)}STU#{reset()}"
-      _ -> "#{dim(color)}???#{reset()}"
+      :command -> "#{green(color)}CMD#{reset(color)}"
+      :injector -> "#{yellow(color)}INJ#{reset(color)}"
+      :nemesis -> "#{red(color)}NEM#{reset(color)}"
+      :mock -> "#{magenta(color)}MOC#{reset(color)}"
+      :stutter -> "#{blue(color)}STU#{reset(color)}"
+      _ -> "#{dim(color)}???#{reset(color)}"
     end
   end
 
@@ -547,7 +548,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
     """
     #{section_header("Reproduction", color)}
-    #{green(color)}#{cmd}#{reset()}
+    #{green(color)}#{cmd}#{reset(color)}
     """
   end
 
@@ -1092,11 +1093,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp section_header(title, color) do
-    "#{bold(color)}#{yellow(color)}## #{title}#{reset()}\n"
+    "#{bold(color)}#{yellow(color)}## #{title}#{reset(color)}\n"
   end
 
   defp label(text, color) do
-    "#{dim(color)}#{String.pad_trailing(text <> ":", 20)}#{reset()}"
+    "#{dim(color)}#{String.pad_trailing(text <> ":", 20)}#{reset(color)}"
   end
 
   # ANSI color helpers
@@ -1124,9 +1125,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp dim(true), do: "\e[2m"
   defp dim(false), do: ""
 
-  defp reset, do: "\e[0m"
+  defp reset(true), do: "\e[0m"
+  defp reset(false), do: ""
 
-  # No-arg versions for concatenation (used in string interpolation)
+  # No-arg versions for concatenation (used only inside color-enabled branches)
   defp red, do: "\e[31m"
   defp bold, do: "\e[1m"
 end
