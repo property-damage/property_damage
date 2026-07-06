@@ -35,6 +35,7 @@ store catches up. It has no external dependencies (the "store" is an in-process
 `Agent` that only reveals a shipped widget ~150ms later), so you can paste it into
 `warehouse_probe.exs` and run `mix run warehouse_probe.exs`.
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule Warehouse.Events do
   defmodule WidgetShipped do

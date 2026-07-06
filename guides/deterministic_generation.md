@@ -161,6 +161,7 @@ captured with `external/0`. Mark the field on the *event* the SUT produces; the
 framework replaces it with a resolvable placeholder during generation and
 resolves it from the recorded server output at execution:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule OrderCreated do
   import PropertyDamage, only: [external: 0]

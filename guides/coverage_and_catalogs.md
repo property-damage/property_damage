@@ -19,6 +19,7 @@ inside a project that depends on `property_damage`. It is a tiny bank: deposits
 and withdrawals against an in-memory balance, with a projection that both tracks
 state and asserts invariants.
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule Bank.Commands.Deposit do
   @behaviour PropertyDamage.Command
@@ -193,6 +194,7 @@ pairs; `Coverage.format(tracker, :matrix)` prints just the matrix.
 `Coverage.from_result/2`). For a full multi-run you must enable coverage so the
 result carries the merged tracker:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 result = PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter, coverage: true)
 tracker = PropertyDamage.coverage(result, Bank.Model)
@@ -233,6 +235,7 @@ time: a duplicate `id` or a `validates:` pointing at an undeclared `id` is a
 `PropertyDamage.assertion_catalog/1` returns the whole catalog, each entry
 carrying the invariant and the checks (with their kind) that validate it:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 for entry <- PropertyDamage.assertion_catalog(Bank.Model) do
   checks = Enum.map_join(entry.checks, ", ", fn c -> "#{c.name}/#{c.kind}" end)
@@ -261,6 +264,7 @@ a guarantee you declared but never tested.
 `PropertyDamage.assertion_coverage/2` joins the run's firings against the catalog
 with no re-execution:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 for inv <- PropertyDamage.assertion_coverage({:ok, stats}, Bank.Model) do
   IO.puts("#{inv.id}: covered?=#{inv.covered?} fire_count=#{inv.fire_count} kinds=#{inspect(inv.kinds)}")
@@ -280,6 +284,7 @@ untested. Each entry is a map with `:projection`, `:id`, `:name`, `:description`
 
 The whole-run tracker exposes the same facts:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.Coverage.uncovered_invariants(stats.coverage)
 #=> [{Bank.Ledger, :closed_balance_zero}]
@@ -298,6 +303,7 @@ progress reporter:
 command, transition, `min_commands`, and `assertion_coverage` thresholds
 together:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.Coverage.meets_threshold?(stats.coverage, command: 100)
 #=> true
@@ -330,6 +336,7 @@ recently-failing seeds that `PropertyDamage.run/1` replays *before* random
 exploration (DR-023), so you do not wait for random generation to re-find the bug
 between edits. Enable it with a run option:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Default file; a new failure's seed is appended, and stored seeds replay first.
 PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter, seed_library: true)
@@ -354,6 +361,7 @@ For end-to-end management around failures — save `.pd` files, add to the seed
 library, generate ExUnit tests, deduplicate similar failures — use the
 `regression:` option, which composes these handlers for you:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.run(
   model: Bank.Model,
