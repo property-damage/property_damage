@@ -208,6 +208,13 @@ end
 
 ### Simulate Callback
 
+> **State-dependent commands require a simulator.** During *generation* there is no
+> SUT, so projection state is built only from the events a simulator predicts. A
+> command whose `when:`/`with:` reads that state (e.g. "select an existing account")
+> will see the empty initial state and **never be selected** unless a `simulator/0`
+> populates the state first. If your `when:`/`with:` commands mysteriously never fire,
+> a missing simulator is the usual cause.
+
 Models that need symbolic execution implement the `PropertyDamage.Model.Simulator` behaviour
 and return themselves (or a delegate module) via `simulator/0`:
 
