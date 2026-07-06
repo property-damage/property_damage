@@ -59,6 +59,15 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     def execute(_command, _context, _runtime), do: {:ok, []}
   end
 
+  # An adapter whose setup/1 always fails, to exercise the replay path's
+  # Executor.run error handling (A4).
+  defmodule SetupFailAdapter do
+    use PropertyDamage.Adapter
+    def setup(_config), do: {:error, :setup_failed}
+    def teardown(_context), do: :ok
+    def execute(_command, _context, _runtime), do: {:ok, []}
+  end
+
   # An injector whose setup/1 raises. It runs in the run (test) process during
   # replay, so it reports the run's EventQueue pid before blowing up, letting the
   # test check whether the queue leaked (A6).
@@ -206,6 +215,24 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
   end
 
   describe "replay error boundaries" do
+    @tag :capture_log
+    test "adapter setup failure during replay surfaces as an error, not a MatchError (A4)" do
+      path = tmp_path("replay_setup_fail")
+      preseed(path, 4242, model: "M")
+
+      result =
+        PropertyDamage.run(
+          model: Model,
+          adapter: SetupFailAdapter,
+          max_commands: 2,
+          shrink: false,
+          validate: false,
+          seed_library: path
+        )
+
+      assert {:error, %{adapter_setup_failed: :setup_failed, phase: :seed_library_replay}} = result
+    end
+
     @tag :capture_log
     test "an injector whose setup raises during replay does not leak the EventQueue (A6)" do
       path = tmp_path("replay_leak")

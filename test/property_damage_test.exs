@@ -95,6 +95,50 @@ defmodule PropertyDamageTest do
     def to_event(_payload), do: :skip
   end
 
+  # A command + always-failing assertion, so run 0 always finds a failure and
+  # `handle_failure` (with its reproduction re-execution) is reached.
+  defmodule AlwaysFailCmd do
+    use PropertyDamage.Command
+    defstruct []
+    @impl true
+    def generator(_overrides), do: StreamData.constant(%{})
+  end
+
+  defmodule AlwaysFailState do
+    use PropertyDamage.Model.Projection
+    def init, do: %{}
+    def apply(state, _), do: state
+  end
+
+  defmodule AlwaysFailAssertion do
+    use PropertyDamage.Model.Projection
+    def init, do: %{}
+    def apply(state, _), do: state
+
+    @trigger every: 1
+    def always_fail(_state, _cmd_or_event), do: PropertyDamage.fail!("always fails")
+  end
+
+  defmodule AlwaysFailModel do
+    @behaviour PropertyDamage.Model
+    def commands, do: [AlwaysFailCmd]
+    def command_sequence_projection, do: AlwaysFailState
+    def assertion_projections, do: [AlwaysFailAssertion]
+  end
+
+  # Setup succeeds on the exploration run and fails on the second call, which is
+  # the reproduction re-execution inside `handle_failure`.
+  defmodule SecondSetupFailsAdapter do
+    use PropertyDamage.Adapter
+
+    def setup(%{setup_counter: ref}) do
+      if :atomics.add_get(ref, 1, 1) >= 2, do: {:error, :setup_failed}, else: {:ok, %{}}
+    end
+
+    def teardown(_context), do: :ok
+    def execute(_command, _context, _runtime), do: {:ok, []}
+  end
+
   describe "run/1 error boundaries" do
     @tag :capture_log
     test "an injector whose setup raises does not leak the EventQueue" do
@@ -126,6 +170,25 @@ defmodule PropertyDamageTest do
 
       assert {:error, info} = result
       assert info.adapter_setup_failed == :setup_failed
+    end
+
+    @tag :capture_log
+    test "reproduction re-execution setup failure falls back to the original failure, not a MatchError" do
+      ref = :atomics.new(1, [])
+
+      result =
+        PropertyDamage.run(
+          model: AlwaysFailModel,
+          adapter: SecondSetupFailsAdapter,
+          adapter_config: %{setup_counter: ref},
+          max_runs: 1,
+          max_commands: 3,
+          shrink: false,
+          validate: false
+        )
+
+      assert {:error, %PropertyDamage.FailureReport{} = report} = result
+      assert report.failure_reason != nil
     end
   end
 
