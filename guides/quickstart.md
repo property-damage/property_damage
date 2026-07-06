@@ -42,6 +42,7 @@ configurable intervals (every step, every N commands, on specific event types).
 
 ## Minimal Example
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # --- Event ---
 defmodule AccountCreated do
@@ -134,6 +135,7 @@ end
 
 Run it:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.run(
   model: AccountModel,

@@ -52,6 +52,7 @@ Events represent the outcomes of operations. Fields the server generates
 (like IDs) are marked with `external()` so PropertyDamage can track them
 symbolically during generation and resolve them during execution:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Events do
   import PropertyDamage, only: [external: 0]
@@ -68,6 +69,7 @@ end
 Commands are pure data generators. State-dependent logic (preconditions,
 overrides) lives in the Model, not here:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Commands.CreateUser do
   use PropertyDamage.Command
@@ -95,6 +97,7 @@ end
 Projections reduce events into state. Functions tagged with `@trigger`
 are invariants, checked at the configured points:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.Users do
   use PropertyDamage.Model.Projection
@@ -132,6 +135,7 @@ During generation, no real system is available. The simulator predicts a
 command's events so projections can build state for preconditions and
 overrides; during execution, real events from the SUT take over:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Simulator do
   @behaviour PropertyDamage.Model.Simulator
@@ -153,6 +157,7 @@ end
 The model ties everything together and owns the state-dependent logic:
 selection weights, `when:` preconditions, and `with:` generator overrides:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
   @behaviour PropertyDamage.Model
@@ -184,6 +189,7 @@ end
 The adapter executes commands against your actual system and returns the
 events that occurred:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestAdapter do
   use PropertyDamage.Adapter
@@ -219,6 +225,7 @@ end
 
 ### 7. Run Tests
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 case PropertyDamage.run(
        model: MyApp.TestModel,
