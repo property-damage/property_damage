@@ -155,8 +155,11 @@ Run with: python #{Common.generate_filename(report, :python)}
       # Build path with f-string interpolation for refs
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
-          replacement = generate_value_interpolation(value)
-          String.replace(acc, ":#{key}", "{#{replacement}}")
+          replacement = "{#{generate_value_interpolation(value)}}"
+          # Match `:key` only at a token boundary so `:id` does not corrupt `:id_tx`.
+          Regex.replace(~r/:#{Regex.escape(to_string(key))}(?![A-Za-z0-9_])/, acc, fn _ ->
+            replacement
+          end)
         end)
 
       ~s(f"#{resolved_path}")

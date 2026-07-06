@@ -159,8 +159,11 @@ defmodule PropertyDamage.Export.Script.Elixir do
       # Build path with interpolation for refs
       resolved_path =
         Enum.reduce(params, path, fn {key, value}, acc ->
-          replacement = generate_value_interpolation(value)
-          String.replace(acc, ":#{key}", "\#{#{replacement}}")
+          replacement = "\#{#{generate_value_interpolation(value)}}"
+          # Match `:key` only at a token boundary so `:id` does not corrupt `:id_tx`.
+          Regex.replace(~r/:#{Regex.escape(to_string(key))}(?![A-Za-z0-9_])/, acc, fn _ ->
+            replacement
+          end)
         end)
 
       ~s("#{resolved_path}")

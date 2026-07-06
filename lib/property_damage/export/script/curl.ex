@@ -163,7 +163,11 @@ defmodule PropertyDamage.Export.Script.Curl do
 
   defp resolve_path(path, params) do
     Enum.reduce(params, path, fn {key, value}, acc ->
-      String.replace(acc, ":#{key}", resolve_value_for_bash(value))
+      replacement = resolve_value_for_bash(value)
+      # Match `:key` only at a token boundary so `:id` does not corrupt `:id_tx`.
+      Regex.replace(~r/:#{Regex.escape(to_string(key))}(?![A-Za-z0-9_])/, acc, fn _ ->
+        replacement
+      end)
     end)
   end
 
