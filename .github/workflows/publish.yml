@@ -1,0 +1,57 @@
+# Pre-publish gate + hex publish (W9 Decision 4).
+#
+# Publishing happens ONLY through this manually dispatched job, so the
+# documentation-verification gate cannot be bypassed by a local
+# `mix hex.publish`. Default mode is gate-only: it runs the full gate and
+# stops, which is also how the gate is exercised without publishing.
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "gate-only runs every check and stops; publish also runs mix hex.publish"
+        type: choice
+        options:
+          - gate-only
+          - publish
+        default: gate-only
+
+jobs:
+  gate:
+    name: Doc-verification gate${{ inputs.mode == 'publish' && ' + hex publish' || '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          # The verified toolchain pair (.tool-versions / CI lint entry).
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: mix-1.20-27-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-1.20-27-
+
+      - run: mix deps.get
+
+      - run: mix compile --warnings-as-errors
+
+      - run: mix test
+
+      - run: mix docs --warnings-as-errors
+
+      - name: Documentation-verification gate (runnable fences + notebook)
+        run: elixir scripts/docs_verify.exs
+
+      - name: Publish to hex.pm
+        if: ${{ inputs.mode == 'publish' }}
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: mix hex.publish --yes
