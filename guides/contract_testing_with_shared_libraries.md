@@ -269,6 +269,7 @@ The seed library tracks `dependency_versions` for each entry, helping identify w
 
 ### Domain Library (company_domain)
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # lib/company_domain/commands/create_order.ex
 defmodule CompanyDomain.Commands.CreateOrder do
@@ -294,6 +295,7 @@ PropertyDamage behaviours. The **shared contract surface is the event struct**
 (`CompanyDomain.Events.OrderCreated`): it flows through the projection and the
 adapter without either side depending on PropertyDamage.
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # lib/order_model/commands/create_order.ex
 defmodule OrderModel.Commands.CreateOrder do

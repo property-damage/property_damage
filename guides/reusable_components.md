@@ -166,6 +166,7 @@ end
 The same pattern works for assertion projections that need to access state
 from different structures:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # The events this invariant folds (defined by your domain).
 defmodule AuthApproved do

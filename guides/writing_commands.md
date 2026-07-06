@@ -28,6 +28,7 @@ Commands do NOT define:
 
 ### Basic Command Example
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyTest.Commands.CreateOrder do
   # Events this command can produce are declared on the command_spec surface.
@@ -73,6 +74,7 @@ end
 
 For commands that need state-dependent values (like selecting from existing refs):
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyTest.Commands.ViewOrder do
   # Read-only commands set shrink: :prefer_remove so they are pruned first.
@@ -96,6 +98,7 @@ end
 
 The Model wires this command with state:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyTest.OrderModel do
   @behaviour PropertyDamage.Model

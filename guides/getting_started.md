@@ -45,6 +45,7 @@ Events represent the outcomes of operations. They're simple structs.
 For fields that are **server-generated** (like IDs returned by your system),
 use `external()` to mark them:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Events do
   import PropertyDamage, only: [external: 0]
@@ -73,6 +74,7 @@ these values automatically.
 Commands represent operations. Each command implements the
 `PropertyDamage.Command` behaviour, most simply via `use`:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Commands.CreateUser do
   use PropertyDamage.Command
@@ -111,6 +113,7 @@ with `external()` in the `UserCreated` event struct.
 
 Projections are state reducers. They process events and maintain state:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.ModelState do
   use PropertyDamage.Model.Projection
@@ -142,6 +145,7 @@ end
 Invariants are checks that should always hold. Define them in assertion
 projections using `@trigger` and `assert_*` functions:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Projections.UserInvariants do
   use PropertyDamage.Model.Projection
@@ -173,6 +177,7 @@ end
 
 The model ties everything together:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
   @behaviour PropertyDamage.Model
@@ -204,6 +209,7 @@ end
 
 The adapter executes commands against your actual system:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestAdapter do
   use PropertyDamage.Adapter
@@ -281,6 +287,7 @@ See the [Cheatsheet](cheatsheet.md) for complete adapter templates.
 
 ### Basic Run
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.run(
   model: MyApp.TestModel,

@@ -4,6 +4,7 @@ Compact syntax reference for all five core behaviours, run options, and common p
 
 ## Command Template
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.Commands.CreateOrder do
   use PropertyDamage.Command
@@ -46,6 +47,7 @@ end
 
 ## Model Template
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
   @behaviour PropertyDamage.Model

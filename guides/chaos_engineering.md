@@ -62,6 +62,7 @@ cache (an `Agent`), the model mixes ordinary `SetKey`/`GetKey` operations with t
 read consistency. Because `setup/1` returns **no** `:toxiproxy` key, this runs in
 **simulated mode** (see the section below for the live variant).
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule Cache.Events do
   defmodule KeySet do
@@ -257,6 +258,7 @@ The next section makes that distinction concrete.
 You can see the exact marker flip without a full run by calling a nemesis's
 `inject/2` directly. With no Toxiproxy in the context, the fault is simulated:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 alias PropertyDamage.Nemesis.NetworkLatency
 

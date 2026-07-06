@@ -58,6 +58,7 @@ current projection states, enabling realistic responses based on test state.
 
 ### Events
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule PaymentAuthorized do
   import PropertyDamage, only: [external: 0]
@@ -147,6 +148,7 @@ end
 
 ### Configuration Command
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule ConfigurePaymentProvider do
   use PropertyDamage.Command

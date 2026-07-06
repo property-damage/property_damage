@@ -119,6 +119,7 @@ per-instance callback.
 Set `idempotent: false` to exclude a command from stutter testing. Commands are
 assumed idempotent by default.
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule IncrementCounter do
   # Non-idempotent by design -- exclude from stutter testing
@@ -139,6 +140,7 @@ Return a key string that the adapter can include in requests (e.g., as an HTTP
 header). This is a per-instance callback (it reads the command struct). If not
 implemented, no idempotency key is provided.
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule CreateOrder do
   use PropertyDamage.Command
