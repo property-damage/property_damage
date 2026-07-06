@@ -191,6 +191,9 @@ check_preconditions(%{accounts: %{"1" => %{name: "alice"}}}, AccountModel)
 
 ## Run Configurations
 
+In these snippets `M` and `A` are your model and adapter modules -- e.g.
+`AccountModel` and `AccountAdapter` from the Minimal Example above.
+
 ```elixir
 # Basic
 PropertyDamage.run(model: M, adapter: A)
@@ -209,7 +212,10 @@ PropertyDamage.run(
   ]
 )
 
-# Stutter / idempotency testing
+# Stutter / idempotency testing. NOTE: this needs an *idempotent* SUT. The
+# in-memory AccountAdapter above mints a fresh id per call, so re-execution is
+# not idempotent and this run reports an idempotency violation -- that is
+# stutter working, not a framework bug. Point it at an idempotent SUT for a pass.
 PropertyDamage.run(
   model: M,
   adapter: A,

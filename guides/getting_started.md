@@ -161,9 +161,9 @@ defmodule MyApp.Projections.UserInvariants do
   # Assertions use @trigger to specify when to run
   # and assert_* naming convention
   @trigger every: 1
-  def assert_emails_unique(state, _cmd_or_event) do
-    # In a real system, duplicate emails would be caught at creation time
-    # This is just an example of the pattern
+  def assert_emails_unique(_state, _cmd_or_event) do
+    # In a real system, duplicate emails would be caught at creation time.
+    # This is just an example of the pattern (see writing_invariants.md).
     :ok
   end
 end
@@ -317,9 +317,10 @@ To see what PropertyDamage generates, add `verbose: true`:
       verbose: true
     )
 
-This prints each generated command, execution result, and assertion check — useful for
-understanding the test flow. See the [Debugging Failures](debugging_failures.md) guide
-for more.
+This prints a run-configuration summary and a per-run progress line (commands
+executed, pass/fail). For per-command detail (each command, its result, and the
+assertion checks) use step-by-step replay; see the
+[Debugging Failures](debugging_failures.md) guide.
 
 ## Understanding Results
 
