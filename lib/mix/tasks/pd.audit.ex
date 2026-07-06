@@ -217,7 +217,13 @@ defmodule Mix.Tasks.Pd.Audit do
 
   defp print_hint(text), do: print_color(:cyan, "    Hint: #{text}\n")
 
-  defp print_color(color, text), do: IO.puts([color_code(color), text, IO.ANSI.reset()])
+  defp print_color(color, text) do
+    if IO.ANSI.enabled?() do
+      IO.puts([color_code(color), text, IO.ANSI.reset()])
+    else
+      IO.puts(text)
+    end
+  end
 
   defp color_code(:red), do: IO.ANSI.red()
   defp color_code(:green), do: IO.ANSI.green()

@@ -211,7 +211,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
     |> Enum.map_join(",\n      ", fn {cmd, idx} ->
       # Give decreasing weights
       weight = max(1, 4 - idx)
-      "{#{weight}, #{cmd}}"
+      "{#{cmd}, weight: #{weight}}"
     end)
   end
 
