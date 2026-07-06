@@ -61,6 +61,42 @@ defmodule PropertyDamage.ValidationTest do
     end
   end
 
+  describe "validate!/3 command callbacks" do
+    defmodule NoGeneratorCommand do
+      # A loaded command module that deliberately omits generator/1.
+      defstruct []
+    end
+
+    defmodule NoGeneratorProjection do
+      @behaviour PropertyDamage.Model.Projection
+
+      @impl true
+      def init, do: %{}
+
+      @impl true
+      def apply(state, _), do: state
+    end
+
+    defmodule NoGeneratorModel do
+      @behaviour PropertyDamage.Model
+
+      @impl true
+      def commands, do: [NoGeneratorCommand]
+
+      @impl true
+      def command_sequence_projection, do: NoGeneratorProjection
+
+      @impl true
+      def assertion_projections, do: []
+    end
+
+    test "raises when a command is missing generator/1" do
+      assert_raise ArgumentError, ~r/generator\/1/, fn ->
+        Validation.validate!(NoGeneratorModel, SimpleAdapter)
+      end
+    end
+  end
+
   describe "validate!/3 with injector adapters" do
     test "validates injectable events coverage" do
       # ExecutorModel may have injectable_events that need coverage

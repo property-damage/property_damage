@@ -701,6 +701,89 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
     end
   end
 
+  # A path parameter and a request-body field can share a name (e.g. `id`),
+  # which collapsed into `defstruct [:id, :id]` and failed to compile.
+  @collision_spec %{
+    "openapi" => "3.0.0",
+    "info" => %{"title" => "Collision", "version" => "1.0.0"},
+    "paths" => %{
+      "/things/{id}" => %{
+        "put" => %{
+          "operationId" => "updateThing",
+          "parameters" => [
+            %{
+              "name" => "id",
+              "in" => "path",
+              "required" => true,
+              "schema" => %{"type" => "string"}
+            }
+          ],
+          "requestBody" => %{
+            "required" => true,
+            "content" => %{
+              "application/json" => %{
+                "schema" => %{
+                  "type" => "object",
+                  "required" => ["id"],
+                  "properties" => %{
+                    "id" => %{"type" => "string"},
+                    "value" => %{"type" => "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "responses" => %{"200" => %{"description" => "ok"}}
+        }
+      }
+    }
+  }
+
+  describe "generate_command/2 field name collisions (H2a)" do
+    test "a path param and a body field sharing a name compile without diagnostics" do
+      [op] = Scaffold.extract_operations(@collision_spec, nil)
+      code = Scaffold.generate_command(op, "PdScaffoldCollisionTest")
+
+      # A duplicate defstruct/map key emits compiler warnings (a hard error under
+      # --warnings-as-errors), so generated code must be diagnostic-clean.
+      {_, diagnostics} =
+        Code.with_diagnostics(fn -> Code.compile_string(code) end)
+
+      assert diagnostics == [],
+             "generated command emitted compiler diagnostics:\n" <>
+               Enum.map_join(diagnostics, "\n", &inspect/1) <> "\n\nSource:\n#{code}"
+    end
+  end
+
+  # Two operations that both omit operationId used to derive the same module
+  # name ("UnnamedOperation"), scaffolding to the same file and silently
+  # overwriting the first.
+  @nil_opid_spec %{
+    "openapi" => "3.0.0",
+    "info" => %{"title" => "NoIds", "version" => "1.0.0"},
+    "paths" => %{
+      "/foo" => %{"get" => %{"responses" => %{"200" => %{"description" => "ok"}}}},
+      "/bar" => %{"get" => %{"responses" => %{"200" => %{"description" => "ok"}}}}
+    }
+  }
+
+  describe "extract_operations/2 missing operationId (H2b)" do
+    test "operations without operationId get distinct module names/filenames" do
+      ops = Scaffold.extract_operations(@nil_opid_spec, nil)
+      assert length(ops) == 2
+
+      module_names = Enum.map(ops, & &1.module_name)
+
+      assert length(Enum.uniq(module_names)) == 2,
+             "expected distinct module names, got #{inspect(module_names)}"
+
+      filenames = Enum.map(module_names, &(Macro.underscore(&1) <> ".ex"))
+
+      assert length(Enum.uniq(filenames)) == 2,
+             "expected distinct filenames, got #{inspect(filenames)}"
+    end
+  end
+
   describe "infer_namespace/1" do
     test "infers namespace from output path" do
       assert infer_namespace("lib/my_app_test/") == "MyAppTest"
