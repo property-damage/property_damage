@@ -87,6 +87,16 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def command_sequence_projection, do: ThrowingProjection
   end
 
+  # A model whose commands/0 lists a command with an invalid (zero) weight, so
+  # normalize_commands raises. build_command_specs used to swallow that.
+  defmodule BadCommandSpecModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [%{command: Cmd, weight: 0}]
+    @impl true
+    def command_sequence_projection, do: NoopProjection
+  end
+
   # An adapter whose behaviour is dictated by the command tag carried in config.
   defmodule Adversary do
     use PropertyDamage.Adapter
@@ -217,6 +227,14 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
              },
              result.failure_reason
            )
+  end
+
+  test "a misconfigured command spec fails loudly instead of silently degrading" do
+    seq = Sequence.linear([%Cmd{tag: :x}])
+
+    assert_raise ArgumentError, ~r/command specs for model/, fn ->
+      Executor.run(seq, BadCommandSpecModel, Adversary, adapter_config: %{behaviour: :ok})
+    end
   end
 
   @tag :capture_log
