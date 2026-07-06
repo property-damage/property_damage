@@ -499,11 +499,11 @@ defmodule PropertyDamage.Regression do
         nil
 
       directory ->
-        # Only :adapter applies to :exunit generation; :base_url is a
-        # script/livebook concern and is not part of the regression surface.
-        export_opts = Keyword.take(opts, [:adapter])
-
-        result = Export.save(failure, directory, :exunit, export_opts)
+        # Forward the full option set to the exporter. The ExUnit generator reads
+        # the keys it understands (e.g. :adapter, :adapter_config) and ignores the
+        # regression-control keys, so a caller can shape the generated test rather
+        # than only supply :adapter.
+        result = Export.save(failure, directory, :exunit, opts)
 
         if verbose do
           case result do

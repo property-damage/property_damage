@@ -1158,6 +1158,10 @@ defmodule PropertyDamage.Options do
     adapter: [
       type: :atom,
       doc: "Adapter module for generated test HTTP-spec mapping."
+    ],
+    adapter_config: [
+      type: :any,
+      doc: "Adapter config embedded in the generated regression test's run opts."
     ]
   ]
 
