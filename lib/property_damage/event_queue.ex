@@ -114,7 +114,7 @@ defmodule PropertyDamage.EventQueue do
       timestamp: System.monotonic_time(:millisecond)
     }
 
-    Agent.update(queue, fn events -> events ++ [entry] end)
+    Agent.update(queue, fn events -> [entry | events] end)
   end
 
   @doc """
@@ -147,7 +147,7 @@ defmodule PropertyDamage.EventQueue do
       timestamp: System.monotonic_time(:millisecond)
     }
 
-    Agent.update(queue, fn events -> events ++ [entry] end)
+    Agent.update(queue, fn events -> [entry | events] end)
   end
 
   @doc """
@@ -170,7 +170,7 @@ defmodule PropertyDamage.EventQueue do
   """
   @spec drain(pid()) :: [entry()]
   def drain(queue) do
-    Agent.get_and_update(queue, fn events -> {events, []} end)
+    Agent.get_and_update(queue, fn events -> {Enum.reverse(events), []} end)
   end
 
   @doc """
@@ -184,7 +184,7 @@ defmodule PropertyDamage.EventQueue do
   """
   @spec peek(pid()) :: [entry()]
   def peek(queue) do
-    Agent.get(queue, & &1)
+    Agent.get(queue, &Enum.reverse/1)
   end
 
   @doc """

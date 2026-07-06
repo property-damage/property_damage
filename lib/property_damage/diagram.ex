@@ -454,8 +454,13 @@ defmodule PropertyDamage.Diagram do
   defp format_value(value) when is_map(value), do: "%{#{map_size(value)} keys}"
   defp format_value(value), do: inspect(value, limit: 3)
 
-  defp truncate(str, max_len) when byte_size(str) <= max_len, do: str
-  defp truncate(str, max_len), do: String.slice(str, 0, max_len - 3) <> "..."
+  defp truncate(str, max_len) do
+    if String.length(str) <= max_len do
+      str
+    else
+      String.slice(str, 0, max_len - 3) <> "..."
+    end
+  end
 
   defp format_extension(:mermaid), do: ".md"
   defp format_extension(:plantuml), do: ".puml"
