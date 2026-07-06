@@ -346,6 +346,32 @@ defmodule PropertyDamage.ShrinkerTest do
       assert String.length(shrunk_name) < String.length("VeryLongNameHere")
     end
 
+    test "shrinks a multi-byte-UTF8 string value (consistent units)" do
+      # Every character is 2 bytes, so byte_size is twice the codepoint length.
+      # Halving with String.slice/3 by a byte-length divisor slices that many
+      # CODEPOINTS, which for a multi-byte string is >= the codepoint count, so it
+      # returns the whole string and the value never shrinks. The failure depends
+      # only on quantity, so the name is free to shrink toward empty.
+      name = String.duplicate("é", 8)
+      assert byte_size(name) == 16
+
+      commands = [%CreateItem{name: name, quantity: 400}]
+
+      result =
+        Shrinker.shrink(commands,
+          failed_at_index: 0,
+          model: FailingModel,
+          adapter: SimpleAdapter,
+          config: Config.new(shrink_arguments: true)
+        )
+
+      shrunk_name = hd(Sequence.to_list(result.sequence)).name
+
+      # A byte-consistent halving makes real progress; the buggy codepoint/byte
+      # mismatch leaves the value at its full size.
+      assert byte_size(shrunk_name) < byte_size(name)
+    end
+
     test "preserves command struct type" do
       commands = [%CreateItem{name: "Test", quantity: 101}]
 
