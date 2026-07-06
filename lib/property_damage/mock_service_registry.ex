@@ -247,19 +247,19 @@ defmodule PropertyDamage.MockServiceRegistry do
 
   @impl true
   def handle_call({:push_event, _adapter_module, event}, _from, state) do
-    new_pending = state.pending_events ++ [event]
+    new_pending = [event | state.pending_events]
     {:reply, :ok, %{state | pending_events: new_pending}}
   end
 
   @impl true
   def handle_call({:push_events, _adapter_module, events}, _from, state) do
-    new_pending = state.pending_events ++ events
+    new_pending = Enum.reverse(events) ++ state.pending_events
     {:reply, :ok, %{state | pending_events: new_pending}}
   end
 
   @impl true
   def handle_call(:flush_events, _from, state) do
-    events = state.pending_events
+    events = Enum.reverse(state.pending_events)
     {:reply, events, %{state | pending_events: []}}
   end
 

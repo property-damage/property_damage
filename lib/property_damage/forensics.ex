@@ -241,7 +241,7 @@ defmodule PropertyDamage.Forensics do
 
     case run_checks(model, assertion_projections, new_projections, check_ctx) do
       :ok ->
-        {:cont, {:ok, new_state, history ++ [event], violations}}
+        {:cont, {:ok, new_state, [event | history], violations}}
 
       {:error, assertion_name, reason} when stop_early ->
         failure =
@@ -254,7 +254,7 @@ defmodule PropertyDamage.Forensics do
         failure =
           build_failure(assertion_name, reason, index, event, state, new_projections, history)
 
-        {:cont, {:ok, new_state, history ++ [event], violations ++ [failure]}}
+        {:cont, {:ok, new_state, [event | history], [failure | violations]}}
     end
   end
 
@@ -267,7 +267,7 @@ defmodule PropertyDamage.Forensics do
       event_at_failure: event,
       state_before: state.projections,
       state_after: new_projections,
-      events_leading_to_failure: history ++ [event]
+      events_leading_to_failure: Enum.reverse([event | history])
     }
   end
 
@@ -282,7 +282,7 @@ defmodule PropertyDamage.Forensics do
        final_state: Map.get(state.projections, command_sequence_projection_key),
        events_processed: state.events_processed,
        projections: state.projections,
-       violations: violations
+       violations: Enum.reverse(violations)
      }}
   end
 

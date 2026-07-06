@@ -609,17 +609,17 @@ defmodule PropertyDamage.Differential do
                 %{
                   state
                   | projections: projections,
-                    event_log: state.event_log ++ events,
-                    results: state.results ++ [result],
-                    timings: state.timings ++ [latency_us],
+                    event_log: Enum.reverse(events) ++ state.event_log,
+                    results: [result | state.results],
+                    timings: [latency_us | state.timings],
                     registry: registry
                 }
 
               {:error, _reason} ->
                 %{
                   state
-                  | results: state.results ++ [result],
-                    timings: state.timings ++ [latency_us]
+                  | results: [result | state.results],
+                    timings: [latency_us | state.timings]
                 }
             end
 
@@ -628,15 +628,17 @@ defmodule PropertyDamage.Differential do
             # failed command for this target rather than crashing the run. No
             # adapter call happened, so attribute zero latency.
             result = {:error, {:placeholder_resolution_failed, reason}}
-            %{state | results: state.results ++ [result], timings: state.timings ++ [0]}
+            %{state | results: [result | state.results], timings: [0 | state.timings]}
         end
       end)
 
+    # Accumulators are built newest-first (prepend) during the reduce; restore
+    # command order once, at the single consumption point.
     %{
       commands: commands,
-      results: final_state.results,
-      timings: final_state.timings,
-      event_log: final_state.event_log
+      results: Enum.reverse(final_state.results),
+      timings: Enum.reverse(final_state.timings),
+      event_log: Enum.reverse(final_state.event_log)
     }
   end
 
