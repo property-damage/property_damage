@@ -297,6 +297,18 @@ defmodule PropertyDamage.Executor.Branching do
     # Check for any branch failures
     case Enum.find(branch_results, fn {_, result, _} -> match?({:failed, _, _, _}, result) end) do
       {branch_id, {:failed, index, reason, state}, _} ->
+        # G5: on branch failure the run exits the branching region with only the
+        # FAILED branch's state, whose pollers finalization stops. Successful
+        # sibling branches also started pollers (forked from the prefix); union
+        # every branch's poller lists onto the failed state so finalization stops
+        # them all instead of leaking the siblings'.
+        state = %{
+          state
+          | active_pollers: collect_branch_pollers(branch_results, :active_pollers),
+            active_resource_pollers:
+              collect_branch_pollers(branch_results, :active_resource_pollers)
+        }
+
         {:error, branch_id, index, reason, state}
 
       nil ->
@@ -526,4 +538,22 @@ defmodule PropertyDamage.Executor.Branching do
 
   defp shift_fold_index(%{fold_index: idx} = entry, offset),
     do: %{entry | fold_index: idx + offset}
+
+  # Union a poller list across every branch's state (G5). Each branch's state is
+  # either a plain state (succeeded) or a `{:failed, ...}` tuple (the failing
+  # branch); both carry the prefix pollers plus their own, so the result is
+  # deduped.
+  defp collect_branch_pollers(branch_results, key) do
+    branch_results
+    |> Enum.flat_map(fn {_id, result, _commands} ->
+      state =
+        case result do
+          {:failed, _index, _reason, failed_state} -> failed_state
+          branch_state -> branch_state
+        end
+
+      Map.get(state, key, [])
+    end)
+    |> Enum.uniq()
+  end
 end
