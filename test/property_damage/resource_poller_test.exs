@@ -443,6 +443,48 @@ defmodule PropertyDamage.ResourcePollerTest do
       EventQueue.stop(queue)
     end
 
+    test "on_timeout function exiting returns on_timeout_error instead of crashing the poller" do
+      {:ok, queue} = EventQueue.start_link()
+
+      poller =
+        ResourcePoller.start(
+          poll_fn: fn -> :pending end,
+          handler: fn _ -> :continue end,
+          interval_ms: 10,
+          timeout_ms: 50,
+          on_timeout: fn _info -> exit(:timeout_boom) end,
+          event_queue: queue,
+          command_index: 0
+        )
+
+      result = ResourcePoller.await(poller, timeout: 1000)
+
+      assert {:error, _id, {:on_timeout_error, {:exit, :timeout_boom}, stacktrace}} = result
+      assert is_list(stacktrace)
+      EventQueue.stop(queue)
+    end
+
+    test "on_timeout function throwing returns on_timeout_error instead of crashing the poller" do
+      {:ok, queue} = EventQueue.start_link()
+
+      poller =
+        ResourcePoller.start(
+          poll_fn: fn -> :pending end,
+          handler: fn _ -> :continue end,
+          interval_ms: 10,
+          timeout_ms: 50,
+          on_timeout: fn _info -> throw(:timeout_boom) end,
+          event_queue: queue,
+          command_index: 0
+        )
+
+      result = ResourcePoller.await(poller, timeout: 1000)
+
+      assert {:error, _id, {:on_timeout_error, {:throw, :timeout_boom}, stacktrace}} = result
+      assert is_list(stacktrace)
+      EventQueue.stop(queue)
+    end
+
     test "on_timeout can return {:error, exception} for structured errors" do
       {:ok, queue} = EventQueue.start_link()
 
