@@ -506,6 +506,36 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     end
   end
 
+  describe "Patterns pattern descriptions (failure-type vocabulary)" do
+    test "a projection_violation cluster reads as an invariant violation, not generic Failure" do
+      failures = [
+        create_failure_report(seed: 111, failure_type: :projection_violation),
+        create_failure_report(seed: 222, failure_type: :projection_violation)
+      ]
+
+      [cluster | _] = Patterns.cluster_failures(failures)
+
+      # The fingerprint carries a real Failure.kind (:projection_violation); the
+      # cluster description must reflect it, not degrade to the generic "Failure".
+      assert cluster.pattern.failure_type == :projection_violation
+      assert cluster.pattern.description =~ "Invariant violation"
+      refute cluster.pattern.description =~ ~r/^Failure\b/
+    end
+
+    test "an assertion_failed cluster reads as a check failure, not generic Failure" do
+      failures = [
+        create_failure_report(seed: 111, failure_type: :assertion_failed),
+        create_failure_report(seed: 222, failure_type: :assertion_failed)
+      ]
+
+      [cluster | _] = Patterns.cluster_failures(failures)
+
+      assert cluster.pattern.failure_type == :assertion_failed
+      assert cluster.pattern.description =~ "Check failure"
+      refute cluster.pattern.description =~ ~r/^Failure\b/
+    end
+  end
+
   # ============================================================================
   # Main API Tests
   # ============================================================================

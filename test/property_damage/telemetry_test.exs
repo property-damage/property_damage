@@ -208,6 +208,24 @@ defmodule PropertyDamage.TelemetryTest do
     end
   end
 
+  describe "Collector lifecycle" do
+    test "detaches its telemetry handler on terminate" do
+      event = [:property_damage, :run, :stop]
+      before = length(:telemetry.list_handlers(event))
+
+      {:ok, pid} = Collector.start_link(name: nil)
+      assert length(:telemetry.list_handlers(event)) == before + 1
+
+      ref = Process.monitor(pid)
+      :ok = GenServer.stop(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+
+      # A collector that never detaches leaves a stale handler behind, so the
+      # count would stay at before + 1 (and grow with each lifecycle).
+      assert length(:telemetry.list_handlers(event)) == before
+    end
+  end
+
   describe "Integration with PropertyDamage.run/1" do
     setup do
       {:ok, pid} = Collector.start_link(name: nil)
