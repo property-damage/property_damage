@@ -946,8 +946,14 @@ defmodule PropertyDamage.Executor do
            assertion_mode,
            assertion_failures
          ) do
-      {:halt, async_name, async_reason, _idx, async_counters} ->
-        failed_state = pack.(%{assertion_counters: async_counters})
+      {:halt, async_name, async_reason, async_index, async_counters} ->
+        # DR-025: attribute the failure to the offending event's command_index
+        # (`async_index`), which may be an earlier command than the one currently
+        # executing (or nil for an ambient injector event) — never blindly to the
+        # current command. Finalization reads this to set `failed_at_index`.
+        failed_state =
+          pack.(%{assertion_counters: async_counters, async_failed_index: async_index})
+
         {:error, Failure.assertion_failed(async_name, async_reason), failed_state}
 
       {:ok, async_counters, async_failures} ->

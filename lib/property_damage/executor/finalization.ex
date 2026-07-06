@@ -46,13 +46,23 @@ defmodule PropertyDamage.Executor.Finalization do
     # Extract stacktrace from failure reason if embedded
     {normalized_reason, stacktrace} = extract_stacktrace(reason)
 
+    # DR-025: a failing state may carry an attributed index (the offending async
+    # event's command_index) that differs from the loop `index` of the command
+    # that was executing when the assertion tripped. Honor it so the report names
+    # the right command; `:unset` means no override.
+    failed_at_index =
+      case Map.get(state, :async_failed_index, :unset) do
+        :unset -> index
+        attributed -> attributed
+      end
+
     %{
       success: false,
       event_log: Enum.reverse(state.event_log),
       executed: state.executed,
       projections: state.projections,
       projections_before: state.projections_before,
-      failed_at_index: index,
+      failed_at_index: failed_at_index,
       failure_reason: normalized_reason,
       stacktrace: stacktrace,
       linearization: linearization,
