@@ -223,11 +223,11 @@ boundary instead of during the command loop. An assertion uses `every:` or
 ```elixir
 # Once on the initial init/0 state, before the first command.
 @trigger at: :startup
-def assert_clean_start(state, _phase), do: # ...
+def assert_clean_start(_state, _phase), do: :ok
 
 # Once on the fully-settled final state, after all pollers finalize.
 @trigger at: :teardown
-def assert_no_overshoot(state, _phase), do: # ...
+def assert_no_overshoot(_state, _phase), do: :ok
 ```
 
 `at: :teardown` is the home for **safety** properties over async effects ("never
