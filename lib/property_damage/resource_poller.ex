@@ -598,6 +598,12 @@ defmodule PropertyDamage.ResourcePoller do
           rescue
             e ->
               {:error, state.id, {:on_timeout_error, e, __STACKTRACE__}}
+          catch
+            # A BEAM exit/throw from on_timeout bypasses `rescue`; capture it as
+            # an on_timeout_error (tagged with how it escaped) so the poller
+            # reports it instead of crashing the run through its start_link (A3).
+            kind, reason ->
+              {:error, state.id, {:on_timeout_error, {kind, reason}, __STACKTRACE__}}
           end
       end
 
