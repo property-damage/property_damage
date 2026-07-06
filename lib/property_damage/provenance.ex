@@ -1,19 +1,22 @@
 defmodule PropertyDamage.Provenance do
-  @moduledoc false
-  # Value provenance classification (DR-034 §4), derived structurally at
-  # consumption time. Nothing is stored per value; the comparator (DR-035) calls
-  # these to separate correlation noise from behavioral signal.
-  #
-  # Three classes:
-  #   - :plan_generated  - a pure function of the effective seed.
-  #   - :run_scoped      - minted via mint_per_run; a function of nonce/epoch.
-  #   - :server_resolved - produced by the SUT (captured via external() or just
-  #                        observed in output).
-  #
-  # Interpretation contract for the comparator: a cross-run difference in a
-  # :run_scoped value is expected (a correlation id, never suspicious); in a
-  # :server_resolved value it is an observed behavioral difference (the subject);
-  # in a :plan_generated value it is a comparability violation (different plans).
+  @moduledoc """
+  Value provenance classification (DR-034 §4), derived structurally at
+  consumption time. Nothing is stored per value; the comparator (DR-035) calls
+  these to separate correlation noise from behavioral signal.
+
+  Three classes:
+  - `:plan_generated` - a pure function of the effective seed.
+  - `:run_scoped` - minted via `PropertyDamage.mint_per_run/1`; a function of
+    nonce/epoch.
+  - `:server_resolved` - produced by the SUT (captured via `external()` or just
+    observed in output).
+
+  Interpretation contract for the comparator: a cross-run difference in a
+  `:run_scoped` value is expected (a correlation id, never suspicious); in a
+  `:server_resolved` value it is an observed behavioral difference (the
+  subject); in a `:plan_generated` value it is a comparability violation
+  (different plans).
+  """
 
   alias PropertyDamage.{External, Mint, Placeholder, RunTrace, Sequence}
 
