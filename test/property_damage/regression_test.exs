@@ -379,6 +379,30 @@ defmodule PropertyDamage.RegressionTest do
     end
   end
 
+  describe "Regression.handle_failure/2 generate_tests export opts (H5)" do
+    @tag :tmp_dir
+    test "forwards a non-adapter export opt (adapter_config) to the generated test",
+         %{tmp_dir: tmp_dir} do
+      failure = make_failure(4242)
+      adapter_config = %{base_url: "http://h5-export-optcheck.test:9999"}
+
+      result =
+        Regression.handle_failure(failure,
+          generate_tests: tmp_dir,
+          adapter_config: adapter_config
+        )
+
+      assert {:ok, path} = result.generated_test
+      contents = File.read!(path)
+
+      assert contents =~ "adapter_config:",
+             "expected the generated regression test to carry adapter_config"
+
+      assert contents =~ "h5-export-optcheck.test:9999",
+             "expected the adapter_config value to reach the generated test"
+    end
+  end
+
   describe "Regression.batch_summary/1" do
     test "returns summary statistics" do
       results = [
