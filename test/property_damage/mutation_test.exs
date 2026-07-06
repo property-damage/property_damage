@@ -47,6 +47,30 @@ defmodule PropertyDamage.MutationTest do
     def timeout(_command), do: 30
   end
 
+  # Operator that records each application by messaging a pid carried on the
+  # mutation. Used to count how many times the adapter applies a mutation.
+  defmodule CountingOperator do
+    @behaviour PropertyDamage.Mutation.Operator
+
+    @impl true
+    def name, do: :counting
+
+    @impl true
+    def description, do: "counts applications for tests"
+
+    @impl true
+    def generate_mutations(_events, _opts \\ []), do: []
+
+    @impl true
+    def apply_mutation(events, %{test_pid: pid}) do
+      send(pid, :mutation_applied)
+      events
+    end
+
+    @impl true
+    def describe_mutation(_mutation), do: "counting"
+  end
+
   # A projection whose assertion always fails, used by the progress-projection
   # tests below. Mutation testing harvests sample events from a baseline run via
   # RunTrace.capture/1, which carries the full event log regardless of outcome,
@@ -453,6 +477,28 @@ defmodule PropertyDamage.MutationTest do
       # the command's {:error, _} result, not be swallowed back to the original
       # successful events.
       assert MutatingAdapter.execute(%FakeCommand{}, ctx, nil) == {:error, :internal_error}
+    end
+
+    test "apply_once applies a mutation at most once across commands (E3)" do
+      test_pid = self()
+
+      adapter =
+        MutatingAdapter.new(
+          inner_adapter: FakeInnerAdapter,
+          mutation: %{type: :counting, test_pid: test_pid},
+          operator: CountingOperator,
+          apply_once: true
+        )
+
+      {:ok, ctx} = MutatingAdapter.setup(adapter)
+
+      MutatingAdapter.execute(%FakeCommand{}, ctx, nil)
+      MutatingAdapter.execute(%FakeCommand{}, ctx, nil)
+
+      # With apply_once the mutation must be injected exactly once, even though
+      # both commands match the (unrestricted) target.
+      assert_received :mutation_applied
+      refute_received :mutation_applied
     end
   end
 
