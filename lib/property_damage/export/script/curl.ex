@@ -141,7 +141,7 @@ defmodule PropertyDamage.Export.Script.Curl do
     # Add body if present
     curl_parts =
       if step.resolved_body do
-        curl_parts ++ ["-d '#{resolve_body_json(step.resolved_body)}'"]
+        curl_parts ++ ["-d \"#{resolve_body_json(step.resolved_body)}\""]
       else
         curl_parts
       end
@@ -184,9 +184,20 @@ defmodule PropertyDamage.Export.Script.Curl do
   defp resolve_body_json(resolved_body) do
     json = resolved_body |> mark_refs() |> Jason.encode!()
 
-    # Replace placeholder markers with bash variable references. Markers use the
-    # variable name (alphanumeric + underscore), so match that, not digits.
-    Regex.replace(~r/"__PH_([a-z0-9_]+)__"/, json, fn _, var -> "$#{var}" end)
+    # The body is emitted inside `-d "..."` (double quotes) so placeholder
+    # variable references expand (DR-021). Escape the literal JSON for a
+    # double-quoted shell string first, so every literal byte round-trips.
+    escaped =
+      json
+      |> String.replace("\\", "\\\\")
+      |> String.replace("\"", "\\\"")
+      |> String.replace("`", "\\`")
+      |> String.replace("$", "\\$")
+
+    # Then re-open the placeholder markers as bare `$var` references (their
+    # surrounding quotes are now escaped) so the shell expands them. Markers use
+    # the variable name (alphanumeric + underscore), so match that, not digits.
+    Regex.replace(~r/\\"__PH_([a-z0-9_]+)__\\"/, escaped, fn _, var -> "$#{var}" end)
   end
 
   # Render the resolved body into a Jason-encodable structure, turning each
