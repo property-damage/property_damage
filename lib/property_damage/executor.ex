@@ -119,11 +119,16 @@ defmodule PropertyDamage.Executor do
   @type result :: %{
           success: boolean(),
           event_log: [Entry.t()],
+          executed: %{term() => struct()},
           projections: %{module() => any()},
+          projections_before: map() | nil,
           failed_at_index: non_neg_integer() | nil,
           failure_reason: term() | nil,
+          stacktrace: Exception.stacktrace() | nil,
           linearization: [struct()] | nil,
-          assertion_failures: [map()] | nil
+          assertion_failures: [map()] | nil,
+          assertion_counters: map(),
+          command_fold_ordinals: %{term() => non_neg_integer()}
         }
 
   @doc """
