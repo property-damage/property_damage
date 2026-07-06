@@ -810,6 +810,41 @@ defmodule PropertyDamage.LoadTestTest do
       Metrics.stop(metrics)
     end
 
+    test "a crashing worker does not take the pool down; :DOWN cleanup runs (D3)" do
+      # start_link links the pool to us; trap exits so a pool crash surfaces as a
+      # message here rather than killing the test process.
+      Process.flag(:trap_exit, true)
+
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, pool} =
+        WorkerPool.start_link(
+          model: WorkerTestModel,
+          adapter: WorkerTestAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      {:ok, worker} = WorkerPool.checkout(pool)
+      pool_ref = Process.monitor(pool)
+
+      # Crash the checked-out worker. The pool links AND monitors it; without
+      # trapping, the link exit kills the pool before the :DOWN cleanup runs.
+      Process.exit(worker, :simulated_crash)
+
+      refute_receive {:DOWN, ^pool_ref, :process, ^pool, _reason}, 300
+      assert Process.alive?(pool)
+
+      # The monitor-driven cleanup removed the dead worker from tracking.
+      stats = WorkerPool.stats(pool)
+      assert stats.in_use == 0
+
+      WorkerPool.stop(pool)
+      Metrics.stop(metrics)
+    end
+
     test "tracks peak workers in use" do
       {:ok, metrics} = Metrics.start_link()
 
