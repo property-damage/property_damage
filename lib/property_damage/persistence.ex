@@ -316,7 +316,8 @@ defmodule PropertyDamage.Persistence do
   @doc """
   Check if a failure file is valid and loadable.
 
-  Performs integrity check without fully loading the report.
+  Attempts to load the report and returns `true` when it deserializes
+  successfully (with or without warnings), `false` otherwise.
   """
   @spec valid?(Path.t()) :: boolean()
   def valid?(path) do
