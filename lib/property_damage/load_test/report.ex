@@ -280,7 +280,7 @@ defmodule PropertyDamage.LoadTest.Report do
 
       # Build chart rows
       rows =
-        for row <- (height - 1)..0 do
+        for row <- (height - 1)..0//-1 do
           threshold = min_val + range * (row / (height - 1))
 
           chars =

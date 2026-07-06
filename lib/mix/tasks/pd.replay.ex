@@ -102,6 +102,10 @@ defmodule Mix.Tasks.Pd.Replay do
     # not compile is indeterminate (125 -> bisect skip), never a reproduction.
     case compile_project() do
       :ok ->
+        # Compile writes .beam files but does not load them; load the SUT app's
+        # modules so the atoms/structs the failure file references exist before
+        # the (`:safe`) term decode, otherwise it fails with `:unsafe_terms`.
+        PropertyDamage.Mix.TaskSupport.load_project_modules()
         replay_file(path, verbose)
 
       :error ->

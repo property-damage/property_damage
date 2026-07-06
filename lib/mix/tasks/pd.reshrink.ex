@@ -119,6 +119,10 @@ defmodule Mix.Tasks.Pd.Reshrink do
         # Ensure the project (and the model/adapter the file references) is
         # compiled before we try to decode terms that name those modules.
         Mix.Task.run("compile", [])
+        # Compile writes .beam files but does not load them; load the SUT app's
+        # modules so the atoms/structs the failure file references exist before
+        # the (`:safe`) term decode, otherwise it fails with `:unsafe_terms`.
+        PropertyDamage.Mix.TaskSupport.load_project_modules()
         reshrink_file(path, strategy, opts)
 
       {:error, value} ->

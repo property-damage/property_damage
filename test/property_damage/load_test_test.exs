@@ -378,6 +378,20 @@ defmodule PropertyDamage.LoadTestTest do
       assert String.contains?(output, "45.20")
     end
 
+    # Regression: the ascii throughput chart iterates a descending range
+    # `(height - 1)..0`, whose implicit step is deprecated on Elixir 1.18 and
+    # errors under --warnings-as-errors. With a populated history the chart path
+    # runs; format/2 must return a binary without raising.
+    test "renders the ascii throughput chart over a populated history", %{report: report} do
+      history = for i <- 1..12, do: %{rps: i * 50.0}
+      report = put_in(report.metrics.history, history)
+
+      output = Report.format(report, :terminal)
+
+      assert is_binary(output)
+      assert String.contains?(output, "Throughput Over Time")
+    end
+
     test "formats markdown report", %{report: report} do
       output = Report.format(report, :markdown)
 

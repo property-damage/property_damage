@@ -396,4 +396,53 @@ defmodule PropertyDamage.PersistenceTest do
       assert {:error, :not_a_trace} = Persistence.load_trace(path)
     end
   end
+
+  # Regression for the `mix pd.replay` / `mix pd.reshrink` `:unsafe_terms` defect.
+  #
+  # `.pd` files are decoded with `:erlang.binary_to_term(bin, [:safe])`, which
+  # refuses to materialise atoms absent from the atom table. A saved failure
+  # references the SUT's own command/event struct modules, so those atoms must
+  # exist before the decode. The mix tasks compiled the project but never LOADED
+  # its modules, so in their fresh VM the atoms did not exist and the decode
+  # failed with `:unsafe_terms`. The fix loads the project app's modules first
+  # (`Code.ensure_loaded/1`), interning those atoms. This test pins both sides
+  # of the invariant that fix depends on: unknown atom fails, and the identical
+  # bytes load once that atom is interned.
+  #
+  # NOTE ON APPROACH: the spec's suggested purge-based test (define a struct,
+  # `:code.delete/1` + `:code.purge/1`, expect `:unsafe_terms`) is infeasible --
+  # atoms persist for the VM's lifetime, so a purged module's atom still decodes
+  # safely (verified empirically). Instead we assemble the atom name as raw
+  # bytes so it is never interned by the test itself, matching the existing
+  # "decode safety" idiom above; interning it via `String.to_atom/1` then
+  # simulates exactly what loading the SUT's modules does.
+  describe "safe decode invariant (mix pd.* module load)" do
+    @tag :tmp_dir
+    test "a .pd naming an unregistered atom fails, then loads once that atom is interned",
+         %{tmp_dir: dir} do
+      # v7 payload `%{report: :<unknown_atom>}`, atom name assembled as raw bytes
+      # so it is never interned by building the term. Checksum is over the intact
+      # bytes, so a decode failure is an environment mismatch, not corruption.
+      name =
+        "pd_replay_fix_unknown_atom_" <> Integer.to_string(System.unique_integer([:positive]))
+
+      term_binary =
+        <<131, 116, 0, 0, 0, 1, 119, 6, "report", 119, byte_size(name)::8, name::binary>>
+
+      checksum = :erlang.crc32(term_binary)
+      path = Path.join(dir, "unknown-atom.pd")
+      File.write!(path, <<"PD", 7::8, checksum::32, term_binary::binary>>)
+
+      # Before interning: exactly what a fresh `mix pd.replay` VM hits when the
+      # SUT's modules have been compiled but not loaded.
+      assert {:error, :unsafe_terms} = Persistence.load(path)
+
+      # Interning the atom (what `Code.ensure_loaded/1` does for the SUT's module
+      # atoms) makes the identical file decode.
+      _ = String.to_atom(name)
+
+      assert match?({:ok, _}, Persistence.load(path)) or
+               match?({:ok, _, _}, Persistence.load(path))
+    end
+  end
 end
