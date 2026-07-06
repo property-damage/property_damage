@@ -1094,34 +1094,44 @@ defmodule PropertyDamage do
 
     case setup_each_result do
       :ok ->
+        # Start event queue for injectors. Its stop is guaranteed by the outer
+        # `after` below so that a raise in injector/mock setup cannot leak it
+        # (A6); injector/mock setup therefore lives inside the outer try.
         {:ok, event_queue} = EventQueue.start_link()
-        setup_injectors(ctx.injector_adapters, event_queue)
-        {mock_registry, mock_contexts} = setup_mocks(ctx.mock_services, event_queue)
 
         try do
-          {:ok, result} =
-            Executor.run(sequence, ctx.model, ctx.adapter,
-              adapter_config: ctx.adapter_config,
-              event_queue: event_queue,
-              mock_registry: mock_registry,
-              stutter_config: ctx.stutter_config,
-              # Replay derives run 0, whose effective seed is the replayed seed.
-              rng_seed: seed,
-              # Mint run-scoped values against the campaign nonce (DR-034);
-              # epoch 0 for this replay's exploration-equivalent execution.
-              run_nonce: ctx.run_nonce,
-              mint_epoch: 0
-            )
+          setup_injectors(ctx.injector_adapters, event_queue)
+          {mock_registry, mock_contexts} = setup_mocks(ctx.mock_services, event_queue)
 
-          fun.(sequence, result, event_queue, mock_registry)
-        after
-          teardown_mocks(mock_registry, mock_contexts)
-          teardown_injectors(ctx.injector_adapters)
-          EventQueue.stop(event_queue)
+          try do
+            {:ok, result} =
+              Executor.run(sequence, ctx.model, ctx.adapter,
+                adapter_config: ctx.adapter_config,
+                event_queue: event_queue,
+                mock_registry: mock_registry,
+                stutter_config: ctx.stutter_config,
+                # Replay derives run 0, whose effective seed is the replayed seed.
+                rng_seed: seed,
+                # Mint run-scoped values against the campaign nonce (DR-034);
+                # epoch 0 for this replay's exploration-equivalent execution.
+                run_nonce: ctx.run_nonce,
+                mint_epoch: 0
+              )
 
-          if function_exported?(ctx.model, :teardown_each, 1) do
-            ctx.model.teardown_each(%{})
+            fun.(sequence, result, event_queue, mock_registry)
+          after
+            # The event queue is stopped by the outer `after` so it is released
+            # even if injector or mock setup raised before this inner try was
+            # entered (A6).
+            teardown_mocks(mock_registry, mock_contexts)
+            teardown_injectors(ctx.injector_adapters)
+
+            if function_exported?(ctx.model, :teardown_each, 1) do
+              ctx.model.teardown_each(%{})
+            end
           end
+        after
+          EventQueue.stop(event_queue)
         end
 
       {:error, reason} ->
@@ -2011,36 +2021,41 @@ defmodule PropertyDamage do
     injector_adapters = opts[:injector_adapters]
     adapter_config = opts[:adapter_config]
 
-    # Start event queue for injectors
+    # Start event queue for injectors. Its stop is guaranteed by the outer
+    # `after` below so that a raise in injector or adapter setup cannot leak it
+    # (A6); injector/adapter setup therefore lives inside the outer try.
     {:ok, event_queue} = EventQueue.start_link()
 
-    # Setup injector adapters
-    setup_injectors(injector_adapters, event_queue)
+    try do
+      # Setup injector adapters
+      setup_injectors(injector_adapters, event_queue)
 
-    # Setup main adapter
-    case adapter.setup(adapter_config) do
-      {:ok, adapter_context} ->
-        context = %{
-          adapter_context: adapter_context,
-          event_queue: event_queue
-        }
+      # Setup main adapter
+      case adapter.setup(adapter_config) do
+        {:ok, adapter_context} ->
+          context = %{
+            adapter_context: adapter_context,
+            event_queue: event_queue
+          }
 
-        sequence = Sequence.linear(commands)
+          sequence = Sequence.linear(commands)
 
-        try do
-          Executor.execute_raw(sequence, adapter, context)
-        after
-          # Cleanup
-          adapter.teardown(adapter_context)
+          try do
+            Executor.execute_raw(sequence, adapter, context)
+          after
+            # Cleanup. The event queue is stopped by the outer `after`.
+            adapter.teardown(adapter_context)
+            teardown_injectors(injector_adapters)
+          end
+
+        {:error, reason} ->
+          # Cleanup injectors on setup failure; the event queue is stopped by
+          # the outer `after`.
           teardown_injectors(injector_adapters)
-          EventQueue.stop(event_queue)
-        end
-
-      {:error, reason} ->
-        # Cleanup event queue and injectors on setup failure
-        teardown_injectors(injector_adapters)
-        EventQueue.stop(event_queue)
-        {:error, {:adapter_setup_failed, reason}}
+          {:error, {:adapter_setup_failed, reason}}
+      end
+    after
+      EventQueue.stop(event_queue)
     end
   end
 
