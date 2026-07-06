@@ -53,6 +53,11 @@ defmodule PropertyDamage.Executor.State do
     * `:active_faults` - `%{{nemesis_module, index} => fault}` (ghost field)
     * `:async_halt` - `{name, reason, command_index}` set when a DR-025 async
       `every:` assertion trips during a `@poll_state` await drain (ghost field)
+    * `:async_failed_index` - the command index a DR-025 async `every:` assertion
+      failure is attributed to (the offending event's `command_index`, which may
+      be an earlier command than the one currently executing, or `nil` for an
+      ambient injector event). `:unset` on every non-failing state; consulted by
+      finalization so the report names the right command (ghost field).
     * `:await_matchers` - DR-030 correlation registry: a registration-ordered
       list of `%{command_index:, branch_id:, match:}` declared via
       `Command.awaits/2`. Persists for the rest of the run (a matcher outlives
@@ -104,6 +109,7 @@ defmodule PropertyDamage.Executor.State do
     active_resource_pollers: [],
     active_faults: %{},
     async_halt: nil,
+    async_failed_index: :unset,
     await_matchers: [],
     fold_counter: 0,
     command_fold_ordinals: %{}
@@ -134,6 +140,7 @@ defmodule PropertyDamage.Executor.State do
           active_resource_pollers: list(),
           active_faults: map(),
           async_halt: term(),
+          async_failed_index: non_neg_integer() | nil | :unset,
           await_matchers: [map()],
           fold_counter: non_neg_integer(),
           command_fold_ordinals: %{term() => non_neg_integer()}

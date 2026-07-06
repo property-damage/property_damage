@@ -222,6 +222,101 @@ defmodule PropertyDamage.AwaitsTest do
     end
   end
 
+  # Safety-only projection (no @poll_state) so the inline DR-025 async check is
+  # the only thing that can halt the run — no poller timing to interfere.
+  defmodule SafetyOnlyProjection do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{webhooks: %{}}
+
+    @impl true
+    def apply(state, %IssueClosedWebhook{issue_id: id}),
+      do: update_in(state, [:webhooks, id], fn n -> (n || 0) + 1 end)
+
+    def apply(state, _), do: state
+
+    @trigger every: IssueClosedWebhook
+    def assert_at_most_one_webhook(state, _event) do
+      unless Enum.all?(state.webhooks, fn {_id, n} -> n <= 1 end) do
+        PropertyDamage.fail!("more than one closing webhook for an issue",
+          webhooks: state.webhooks
+        )
+      end
+    end
+  end
+
+  defmodule LaterDeliveryModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [CloseIssue]
+    @impl true
+    def command_sequence_projection, do: SafetyOnlyProjection
+    @impl true
+    def assertion_projections, do: [SafetyOnlyProjection]
+  end
+
+  # A later, unrelated command whose adapter delivers the duplicate webhooks for
+  # issue "i1", so they are drained (and the assertion trips) during THIS
+  # command's pipeline, not the awaiting command's.
+  defmodule DeliverWebhooks do
+    use PropertyDamage.Command
+    defstruct []
+
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+  end
+
+  defmodule LaterDeliveryAdapter do
+    use PropertyDamage.Adapter
+    @impl true
+    def setup(config), do: {:ok, config}
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(%CloseIssue{issue_id: id}, _ctx, _runtime),
+      do: {:ok, [%IssueCloseRequested{issue_id: id}]}
+
+    def execute(%DeliverWebhooks{}, ctx, _runtime) do
+      EventQueue.push(ctx.event_queue, WebhookInjector, %IssueClosedWebhook{issue_id: "i1"})
+      EventQueue.push(ctx.event_queue, WebhookInjector, %IssueClosedWebhook{issue_id: "i1"})
+      {:ok, []}
+    end
+  end
+
+  describe "attribution of an async every: failure to an earlier command (DR-025)" do
+    test "a later command's drain trips the assertion but the failure names the awaiting command" do
+      {:ok, queue} = EventQueue.start_link()
+      seq = Sequence.linear([%CloseIssue{issue_id: "i1"}, %DeliverWebhooks{}])
+
+      {:ok, result} =
+        Executor.run(seq, LaterDeliveryModel, LaterDeliveryAdapter,
+          event_queue: queue,
+          adapter_config: %{event_queue: queue}
+        )
+
+      EventQueue.stop(queue)
+
+      refute result.success
+
+      assert %Failure{
+               type: %Failure.Assertion{kind: :assertion_failed, name: :at_most_one_webhook}
+             } = result.failure_reason
+
+      # The offending webhooks are correlated to CloseIssue (index 0); the
+      # assertion tripped while DeliverWebhooks (index 1) was draining them.
+      # DR-025 command attribution must name the owning command, not the current.
+      indices =
+        result.event_log
+        |> Enum.filter(&match?(%IssueClosedWebhook{}, &1.event))
+        |> Enum.map(& &1.command_index)
+
+      assert indices == [0, 0]
+      assert result.failed_at_index == 0
+    end
+  end
+
   # No-assertion projection so the overlap scenario exercises pure attribution
   # (no pollers / triggers to interfere).
   defmodule PlainProjection do
