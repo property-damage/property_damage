@@ -70,4 +70,11 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
       end
     end
   end
+
+  describe "color: false" do
+    test ":terminal output contains no ANSI escape bytes (I1)" do
+      out = Formatter.format(sut_failure(), :terminal, color: false)
+      refute out =~ "\e[", "plain output leaked an ANSI escape sequence"
+    end
+  end
 end
