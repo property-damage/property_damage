@@ -44,7 +44,6 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   - `:mean_latency_ms` - Average latency
   - `:success_rate` - Ratio of successes to total
   - `:error_rate` - Ratio of errors to total
-  - `:throughput` - Operations per second (requires time tracking)
 
   ## Recording Metrics
 
@@ -69,8 +68,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
     :error_count,
     :window_size,
     :assertions,
-    :current_step,
-    :start_time
+    :current_step
   ]
 
   @type t :: %__MODULE__{
@@ -79,8 +77,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
           error_count: non_neg_integer(),
           window_size: pos_integer(),
           assertions: [assertion()],
-          current_step: non_neg_integer(),
-          start_time: integer()
+          current_step: non_neg_integer()
         }
 
   @type metric ::
@@ -108,8 +105,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
       error_count: 0,
       window_size: Keyword.get(opts, :window_size, @default_window_size),
       assertions: Keyword.get(opts, :assertions, []),
-      current_step: 0,
-      start_time: System.monotonic_time(:millisecond)
+      current_step: 0
     }
   end
 

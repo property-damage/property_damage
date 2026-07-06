@@ -24,9 +24,9 @@ defmodule PropertyDamage.Suggestions do
       IO.puts(PropertyDamage.Suggestions.format(suggestions))
 
       # Get suggestions as structured data
-      suggestions.missing_checks      # List of suggested checks
-      suggestions.unchecked_fields    # Fields with no apparent validation
-      suggestions.coverage_gaps       # Areas lacking coverage
+      suggestions.suggestions         # List of suggested checks
+      suggestions.field_coverage      # Per-field coverage detail
+      suggestions.detected_patterns   # Patterns detected in events
 
   ## How It Works
 

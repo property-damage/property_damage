@@ -253,7 +253,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
 
     # Command rows
     rows =
-      for row_idx <- 0..(max_len - 1) do
+      for row_idx <- 0..(max_len - 1)//1 do
         cells =
           branches
           |> Enum.with_index()
