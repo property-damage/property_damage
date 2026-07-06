@@ -57,7 +57,7 @@ defmodule PropertyDamage.LoadTest.Runner do
   - `:ramp_up` - Ramp-up strategy (default: :immediate)
   - `:ramp_down` - Ramp-down strategy (default: :immediate)
   - `:think_time` - {min, max} ms between commands in sequence (default: {0, 0})
-  - `:metrics_interval` - Snapshot cadence for progress updates (default: {1, :second})
+  - `:metrics_interval` - Snapshot cadence for progress updates (default: {1, :seconds})
   - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` values: a
     `LoadUpdate` each interval and a terminal `LoadResult` (DR-022)
   - `:assertion_mode` - How to handle assertions (default: :disabled)
@@ -132,6 +132,7 @@ defmodule PropertyDamage.LoadTest.Runner do
 
     # Start dynamic worker pool (no size configuration needed)
     case WorkerPool.start_link(
+           owner: self(),
            model: model,
            adapter: adapter,
            adapter_config: adapter_config,
@@ -344,10 +345,22 @@ defmodule PropertyDamage.LoadTest.Runner do
   end
 
   @impl true
-  def handle_info({:arrival_completed, ref, _result}, state) do
-    new_in_flight = MapSet.delete(state.in_flight, ref)
-    Metrics.arrival_completed(state.metrics)
-    {:noreply, %{state | in_flight: new_in_flight}}
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    # Each arrival is spawned with a monitor (see spawn_arrival/1) and tracked in
+    # in_flight by its monitor ref. Whether the arrival finished cleanly or
+    # crashed, its :DOWN reaps the ref so the drain loop can terminate; an
+    # unmonitored crash used to leak the ref and wedge `await :infinity`.
+    if MapSet.member?(state.in_flight, ref) do
+      # Only a clean run counts as a completed arrival; a crash is not a
+      # completion (matching the previous success-path accounting).
+      if reason == :normal do
+        Metrics.arrival_completed(state.metrics)
+      end
+
+      {:noreply, %{state | in_flight: MapSet.delete(state.in_flight, ref)}}
+    else
+      {:noreply, state}
+    end
   end
 
   @impl true
@@ -427,20 +440,22 @@ defmodule PropertyDamage.LoadTest.Runner do
   # ============================================================================
 
   defp spawn_arrival(state) do
-    runner_pid = self()
-    ref = make_ref()
+    pool = state.pool
 
     # Checkout a worker (dynamic pool - always succeeds or creates new worker)
-    case WorkerPool.checkout(state.pool) do
+    case WorkerPool.checkout(pool) do
       {:ok, worker} ->
         Metrics.arrival_spawned(state.metrics)
 
-        # Execute sequence in a task
-        Task.start(fn ->
-          result = Worker.execute_sequence(worker)
-          WorkerPool.checkin(state.pool, worker)
-          send(runner_pid, {:arrival_completed, ref, result})
-        end)
+        # Execute the sequence in a *monitored* task. spawn_monitor (unlike the
+        # former unlinked Task.start) guarantees a :DOWN even when the arrival
+        # crashes, so the runner always reaps its in_flight ref and the drain
+        # loop terminates. We key in_flight by the monitor ref.
+        {_pid, ref} =
+          spawn_monitor(fn ->
+            Worker.execute_sequence(worker)
+            WorkerPool.checkin(pool, worker)
+          end)
 
         %{state | in_flight: MapSet.put(state.in_flight, ref)}
 
@@ -522,8 +537,9 @@ defmodule PropertyDamage.LoadTest.Runner do
     Process.send_after(self(), :check_duration, interval_ms)
   end
 
-  defp duration_to_ms({value, :milliseconds}), do: value
-  defp duration_to_ms({value, :seconds}), do: value * 1000
-  defp duration_to_ms({value, :minutes}), do: value * 60 * 1000
-  defp duration_to_ms({value, :hours}), do: value * 60 * 60 * 1000
+  # Both singular and plural unit atoms are accepted (see Options.duration_to_ms/1).
+  defp duration_to_ms({value, unit}) when unit in [:millisecond, :milliseconds], do: value
+  defp duration_to_ms({value, unit}) when unit in [:second, :seconds], do: value * 1000
+  defp duration_to_ms({value, unit}) when unit in [:minute, :minutes], do: value * 60 * 1000
+  defp duration_to_ms({value, unit}) when unit in [:hour, :hours], do: value * 60 * 60 * 1000
 end

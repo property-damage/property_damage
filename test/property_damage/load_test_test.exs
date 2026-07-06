@@ -306,6 +306,29 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   # ============================================================================
+  # Duration Unit Tests (D6a)
+  # ============================================================================
+
+  describe "duration_to_ms unit handling (D6a)" do
+    test "accepts singular time units (matching the framework's plural forms)" do
+      # The load-test duration helper only knew plural unit atoms, so a singular
+      # unit raised FunctionClauseError. Singular and plural must both convert,
+      # matching the framework convention (projection.ex normalize_time).
+      assert PropertyDamage.Options.duration_to_ms({1, :millisecond}) == 1
+      assert PropertyDamage.Options.duration_to_ms({1, :second}) == 1_000
+      assert PropertyDamage.Options.duration_to_ms({2, :minute}) == 120_000
+      assert PropertyDamage.Options.duration_to_ms({1, :hour}) == 3_600_000
+    end
+
+    test "still accepts the plural time units" do
+      assert PropertyDamage.Options.duration_to_ms({1, :milliseconds}) == 1
+      assert PropertyDamage.Options.duration_to_ms({1, :seconds}) == 1_000
+      assert PropertyDamage.Options.duration_to_ms({2, :minutes}) == 120_000
+      assert PropertyDamage.Options.duration_to_ms({1, :hours}) == 3_600_000
+    end
+  end
+
+  # ============================================================================
   # Report Tests
   # ============================================================================
 
@@ -493,6 +516,23 @@ defmodule PropertyDamage.LoadTestTest do
     end
   end
 
+  # D2 fixture: an adapter whose execute/3 raises. On the unfixed worker the raise
+  # crashes the adapter Task, which is linked to the worker, so the worker (and its
+  # GenServer.call caller) go down. The fix captures the raise inside the task and
+  # reports it as a command error.
+  defmodule WorkerRaisingAdapter do
+    use PropertyDamage.Adapter, default_timeout: 30
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(_cmd, _ctx, _runtime), do: raise("adapter boom (D2)")
+  end
+
   # Ordering-regression fixtures: a command whose event sets state the command's
   # own `@trigger` reads back. Under load-test assertions this must observe the
   # command's own event (matching the main Executor), so `last` is set when the
@@ -591,6 +631,47 @@ defmodule PropertyDamage.LoadTestTest do
 
       Process.sleep(20)
       assert Metrics.snapshot(metrics).assertion_failures == 0
+
+      Worker.stop(worker)
+      Metrics.stop(metrics)
+    end
+
+    test "a raising adapter is captured as a command error, not a worker crash (D2)" do
+      # The worker is linked to us via start_link; trap exits so a (buggy) cascade
+      # surfaces as a caught exit here rather than taking the test process down.
+      Process.flag(:trap_exit, true)
+
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, worker} =
+        Worker.start_link(
+          worker_id: 1,
+          model: WorkerTestModel,
+          adapter: WorkerRaisingAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      worker_ref = Process.monitor(worker)
+
+      result =
+        try do
+          Worker.execute_sequence(worker)
+        catch
+          :exit, reason -> {:worker_crashed, reason}
+        end
+
+      # The adapter raise must be converted into command errors, and the sequence
+      # must still return a result. On the unfixed worker the raise crashes the
+      # worker, so the call exits and `result` is {:worker_crashed, _}.
+      assert match?({:ok, %{errors: errors}} when errors > 0, result),
+             "expected adapter raise captured as command errors, got: #{inspect(result)}"
+
+      # The worker survived the raising adapter.
+      refute_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 200
+      assert Process.alive?(worker)
 
       Worker.stop(worker)
       Metrics.stop(metrics)
@@ -752,6 +833,41 @@ defmodule PropertyDamage.LoadTestTest do
       Metrics.stop(metrics)
     end
 
+    test "a crashing worker does not take the pool down; :DOWN cleanup runs (D3)" do
+      # start_link links the pool to us; trap exits so a pool crash surfaces as a
+      # message here rather than killing the test process.
+      Process.flag(:trap_exit, true)
+
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, pool} =
+        WorkerPool.start_link(
+          model: WorkerTestModel,
+          adapter: WorkerTestAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      {:ok, worker} = WorkerPool.checkout(pool)
+      pool_ref = Process.monitor(pool)
+
+      # Crash the checked-out worker. The pool links AND monitors it; without
+      # trapping, the link exit kills the pool before the :DOWN cleanup runs.
+      Process.exit(worker, :simulated_crash)
+
+      refute_receive {:DOWN, ^pool_ref, :process, ^pool, _reason}, 300
+      assert Process.alive?(pool)
+
+      # The monitor-driven cleanup removed the dead worker from tracking.
+      stats = WorkerPool.stats(pool)
+      assert stats.in_use == 0
+
+      WorkerPool.stop(pool)
+      Metrics.stop(metrics)
+    end
+
     test "tracks peak workers in use" do
       {:ok, metrics} = Metrics.start_link()
 
@@ -844,6 +960,54 @@ defmodule PropertyDamage.LoadTestTest do
         Process.sleep(:rand.uniform(5))
         {:ok, [%{type: :executed}]}
       end
+    end
+
+    # D1 fixture: timeout/1 raises, which crashes the worker *inside its
+    # GenServer.call* (before the adapter execution task, so D2's rescue does not
+    # cover it). The arrival task's call therefore exits, crashing the arrival.
+    defmodule CrashingArrivalAdapter do
+      use PropertyDamage.Adapter, default_timeout: 30
+
+      @impl true
+      def setup(_config), do: {:ok, %{}}
+
+      @impl true
+      def teardown(_ctx), do: :ok
+
+      @impl true
+      def execute(_cmd, _ctx, _runtime), do: {:ok, [%{type: :executed}]}
+
+      @impl true
+      def timeout(_command), do: raise("boom in timeout/1 (crashes the arrival's worker)")
+    end
+
+    @tag :integration
+    test "a crashing arrival does not wedge the drain loop (D1)" do
+      capture_log(fn ->
+        # Bound the run: on the unfixed runner, arrivals crash without reaping
+        # their in_flight refs, so the drain loop (await :infinity) never returns.
+        task =
+          Task.async(fn ->
+            LoadTest.run(
+              model: MockModel,
+              adapter: CrashingArrivalAdapter,
+              arrival_rate: 50,
+              duration: {200, :milliseconds}
+            )
+          end)
+
+        case Task.yield(task, 5_000) || Task.shutdown(task, :brutal_kill) do
+          {:ok, {:ok, report}} ->
+            # The run completed instead of wedging, and arrivals were generated.
+            assert report.metrics.arrivals_spawned > 0
+
+          other ->
+            flunk(
+              "load test did not complete within 5s (drain wedged on crashed " <>
+                "arrivals): #{inspect(other)}"
+            )
+        end
+      end)
     end
 
     @tag :integration

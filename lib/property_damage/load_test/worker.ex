@@ -336,7 +336,18 @@ defmodule PropertyDamage.LoadTest.Worker do
         execute_fn = fn runtime ->
           task =
             Task.async(fn ->
-              state.adapter.execute(resolved_command, state.adapter_context, runtime)
+              # Capture adapter failures inside the task and convert them to an
+              # error result. Task.async links the task to this worker, so an
+              # uncaught raise/throw/exit here would otherwise cascade
+              # worker -> pool -> runner -> caller instead of being recorded as a
+              # single failed command.
+              try do
+                state.adapter.execute(resolved_command, state.adapter_context, runtime)
+              rescue
+                exception -> {:error, {:adapter_error, exception}}
+              catch
+                kind, reason -> {:error, {:adapter_error, {kind, reason}}}
+              end
             end)
 
           case Task.yield(task, timeout_ms) || Task.shutdown(task) do
