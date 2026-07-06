@@ -74,9 +74,11 @@ defmodule PropertyDamage.MockServiceRegistry do
   @doc """
   Register a mock adapter with the registry.
 
-  The adapter's `init_state/0` is called to initialize its state.
+  The adapter's `init_state/0` is called to initialize its state. Returns `:ok`,
+  or `{:error, {module, :init_state, reason}}` if `init_state/0` raised, exited,
+  or threw (the registry stays up).
   """
-  @spec register(t(), module()) :: :ok
+  @spec register(t(), module()) :: :ok | {:error, term()}
   def register(registry, adapter_module) do
     GenServer.call(registry, {:register, adapter_module})
   end
@@ -199,10 +201,17 @@ defmodule PropertyDamage.MockServiceRegistry do
 
   @impl true
   def handle_call({:register, adapter_module}, _from, state) do
-    adapter_state = adapter_module.init_state()
+    # A user mock's init_state/0 runs here, inside the registry GenServer. Guard
+    # it so a raising/exiting/throwing callback surfaces as an error result
+    # instead of crashing the registry and, through its start_link, the run (J13).
+    case guarded_init_state(adapter_module) do
+      {:ok, adapter_state} ->
+        new_adapters = Map.put(state.adapters, adapter_module, adapter_state)
+        {:reply, :ok, %{state | adapters: new_adapters}}
 
-    new_adapters = Map.put(state.adapters, adapter_module, adapter_state)
-    {:reply, :ok, %{state | adapters: new_adapters}}
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
   end
 
   @impl true
@@ -288,6 +297,18 @@ defmodule PropertyDamage.MockServiceRegistry do
   # ==========================================================================
   # Private Helpers
   # ==========================================================================
+
+  # Guard a mock's `init_state/0` the same way `notify_all/3` guards the other
+  # user callbacks: on a raise/exit/throw, return an error naming the offending
+  # mock instead of letting the crash take the GenServer down (J13). Returns
+  # `{:ok, adapter_state}` on success.
+  defp guarded_init_state(adapter_module) do
+    {:ok, adapter_module.init_state()}
+  rescue
+    e -> {:error, {adapter_module, :init_state, e}}
+  catch
+    kind, reason -> {:error, {adapter_module, :init_state, {kind, reason}}}
+  end
 
   # Fold `callback` (`:on_command` / `:on_event`) over every registered adapter,
   # guarding each user callback. On the first callback that raises/exits/throws,

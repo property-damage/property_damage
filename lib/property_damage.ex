@@ -948,6 +948,10 @@ defmodule PropertyDamage do
     {:halt, %{setup_each_failed: reason, phase: :seed_library_replay}}
   end
 
+  defp finish_replay({:adapter_setup_failed, reason}, _path, _k, _reporter) do
+    {:halt, %{adapter_setup_failed: reason, phase: :seed_library_replay}}
+  end
+
   defp finish_replay({:ok, library, results, rep_report}, path, k, reporter) do
     {pruned_library, pruned_count} = SeedLibrary.prune(library, k)
     save_replay_library(pruned_library, path)
@@ -990,6 +994,7 @@ defmodule PropertyDamage do
 
     case outcome do
       {:setup_each_failed, _reason} = err -> err
+      {:adapter_setup_failed, _reason} = err -> err
       {lib, results, rep} -> {:ok, lib, Enum.reverse(results), rep}
     end
   end
@@ -1004,6 +1009,9 @@ defmodule PropertyDamage do
 
     case execution do
       {:setup_each_failed, _reason} = err ->
+        {:halt, err}
+
+      {:adapter_setup_failed, _reason} = err ->
         {:halt, err}
 
       {:pass} ->
@@ -1094,34 +1102,53 @@ defmodule PropertyDamage do
 
     case setup_each_result do
       :ok ->
+        # Start event queue for injectors. Its stop is guaranteed by the outer
+        # `after` below so that a raise in injector/mock setup cannot leak it
+        # (A6); injector/mock setup therefore lives inside the outer try.
         {:ok, event_queue} = EventQueue.start_link()
-        setup_injectors(ctx.injector_adapters, event_queue)
-        {mock_registry, mock_contexts} = setup_mocks(ctx.mock_services, event_queue)
 
         try do
-          {:ok, result} =
-            Executor.run(sequence, ctx.model, ctx.adapter,
-              adapter_config: ctx.adapter_config,
-              event_queue: event_queue,
-              mock_registry: mock_registry,
-              stutter_config: ctx.stutter_config,
-              # Replay derives run 0, whose effective seed is the replayed seed.
-              rng_seed: seed,
-              # Mint run-scoped values against the campaign nonce (DR-034);
-              # epoch 0 for this replay's exploration-equivalent execution.
-              run_nonce: ctx.run_nonce,
-              mint_epoch: 0
-            )
+          setup_injectors(ctx.injector_adapters, event_queue)
+          {mock_registry, mock_contexts} = setup_mocks(ctx.mock_services, event_queue)
 
-          fun.(sequence, result, event_queue, mock_registry)
-        after
-          teardown_mocks(mock_registry, mock_contexts)
-          teardown_injectors(ctx.injector_adapters)
-          EventQueue.stop(event_queue)
+          try do
+            run_result =
+              Executor.run(sequence, ctx.model, ctx.adapter,
+                adapter_config: ctx.adapter_config,
+                event_queue: event_queue,
+                mock_registry: mock_registry,
+                stutter_config: ctx.stutter_config,
+                # Replay derives run 0, whose effective seed is the replayed seed.
+                rng_seed: seed,
+                # Mint run-scoped values against the campaign nonce (DR-034);
+                # epoch 0 for this replay's exploration-equivalent execution.
+                run_nonce: ctx.run_nonce,
+                mint_epoch: 0
+              )
 
-          if function_exported?(ctx.model, :teardown_each, 1) do
-            ctx.model.teardown_each(%{})
+            case run_result do
+              {:ok, result} ->
+                fun.(sequence, result, event_queue, mock_registry)
+
+              # Executor.run returns {:error, reason} when the adapter's setup/1
+              # fails. Surface it up the replay chain (mirroring setup_each_failed)
+              # instead of crashing on a hard {:ok, _} match (A4).
+              {:error, reason} ->
+                {:adapter_setup_failed, reason}
+            end
+          after
+            # The event queue is stopped by the outer `after` so it is released
+            # even if injector or mock setup raised before this inner try was
+            # entered (A6).
+            teardown_mocks(mock_registry, mock_contexts)
+            teardown_injectors(ctx.injector_adapters)
+
+            if function_exported?(ctx.model, :teardown_each, 1) do
+              ctx.model.teardown_each(%{})
+            end
           end
+        after
+          EventQueue.stop(event_queue)
         end
 
       {:error, reason} ->
@@ -1320,7 +1347,17 @@ defmodule PropertyDamage do
       ] ++
         stutter_repro_run_opts(result.failure_reason, stutter_config, seed)
 
-    {:ok, fresh_result} = Executor.run(shrunk_sequence, model, adapter, fresh_opts)
+    fresh_result =
+      case Executor.run(shrunk_sequence, model, adapter, fresh_opts) do
+        {:ok, fresh} ->
+          fresh
+
+        # The reproduction re-execution's adapter setup can fail. Treat that as a
+        # non-reproduction and fall back to the original observed failure below,
+        # instead of crashing on a hard {:ok, _} match (A4).
+        {:error, _reason} ->
+          nil
+      end
 
     # Normally the re-execution reproduces the failure on the (possibly smaller)
     # shrunk sequence, giving the report fresh state and a minimal repro. But an
@@ -1330,7 +1367,9 @@ defmodule PropertyDamage do
     # reason we actually observed. When the re-run fails to reproduce, fall back
     # to the original failing run -- report its sequence, reason, index, and
     # state. A genuine reproduction keeps the shrunk sequence and fresh state.
-    reproduced? = not fresh_result.success and not is_nil(fresh_result.failure_reason)
+    reproduced? =
+      not is_nil(fresh_result) and not fresh_result.success and
+        not is_nil(fresh_result.failure_reason)
 
     {report_shrunk_sequence, report_result} =
       if reproduced? do
@@ -1542,53 +1581,59 @@ defmodule PropertyDamage do
         fresh_epoch = :atomics.add_get(mint_epoch_counter, 1, 1)
 
         # Re-execute to get fresh state
-        {:ok, fresh_result} =
-          Executor.run(shrink_result.sequence, model, adapter,
-            adapter_config: adapter_config,
-            event_queue: event_queue,
-            run_nonce: run_nonce,
-            mint_epoch: fresh_epoch
-          )
+        case Executor.run(shrink_result.sequence, model, adapter,
+               adapter_config: adapter_config,
+               event_queue: event_queue,
+               run_nonce: run_nonce,
+               mint_epoch: fresh_epoch
+             ) do
+          # A re-execution whose adapter setup fails cannot confirm a further
+          # shrink; surface it as a run error instead of crashing on a hard
+          # {:ok, _} match (A4), mirroring run_loop's adapter_setup_failed.
+          {:error, reason} ->
+            {:error, %{adapter_setup_failed: reason, run_number: report.run_number}}
 
-        end_time = System.monotonic_time(:millisecond)
+          {:ok, fresh_result} ->
+            end_time = System.monotonic_time(:millisecond)
 
-        # As in handle_failure/N: only adopt the further-shrunk sequence on a
-        # genuine reproduction. If the re-execution did not reproduce the failure
-        # (a flaky repro), the fresh result carries `success: true / reason: nil`,
-        # which would emit a nil-reason "Unknown Failure" for an unverified
-        # smaller sequence. In that case return the incoming report unchanged --
-        # the further-shrink found nothing it could confirm.
-        if fresh_result.success or is_nil(fresh_result.failure_reason) do
-          {:ok, report}
-        else
-          new_report =
-            FailureReport.new(
-              seed: report.seed,
-              run_number: report.run_number,
-              original_sequence: report.original_sequence,
-              shrunk_sequence: shrink_result.sequence,
-              failed_at_index: fresh_result.failed_at_index,
-              failure_reason: fresh_result.failure_reason,
-              shrink_iterations: report.shrink_iterations + shrink_result.iterations,
-              shrink_time_ms: report.shrink_time_ms + (end_time - start_time),
-              event_log: fresh_result.event_log,
-              executed: Map.get(fresh_result, :executed, %{}),
-              # A further-shrunk report only reaches here on a genuine
-              # reproduction, so its plan is a shrinker product (DR-033).
-              plan_source: :shrunk,
-              source_revision: RunTrace.source_revision(),
-              run_nonce: run_nonce,
-              mint_epoch: fresh_epoch,
-              projections: fresh_result.projections,
-              projections_before: fresh_result.projections_before,
-              command_fold_ordinals: Map.get(fresh_result, :command_fold_ordinals, %{}),
-              model: model,
-              adapter: adapter,
-              linearization: fresh_result.linearization,
-              stacktrace: Map.get(fresh_result, :stacktrace)
-            )
+            # As in handle_failure/N: only adopt the further-shrunk sequence on a
+            # genuine reproduction. If the re-execution did not reproduce the
+            # failure (a flaky repro), the fresh result carries `success: true /
+            # reason: nil`, which would emit a nil-reason "Unknown Failure" for an
+            # unverified smaller sequence. In that case return the incoming report
+            # unchanged -- the further-shrink found nothing it could confirm.
+            if fresh_result.success or is_nil(fresh_result.failure_reason) do
+              {:ok, report}
+            else
+              new_report =
+                FailureReport.new(
+                  seed: report.seed,
+                  run_number: report.run_number,
+                  original_sequence: report.original_sequence,
+                  shrunk_sequence: shrink_result.sequence,
+                  failed_at_index: fresh_result.failed_at_index,
+                  failure_reason: fresh_result.failure_reason,
+                  shrink_iterations: report.shrink_iterations + shrink_result.iterations,
+                  shrink_time_ms: report.shrink_time_ms + (end_time - start_time),
+                  event_log: fresh_result.event_log,
+                  executed: Map.get(fresh_result, :executed, %{}),
+                  # A further-shrunk report only reaches here on a genuine
+                  # reproduction, so its plan is a shrinker product (DR-033).
+                  plan_source: :shrunk,
+                  source_revision: RunTrace.source_revision(),
+                  run_nonce: run_nonce,
+                  mint_epoch: fresh_epoch,
+                  projections: fresh_result.projections,
+                  projections_before: fresh_result.projections_before,
+                  command_fold_ordinals: Map.get(fresh_result, :command_fold_ordinals, %{}),
+                  model: model,
+                  adapter: adapter,
+                  linearization: fresh_result.linearization,
+                  stacktrace: Map.get(fresh_result, :stacktrace)
+                )
 
-          {:ok, new_report}
+              {:ok, new_report}
+            end
         end
       after
         EventQueue.stop(event_queue)
@@ -2011,36 +2056,41 @@ defmodule PropertyDamage do
     injector_adapters = opts[:injector_adapters]
     adapter_config = opts[:adapter_config]
 
-    # Start event queue for injectors
+    # Start event queue for injectors. Its stop is guaranteed by the outer
+    # `after` below so that a raise in injector or adapter setup cannot leak it
+    # (A6); injector/adapter setup therefore lives inside the outer try.
     {:ok, event_queue} = EventQueue.start_link()
 
-    # Setup injector adapters
-    setup_injectors(injector_adapters, event_queue)
+    try do
+      # Setup injector adapters
+      setup_injectors(injector_adapters, event_queue)
 
-    # Setup main adapter
-    case adapter.setup(adapter_config) do
-      {:ok, adapter_context} ->
-        context = %{
-          adapter_context: adapter_context,
-          event_queue: event_queue
-        }
+      # Setup main adapter
+      case adapter.setup(adapter_config) do
+        {:ok, adapter_context} ->
+          context = %{
+            adapter_context: adapter_context,
+            event_queue: event_queue
+          }
 
-        sequence = Sequence.linear(commands)
+          sequence = Sequence.linear(commands)
 
-        try do
-          Executor.execute_raw(sequence, adapter, context)
-        after
-          # Cleanup
-          adapter.teardown(adapter_context)
+          try do
+            Executor.execute_raw(sequence, adapter, context)
+          after
+            # Cleanup. The event queue is stopped by the outer `after`.
+            adapter.teardown(adapter_context)
+            teardown_injectors(injector_adapters)
+          end
+
+        {:error, reason} ->
+          # Cleanup injectors on setup failure; the event queue is stopped by
+          # the outer `after`.
           teardown_injectors(injector_adapters)
-          EventQueue.stop(event_queue)
-        end
-
-      {:error, reason} ->
-        # Cleanup event queue and injectors on setup failure
-        teardown_injectors(injector_adapters)
-        EventQueue.stop(event_queue)
-        {:error, {:adapter_setup_failed, reason}}
+          {:error, {:adapter_setup_failed, reason}}
+      end
+    after
+      EventQueue.stop(event_queue)
     end
   end
 

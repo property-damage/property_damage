@@ -69,6 +69,23 @@ defmodule PropertyDamage.ShrinkFurtherTest do
     def command_sequence_projection, do: Counter
   end
 
+  # Like FailingAdapter, but its setup/1 fails when asked to, so the report's
+  # re-execution path in shrink_further exercises the Executor.run error branch.
+  defmodule SetupGuardAdapter do
+    @moduledoc false
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(%{fail_setup: true}), do: {:error, :setup_failed}
+    def setup(config), do: {:ok, %{config: config}}
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def execute(%Bump{}, _context, _runtime), do: {:ok, [%Counted{amount: 1}]}
+  end
+
   defp report_of_length(length, overrides \\ []) do
     sequence = Sequence.linear(List.duplicate(%Bump{}, length))
     {:ok, result} = Executor.run(sequence, FailingModel, FailingAdapter, [])
@@ -136,5 +153,12 @@ defmodule PropertyDamage.ShrinkFurtherTest do
   test "returns {:error, :missing_model_or_adapter} when the adapter is nil" do
     report = report_of_length(8, adapter: nil)
     assert {:error, :missing_model_or_adapter} = PropertyDamage.shrink_further(report)
+  end
+
+  test "re-execution adapter setup failure surfaces as an error, not a MatchError (A4)" do
+    report = report_of_length(8, adapter: SetupGuardAdapter)
+
+    assert {:error, %{adapter_setup_failed: :setup_failed}} =
+             PropertyDamage.shrink_further(report, adapter_config: %{fail_setup: true})
   end
 end
