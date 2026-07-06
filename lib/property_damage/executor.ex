@@ -214,6 +214,17 @@ defmodule PropertyDamage.Executor do
         )
 
         :ok
+    catch
+      # A BEAM exit/throw from teardown/1 bypasses `rescue`; keep teardown
+      # best-effort so a cleanup hiccup cannot crash the run or perturb the
+      # failure being minimized during shrinking (A5).
+      kind, reason ->
+        Logger.warning(
+          "Adapter #{inspect(adapter)} teardown/1 escaped via #{kind}: " <>
+            Exception.format(kind, reason, __STACKTRACE__)
+        )
+
+        :ok
     end
   end
 
