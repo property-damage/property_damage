@@ -939,6 +939,54 @@ defmodule PropertyDamage.LoadTestTest do
       end
     end
 
+    # D1 fixture: timeout/1 raises, which crashes the worker *inside its
+    # GenServer.call* (before the adapter execution task, so D2's rescue does not
+    # cover it). The arrival task's call therefore exits, crashing the arrival.
+    defmodule CrashingArrivalAdapter do
+      use PropertyDamage.Adapter, default_timeout: 30
+
+      @impl true
+      def setup(_config), do: {:ok, %{}}
+
+      @impl true
+      def teardown(_ctx), do: :ok
+
+      @impl true
+      def execute(_cmd, _ctx, _runtime), do: {:ok, [%{type: :executed}]}
+
+      @impl true
+      def timeout(_command), do: raise("boom in timeout/1 (crashes the arrival's worker)")
+    end
+
+    @tag :integration
+    test "a crashing arrival does not wedge the drain loop (D1)" do
+      capture_log(fn ->
+        # Bound the run: on the unfixed runner, arrivals crash without reaping
+        # their in_flight refs, so the drain loop (await :infinity) never returns.
+        task =
+          Task.async(fn ->
+            LoadTest.run(
+              model: MockModel,
+              adapter: CrashingArrivalAdapter,
+              arrival_rate: 50,
+              duration: {200, :milliseconds}
+            )
+          end)
+
+        case Task.yield(task, 5_000) || Task.shutdown(task, :brutal_kill) do
+          {:ok, {:ok, report}} ->
+            # The run completed instead of wedging, and arrivals were generated.
+            assert report.metrics.arrivals_spawned > 0
+
+          other ->
+            flunk(
+              "load test did not complete within 5s (drain wedged on crashed " <>
+                "arrivals): #{inspect(other)}"
+            )
+        end
+      end)
+    end
+
     @tag :integration
     test "runs a short load test" do
       capture_log(fn ->
