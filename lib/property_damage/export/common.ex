@@ -35,83 +35,6 @@ defmodule PropertyDamage.Export.Common do
   end
 
   # ============================================================================
-  # Value Serialization
-  # ============================================================================
-
-  @doc """
-  Serializes a value for use in scripts.
-
-  Handles atoms, strings, numbers, lists, and maps.
-  """
-  @spec serialize_value(term(), keyword()) :: String.t()
-  def serialize_value(value, opts \\ [])
-
-  def serialize_value(value, opts) when is_atom(value) do
-    format = Keyword.get(opts, :format, :elixir)
-
-    case format do
-      :elixir -> inspect(value)
-      :json -> Jason.encode!(to_string(value))
-      :python -> Jason.encode!(to_string(value))
-      :bash -> Jason.encode!(to_string(value))
-    end
-  end
-
-  def serialize_value(value, opts) when is_binary(value) do
-    format = Keyword.get(opts, :format, :elixir)
-
-    case format do
-      :elixir -> inspect(value)
-      _ -> Jason.encode!(value)
-    end
-  end
-
-  def serialize_value(value, _opts) when is_number(value), do: to_string(value)
-
-  def serialize_value(value, opts) when is_list(value) do
-    format = Keyword.get(opts, :format, :elixir)
-
-    case format do
-      :elixir ->
-        items = Enum.map_join(value, ", ", &serialize_value(&1, opts))
-        "[#{items}]"
-
-      _ ->
-        Jason.encode!(value)
-    end
-  end
-
-  def serialize_value(value, opts) when is_map(value) do
-    format = Keyword.get(opts, :format, :elixir)
-
-    case format do
-      :elixir ->
-        items =
-          value
-          |> Enum.map_join(", ", fn {k, v} ->
-            "#{serialize_map_key(k)}: #{serialize_value(v, opts)}"
-          end)
-
-        "%{#{items}}"
-
-      _ ->
-        Jason.encode!(value)
-    end
-  end
-
-  def serialize_value(value, opts) do
-    format = Keyword.get(opts, :format, :elixir)
-
-    case format do
-      :elixir -> inspect(value)
-      _ -> Jason.encode!(value)
-    end
-  end
-
-  defp serialize_map_key(key) when is_atom(key), do: to_string(key)
-  defp serialize_map_key(key), do: inspect(key)
-
-  # ============================================================================
   # Command Serialization
   # ============================================================================
 
@@ -202,55 +125,6 @@ defmodule PropertyDamage.Export.Common do
     do: Enum.any?(value, fn {_k, v} -> contains_placeholder?(v) end)
 
   defp contains_placeholder?(_value), do: false
-
-  # ============================================================================
-  # Header Generation
-  # ============================================================================
-
-  @doc """
-  Generates a header comment for scripts.
-  """
-  @spec generate_header(map(), keyword()) :: String.t()
-  def generate_header(metadata, opts \\ []) do
-    format = Keyword.get(opts, :format, :elixir)
-    timestamp = format_timestamp(metadata.timestamp)
-
-    failure_desc =
-      case metadata.check_name do
-        nil -> to_string(metadata.failure_type)
-        check -> "#{check} check failed"
-      end
-
-    case format do
-      :elixir ->
-        """
-        # Failure Reproduction Script
-        # Generated: #{timestamp}
-        # Failure: #{failure_desc}
-        # Seed: #{metadata.seed}
-        """
-
-      :bash ->
-        """
-        # Failure Reproduction Script
-        # Generated: #{timestamp}
-        # Failure: #{failure_desc}
-        # Seed: #{metadata.seed}
-        """
-
-      :python ->
-        ~s("""
-        Failure Reproduction Script
-        Generated: #{timestamp}
-        Failure: #{failure_desc}
-        Seed: #{metadata.seed}
-        """)
-    end
-  end
-
-  defp format_timestamp(nil), do: DateTime.utc_now() |> DateTime.to_iso8601()
-  defp format_timestamp(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
-  defp format_timestamp(other), do: inspect(other)
 
   # ============================================================================
   # Filename Generation

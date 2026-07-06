@@ -9,7 +9,7 @@ defmodule PropertyDamage.Export.LiveBook do
 
   ## Options
 
-  - `:base_url` - Base URL for HTTP calls (required)
+  - `:base_url` - Base URL for HTTP calls (default: "http://localhost:4000")
   - `:adapter` - Adapter module for HTTPSpec (optional)
   - `:include_exploration` - Include exploration section (default: true)
   - `:include_state_tracking` - Track model state (default: true)

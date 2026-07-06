@@ -57,4 +57,24 @@ defmodule Mix.Tasks.Pd.AuditTest do
       assert output =~ "Usage: mix pd.audit MODEL"
     end
   end
+
+  describe "ANSI gating (I2)" do
+    test "emits no ANSI escape bytes when IO.ANSI is disabled" do
+      previous = Application.get_env(:elixir, :ansi_enabled)
+      Application.put_env(:elixir, :ansi_enabled, false)
+
+      on_exit(fn ->
+        if previous == nil do
+          Application.delete_env(:elixir, :ansi_enabled)
+        else
+          Application.put_env(:elixir, :ansi_enabled, previous)
+        end
+      end)
+
+      output = capture_io(fn -> Audit.run([@pure, "--seeds", "20", "--max-commands", "15"]) end)
+
+      assert output =~ "AUDIT PASSED"
+      refute output =~ "\e[", "task leaked ANSI escapes with color disabled"
+    end
+  end
 end

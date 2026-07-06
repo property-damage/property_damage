@@ -254,4 +254,24 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
       assert output =~ "expected exactly one failure file path"
     end
   end
+
+  describe "ANSI gating (I2)" do
+    test "emits no ANSI escape bytes when IO.ANSI is disabled" do
+      previous = Application.get_env(:elixir, :ansi_enabled)
+      Application.put_env(:elixir, :ansi_enabled, false)
+
+      on_exit(fn ->
+        if previous == nil do
+          Application.delete_env(:elixir, :ansi_enabled)
+        else
+          Application.put_env(:elixir, :ansi_enabled, previous)
+        end
+      end)
+
+      {_status, output} = with_output(fn -> Reshrink.exec([]) end)
+
+      assert output =~ "a failure file path is required"
+      refute output =~ "\e[", "task leaked ANSI escapes with color disabled"
+    end
+  end
 end

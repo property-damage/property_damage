@@ -181,4 +181,24 @@ defmodule Mix.Tasks.Pd.BisectTest do
       assert output =~ "failure file not found"
     end
   end
+
+  describe "ANSI gating (I2)" do
+    test "emits no ANSI escape bytes when IO.ANSI is disabled" do
+      previous = Application.get_env(:elixir, :ansi_enabled)
+      Application.put_env(:elixir, :ansi_enabled, false)
+
+      on_exit(fn ->
+        if previous == nil do
+          Application.delete_env(:elixir, :ansi_enabled)
+        else
+          Application.put_env(:elixir, :ansi_enabled, previous)
+        end
+      end)
+
+      {_status, output} = with_output(fn -> Bisect.exec(["some.pd"]) end)
+
+      assert output =~ "--good REF is required"
+      refute output =~ "\e[", "task leaked ANSI escapes with color disabled"
+    end
+  end
 end
