@@ -108,9 +108,7 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
       {:ok, events} ->
         # Check if we should mutate this command's response
         if should_mutate?(command, adapter) do
-          mutated_events = apply_mutation(events, adapter)
-          # Mark mutation as applied if apply_once is true
-          {:ok, mutated_events}
+          apply_mutation(events, adapter)
         else
           {:ok, events}
         end
@@ -159,12 +157,16 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
     operator = adapter.operator
 
     case operator.apply_mutation(events, mutation) do
-      {:error, _reason} ->
-        # If mutation fails, return original events
-        events
+      {:error, reason} ->
+        # An operator that returns an error tuple has *applied* its mutation:
+        # the intended output is an error response (e.g. a status
+        # :success_to_error mutation). Flow it through as this command's
+        # result. A mutation that merely fails to apply returns the events
+        # unchanged (a list), so it is not conflated with this case.
+        {:error, reason}
 
       mutated_events when is_list(mutated_events) ->
-        mutated_events
+        {:ok, mutated_events}
     end
   end
 
