@@ -72,6 +72,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
 
   use Mix.Task
 
+  alias PropertyDamage.Mix.TaskSupport
   alias PropertyDamage.Sequence
 
   @shortdoc "Re-shrink a saved PropertyDamage failure with a larger budget"
@@ -122,7 +123,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
         # Compile writes .beam files but does not load them; load the SUT app's
         # modules so the atoms/structs the failure file references exist before
         # the (`:safe`) term decode, otherwise it fails with `:unsafe_terms`.
-        PropertyDamage.Mix.TaskSupport.load_project_modules()
+        TaskSupport.load_project_modules()
         reshrink_file(path, strategy, opts)
 
       {:error, value} ->
