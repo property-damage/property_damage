@@ -446,7 +446,7 @@ defmodule PropertyDamage.Generator do
     # surviving branch indices are remapped to match the executor's branch_id
     # ordering.
     branch_generators =
-      for b <- 0..(num_branches - 1) do
+      for b <- 0..(num_branches - 1)//1 do
         generate_branch(
           commands,
           projection,

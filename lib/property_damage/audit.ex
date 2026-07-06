@@ -185,7 +185,7 @@ defmodule PropertyDamage.Audit do
   end
 
   defp normalize_seeds(count) when is_integer(count) and count > 0,
-    do: Enum.to_list(0..(count - 1))
+    do: Enum.to_list(0..(count - 1)//1)
 
   defp normalize_seeds(list) when is_list(list), do: list
 
