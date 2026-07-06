@@ -6,7 +6,7 @@
 # (campaign W1-W8) never has to be repeated by hand.
 #
 # Corpus: README.md, guides/*.md, benches/*/README.md, shipped agent skills
-# (.claude/skills/pd-*/SKILL.md, none yet), and the Livebook notebook
+# (.claude/skills/pd-*/**/*.md, SKILL.md plus references), and the Livebook notebook
 # notebooks/property_damage_demo.livemd. A fence is executable only when the line
 # immediately above it is exactly `<!-- pd-doc-verify: runnable -->`. See
 # Decisions 1-3 in wave_9_doc_verification_gate.md.
@@ -80,13 +80,14 @@ defmodule DocsVerify.CLI do
   end
 
   # Full corpus (in a stable, readable order) or the explicit subset from argv.
-  # Shipped pd-* agent skills join the corpus automatically once they exist
-  # (W9 Decision 6); the glob matches nothing until the first skill lands.
+  # Shipped pd-* agent skills join the corpus automatically (W9 Decision 6),
+  # including their bundled reference docs - skill templates carry runnable
+  # exemplars precisely so this gate catches their rot.
   defp corpus(root, []) do
     readme = [Path.join(root, "README.md")]
     guides = Path.wildcard(Path.join(root, "guides/*.md")) |> Enum.sort()
     benches = Path.wildcard(Path.join(root, "benches/*/README.md")) |> Enum.sort()
-    skills = Path.wildcard(Path.join(root, ".claude/skills/pd-*/SKILL.md")) |> Enum.sort()
+    skills = Path.wildcard(Path.join(root, ".claude/skills/pd-*/**/*.md")) |> Enum.sort()
     notebook = Path.wildcard(Path.join(root, "notebooks/*.livemd")) |> Enum.sort()
     readme ++ guides ++ benches ++ skills ++ notebook
   end
