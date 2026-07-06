@@ -375,13 +375,35 @@ defmodule PropertyDamage.Executor.Branching do
         Enum.reduce(events, projs, fn event, acc -> Events.update_projections(acc, event) end)
       end)
 
+    # Fold-ordinal re-basing (P8 / DR-040). Every branch forked from the prefix
+    # carrying the SAME `fold_counter`, so each branch numbered its own commands
+    # and events starting from `base`. Left as-is those ranges overlap across
+    # branches, which is not a total fold order. Re-base branch i onto the range
+    # immediately after branches 0..i-1 (branch order is a valid interleaving of
+    # independent branches), giving each branch a disjoint, contiguous ordinal
+    # range and letting the suffix continue past all of them.
+    base = prefix_state.fold_counter
+    branch_deltas = Enum.map(branch_results, fn {_, state, _} -> state.fold_counter - base end)
+
+    # Exclusive prefix sums: `branch_offsets[i]` is how far to shift branch i's
+    # ordinals so it starts where branch i-1 ended. `total_branch_delta` is the
+    # ordinals consumed across all branches.
+    {branch_offsets, total_branch_delta} =
+      Enum.map_reduce(branch_deltas, 0, fn delta, acc -> {acc, acc + delta} end)
+
     # The state's event_log invariant is reverse-chronological. Overall
     # chronological order is prefix ++ branch0 ++ branch1 ++ ...; so the
     # branch logs (chronological here) are reversed as a whole and prepended
-    # to the still-reversed prefix log.
+    # to the still-reversed prefix log. Each branch's entry `fold_index` is
+    # shifted by that branch's offset so it stays consistent with the re-based
+    # command ordinals (a `nil` fold_index — stutter/telemetry — never folded, so
+    # it is left untouched).
     merged_event_log =
-      branch_event_logs
-      |> Enum.flat_map(fn {_branch_id, events} -> events end)
+      [branch_event_logs, branch_offsets]
+      |> Enum.zip()
+      |> Enum.flat_map(fn {{_branch_id, events}, offset} ->
+        Enum.map(events, &shift_fold_index(&1, offset))
+      end)
       |> Enum.reverse()
       |> Enum.concat(prefix_state.event_log)
 
@@ -433,20 +455,25 @@ defmodule PropertyDamage.Executor.Branching do
         Map.merge(acc, state.executed)
       end)
 
-    # Merge the per-command fold ordinals (P8 / DR-040). Each branch forked from
-    # the prefix, so it carries the prefix ordinals plus its own disjoint
-    # `{:branch, id}` positions; unioning is conflict-free. The suffix then
-    # continues folding from a counter past every branch's, so its ordinals never
-    # collide with a branch's.
+    # Merge the per-command fold ordinals (P8 / DR-040). Each branch's own
+    # positions (ordinal >= base; the shared prefix ordinals are < base and
+    # already present) are re-based by that branch's offset so no two branches
+    # share an ordinal.
     merged_command_fold_ordinals =
-      Enum.reduce(branch_results, prefix_state.command_fold_ordinals, fn {_, state, _}, acc ->
-        Map.merge(acc, state.command_fold_ordinals)
+      [branch_results, branch_offsets]
+      |> Enum.zip()
+      |> Enum.reduce(prefix_state.command_fold_ordinals, fn {{_, state, _}, offset}, acc ->
+        own =
+          for {position, ordinal} <- state.command_fold_ordinals,
+              ordinal >= base,
+              into: %{},
+              do: {position, ordinal + offset}
+
+        Map.merge(acc, own)
       end)
 
-    merged_fold_counter =
-      Enum.reduce(branch_results, prefix_state.fold_counter, fn {_, state, _}, acc ->
-        max(acc, state.fold_counter)
-      end)
+    # The suffix folds from a counter past every branch's re-based range.
+    merged_fold_counter = base + total_branch_delta
 
     # Update through the prefix state so every other key (stutter config, mock
     # registry, model, external markers, ...) is preserved instead of dropped
@@ -492,4 +519,11 @@ defmodule PropertyDamage.Executor.Branching do
   defp count_branch_commands(branches) do
     Enum.sum(Enum.map(branches, &length/1))
   end
+
+  # Shift a folded entry's fold ordinal by `offset` (P8 / DR-040). Entries that
+  # never folded (nil fold_index) are left untouched.
+  defp shift_fold_index(%{fold_index: nil} = entry, _offset), do: entry
+
+  defp shift_fold_index(%{fold_index: idx} = entry, offset),
+    do: %{entry | fold_index: idx + offset}
 end
