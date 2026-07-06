@@ -122,11 +122,12 @@ defmodule PropertyDamage.Export.Script.Curl do
     var_name = "RESP#{step.flattened_index + 1}"
     method = HTTPSpec.method_string(spec)
     path = resolve_path(spec.path, step.resolved_path_params)
+    query = resolve_query(step.resolved_query_params)
 
     curl_parts = [
       "curl -s",
       "-X #{method}",
-      "\"$#{env_var}#{path}\""
+      "\"$#{env_var}#{path}#{query}\""
     ]
 
     # Add headers
@@ -168,6 +169,17 @@ defmodule PropertyDamage.Export.Script.Curl do
 
   defp resolve_value_for_bash(%StepPlan.Var{name: name}), do: "$" <> name
   defp resolve_value_for_bash(value), do: to_string(value)
+
+  # Render the spec's query params as a `?k=v&...` suffix. Sorted for stable
+  # output; values resolve like path params (`$var` for produced refs).
+  defp resolve_query(params) when map_size(params) == 0, do: ""
+
+  defp resolve_query(params) do
+    "?" <>
+      (params
+       |> Enum.sort()
+       |> Enum.map_join("&", fn {key, value} -> "#{key}=#{resolve_value_for_bash(value)}" end))
+  end
 
   defp resolve_body_json(resolved_body) do
     json = resolved_body |> mark_refs() |> Jason.encode!()

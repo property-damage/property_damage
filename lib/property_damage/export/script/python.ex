@@ -126,7 +126,11 @@ Run with: python #{Common.generate_filename(report, :python)}
 
   defp generate_requests_code(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step) do
     var_name = "resp#{step.flattened_index + 1}"
-    path = generate_path_code(spec.path, step.resolved_path_params)
+
+    path =
+      spec.path
+      |> generate_path_code(step.resolved_path_params)
+      |> append_query_code(step.resolved_query_params)
 
     # Build the requests call
     req_call = build_requests_call(spec.method, path, spec, step.resolved_body)
@@ -157,6 +161,22 @@ Run with: python #{Common.generate_filename(report, :python)}
 
       ~s(f"#{resolved_path}")
     end
+  end
+
+  # Append the spec's query params as an f-string `?k=v&...` fragment onto the
+  # path expression. Sorted for stable output; values interpolate like path
+  # params (a produced ref renders as `refs['name']`).
+  defp append_query_code(path_code, params) when map_size(params) == 0, do: path_code
+
+  defp append_query_code(path_code, params) do
+    pairs =
+      params
+      |> Enum.sort()
+      |> Enum.map_join("&", fn {key, value} ->
+        "#{key}={#{generate_value_interpolation(value)}}"
+      end)
+
+    ~s(#{path_code} + f"?#{pairs}")
   end
 
   # Single-quoted dict key so it nests safely inside an f-string.

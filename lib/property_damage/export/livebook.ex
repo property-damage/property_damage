@@ -138,7 +138,12 @@ defmodule PropertyDamage.Export.LiveBook do
 
   defp generate_livebook_code(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step, include_state) do
     method = spec.method
-    path = generate_path_code(spec.path, step.resolved_path_params)
+
+    path =
+      spec.path
+      |> generate_path_code(step.resolved_path_params)
+      |> append_query_code(step.resolved_query_params)
+
     req_opts = build_req_opts(spec, step.resolved_body)
 
     req_call =
@@ -201,6 +206,22 @@ defmodule PropertyDamage.Export.LiveBook do
 
   defp generate_value_interpolation(value) do
     inspect(value)
+  end
+
+  # Append the spec's query params as a `?k=v&...` fragment onto the path
+  # string. Sorted for stable output; values interpolate like path params
+  # (a produced ref renders as `state.refs["name"]`).
+  defp append_query_code(path_code, params) when map_size(params) == 0, do: path_code
+
+  defp append_query_code(path_code, params) do
+    pairs =
+      params
+      |> Enum.sort()
+      |> Enum.map_join("&", fn {key, value} ->
+        "#{key}=\#{#{generate_value_interpolation(value)}}"
+      end)
+
+    ~s(#{path_code} <> "?#{pairs}")
   end
 
   defp build_req_opts(spec, resolved_body) do
