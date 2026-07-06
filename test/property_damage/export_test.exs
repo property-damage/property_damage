@@ -26,6 +26,10 @@ defmodule PropertyDamage.ExportTest do
     defstruct [:items]
   end
 
+  defmodule ListAccounts do
+    defstruct [:status]
+  end
+
   # Producer/consumer pair for DR-021 external() placeholder wiring.
   defmodule Provision do
     defstruct [:spec]
@@ -89,6 +93,14 @@ defmodule PropertyDamage.ExportTest do
         method: :post,
         path: "/api/batch",
         body: %{items: items}
+      }
+    end
+
+    def http_spec(%ListAccounts{status: status}, _ctx) do
+      %HTTPSpec{
+        method: :get,
+        path: "/api/accounts",
+        query_params: %{limit: 10, offset: 5, status: status}
       }
     end
 
@@ -444,6 +456,77 @@ defmodule PropertyDamage.ExportTest do
         assert script =~ "Run with: #{runner} #{expected}",
                "#{format} header should name the real filename (#{expected})"
       end
+    end
+  end
+
+  # ============================================================================
+  # Query Parameters (F1)
+  # ============================================================================
+
+  describe "to_script/3 - query params (F1)" do
+    defp query_params_report do
+      commands = [%ListAccounts{status: "active"}]
+
+      %FailureReport{
+        seed: 1,
+        failed_at_index: 0,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+    end
+
+    test "curl emits the HTTPSpec query params" do
+      script =
+        Export.to_script(query_params_report(), :curl,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "limit="
+      assert script =~ "offset="
+      assert script =~ "status="
+    end
+
+    test "python emits the HTTPSpec query params" do
+      script =
+        Export.to_script(query_params_report(), :python,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "limit="
+      assert script =~ "offset="
+      assert script =~ "status="
+    end
+
+    test "elixir emits the HTTPSpec query params" do
+      script =
+        Export.to_script(query_params_report(), :elixir,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "limit="
+      assert script =~ "offset="
+      assert script =~ "status="
+    end
+
+    test "livebook emits the HTTPSpec query params" do
+      notebook =
+        Export.to_livebook(query_params_report(),
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert notebook =~ "limit="
+      assert notebook =~ "offset="
+      assert notebook =~ "status="
     end
   end
 
