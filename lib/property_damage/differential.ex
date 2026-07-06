@@ -538,7 +538,7 @@ defmodule PropertyDamage.Differential do
     generator_opts = [max_commands: config.max_commands]
     generator = Generator.generate_sequence(config.model, generator_opts)
 
-    for run_number <- 0..(config.max_runs - 1) do
+    for run_number <- 0..(config.max_runs - 1)//1 do
       sequence = generate_one(generator, Generator.run_seed(config.seed, run_number))
       Sequence.to_list(sequence)
     end

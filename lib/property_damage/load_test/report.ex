@@ -273,7 +273,7 @@ defmodule PropertyDamage.LoadTest.Report do
       samples =
         if length(values) > width do
           step = length(values) / width
-          Enum.map(0..(width - 1), fn i -> Enum.at(values, trunc(i * step)) end)
+          Enum.map(0..(width - 1)//1, fn i -> Enum.at(values, trunc(i * step)) end)
         else
           values
         end
