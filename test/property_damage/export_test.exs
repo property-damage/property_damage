@@ -30,6 +30,10 @@ defmodule PropertyDamage.ExportTest do
     defstruct [:status]
   end
 
+  defmodule FetchTx do
+    defstruct []
+  end
+
   # Producer/consumer pair for DR-021 external() placeholder wiring.
   defmodule Provision do
     defstruct [:spec]
@@ -101,6 +105,14 @@ defmodule PropertyDamage.ExportTest do
         method: :get,
         path: "/api/accounts",
         query_params: %{limit: 10, offset: 5, status: status}
+      }
+    end
+
+    def http_spec(%FetchTx{}, _ctx) do
+      %HTTPSpec{
+        method: :get,
+        path: "/api/accounts/:id/tx/:id_tx",
+        path_params: %{id: "acc_1", id_tx: "tx_9"}
       }
     end
 
@@ -185,6 +197,16 @@ defmodule PropertyDamage.ExportTest do
       assert url =~ "http://localhost:4000/api/accounts?"
       assert url =~ "page=1"
       assert url =~ "limit=10"
+    end
+
+    test "resolve_path is token-boundary safe (:id does not corrupt :id_tx)" do
+      spec = %HTTPSpec{
+        method: :get,
+        path: "/api/accounts/:id/tx/:id_tx",
+        path_params: %{id: "acc_1", id_tx: "tx_9"}
+      }
+
+      assert HTTPSpec.resolve_path(spec) == "/api/accounts/acc_1/tx/tx_9"
     end
 
     test "method_string returns uppercase" do
@@ -494,6 +516,72 @@ defmodule PropertyDamage.ExportTest do
         assert script =~ "Run with: #{runner} #{expected}",
                "#{format} header should name the real filename (#{expected})"
       end
+    end
+  end
+
+  # ============================================================================
+  # Path parameter token-boundary safety (F6)
+  # ============================================================================
+
+  describe "to_script/3 - path param substitution is prefix-safe (F6)" do
+    defp fetch_tx_report do
+      commands = [%FetchTx{}]
+
+      %FailureReport{
+        seed: 1,
+        failed_at_index: 0,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+    end
+
+    # `:id` must not be substituted inside the `:id_tx` token: the corrupt
+    # output drops `tx_9` (turning `:id_tx` into `acc_1_tx`).
+    test "curl substitutes :id_tx correctly, not as :id + _tx" do
+      script =
+        Export.to_script(fetch_tx_report(), :curl,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "tx_9"
+      refute script =~ "acc_1_tx"
+    end
+
+    test "python substitutes :id_tx correctly, not as :id + _tx" do
+      script =
+        Export.to_script(fetch_tx_report(), :python,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "tx_9"
+    end
+
+    test "elixir substitutes :id_tx correctly, not as :id + _tx" do
+      script =
+        Export.to_script(fetch_tx_report(), :elixir,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "tx_9"
+    end
+
+    test "livebook substitutes :id_tx correctly, not as :id + _tx" do
+      notebook =
+        Export.to_livebook(fetch_tx_report(),
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert notebook =~ "tx_9"
     end
   end
 
