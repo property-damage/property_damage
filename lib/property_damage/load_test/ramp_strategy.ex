@@ -39,7 +39,7 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
     steps = 10
     step_duration = div(duration_ms, steps)
 
-    for i <- 0..(steps - 1) do
+    for i <- 0..(steps - 1)//1 do
       time_ms = i * step_duration
       factor = (i + 1) / steps
       rate_per_sec = max(1, round(target_per_sec * factor))
@@ -51,7 +51,7 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
     interval_ms = to_ms(interval)
     target_per_sec = rate_to_per_second(target_rate)
 
-    for i <- 0..(num_steps - 1) do
+    for i <- 0..(num_steps - 1)//1 do
       time_ms = i * interval_ms
       factor = (i + 1) / num_steps
       rate_per_sec = max(1, round(target_per_sec * factor))
@@ -70,7 +70,7 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
     # Exponential growth: rate = target * (e^(k*t) - 1) / (e^k - 1)
     k = 2.0
 
-    for i <- 0..(steps - 1) do
+    for i <- 0..(steps - 1)//1 do
       time_ms = i * step_duration
       t = (i + 1) / steps
       factor = (:math.exp(k * t) - 1) / (:math.exp(k) - 1)
@@ -102,7 +102,7 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
     steps = 10
     step_duration = div(duration_ms, steps)
 
-    for i <- 0..(steps - 1) do
+    for i <- 0..(steps - 1)//1 do
       time_ms = i * step_duration
       factor = 1 - (i + 1) / steps
       rate_per_sec = max(1, round(current_per_sec * factor))
@@ -114,7 +114,7 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
     interval_ms = to_ms(interval)
     current_per_sec = rate_to_per_second(current_rate)
 
-    for i <- 0..(num_steps - 1) do
+    for i <- 0..(num_steps - 1)//1 do
       time_ms = i * interval_ms
       factor = 1 - (i + 1) / num_steps
       rate_per_sec = max(1, round(current_per_sec * factor))
@@ -130,7 +130,7 @@ defmodule PropertyDamage.LoadTest.RampStrategy do
     step_duration = div(duration_ms, steps)
     k = 2.0
 
-    for i <- 0..(steps - 1) do
+    for i <- 0..(steps - 1)//1 do
       time_ms = i * step_duration
       t = (i + 1) / steps
       factor = (:math.exp(k * t) - 1) / (:math.exp(k) - 1)

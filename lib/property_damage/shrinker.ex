@@ -799,7 +799,7 @@ defmodule PropertyDamage.Shrinker do
     graph = Graph.build(original_commands)
     levels = Graph.compress(graph)
 
-    kept = MapSet.new(0..(length(original_commands) - 1))
+    kept = MapSet.new(0..(length(original_commands) - 1)//1)
 
     state =
       try_remove_levels(

@@ -71,7 +71,7 @@ defmodule PropertyDamage.RunComparison.Align do
     (rows ++ extra_rows)
     |> Enum.map(fn row ->
       events =
-        Enum.reduce(0..(trace_count - 1), row.events, fn i, acc ->
+        Enum.reduce(0..(trace_count - 1)//1, row.events, fn i, acc ->
           Map.put_new(acc, i, :absent)
         end)
 

@@ -159,7 +159,7 @@ defmodule PropertyDamage.RunComparison.Html do
 
   defp fields_section(%RunComparison{fields: fields, traces: traces}) do
     trace_count = length(traces)
-    header_cells = Enum.map_join(0..(trace_count - 1), "", &"<th>##{&1}</th>")
+    header_cells = Enum.map_join(0..(trace_count - 1)//1, "", &"<th>##{&1}</th>")
 
     rows =
       fields
@@ -179,7 +179,7 @@ defmodule PropertyDamage.RunComparison.Html do
 
   defp field_row(%Field{} = f, trace_count) do
     cells =
-      Enum.map_join(0..(trace_count - 1), "", fn i ->
+      Enum.map_join(0..(trace_count - 1)//1, "", fn i ->
         ~s(<td class="mono">#{esc(display(Map.get(f.values, i, :absent)))}</td>)
       end)
 
