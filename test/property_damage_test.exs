@@ -129,6 +129,21 @@ defmodule PropertyDamageTest do
     end
   end
 
+  describe "execute/2 error boundaries" do
+    @tag :capture_log
+    test "an injector whose setup raises does not leak the EventQueue" do
+      assert_raise RuntimeError, ~r/injector setup boom/, fn ->
+        PropertyDamage.execute([],
+          adapter: SimpleAdapter,
+          injector_adapters: [LeakProbeInjector]
+        )
+      end
+
+      assert_received {:leaked_event_queue, event_queue}
+      refute Process.alive?(event_queue)
+    end
+  end
+
   describe "run/1 with lifecycle callbacks" do
     defmodule LifecycleModel do
       @behaviour PropertyDamage.Model
