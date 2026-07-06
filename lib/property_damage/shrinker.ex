@@ -394,6 +394,17 @@ defmodule PropertyDamage.Shrinker do
 
     shrink_state = %{
       sequence: sequence,
+      # The placeholder registry (DR-021), whose producer_link is keyed by the
+      # ORIGINAL structured positions. Kept pristine; each candidate is executed
+      # with a copy remapped onto the candidate's own positions (see
+      # still_fails_branch?), and the final result carries the same remap.
+      registry: sequence.registry,
+      # A structural mirror of `sequence` holding each surviving command's
+      # ORIGINAL Position (a %Sequence{} of positions, parallel to `sequence`).
+      # Kept in lockstep with every removal so we can rebuild the original ->
+      # candidate position map the registry remap needs. This is the branching
+      # analogue of shrink_linear's parallel `positions` list.
+      positions: initial_branch_positions(sequence),
       model: model,
       adapter: adapter,
       adapter_config: adapter_config,
@@ -437,18 +448,69 @@ defmodule PropertyDamage.Shrinker do
     end_time = System.monotonic_time(:millisecond)
 
     %{
-      sequence: shrink_state.sequence,
+      # Carry the remapped registry so the shrunk sequence (reported and
+      # replayed) still resolves its externals against its own positions.
+      sequence:
+        Sequence.with_registry(
+          shrink_state.sequence,
+          remap_branch_registry(
+            shrink_state.registry,
+            shrink_state.positions,
+            shrink_state.sequence
+          )
+        ),
       iterations: shrink_state.iterations,
       time_ms: end_time - start_time
     }
+  end
+
+  # The original structured positions of a branching sequence, laid out as a
+  # %Sequence{} mirror so removals stay in lockstep with the command sequence
+  # (DR-021). Each slot holds the Position that keys the registry's producer_link.
+  defp initial_branch_positions(%Sequence{prefix: prefix, branches: branches, suffix: suffix}) do
+    %Sequence{
+      prefix: prefix |> Enum.with_index() |> Enum.map(fn {_c, i} -> Position.prefix(i) end),
+      branches:
+        (branches || [])
+        |> Enum.with_index()
+        |> Enum.map(fn {branch, id} ->
+          branch |> Enum.with_index() |> Enum.map(fn {_c, i} -> Position.branch(id, i) end)
+        end),
+      suffix: suffix |> Enum.with_index() |> Enum.map(fn {_c, i} -> Position.suffix(i) end)
+    }
+  end
+
+  # Remap a registry's producer_link from original positions onto the positions
+  # `candidate_seq` will actually run at (DR-021). `positions` mirrors
+  # `candidate_seq` structurally and holds each command's original position, so
+  # zipping its reading-order flattening against `candidate_seq`'s own canonical
+  # positions gives the original -> candidate map. A producer whose command was
+  # removed is absent from `positions` and so is dropped, exactly as on the
+  # linear path.
+  defp remap_branch_registry(nil, _positions, _candidate_seq), do: nil
+
+  defp remap_branch_registry(registry, positions, candidate_seq) do
+    orig_positions = Sequence.to_list(positions)
+
+    new_positions =
+      candidate_seq |> Sequence.indexed() |> Enum.map(fn {position, _idx, _cmd} -> position end)
+
+    orig_to_new = orig_positions |> Enum.zip(new_positions) |> Map.new()
+    PlaceholderRegistry.remap_positions(registry, orig_to_new)
   end
 
   defp try_convert_to_linear(state) do
     if exceeded_limits_branch?(state) do
       state
     else
-      # Try flattening to linear sequence
-      linear_seq = Sequence.linear(Sequence.to_list(state.sequence))
+      # Try flattening to linear sequence. The registry's producer_link is keyed
+      # by the branch-structured positions, so it must be remapped onto the flat
+      # prefix positions the flattened sequence runs at (DR-021); otherwise a
+      # consumer strands and the linear re-run fails with a different signature,
+      # spuriously blocking the (valid) conversion.
+      linear_base = Sequence.linear(Sequence.to_list(state.sequence))
+      linear_registry = remap_branch_registry(state.registry, state.positions, linear_base)
+      linear_seq = Sequence.with_registry(linear_base, linear_registry)
       state = increment_iterations_branch(state)
 
       case linear_run_result(linear_seq, state) do
@@ -481,9 +543,18 @@ defmodule PropertyDamage.Shrinker do
               run_nonce: state.run_nonce
             )
 
+          # shrink_linear returns a linear sequence carrying a registry already
+          # remapped onto its own compact prefix positions. Re-base the tracking
+          # state on that so the remaining (branch-guarded no-op, plus prefix/
+          # suffix and argument) strategies and the final remap keep operating on
+          # a consistent registry/positions pair.
+          converted = linear_result.sequence
+
           %{
             state
-            | sequence: linear_result.sequence,
+            | sequence: converted,
+              registry: converted.registry,
+              positions: initial_branch_positions(converted),
               iterations: state.iterations + linear_result.iterations
           }
 
@@ -515,10 +586,16 @@ defmodule PropertyDamage.Shrinker do
 
       if length(new_branches) >= 2 do
         candidate = %{state.sequence | branches: new_branches}
+        # Drop the same branch from the position mirror so the two stay aligned.
+        candidate_positions = %{
+          state.positions
+          | branches: List.delete_at(state.positions.branches, index)
+        }
+
         state = increment_iterations_branch(state)
 
-        if still_fails_branch?(candidate, state) do
-          new_state = %{state | sequence: candidate}
+        if still_fails_branch?(candidate, candidate_positions, state) do
+          new_state = %{state | sequence: candidate, positions: candidate_positions}
           do_remove_branches(new_state, index)
         else
           do_remove_branches(state, index + 1)
@@ -576,10 +653,19 @@ defmodule PropertyDamage.Shrinker do
       new_branches = List.replace_at(state.sequence.branches, branch_idx, candidate_branch)
       candidate_seq = %{state.sequence | branches: new_branches}
 
+      # Mirror the same by-position removal in the position tracker.
+      pos_branch = Enum.at(state.positions.branches, branch_idx)
+      candidate_pos_branch = List.delete_at(pos_branch, index)
+
+      new_pos_branches =
+        List.replace_at(state.positions.branches, branch_idx, candidate_pos_branch)
+
+      candidate_positions = %{state.positions | branches: new_pos_branches}
+
       state = increment_iterations_branch(state)
 
-      if still_fails_branch?(candidate_seq, state) do
-        new_state = %{state | sequence: candidate_seq}
+      if still_fails_branch?(candidate_seq, candidate_positions, state) do
+        new_state = %{state | sequence: candidate_seq, positions: candidate_positions}
         # Recompute priorities for the shrunk branch
         new_prioritized = sort_indices_by_shrink_priority(candidate_branch)
         do_shrink_single_branch(candidate_branch, branch_idx, new_state, new_prioritized)
@@ -623,10 +709,14 @@ defmodule PropertyDamage.Shrinker do
       candidate_commands = List.delete_at(commands, index)
       candidate_seq = Map.put(state.sequence, part, candidate_commands)
 
+      # Mirror the removal in the position tracker's matching section.
+      pos_commands = Map.get(state.positions, part)
+      candidate_positions = Map.put(state.positions, part, List.delete_at(pos_commands, index))
+
       state = increment_iterations_branch(state)
 
-      if still_fails_branch?(candidate_seq, state) do
-        new_state = %{state | sequence: candidate_seq}
+      if still_fails_branch?(candidate_seq, candidate_positions, state) do
+        new_state = %{state | sequence: candidate_seq, positions: candidate_positions}
         # Recompute priorities for the shrunk commands
         new_prioritized = sort_indices_by_shrink_priority(candidate_commands)
         do_shrink_seq_part(new_state, part, candidate_commands, new_prioritized)
@@ -647,7 +737,9 @@ defmodule PropertyDamage.Shrinker do
 
     state = increment_iterations_branch(state)
 
-    if still_fails_branch?(candidate, state) do
+    # Argument shrinking replaces commands in place, so the structure (and thus
+    # the position tracker) is unchanged.
+    if still_fails_branch?(candidate, state.positions, state) do
       %{state | sequence: candidate}
     else
       state
@@ -966,7 +1058,7 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
-  # Like still_fails_branch?/2, but also surfaces the LINEAR failure index from
+  # Like still_fails_branch?/3, but also surfaces the LINEAR failure index from
   # the re-run so the caller can hand shrink_linear a truncation coordinate that
   # is consistent with the (flattened) candidate sequence. Returns
   # `{:reproduces, linear_failed_at_index}` when the candidate reproduces the
@@ -1020,7 +1112,7 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
-  defp still_fails_branch?(sequence, state) do
+  defp still_fails_branch?(sequence, positions, state) do
     # Call setup_each to reset SUT state before each shrink attempt
     setup_each_result = call_setup_each(state.model, state.adapter_config)
 
@@ -1028,6 +1120,15 @@ defmodule PropertyDamage.Shrinker do
       :ok ->
         # Regenerate idempotency keys to ensure fresh SUT state
         sequence = regenerate_sequence_idempotency_keys(sequence)
+
+        # Attach a registry whose producer_link is remapped onto THIS candidate's
+        # positions (DR-021), so externals resolve against the shrunk sequence's
+        # own indices instead of the stale original ones.
+        sequence =
+          Sequence.with_registry(
+            sequence,
+            remap_branch_registry(state.registry, positions, sequence)
+          )
 
         case Executor.run(sequence, state.model, state.adapter,
                adapter_config: state.adapter_config,
