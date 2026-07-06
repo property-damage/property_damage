@@ -189,6 +189,23 @@ defmodule PropertyDamage.MutationTest do
       assert desc =~ "100"
       assert desc =~ "101"
     end
+
+    test "generated mutations carry the targeted event's index (not always 0)" do
+      # sample_events: TestEvent at index 0 (has :amount), AnotherEvent at
+      # index 1 (has :value). A mutation targeting :value must carry
+      # event_index == 1, and applying it must mutate event 1 while leaving
+      # event 0 untouched.
+      events = sample_events()
+      mutations = Value.generate_mutations(events, max_mutations: 100)
+
+      value_mutation = Enum.find(mutations, &(&1.target == :value))
+      assert value_mutation, "expected a mutation targeting AnotherEvent.value"
+      assert value_mutation.event_index == 1
+
+      [unchanged, mutated] = Value.apply_mutation(events, value_mutation)
+      assert unchanged == Enum.at(events, 0)
+      assert mutated.value != 50
+    end
   end
 
   # ============================================================================
