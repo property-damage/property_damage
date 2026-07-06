@@ -500,7 +500,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp try_convert_to_linear(state) do
-    if exceeded_limits_branch?(state) do
+    if exceeded_limits?(state) do
       state
     else
       # Try flattening to linear sequence. The registry's producer_link is keyed
@@ -511,7 +511,7 @@ defmodule PropertyDamage.Shrinker do
       linear_base = Sequence.linear(Sequence.to_list(state.sequence))
       linear_registry = remap_branch_registry(state.registry, state.positions, linear_base)
       linear_seq = Sequence.with_registry(linear_base, linear_registry)
-      state = increment_iterations_branch(state)
+      state = increment_iterations(state)
 
       case linear_run_result(linear_seq, state) do
         {:reproduces, linear_failed_at_index} ->
@@ -567,7 +567,7 @@ defmodule PropertyDamage.Shrinker do
   defp try_remove_branches(state) do
     %Sequence{branches: branches} = state.sequence
 
-    if is_nil(branches) or length(branches) <= 2 or exceeded_limits_branch?(state) do
+    if is_nil(branches) or length(branches) <= 2 or exceeded_limits?(state) do
       state
     else
       # Try removing each branch
@@ -578,7 +578,7 @@ defmodule PropertyDamage.Shrinker do
   defp do_remove_branches(state, index) do
     %Sequence{branches: branches} = state.sequence
 
-    if is_nil(branches) or index >= length(branches) or exceeded_limits_branch?(state) do
+    if is_nil(branches) or index >= length(branches) or exceeded_limits?(state) do
       state
     else
       # Try removing branch at index
@@ -592,7 +592,7 @@ defmodule PropertyDamage.Shrinker do
           | branches: List.delete_at(state.positions.branches, index)
         }
 
-        state = increment_iterations_branch(state)
+        state = increment_iterations(state)
 
         if still_fails_branch?(candidate, candidate_positions, state) do
           new_state = %{state | sequence: candidate, positions: candidate_positions}
@@ -609,13 +609,13 @@ defmodule PropertyDamage.Shrinker do
   defp shrink_branch_contents(state) do
     %Sequence{branches: branches} = state.sequence
 
-    if is_nil(branches) or exceeded_limits_branch?(state) do
+    if is_nil(branches) or exceeded_limits?(state) do
       state
     else
       # Shrink each branch individually
       {new_branches, new_state} =
         Enum.reduce(Enum.with_index(branches), {[], state}, fn {branch, idx}, {acc, s} ->
-          if exceeded_limits_branch?(s) do
+          if exceeded_limits?(s) do
             {[branch | acc], s}
           else
             {shrunk_branch, updated_state} = shrink_single_branch(branch, idx, s)
@@ -644,7 +644,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp do_shrink_single_branch(branch, branch_idx, state, [index | rest_indices]) do
-    if exceeded_limits_branch?(state) do
+    if exceeded_limits?(state) do
       {branch, state}
     else
       # Try removing command at index. The branch is replaced BY POSITION:
@@ -662,7 +662,7 @@ defmodule PropertyDamage.Shrinker do
 
       candidate_positions = %{state.positions | branches: new_pos_branches}
 
-      state = increment_iterations_branch(state)
+      state = increment_iterations(state)
 
       if still_fails_branch?(candidate_seq, candidate_positions, state) do
         new_state = %{state | sequence: candidate_seq, positions: candidate_positions}
@@ -676,7 +676,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp shrink_prefix_suffix(state) do
-    if exceeded_limits_branch?(state) do
+    if exceeded_limits?(state) do
       state
     else
       # Shrink prefix
@@ -703,7 +703,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   defp do_shrink_seq_part(state, part, commands, [index | rest_indices]) do
-    if exceeded_limits_branch?(state) do
+    if exceeded_limits?(state) do
       state
     else
       candidate_commands = List.delete_at(commands, index)
@@ -713,7 +713,7 @@ defmodule PropertyDamage.Shrinker do
       pos_commands = Map.get(state.positions, part)
       candidate_positions = Map.put(state.positions, part, List.delete_at(pos_commands, index))
 
-      state = increment_iterations_branch(state)
+      state = increment_iterations(state)
 
       if still_fails_branch?(candidate_seq, candidate_positions, state) do
         new_state = %{state | sequence: candidate_seq, positions: candidate_positions}
@@ -735,7 +735,7 @@ defmodule PropertyDamage.Shrinker do
     # This is a simplification - proper implementation would track positions
     candidate = rebuild_sequence_with_commands(state.sequence, shrunk_commands)
 
-    state = increment_iterations_branch(state)
+    state = increment_iterations(state)
 
     # Argument shrinking replaces commands in place, so the structure (and thus
     # the position tracker) is unchanged.
@@ -1213,19 +1213,7 @@ defmodule PropertyDamage.Shrinker do
       elapsed >= state.config.max_time_ms
   end
 
-  defp exceeded_limits_branch?(state) do
-    now = System.monotonic_time(:millisecond)
-    elapsed = now - state.start_time
-
-    state.iterations >= state.config.max_iterations or
-      elapsed >= state.config.max_time_ms
-  end
-
   defp increment_iterations(state) do
-    %{state | iterations: state.iterations + 1}
-  end
-
-  defp increment_iterations_branch(state) do
     %{state | iterations: state.iterations + 1}
   end
 
