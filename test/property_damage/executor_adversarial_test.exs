@@ -62,6 +62,8 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
 
     @impl true
     def execute(%Cmd{}, %{behaviour: :raise}, _runtime), do: raise("adapter boom")
+    def execute(%Cmd{}, %{behaviour: :exit}, _runtime), do: exit(:boom)
+    def execute(%Cmd{}, %{behaviour: :throw}, _runtime), do: throw(:thrown_boom)
     def execute(%Cmd{}, %{behaviour: :malformed_atom}, _runtime), do: :garbage
     def execute(%Cmd{}, %{behaviour: :malformed_ok}, _runtime), do: {:ok, :not_a_list}
     def execute(%Cmd{}, %{behaviour: :sync_retry}, _runtime), do: {:retry, :not_ready}
@@ -90,6 +92,23 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
              },
              result.failure_reason
            )
+  end
+
+  test "an adapter that exits becomes a graceful adapter_error, not a crash" do
+    assert {:ok, result} = run(NoopModel, :exit)
+    assert result.failed_at_index == 0
+
+    assert %Failure{type: %Failure.Execution{kind: :adapter_error, detail: {:exit, :boom}}} =
+             result.failure_reason
+  end
+
+  test "an adapter that throws becomes a graceful adapter_error, not a crash" do
+    assert {:ok, result} = run(NoopModel, :throw)
+    assert result.failed_at_index == 0
+
+    assert %Failure{
+             type: %Failure.Execution{kind: :adapter_error, detail: {:throw, :thrown_boom}}
+           } = result.failure_reason
   end
 
   test "a malformed atom return is reported, not a CaseClauseError" do
