@@ -16,6 +16,8 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     :think_time_range,
     :assertion_mode,
     :run_nonce,
+    # Owning process (runner); we stop with it so workers never orphan
+    :owner,
     # Pool state
     :available,
     :in_use,
@@ -96,6 +98,13 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
 
   @impl true
   def init(opts) do
+    # Workers are started with start_link so they die with the pool, but we trap
+    # exits so a *crashing* worker does not take the pool down with it. Its
+    # `{:EXIT, worker, reason}` is then just a message; the monitor `:DOWN`
+    # handler below performs the tracking cleanup. We still honour the link to our
+    # owning runner: if it dies, we stop too (see handle_info/2 for `:EXIT`).
+    Process.flag(:trap_exit, true)
+
     model = Keyword.fetch!(opts, :model)
     adapter = Keyword.fetch!(opts, :adapter)
     adapter_config = Keyword.get(opts, :adapter_config, %{})
@@ -111,6 +120,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
       think_time_range: think_time_range,
       assertion_mode: assertion_mode,
       run_nonce: Keyword.get(opts, :run_nonce),
+      owner: Keyword.get(opts, :owner),
       available: :queue.new(),
       in_use: MapSet.new(),
       total_created: 0,
@@ -232,6 +242,21 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
       Logger.warning("WorkerPool received checkin for unknown worker: #{inspect(worker)}")
       {:noreply, state}
     end
+  end
+
+  @impl true
+  def handle_info({:EXIT, pid, reason}, %{owner: owner} = state)
+      when pid == owner and reason not in [:normal, :shutdown] do
+    # Our owning runner died abnormally; stop so terminate/2 tears the workers
+    # down rather than leaving them orphaned.
+    {:stop, reason, state}
+  end
+
+  @impl true
+  def handle_info({:EXIT, _pid, _reason}, state) do
+    # A linked worker exited (crash or normal). The monitor `:DOWN` handler does
+    # the tracking cleanup; nothing to do here beyond not dying with it.
+    {:noreply, state}
   end
 
   @impl true
