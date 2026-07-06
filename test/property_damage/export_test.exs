@@ -26,6 +26,14 @@ defmodule PropertyDamage.ExportTest do
     defstruct [:items]
   end
 
+  defmodule ListAccounts do
+    defstruct [:status]
+  end
+
+  defmodule FetchTx do
+    defstruct []
+  end
+
   # Producer/consumer pair for DR-021 external() placeholder wiring.
   defmodule Provision do
     defstruct [:spec]
@@ -89,6 +97,22 @@ defmodule PropertyDamage.ExportTest do
         method: :post,
         path: "/api/batch",
         body: %{items: items}
+      }
+    end
+
+    def http_spec(%ListAccounts{status: status}, _ctx) do
+      %HTTPSpec{
+        method: :get,
+        path: "/api/accounts",
+        query_params: %{limit: 10, offset: 5, status: status}
+      }
+    end
+
+    def http_spec(%FetchTx{}, _ctx) do
+      %HTTPSpec{
+        method: :get,
+        path: "/api/accounts/:id/tx/:id_tx",
+        path_params: %{id: "acc_1", id_tx: "tx_9"}
       }
     end
 
@@ -173,6 +197,16 @@ defmodule PropertyDamage.ExportTest do
       assert url =~ "http://localhost:4000/api/accounts?"
       assert url =~ "page=1"
       assert url =~ "limit=10"
+    end
+
+    test "resolve_path is token-boundary safe (:id does not corrupt :id_tx)" do
+      spec = %HTTPSpec{
+        method: :get,
+        path: "/api/accounts/:id/tx/:id_tx",
+        path_params: %{id: "acc_1", id_tx: "tx_9"}
+      }
+
+      assert HTTPSpec.resolve_path(spec) == "/api/accounts/acc_1/tx/tx_9"
     end
 
     test "method_string returns uppercase" do
@@ -426,6 +460,44 @@ defmodule PropertyDamage.ExportTest do
     end
   end
 
+  # ============================================================================
+  # Curl body variable expansion (F2)
+  # ============================================================================
+
+  describe "to_script/3 - curl body variable expansion (F2)" do
+    test "a produced $var inside a curl body is not trapped in single quotes" do
+      # BatchCredit's body carries a placeholder produced by Provision; the
+      # generated body must let the shell variable expand (DR-021), so it may
+      # not be wrapped in single quotes (which suppress expansion).
+      ph = Placeholder.new_at(Provisioned, [:id], Position.prefix(0), 0)
+      commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
+
+      report = %FailureReport{
+        seed: 1,
+        failed_at_index: 1,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+
+      script =
+        Export.to_script(report, :curl,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "$provisioned_id_0"
+
+      refute script =~ ~r/-d '[^']*\$provisioned_id_0/,
+             "curl body wraps the produced $var in single quotes, so the shell never expands it"
+    end
+  end
+
   describe "to_script/3 - reproduce filename header" do
     alias PropertyDamage.Export.Common
 
@@ -444,6 +516,143 @@ defmodule PropertyDamage.ExportTest do
         assert script =~ "Run with: #{runner} #{expected}",
                "#{format} header should name the real filename (#{expected})"
       end
+    end
+  end
+
+  # ============================================================================
+  # Path parameter token-boundary safety (F6)
+  # ============================================================================
+
+  describe "to_script/3 - path param substitution is prefix-safe (F6)" do
+    defp fetch_tx_report do
+      commands = [%FetchTx{}]
+
+      %FailureReport{
+        seed: 1,
+        failed_at_index: 0,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+    end
+
+    # `:id` must not be substituted inside the `:id_tx` token: the corrupt
+    # output drops `tx_9` (turning `:id_tx` into `acc_1_tx`).
+    test "curl substitutes :id_tx correctly, not as :id + _tx" do
+      script =
+        Export.to_script(fetch_tx_report(), :curl,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "tx_9"
+      refute script =~ "acc_1_tx"
+    end
+
+    test "python substitutes :id_tx correctly, not as :id + _tx" do
+      script =
+        Export.to_script(fetch_tx_report(), :python,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "tx_9"
+    end
+
+    test "elixir substitutes :id_tx correctly, not as :id + _tx" do
+      script =
+        Export.to_script(fetch_tx_report(), :elixir,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "tx_9"
+    end
+
+    test "livebook substitutes :id_tx correctly, not as :id + _tx" do
+      notebook =
+        Export.to_livebook(fetch_tx_report(),
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert notebook =~ "tx_9"
+    end
+  end
+
+  # ============================================================================
+  # Query Parameters (F1)
+  # ============================================================================
+
+  describe "to_script/3 - query params (F1)" do
+    defp query_params_report do
+      commands = [%ListAccounts{status: "active"}]
+
+      %FailureReport{
+        seed: 1,
+        failed_at_index: 0,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+    end
+
+    test "curl emits the HTTPSpec query params" do
+      script =
+        Export.to_script(query_params_report(), :curl,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "limit="
+      assert script =~ "offset="
+      assert script =~ "status="
+    end
+
+    test "python emits the HTTPSpec query params" do
+      script =
+        Export.to_script(query_params_report(), :python,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "limit="
+      assert script =~ "offset="
+      assert script =~ "status="
+    end
+
+    test "elixir emits the HTTPSpec query params" do
+      script =
+        Export.to_script(query_params_report(), :elixir,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "limit="
+      assert script =~ "offset="
+      assert script =~ "status="
+    end
+
+    test "livebook emits the HTTPSpec query params" do
+      notebook =
+        Export.to_livebook(query_params_report(),
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert notebook =~ "limit="
+      assert notebook =~ "offset="
+      assert notebook =~ "status="
     end
   end
 

@@ -99,7 +99,11 @@ defmodule PropertyDamage.Export.HTTPSpec do
   @spec resolve_path(t()) :: String.t()
   def resolve_path(%__MODULE__{path: path, path_params: params}) do
     Enum.reduce(params, path, fn {key, value}, acc ->
-      String.replace(acc, ":#{key}", to_string(value))
+      replacement = to_string(value)
+      # Match `:key` only at a token boundary so `:id` does not corrupt `:id_tx`.
+      Regex.replace(~r/:#{Regex.escape(to_string(key))}(?![A-Za-z0-9_])/, acc, fn _ ->
+        replacement
+      end)
     end)
   end
 

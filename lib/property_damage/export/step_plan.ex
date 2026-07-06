@@ -48,6 +48,7 @@ defmodule PropertyDamage.Export.StepPlan do
             failed?: boolean(),
             http_spec: HTTPSpec.t() | nil,
             resolved_path_params: map(),
+            resolved_query_params: map(),
             resolved_body: map() | nil,
             producer_bindings: [{[term()], String.t()}]
           }
@@ -60,6 +61,7 @@ defmodule PropertyDamage.Export.StepPlan do
       :failed?,
       :http_spec,
       :resolved_path_params,
+      :resolved_query_params,
       :resolved_body,
       :producer_bindings
     ]
@@ -91,6 +93,7 @@ defmodule PropertyDamage.Export.StepPlan do
         failed?: step.failed?,
         http_spec: spec,
         resolved_path_params: resolve_path_params(spec, var_map),
+        resolved_query_params: resolve_query_params(spec, var_map),
         resolved_body: resolve_body(spec, step.command, var_map),
         producer_bindings: producer_bindings(extractions, step.flattened_index)
       }
@@ -132,6 +135,12 @@ defmodule PropertyDamage.Export.StepPlan do
   defp resolve_path_params(nil, _var_map), do: %{}
 
   defp resolve_path_params(%HTTPSpec{path_params: params}, var_map) do
+    Map.new(params, fn {key, value} -> {key, tag(value, var_map)} end)
+  end
+
+  defp resolve_query_params(nil, _var_map), do: %{}
+
+  defp resolve_query_params(%HTTPSpec{query_params: params}, var_map) do
     Map.new(params, fn {key, value} -> {key, tag(value, var_map)} end)
   end
 
