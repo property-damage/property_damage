@@ -2,32 +2,55 @@
 
 ```elixir
 Mix.install([
-  {:property_damage, path: ".."}
+  {:property_damage, "~> 0.2"},
+  {:stream_data, "~> 1.0"},
+  {:kino, "~> 0.12"}
 ])
 ```
 
 ## Introduction
 
-This notebook demonstrates PropertyDamage, a stateful property-based testing
-framework. You'll learn how to:
+This notebook is a hands-on tour of **PropertyDamage**, a stateful
+property-based testing framework for Elixir. Instead of testing single inputs,
+you describe a *model* of your system, and PropertyDamage generates random
+**sequences of operations**, checks your invariants after every step, and — when
+it finds a failure — automatically **shrinks** it to a minimal reproduction.
 
-- Define models, commands, and projections
-- Run tests and inspect results
-- Analyze coverage and failures
-- Use chaos engineering with nemesis operations
+We build one running example: a tiny in-memory **bank**. You will:
 
-## Part 1: Define a Simple Model
+1. Define the model — commands, events, a projection with an invariant, a
+   simulator, the model, and an adapter.
+2. Run the property test against a correct implementation.
+3. Read a **coverage** report to confirm the run was not vacuous.
+4. Introduce a bug and watch PropertyDamage **find and shrink** it, then debug it.
+5. Layer in **chaos engineering** with a nemesis.
 
-Let's create a bank account model to demonstrate PropertyDamage concepts.
+The five moving parts:
+
+| Component | Role |
+| --- | --- |
+| **Command** | A pure generator for one operation's fields (`OpenAccount`, `Credit`, `Debit`). |
+| **Event** | The recorded outcome of an operation (`AccountOpened`, `Credited`, ...). |
+| **Projection** | A reducer over events that tracks state and asserts invariants. |
+| **Simulator** | Predicts events during generation so state-dependent commands become eligible. |
+| **Adapter** | Executes a command against the real System Under Test. |
+
+## Part 1 — Define the model
 
 ### Events
 
-Events represent outcomes of operations:
+Events are plain structs describing what happened. A field the *server* assigns
+(here, the account id) is marked with `external()` so PropertyDamage tracks it
+with a placeholder during generation and resolves it to the real value during
+execution.
 
 ```elixir
 defmodule Demo.Events do
-  defmodule AccountCreated do
-    defstruct [:account_id, :currency, :balance]
+  import PropertyDamage, only: [external: 0]
+
+  defmodule AccountOpened do
+    # account_id is minted by the bank (the SUT), so it is external().
+    defstruct [:currency, :opening_balance, account_id: external()]
   end
 
   defmodule Credited do
@@ -38,7 +61,7 @@ defmodule Demo.Events do
     defstruct [:account_id, :amount, :new_balance]
   end
 
-  defmodule DebitFailed do
+  defmodule DebitRejected do
     defstruct [:account_id, :amount, :reason]
   end
 end
@@ -46,393 +69,558 @@ end
 
 ### Commands
 
-Commands represent operations that can be executed:
+Commands are **pure data generators**. They know their own fields and how to
+generate valid values, but nothing about state. State-dependent choices (which
+account to debit, when a command is allowed) live in the Model, not here.
+
+Each command builds a map of `StreamData` generators, pipes it through
+`PropertyDamage.Generator.merge_overrides/2` (so the Model can inject
+state-derived values), and finishes with `StreamData.fixed_map/1`.
+
+`Credit` and `Debit` default `account_ref` to `nil`; the Model fills it from
+state via `with:`.
 
 ```elixir
-defmodule Demo.Commands.CreateAccount do
-  @behaviour PropertyDamage.Command
+defmodule Demo.Commands.OpenAccount do
+  use PropertyDamage.Command
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
 
-  alias Demo.Events.AccountCreated
-
-  defstruct [:currency, :initial_balance]
-
-  @impl true
-  def new!(_state, _overrides \\ %{}) do
-    import StreamData
-
-    bind(member_of(["USD", "EUR", "GBP"]), fn currency ->
-      bind(integer(0..10000), fn balance ->
-        constant(%__MODULE__{
-          currency: currency,
-          initial_balance: balance
-        })
-      end)
-    end)
-  end
+  defstruct [:currency, :opening_balance]
 
   @impl true
-  def precondition(_state), do: true
-
-  @impl true
-  def ref(_cmd, events) do
-    case events do
-      [%AccountCreated{account_id: id} | _] -> id
-      _ -> nil
-    end
+  def generator(overrides \\ %{}) do
+    %{
+      currency: StreamData.member_of(["USD", "EUR", "GBP"]),
+      opening_balance: StreamData.integer(0..1000)
+    }
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
 end
 
 defmodule Demo.Commands.Credit do
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:account_ref, :amount]
 
   @impl true
-  def new!(state, _overrides \\ %{}) do
-    import StreamData
-
-    accounts = Map.keys(state[:accounts] || %{})
-
-    if Enum.empty?(accounts) do
-      nil
-    else
-      bind(member_of(accounts), fn account_ref ->
-        bind(integer(1..5000), fn amount ->
-          constant(%__MODULE__{
-            account_ref: account_ref,
-            amount: amount
-          })
-        end)
-      end)
-    end
+  def generator(overrides \\ %{}) do
+    # account_ref is supplied by the Model's `with:` from live state.
+    %{account_ref: nil, amount: StreamData.integer(1..500)}
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
-
-  @impl true
-  def precondition(state) do
-    map_size(state[:accounts] || %{}) > 0
-  end
-
-  @impl true
-  def ref(_cmd, _events), do: nil
 end
 
 defmodule Demo.Commands.Debit do
-  @behaviour PropertyDamage.Command
+  # `observables:` is static command metadata (command_spec): the event types
+  # this command can produce. Declared once, via `use` options.
+  use PropertyDamage.Command,
+    observables: [Demo.Events.Debited, Demo.Events.DebitRejected]
+
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:account_ref, :amount]
 
   @impl true
-  def new!(state, _overrides \\ %{}) do
-    import StreamData
-
-    accounts = Map.keys(state[:accounts] || %{})
-
-    if Enum.empty?(accounts) do
-      nil
-    else
-      bind(member_of(accounts), fn account_ref ->
-        bind(integer(1..5000), fn amount ->
-          constant(%__MODULE__{
-            account_ref: account_ref,
-            amount: amount
-          })
-        end)
-      end)
-    end
+  def generator(overrides \\ %{}) do
+    %{account_ref: nil, amount: StreamData.integer(1..500)}
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
-
-  @impl true
-  def precondition(state) do
-    map_size(state[:accounts] || %{}) > 0
-  end
-
-  @impl true
-  def ref(_cmd, _events), do: nil
 end
 ```
 
-### Projections
+### Projection and invariant
 
-Projections maintain state and check invariants:
+A projection reduces events into state with `apply/2`. Functions tagged
+`@trigger` are **invariants**: PropertyDamage runs them at the configured points
+and treats a raised exception (via `PropertyDamage.fail!/2`) as a violation. A
+returned value is ignored — an invariant signals failure only by raising.
+
+Our invariant is the classic bounds property: **no account balance is ever
+negative**. We name it with `@invariant` and link the assertion with
+`validates:`, which lets the coverage report tell us the invariant actually
+fired.
+
+The `Credited`/`Debited` clauses guard with `Map.has_key?/2` so the projection
+stays a total function even while the shrinker explores reduced sequences.
 
 ```elixir
-defmodule Demo.Projections.ModelState do
-  @behaviour PropertyDamage.Projection
+defmodule Demo.Bank do
+  use PropertyDamage.Model.Projection
 
-  alias Demo.Events.{AccountCreated, Credited, Debited, DebitFailed}
+  alias Demo.Events.{AccountOpened, Credited, Debited, DebitRejected}
 
   @impl true
   def init, do: %{accounts: %{}}
 
   @impl true
-  def apply(state, %AccountCreated{account_id: id, currency: currency, balance: balance}) do
-    put_in(state, [:accounts, id], %{currency: currency, balance: balance})
+  def apply(state, %AccountOpened{account_id: id, currency: c, opening_balance: b}) do
+    put_in(state, [:accounts, id], %{currency: c, balance: b})
   end
 
-  def apply(state, %Credited{account_id: id, new_balance: balance}) do
-    put_in(state, [:accounts, id, :balance], balance)
+  def apply(state, %Credited{account_id: id, new_balance: nb}) do
+    if Map.has_key?(state.accounts, id),
+      do: put_in(state, [:accounts, id, :balance], nb),
+      else: state
   end
 
-  def apply(state, %Debited{account_id: id, new_balance: balance}) do
-    put_in(state, [:accounts, id, :balance], balance)
+  def apply(state, %Debited{account_id: id, new_balance: nb}) do
+    if Map.has_key?(state.accounts, id),
+      do: put_in(state, [:accounts, id, :balance], nb),
+      else: state
   end
 
-  def apply(state, %DebitFailed{}), do: state
-  def apply(state, _), do: state
-end
+  def apply(state, %DebitRejected{}), do: state
+  def apply(state, _event), do: state
 
-defmodule Demo.Projections.AccountInvariants do
-  @behaviour PropertyDamage.Projection
+  @invariant id: :balance_non_negative,
+             description: "No account balance is ever negative (no overdrafts)"
 
-  alias Demo.Events.{AccountCreated, Credited, Debited}
+  @trigger every: 1, validates: :balance_non_negative
+  def assert_balance_non_negative(state, _step) do
+    negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
 
-  @impl true
-  def init, do: %{balances: %{}}
-
-  @impl true
-  def apply(state, %AccountCreated{account_id: id, balance: balance}) do
-    put_in(state, [:balances, id], balance)
-  end
-
-  def apply(state, %Credited{account_id: id, amount: amount}) do
-    update_in(state, [:balances, id], &(&1 + amount))
-  end
-
-  def apply(state, %Debited{account_id: id, amount: amount}) do
-    update_in(state, [:balances, id], &(&1 - amount))
-  end
-
-  def apply(state, _), do: state
-
-  # Invariant checks
-  def __checks__ do
-    [
-      %{name: :balance_never_negative, trigger: :always, sample: 1}
-    ]
-  end
-
-  def check(:balance_never_negative, state, _ctx) do
-    negative =
-      state.balances
-      |> Enum.filter(fn {_id, balance} -> balance < 0 end)
-
-    if Enum.empty?(negative) do
-      :ok
-    else
-      {:error, "Negative balances found: #{inspect(negative)}"}
+    unless negative == [] do
+      PropertyDamage.fail!("account balance went negative", accounts: negative)
     end
   end
 end
 ```
 
+### Simulator
+
+During generation the SUT has not run yet, so PropertyDamage asks the
+**simulator** to predict each command's events. Those predicted events flow
+through the projection to build state, which is what makes state-dependent
+commands (a `Debit` needs an account to exist) eligible.
+
+`AccountOpened` leaves `account_id` at its `external()` default — the framework
+mints the placeholder. `Debit` predicts a rejection when funds are short: this
+is the *model's* view of correct behaviour, and the run later checks the SUT
+against it.
+
+```elixir
+defmodule Demo.Simulator do
+  @behaviour PropertyDamage.Model.Simulator
+
+  alias Demo.Commands.{OpenAccount, Credit, Debit}
+  alias Demo.Events.{AccountOpened, Credited, Debited, DebitRejected}
+
+  @impl true
+  def simulate(%OpenAccount{currency: c, opening_balance: b}, _state) do
+    [%AccountOpened{currency: c, opening_balance: b}]
+  end
+
+  def simulate(%Credit{account_ref: ref, amount: amt}, state) do
+    bal = get_in(state, [:accounts, ref, :balance]) || 0
+    [%Credited{account_id: ref, amount: amt, new_balance: bal + amt}]
+  end
+
+  def simulate(%Debit{account_ref: ref, amount: amt}, state) do
+    bal = get_in(state, [:accounts, ref, :balance]) || 0
+
+    if bal >= amt do
+      [%Debited{account_id: ref, amount: amt, new_balance: bal - amt}]
+    else
+      [%DebitRejected{account_id: ref, amount: amt, reason: :insufficient_funds}]
+    end
+  end
+
+  def simulate(_command, _state), do: []
+end
+```
+
 ### Model
 
-The model ties everything together:
+The model wires everything together: the weighted command list (with `when:`
+preconditions and `with:` state-derived overrides), the projection used for
+sequence state, the assertion projections, and the simulator.
 
 ```elixir
 defmodule Demo.Model do
   @behaviour PropertyDamage.Model
 
-  alias Demo.Commands.{CreateAccount, Credit, Debit}
-  alias Demo.Projections.{ModelState, AccountInvariants}
+  alias Demo.Commands.{OpenAccount, Credit, Debit}
 
   @impl true
   def commands do
     [
-      {5, CreateAccount},
-      {3, Credit},
-      {3, Debit}
+      {OpenAccount, weight: 3},
+      {Credit,
+       weight: 3,
+       when: fn s -> map_size(s.accounts) > 0 end,
+       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+      {Debit,
+       weight: 3,
+       when: fn s -> map_size(s.accounts) > 0 end,
+       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end}
     ]
   end
 
   @impl true
-  def command_sequence_projection, do: ModelState
+  def command_sequence_projection, do: Demo.Bank
 
   @impl true
-  def assertion_projections, do: [AccountInvariants]
+  def assertion_projections, do: [Demo.Bank]
 
   @impl true
-  def injectable_events, do: []
+  def simulator, do: Demo.Simulator
 end
 ```
 
 ### Adapter
 
-The adapter executes commands against the system under test:
+The adapter executes commands against the real System Under Test. Ours is an
+in-memory bank whose state lives in an `Agent` (adapter context returned by
+`setup/1` is read-only across commands, so mutable SUT state belongs in a
+process, not the return value). `execute/3` returns `{:ok, events}`. Account ids
+are minted with `System.unique_integer/1` — no external service required.
+
+This adapter is **correct**: it rejects debits that would overdraw.
 
 ```elixir
-defmodule Demo.Adapter do
-  @behaviour PropertyDamage.Adapter
+defmodule Demo.BankAdapter do
+  use PropertyDamage.Adapter
 
-  alias Demo.Events.{AccountCreated, Credited, Debited, DebitFailed}
-  alias Demo.Commands.{CreateAccount, Credit, Debit}
+  alias Demo.Commands.{OpenAccount, Credit, Debit}
+  alias Demo.Events.{AccountOpened, Credited, Debited, DebitRejected}
 
-  # In-memory "database"
   @impl true
   def setup(_config) do
-    {:ok, %{accounts: %{}, next_id: 1}}
+    {:ok, store} = Agent.start_link(fn -> %{} end)
+    {:ok, %{store: store}}
   end
 
   @impl true
-  def teardown(_ctx), do: :ok
+  def teardown(%{store: store}), do: Agent.stop(store)
 
   @impl true
-  def execute(%CreateAccount{currency: currency, initial_balance: balance}, ctx) do
-    id = "acc_#{ctx.next_id}"
-
-    new_ctx = %{
-      ctx
-      | accounts: Map.put(ctx.accounts, id, %{currency: currency, balance: balance}),
-        next_id: ctx.next_id + 1
-    }
-
-    events = [%AccountCreated{account_id: id, currency: currency, balance: balance}]
-    {:ok, events, new_ctx}
+  def execute(%OpenAccount{currency: c, opening_balance: b}, %{store: store}, _runtime) do
+    id = "acc_#{System.unique_integer([:positive])}"
+    Agent.update(store, &Map.put(&1, id, %{currency: c, balance: b}))
+    {:ok, [%AccountOpened{account_id: id, currency: c, opening_balance: b}]}
   end
 
-  def execute(%Credit{account_ref: id, amount: amount}, ctx) do
-    account = ctx.accounts[id]
-    new_balance = account.balance + amount
-
-    new_ctx = put_in(ctx, [:accounts, id, :balance], new_balance)
-    events = [%Credited{account_id: id, amount: amount, new_balance: new_balance}]
-
-    {:ok, events, new_ctx}
+  def execute(%Credit{account_ref: id, amount: amt}, %{store: store}, _runtime) do
+    new_balance = Agent.get(store, & &1[id].balance) + amt
+    Agent.update(store, &put_in(&1, [id, :balance], new_balance))
+    {:ok, [%Credited{account_id: id, amount: amt, new_balance: new_balance}]}
   end
 
-  def execute(%Debit{account_ref: id, amount: amount}, ctx) do
-    account = ctx.accounts[id]
+  def execute(%Debit{account_ref: id, amount: amt}, %{store: store}, _runtime) do
+    balance = Agent.get(store, & &1[id].balance)
 
-    # BUG: Allow negative balance (intentional for demo)
-    new_balance = account.balance - amount
-
-    new_ctx = put_in(ctx, [:accounts, id, :balance], new_balance)
-    events = [%Debited{account_id: id, amount: amount, new_balance: new_balance}]
-
-    {:ok, events, new_ctx}
+    if balance >= amt do
+      Agent.update(store, &put_in(&1, [id, :balance], balance - amt))
+      {:ok, [%Debited{account_id: id, amount: amt, new_balance: balance - amt}]}
+    else
+      {:ok, [%DebitRejected{account_id: id, amount: amt, reason: :insufficient_funds}]}
+    end
   end
 end
 ```
 
-## Part 2: Run Tests
+## Part 2 — Run the property test
 
-Run the property test against the model and adapter:
+`PropertyDamage.run/1` generates command sequences, executes them through the
+adapter, folds the resulting events through the projections, and checks the
+invariant after every step. We pass `coverage: true` so the next section can
+report how thoroughly the model was exercised.
+
+Against the correct adapter this returns `{:ok, stats}`.
 
 ```elixir
 result =
   PropertyDamage.run(
     model: Demo.Model,
-    adapter: Demo.Adapter,
-    max_runs: 20,
-    max_commands: 15
+    adapter: Demo.BankAdapter,
+    max_commands: 25,
+    max_runs: 100,
+    seed: 42,
+    coverage: true
   )
 ```
 
-## Part 3: Coverage Analysis
+## Part 3 — Coverage: is the green result trustworthy?
 
-Analyze how thoroughly your model was exercised:
+A passing run means nothing if a command was never generated or the invariant
+never actually ran. Coverage makes the result trustworthy. Because we ran with
+`coverage: true`, the result carries a merged tracker;
+`PropertyDamage.coverage/2` pulls it out and `PropertyDamage.Coverage.format/2`
+renders it.
 
 ```elixir
-coverage = PropertyDamage.Coverage.from_result(result)
-PropertyDamage.Coverage.format_summary(coverage)
+coverage = PropertyDamage.coverage(result, Demo.Model)
+Kino.Markdown.new("```\n" <> PropertyDamage.Coverage.format(coverage, :summary) <> "\n```")
 ```
 
-## Part 4: Chaos Engineering with Nemesis
-
-PropertyDamage includes nemesis operations for fault injection.
-Here's how to use them:
+`PropertyDamage.assertion_coverage/2` joins the run's assertion firings against
+the invariant catalog — an invariant that never fired is a *vacuous* guarantee.
+Here `balance_non_negative` should show `covered?: true` with a large fire count.
 
 ```elixir
-# Example: Simulating network latency
+rows =
+  for inv <- PropertyDamage.assertion_coverage(result, Demo.Model) do
+    %{invariant: inv.id, covered?: inv.covered?, fire_count: inv.fire_count}
+  end
+
+Kino.DataTable.new(rows)
+```
+
+```elixir
+# Any invariant the run never exercised (empty list here = fully exercised):
+PropertyDamage.Coverage.uncovered_invariants(coverage)
+```
+
+## Part 4 — Introduce a bug, then debug it
+
+Now the interesting part. We swap in a **buggy** adapter that forgets to check
+the balance before debiting, so overdrafts slip through. The model and its
+invariant are unchanged — only the SUT is wrong.
+
+```elixir
+defmodule Demo.BuggyBankAdapter do
+  use PropertyDamage.Adapter
+
+  alias Demo.Commands.{OpenAccount, Credit, Debit}
+  alias Demo.Events.{AccountOpened, Credited, Debited}
+
+  @impl true
+  def setup(_config) do
+    {:ok, store} = Agent.start_link(fn -> %{} end)
+    {:ok, %{store: store}}
+  end
+
+  @impl true
+  def teardown(%{store: store}), do: Agent.stop(store)
+
+  @impl true
+  def execute(%OpenAccount{currency: c, opening_balance: b}, %{store: store}, _runtime) do
+    id = "acc_#{System.unique_integer([:positive])}"
+    Agent.update(store, &Map.put(&1, id, %{currency: c, balance: b}))
+    {:ok, [%AccountOpened{account_id: id, currency: c, opening_balance: b}]}
+  end
+
+  def execute(%Credit{account_ref: id, amount: amt}, %{store: store}, _runtime) do
+    new_balance = Agent.get(store, & &1[id].balance) + amt
+    Agent.update(store, &put_in(&1, [id, :balance], new_balance))
+    {:ok, [%Credited{account_id: id, amount: amt, new_balance: new_balance}]}
+  end
+
+  def execute(%Debit{account_ref: id, amount: amt}, %{store: store}, _runtime) do
+    # BUG: no funds check -- overdrafts are silently allowed.
+    new_balance = Agent.get(store, & &1[id].balance) - amt
+    Agent.update(store, &put_in(&1, [id, :balance], new_balance))
+    {:ok, [%Debited{account_id: id, amount: amt, new_balance: new_balance}]}
+  end
+end
+```
+
+Run against the buggy adapter. PropertyDamage finds a violating sequence, shrinks
+it, and returns `{:error, failure}`.
+
+```elixir
+{:error, failure} =
+  PropertyDamage.run(
+    model: Demo.Model,
+    adapter: Demo.BuggyBankAdapter,
+    max_commands: 25,
+    max_runs: 100,
+    seed: 42
+  )
+
+%{
+  failure_type: PropertyDamage.FailureReport.failure_type(failure),
+  check_name: PropertyDamage.FailureReport.check_name(failure),
+  seed: failure.seed
+}
+```
+
+### The shrunk sequence
+
+`shrunk_sequence/1` is the minimal reproduction — every command in it is
+necessary. Expect something like *open an account, then debit more than its
+balance*.
+
+```elixir
+failure
+|> PropertyDamage.FailureReport.shrunk_sequence()
+|> PropertyDamage.Sequence.to_list()
+|> Enum.with_index()
+|> Enum.map_join("\n", fn {cmd, idx} -> "[#{idx}] #{inspect(cmd)}" end)
+|> Kino.Markdown.new()
+```
+
+### Step-by-step replay
+
+`replay/2` re-executes the shrunk sequence and returns each step with its command,
+resulting events, and projection state — the play-by-play of how the balance went
+negative.
+
+```elixir
+{:ok, steps} = PropertyDamage.replay(failure)
+
+steps
+|> Enum.map_join("\n\n", fn step ->
+  """
+  === Step #{step.index} ===
+  Command: #{inspect(step.command)}
+  Events:  #{inspect(step.events)}
+  State:   #{inspect(step.projections)}
+  """
+end)
+|> Kino.Markdown.new()
+```
+
+### A sequence diagram
+
+`Diagram.from_failure_report/2` renders the failing sequence as a Mermaid
+diagram, which Livebook draws inline via `Kino.Mermaid`.
+
+```elixir
+failure
+|> PropertyDamage.Diagram.from_failure_report(:mermaid)
+|> Kino.Mermaid.new()
+```
+
+### Freeze it into a regression test
+
+`Export.to_exunit/1` turns the failure into a standalone ExUnit test that replays
+the exact shrunk sequence — a durable regression that survives generator changes.
+
+```elixir
+test_code = PropertyDamage.Export.to_exunit(failure)
+Kino.Markdown.new("```elixir\n" <> test_code <> "\n```")
+```
+
+Other debugging tools worth knowing (see the *Debugging Failures* guide):
+`PropertyDamage.explain/1` for a per-command rationale,
+`PropertyDamage.isolate_trigger/1` to pin down the offending field, and
+`PropertyDamage.save_failure/2` to persist a `.pd` file for `mix pd.replay` /
+`mix pd.bisect`:
+
+```elixir
+{:ok, path} = PropertyDamage.save_failure(failure, "failures/")
+path
+```
+
+## Part 5 — Chaos engineering with a nemesis
+
+A **nemesis** injects faults so you can test resilience. `NetworkLatency` degrades
+the SUT's network path when a Toxiproxy endpoint is configured in the adapter
+context; without one it runs in **simulated** mode (a no-op that still tags its
+event), which is perfect for a self-contained demo.
+
+You can see the marker directly:
+
+```elixir
 alias PropertyDamage.Nemesis.NetworkLatency
 
-latency_cmd = %NetworkLatency{
-  latency_ms: 100,
-  jitter_ms: 20,
-  duration_ms: 5000
-}
-
-# Inject the fault
-{:ok, events} = NetworkLatency.inject(latency_cmd, %{})
-IO.inspect(events, label: "Latency injected")
-
-# Check if latency should be applied
-NetworkLatency.should_delay?()
-
-# Restore normal operation
-{:ok, _} = NetworkLatency.restore(latency_cmd, %{})
+{:ok, [event]} = NetworkLatency.inject(%NetworkLatency{latency_ms: 100, jitter_ms: 20}, %{})
+%{simulated?: PropertyDamage.Nemesis.simulated_event?(event)}
 ```
 
-### Certificate Expiry Simulation
+To wire a nemesis into a run, add it to the model's `commands/0` with a low weight.
+Its injected/restored events (`NetworkLatencyInjected` / `NetworkLatencyRestored`)
+flow through your projection like any other, so you can count active faults. The
+balance invariant must still hold under (simulated) latency, so the run passes.
 
 ```elixir
-alias PropertyDamage.Nemesis.CertificateExpiry
+defmodule Demo.ChaosBank do
+  use PropertyDamage.Model.Projection
 
-cert_cmd = %CertificateExpiry{
-  failure_type: :expired,
-  target: :api,
-  duration_ms: 10000
-}
+  alias Demo.Events.{AccountOpened, Credited, Debited, DebitRejected}
 
-# Inject certificate failure
-{:ok, events} = CertificateExpiry.inject(cert_cmd, %{})
-IO.inspect(events, label: "Certificate failure injected")
+  @impl true
+  def init, do: %{accounts: %{}, faults: 0}
 
-# Check if requests should fail
-CertificateExpiry.should_fail?(:api)
+  @impl true
+  def apply(state, %AccountOpened{account_id: id, currency: c, opening_balance: b}) do
+    put_in(state, [:accounts, id], %{currency: c, balance: b})
+  end
 
-# Get the SSL error that would be returned
-CertificateExpiry.get_ssl_error()
+  def apply(state, %Credited{account_id: id, new_balance: nb}) do
+    if Map.has_key?(state.accounts, id),
+      do: put_in(state, [:accounts, id, :balance], nb),
+      else: state
+  end
 
-# Restore
-{:ok, _} = CertificateExpiry.restore(cert_cmd, %{})
+  def apply(state, %Debited{account_id: id, new_balance: nb}) do
+    if Map.has_key?(state.accounts, id),
+      do: put_in(state, [:accounts, id, :balance], nb),
+      else: state
+  end
+
+  def apply(state, %DebitRejected{}), do: state
+  def apply(state, %NetworkLatencyInjected{}), do: update_in(state, [:faults], &(&1 + 1))
+  def apply(state, %NetworkLatencyRestored{}), do: state
+  def apply(state, _event), do: state
+
+  @trigger every: 1
+  def assert_balance_non_negative(state, _step) do
+    negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
+
+    unless negative == [] do
+      PropertyDamage.fail!("account balance went negative", accounts: negative)
+    end
+  end
+end
+
+defmodule Demo.ChaosModel do
+  @behaviour PropertyDamage.Model
+
+  alias Demo.Commands.{OpenAccount, Credit, Debit}
+  alias PropertyDamage.Nemesis.NetworkLatency
+
+  @impl true
+  def commands do
+    [
+      {OpenAccount, weight: 3},
+      {Credit,
+       weight: 3,
+       when: fn s -> map_size(s.accounts) > 0 end,
+       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+      {Debit,
+       weight: 3,
+       when: fn s -> map_size(s.accounts) > 0 end,
+       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+      # Low weight = occasional faults.
+      {NetworkLatency, weight: 1}
+    ]
+  end
+
+  @impl true
+  def command_sequence_projection, do: Demo.ChaosBank
+
+  @impl true
+  def assertion_projections, do: [Demo.ChaosBank]
+
+  @impl true
+  def simulator, do: Demo.Simulator
+end
+
+PropertyDamage.run(
+  model: Demo.ChaosModel,
+  adapter: Demo.BankAdapter,
+  max_commands: 20,
+  max_runs: 30,
+  seed: 7
+)
 ```
 
-## Part 5: Export Results
+To make the fault *real*, have your adapter's `setup/1` return
+`%{toxiproxy: %{proxy_name: ..., api_url: ...}}` and route the SUT through that
+proxy. See the **Chaos Engineering** guide for the live Toxiproxy recipe.
 
-### Export to ExUnit Test
+## Where to go next
 
-Generate a regression test from a failing sequence:
-
-```elixir
-# If we had a failure, we could export it:
-# PropertyDamage.Export.to_exunit(result, "test/regression_test.exs")
-
-# For now, let's see the markdown export:
-md = PropertyDamage.Export.to_markdown(result)
-Kino.Markdown.new(md)
+- `guides/getting_started.md` and `guides/quickstart.md` — the canonical shapes.
+- `guides/writing_commands.md`, `guides/writing_invariants.md` — commands and invariants in depth.
+- `guides/coverage_and_catalogs.md` — anti-vacuity coverage and the invariant catalog.
+- `guides/debugging_failures.md` — the full debugging workflow (replay, bisect, run comparison).
+- `guides/chaos_engineering.md` — nemesis operations, simulated vs. real faults.
+- `benches/cachex_bench/` — a complete, CI-gated model + adapter against real software.
 ```
-
-### Export to Script
-
-```elixir
-# Generate a curl script (if using HTTP adapter):
-# script = PropertyDamage.Export.to_script(result, :curl)
-# IO.puts(script)
-```
-
-## Tips for Effective Testing
-
-1. **Start Simple**: Begin with basic commands and add complexity gradually
-
-2. **Use Weights**: Weight commands to ensure necessary preconditions are met
-   (e.g., create accounts before debiting them)
-
-3. **Check Coverage**: Use `Coverage.from_result/1` to ensure all commands
-   and transitions are being exercised
-
-4. **Debug with Replay**: When tests fail, use step-by-step replay
-   (`PropertyDamage.replay/2`) to understand exactly what happened
-
-5. **Shrinking is Your Friend**: PropertyDamage automatically shrinks
-   failing sequences to minimal reproductions
-
-6. **Add Nemesis Gradually**: Start with basic tests, then add chaos
-   engineering to test resilience
-
-## Next Steps
-
-- Explore the `example_tests/` directory for more complex examples
-- Try the ToyBank example with 12 intentional bugs to find
-- Use TravelBooking example for chaos engineering patterns
-- Read the README for complete API documentation
