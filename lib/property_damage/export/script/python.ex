@@ -9,7 +9,7 @@ defmodule PropertyDamage.Export.Script.Python do
 
   ## Options
 
-  - `:base_url` - Base URL for HTTP calls (required)
+  - `:base_url` - Base URL for HTTP calls (default: "http://localhost:4000")
   - `:adapter` - Adapter module for HTTPSpec (optional)
   - `:env_var` - Environment variable name (default: "BASE_URL")
   - `:verbose` - Include extra comments (default: true)
