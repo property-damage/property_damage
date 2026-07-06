@@ -50,11 +50,9 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
       rep = report(failure_reason: Failure.assertion_failed(:x, "m"), projections: projections)
 
       assert {:ok, decoded} = Jason.decode(Formatter.format(rep, :json))
-      fields = decoded["state_at_failure"]["SomeEvent"]["_fields"] || decoded
       # Round-tripped types survive (somewhere in the structure)
       assert json_contains_value?(decoded, true)
       assert json_contains_value?(decoded, nil)
-      _ = fields
     end
   end
 
