@@ -74,6 +74,23 @@ defmodule PropertyDamageTest do
     end
   end
 
+  describe "run/1 error boundaries" do
+    test "adapter setup failure surfaces as an error, not a MatchError crash" do
+      result =
+        PropertyDamage.run(
+          model: ExecutorModel,
+          adapter: PropertyDamage.Test.FailingAdapter,
+          adapter_config: %{fail_setup: true},
+          max_runs: 1,
+          max_commands: 3,
+          validate: false
+        )
+
+      assert {:error, info} = result
+      assert info.adapter_setup_failed == :setup_failed
+    end
+  end
+
   describe "run/1 with lifecycle callbacks" do
     defmodule LifecycleModel do
       @behaviour PropertyDamage.Model
