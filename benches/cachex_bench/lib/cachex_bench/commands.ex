@@ -47,9 +47,6 @@ defmodule CachexBench.Commands.GetKey do
   defstruct [:key]
 
   @impl true
-  def read_only?, do: true
-
-  @impl true
   def generator(overrides \\ %{}) do
     %{key: StreamData.member_of(CachexBench.keys())}
     |> merge_overrides(overrides)

@@ -51,9 +51,6 @@ defmodule RedisBench.Commands.ReadValue do
   defstruct []
 
   @impl true
-  def read_only?, do: true
-
-  @impl true
   def generator(_overrides \\ %{}), do: StreamData.constant(%{})
 end
 
