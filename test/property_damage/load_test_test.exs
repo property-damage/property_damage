@@ -493,6 +493,23 @@ defmodule PropertyDamage.LoadTestTest do
     end
   end
 
+  # D2 fixture: an adapter whose execute/3 raises. On the unfixed worker the raise
+  # crashes the adapter Task, which is linked to the worker, so the worker (and its
+  # GenServer.call caller) go down. The fix captures the raise inside the task and
+  # reports it as a command error.
+  defmodule WorkerRaisingAdapter do
+    use PropertyDamage.Adapter, default_timeout: 30
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(_cmd, _ctx, _runtime), do: raise("adapter boom (D2)")
+  end
+
   # Ordering-regression fixtures: a command whose event sets state the command's
   # own `@trigger` reads back. Under load-test assertions this must observe the
   # command's own event (matching the main Executor), so `last` is set when the
@@ -591,6 +608,47 @@ defmodule PropertyDamage.LoadTestTest do
 
       Process.sleep(20)
       assert Metrics.snapshot(metrics).assertion_failures == 0
+
+      Worker.stop(worker)
+      Metrics.stop(metrics)
+    end
+
+    test "a raising adapter is captured as a command error, not a worker crash (D2)" do
+      # The worker is linked to us via start_link; trap exits so a (buggy) cascade
+      # surfaces as a caught exit here rather than taking the test process down.
+      Process.flag(:trap_exit, true)
+
+      {:ok, metrics} = Metrics.start_link()
+
+      {:ok, worker} =
+        Worker.start_link(
+          worker_id: 1,
+          model: WorkerTestModel,
+          adapter: WorkerRaisingAdapter,
+          adapter_config: %{},
+          metrics: metrics,
+          think_time_range: {0, 0},
+          assertion_mode: :disabled
+        )
+
+      worker_ref = Process.monitor(worker)
+
+      result =
+        try do
+          Worker.execute_sequence(worker)
+        catch
+          :exit, reason -> {:worker_crashed, reason}
+        end
+
+      # The adapter raise must be converted into command errors, and the sequence
+      # must still return a result. On the unfixed worker the raise crashes the
+      # worker, so the call exits and `result` is {:worker_crashed, _}.
+      assert match?({:ok, %{errors: errors}} when errors > 0, result),
+             "expected adapter raise captured as command errors, got: #{inspect(result)}"
+
+      # The worker survived the raising adapter.
+      refute_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 200
+      assert Process.alive?(worker)
 
       Worker.stop(worker)
       Metrics.stop(metrics)
