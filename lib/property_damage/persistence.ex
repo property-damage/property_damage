@@ -462,7 +462,13 @@ defmodule PropertyDamage.Persistence do
 
       true ->
         try do
-          fun.(:erlang.binary_to_term(term_binary, [:safe]))
+          case :erlang.binary_to_term(term_binary, [:safe]) do
+            payload when is_map(payload) -> fun.(payload)
+            # A validly-encoded but non-map payload cannot carry a PD envelope;
+            # reject it with the same shape unloadable terms get rather than
+            # letting payload access crash the loader.
+            _ -> {:error, :unsafe_terms}
+          end
         rescue
           ArgumentError -> {:error, :unsafe_terms}
         end
