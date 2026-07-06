@@ -1433,11 +1433,17 @@ in `.claude/skills/`, grouped by name prefix for two distinct audiences:
 - **`pd-*` (library users).** Judgment-heavy workflows for testing *your* system
   with PropertyDamage: authoring a correct model and invariants, diagnosing shrunk
   counterexamples. These are meant to run in your application's repository, next to
-  your SUT, not in this one. The first skills in this group are in development.
+  your SUT, not in this one. Current skills:
+  - **`pd-model-interview`** — interviews you about your system's behavior,
+    writes a durable `model_spec.md`, and scaffolds the model from it (Events,
+    Commands, Projections, Invariants, adapter skeleton). Also handles evolving
+    an existing spec-backed model. The runnable examples in its reference docs
+    are executed by the documentation-verification gate, so the skill's
+    templates are held to the same standard as the guides.
 - **`openspec-*` (contributors).** The OpenSpec change workflow used to develop
   PropertyDamage itself. Only meaningful inside this repository.
 
-To use `pd-*` skills in your application (once the first ones land), copy them from
+To use `pd-*` skills in your application, copy them from
 the git tag matching your installed version. Skills track the API of their release, so skills from a newer
 tag may reference APIs your version does not have:
 
