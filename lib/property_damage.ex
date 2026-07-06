@@ -35,15 +35,13 @@ defmodule PropertyDamage do
 
       defmodule MyModelTest do
         use ExUnit.Case
-        use PropertyDamage
+        use PropertyDamage.ExUnit
 
-        @model MyApp.TestModel
-        @adapter MyApp.TestAdapter
-
-        property_damage "system maintains invariants" do
+        property_damage "system maintains invariants",
+          model: MyApp.TestModel,
+          adapter: MyApp.TestAdapter,
           max_commands: 50,
           max_runs: 100
-        end
       end
 
   ## Running Directly

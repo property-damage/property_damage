@@ -87,12 +87,10 @@ defmodule PropertyDamage.ExUnit do
         use ExUnit.Case
         use PropertyDamage.ExUnit
 
-        @model MyModel
-        @adapter MyAdapter
-
-        property_damage "test name" do
+        property_damage "test name",
+          model: MyModel,
+          adapter: MyAdapter,
           max_runs: 10
-        end
       end
   """
   defmacro __using__(_opts) do
