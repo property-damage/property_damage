@@ -214,6 +214,17 @@ defmodule PropertyDamage.Executor do
         )
 
         :ok
+    catch
+      # A BEAM exit/throw from teardown/1 bypasses `rescue`; keep teardown
+      # best-effort so a cleanup hiccup cannot crash the run or perturb the
+      # failure being minimized during shrinking (A5).
+      kind, reason ->
+        Logger.warning(
+          "Adapter #{inspect(adapter)} teardown/1 escaped via #{kind}: " <>
+            Exception.format(kind, reason, __STACKTRACE__)
+        )
+
+        :ok
     end
   end
 
@@ -1019,7 +1030,26 @@ defmodule PropertyDamage.Executor do
     |> PropertyDamage.Model.normalize_commands()
     |> Map.new(fn {_weight, module, spec} -> {module, spec} end)
   rescue
-    _ -> %{}
+    # Never swallow a misconfigured model into an empty spec map: that silently
+    # dropped every command's settle/stutter semantics and turned a config bug
+    # into confusing downstream behaviour. Re-raise loudly with fix-forward
+    # guidance, preserving the original cause (B4).
+    e ->
+      reraise ArgumentError, [message: build_command_specs_error(model, e)], __STACKTRACE__
+  end
+
+  defp build_command_specs_error(model, error) do
+    """
+    Could not build command specs for model #{inspect(model)}: #{Exception.message(error)}
+
+    Suggestions:
+      - Ensure #{inspect(model)}.commands/0 returns a list of command modules, \
+    {module, weight} tuples, or %{command: module, ...} maps.
+      - Give each command a positive integer weight, and check any `when:`/`with:` \
+    overrides have the expected shape.
+      - Verify every listed command module is defined and uses `PropertyDamage.Command`.
+    """
+    |> String.trim()
   end
 
   # Inject an event mid-execution from an adapter.

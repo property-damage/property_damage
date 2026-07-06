@@ -389,5 +389,42 @@ defmodule PropertyDamage.StatePollerTest do
       # Should have been called at least 3 times (2 failures + 1 success)
       assert :counters.get(call_count, 1) >= 3
     end
+
+    @tag :capture_log
+    test "continues polling even if predicate exits" do
+      import ExUnit.CaptureLog
+
+      call_count = :counters.new(1, [:atomics])
+
+      predicate = fn _state ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        # A GenServer.call to a dead process exits; simulate that BEAM exit here.
+        # It bypasses `rescue`, so before the fix it killed the poller and, via
+        # the start_link, the caller (the run) with it.
+        if count < 2 do
+          exit(:predicate_boom)
+        else
+          true
+        end
+      end
+
+      poller =
+        StatePoller.start(
+          predicate: predicate,
+          projection: TestProjection,
+          interval_ms: 10,
+          timeout_ms: 500,
+          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          get_state_fn: fn _proj -> %{} end
+        )
+
+      capture_log(fn ->
+        assert {:success, _} = StatePoller.await(poller)
+      end)
+
+      assert :counters.get(call_count, 1) >= 3
+    end
   end
 end
