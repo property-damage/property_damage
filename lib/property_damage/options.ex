@@ -1384,10 +1384,14 @@ defmodule PropertyDamage.Options do
 
   @doc """
   Converts a duration tuple to milliseconds.
+
+  Both singular and plural unit atoms are accepted so `{1, :second}` reads as
+  naturally as `{2, :seconds}` (consistent with the framework's other time
+  helpers, e.g. `PropertyDamage.Model.Projection`).
   """
   @spec duration_to_ms({pos_integer(), atom()}) :: non_neg_integer()
-  def duration_to_ms({value, :milliseconds}), do: value
-  def duration_to_ms({value, :seconds}), do: value * 1_000
-  def duration_to_ms({value, :minutes}), do: value * 60_000
-  def duration_to_ms({value, :hours}), do: value * 3_600_000
+  def duration_to_ms({value, unit}) when unit in [:millisecond, :milliseconds], do: value
+  def duration_to_ms({value, unit}) when unit in [:second, :seconds], do: value * 1_000
+  def duration_to_ms({value, unit}) when unit in [:minute, :minutes], do: value * 60_000
+  def duration_to_ms({value, unit}) when unit in [:hour, :hours], do: value * 3_600_000
 end

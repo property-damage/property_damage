@@ -57,7 +57,7 @@ defmodule PropertyDamage.LoadTest.Runner do
   - `:ramp_up` - Ramp-up strategy (default: :immediate)
   - `:ramp_down` - Ramp-down strategy (default: :immediate)
   - `:think_time` - {min, max} ms between commands in sequence (default: {0, 0})
-  - `:metrics_interval` - Snapshot cadence for progress updates (default: {1, :second})
+  - `:metrics_interval` - Snapshot cadence for progress updates (default: {1, :seconds})
   - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` values: a
     `LoadUpdate` each interval and a terminal `LoadResult` (DR-022)
   - `:assertion_mode` - How to handle assertions (default: :disabled)
@@ -537,8 +537,9 @@ defmodule PropertyDamage.LoadTest.Runner do
     Process.send_after(self(), :check_duration, interval_ms)
   end
 
-  defp duration_to_ms({value, :milliseconds}), do: value
-  defp duration_to_ms({value, :seconds}), do: value * 1000
-  defp duration_to_ms({value, :minutes}), do: value * 60 * 1000
-  defp duration_to_ms({value, :hours}), do: value * 60 * 60 * 1000
+  # Both singular and plural unit atoms are accepted (see Options.duration_to_ms/1).
+  defp duration_to_ms({value, unit}) when unit in [:millisecond, :milliseconds], do: value
+  defp duration_to_ms({value, unit}) when unit in [:second, :seconds], do: value * 1000
+  defp duration_to_ms({value, unit}) when unit in [:minute, :minutes], do: value * 60 * 1000
+  defp duration_to_ms({value, unit}) when unit in [:hour, :hours], do: value * 60 * 60 * 1000
 end

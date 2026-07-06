@@ -142,15 +142,16 @@ defmodule PropertyDamage.LoadTest do
 
   - `:model` - Model module implementing PropertyDamage.Model
   - `:adapter` - Adapter module implementing PropertyDamage.Adapter
-  - `:concurrent_users` - Target number of concurrent user sessions
+  - `:arrival_rate` - Target arrival rate: an integer (arrivals per second, e.g.
+    `100`) or a `{count, {time, unit}}` tuple (e.g. `{2, {15, :milliseconds}}`)
   - `:duration` - Test duration as `{value, unit}` tuple
 
   ## Optional Options
 
   - `:adapter_config` - Configuration passed to adapter.setup/1 (default: %{})
+  - `:arrival_jitter` - {min, max} ms jitter added per arrival (default: {0, 0})
   - `:ramp_up` - Strategy for ramping up load (default: :immediate)
   - `:ramp_down` - Strategy for ramping down load (default: :immediate)
-  - `:commands_per_session` - {min, max} commands per sequence (default: {10, 50})
   - `:think_time` - {min, max} ms delay between commands (default: {0, 0})
   - `:metrics_interval` - Snapshot cadence for progress updates (default: {1, :seconds})
   - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` values: a
@@ -173,7 +174,7 @@ defmodule PropertyDamage.LoadTest do
         model: MyApp.Model,
         adapter: MyApp.HTTPAdapter,
         adapter_config: %{base_url: "http://localhost:4000"},
-        concurrent_users: 50,
+        arrival_rate: 50,
         duration: {2, :minutes}
       )
 
@@ -182,7 +183,7 @@ defmodule PropertyDamage.LoadTest do
         model: MyApp.Model,
         adapter: MyApp.HTTPAdapter,
         adapter_config: %{base_url: "http://localhost:4000"},
-        concurrent_users: 100,
+        arrival_rate: 100,
         duration: {5, :minutes},
         ramp_up: {:linear, {60, :seconds}},
         on_progress: fn

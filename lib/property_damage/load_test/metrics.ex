@@ -221,7 +221,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
     # Increment request count
     :atomics.add(counters, @total_requests, 1)
 
-    # Record latency using reservoir sampling
+    # Record latency into the bounded latency table (random-slot overwrite)
     record_latency(state.latencies_table, latency_ms)
 
     # Record per-command metrics
@@ -355,7 +355,11 @@ defmodule PropertyDamage.LoadTest.Metrics do
   end
 
   defp record_latency(table, latency_ms) do
-    # Use reservoir sampling for bounded memory
+    # Bounded-memory latency retention via random-slot overwrite: pick a uniformly
+    # random slot in a fixed-size table and overwrite whatever is there. This is
+    # NOT reservoir sampling (it does not preserve a uniform sample of the whole
+    # stream — later samples overwrite earlier ones at a constant per-slot rate,
+    # biasing the retained set toward recent traffic). It only bounds memory.
     key = :rand.uniform(@reservoir_size)
     :ets.insert(table, {key, latency_ms})
   end
@@ -383,7 +387,9 @@ defmodule PropertyDamage.LoadTest.Metrics do
 
         latencies =
           if length(existing.latencies) >= 100 do
-            # Use reservoir sampling
+            # Bounded via random-slot overwrite (not reservoir sampling): overwrite
+            # a uniformly random slot, biasing the retained samples toward recent
+            # traffic. Keeps the per-command latency list at a fixed size.
             idx = :rand.uniform(100)
             List.replace_at(existing.latencies, idx - 1, latency_ms)
           else
