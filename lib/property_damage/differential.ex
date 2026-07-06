@@ -147,8 +147,10 @@ defmodule PropertyDamage.Differential do
     with {:ok, config} <- build_config(opts),
          {:ok, targets} <- parse_targets(config.targets),
          {:ok, baseline} <- maybe_load_baseline(config.baseline) do
-      # Determine execution mode
+      # Determine execution mode (record it on config so the result reports the
+      # mode actually used, including baseline-forced sequential runs).
       execution_mode = determine_execution_mode(config, baseline)
+      config = Map.put(config, :execution_mode, execution_mode)
 
       # Run the appropriate execution strategy
       result =
@@ -163,16 +165,14 @@ defmodule PropertyDamage.Differential do
       # Maybe export results
       case result do
         {:ok, result} ->
-          if config.export_to do
-            :ok = Baseline.export(result, config, config.export_to)
+          with :ok <- maybe_export(config, result) do
+            # Terminal notification (DR-022): a copy of the authoritative result
+            # for consumers, emitted once for both execution modes. The returned
+            # `{:ok, result}` remains the source of truth.
+            Reporter.emit(config.reporter, fn -> %DifferentialResult{result: result} end)
+
+            {:ok, result}
           end
-
-          # Terminal notification (DR-022): a copy of the authoritative result
-          # for consumers, emitted once for both execution modes. The returned
-          # `{:ok, result}` remains the source of truth.
-          Reporter.emit(config.reporter, fn -> %DifferentialResult{result: result} end)
-
-          {:ok, result}
 
         error ->
           error
@@ -280,6 +280,12 @@ defmodule PropertyDamage.Differential do
 
   defp maybe_load_baseline(path) do
     Baseline.load(path)
+  end
+
+  defp maybe_export(%{export_to: nil}, _result), do: :ok
+
+  defp maybe_export(%{export_to: path} = config, result) do
+    Baseline.export(result, config, path)
   end
 
   # ============================================================================
@@ -806,7 +812,7 @@ defmodule PropertyDamage.Differential do
 
     %Result{
       mode: config.compare,
-      execution: determine_execution_mode(config, nil),
+      execution: config.execution_mode,
       runs: config.max_runs,
       seed: config.seed,
       reference: if(reference, do: reference.name, else: nil),
