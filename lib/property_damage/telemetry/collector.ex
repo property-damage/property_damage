@@ -224,7 +224,7 @@ defmodule PropertyDamage.Telemetry.Collector do
   end
 
   defp handle_telemetry_event([:property_damage, :run, :stop], measurements, metadata, state) do
-    duration_us = div(measurements[:duration] || 0, 1000)
+    duration_us = System.convert_time_unit(measurements[:duration] || 0, :native, :microsecond)
 
     new_state =
       if metadata[:result] == :ok do
@@ -322,7 +322,7 @@ defmodule PropertyDamage.Telemetry.Collector do
   end
 
   defp handle_telemetry_event([:property_damage, :command, :stop], measurements, metadata, state) do
-    duration_us = div(measurements[:duration] || 0, 1000)
+    duration_us = System.convert_time_unit(measurements[:duration] || 0, :native, :microsecond)
     command = metadata[:command]
 
     # Update per-command stats
@@ -343,7 +343,7 @@ defmodule PropertyDamage.Telemetry.Collector do
   end
 
   defp handle_telemetry_event([:property_damage, :check, :stop], measurements, metadata, state) do
-    duration_us = div(measurements[:duration] || 0, 1000)
+    duration_us = System.convert_time_unit(measurements[:duration] || 0, :native, :microsecond)
     check_name = metadata[:check_name]
     passed = metadata[:passed]
 
@@ -405,7 +405,7 @@ defmodule PropertyDamage.Telemetry.Collector do
   end
 
   defp handle_telemetry_event([:property_damage, :shrink, :stop], measurements, metadata, state) do
-    duration_us = div(measurements[:duration] || 0, 1000)
+    duration_us = System.convert_time_unit(measurements[:duration] || 0, :native, :microsecond)
 
     new_state = %{state | total_shrink_time: state.total_shrink_time + duration_us}
 
