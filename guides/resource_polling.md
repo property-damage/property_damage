@@ -282,6 +282,8 @@ When testing adapters that use resource polling, you can use the returned poller
 
 ```elixir
 test "authorization polling" do
+  alias PropertyDamage.{EventQueue, ResourcePoller}
+
   {:ok, queue} = EventQueue.start_link()
 
   # User context is exactly the setup/1 return

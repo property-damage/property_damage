@@ -106,6 +106,9 @@ PropertyDamage.Differential.run(
 )
 ```
 
+> Create the target directory first (e.g. `File.mkdir_p!("baselines")`) —
+> `export_to:` writes to the path as given and does not create parent directories.
+
 ### Compare Against Baseline
 
 Days or weeks later:
