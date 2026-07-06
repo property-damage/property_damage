@@ -306,6 +306,29 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   # ============================================================================
+  # Duration Unit Tests (D6a)
+  # ============================================================================
+
+  describe "duration_to_ms unit handling (D6a)" do
+    test "accepts singular time units (matching the framework's plural forms)" do
+      # The load-test duration helper only knew plural unit atoms, so a singular
+      # unit raised FunctionClauseError. Singular and plural must both convert,
+      # matching the framework convention (projection.ex normalize_time).
+      assert PropertyDamage.Options.duration_to_ms({1, :millisecond}) == 1
+      assert PropertyDamage.Options.duration_to_ms({1, :second}) == 1_000
+      assert PropertyDamage.Options.duration_to_ms({2, :minute}) == 120_000
+      assert PropertyDamage.Options.duration_to_ms({1, :hour}) == 3_600_000
+    end
+
+    test "still accepts the plural time units" do
+      assert PropertyDamage.Options.duration_to_ms({1, :milliseconds}) == 1
+      assert PropertyDamage.Options.duration_to_ms({1, :seconds}) == 1_000
+      assert PropertyDamage.Options.duration_to_ms({2, :minutes}) == 120_000
+      assert PropertyDamage.Options.duration_to_ms({1, :hours}) == 3_600_000
+    end
+  end
+
+  # ============================================================================
   # Report Tests
   # ============================================================================
 
