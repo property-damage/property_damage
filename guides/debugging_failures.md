@@ -20,7 +20,7 @@ IO.inspect(failure, label: "Failure")
 The report includes:
 - **seed** - Random seed for reproducibility
 - **original_sequence** - Full command sequence that failed
-- **shrunk_sequence** - Minimal reproduction (after shrinking)
+- **shrunk_sequence(failure)** - Minimal reproduction (after shrinking), read via the accessor `PropertyDamage.FailureReport.shrunk_sequence/1` (it is not a struct field)
 - **shrink_iterations** / **shrink_time_ms** - How much shrinking it took
 - **failure_reason** - a `%PropertyDamage.Failure{}` describing what failed (see below)
 - **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over `failure_reason`: which assertion failed and a human-readable description
@@ -88,7 +88,7 @@ necessary for the failure:
 
 ```elixir
 # Print the shrunk sequence (a %PropertyDamage.Sequence{}; flatten with to_list/1)
-failure.shrunk_sequence
+PropertyDamage.FailureReport.shrunk_sequence(failure)
 |> PropertyDamage.Sequence.to_list()
 |> Enum.with_index()
 |> Enum.each(fn {cmd, idx} ->
@@ -197,7 +197,7 @@ Find the specific field/value that causes the failure:
 {:ok, trigger} = PropertyDamage.isolate_trigger(failure)
 
 IO.puts("Trigger: #{inspect(trigger)}")
-# => %{command_index: 2, field: :amount, value: 600, threshold: 500}
+# => %{trigger_index: 0, trigger_command: %Withdraw{...}, likely_cause: "...", changes: [%{field: ..., original: ..., fixed: ...}]}
 ```
 
 ## Step 6: Visual Debugging
@@ -231,8 +231,8 @@ discriminate the outcomes (DR-035). The two use cases:
 Both need full, unshrunk runs of the same plan, which is exactly what a
 `FailureReport` is *not* (it holds a shrunk sequence). Capture those runs with
 `PropertyDamage.RunTrace.capture/1` and feed them to
-`PropertyDamage.RunComparison.compare/2`. Neither runs a SUT during comparison:
-capture records the runs, `compare/2` is pure data-in/data-out.
+`PropertyDamage.RunComparison.compare/1`. Neither runs a SUT during comparison:
+capture records the runs, `compare/1` is pure data-in/data-out.
 
 For regression localization, capture one trace per revision of the SUT at the
 same seed (same seed and model ⇒ same plan ⇒ comparable):
@@ -247,7 +247,7 @@ after_ = RunTrace.capture(model: MyModel, adapter: MyAdapter.Buggy, seed: failur
 comparison = RunComparison.compare([before, after_])
 ```
 
-`compare/2` refuses rather than emit a misleading diff when the traces are not
+`compare/1` refuses rather than emit a misleading diff when the traces are not
 the same plan (unequal plan fingerprint or model). Always check the guard, then
 read the ranking (most discriminating field first):
 
@@ -258,7 +258,7 @@ if comparison.comparable? do
 
   Enum.each(comparison.ranking, fn field ->
     IO.inspect(%{
-      where: field.location,          # {:command, position, path} | {:event, ...}
+      where: field.location,          # {:command, position, path} | {:event, ...} | {:state, position, projection, path}
       class: field.classification,    # :discriminating | :incidental | :weak | ...
       values: field.values            # %{trace_index => value}
     })
@@ -376,19 +376,19 @@ File.write!("test/regression/capture_overflow_test.exs", test_code)
 ### Generate Reproduction Script
 
 ```elixir
-# Curl script for API testing
-script = PropertyDamage.Export.to_script(failure, :curl)
+# Curl script for API testing (script/livebook exports need a :base_url)
+script = PropertyDamage.Export.to_script(failure, :curl, base_url: "http://localhost:4000")
 File.write!("debug/reproduce.sh", script)
 
 # Elixir script
-script = PropertyDamage.Export.to_script(failure, :elixir)
+script = PropertyDamage.Export.to_script(failure, :elixir, base_url: "http://localhost:4000")
 File.write!("debug/reproduce.exs", script)
 ```
 
 ### Generate Livebook
 
 ```elixir
-notebook = PropertyDamage.Export.to_livebook(failure)
+notebook = PropertyDamage.Export.to_livebook(failure, base_url: "http://localhost:4000")
 File.write!("debug/failure_analysis.livemd", notebook)
 ```
 
@@ -398,7 +398,7 @@ File.write!("debug/failure_analysis.livemd", notebook)
 
 ```elixir
 {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
-# => "failures/capture_overflow_20240115_143022.failure"
+# => "failures/capture_overflow_20240115_143022.pd"
 ```
 
 ### Replay the failing seed first while you fix it
@@ -552,7 +552,7 @@ IO.puts("shrink iterations: #{failure.shrink_iterations}")
 IO.puts("shrink time: #{failure.shrink_time_ms}ms")
 
 original_len = failure.original_sequence |> PropertyDamage.Sequence.to_list() |> length()
-shrunk_len = failure.shrunk_sequence |> PropertyDamage.Sequence.to_list() |> length()
+shrunk_len = PropertyDamage.FailureReport.shrunk_sequence(failure) |> PropertyDamage.Sequence.to_list() |> length()
 IO.puts("#{original_len} -> #{shrunk_len} commands")
 ```
 

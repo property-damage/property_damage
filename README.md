@@ -950,7 +950,7 @@ else
 end
 ```
 
-`compare/2` refuses (returns `comparable?: false` with `guard_violations`) rather
+`compare/1` refuses (returns `comparable?: false` with `guard_violations`) rather
 than emit a misleading diff when the traces are not the same plan (unequal plan
 fingerprint or model).
 

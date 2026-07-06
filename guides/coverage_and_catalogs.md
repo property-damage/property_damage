@@ -189,17 +189,19 @@ Invariant coverage:
 `Coverage.format(tracker, :full)` adds a transition matrix and the untested
 pairs; `Coverage.format(tracker, :matrix)` prints just the matrix.
 
-If you did not run with `coverage: true`, you can still derive a tracker from any
-single result — this is what `PropertyDamage.coverage/2` does (it delegates to
-`Coverage.from_result/2`):
+`PropertyDamage.coverage/2` returns a tracker from a run result (it delegates to
+`Coverage.from_result/2`). For a full multi-run you must enable coverage so the
+result carries the merged tracker:
 
 ```elixir
-result = PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter)
+result = PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter, coverage: true)
 tracker = PropertyDamage.coverage(result, Bank.Model)
 ```
 
-Note the difference: `coverage: true` accumulates the whole run; `coverage/2`
-summarizes one result.
+`coverage/2` also accepts a single result — a `{:ok, %{sequence: ...}}` or an
+`{:error, report}` failure — recording it into a fresh tracker. A multi-run
+result **without** `coverage: true` carries no coverage data and raises, naming
+the option to set.
 
 ## The invariant catalog (DR-026)
 

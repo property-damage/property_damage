@@ -333,7 +333,7 @@ $ cd benches/openapi_bench
 $ mix test
 ...........
 Finished in 1.7 seconds (0.00s async, 1.7s sync)
-Result: 11 passed
+18 tests, 0 failures
 ```
 
 The payoff is `seeded_bug_test.exs`. The bench can flip a `bug` flag that makes
