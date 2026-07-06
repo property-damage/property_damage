@@ -447,7 +447,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
             change_text =
               if changes != "",
-                do: "\n    #{yellow(color)}Changes:#{reset(color)}\n#{indent_text(changes, "      ")}",
+                do:
+                  "\n    #{yellow(color)}Changes:#{reset(color)}\n#{indent_text(changes, "      ")}",
                 else: ""
 
             """
