@@ -499,7 +499,7 @@ defmodule PropertyDamage.ShrinkerTest do
         )
 
       # Should convert to linear sequence since race is not needed
-      assert Sequence.linear?(result.sequence) or Sequence.command_count(result.sequence) == 2
+      assert Sequence.linear?(result.sequence)
     end
 
     test "converted-linear shrink truncates at the linear failure index, not the branch-relative one" do

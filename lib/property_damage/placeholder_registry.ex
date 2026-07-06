@@ -71,7 +71,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
   @doc """
   Get the placeholder IDs produced at a structured position (DR-021).
   """
-  @spec ids_at_position(t(), Placeholder.position()) :: [reference()]
+  @spec ids_at_position(t(), Placeholder.position()) :: [Placeholder.id()]
   def ids_at_position(%__MODULE__{} = reg, position) do
     Map.get(reg.producer_link, position, [])
   end
@@ -107,7 +107,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
   Returns the registry unchanged if no placeholder has that ID. This is the
   id-based write that execution-time capture uses, paired with `ids_at_position/2`.
   """
-  @spec resolve(t(), reference(), term()) :: t()
+  @spec resolve(t(), Placeholder.id(), term()) :: t()
   def resolve(%__MODULE__{} = reg, id, value) do
     case Map.get(reg.placeholders, id) do
       nil -> reg
@@ -152,7 +152,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
   @doc """
   Get a placeholder by its ID.
   """
-  @spec get(t(), reference()) :: Placeholder.t() | nil
+  @spec get(t(), Placeholder.id()) :: Placeholder.t() | nil
   def get(%__MODULE__{} = reg, id) do
     Map.get(reg.placeholders, id)
   end
@@ -276,7 +276,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
 
   Returns a list of placeholder IDs found in the structure.
   """
-  @spec collect_placeholder_ids(term()) :: [reference()]
+  @spec collect_placeholder_ids(term()) :: [Placeholder.id()]
   def collect_placeholder_ids(data) do
     do_collect_ids(data, [])
     |> Enum.uniq()
