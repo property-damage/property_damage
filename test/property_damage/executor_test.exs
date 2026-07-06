@@ -365,6 +365,43 @@ defmodule PropertyDamage.ExecutorTest do
                result.failure_reason
     end
 
+    test "merged fold ordinals are collision-free and the suffix counts past every branch (P8 / DR-040)" do
+      # Each branch forks from the same prefix fold counter, so without a
+      # collision-free merge two branch commands are recorded at the SAME fold
+      # ordinal and the merged counter takes max() instead of the sum, letting
+      # the suffix's ordinals overlap a branch's. A faithful fold order must be a
+      # total order: every command's recorded ordinal is distinct, and the suffix
+      # continues strictly past every branch ordinal.
+      seq =
+        Sequence.branching(
+          [%CreateItem{name: "Prefix", quantity: 1}],
+          [
+            [%CreateItem{name: "A0", quantity: 1}, %CreateItem{name: "A1", quantity: 1}],
+            [%CreateItem{name: "B0", quantity: 1}]
+          ],
+          [%CreateItem{name: "Suffix", quantity: 1}]
+        )
+
+      {:ok, result} = Executor.run(seq, ExecutorModel, SimpleAdapter)
+      assert result.success == true
+
+      ordinals = result.command_fold_ordinals
+      values = Map.values(ordinals)
+
+      # No two commands share a fold ordinal.
+      assert length(values) == length(Enum.uniq(values)),
+             "expected distinct fold ordinals, got #{inspect(ordinals)}"
+
+      # The suffix folds after every branch command (counter = prefix + sum of
+      # branch deltas, not max).
+      suffix_ordinal = Map.fetch!(ordinals, Position.suffix(0))
+
+      branch_ordinals =
+        for {%Position{section: {:branch, _}}, ordinal} <- ordinals, do: ordinal
+
+      assert Enum.all?(branch_ordinals, &(&1 < suffix_ordinal))
+    end
+
     test "merges projections from all branches" do
       seq =
         Sequence.branching(
