@@ -114,6 +114,56 @@ defmodule PropertyDamage.Shrinker.GraphTest do
     end
   end
 
+  describe "build/2 with a producers override" do
+    test "honors the override instead of the embedded positions" do
+      # Consumer embeds a placeholder whose position (prefix offset 5) is stale:
+      # it points past the end of this 2-command list. Passing an explicit
+      # producers map overrides the embedded-position derivation.
+      stale = Placeholder.new_at(Event, [:id], Position.prefix(5), 0)
+
+      commands = [
+        %Command{name: "producer"},
+        %Command{name: "consumer", a: stale}
+      ]
+
+      producers = %{{:placeholder, stale.id} => 0}
+      graph = Graph.build(commands, producers)
+
+      # Producer resolves to node 0 (the override), and the edge runs 0 -> 1.
+      assert Map.get(graph.producers, {:placeholder, stale.id}) == 0
+      assert MapSet.member?(Map.get(graph.edges, 0, MapSet.new()), 1)
+      assert MapSet.equal?(Graph.ancestors(graph, 1), MapSet.new([0]))
+    end
+
+    test "default path (no override) still derives from embedded positions" do
+      stale = Placeholder.new_at(Event, [:id], Position.prefix(5), 0)
+
+      commands = [
+        %Command{name: "producer"},
+        %Command{name: "consumer", a: stale}
+      ]
+
+      graph = Graph.build(commands)
+
+      # Without an override the producer index comes from the embedded offset (5).
+      assert Map.get(graph.producers, {:placeholder, stale.id}) == 5
+    end
+
+    test "an empty override map yields no producers or edges" do
+      p = produced_at(0)
+
+      commands = [
+        %Command{name: "producer"},
+        %Command{name: "consumer", a: p}
+      ]
+
+      graph = Graph.build(commands, %{})
+
+      assert graph.producers == %{}
+      assert graph.edges == %{}
+    end
+  end
+
   describe "ancestors/2" do
     test "returns empty set for root nodes" do
       commands = [

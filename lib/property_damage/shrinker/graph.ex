@@ -32,6 +32,16 @@ defmodule PropertyDamage.Shrinker.Graph do
   ## Parameters
 
   - `commands` - List of command structs
+  - `producers` - Optional producer map `%{{:placeholder, reference()} =>
+    non_neg_integer()}` mapping each dependency identity to its producing node
+    index. When `nil` (the default), producers are derived from the positions
+    embedded in each command's `%Placeholder{}` structs. That derivation is only
+    valid when those embedded positions are current, which holds for the
+    original (unshrunk) command list the shrinker feeds this. It does NOT hold
+    for a shrunk command list: the shrinker leaves embedded positions at their
+    stale original offsets and instead remaps the registry's `producer_link`
+    (see `PlaceholderRegistry.remap_positions/2`), so a caller working from a
+    shrunk sequence must build the map from that registry and pass it here.
 
   ## Returns
 
@@ -42,12 +52,14 @@ defmodule PropertyDamage.Shrinker.Graph do
       consumer = %AddItem{order: placeholder_for_index_0}
       graph = Graph.build([%CreateOrder{}, consumer])
   """
-  @spec build([struct()]) :: t()
-  def build(commands) do
-    # Identify producers. A placeholder's producer is identified by its
-    # structured position (DR-021); for the linear command list the graph
-    # operates on, a prefix position's offset maps directly to index i.
-    producers = add_placeholder_producers(commands, %{})
+  @spec build([struct()], %{{:placeholder, reference()} => non_neg_integer()} | nil) :: t()
+  def build(commands, producers \\ nil) do
+    # Identify producers. When no override is supplied, derive them from the
+    # structured position embedded in each placeholder (DR-021); for the linear
+    # command list the graph operates on, a prefix position's offset maps
+    # directly to index i. A caller with a shrunk sequence supplies the
+    # authoritative map instead, because the embedded positions are stale there.
+    producers = producers || add_placeholder_producers(commands, %{})
 
     # Identify consumers and build edges
     {nodes, edges, consumers} =
@@ -88,7 +100,10 @@ defmodule PropertyDamage.Shrinker.Graph do
     }
   end
 
-  # Scan all commands to find placeholders and record their producers
+  # Scan all commands to find placeholders and record their producers from the
+  # positions embedded in the placeholder structs. Correct only when those
+  # positions are current (the unshrunk command list); shrunk callers pass an
+  # authoritative producer map to `build/2` rather than relying on this.
   defp add_placeholder_producers(commands, producers) do
     commands
     |> Enum.with_index()
