@@ -660,7 +660,7 @@ defmodule PropertyDamage do
 
         try do
           # Execute the sequence
-          {:ok, result} =
+          run_result =
             Executor.run(sequence, model, adapter,
               adapter_config: adapter_config,
               event_queue: event_queue,
@@ -676,61 +676,70 @@ defmodule PropertyDamage do
               mint_epoch: 0
             )
 
-          # Emit telemetry for sequence stop
-          Telemetry.sequence_stop(seq_start_time, %{
-            run_number: run_number,
-            success: result.success,
-            commands_executed: command_count
-          })
+          case run_result do
+            {:ok, result} ->
+              # Emit telemetry for sequence stop
+              Telemetry.sequence_stop(seq_start_time, %{
+                run_number: run_number,
+                success: result.success,
+                commands_executed: command_count
+              })
 
-          # Accumulate this sequence's per-assertion firings into the whole-run
-          # total (DR-026), and (only under coverage: true) fold its
-          # command/transition/state dimensions into the tracker.
-          coverage_acc = accumulate_coverage(coverage_acc, result, sequence)
+              # Accumulate this sequence's per-assertion firings into the whole-run
+              # total (DR-026), and (only under coverage: true) fold its
+              # command/transition/state dimensions into the tracker.
+              coverage_acc = accumulate_coverage(coverage_acc, result, sequence)
 
-          if result.success do
-            # Success - continue to next run
-            run_loop(
-              generator,
-              model,
-              adapter,
-              max_runs,
-              seed,
-              run_nonce,
-              injector_adapters,
-              mock_services,
-              adapter_config,
-              shrink,
-              shrinker_config,
-              on_failure,
-              reporter,
-              stutter_config,
-              run_number + 1,
-              total_commands + command_count,
-              coverage_acc
-            )
-          else
-            # Failure - shrink and report. Pass the run's EFFECTIVE seed so
-            # the report's "reproduce with this seed" is exact (run 0 of a
-            # reproduction derives the identical sequence from it).
-            handle_failure(
-              sequence,
-              result,
-              model,
-              adapter,
-              adapter_config,
-              event_queue,
-              mock_registry,
-              shrink,
-              shrinker_config,
-              on_failure,
-              reporter,
-              run_seed,
-              run_number,
-              run_nonce,
-              stutter_config,
-              coverage_acc.fires
-            )
+              if result.success do
+                # Success - continue to next run
+                run_loop(
+                  generator,
+                  model,
+                  adapter,
+                  max_runs,
+                  seed,
+                  run_nonce,
+                  injector_adapters,
+                  mock_services,
+                  adapter_config,
+                  shrink,
+                  shrinker_config,
+                  on_failure,
+                  reporter,
+                  stutter_config,
+                  run_number + 1,
+                  total_commands + command_count,
+                  coverage_acc
+                )
+              else
+                # Failure - shrink and report. Pass the run's EFFECTIVE seed so
+                # the report's "reproduce with this seed" is exact (run 0 of a
+                # reproduction derives the identical sequence from it).
+                handle_failure(
+                  sequence,
+                  result,
+                  model,
+                  adapter,
+                  adapter_config,
+                  event_queue,
+                  mock_registry,
+                  shrink,
+                  shrinker_config,
+                  on_failure,
+                  reporter,
+                  run_seed,
+                  run_number,
+                  run_nonce,
+                  stutter_config,
+                  coverage_acc.fires
+                )
+              end
+
+            # Executor.run returns {:error, reason} when the adapter's setup/1
+            # fails. Surface it as a run-level error (mirroring setup_each_failed)
+            # instead of crashing on a hard {:ok, _} match (A4).
+            {:error, reason} ->
+              {:error, %{adapter_setup_failed: reason, run_number: run_number}}
           end
         after
           # Teardown declared mock services, then injectors and the event queue.
