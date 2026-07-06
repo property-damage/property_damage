@@ -415,9 +415,11 @@ defmodule PropertyDamage.Suggestions.Formatter do
   # Helpers
   # ============================================================================
 
-  defp truncate(str, max_len) when byte_size(str) <= max_len, do: str
-
   defp truncate(str, max_len) do
-    String.slice(str, 0, max_len - 3) <> "..."
+    if String.length(str) <= max_len do
+      str
+    else
+      String.slice(str, 0, max_len - 3) <> "..."
+    end
   end
 end
