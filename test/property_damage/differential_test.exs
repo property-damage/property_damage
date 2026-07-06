@@ -725,6 +725,66 @@ defmodule PropertyDamage.DifferentialTest do
     end
   end
 
+  describe "baseline and export (I4)" do
+    @tag :tmp_dir
+    test "reports the actual (sequential) execution mode when a baseline is used (I4a)",
+         %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "i4a_baseline.json")
+
+      run_data = %{
+        runs: [
+          %{
+            commands: [%TestCommand{value: 1}],
+            results: [{:ok, [%TestEvent{value: 1, item_ref: "a"}]}],
+            timings: [100],
+            event_log: [],
+            is_warmup: false
+          }
+        ],
+        setup_success: true
+      }
+
+      config = %{model: TestModel, targets: [{ReferenceAdapter, name: "test"}], seed: 12_345}
+      :ok = Baseline.export_run_data(run_data, config, path)
+
+      {:ok, result} =
+        Differential.run(
+          model: TestModel,
+          targets: [{ReferenceAdapter, name: "current"}],
+          compare: :correctness,
+          baseline: path,
+          max_runs: 1,
+          max_commands: 2,
+          seed: 12_345
+        )
+
+      # A baseline forces sequential execution; the reported mode must match.
+      assert result.execution == :sequential
+    end
+
+    @tag :tmp_dir
+    test "returns an error instead of crashing when baseline export fails (I4b)",
+         %{tmp_dir: tmp_dir} do
+      bad_path = Path.join([tmp_dir, "missing_dir", "export.json"])
+
+      result =
+        Differential.run(
+          model: TestModel,
+          targets: [
+            {ReferenceAdapter, role: :reference},
+            {IdenticalAdapter}
+          ],
+          compare: :correctness,
+          export_to: bad_path,
+          max_runs: 1,
+          max_commands: 2,
+          seed: 12_345
+        )
+
+      assert {:error, {:write_failed, _}} = result
+    end
+  end
+
   # ============================================================================
   # Progress projection (DR-022)
   # ============================================================================
