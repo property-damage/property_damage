@@ -133,20 +133,18 @@ defmodule PropertyDamage.MockServiceAdapter do
   allows mock adapters to react and update their behavior:
 
       defmodule ConfigurePayment do
-        @behaviour PropertyDamage.Command
+        use PropertyDamage.Command
 
         defstruct [:behavior, :reason]
 
         @impl true
-        def precondition(_state), do: true
-
-        @impl true
-        def new!(state, overrides \\\\ %{}) do
-          StreamData.fixed_map(%{
+        def generator(overrides \\\\ %{}) do
+          %{
             behavior: StreamData.member_of([:success, :decline]),
             reason: StreamData.member_of([nil, "insufficient_funds"])
-          })
-          |> StreamData.map(&struct!(__MODULE__, &1))
+          }
+          |> PropertyDamage.Generator.merge_overrides(overrides)
+          |> StreamData.fixed_map()
         end
       end
 
