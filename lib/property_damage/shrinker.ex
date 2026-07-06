@@ -981,8 +981,14 @@ defmodule PropertyDamage.Shrinker do
   defp shrink_value(n) when is_integer(n) and n > 0, do: div(n, 2)
   defp shrink_value(n) when is_integer(n) and n < 0, do: div(n, 2)
 
+  # Halve a binary toward empty in consistent units: take the first half of its
+  # BYTES via binary_part/3 (J12). The former String.slice/3 mixed units — a
+  # byte-length divisor applied as a codepoint count — so a multi-byte binary
+  # sliced its whole length (no progress), and arbitrary/invalid-UTF8 binaries
+  # were not slice-safe. binary_part works uniformly on any binary and always
+  # shrinks (div(byte_size, 2) < byte_size for byte_size >= 2; 1 shrinks to "").
   defp shrink_value(s) when is_binary(s) and byte_size(s) > 0 do
-    String.slice(s, 0, div(byte_size(s), 2))
+    binary_part(s, 0, div(byte_size(s), 2))
   end
 
   defp shrink_value(list) when is_list(list) and list != [] do
