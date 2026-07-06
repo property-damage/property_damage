@@ -19,7 +19,7 @@ RESP1=$(curl -s \
   -X POST \
   "$BASE_URL/api/accounts" \
   -H "Content-Type: application/json" \
-  -d '{"currency":"USD"}')
+  -d "{\"currency\":\"USD\"}")
 echo "$RESP1"
 
 
@@ -30,7 +30,7 @@ RESP2=$(curl -s \
   -X POST \
   "$BASE_URL/api/accounts/acc_0/credit" \
   -H "Content-Type: application/json" \
-  -d '{"amount":100}')
+  -d "{\"amount\":100}")
 echo "$RESP2"
 
 
@@ -41,7 +41,7 @@ RESP3=$(curl -s \
   -X POST \
   "$BASE_URL/api/accounts/acc_0/debit" \
   -H "Content-Type: application/json" \
-  -d '{"amount":200}')
+  -d "{\"amount\":200}")
 echo "$RESP3"
 
 
