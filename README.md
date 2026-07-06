@@ -1418,6 +1418,29 @@ is browsable in the `guides/` directory and rendered on
 [HexDocs](https://hexdocs.pm/property_damage). New here? Start with
 [Getting Started](guides/getting_started.md).
 
+## Agent Skills
+
+The repository carries [Claude Code skills](https://code.claude.com/docs/en/skills)
+in `.claude/skills/`, grouped by name prefix for two distinct audiences:
+
+- **`pd-*` (library users).** Judgment-heavy workflows for testing *your* system
+  with PropertyDamage: authoring a correct model and invariants, diagnosing shrunk
+  counterexamples. These are meant to run in your application's repository, next to
+  your SUT, not in this one. The first skills in this group are in development.
+- **`openspec-*` (contributors).** The OpenSpec change workflow used to develop
+  PropertyDamage itself. Only meaningful inside this repository.
+
+To use `pd-*` skills in your application (once the first ones land), copy them from
+the git tag matching your installed version. Skills track the API of their release, so skills from a newer
+tag may reference APIs your version does not have:
+
+```bash
+git clone --depth 1 --branch v0.2.0 https://github.com/property-damage/property_damage /tmp/pd
+cp -r /tmp/pd/.claude/skills/pd-* your_app/.claude/skills/
+```
+
+Skills are not part of the hex package; this repository is the distribution channel.
+
 ## Architecture
 
 ```
