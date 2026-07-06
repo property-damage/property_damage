@@ -55,6 +55,7 @@ real.
 ## Running
 
 ```bash
+mix deps.get      # fetch deps (first run)
 mix test          # starts the in-process server, then runs
 PD_OPENAPI_URL=http://host:port mix test   # point at an external SUT instead
 
