@@ -223,6 +223,21 @@ defmodule PropertyDamage.PersistenceTest do
     end
 
     @tag :tmp_dir
+    test "a valid-checksum file whose payload is not a map is rejected, not crashed (I5)",
+         %{tmp_dir: dir} do
+      # The framing and checksum are intact and the term decodes safely, but the
+      # payload is a bare string rather than the expected map. Payload access
+      # must not escape the decode guard and crash the loader.
+      payload = "a valid term that is not a payload map"
+      term_binary = :erlang.term_to_binary(payload, [:compressed])
+      checksum = :erlang.crc32(term_binary)
+      path = Path.join(dir, "non-map.pd")
+      File.write!(path, <<"PD", 7::8, checksum::32, term_binary::binary>>)
+
+      assert {:error, :unsafe_terms} = Persistence.load(path)
+    end
+
+    @tag :tmp_dir
     test "genuinely malformed bytes (no header) are still an invalid format", %{tmp_dir: dir} do
       path = Path.join(dir, "garbage.pd")
       File.write!(path, "not a pd file at all")
