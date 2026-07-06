@@ -105,6 +105,8 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def execute(%Cmd{}, _ctx, _runtime), do: {:ok, [%Ev{tag: :x}]}
 
     @impl true
+    def teardown(%{behaviour: :teardown_exit}), do: exit(:teardown_boom)
+    def teardown(%{behaviour: :teardown_throw}), do: throw(:teardown_thrown)
     def teardown(_ctx), do: :ok
   end
 
@@ -215,5 +217,17 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
              },
              result.failure_reason
            )
+  end
+
+  @tag :capture_log
+  test "a teardown that exits does not crash the run (best-effort)" do
+    assert {:ok, result} = run(NoopModel, :teardown_exit)
+    assert result.success
+  end
+
+  @tag :capture_log
+  test "a teardown that throws does not crash the run (best-effort)" do
+    assert {:ok, result} = run(NoopModel, :teardown_throw)
+    assert result.success
   end
 end
