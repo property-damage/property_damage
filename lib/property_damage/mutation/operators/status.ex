@@ -63,10 +63,6 @@ defmodule PropertyDamage.Mutation.Operators.Status do
       :empty_events ->
         # Return empty event list
         []
-
-      :error_to_success ->
-        # Return empty success
-        []
     end
   end
 
@@ -78,9 +74,6 @@ defmodule PropertyDamage.Mutation.Operators.Status do
 
       :empty_events ->
         "Returned empty events instead of #{mutation.original} events"
-
-      :error_to_success ->
-        "Changed error to success with empty events"
     end
   end
 end

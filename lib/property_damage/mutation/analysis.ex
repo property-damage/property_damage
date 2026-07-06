@@ -292,7 +292,6 @@ defmodule PropertyDamage.Mutation.Analysis do
       footer = "└─────────────────────────────────────────────────────────────────────┘"
 
       fields = Enum.join(analysis.unchecked_fields, ", ")
-      "│ #{String.pad_trailing(fields, 68)} │"
 
       "\n#{header}\n│ #{String.pad_trailing(fields, 68)} │\n#{footer}"
     end
