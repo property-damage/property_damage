@@ -37,6 +37,24 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def apply(state, _item), do: state
   end
 
+  defmodule ExitingProjection do
+    @behaviour PropertyDamage.Model.Projection
+    @impl true
+    def init, do: %{}
+    @impl true
+    def apply(_state, %Ev{}), do: exit(:proj_boom)
+    def apply(state, _item), do: state
+  end
+
+  defmodule ThrowingProjection do
+    @behaviour PropertyDamage.Model.Projection
+    @impl true
+    def init, do: %{}
+    @impl true
+    def apply(_state, %Ev{}), do: throw(:proj_thrown)
+    def apply(state, _item), do: state
+  end
+
   defmodule NoopModel do
     @behaviour PropertyDamage.Model
     @impl true
@@ -51,6 +69,22 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def commands, do: [Cmd]
     @impl true
     def command_sequence_projection, do: RaisingProjection
+  end
+
+  defmodule ExitingProjectionModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Cmd]
+    @impl true
+    def command_sequence_projection, do: ExitingProjection
+  end
+
+  defmodule ThrowingProjectionModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Cmd]
+    @impl true
+    def command_sequence_projection, do: ThrowingProjection
   end
 
   # An adapter whose behaviour is dictated by the command tag carried in config.
@@ -154,6 +188,30 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     assert match?(
              %Failure{
                type: %Failure.Assertion{kind: :projection_violation, name: RaisingProjection}
+             },
+             result.failure_reason
+           )
+  end
+
+  test "a projection that exits becomes a projection_violation, not a crash" do
+    assert {:ok, result} = run(ExitingProjectionModel, :ok)
+    assert result.failed_at_index == 0
+
+    assert match?(
+             %Failure{
+               type: %Failure.Assertion{kind: :projection_violation, name: ExitingProjection}
+             },
+             result.failure_reason
+           )
+  end
+
+  test "a projection that throws becomes a projection_violation, not a crash" do
+    assert {:ok, result} = run(ThrowingProjectionModel, :ok)
+    assert result.failed_at_index == 0
+
+    assert match?(
+             %Failure{
+               type: %Failure.Assertion{kind: :projection_violation, name: ThrowingProjection}
              },
              result.failure_reason
            )
