@@ -647,101 +647,117 @@ defmodule PropertyDamage do
 
     case setup_each_result do
       :ok ->
-        # Start event queue for injectors
+        # Start event queue for injectors. Its stop is guaranteed by the outer
+        # `after` below so that a raise in injector/mock setup cannot leak it
+        # (A6); injector/mock setup therefore lives inside the outer try.
         {:ok, event_queue} = EventQueue.start_link()
 
-        # Setup injector adapters
-        setup_injectors(injector_adapters, event_queue)
-
-        # Setup declared mock services (WP-C5): a per-run registry, one per run
-        # like the event queue, reused across this run's shrink attempts and the
-        # reproduction re-execution (mock_registry is nil when none declared).
-        {mock_registry, mock_contexts} = setup_mocks(mock_services, event_queue)
-
         try do
-          # Execute the sequence
-          {:ok, result} =
-            Executor.run(sequence, model, adapter,
-              adapter_config: adapter_config,
-              event_queue: event_queue,
-              mock_registry: mock_registry,
-              stutter_config: stutter_config,
-              # Explicit stutter RNG base (DR-029): per-run seed so stutter
-              # decisions are decoupled from run count and seed-library replay
-              # drift, yet reproduce on the same campaign seed.
-              rng_seed: run_seed,
-              # Client-minted run-scoped values (DR-034): the exploration run is
-              # epoch 0; the nonce is constant across the campaign's runs.
-              run_nonce: run_nonce,
-              mint_epoch: 0
-            )
+          # Setup injector adapters
+          setup_injectors(injector_adapters, event_queue)
 
-          # Emit telemetry for sequence stop
-          Telemetry.sequence_stop(seq_start_time, %{
-            run_number: run_number,
-            success: result.success,
-            commands_executed: command_count
-          })
+          # Setup declared mock services (WP-C5): a per-run registry, one per run
+          # like the event queue, reused across this run's shrink attempts and the
+          # reproduction re-execution (mock_registry is nil when none declared).
+          {mock_registry, mock_contexts} = setup_mocks(mock_services, event_queue)
 
-          # Accumulate this sequence's per-assertion firings into the whole-run
-          # total (DR-026), and (only under coverage: true) fold its
-          # command/transition/state dimensions into the tracker.
-          coverage_acc = accumulate_coverage(coverage_acc, result, sequence)
+          try do
+            # Execute the sequence
+            run_result =
+              Executor.run(sequence, model, adapter,
+                adapter_config: adapter_config,
+                event_queue: event_queue,
+                mock_registry: mock_registry,
+                stutter_config: stutter_config,
+                # Explicit stutter RNG base (DR-029): per-run seed so stutter
+                # decisions are decoupled from run count and seed-library replay
+                # drift, yet reproduce on the same campaign seed.
+                rng_seed: run_seed,
+                # Client-minted run-scoped values (DR-034): the exploration run is
+                # epoch 0; the nonce is constant across the campaign's runs.
+                run_nonce: run_nonce,
+                mint_epoch: 0
+              )
 
-          if result.success do
-            # Success - continue to next run
-            run_loop(
-              generator,
-              model,
-              adapter,
-              max_runs,
-              seed,
-              run_nonce,
-              injector_adapters,
-              mock_services,
-              adapter_config,
-              shrink,
-              shrinker_config,
-              on_failure,
-              reporter,
-              stutter_config,
-              run_number + 1,
-              total_commands + command_count,
-              coverage_acc
-            )
-          else
-            # Failure - shrink and report. Pass the run's EFFECTIVE seed so
-            # the report's "reproduce with this seed" is exact (run 0 of a
-            # reproduction derives the identical sequence from it).
-            handle_failure(
-              sequence,
-              result,
-              model,
-              adapter,
-              adapter_config,
-              event_queue,
-              mock_registry,
-              shrink,
-              shrinker_config,
-              on_failure,
-              reporter,
-              run_seed,
-              run_number,
-              run_nonce,
-              stutter_config,
-              coverage_acc.fires
-            )
+            case run_result do
+              {:ok, result} ->
+                # Emit telemetry for sequence stop
+                Telemetry.sequence_stop(seq_start_time, %{
+                  run_number: run_number,
+                  success: result.success,
+                  commands_executed: command_count
+                })
+
+                # Accumulate this sequence's per-assertion firings into the whole-run
+                # total (DR-026), and (only under coverage: true) fold its
+                # command/transition/state dimensions into the tracker.
+                coverage_acc = accumulate_coverage(coverage_acc, result, sequence)
+
+                if result.success do
+                  # Success - continue to next run
+                  run_loop(
+                    generator,
+                    model,
+                    adapter,
+                    max_runs,
+                    seed,
+                    run_nonce,
+                    injector_adapters,
+                    mock_services,
+                    adapter_config,
+                    shrink,
+                    shrinker_config,
+                    on_failure,
+                    reporter,
+                    stutter_config,
+                    run_number + 1,
+                    total_commands + command_count,
+                    coverage_acc
+                  )
+                else
+                  # Failure - shrink and report. Pass the run's EFFECTIVE seed so
+                  # the report's "reproduce with this seed" is exact (run 0 of a
+                  # reproduction derives the identical sequence from it).
+                  handle_failure(
+                    sequence,
+                    result,
+                    model,
+                    adapter,
+                    adapter_config,
+                    event_queue,
+                    mock_registry,
+                    shrink,
+                    shrinker_config,
+                    on_failure,
+                    reporter,
+                    run_seed,
+                    run_number,
+                    run_nonce,
+                    stutter_config,
+                    coverage_acc.fires
+                  )
+                end
+
+              # Executor.run returns {:error, reason} when the adapter's setup/1
+              # fails. Surface it as a run-level error (mirroring setup_each_failed)
+              # instead of crashing on a hard {:ok, _} match (A4).
+              {:error, reason} ->
+                {:error, %{adapter_setup_failed: reason, run_number: run_number}}
+            end
+          after
+            # Teardown declared mock services, then injectors. The event queue
+            # is stopped by the outer `after` so it is released even if injector
+            # or mock setup raised before this inner try was entered (A6).
+            teardown_mocks(mock_registry, mock_contexts)
+            teardown_injectors(injector_adapters)
+
+            # Teardown each
+            if function_exported?(model, :teardown_each, 1) do
+              model.teardown_each(%{})
+            end
           end
         after
-          # Teardown declared mock services, then injectors and the event queue.
-          teardown_mocks(mock_registry, mock_contexts)
-          teardown_injectors(injector_adapters)
           EventQueue.stop(event_queue)
-
-          # Teardown each
-          if function_exported?(model, :teardown_each, 1) do
-            model.teardown_each(%{})
-          end
         end
 
       {:error, reason} ->

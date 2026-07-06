@@ -37,6 +37,24 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def apply(state, _item), do: state
   end
 
+  defmodule ExitingProjection do
+    @behaviour PropertyDamage.Model.Projection
+    @impl true
+    def init, do: %{}
+    @impl true
+    def apply(_state, %Ev{}), do: exit(:proj_boom)
+    def apply(state, _item), do: state
+  end
+
+  defmodule ThrowingProjection do
+    @behaviour PropertyDamage.Model.Projection
+    @impl true
+    def init, do: %{}
+    @impl true
+    def apply(_state, %Ev{}), do: throw(:proj_thrown)
+    def apply(state, _item), do: state
+  end
+
   defmodule NoopModel do
     @behaviour PropertyDamage.Model
     @impl true
@@ -53,6 +71,32 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def command_sequence_projection, do: RaisingProjection
   end
 
+  defmodule ExitingProjectionModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Cmd]
+    @impl true
+    def command_sequence_projection, do: ExitingProjection
+  end
+
+  defmodule ThrowingProjectionModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Cmd]
+    @impl true
+    def command_sequence_projection, do: ThrowingProjection
+  end
+
+  # A model whose commands/0 lists a command with an invalid (zero) weight, so
+  # normalize_commands raises. build_command_specs used to swallow that.
+  defmodule BadCommandSpecModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [%{command: Cmd, weight: 0}]
+    @impl true
+    def command_sequence_projection, do: NoopProjection
+  end
+
   # An adapter whose behaviour is dictated by the command tag carried in config.
   defmodule Adversary do
     use PropertyDamage.Adapter
@@ -62,6 +106,8 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
 
     @impl true
     def execute(%Cmd{}, %{behaviour: :raise}, _runtime), do: raise("adapter boom")
+    def execute(%Cmd{}, %{behaviour: :exit}, _runtime), do: exit(:boom)
+    def execute(%Cmd{}, %{behaviour: :throw}, _runtime), do: throw(:thrown_boom)
     def execute(%Cmd{}, %{behaviour: :malformed_atom}, _runtime), do: :garbage
     def execute(%Cmd{}, %{behaviour: :malformed_ok}, _runtime), do: {:ok, :not_a_list}
     def execute(%Cmd{}, %{behaviour: :sync_retry}, _runtime), do: {:retry, :not_ready}
@@ -69,6 +115,8 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     def execute(%Cmd{}, _ctx, _runtime), do: {:ok, [%Ev{tag: :x}]}
 
     @impl true
+    def teardown(%{behaviour: :teardown_exit}), do: exit(:teardown_boom)
+    def teardown(%{behaviour: :teardown_throw}), do: throw(:teardown_thrown)
     def teardown(_ctx), do: :ok
   end
 
@@ -90,6 +138,23 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
              },
              result.failure_reason
            )
+  end
+
+  test "an adapter that exits becomes a graceful adapter_error, not a crash" do
+    assert {:ok, result} = run(NoopModel, :exit)
+    assert result.failed_at_index == 0
+
+    assert %Failure{type: %Failure.Execution{kind: :adapter_error, detail: {:exit, :boom}}} =
+             result.failure_reason
+  end
+
+  test "an adapter that throws becomes a graceful adapter_error, not a crash" do
+    assert {:ok, result} = run(NoopModel, :throw)
+    assert result.failed_at_index == 0
+
+    assert %Failure{
+             type: %Failure.Execution{kind: :adapter_error, detail: {:throw, :thrown_boom}}
+           } = result.failure_reason
   end
 
   test "a malformed atom return is reported, not a CaseClauseError" do
@@ -138,5 +203,49 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
              },
              result.failure_reason
            )
+  end
+
+  test "a projection that exits becomes a projection_violation, not a crash" do
+    assert {:ok, result} = run(ExitingProjectionModel, :ok)
+    assert result.failed_at_index == 0
+
+    assert match?(
+             %Failure{
+               type: %Failure.Assertion{kind: :projection_violation, name: ExitingProjection}
+             },
+             result.failure_reason
+           )
+  end
+
+  test "a projection that throws becomes a projection_violation, not a crash" do
+    assert {:ok, result} = run(ThrowingProjectionModel, :ok)
+    assert result.failed_at_index == 0
+
+    assert match?(
+             %Failure{
+               type: %Failure.Assertion{kind: :projection_violation, name: ThrowingProjection}
+             },
+             result.failure_reason
+           )
+  end
+
+  test "a misconfigured command spec fails loudly instead of silently degrading" do
+    seq = Sequence.linear([%Cmd{tag: :x}])
+
+    assert_raise ArgumentError, ~r/command specs for model/, fn ->
+      Executor.run(seq, BadCommandSpecModel, Adversary, adapter_config: %{behaviour: :ok})
+    end
+  end
+
+  @tag :capture_log
+  test "a teardown that exits does not crash the run (best-effort)" do
+    assert {:ok, result} = run(NoopModel, :teardown_exit)
+    assert result.success
+  end
+
+  @tag :capture_log
+  test "a teardown that throws does not crash the run (best-effort)" do
+    assert {:ok, result} = run(NoopModel, :teardown_throw)
+    assert result.success
   end
 end

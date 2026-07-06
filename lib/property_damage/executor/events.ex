@@ -33,6 +33,20 @@ defmodule PropertyDamage.Executor.Events do
                       original_stacktrace: __STACKTRACE__
                     ],
                     __STACKTRACE__
+        catch
+          # A BEAM exit/throw from apply/2 bypasses `rescue`; without this it
+          # would unwind past execute_command's ProjectionError guard and crash
+          # the run. Tag it as the same ProjectionError so it is reported as a
+          # :projection_violation exactly like a raising apply/2 (A2).
+          kind, reason ->
+            reraise PropertyDamage.ProjectionError,
+                    [
+                      projection: projection,
+                      item: item,
+                      original: {kind, reason},
+                      original_stacktrace: __STACKTRACE__
+                    ],
+                    __STACKTRACE__
         end
 
       {projection, new_state}

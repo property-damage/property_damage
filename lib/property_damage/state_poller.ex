@@ -343,6 +343,27 @@ defmodule PropertyDamage.StatePoller do
 
           {:noreply,
            %{state | poll_count: poll_count, last_state: current_state, last_predicate_error: e}}
+      catch
+        # A BEAM exit/throw (e.g. a GenServer.call to a dead process) bypasses
+        # `rescue`; without this it kills the poller and, through its start_link,
+        # the run. Treat it exactly like a raising predicate (A3).
+        kind, reason ->
+          require Logger
+
+          Logger.warning(
+            "StatePoller predicate escaped via #{kind}: #{inspect(reason)} " <>
+              "in #{state.triggered_by.assertion_name}"
+          )
+
+          Process.send_after(self(), :poll, state.interval_ms)
+
+          {:noreply,
+           %{
+             state
+             | poll_count: poll_count,
+               last_state: current_state,
+               last_predicate_error: {kind, reason}
+           }}
       end
     end
   end

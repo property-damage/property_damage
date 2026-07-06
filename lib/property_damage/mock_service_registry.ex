@@ -92,9 +92,11 @@ defmodule PropertyDamage.MockServiceRegistry do
   @doc """
   Notify all mocks of a command being executed.
 
-  Each mock's `on_command/2` is called with the command.
+  Each mock's `on_command/2` is called with the command. Returns `:ok`, or
+  `{:error, {module, :on_command, reason}}` if a mock's callback raised, exited,
+  or threw (the registry stays up).
   """
-  @spec notify_command(t(), struct()) :: :ok
+  @spec notify_command(t(), struct()) :: :ok | {:error, term()}
   def notify_command(registry, command) do
     GenServer.call(registry, {:notify_command, command})
   end
@@ -102,9 +104,11 @@ defmodule PropertyDamage.MockServiceRegistry do
   @doc """
   Notify all mocks of an event.
 
-  Each mock's `on_event/2` is called with the event.
+  Each mock's `on_event/2` is called with the event. Returns `:ok`, or
+  `{:error, {module, :on_event, reason}}` if a mock's callback raised, exited,
+  or threw (the registry stays up).
   """
-  @spec notify_event(t(), struct()) :: :ok
+  @spec notify_event(t(), struct()) :: :ok | {:error, term()}
   def notify_event(registry, event) do
     GenServer.call(registry, {:notify_event, event})
   end
@@ -209,26 +213,22 @@ defmodule PropertyDamage.MockServiceRegistry do
 
   @impl true
   def handle_call({:notify_command, command}, _from, state) do
-    # Update each adapter's state via on_command
-    new_adapters =
-      Enum.reduce(state.adapters, %{}, fn {module, adapter_state}, acc ->
-        new_adapter_state = module.on_command(command, adapter_state)
-        Map.put(acc, module, new_adapter_state)
-      end)
-
-    {:reply, :ok, %{state | adapters: new_adapters}}
+    # A user mock's on_command/2 runs here, inside the registry GenServer. Guard
+    # it so a raising/exiting/throwing callback surfaces as an error result
+    # instead of crashing the registry and, through its start_link, the run (J13).
+    case notify_all(state.adapters, :on_command, command) do
+      {:ok, new_adapters} -> {:reply, :ok, %{state | adapters: new_adapters}}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
   end
 
   @impl true
   def handle_call({:notify_event, event}, _from, state) do
-    # Update each adapter's state via on_event
-    new_adapters =
-      Enum.reduce(state.adapters, %{}, fn {module, adapter_state}, acc ->
-        new_adapter_state = module.on_event(event, adapter_state)
-        Map.put(acc, module, new_adapter_state)
-      end)
-
-    {:reply, :ok, %{state | adapters: new_adapters}}
+    # Same guard as :notify_command for the on_event/2 callback.
+    case notify_all(state.adapters, :on_event, event) do
+      {:ok, new_adapters} -> {:reply, :ok, %{state | adapters: new_adapters}}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
   end
 
   @impl true
@@ -283,5 +283,26 @@ defmodule PropertyDamage.MockServiceRegistry do
       :error ->
         {:reply, {:error, :not_found}, state}
     end
+  end
+
+  # ==========================================================================
+  # Private Helpers
+  # ==========================================================================
+
+  # Fold `callback` (`:on_command` / `:on_event`) over every registered adapter,
+  # guarding each user callback. On the first callback that raises/exits/throws,
+  # abandon the fold and return an error naming the offending mock (leaving the
+  # registry's state untouched) rather than letting the crash take the GenServer
+  # down (J13). Returns `{:ok, new_adapters}` on success.
+  defp notify_all(adapters, callback, arg) do
+    Enum.reduce_while(adapters, {:ok, %{}}, fn {module, adapter_state}, {:ok, acc} ->
+      try do
+        {:cont, {:ok, Map.put(acc, module, apply(module, callback, [arg, adapter_state]))}}
+      rescue
+        e -> {:halt, {:error, {module, callback, e}}}
+      catch
+        kind, reason -> {:halt, {:error, {module, callback, {kind, reason}}}}
+      end
+    end)
   end
 end

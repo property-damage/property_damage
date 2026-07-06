@@ -74,6 +74,61 @@ defmodule PropertyDamageTest do
     end
   end
 
+  # An injector whose setup/1 raises. It runs in the run (test) process, so it
+  # reports the run's EventQueue pid to that process's mailbox before blowing up,
+  # letting the test check whether the queue leaked.
+  defmodule LeakProbeInjector do
+    use PropertyDamage.Adapter.Injector
+
+    @emits []
+
+    @impl true
+    def setup(%{event_queue: event_queue}) do
+      send(self(), {:leaked_event_queue, event_queue})
+      raise "injector setup boom"
+    end
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def to_event(_payload), do: :skip
+  end
+
+  describe "run/1 error boundaries" do
+    @tag :capture_log
+    test "an injector whose setup raises does not leak the EventQueue" do
+      assert_raise RuntimeError, ~r/injector setup boom/, fn ->
+        PropertyDamage.run(
+          model: ExecutorModel,
+          adapter: SimpleAdapter,
+          injector_adapters: [LeakProbeInjector],
+          max_runs: 1,
+          max_commands: 3,
+          validate: false
+        )
+      end
+
+      assert_received {:leaked_event_queue, event_queue}
+      refute Process.alive?(event_queue)
+    end
+
+    test "adapter setup failure surfaces as an error, not a MatchError crash" do
+      result =
+        PropertyDamage.run(
+          model: ExecutorModel,
+          adapter: PropertyDamage.Test.FailingAdapter,
+          adapter_config: %{fail_setup: true},
+          max_runs: 1,
+          max_commands: 3,
+          validate: false
+        )
+
+      assert {:error, info} = result
+      assert info.adapter_setup_failed == :setup_failed
+    end
+  end
+
   describe "run/1 with lifecycle callbacks" do
     defmodule LifecycleModel do
       @behaviour PropertyDamage.Model
