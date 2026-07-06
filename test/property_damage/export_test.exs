@@ -438,6 +438,44 @@ defmodule PropertyDamage.ExportTest do
     end
   end
 
+  # ============================================================================
+  # Curl body variable expansion (F2)
+  # ============================================================================
+
+  describe "to_script/3 - curl body variable expansion (F2)" do
+    test "a produced $var inside a curl body is not trapped in single quotes" do
+      # BatchCredit's body carries a placeholder produced by Provision; the
+      # generated body must let the shell variable expand (DR-021), so it may
+      # not be wrapped in single quotes (which suppress expansion).
+      ph = Placeholder.new_at(Provisioned, [:id], Position.prefix(0), 0)
+      commands = [%Provision{spec: nil}, %BatchCredit{items: [ph]}]
+
+      report = %FailureReport{
+        seed: 1,
+        failed_at_index: 1,
+        failure_reason: Failure.assertion_failed(nil, "check failed"),
+        trace:
+          PropertyDamage.RunTrace.new(
+            plan: %Sequence{prefix: commands, branches: nil, suffix: []}
+          ),
+        model: TestModelStub,
+        adapter: TestHTTPAdapter,
+        timestamp: ~U[2025-01-01 00:00:00Z]
+      }
+
+      script =
+        Export.to_script(report, :curl,
+          base_url: "http://localhost:4000",
+          adapter: TestHTTPAdapter
+        )
+
+      assert script =~ "$provisioned_id_0"
+
+      refute script =~ ~r/-d '[^']*\$provisioned_id_0/,
+             "curl body wraps the produced $var in single quotes, so the shell never expands it"
+    end
+  end
+
   describe "to_script/3 - reproduce filename header" do
     alias PropertyDamage.Export.Common
 
