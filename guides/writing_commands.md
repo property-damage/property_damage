@@ -31,7 +31,7 @@ Commands do NOT define:
 ```elixir
 defmodule MyTest.Commands.CreateOrder do
   # Events this command can produce are declared on the command_spec surface.
-  use PropertyDamage.Command, observables: [OrderCreated, OrderRejected]
+  use PropertyDamage.Command, observables: [MyTest.Events.OrderCreated, MyTest.Events.OrderRejected]
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:amount, :currency]
@@ -54,6 +54,19 @@ defmodule MyTest.Events.OrderCreated do
   # order_id is server-generated, amount and currency come from the command
   defstruct [:amount, :currency, order_id: external()]
 end
+
+# The other events referenced by observables and the simulate/2 clauses below.
+defmodule MyTest.Events.OrderRejected do
+  defstruct [:reason]
+end
+
+defmodule MyTest.Events.OrderViewed do
+  defstruct [:order_ref]
+end
+
+defmodule MyTest.Events.OrderNotFound do
+  defstruct [:order_ref]
+end
 ```
 
 ### State-Dependent Command Example
@@ -65,7 +78,7 @@ defmodule MyTest.Commands.ViewOrder do
   # Read-only commands set shrink: :prefer_remove so they are pruned first.
   use PropertyDamage.Command,
     shrink: :prefer_remove,
-    observables: [OrderViewed, OrderNotFound]
+    observables: [MyTest.Events.OrderViewed, MyTest.Events.OrderNotFound]
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
@@ -88,6 +101,9 @@ defmodule MyTest.OrderModel do
   @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
 
+  alias MyTest.Commands.{CreateOrder, ViewOrder}
+  alias MyTest.Events.{OrderViewed, OrderNotFound}
+
   def commands do
     [
       CreateOrder,
@@ -96,6 +112,8 @@ defmodule MyTest.OrderModel do
         with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
     ]
   end
+
+  def command_sequence_projection, do: MyTest.OrderProjection
 
   # Return self as the simulator module
   def simulator, do: __MODULE__
