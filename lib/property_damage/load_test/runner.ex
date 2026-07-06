@@ -132,6 +132,7 @@ defmodule PropertyDamage.LoadTest.Runner do
 
     # Start dynamic worker pool (no size configuration needed)
     case WorkerPool.start_link(
+           owner: self(),
            model: model,
            adapter: adapter,
            adapter_config: adapter_config,
