@@ -2269,9 +2269,6 @@ defmodule PropertyDamage do
   defmacro __using__(_opts) do
     quote do
       import PropertyDamage, only: []
-
-      Module.register_attribute(__MODULE__, :property_damage_model, persist: true)
-      Module.register_attribute(__MODULE__, :property_damage_adapter, persist: true)
     end
   end
 end
