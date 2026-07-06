@@ -268,15 +268,26 @@ defmodule PropertyDamage.FailureIntelligence.Patterns do
   end
 
   defp generate_pattern_description(traits, command_types, count) do
+    # Keyed on the real `PropertyDamage.Failure.kind/1` vocabulary that
+    # fingerprints actually carry (via `FailureReport.failure_type/1`); the old
+    # `:check_failed`/`:invariant_violated`/... atoms never matched, so every
+    # cluster degraded to the generic "Failure".
     type_desc =
       case traits.failure_type do
-        :check_failed -> "Check failure"
-        :invariant_violated -> "Invariant violation"
-        :precondition_failed -> "Precondition failure"
-        :postcondition_failed -> "Postcondition failure"
-        :exception -> "Exception"
+        :assertion_failed -> "Check failure"
+        :projection_violation -> "Invariant violation"
+        :idempotency_violation -> "Idempotency violation"
+        :poll_timeout -> "Poll timeout"
+        :poll_error -> "Poll predicate error"
+        :settle_timeout -> "Settle timeout"
         :adapter_error -> "Adapter error"
-        :timeout -> "Timeout"
+        :nemesis_error -> "Fault injection error"
+        :linearization -> "Linearization failure"
+        :stutter_execution_failed -> "Stutter execution failure"
+        :resource_poller_error -> "Resource poller error"
+        :retry_from_sync_command -> "Sync command returned retry"
+        :malformed_adapter_return -> "Malformed adapter return"
+        :placeholder_resolution -> "Placeholder resolution error"
         _ -> "Failure"
       end
 

@@ -187,6 +187,14 @@ defmodule PropertyDamage.Telemetry.Collector do
     {:noreply, new_state}
   end
 
+  @impl true
+  def terminate(_reason, _state) do
+    # Detach the telemetry handler so it does not outlive the collector; without
+    # this, stale handlers accumulate across collector lifecycles.
+    :telemetry.detach(handler_id())
+    :ok
+  end
+
   # ============================================================================
   # Telemetry Event Handlers
   # ============================================================================
@@ -439,14 +447,18 @@ defmodule PropertyDamage.Telemetry.Collector do
       [:property_damage, :shrink, :stop]
     ]
 
-    handler_id = "property_damage_collector_#{inspect(self())}"
-
     :telemetry.attach_many(
-      handler_id,
+      handler_id(),
       events,
       &__MODULE__.dispatch_telemetry_event/4,
       %{pid: self()}
     )
+  end
+
+  # Stable per-collector handler id, keyed on the collector process so `init/1`
+  # (attach) and `terminate/2` (detach) resolve to the same id.
+  defp handler_id do
+    "property_damage_collector_#{inspect(self())}"
   end
 
   @doc false
