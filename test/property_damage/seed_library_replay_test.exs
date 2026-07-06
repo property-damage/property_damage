@@ -73,6 +73,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
   # test check whether the queue leaked (A6).
   defmodule LeakProbeInjector do
     use PropertyDamage.Adapter.Injector
+
     def setup(%{event_queue: event_queue}) do
       send(self(), {:leaked_event_queue, event_queue})
       raise "injector setup boom"
@@ -230,7 +231,8 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
           seed_library: path
         )
 
-      assert {:error, %{adapter_setup_failed: :setup_failed, phase: :seed_library_replay}} = result
+      assert {:error, %{adapter_setup_failed: :setup_failed, phase: :seed_library_replay}} =
+               result
     end
 
     @tag :capture_log
