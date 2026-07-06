@@ -1,23 +1,25 @@
 defmodule PropertyDamage.Mint do
-  @moduledoc false
-  # Internal module - users create markers via `PropertyDamage.mint_per_run/1`.
-  #
-  # A Mint marker (DR-034) marks a command field as a client-minted, run-scoped
-  # value: minted at execution rather than fixed at generation, so the plan
-  # stays a pure function of the effective seed while the value is unique per
-  # run (a request UUID / idempotency key sent to a non-resettable SUT).
-  #
-  # Contrast with %Placeholder{} (external()): a placeholder captures a value the
-  # SUT *returns*; a Mint mints a value the client *sends*. A Mint therefore has
-  # no producer/capture side and never enters the placeholder registry.
-  #
-  # Lifecycle:
-  # 1. `mint_per_run(kind)` returns an unreified marker (position/path nil).
-  # 2. Generation reifies it with its `(position, path)` coordinates (DR-036),
-  #    baked into the command struct so the value is stable under shrinking.
-  # 3. The executor's resolution pass (and PlaceholderRegistry.resolve_data/2 for
-  #    the Differential/LoadTest engines) derives the concrete value from
-  #    `(run_nonce, mint_epoch, position, path, kind)`.
+  @moduledoc """
+  The mint marker struct and its types. Create markers via
+  `PropertyDamage.mint_per_run/1`; this module is not used directly.
+
+  A Mint marker (DR-034) marks a command field as a client-minted, run-scoped
+  value: minted at execution rather than fixed at generation, so the plan
+  stays a pure function of the effective seed while the value is unique per
+  run (a request UUID / idempotency key sent to a non-resettable SUT).
+
+  Contrast with `%Placeholder{}` (`external()`): a placeholder captures a value
+  the SUT *returns*; a Mint mints a value the client *sends*. A Mint therefore
+  has no producer/capture side and never enters the placeholder registry.
+
+  Lifecycle:
+  1. `PropertyDamage.mint_per_run/1` returns an unreified marker (position/path nil).
+  2. Generation reifies it with its `(position, path)` coordinates (DR-036),
+     baked into the command struct so the value is stable under shrinking.
+  3. The executor's resolution pass (and `PlaceholderRegistry.resolve_data/2` for
+     the Differential/LoadTest engines) derives the concrete value from
+     `(run_nonce, mint_epoch, position, path, kind)`.
+  """
 
   alias PropertyDamage.Sequence.Position
 

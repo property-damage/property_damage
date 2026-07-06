@@ -43,9 +43,6 @@ defmodule OpenapiBench.Generated.Commands.GetValue do
     []
   end
 
-  @impl true
-  def read_only?, do: true
-
   # HTTP Info (for adapter)
   def __http_method__, do: :get
   def __http_path__, do: "/kv/{key}"
