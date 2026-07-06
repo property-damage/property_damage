@@ -9,7 +9,7 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
     :target_command,
     :mutation,
     :operator,
-    :mutation_applied,
+    :applied_count,
     :apply_once
   ]
 
@@ -19,7 +19,7 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
           target_command: module() | nil,
           mutation: map(),
           operator: module(),
-          mutation_applied: boolean(),
+          applied_count: :atomics.atomics_ref(),
           apply_once: boolean()
         }
 
@@ -32,17 +32,22 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
   - `:target_command` - Command module to mutate (nil = mutate all)
   - `:mutation` - The mutation specification to apply
   - `:operator` - The operator module that will apply the mutation
-  - `:apply_once` - Only apply mutation once (default: true)
+  - `:apply_once` - Only apply mutation once per run (default: true)
   """
   @spec new(keyword()) :: t()
   def new(opts) do
+    # `execute/3` runs in a short-lived child process and the framework never
+    # threads updated context back between commands, so a plain struct field
+    # cannot track "already applied". A shared `:atomics` counter can: it is a
+    # reference to mutable memory that survives message passing across processes
+    # (see the adapter cross-process notes in `PropertyDamage.Adapter`).
     %__MODULE__{
       inner_adapter: Keyword.fetch!(opts, :inner_adapter),
       inner_context: nil,
       target_command: Keyword.get(opts, :target_command),
       mutation: Keyword.fetch!(opts, :mutation),
       operator: Keyword.fetch!(opts, :operator),
-      mutation_applied: false,
+      applied_count: :atomics.new(1, signed: false),
       apply_once: Keyword.get(opts, :apply_once, true)
     }
   end
@@ -57,6 +62,7 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
     # clause would otherwise swallow the adapter struct
     case adapter.inner_adapter.setup(%{}) do
       {:ok, inner_context} ->
+        reset_applied(adapter)
         {:ok, %{adapter | inner_context: inner_context}}
 
       {:error, reason} ->
@@ -72,6 +78,7 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
 
         case adapter.inner_adapter.setup(inner_config) do
           {:ok, inner_context} ->
+            reset_applied(adapter)
             {:ok, %{adapter | inner_context: inner_context}}
 
           {:error, reason} ->
@@ -106,11 +113,10 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
     # Execute the real command, forwarding the Runtime handle to the inner adapter
     case adapter.inner_adapter.execute(command, inner_context, runtime) do
       {:ok, events} ->
-        # Check if we should mutate this command's response
-        if should_mutate?(command, adapter) do
-          mutated_events = apply_mutation(events, adapter)
-          # Mark mutation as applied if apply_once is true
-          {:ok, mutated_events}
+        # Mutate this command's response only when it matches the target and
+        # this adapter is still allowed to apply (apply_once budget not spent).
+        if should_mutate?(command, adapter) and claim_application(adapter) do
+          apply_mutation(events, adapter)
         else
           {:ok, events}
         end
@@ -138,20 +144,29 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
   end
 
   defp should_mutate?(command, adapter) do
-    # Don't mutate if already applied and apply_once is true
-    if adapter.apply_once and adapter.mutation_applied do
-      false
-    else
-      # Check if this command matches the target
-      case adapter.target_command do
-        nil ->
-          # No target specified, mutate all commands
-          true
+    # Check if this command matches the target
+    case adapter.target_command do
+      nil ->
+        # No target specified, mutate all commands
+        true
 
-        target when is_atom(target) ->
-          command.__struct__ == target
-      end
+      target when is_atom(target) ->
+        command.__struct__ == target
     end
+  end
+
+  # Claim the right to apply the mutation. With apply_once the mutation is
+  # injected at most once per run: the first matching command wins, later ones
+  # pass through unmutated. The atomic increment makes this safe even though
+  # each command executes in its own process.
+  defp claim_application(%__MODULE__{apply_once: false}), do: true
+
+  defp claim_application(%__MODULE__{apply_once: true, applied_count: ref}) do
+    :atomics.add_get(ref, 1, 1) == 1
+  end
+
+  defp reset_applied(%__MODULE__{applied_count: ref}) do
+    :atomics.put(ref, 1, 0)
   end
 
   defp apply_mutation(events, adapter) do
@@ -159,12 +174,16 @@ defmodule PropertyDamage.Mutation.MutatingAdapter do
     operator = adapter.operator
 
     case operator.apply_mutation(events, mutation) do
-      {:error, _reason} ->
-        # If mutation fails, return original events
-        events
+      {:error, reason} ->
+        # An operator that returns an error tuple has *applied* its mutation:
+        # the intended output is an error response (e.g. a status
+        # :success_to_error mutation). Flow it through as this command's
+        # result. A mutation that merely fails to apply returns the events
+        # unchanged (a list), so it is not conflated with this case.
+        {:error, reason}
 
       mutated_events when is_list(mutated_events) ->
-        mutated_events
+        {:ok, mutated_events}
     end
   end
 
