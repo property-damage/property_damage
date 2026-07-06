@@ -493,6 +493,12 @@ defmodule PropertyDamage.ResourcePoller do
       rescue
         e ->
           {:poll_fn_error, e, __STACKTRACE__}
+      catch
+        # A BEAM exit/throw from poll_fn bypasses `rescue`; capture it as a
+        # poll_fn_error (tagged with how it escaped) so the poller reports it
+        # instead of crashing the run through its start_link (A3).
+        kind, reason ->
+          {:poll_fn_error, {kind, reason}, __STACKTRACE__}
       end
 
     case poll_result do
@@ -504,6 +510,11 @@ defmodule PropertyDamage.ResourcePoller do
           rescue
             e ->
               {:handler_error, e, __STACKTRACE__}
+          catch
+            # As with poll_fn: an exit/throw from the handler must be captured,
+            # not left to crash the poller and the run (A3).
+            kind, reason ->
+              {:handler_error, {kind, reason}, __STACKTRACE__}
           end
 
         case handler_result do
