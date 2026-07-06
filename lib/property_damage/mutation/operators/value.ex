@@ -16,7 +16,8 @@ defmodule PropertyDamage.Mutation.Operators.Value do
     max_mutations = Keyword.get(opts, :max_mutations, 10)
 
     events
-    |> Enum.flat_map(&extract_mutable_fields/1)
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {event, event_idx} -> extract_mutable_fields(event, event_idx) end)
     |> Enum.flat_map(&generate_field_mutations/1)
     |> Enum.take(max_mutations)
   end
@@ -60,30 +61,26 @@ defmodule PropertyDamage.Mutation.Operators.Value do
   # Private Functions
   # ============================================================================
 
-  defp extract_mutable_fields(event) when is_struct(event) do
+  defp extract_mutable_fields(event, event_idx) when is_struct(event) do
     event
     |> Map.from_struct()
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {{field, value}, _} ->
+    |> Enum.flat_map(fn {field, value} ->
       if mutable_value?(value) do
-        [{event, field, value}]
+        [{event, field, value, event_idx}]
       else
         []
       end
     end)
   end
 
-  defp extract_mutable_fields(_), do: []
+  defp extract_mutable_fields(_, _), do: []
 
   defp mutable_value?(value) when is_number(value), do: true
   defp mutable_value?(value) when is_binary(value), do: true
   defp mutable_value?(value) when is_atom(value) and not is_nil(value), do: true
   defp mutable_value?(_), do: false
 
-  defp generate_field_mutations({_event, field, value}) when is_number(value) do
-    # We'll adjust this during application
-    event_idx = 0
-
+  defp generate_field_mutations({_event, field, value, event_idx}) when is_number(value) do
     mutations = [
       Operator.new_mutation(:value,
         type: :zero,
@@ -142,9 +139,7 @@ defmodule PropertyDamage.Mutation.Operators.Value do
     Enum.map(mutations, &Map.put(&1, :event_index, event_idx))
   end
 
-  defp generate_field_mutations({_event, field, value}) when is_binary(value) do
-    event_idx = 0
-
+  defp generate_field_mutations({_event, field, value, event_idx}) when is_binary(value) do
     mutations = [
       Operator.new_mutation(:value,
         type: :empty,
@@ -198,9 +193,7 @@ defmodule PropertyDamage.Mutation.Operators.Value do
     Enum.map(mutations, &Map.put(&1, :event_index, event_idx))
   end
 
-  defp generate_field_mutations({_event, field, value}) when is_atom(value) do
-    event_idx = 0
-
+  defp generate_field_mutations({_event, field, value, event_idx}) when is_atom(value) do
     # Common atom swaps
     swaps = %{
       true => false,

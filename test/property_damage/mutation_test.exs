@@ -8,7 +8,7 @@ defmodule PropertyDamage.MutationTest do
   end
 
   alias PropertyDamage.Mutation
-  alias PropertyDamage.Mutation.{Analysis, Formatter, Operator, Report}
+  alias PropertyDamage.Mutation.{Analysis, Formatter, MutatingAdapter, Operator, Report}
   alias PropertyDamage.Mutation.Operators.{Boundary, Event, Omission, Status, Value}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{MutationResult, MutationUpdate}
@@ -23,6 +23,52 @@ defmodule PropertyDamage.MutationTest do
 
   defmodule AnotherEvent do
     defstruct [:ref_id, :value]
+  end
+
+  defmodule FakeCommand do
+    defstruct [:tag]
+  end
+
+  # Minimal inner adapter for MutatingAdapter unit tests: always succeeds with a
+  # single event, ignoring the runtime handle.
+  defmodule FakeInnerAdapter do
+    @behaviour PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(_command, _ctx, _runtime), do: {:ok, [%TestEvent{amount: 100}]}
+
+    @impl true
+    def timeout(_command), do: 30
+  end
+
+  # Operator that records each application by messaging a pid carried on the
+  # mutation. Used to count how many times the adapter applies a mutation.
+  defmodule CountingOperator do
+    @behaviour PropertyDamage.Mutation.Operator
+
+    @impl true
+    def name, do: :counting
+
+    @impl true
+    def description, do: "counts applications for tests"
+
+    @impl true
+    def generate_mutations(_events, _opts \\ []), do: []
+
+    @impl true
+    def apply_mutation(events, %{test_pid: pid}) do
+      send(pid, :mutation_applied)
+      events
+    end
+
+    @impl true
+    def describe_mutation(_mutation), do: "counting"
   end
 
   # A projection whose assertion always fails, used by the progress-projection
@@ -188,6 +234,23 @@ defmodule PropertyDamage.MutationTest do
       assert desc =~ "amount"
       assert desc =~ "100"
       assert desc =~ "101"
+    end
+
+    test "generated mutations carry the targeted event's index (not always 0)" do
+      # sample_events: TestEvent at index 0 (has :amount), AnotherEvent at
+      # index 1 (has :value). A mutation targeting :value must carry
+      # event_index == 1, and applying it must mutate event 1 while leaving
+      # event 0 untouched.
+      events = sample_events()
+      mutations = Value.generate_mutations(events, max_mutations: 100)
+
+      value_mutation = Enum.find(mutations, &(&1.target == :value))
+      assert value_mutation, "expected a mutation targeting AnotherEvent.value"
+      assert value_mutation.event_index == 1
+
+      [unchanged, mutated] = Value.apply_mutation(events, value_mutation)
+      assert unchanged == Enum.at(events, 0)
+      assert mutated.value != 50
     end
   end
 
@@ -384,6 +447,58 @@ defmodule PropertyDamage.MutationTest do
 
       [mutated] = Boundary.apply_mutation(events, mutation)
       assert mutated.amount == 0
+    end
+  end
+
+  # ============================================================================
+  # MutatingAdapter Tests
+  # ============================================================================
+
+  describe "MutatingAdapter" do
+    test "success_to_error status mutation flows through as an error response (E2)" do
+      mutation = %{
+        type: :success_to_error,
+        target: :response,
+        original: :ok,
+        mutated: {:error, :internal_error},
+        operator: :status
+      }
+
+      adapter =
+        MutatingAdapter.new(
+          inner_adapter: FakeInnerAdapter,
+          mutation: mutation,
+          operator: Status
+        )
+
+      {:ok, ctx} = MutatingAdapter.setup(adapter)
+
+      # The mutation's intended output is an error response; it must surface as
+      # the command's {:error, _} result, not be swallowed back to the original
+      # successful events.
+      assert MutatingAdapter.execute(%FakeCommand{}, ctx, nil) == {:error, :internal_error}
+    end
+
+    test "apply_once applies a mutation at most once across commands (E3)" do
+      test_pid = self()
+
+      adapter =
+        MutatingAdapter.new(
+          inner_adapter: FakeInnerAdapter,
+          mutation: %{type: :counting, test_pid: test_pid},
+          operator: CountingOperator,
+          apply_once: true
+        )
+
+      {:ok, ctx} = MutatingAdapter.setup(adapter)
+
+      MutatingAdapter.execute(%FakeCommand{}, ctx, nil)
+      MutatingAdapter.execute(%FakeCommand{}, ctx, nil)
+
+      # With apply_once the mutation must be injected exactly once, even though
+      # both commands match the (unrestricted) target.
+      assert_received :mutation_applied
+      refute_received :mutation_applied
     end
   end
 
