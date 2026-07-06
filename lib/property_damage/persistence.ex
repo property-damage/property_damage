@@ -655,7 +655,6 @@ defmodule PropertyDamage.Persistence do
     timestamp =
       report.timestamp
       |> DateTime.to_iso8601(:basic)
-      |> String.replace(":", "-")
       |> String.slice(0, 15)
 
     type = FailureReport.failure_type(report) || "unknown"
@@ -669,7 +668,6 @@ defmodule PropertyDamage.Persistence do
     timestamp =
       (trace.timestamp || DateTime.from_unix!(0))
       |> DateTime.to_iso8601(:basic)
-      |> String.replace(":", "-")
       |> String.slice(0, 15)
 
     outcome =
