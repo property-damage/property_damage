@@ -171,6 +171,36 @@ defmodule PropertyDamage.IntegrationTest do
       # returns the (empty) accumulated bug list.
       assert bugs == []
     end
+
+    # Regression: a discovered failure carries maps keyed by
+    # `%PropertyDamage.Sequence.Position{}` structs. `save_to` JSON-encodes the
+    # failure, and `Jason.Encode.key/2` raised on the Position key (no
+    # String.Chars impl). The fix stringifies non-string/atom map keys in
+    # `sanitize_for_json/1`, so save_to must write valid JSON without raising.
+    @tag :tmp_dir
+    test "save_to writes a valid JSON file (Position-keyed maps do not crash encoding)",
+         %{tmp_dir: dir} do
+      assert {:ok, bugs} =
+               Integration.hunt_bugs(
+                 model: FailingModel,
+                 adapter: SimpleAdapter,
+                 adapter_config: %{},
+                 stop_after: 1,
+                 max_runs: 30,
+                 save_to: dir,
+                 verbose: false
+               )
+
+      assert bugs != []
+
+      files = File.ls!(dir)
+      assert files != []
+
+      for file <- files do
+        content = File.read!(Path.join(dir, file))
+        assert {:ok, _decoded} = Jason.decode(content)
+      end
+    end
   end
 
   describe "health_check/1" do

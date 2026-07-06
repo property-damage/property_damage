@@ -479,9 +479,9 @@ defmodule PropertyDamage.Integration do
   defp sanitize_for_json(data) when is_map(data) do
     data
     |> Map.from_struct()
-    |> Map.new(fn {k, v} -> {k, sanitize_for_json(v)} end)
+    |> Map.new(fn {k, v} -> {sanitize_key(k), sanitize_for_json(v)} end)
   rescue
-    _ -> Map.new(data, fn {k, v} -> {k, sanitize_for_json(v)} end)
+    _ -> Map.new(data, fn {k, v} -> {sanitize_key(k), sanitize_for_json(v)} end)
   end
 
   defp sanitize_for_json(data) when is_list(data) do
@@ -497,6 +497,14 @@ defmodule PropertyDamage.Integration do
   defp sanitize_for_json(data) when is_pid(data), do: inspect(data)
   defp sanitize_for_json(data) when is_function(data), do: inspect(data)
   defp sanitize_for_json(data), do: data
+
+  # JSON object keys must be strings or atoms; `Jason.Encode.key/2` raises on
+  # anything else (e.g. a `%Sequence.Position{}` struct key has no String.Chars
+  # impl). Stringify any non-string/non-atom key (structs, tuples, ...) so the
+  # encode cannot crash on the key regardless of shape.
+  defp sanitize_key(k) when is_binary(k), do: k
+  defp sanitize_key(k) when is_atom(k), do: k
+  defp sanitize_key(k), do: inspect(k)
 
   defp print_summary(result) do
     IO.puts("")
