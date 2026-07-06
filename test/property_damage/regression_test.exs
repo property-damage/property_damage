@@ -374,8 +374,11 @@ defmodule PropertyDamage.RegressionTest do
       processed = Enum.reject(results, & &1.skipped)
       skipped = Enum.filter(results, & &1.skipped)
 
-      assert processed != []
-      assert is_list(skipped)
+      # The three failures are identical bar their seed, so exactly the first is
+      # processed and the two duplicates are skipped (with a :duplicate reason).
+      assert length(processed) == 1
+      assert length(skipped) == 2
+      assert Enum.all?(skipped, &(&1.skip_reason == :duplicate))
     end
   end
 
