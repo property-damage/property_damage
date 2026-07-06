@@ -563,7 +563,7 @@ defmodule PropertyDamage.Executor do
   # Shared with PropertyDamage.Executor.Branching (prefix/branch/suffix). DR-029.
   @doc false
   def execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    mock_registry = Map.get(state, :mock_registry)
+    mock_registry = state.mock_registry
 
     try do
       # Check if this is a nemesis command
@@ -613,8 +613,7 @@ defmodule PropertyDamage.Executor do
       MockServiceRegistry.notify_command(mock_registry, command)
     end
 
-    # Get placeholder_registry from state (may not exist in older tests)
-    placeholder_registry = Map.get(state, :placeholder_registry, PlaceholderRegistry.new())
+    placeholder_registry = state.placeholder_registry
 
     # 1. Resolve placeholders and mint markers in the command (DR-021/DR-034).
     case resolve_command_placeholders(
@@ -681,7 +680,7 @@ defmodule PropertyDamage.Executor do
         # Commands may be plain maps in low-level/test usage, hence the guard.
         command_spec =
           if is_struct(command) do
-            Map.get(Map.get(state, :command_specs, %{}), command.__struct__)
+            Map.get(state.command_specs, command.__struct__)
           end
 
         execute_fn = fn runtime ->
@@ -712,8 +711,8 @@ defmodule PropertyDamage.Executor do
         base_event_log = final_injection_ctx.event_log
         injected_events = final_injection_ctx.injected_events
 
-        assertion_mode = Map.get(state, :assertion_mode, :halt)
-        assertion_failures = Map.get(state, :assertion_failures, [])
+        assertion_mode = state.assertion_mode
+        assertion_failures = state.assertion_failures
 
         # Pollers started during this command's execution must be tracked even on
         # the failure branches below, so finalize_result/2 can stop them at run
@@ -923,8 +922,7 @@ defmodule PropertyDamage.Executor do
                 resolved_command
               ),
             step_count: state.step_count + 1,
-            active_resource_pollers:
-              Map.get(state, :active_resource_pollers, []) ++ started_resource_pollers,
+            active_resource_pollers: state.active_resource_pollers ++ started_resource_pollers,
             # P8 / DR-040: persist the advanced fold counter and this command's
             # recorded fold ordinal on every outcome path.
             fold_counter: fold_counter,
@@ -1299,8 +1297,8 @@ defmodule PropertyDamage.Executor do
   # Shared with PropertyDamage.Executor.Finalization (:teardown checkpoint). DR-029.
   @doc false
   def run_phase_assertions(state, phase) do
-    assertion_mode = Map.get(state, :assertion_mode, :halt)
-    counters = Map.get(state, :assertion_counters, %{})
+    assertion_mode = state.assertion_mode
+    counters = state.assertion_counters
 
     if assertion_mode == :disabled do
       {:ok, [], counters}
@@ -1646,7 +1644,7 @@ defmodule PropertyDamage.Executor do
   end
 
   defp maybe_spawn_pollers(state, events, model, command_index) do
-    assertion_mode = Map.get(state, :assertion_mode, :halt)
+    assertion_mode = state.assertion_mode
 
     # Skip if assertions are disabled
     if assertion_mode == :disabled do
@@ -1716,12 +1714,11 @@ defmodule PropertyDamage.Executor do
         new_pollers = Enum.map(spawned, fn {_proj, _name, poller} -> poller end)
 
         counters =
-          Enum.reduce(spawned, Map.get(state, :assertion_counters, %{}), fn {proj, name, _poller},
-                                                                            acc ->
+          Enum.reduce(spawned, state.assertion_counters, fn {proj, name, _poller}, acc ->
             bump_fired(acc, proj, name)
           end)
 
-        existing_pollers = Map.get(state, :active_pollers, [])
+        existing_pollers = state.active_pollers
         %{state | active_pollers: existing_pollers ++ new_pollers, assertion_counters: counters}
       end
     end
@@ -1731,7 +1728,7 @@ defmodule PropertyDamage.Executor do
   # Update state getter for all active pollers with new projection state.
   # Shared with PropertyDamage.Executor.Finalization (drain). DR-029.
   def update_poller_state_getters(state) do
-    pollers = Map.get(state, :active_pollers, [])
+    pollers = state.active_pollers
     projections = state.projections
 
     for poller <- pollers do
