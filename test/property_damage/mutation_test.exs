@@ -8,7 +8,7 @@ defmodule PropertyDamage.MutationTest do
   end
 
   alias PropertyDamage.Mutation
-  alias PropertyDamage.Mutation.{Analysis, Formatter, Operator, Report}
+  alias PropertyDamage.Mutation.{Analysis, Formatter, MutatingAdapter, Operator, Report}
   alias PropertyDamage.Mutation.Operators.{Boundary, Event, Omission, Status, Value}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{MutationResult, MutationUpdate}
@@ -23,6 +23,28 @@ defmodule PropertyDamage.MutationTest do
 
   defmodule AnotherEvent do
     defstruct [:ref_id, :value]
+  end
+
+  defmodule FakeCommand do
+    defstruct [:tag]
+  end
+
+  # Minimal inner adapter for MutatingAdapter unit tests: always succeeds with a
+  # single event, ignoring the runtime handle.
+  defmodule FakeInnerAdapter do
+    @behaviour PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(_command, _ctx, _runtime), do: {:ok, [%TestEvent{amount: 100}]}
+
+    @impl true
+    def timeout(_command), do: 30
   end
 
   # A projection whose assertion always fails, used by the progress-projection
@@ -401,6 +423,36 @@ defmodule PropertyDamage.MutationTest do
 
       [mutated] = Boundary.apply_mutation(events, mutation)
       assert mutated.amount == 0
+    end
+  end
+
+  # ============================================================================
+  # MutatingAdapter Tests
+  # ============================================================================
+
+  describe "MutatingAdapter" do
+    test "success_to_error status mutation flows through as an error response (E2)" do
+      mutation = %{
+        type: :success_to_error,
+        target: :response,
+        original: :ok,
+        mutated: {:error, :internal_error},
+        operator: :status
+      }
+
+      adapter =
+        MutatingAdapter.new(
+          inner_adapter: FakeInnerAdapter,
+          mutation: mutation,
+          operator: Status
+        )
+
+      {:ok, ctx} = MutatingAdapter.setup(adapter)
+
+      # The mutation's intended output is an error response; it must surface as
+      # the command's {:error, _} result, not be swallowed back to the original
+      # successful events.
+      assert MutatingAdapter.execute(%FakeCommand{}, ctx, nil) == {:error, :internal_error}
     end
   end
 
