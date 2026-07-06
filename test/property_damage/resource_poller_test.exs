@@ -339,6 +339,44 @@ defmodule PropertyDamage.ResourcePollerTest do
       EventQueue.stop(queue)
     end
 
+    test "poll_fn exit returns poll_fn_error instead of crashing the poller" do
+      {:ok, queue} = EventQueue.start_link()
+
+      poller =
+        ResourcePoller.start(
+          poll_fn: fn -> exit(:poll_boom) end,
+          handler: fn _ -> {:done, []} end,
+          interval_ms: 10,
+          timeout_ms: 5000,
+          event_queue: queue,
+          command_index: 0
+        )
+
+      result = ResourcePoller.await(poller)
+      assert {:error, _id, {:poll_fn_error, {:exit, :poll_boom}, _stacktrace}} = result
+
+      EventQueue.stop(queue)
+    end
+
+    test "handler exit returns handler_error instead of crashing the poller" do
+      {:ok, queue} = EventQueue.start_link()
+
+      poller =
+        ResourcePoller.start(
+          poll_fn: fn -> :ok end,
+          handler: fn _ -> throw(:handler_boom) end,
+          interval_ms: 10,
+          timeout_ms: 5000,
+          event_queue: queue,
+          command_index: 0
+        )
+
+      result = ResourcePoller.await(poller)
+      assert {:error, _id, {:handler_error, {:throw, :handler_boom}, _stacktrace}} = result
+
+      EventQueue.stop(queue)
+    end
+
     test "handler exception returns handler_error" do
       {:ok, queue} = EventQueue.start_link()
 
