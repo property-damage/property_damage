@@ -233,10 +233,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       regression test), use the new `Position.prefix/1`, `Position.branch/2`, and
       `Position.suffix/1` constructors instead of raw tuples.
 
-- **`PropertyDamage.Validator` renamed to `PropertyDamage.Sequence.Validator`.**
+- **`PropertyDamage.Validator` renamed to `Sequence.Validator`.**
   The sequence-data validity check (`valid_sequence?/2`, run by the shrinker and
   by `Analysis`) now lives under the `Sequence` namespace, next to
-  `Sequence.Position`, resolving the collision with `PropertyDamage.Validation`
+  `Sequence.Position`, resolving the collision with `Validation`
   (config/model-adapter setup validation, unchanged). Both were `@moduledoc
   false` internals; clean break, no forwarding module.
 
@@ -315,7 +315,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `def acceptable_retry_events, do: [...]` → `use PropertyDamage.Command, acceptable_retry_events: [...]`
   The per-instance callbacks `generator/1` (required), `idempotency_key/1`,
   `label/2`, and `awaits/2` are unchanged (they take the command and/or state, so
-  they cannot live in a static map). `PropertyDamage.Command.build_spec_from_legacy/1`
+  they cannot live in a static map). `Command.build_spec_from_legacy/1`
   and the legacy branch of `Model.resolve_spec/2` are removed; a command module
   without `command_spec/1` now resolves to the framework defaults (plus any
   Model-supplied overrides). This supersedes the legacy-fallback portion of DR-019.
