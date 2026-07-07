@@ -161,6 +161,7 @@ defmodule PropertyDamage.LoadTest do
     - `:disabled` - Skip all assertions (maximum throughput)
     - `:record` - Run assertions and record failures in metrics
     - `:log` - Run assertions and log failures as warnings
+    - `:halt` - Run assertions and halt on the first failure
 
   ## Returns
 
