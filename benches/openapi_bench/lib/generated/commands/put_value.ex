@@ -11,7 +11,7 @@ defmodule OpenapiBench.Generated.Commands.PutValue do
   `simulate/2` callback.
   """
 
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:key, :value]

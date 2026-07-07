@@ -11,7 +11,7 @@ defmodule OpenapiBench.Generated.Commands.GetValue do
   `simulate/2` callback.
   """
 
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command, shrink: :prefer_remove
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:key]
