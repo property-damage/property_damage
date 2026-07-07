@@ -7,6 +7,6 @@ defmodule OpenapiBench.Generated.Events.PutValueCompleted do
 
   defstruct [:key, :value]
 
-  # key: integer (required)
-  # value: integer (required)
+  # key: integer (set by events/3; may be :unset)
+  # value: integer (set by events/3; may be :unset)
 end

@@ -1020,12 +1020,15 @@ defmodule Mix.Tasks.Pd.Scaffold do
   end
 
   defp generate_event_field_docs(fields) do
+    # Unlike command structs, an event field is not "required": its value is
+    # whatever the events/3 fill-in records for it, which may be :unset (e.g. the
+    # taught 404 -> :unset mapping). The type shows the value observed on the
+    # happy path; the requiredness of the request schema does not carry over.
     fields
     |> Enum.map_join("\n", fn f ->
       type_str = format_type_doc(f.type)
-      req = if f.required, do: "required", else: "optional"
       desc = if f.description != "", do: " - #{f.description}", else: ""
-      "  # #{f.name}: #{type_str} (#{req})#{desc}"
+      "  # #{f.name}: #{type_str} (set by events/3; may be :unset)#{desc}"
     end)
     |> then(&(&1 <> "\n"))
   end
@@ -1389,10 +1392,10 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
       # Optional lifecycle callbacks
       # @impl true
-      # def setup_once(config), do: {:ok, config}
+      # def setup_once(_config), do: :ok
       #
       # @impl true
-      # def setup_each(config), do: {:ok, config}
+      # def setup_each(_config), do: :ok
       #
       # @impl true
       # def teardown_each(_config), do: :ok
