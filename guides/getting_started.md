@@ -251,7 +251,7 @@ end
 
 ### Adapter Variations
 
-The example above uses HTTP, but adapters can target any transport:
+The example above is in-memory, but adapters can target any transport:
 
 **In-memory** — Call application functions directly for fast tests:
 

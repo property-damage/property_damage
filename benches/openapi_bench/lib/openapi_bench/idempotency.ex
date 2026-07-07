@@ -13,7 +13,7 @@ defmodule OpenapiBench.Idempotency.Commands.CreateValue do
   returns the original id (match); a SUT that ignores the key double-creates
   (mismatch = idempotency violation).
   """
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
   defstruct [:value, :token]
