@@ -97,6 +97,68 @@ defmodule PropertyDamage.ValidationTest do
     end
   end
 
+  # Regression (W4A/A1): a nemesis module listed directly in commands/0 — the
+  # usage taught by guides/chaos_engineering.md and every nemesis moduledoc —
+  # generates via new!/2 (DR-031), not generator/1, and does not `use
+  # PropertyDamage.Command`. Validation used to require generator/1 on every
+  # command module unconditionally, so it raised "missing required callback
+  # generator/1" before generation ever ran. It must instead require the
+  # callback the generation path actually calls (new!/2) for nemesis modules.
+  describe "validate!/3 with a nemesis module in commands/0" do
+    defmodule NemesisEvents do
+      defmodule Touched, do: defstruct([])
+    end
+
+    defmodule NemesisRegularCommand do
+      use PropertyDamage.Command, observables: [NemesisEvents.Touched]
+      defstruct []
+
+      @impl true
+      def generator(overrides \\ %{}) do
+        %{}
+        |> PropertyDamage.Generator.merge_overrides(overrides)
+        |> StreamData.fixed_map()
+      end
+    end
+
+    defmodule NemesisProjection do
+      use PropertyDamage.Model.Projection
+
+      @impl true
+      def init, do: %{}
+
+      @impl true
+      def apply(state, _), do: state
+    end
+
+    defmodule NemesisModel do
+      @behaviour PropertyDamage.Model
+
+      @impl true
+      def commands do
+        [
+          {NemesisRegularCommand, weight: 5},
+          {PropertyDamage.Nemesis.NetworkLatency, weight: 1}
+        ]
+      end
+
+      @impl true
+      def command_sequence_projection, do: NemesisProjection
+
+      @impl true
+      def assertion_projections, do: []
+    end
+
+    test "validates a nemesis command via new!/2 instead of generator/1" do
+      assert {:ok, warnings} = Validation.validate!(NemesisModel, SimpleAdapter)
+      assert is_list(warnings)
+    end
+
+    test "validate_command_list!/1 accepts a nemesis command" do
+      assert :ok = Validation.validate_command_list!(NemesisModel)
+    end
+  end
+
   describe "validate!/3 with injector adapters" do
     test "validates injectable events coverage" do
       # ExecutorModel may have injectable_events that need coverage
