@@ -2,10 +2,19 @@ defmodule PropertyDamage.Validation do
   @moduledoc false
 
   alias PropertyDamage.Error
+  alias PropertyDamage.Nemesis
 
-  # Callbacks every command module must implement. Single source of truth shared
-  # by validate_command_callbacks!/1 and the validate!/3 command check.
+  # Callbacks a regular command module must implement. Single source of truth
+  # shared by validate_command_callbacks!/1 and the validate!/3 command check.
   @required_command_callbacks [{:generator, 1}]
+
+  # A nemesis module listed in commands/0 generates through `new!/2`, not
+  # `generator/1` (DR-031): it does not `use PropertyDamage.Command`, and the
+  # generation path (PropertyDamage.Generator.get_command_generator/3) branches
+  # on nemesis_module?/1 to call new!/2. Validate the callback generation
+  # actually calls, so the documented "nemesis directly in commands/0" usage
+  # passes validation instead of raising a spurious missing-generator/1 error.
+  @required_nemesis_callbacks [{:new!, 2}]
 
   @doc """
   Validate test configuration.
@@ -136,8 +145,8 @@ defmodule PropertyDamage.Validation do
   """
   @spec validate_command_callbacks!(module()) :: :ok
   def validate_command_callbacks!(cmd) do
-    # generator/1 is the only required callback in the new pattern
-    for {callback, arity} <- @required_command_callbacks do
+    # generator/1 for regular commands, new!/2 for nemesis modules (DR-031).
+    for {callback, arity} <- required_command_callbacks(cmd) do
       unless function_exported?(cmd, callback, arity) do
         raise ArgumentError,
               Error.format_config_error(:command_missing_callback, {cmd, callback, arity})
@@ -357,9 +366,19 @@ defmodule PropertyDamage.Validation do
   # command implements them all. Mirrors validate_command_callbacks!/1 but
   # accumulates rather than raising, matching the validate!/3 error-collection.
   defp missing_command_callback(cmd) do
-    Enum.find(@required_command_callbacks, fn {callback, arity} ->
+    Enum.find(required_command_callbacks(cmd), fn {callback, arity} ->
       not function_exported?(cmd, callback, arity)
     end)
+  end
+
+  # Which callbacks a command module in commands/0 must implement. Nemesis
+  # modules generate via new!/2 (DR-031); every other command via generator/1.
+  defp required_command_callbacks(cmd) do
+    if Nemesis.nemesis_module?(cmd) do
+      @required_nemesis_callbacks
+    else
+      @required_command_callbacks
+    end
   end
 
   defp validate_projections(model) do
