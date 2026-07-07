@@ -294,18 +294,44 @@ defmodule PropertyDamage.Model do
   """
   @callback injectable_events() :: [module()]
 
+  @typedoc """
+  Argument map delivered to every lifecycle callback.
+
+  `:adapter_config` is guaranteed on every invocation of every lifecycle
+  callback: it is the `adapter_config` map passed to the run (defaulting to
+  `%{}`). The remaining keys are path tags, present only on the paths that set
+  them, so a robust callback destructures `adapter_config` and treats the rest
+  as informational:
+
+  - `:run_number` - the exploration run index. Present on the run-loop and
+    trace/single-run paths (the latter passes `0`); absent during replay.
+  - `:replay` - always `true` when present. Set only on the
+    `PropertyDamage.replay/2` path; never combined with `:run_number`.
+  - `:capture` - always `true` when present. Set only on the trace-capture
+    path (`RunTrace`), alongside `:run_number`.
+  """
+  @type lifecycle_config :: %{
+          required(:adapter_config) => map(),
+          optional(:run_number) => non_neg_integer(),
+          optional(:replay) => true,
+          optional(:capture) => true
+        }
+
   @doc """
   Setup that runs ONCE at the start of the property test.
 
   This is NOT re-run during shrinking. Use for expensive one-time setup
   like starting applications or external services.
 
+  Runs on the standard run path only (`PropertyDamage.run/3`); replay never
+  invokes the `_once` callbacks. Receives `%{adapter_config: adapter_config}`.
+
   ## Returns
 
   - `:ok` - Setup succeeded
   - `{:error, reason}` - Setup failed, test aborted
   """
-  @callback setup_once(config :: map()) :: :ok | {:error, term()}
+  @callback setup_once(config :: lifecycle_config()) :: :ok | {:error, term()}
 
   @doc """
   Setup that runs BEFORE EACH execution.
@@ -313,12 +339,17 @@ defmodule PropertyDamage.Model do
   This runs before every execution including every shrink attempt.
   Use for resetting state that must be pristine (database, cache, etc.).
 
+  `:adapter_config` is always present. The run-loop and trace/single-run paths
+  additionally pass `:run_number` (the trace path uses `0`); replay instead
+  passes `replay: true`; the trace-capture path also sets `capture: true`.
+  Destructure `%{adapter_config: config}` and treat the rest as informational.
+
   ## Returns
 
   - `:ok` - Setup succeeded
   - `{:error, reason}` - Setup failed, execution skipped
   """
-  @callback setup_each(config :: map()) :: :ok | {:error, term()}
+  @callback setup_each(config :: lifecycle_config()) :: :ok | {:error, term()}
 
   @doc """
   Teardown that runs after each execution.
@@ -326,11 +357,15 @@ defmodule PropertyDamage.Model do
   This is best-effort cleanup. The framework logs warnings if teardowns
   raise but does not fail the test.
 
+  Receives the same argument contract as `setup_each/1`: `:adapter_config` is
+  always present; the run-loop and trace/single-run paths add `:run_number`
+  (the trace path uses `0`), and replay adds `replay: true`.
+
   ## Returns
 
   Always returns `:ok`. Handle errors internally.
   """
-  @callback teardown_each(config :: map()) :: :ok
+  @callback teardown_each(config :: lifecycle_config()) :: :ok
 
   @doc """
   Final teardown after all shrinking complete.
@@ -338,11 +373,14 @@ defmodule PropertyDamage.Model do
   This is best-effort cleanup. The framework logs warnings if teardowns
   raise but does not fail the test.
 
+  Runs on the standard run path only. Receives
+  `%{adapter_config: adapter_config}`.
+
   ## Returns
 
   Always returns `:ok`. Handle errors internally.
   """
-  @callback teardown_once(config :: map()) :: :ok
+  @callback teardown_once(config :: lifecycle_config()) :: :ok
 
   @doc """
   Determines if the test should terminate after the given command/events.

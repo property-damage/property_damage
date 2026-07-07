@@ -402,7 +402,7 @@ defmodule PropertyDamage.Replay do
 
     if session.model && function_exported?(session.model, :teardown_each, 1) do
       try do
-        session.model.teardown_each(%{adapter_config: session.adapter_config})
+        session.model.teardown_each(%{adapter_config: session.adapter_config, replay: true})
       rescue
         _ -> :ok
       end

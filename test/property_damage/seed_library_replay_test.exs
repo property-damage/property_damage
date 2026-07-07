@@ -52,6 +52,26 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     def assertion_projections, do: [Switchable]
   end
 
+  # Same model, but records the exact map its lifecycle callbacks receive. Used
+  # to pin the trace/single-run contract delivered by the seed-library replay
+  # phase (`with_sequence_execution`), which passes run_number: 0.
+  defmodule LifecycleModel do
+    @behaviour PropertyDamage.Model
+    def commands, do: [Cmd]
+    def command_sequence_projection, do: State
+    def assertion_projections, do: [Switchable]
+
+    def setup_each(config) do
+      send(config.adapter_config.test_pid, {:lifecycle, :setup_each, config})
+      :ok
+    end
+
+    def teardown_each(config) do
+      send(config.adapter_config.test_pid, {:lifecycle, :teardown_each, config})
+      :ok
+    end
+  end
+
   defmodule Adapter do
     use PropertyDamage.Adapter
     def setup(config), do: {:ok, config}
@@ -254,6 +274,41 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
 
       assert_received {:leaked_event_queue, event_queue}
       refute Process.alive?(event_queue)
+    end
+  end
+
+  describe "lifecycle callback arguments on the trace/single-run replay path" do
+    test "setup_each and teardown_each receive adapter_config + run_number: 0" do
+      path = tmp_path("trace_lifecycle")
+      preseed(path, 7, model: "M")
+      # A still-failing preseeded seed reproduces via with_sequence_execution and
+      # halts before exploration, so the only tagged setup_each/teardown_each are
+      # the trace path's. shrink: false keeps the shrinker off this run entirely.
+      set_mode(:fail)
+      pid = self()
+
+      assert {:error, _} =
+               PropertyDamage.run(
+                 model: LifecycleModel,
+                 adapter: Adapter,
+                 max_commands: 2,
+                 shrink: false,
+                 validate: false,
+                 seed_library: path,
+                 max_runs: 1,
+                 adapter_config: %{test_pid: pid}
+               )
+
+      assert_received {:lifecycle, :setup_each,
+                       %{adapter_config: %{test_pid: ^pid}, run_number: 0} = setup_config}
+
+      assert map_size(setup_config) == 2
+
+      assert_received {:lifecycle, :teardown_each,
+                       %{adapter_config: %{test_pid: ^pid}, run_number: 0} = teardown_config}
+
+      assert map_size(teardown_config) == 2
+      refute Map.has_key?(teardown_config, :replay)
     end
   end
 end

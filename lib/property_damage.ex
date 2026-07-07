@@ -452,7 +452,7 @@ defmodule PropertyDamage do
         after
           # Teardown once
           if function_exported?(model, :teardown_once, 1) do
-            model.teardown_once(%{})
+            model.teardown_once(%{adapter_config: adapter_config})
           end
         end
 
@@ -751,7 +751,7 @@ defmodule PropertyDamage do
 
             # Teardown each
             if function_exported?(model, :teardown_each, 1) do
-              model.teardown_each(%{})
+              model.teardown_each(%{adapter_config: adapter_config, run_number: run_number})
             end
           end
         after
@@ -1142,7 +1142,7 @@ defmodule PropertyDamage do
             teardown_injectors(ctx.injector_adapters)
 
             if function_exported?(ctx.model, :teardown_each, 1) do
-              ctx.model.teardown_each(%{})
+              ctx.model.teardown_each(%{adapter_config: ctx.adapter_config, run_number: 0})
             end
           end
         after

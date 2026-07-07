@@ -223,59 +223,76 @@ defmodule PropertyDamageTest do
       @impl true
       def assertion_projections, do: []
 
+      # Every callback echoes the exact map it received back to the test pid,
+      # which lives in adapter_config (guaranteed present on every path).
       @impl true
       def setup_once(config) do
-        # config is %{adapter_config: %{test_pid: pid}}
-        send(config[:adapter_config][:test_pid], :setup_once_called)
+        send(config.adapter_config.test_pid, {:lifecycle, :setup_once, config})
         :ok
       end
 
       @impl true
       def setup_each(config) do
-        # config is %{adapter_config: %{test_pid: pid}, run_number: n}
-        send(config[:adapter_config][:test_pid], {:setup_each_called, config[:run_number]})
+        send(config.adapter_config.test_pid, {:lifecycle, :setup_each, config})
         :ok
       end
 
       @impl true
-      def teardown_each(_config) do
-        # Can't reliably send from here due to after block timing
+      def teardown_each(config) do
+        send(config.adapter_config.test_pid, {:lifecycle, :teardown_each, config})
         :ok
       end
 
       @impl true
-      def teardown_once(_config) do
-        # Can't reliably send from here due to after block timing
+      def teardown_once(config) do
+        send(config.adapter_config.test_pid, {:lifecycle, :teardown_once, config})
         :ok
       end
     end
 
-    test "calls setup_once at start" do
+    test "setup_once and teardown_once receive %{adapter_config: ...} on the run path" do
+      pid = self()
+
       PropertyDamage.run(
         model: LifecycleModel,
         adapter: SimpleAdapter,
         max_runs: 1,
         max_commands: 2,
         validate: false,
-        adapter_config: %{test_pid: self()}
+        adapter_config: %{test_pid: pid}
       )
 
-      assert_received :setup_once_called
+      assert_received {:lifecycle, :setup_once, setup_config}
+      assert setup_config == %{adapter_config: %{test_pid: pid}}
+
+      assert_received {:lifecycle, :teardown_once, teardown_config}
+      assert teardown_config == %{adapter_config: %{test_pid: pid}}
     end
 
-    test "calls setup_each before each run" do
+    test "setup_each and teardown_each receive adapter_config + run_number on the run path" do
+      pid = self()
+
       PropertyDamage.run(
         model: LifecycleModel,
         adapter: SimpleAdapter,
         max_runs: 3,
         max_commands: 2,
         validate: false,
-        adapter_config: %{test_pid: self()}
+        adapter_config: %{test_pid: pid}
       )
 
-      assert_received {:setup_each_called, 0}
-      assert_received {:setup_each_called, 1}
-      assert_received {:setup_each_called, 2}
+      for n <- 0..2 do
+        assert_received {:lifecycle, :setup_each,
+                         %{adapter_config: %{test_pid: ^pid}, run_number: ^n} = setup_config}
+
+        assert map_size(setup_config) == 2
+
+        assert_received {:lifecycle, :teardown_each,
+                         %{adapter_config: %{test_pid: ^pid}, run_number: ^n} = teardown_config}
+
+        assert map_size(teardown_config) == 2
+        refute Map.has_key?(teardown_config, :replay)
+      end
     end
   end
 

@@ -66,6 +66,33 @@ defmodule PropertyDamage.ReplayTest do
     def command_sequence_projection, do: Counter
   end
 
+  # Same counter, but records the exact map each lifecycle callback receives by
+  # echoing it to the pid carried in adapter_config.
+  defmodule LifecycleCounterModel do
+    @moduledoc false
+    @behaviour PropertyDamage.Model
+
+    alias PropertyDamage.ReplayTest.{Bump, Counter}
+
+    @impl true
+    def commands, do: [Bump]
+
+    @impl true
+    def command_sequence_projection, do: Counter
+
+    @impl true
+    def setup_each(config) do
+      send(config.adapter_config.test_pid, {:lifecycle, :setup_each, config})
+      :ok
+    end
+
+    @impl true
+    def teardown_each(config) do
+      send(config.adapter_config.test_pid, {:lifecycle, :teardown_each, config})
+      :ok
+    end
+  end
+
   # Run the failing sequence through the real engine and package the result as
   # a FailureReport, exactly as the run loop would.
   defp recorded_failure do
@@ -218,6 +245,40 @@ defmodule PropertyDamage.ReplayTest do
       assert output =~ "[0] Bump -> OK"
       assert output =~ "[2] Bump -> FAILED (count_bounded)"
       assert output =~ "Events: Counted"
+    end
+  end
+
+  describe "lifecycle callback arguments" do
+    test "replay passes replay: true (and no run_number) to setup_each and teardown_each" do
+      pid = self()
+      sequence = Sequence.linear([%Bump{}, %Bump{}, %Bump{}])
+
+      {:ok, result} = Executor.run(sequence, LifecycleCounterModel, CounterAdapter, [])
+      refute result.success
+
+      failure =
+        FailureReport.new(
+          seed: 0,
+          run_number: 1,
+          original_sequence: sequence,
+          shrunk_sequence: sequence,
+          failed_at_index: result.failed_at_index,
+          failure_reason: result.failure_reason,
+          event_log: result.event_log,
+          projections: result.projections,
+          projections_before: result.projections_before,
+          model: LifecycleCounterModel,
+          adapter: CounterAdapter
+        )
+
+      # Replay.run starts a session (setup_each) and stops it (teardown_each).
+      {:ok, _steps} = Replay.run(failure, adapter_config: %{test_pid: pid})
+
+      assert_received {:lifecycle, :setup_each, setup_config}
+      assert setup_config == %{adapter_config: %{test_pid: pid}, replay: true}
+
+      assert_received {:lifecycle, :teardown_each, teardown_config}
+      assert teardown_config == %{adapter_config: %{test_pid: pid}, replay: true}
     end
   end
 end
