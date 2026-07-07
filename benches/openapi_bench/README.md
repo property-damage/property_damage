@@ -18,6 +18,7 @@ container / BYO); then it starts nothing locally.
 ```
 PUT  /kv/{key}   {"value": int}  -> 200 {"key": int, "value": int}
 GET  /kv/{key}                   -> 200 {"key": int, "value": int} | 404
+POST /values     {"value": int}  -> 201 {"id": int, "value": int}   (honors Idempotency-Key)
 POST /__reset__  {"bug": bool}   -> 200 {"ok": true}   (harness only, not in the spec)
 ```
 
