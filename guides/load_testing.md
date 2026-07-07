@@ -113,7 +113,7 @@ write.
 | `arrival_jitter` | `{min_ms, max_ms}` jitter per arrival | `{0, 0}` |
 | `metrics_interval` | How often to sample metrics (snapshot cadence) | `{1, :seconds}` |
 | `on_progress` | Progress consumer: `LoadUpdate` snapshots + a terminal `LoadResult` | `nil` |
-| `assertion_mode` | `:disabled`, `:log`, or `:fail` | `:disabled` |
+| `assertion_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
 
 ### Arrival Rate Formats
 
