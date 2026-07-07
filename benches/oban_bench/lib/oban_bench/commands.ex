@@ -24,7 +24,7 @@ end
 
 defmodule ObanBench.Commands.Increment do
   @moduledoc "Enqueue an async job that increments a named counter by one."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
