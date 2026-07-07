@@ -22,8 +22,13 @@ defmodule OpenapiBench.Idempotency.Commands.CreateValue do
   def generator(overrides \\ %{}) do
     %{
       value: StreamData.integer(0..100),
-      # Wide range so each generated create gets a distinct idempotency key.
-      token: StreamData.integer(0..1_000_000)
+      # A client-minted, run-scoped idempotency token (DR-034). During
+      # generation the field holds a mint marker reified with its coordinates,
+      # so the plan stays a pure function of the seed; at execution it resolves
+      # to a UUID derived from the run's nonce/epoch and those coordinates.
+      # Unlike a bounded integer, this is unique per run and thus collision-safe
+      # against the advertised non-resettable external SUT (PD_OPENAPI_URL).
+      token: StreamData.constant(PropertyDamage.mint_per_run(:uuid))
     }
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()

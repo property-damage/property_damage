@@ -72,7 +72,7 @@ end
 
 defmodule ObanBench.JobRefs.Commands.EnqueueJob do
   @moduledoc "Producer: insert a scheduled Oban job whose id is server-generated."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   defstruct []
 
@@ -82,7 +82,7 @@ end
 
 defmodule ObanBench.JobRefs.Commands.CancelJob do
   @moduledoc "Consumer: cancel a previously enqueued job by its server-generated id."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
@@ -100,7 +100,7 @@ end
 
 defmodule ObanBench.JobRefs.Commands.ReadJobState do
   @moduledoc "Consumer: read a previously enqueued job's state by its server-generated id."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 

@@ -22,7 +22,7 @@ state and asserts invariants.
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule Bank.Commands.Deposit do
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
   import PropertyDamage.Generator, only: [merge_overrides: 2]
   defstruct [:amount]
   @impl true
@@ -32,7 +32,7 @@ defmodule Bank.Commands.Deposit do
 end
 
 defmodule Bank.Commands.Withdraw do
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
   import PropertyDamage.Generator, only: [merge_overrides: 2]
   defstruct [:amount]
   @impl true

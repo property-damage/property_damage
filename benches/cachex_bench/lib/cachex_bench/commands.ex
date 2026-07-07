@@ -21,7 +21,7 @@ end
 
 defmodule CachexBench.Commands.PutKey do
   @moduledoc "Write a value under a key."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
@@ -40,7 +40,7 @@ end
 
 defmodule CachexBench.Commands.GetKey do
   @moduledoc "Read a key; the model asserts the returned value matches expectation."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
@@ -56,7 +56,7 @@ end
 
 defmodule CachexBench.Commands.DelKey do
   @moduledoc "Delete a key (idempotent: deleting an absent key is fine)."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
@@ -72,7 +72,7 @@ end
 
 defmodule CachexBench.Commands.ClearCache do
   @moduledoc "Wipe the whole cache."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   defstruct []
 

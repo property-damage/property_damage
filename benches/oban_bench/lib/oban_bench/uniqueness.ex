@@ -23,7 +23,7 @@ end
 
 defmodule ObanBench.Uniqueness.Commands.UniqueIncrement do
   @moduledoc "Enqueue an increment tagged with a dedup key."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 

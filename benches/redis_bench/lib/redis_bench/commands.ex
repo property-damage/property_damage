@@ -36,7 +36,7 @@ end
 
 defmodule RedisBench.Commands.Increment do
   @moduledoc "Atomically increment the register (`INCR`)."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   defstruct []
 
@@ -46,7 +46,7 @@ end
 
 defmodule RedisBench.Commands.ReadValue do
   @moduledoc "Read the register (`GET`); the model asserts the value is consistent."
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   defstruct []
 
@@ -65,7 +65,7 @@ defmodule RedisBench.Commands.GetThenSet do
   losing one update. This is the command whose branches the linearization
   checker refutes when the race bites.
   """
-  @behaviour PropertyDamage.Command
+  use PropertyDamage.Command
 
   defstruct []
 
