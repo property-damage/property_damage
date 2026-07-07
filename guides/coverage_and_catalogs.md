@@ -187,6 +187,21 @@ Invariant coverage:
 - **Transition coverage** — fraction of ordered command pairs (A → B) seen.
 - **State coverage** — count of distinct projection states (by hash).
 
+Each headline number is also available programmatically. `command_coverage/1`
+returns the percentage in the "Command coverage" line, and the raw per-command
+execution counts live in the tracker's `command_counts` field
+(`%{command_module => count}`) — the same map `top_commands/2` and
+`bottom_commands/2` rank:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+PropertyDamage.Coverage.command_coverage(stats.coverage)
+#=> 100.0
+
+stats.coverage.command_counts
+#=> %{Bank.Commands.Deposit => 582, Bank.Commands.Withdraw => 418}
+```
+
 `Coverage.format(tracker, :full)` adds a transition matrix and the untested
 pairs; `Coverage.format(tracker, :matrix)` prints just the matrix.
 

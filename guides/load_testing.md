@@ -54,6 +54,46 @@ IO.puts(Report.format(report, :terminal))
 Report.save(report, "load_test_report.md", :markdown)
 ```
 
+### The `run/1` entry point
+
+The Quick Start above drives the async `Runner` surface directly. The simplest
+way to run a load test is the one-shot `PropertyDamage.LoadTest.run/1`, the same
+entry point `benches/openapi_bench` uses. It starts a runner, blocks until the
+run finishes, and returns the final report:
+
+```elixir
+{:ok, report} = PropertyDamage.LoadTest.run(
+  model: MyApp.Model,
+  adapter: MyApp.HTTPAdapter,
+  adapter_config: %{base_url: "http://localhost:4000"},
+  arrival_rate: 50,
+  duration: {2, :minutes}
+)
+
+IO.puts(PropertyDamage.LoadTest.format(report, :terminal))
+```
+
+Like `PropertyDamage.run/1` for correctness testing, `run/1` takes a keyword
+list and returns a single result: `{:ok, report}` on completion or
+`{:error, reason}` if the runner fails to start. The difference is what happens
+between those points. `PropertyDamage.run/1` explores many short sequences
+hunting for bugs and returns run statistics (or a failure report);
+`LoadTest.run/1` sustains concurrent arrivals for the configured `duration` and
+returns a load report (see [Understanding the Report](#understanding-the-report)).
+
+When you need to observe or stop a run in flight, use the async facade instead
+of `run/1`. `PropertyDamage.LoadTest` exposes `start/1` (returns
+`{:ok, runner}`), `await/2`, `status/1`, `get_metrics/1`, and `stop/1` over the
+`Runner` process shown in the Quick Start; `run/1` is exactly `start/1` followed
+by `await/2`. `format/2`, `summary/1`, and `save/3` render a report and delegate
+to `PropertyDamage.LoadTest.Report`.
+
+`run/1` validates its options against a NimbleOptions schema
+(`PropertyDamage.Options.load_test_schema/0`, the authority for what is
+accepted). The required options are `model`, `adapter`, `arrival_rate`, and
+`duration`; everything in [Configuration Options](#configuration-options) below
+is optional.
+
 ## Server-Generated Values (`external()`)
 
 Realistic load uses the same models as correctness testing, including commands
@@ -114,6 +154,7 @@ write.
 | `metrics_interval` | How often to sample metrics (snapshot cadence) | `{1, :seconds}` |
 | `on_progress` | Progress consumer: `LoadUpdate` snapshots + a terminal `LoadResult` | `nil` |
 | `assertion_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
+| `run_nonce` | `non_neg_integer` seeding client-minted run-scoped values (DR-034); set it only for reproducible minted values | strong random entropy |
 
 ### Arrival Rate Formats
 
@@ -159,6 +200,53 @@ Runner.start_link(
 ```
 
 ## Understanding the Report
+
+### Report structure
+
+The value `run/1` (or `await/2`) returns is a plain map, not a struct, with three
+top-level keys: `report.metrics`, `report.pool_stats`, and `report.config`. The
+formatters above render it, but you can read the fields directly for assertions
+or custom reporting.
+
+`report.metrics` is the final metrics snapshot. The adopter-relevant fields:
+
+| Field | Meaning |
+|-------|---------|
+| `total_requests` | Total commands executed (the report calls these "commands") |
+| `requests_per_second` | Mean command throughput over the run |
+| `latency_min` / `latency_p50` / `latency_p95` / `latency_p99` / `latency_max` / `latency_mean` | Per-command latency stats in ms |
+| `total_errors` / `error_rate` | Execution error count and percentage of commands |
+| `errors_by_type` | `%{error_type => count}` |
+| `arrivals_spawned` / `arrivals_completed` / `arrivals_per_second` | Arrival (sequence) counts and rate |
+| `by_command` | `%{command_module => %{count, latency_p50, latency_p95, latency_mean, error_count}}` |
+| `duration_ms` | Wall-clock length of the run |
+| `active_sessions` / `completed_sessions` | Session gauges at snapshot time |
+| `assertion_failures` / `assertion_failure_rate` / `failures_by_exception` | Populated when `assertion_mode` is not `:disabled` (`failures_by_exception` is `%{exception_module => count}`) |
+| `recent_assertion_failures` | Bounded list of recent assertion-failure detail maps |
+| `history` | Time series: a list of `%{timestamp, rps, latency_p95, active_sessions, error_rate}` points |
+
+`report.pool_stats` describes the dynamic worker pool:
+
+| Field | Meaning |
+|-------|---------|
+| `total_created` | Total workers the pool created over the run |
+| `peak_in_use` | Maximum workers checked out at once |
+| `peak_utilization` | `peak_in_use / total_created` |
+| `avg_utilization` | Mean utilization across checkout samples |
+| `utilization` | Instantaneous utilization at report time |
+| `total_checkouts` / `total_checkins` | How many times workers were borrowed and returned |
+| `available` / `in_use` | Idle and busy worker counts at report time |
+
+`report.config` echoes the run configuration: `model`, `adapter`, `arrival_rate`,
+and `duration_ms`.
+
+```elixir
+{:ok, report} = PropertyDamage.LoadTest.run(opts)
+
+report.metrics.latency_p95
+report.metrics.by_command
+report.pool_stats.peak_in_use
+```
 
 ### Key Terminology
 

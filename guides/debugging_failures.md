@@ -57,6 +57,33 @@ Read a failure with the accessors rather than matching the struct by hand:
 `partial_events/1`. `FailureReport.failure_type/1` returns the kind and
 `FailureReport.check_name/1` the name.
 
+#### Idempotency failures
+
+Idempotency violations (from stutter testing, see the
+[idempotency guide](idempotency_testing.md)) have two dedicated accessors so you
+do not have to reach into the `%Failure{}` by hand:
+
+- `PropertyDamage.FailureReport.idempotency_failure?/1` — `true` when the failure
+  kind is `:idempotency_violation`, `false` otherwise.
+- `PropertyDamage.FailureReport.idempotency_violation/1` — the
+  `%PropertyDamage.Stutter.Violation{}` for such a failure, or `nil` for any other
+  failure kind.
+
+The violation records `command`, `command_index`, `comparison_result`, and
+`attempts`. `attempts` is the list you usually inspect: each entry is a map
+`%{attempt: n, events: [...], is_retry: boolean}`, so you can compare the events
+the SUT returned on the first execution against those from each retry.
+
+```elixir
+if PropertyDamage.FailureReport.idempotency_failure?(failure) do
+  violation = PropertyDamage.FailureReport.idempotency_violation(failure)
+
+  Enum.each(violation.attempts, fn attempt ->
+    IO.puts("attempt #{attempt.attempt} (retry? #{attempt.is_retry}): #{inspect(attempt.events)}")
+  end)
+end
+```
+
 > **Triage note — tuning vs. bug.** A `kind in [:poll_timeout, :settle_timeout]`
 > failure means the system did not reach the expected state *in time*. That is
 > often a tuning question (the timeout is too tight, or the operation is slower
@@ -139,7 +166,7 @@ Replay the sequence step by step to observe state changes:
 
 ```elixir
 # replay/2 returns {:ok, [step]}; each step is
-# %{index, command, command_name, events, projections}
+# %{index, command, command_name, events, projections, projections_before, result}
 {:ok, steps} = PropertyDamage.replay(failure)
 
 Enum.each(steps, fn step ->
@@ -148,6 +175,37 @@ Enum.each(steps, fn step ->
   IO.puts("Events: #{inspect(step.events)}")
   IO.puts("Projections after: #{inspect(step.projections)}")
   IO.puts("")
+end)
+```
+
+`step.projections` is the projection state after the command; `projections_before`
+is the state just before it, so you can diff the two around the failing step.
+
+#### Step results
+
+`step.result` records how each command's execution and checks turned out. It is
+a replay-local outcome vocabulary (distinct from the run-level `failure_reason`)
+with three shapes:
+
+- `:ok` — the command executed and every check that ran passed.
+- `{:check_failed, name, exception}` — an assertion failed. `name` is the check
+  name (an atom, e.g. `:balance_non_negative`) and `exception` is the exception
+  struct the assertion raised. Only `:assertion_failed` failures take this shape.
+- `{:error, reason}` — any other failure: an adapter/execution error, or a
+  non-assertion failure (a poll/settle timeout, linearization, framework error).
+  `reason` is the underlying value.
+
+So the failing step is the one whose `result` is not `:ok`:
+
+```elixir
+{:ok, steps} = PropertyDamage.replay(failure)
+
+Enum.each(steps, fn step ->
+  case step.result do
+    :ok -> :ok
+    {:check_failed, name, _exception} -> IO.puts("[#{step.index}] check failed: #{name}")
+    {:error, reason} -> IO.puts("[#{step.index}] error: #{inspect(reason)}")
+  end
 end)
 ```
 

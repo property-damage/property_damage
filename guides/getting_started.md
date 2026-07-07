@@ -205,6 +205,24 @@ defmodule MyApp.TestModel do
 end
 ```
 
+The model above implements four callbacks, but only two are **required**:
+`commands/0` and `command_sequence_projection/0`. Every other `PropertyDamage.Model`
+callback is optional (they are listed in `@optional_callbacks`), so a minimal
+model is just those two. The optional ones:
+
+- `assertion_projections/0` — invariant projections to run; defaults to `[]`.
+- `injectable_events/0` — events that arrive from outside command execution
+  (webhooks, callbacks) rather than from commands; defaults to `[]`.
+- `simulator/0` — a separate simulator module for sequence generation (defaults
+  to the model itself).
+- `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1` — lifecycle
+  hooks (see the [Cheatsheet](cheatsheet.md) for their argument shapes).
+- `terminate?/3` — a predicate to stop generating a sequence early.
+
+This example spells out `assertion_projections/0` and `injectable_events/0`
+(even though `injectable_events` returns `[]`) to show their shape; you can drop
+either until you need it.
+
 ## Step 6: Define the Adapter
 
 The adapter executes commands against your actual system:

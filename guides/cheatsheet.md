@@ -95,6 +95,30 @@ defmodule MyApp.TestModel do
 end
 ```
 
+### Lifecycle callback arguments
+
+Each lifecycle callback receives a single map. `setup_once/1` runs once at the
+start and gets `%{adapter_config: config}` (the `adapter_config` you passed to
+the run). `setup_each/1` runs before every sequence and gets that plus a
+`:run_number` on the normal run path — `%{adapter_config: config, run_number: n}`
+— while during a `PropertyDamage.replay/2` it instead gets
+`%{adapter_config: config, replay: true}`. The one key present on every
+`setup_each/1` invocation is `adapter_config`, so destructure only that and treat
+`run_number` as informational (the trace/single-run derivation passes
+`run_number: 0`, and replay omits it entirely):
+
+```elixir
+@impl true
+def setup_each(%{adapter_config: config}) do
+  MyApp.Repo.reset(config)
+  :ok
+end
+```
+
+The teardown callbacks also take a map, but on the normal run path it is empty
+(`teardown_once/1` and `teardown_each/1` receive `%{}`), so do not depend on its
+contents.
+
 ## Projection Template
 
 ```elixir
