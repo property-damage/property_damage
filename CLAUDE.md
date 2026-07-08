@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PropertyDamage is a stateful property-based testing (SPBT) framework for Elixir. It generates random sequences of operations against a System Under Test, verifies invariants hold throughout, and automatically shrinks failures to minimal reproductions.
 
+## Repository scope
+
+This is the PropertyDamage framework library, and it is public. Keep it framework-only: application, demo, example, and consumer code that merely *uses* PropertyDamage (including in tests, fixtures, and docs) belongs in a separate consumer project, not in this repo. Anything committed here is permanently public through merged-PR history even if later deleted from `main`, so confirm a change is framework scope before opening a PR.
+
 ## Commands
 
 ```bash
