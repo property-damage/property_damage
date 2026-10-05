@@ -28,7 +28,7 @@ defmodule PropertyDamage.Linearization do
      at that point, and compare against the events the SUT actually produced
      for that command
   3. Advance the model state with the OBSERVED events and, at that same
-     position, run the model's synchronous (`@trigger`) assertions against the
+     position, run the model's synchronous (`@check`) assertions against the
      advanced state
   4. Advance and continue
   5. If any interleaving is fully consistent (events compatible AND all

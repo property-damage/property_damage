@@ -85,7 +85,7 @@ defmodule PropertyDamage.MutationTest do
     @impl true
     def apply(state, _), do: state
 
-    @trigger every: PropertyDamage.Test.Commands.CreateItem
+    @check every: PropertyDamage.Test.Commands.CreateItem
     def assert_always_fails(_state, _cmd_or_event) do
       PropertyDamage.fail!("mutation progress fixture: always fails")
     end

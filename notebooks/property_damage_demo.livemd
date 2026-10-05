@@ -135,7 +135,7 @@ end
 ### Projection and invariant
 
 A projection reduces events into state with `apply/2`. Functions tagged
-`@trigger` are **invariants**: PropertyDamage runs them at the configured points
+`@check` are **invariants**: PropertyDamage runs them at the configured points
 and treats a raised exception (via `PropertyDamage.fail!/2`) as a violation. A
 returned value is ignored — an invariant signals failure only by raising.
 
@@ -179,7 +179,7 @@ defmodule Demo.Bank do
   @invariant id: :balance_non_negative,
              description: "No account balance is ever negative (no overdrafts)"
 
-  @trigger every: 1, validates: :balance_non_negative
+  @check every: 1, validates: :balance_non_negative
   def assert_balance_non_negative(state, _step) do
     negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
 
@@ -559,7 +559,7 @@ defmodule Demo.ChaosBank do
   def apply(state, %NetworkLatencyRestored{}), do: state
   def apply(state, _event), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_balance_non_negative(state, _step) do
     negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
 

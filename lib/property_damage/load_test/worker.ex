@@ -438,7 +438,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     # any assertion, mirroring the main Executor (which asserts against the
     # post-events state; see Executor.run_checks, invoked with projections that
     # already have both the command and its events applied). A command-level
-    # `@trigger every: Cmd` therefore observes this command's own events — e.g. a
+    # `@check every: Cmd` therefore observes this command's own events — e.g. a
     # read-consistency check sees the value just retrieved. Folding events one at
     # a time and asserting in between (the prior behavior) made such checks read
     # stale state and misfire.

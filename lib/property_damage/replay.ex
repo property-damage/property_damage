@@ -9,7 +9,7 @@ defmodule PropertyDamage.Replay do
   Replay is a thin **stepping shell over the Executor**: every command runs
   through the exact same engine path as a real run (ref/placeholder resolution,
   settle for probe/async commands, nemesis injection, injector and mock events,
-  projection updates, `@trigger` assertions, and stutter). This is what makes a
+  projection updates, `@check` assertions, and stutter). This is what makes a
   recorded failure replay to the identical step sequence and state.
 
   ## Usage Modes

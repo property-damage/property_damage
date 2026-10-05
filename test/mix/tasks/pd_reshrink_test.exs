@@ -43,7 +43,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
     def apply(state, %Counted{amount: n}), do: %{state | count: state.count + n}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def count_bounded(state, _cmd_or_event) do
       if state.count >= 3 do
         PropertyDamage.fail!("count exceeded bound", count: state.count)

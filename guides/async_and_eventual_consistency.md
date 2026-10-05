@@ -140,7 +140,7 @@ defmodule Warehouse.State do
 
   # Safety: a widget can only arrive once the probe has settled, and it can only
   # arrive if it was shipped. This fires once per settled AwaitWidget probe.
-  @trigger every: Warehouse.Events.WidgetArrived
+  @check every: Warehouse.Events.WidgetArrived
   def assert_arrivals_were_shipped(state, %WidgetArrived{sku: sku}) do
     unless MapSet.member?(state.shipped, sku) do
       PropertyDamage.fail!("widget arrived without being shipped",
@@ -769,10 +769,10 @@ overlap diagnostic is logged.
 Express judgment over a command's correlated set with ordinary projection
 assertions:
 
-- **liveness** ("the webhook must arrive") — a `@poll_state` over the correlated
+- **liveness** ("the webhook must arrive") — a `@eventually` over the correlated
   set (e.g. `fn s -> s.webhooks[id] >= 1 end`). A timeout is reported at the
   awaiting command's index.
-- **safety / cardinality** ("exactly one webhook per close") — a `@trigger` or
+- **safety / cardinality** ("exactly one webhook per close") — a `@check` or
   `@invariant` over the correlated set.
 
 When you also run in simulator mode, have `Model.simulate/2` predict the awaited
@@ -903,26 +903,26 @@ defmodule MyTest.AuthorizationPoller do
 end
 ```
 
-## Safety vs Liveness: `@trigger at: :teardown`
+## Safety vs Liveness: `@check at: :teardown`
 
 Verifying an eventually-consistent effect has two halves, and they need
 different tools:
 
-- **Liveness** ("the effect *eventually* happens") is what `@poll_state`
+- **Liveness** ("the effect *eventually* happens") is what `@eventually`
   expresses: its poller resolves the instant its predicate is first true, then
   stops. This is a reachability check.
 - **Safety** ("the effect *never* happens too much": at most once, never
-  exceeds N) is the dual. A `@poll_state` predicate *cannot* express it: a value
+  exceeds N) is the dual. A `@eventually` predicate *cannot* express it: a value
   can pass *through* the correct number on its way to overshooting, and the
   poller resolves on that transient pass and stops watching. Its natural
   evaluation point is the moment the system has **settled**, on the final state.
 
-That settled checkpoint is `@trigger at: :teardown`. It runs once, on the merged
-final projection state, after both the state pollers (`@poll_state`) and the
+That settled checkpoint is `@check at: :teardown`. It runs once, on the merged
+final projection state, after both the state pollers (`@eventually`) and the
 resource pollers have finalized, and before `Adapter.teardown/1`. A persistent
 over-application (a counter left above its expected value, a job applied twice)
 is still visible there and reports as a clear, named assertion failure rather
-than as a generic poll timeout. A genuine `@poll_state` liveness timeout
+than as a generic poll timeout. A genuine `@eventually` liveness timeout
 preempts the checkpoint (a timeout is itself a not-settled outcome).
 
 ```elixir
@@ -940,11 +940,11 @@ defmodule JobProjection do
   def apply(s, _), do: s
 
   # Liveness: the effect eventually reaches the expected count.
-  @poll_state after: Enqueue, timeout: {5, :seconds}, interval: {50, :milliseconds}
+  @eventually after: Enqueue, timeout: {5, :seconds}, interval: {50, :milliseconds}
   def eventually_applied(_s, %Enqueue{}), do: fn s -> s.applied >= s.expected end
 
   # Safety: it never over-applies. Evaluated on the settled state.
-  @trigger at: :teardown
+  @check at: :teardown
   def assert_effectively_once(state, _phase) do
     if state.max_applied > state.expected do
       PropertyDamage.fail!("over-applied",

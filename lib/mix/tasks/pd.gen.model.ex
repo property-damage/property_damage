@@ -30,8 +30,8 @@ defmodule Mix.Tasks.Pd.Gen.Model do
 
   All projections use `PropertyDamage.Model.Projection` and can:
   - Track state via `apply/2`
-  - Define synchronous assertions via `@trigger`
-  - Define temporal assertions via `@poll_state`
+  - Define synchronous assertions via `@check`
+  - Define temporal assertions via `@eventually`
 
   The `command_sequence_projection` is the primary projection used for command generation.
   The `check_projections` are additional projections for invariants and side tracking.

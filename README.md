@@ -94,7 +94,7 @@ end
 
 ### 3. Define Projections and Invariants
 
-Projections reduce events into state. Functions tagged with `@trigger`
+Projections reduce events into state. Functions tagged with `@check`
 are invariants, checked at the configured points:
 
 <!-- pd-doc-verify: runnable -->
@@ -117,7 +117,7 @@ defmodule MyApp.Projections.Users do
   # Checked after every command. Assert a property your SUT must never violate.
   # (Don't assert uniqueness of a client-supplied field like emails -- the
   # generator can legitimately repeat them; assert on what the SUT guarantees.)
-  @trigger every: 1
+  @check every: 1
   def assert_emails_present(state, _cmd_or_event) do
     if Enum.any?(state.users, fn {_id, u} -> u.email in [nil, ""] end) do
       PropertyDamage.fail!("user with missing email", users: state.users)
@@ -126,7 +126,7 @@ defmodule MyApp.Projections.Users do
 end
 ```
 
-(`@trigger every: MyApp.Commands.CreateUser` runs a check only after that
+(`@check every: MyApp.Commands.CreateUser` runs a check only after that
 command; see the [invariants guide](guides/writing_invariants.md) for more.)
 
 ### 4. Define a Simulator
@@ -819,7 +819,7 @@ context = %{
 ### Adjusting Invariants During Faults
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_latency_sla(state, _cmd_or_event) do
   # Skip SLA check during partition
   unless Map.get(state.active_faults, :network_partition) do
@@ -1368,7 +1368,7 @@ benches/openapi_bench/
 ### oban_bench
 
 [Oban](https://hex.pm/packages/oban) on real Postgres: the eventual-consistency
-rung (`@poll_state`, pollers, `external()` job ids). Provisions Postgres via
+rung (`@eventually`, pollers, `external()` job ids). Provisions Postgres via
 Docker.
 
 ```

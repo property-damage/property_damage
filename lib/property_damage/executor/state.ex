@@ -48,11 +48,11 @@ defmodule PropertyDamage.Executor.State do
     * `:assertion_counters` - `%{step:, command:, event:, ...}` firing counts
     * `:assertion_failures` - accumulated `:record`-mode failures (newest-first)
     * `:branch_id` - current branch id during branching (`nil` on the linear path)
-    * `:active_pollers` - running `@poll_state` pollers
+    * `:active_pollers` - running `@eventually` pollers
     * `:active_resource_pollers` - running resource pollers
     * `:active_faults` - `%{{nemesis_module, index} => fault}` (ghost field)
     * `:async_halt` - `{name, reason, command_index}` set when a DR-025 async
-      `every:` assertion trips during a `@poll_state` await drain (ghost field)
+      `every:` assertion trips during a `@eventually` await drain (ghost field)
     * `:async_failed_index` - the command index a DR-025 async `every:` assertion
       failure is attributed to (the offending event's `command_index`, which may
       be an earlier command than the one currently executing, or `nil` for an

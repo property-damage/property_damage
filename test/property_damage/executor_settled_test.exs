@@ -31,7 +31,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
 
   # A probe command that settles after two {:retry, _} attempts. It carries the
   # same fields the sync CreateItem does so the produced event drives the exact
-  # same projections and @trigger every: assertion, making the settled path
+  # same projections and @check every: assertion, making the settled path
   # directly comparable to the sync path.
   defmodule SettledCreate do
     use PropertyDamage.Command,
@@ -74,7 +74,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
     end
   end
 
-  # Model wiring the probe command to the same FailingAssertion (@trigger every: 1,
+  # Model wiring the probe command to the same FailingAssertion (@check every: 1,
   # fails once cumulative quantity exceeds 100) the sync FailingModel uses.
   defmodule SettledModel do
     @behaviour PropertyDamage.Model
@@ -122,7 +122,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
     end
   end
 
-  describe "{:settled, events} arm: @trigger every: assertion failure" do
+  describe "{:settled, events} arm: @check every: assertion failure" do
     test "a settled event that trips an every: assertion fails identically to the sync path" do
       # Sync equivalent: CreateItem over the same limit fails with this shape.
       {:ok, sync_result} =
@@ -141,7 +141,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
       assert %PropertyDamage.CheckFailed{} = sync_exception
 
       # Settled path: the probe command's settled event drives the same
-      # @trigger every: 1 assertion and must produce the same failure_reason shape.
+      # @check every: 1 assertion and must produce the same failure_reason shape.
       {:ok, settled_result} =
         Executor.run(
           [%SettledCreate{name: "Big", quantity: 150}],

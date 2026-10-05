@@ -59,7 +59,7 @@ defmodule PropertyDamage.Test.Flake.Health do
   def apply(state, %Bad{}), do: %{state | ok: false}
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_healthy(%{ok: false}, _cmd_or_event) do
     PropertyDamage.fail!("flaked: a Bad event was observed")
   end

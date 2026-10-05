@@ -36,7 +36,7 @@ defmodule CachexBench.Projection do
 
   # After every read, the value the SUT returned must equal what the
   # model expects for that key (nil when the key should be absent).
-  @trigger every: CachexBench.Commands.GetKey, validates: :read_consistent
+  @check every: CachexBench.Commands.GetKey, validates: :read_consistent
   def assert_read_consistent(state, _command) do
     {key, actual} = state.last_read
     expected = Map.get(state.expected, key)

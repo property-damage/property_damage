@@ -4,7 +4,7 @@ defmodule ObanBench.UniquenessTest do
 
   The faithful `UniqueWorker` deduplicates jobs by {counter, key}, so the
   counter equals the number of DISTINCT keys enqueued, never the number of
-  enqueues. Both halves are checked: liveness via the model's `@poll_state`
+  enqueues. Both halves are checked: liveness via the model's `@eventually`
   (the value reaches the deduplicated expected) and safety via the resource
   poller (the value never EXCEEDS it, see `ObanBench.ExactlyOnce`).
 
@@ -74,7 +74,7 @@ defmodule ObanBench.UniquenessTest do
                  verbose: false
                )
 
-      # A clean exactly-once safety violation: the @trigger at: :teardown check
+      # A clean exactly-once safety violation: the @check at: :teardown check
       # saw the counter overshoot its deduplicated expected value (the duplicate
       # job ran a second time).
       assert %PropertyDamage.Failure{

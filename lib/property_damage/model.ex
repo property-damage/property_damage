@@ -278,7 +278,7 @@ defmodule PropertyDamage.Model do
 
   These projections verify invariants via `use PropertyDamage.Model.Projection`.
   Their state is updated with each command and event, and assertions are run
-  according to their `@trigger` conditions.
+  according to their `@check` conditions.
 
   Optional - defaults to `[]` if not implemented.
   """
@@ -599,9 +599,9 @@ defmodule PropertyDamage.Model do
   invariants. Each entry carries the `%PropertyDamage.Invariants.Invariant{}` and
   the assertions that check it, with a per-check kind:
 
-  - `:synchronous` - a during-run `@trigger every:` check
-  - `:lifecycle` - a `@trigger at:` lifecycle-boundary check
-  - `:polling` - a temporal `@poll_state` check
+  - `:synchronous` - a during-run `@check every:` check
+  - `:lifecycle` - a `@check at:` lifecycle-boundary check
+  - `:polling` - a temporal `@eventually` check
 
   Returns a list deterministically ordered by `{inspect(projection), id}`.
   """

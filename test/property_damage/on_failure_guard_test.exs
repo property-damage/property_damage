@@ -23,7 +23,7 @@ defmodule PropertyDamage.OnFailureGuardTest do
     def init, do: %{}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_never(_state, _cmd_or_event), do: PropertyDamage.fail!("always fails")
   end
 

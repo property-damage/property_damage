@@ -51,7 +51,7 @@ defmodule PropertyDamage.Executor.Branching do
         mint
       )
 
-    # DR-024: @trigger at: :startup runs once on the shared initial state,
+    # DR-024: @check at: :startup runs once on the shared initial state,
     # before any branch. A :halt failure aborts before any command runs.
     case Executor.run_phase_assertions(initial_state, :startup) do
       {:halt, name, reason, _counters} ->
@@ -249,7 +249,7 @@ defmodule PropertyDamage.Executor.Branching do
         # Synchronous assertions are DISABLED inside branches on purpose. A
         # forked branch only sees the prefix plus its own commands, never the
         # concurrently-executing sibling branches' effects, so running
-        # @trigger assertions against this partial state over-reports races
+        # @check assertions against this partial state over-reports races
         # (e.g. a read that legally observed a sibling's write fails against a
         # model that never recorded it). Branch correctness is decided AFTER
         # all branches run, by the assertion-aware Linearization.check below,

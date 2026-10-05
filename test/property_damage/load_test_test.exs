@@ -534,7 +534,7 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   # Ordering-regression fixtures: a command whose event sets state the command's
-  # own `@trigger` reads back. Under load-test assertions this must observe the
+  # own `@check` reads back. Under load-test assertions this must observe the
   # command's own event (matching the main Executor), so `last` is set when the
   # command-level assertion fires. If the worker asserted before folding the
   # command's events, `last` would still be nil and every command would fail.
@@ -558,7 +558,7 @@ defmodule PropertyDamage.LoadTestTest do
     def apply(state, %OrderingEvent{n: n}), do: %{state | last: n}
     def apply(state, _), do: state
 
-    @trigger every: PropertyDamage.LoadTestTest.OrderingCommand
+    @check every: PropertyDamage.LoadTestTest.OrderingCommand
     def assert_sees_own_event(state, _cmd) do
       if state.last == nil do
         PropertyDamage.fail!(
@@ -625,7 +625,7 @@ defmodule PropertyDamage.LoadTestTest do
       assert {:ok, stats} = Worker.execute_sequence(worker)
       assert stats.commands_run >= 1
 
-      # The command's `@trigger` read its own event, so nothing failed. Before the
+      # The command's `@check` read its own event, so nothing failed. Before the
       # worker folded events before command assertions, each command failed here.
       assert stats.assertion_failures == 0
 
@@ -1228,7 +1228,7 @@ defmodule PropertyDamage.LoadTestTest do
       @impl true
       def apply(state, _), do: %{state | count: state.count + 1}
 
-      @trigger every: 1
+      @check every: 1
       def assert_count_check(state, _cmd_or_event) do
         # Fail every 3rd assertion to simulate intermittent failures
         if rem(state.count, 3) == 0 do

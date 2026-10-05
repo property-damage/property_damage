@@ -231,11 +231,11 @@ defmodule PropertyDamage.ValidationTest do
   end
 
   # Regression: warn_orphan_events/1 used to read assertion.trigger blindly,
-  # which crashed (KeyError :trigger) on @poll_state assertions, since those
-  # carry :poll_state instead. Surfaced by the Oban (6b) bench, whose model
-  # validates a projection with a @poll_state assertion. The event a poll
+  # which crashed (KeyError :trigger) on @eventually assertions, since those
+  # carry :eventually instead. Surfaced by the Oban (6b) bench, whose model
+  # validates a projection with a @eventually assertion. The event a poll
   # triggers on must also count as handled (not reported as an orphan).
-  describe "validate!/3 with a @poll_state check projection" do
+  describe "validate!/3 with a @eventually check projection" do
     defmodule PollEvents do
       defmodule Started, do: defstruct([])
       defmodule Finished, do: defstruct([])
@@ -261,7 +261,7 @@ defmodule PropertyDamage.ValidationTest do
       def apply(state, %Finished{}), do: %{state | done: true}
       def apply(state, _), do: state
 
-      @poll_state after: Started, timeout: {100, :milliseconds}, interval: {10, :milliseconds}
+      @eventually after: Started, timeout: {100, :milliseconds}, interval: {10, :milliseconds}
       def eventually_finished(_state, %Started{}), do: fn s -> s.done end
     end
 
@@ -287,7 +287,7 @@ defmodule PropertyDamage.ValidationTest do
       def execute(%PollCommand{}, _ctx, _runtime), do: {:ok, [%PollEvents.Started{}]}
     end
 
-    test "validation does not crash on a @poll_state assertion" do
+    test "validation does not crash on a @eventually assertion" do
       assert {:ok, warnings} = Validation.validate!(PollModel, PollAdapter)
       assert is_list(warnings)
     end

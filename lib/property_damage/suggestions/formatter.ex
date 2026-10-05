@@ -342,7 +342,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
 
   defp generate_non_negative_code(field) do
     """
-    @trigger every: 1
+    @check every: 1
     def assert_#{field}_non_negative(state, _cmd_or_event) do
       violations =
         state.entities
@@ -359,7 +359,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
 
   defp generate_currency_code do
     """
-    @trigger every: 1
+    @check every: 1
     def assert_currency_consistency(state, _cmd_or_event) do
       violations =
         state.operations
@@ -379,7 +379,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
     entity = field |> Atom.to_string() |> String.replace(~r/_ref|_id/, "")
 
     """
-    @trigger every: 1
+    @check every: 1
     def assert_#{field}_exists(state, _cmd_or_event) do
       refs_in_use = # collect all #{field} values from state
       known_refs = Map.keys(state.#{entity}s)
@@ -394,7 +394,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
 
   defp generate_status_code(field) do
     """
-    @trigger every: 1
+    @check every: 1
     def assert_valid_#{field}(state, _cmd_or_event) do
       valid_statuses = [:pending, :active, :completed, :cancelled]
 

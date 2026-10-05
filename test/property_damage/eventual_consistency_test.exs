@@ -1,9 +1,9 @@
 defmodule PropertyDamage.EventualConsistencyTest do
   @moduledoc """
-  End-to-end tests for the @poll_state eventual-consistency pipeline through
+  End-to-end tests for the @eventually eventual-consistency pipeline through
   Executor.run. These exercise the R4 fixes:
 
-    1. @poll_state assertions no longer crash the run on the first command
+    1. @eventually assertions no longer crash the run on the first command
        (the run_projection_assertions type filter)
     2. a poll predicate can observe events that arrive AFTER the last command
        (the drain-and-refresh finalization loop)
@@ -43,8 +43,8 @@ defmodule PropertyDamage.EventualConsistencyTest do
 
     # Eventual consistency: the payment must become confirmed within the
     # window. The confirming event arrives via a resource poller AFTER the
-    # command returns. @poll_state triggers on the PaymentInitiated EVENT.
-    @poll_state after: PaymentInitiated,
+    # command returns. @eventually triggers on the PaymentInitiated EVENT.
+    @eventually after: PaymentInitiated,
                 timeout: {300, :milliseconds},
                 interval: {10, :milliseconds}
     def payment_eventually_confirmed(_state, %PaymentInitiated{id: id}) do
@@ -125,7 +125,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     end
   end
 
-  test "a @poll_state predicate observes a confirmation that arrives after the command" do
+  test "a @eventually predicate observes a confirmation that arrives after the command" do
     {:ok, result} = run_executor(ConfirmingAdapter)
 
     assert result.success,
@@ -236,7 +236,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     assert {:error, %PropertyDamage.FailureReport{} = report} = result
     assert %Failure{type: %Failure.Assertion{kind: :poll_timeout}} = report.failure_reason
 
-    # DR-030: a @poll_state liveness timeout is now attributed to the command
+    # DR-030: a @eventually liveness timeout is now attributed to the command
     # whose event opened the poll window (InitiatePayment at index 0), so the
     # shrinker keeps locality. (Previously reported as nil.)
     assert report.failed_at_index == 0

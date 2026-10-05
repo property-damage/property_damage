@@ -10,7 +10,7 @@ PropertyDamage's architecture and gets you running fast.
 |---------------------|----------------|-------|
 | `state_machine` / `statem` | **Model** | Orchestrates commands, weights, preconditions |
 | `command` (generator + precondition) | **Command** (pure generator only) | No state dependency in Command; state logic lives in Model |
-| `postcondition` | **Projection** + `@trigger` assertions | Event-driven, not return-value-driven |
+| `postcondition` | **Projection** + `@check` assertions | Event-driven, not return-value-driven |
 | `next_state` | **Projection** `apply/2` + **Simulator** | Projections reduce events; Simulator predicts events during generation |
 | `precondition` | Model's `when:` predicate | Declared per-command in `commands/0` |
 | `initial_state` | Projection `init/0` | Each projection has its own initial state |
@@ -37,7 +37,7 @@ predicts events so projections can build state for preconditions and overrides.
 During execution, real events from the SUT replace predictions.
 
 **Assertions are projection-based.** Instead of postconditions on return values,
-you define projections with `@trigger` attributes that fire assertions at
+you define projections with `@check` attributes that fire assertions at
 configurable intervals (every step, every N commands, on specific event types).
 
 ## Minimal Example
@@ -80,7 +80,7 @@ defmodule AccountState do
   # generator can legitimately repeat. This one holds for the in-memory adapter
   # below (every stored account keeps a non-empty name), so the run passes; see
   # writing_invariants.md for invariants that catch real bugs.
-  @trigger every: 1
+  @check every: 1
   def assert_names_present(state, _) do
     if Enum.any?(state.accounts, fn {_id, acc} -> acc.name in [nil, ""] end) do
       PropertyDamage.fail!("account with empty name", accounts: state.accounts)

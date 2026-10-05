@@ -144,7 +144,7 @@ defmodule PropertyDamage.Test.ShrinkQuality.Projection do
 
   def apply(state, _event), do: state
 
-  @trigger every: GetKey
+  @check every: GetKey
   def assert_read_consistent(state, _command) do
     {key, actual} = state.last_read
     expected = Map.get(state.expected, key)

@@ -9,15 +9,15 @@ synchronously.
 
 What it validates:
 
-- **`@poll_state` / settle / resource pollers end to end**: `Increment` enqueues
+- **`@eventually` / settle / resource pollers end to end**: `Increment` enqueues
   a real Oban job; an adapter resource poller watches the database between
   commands and streams the observed counter value back as events; a
-  `@poll_state` invariant asserts the observed value eventually matches what was
+  `@eventually` invariant asserts the observed value eventually matches what was
   enqueued. This drives the R4 eventual-consistency pipeline against real async
   job processing rather than the framework's own mocks.
 - **Non-vacuity** (`test/seeded_bug_test.exs`): a deliberately buggy worker that
   completes its job without performing the increment. The observed value never
-  catches up, so PropertyDamage catches it via the `@poll_state` timeout and
+  catches up, so PropertyDamage catches it via the `@eventually` timeout and
   shrinks it to the minimal reproduction (a single `Increment`).
 - **Server-generated identifiers (`external()`)** (`lib/oban_bench/job_refs.ex`):
   `Oban.insert` returns a database-generated integer job id, exactly the shape
@@ -93,7 +93,7 @@ any Postgres you provide; the container step is then skipped entirely.
 - `lib/oban_bench/worker.ex` — the async work (increment a counter)
 - `lib/oban_bench/db.ex` — small SQL helpers (increment, value, job state)
 - `lib/oban_bench/commands.ex` — events + the `Increment` command
-- `lib/oban_bench/model.ex` — projection with the `@poll_state` invariant,
+- `lib/oban_bench/model.ex` — projection with the `@eventually` invariant,
   simulator, model
 - `lib/oban_bench/job_refs.ex` — the `external()` server-generated-id bench
   (producer/consumer commands, projection, simulator, model, adapter)

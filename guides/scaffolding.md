@@ -307,7 +307,7 @@ generated files' "next steps" footer lists exactly what is left:
 
 2. **Write a state projection with invariants** — this is the part that catches
    bugs. It reduces events into model state and asserts properties with
-   `@trigger`. See *Writing Effective Invariants* and *Coverage and Invariant
+   `@check`. See *Writing Effective Invariants* and *Coverage and Invariant
    Catalogs*.
 
 3. **Wire the projection into the model** — replace the `raise` in

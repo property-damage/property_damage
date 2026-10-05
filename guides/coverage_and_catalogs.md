@@ -74,13 +74,13 @@ defmodule Bank.Ledger do
   def apply(state, %Withdrawn{balance: b}), do: %{state | balance: b}
   def apply(state, _event), do: state
 
-  @trigger every: 1, validates: :balance_nonneg
+  @check every: 1, validates: :balance_nonneg
   def assert_balance_nonneg(state, _step) do
     if state.balance < 0, do: PropertyDamage.fail!("balance went negative", balance: state.balance)
   end
 
   # Fires only on AccountClosed, which no command emits -> never exercised.
-  @trigger every: AccountClosed, validates: :closed_balance_zero
+  @check every: AccountClosed, validates: :closed_balance_zero
   def assert_closed_balance_zero(_state, %AccountClosed{balance: b}) do
     if b != 0, do: PropertyDamage.fail!("closed with non-zero balance", balance: b)
   end
@@ -229,14 +229,14 @@ with `validates:`:
 ```elixir
 @invariant id: :balance_nonneg, description: "The balance never goes negative"
 
-@trigger every: 1, validates: :balance_nonneg
+@check every: 1, validates: :balance_nonneg
 def assert_balance_nonneg(state, _step), do: ...
 ```
 
 Three ways to attach an assertion to an invariant:
 
 - **`validates: :id`** — link to an invariant declared with `@invariant`.
-- **Inline `id:`** on the `@trigger`/`@poll_state` — declares the invariant *and*
+- **Inline `id:`** on the `@check`/`@eventually` — declares the invariant *and*
   registers this assertion as one of its checks, in one place.
 - **Neither** — the assertion owns an invariant whose `id` is its own name with
   `assert_` stripped (so `assert_balance_nonneg` validates `:balance_nonneg` by
@@ -263,8 +263,8 @@ Bank.Ledger balance_nonneg: balance_nonneg/synchronous
 Bank.Ledger closed_balance_zero: closed_balance_zero/synchronous
 ```
 
-Check kinds are `:synchronous` (`@trigger every:`), `:lifecycle` (`@trigger at:`),
-and `:polling` (`@poll_state`). One invariant may have several checks of
+Check kinds are `:synchronous` (`@check every:`), `:lifecycle` (`@check at:`),
+and `:polling` (`@eventually`). One invariant may have several checks of
 different kinds. `mix pd.validate` prints this catalog and flags static-vacuity
 entries.
 

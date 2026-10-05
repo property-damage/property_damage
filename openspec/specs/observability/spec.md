@@ -80,7 +80,7 @@ The system SHALL track and report coverage metrics for property-based test execu
 #### Scenario: Assertion (invariant) coverage (DR-026)
 
 - **WHEN** assertions are evaluated during test runs
-- **THEN** the system SHALL record how many times each assertion actually fired, keyed by its owning projection and name, counting firing at every evaluation site (synchronous `every:` on commands and observed events including the asynchronous paths of DR-025, lifecycle `at:` boundaries of DR-024, and `@poll_state` poller spawn)
+- **THEN** the system SHALL record how many times each assertion actually fired, keyed by its owning projection and name, counting firing at every evaluation site (synchronous `every:` on commands and observed events including the asynchronous paths of DR-025, lifecycle `at:` boundaries of DR-024, and `@eventually` poller spawn)
 - **AND** firing counts SHALL be attached to every result as `result.assertion_fires` and accumulated across all sequences of the run
 - **AND** this recording SHALL be always-on (it does not require the `coverage: true` option)
 

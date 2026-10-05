@@ -29,10 +29,10 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
   Test check projection demonstrating all assertion features.
 
   Includes:
-  - @trigger every: 1 (every step)
-  - @trigger every: Module (after specific module)
-  - @trigger every: [Module1, Module2] (after any listed)
-  - @trigger every: N (sampling)
+  - @check every: 1 (every step)
+  - @check every: Module (after specific module)
+  - @check every: [Module1, Module2] (after any listed)
+  - @check every: N (sampling)
   """
   use PropertyDamage.Model.Projection
 
@@ -61,34 +61,34 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
 
   # === Assertions ===
 
-  @trigger every: 1
+  @check every: 1
   def assert_quantity_non_negative(state, _cmd_or_event) do
     unless state.total_quantity >= 0 do
       PropertyDamage.fail!("Negative quantity", total: state.total_quantity)
     end
   end
 
-  @trigger every: CreateItem
+  @check every: CreateItem
   def assert_create_increments_count(state, _cmd_or_event) do
     unless state.create_count > 0 do
       PropertyDamage.fail!("Create count should be positive")
     end
   end
 
-  @trigger every: [CreateItem, ViewItem]
+  @check every: [CreateItem, ViewItem]
   def assert_command_was_tracked(state, _cmd_or_event) do
     unless state.create_count > 0 or state.view_count > 0 do
       PropertyDamage.fail!("No commands tracked")
     end
   end
 
-  @trigger every: 5
+  @check every: 5
   def assert_sampled_check(_state, _cmd_or_event) do
     # This only runs every 5th step
     :ok
   end
 
-  @trigger every: 1
+  @check every: 1
   def assert_multi_requirement_check(_state, _cmd_or_event) do
     :ok
   end
@@ -108,7 +108,7 @@ defmodule PropertyDamage.Test.Projections.SingleAfterTrigger do
   @impl true
   def apply(state, _), do: state
 
-  @trigger every: CreateItem
+  @check every: CreateItem
   def assert_after_create(_state, _cmd_or_event), do: :ok
 end
 
@@ -126,6 +126,6 @@ defmodule PropertyDamage.Test.Projections.EventAfterTrigger do
   @impl true
   def apply(state, _), do: state
 
-  @trigger every: ItemCreated
+  @check every: ItemCreated
   def assert_after_item_created(_state, _cmd_or_event), do: :ok
 end

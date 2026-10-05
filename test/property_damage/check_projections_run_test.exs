@@ -31,7 +31,7 @@ defmodule PropertyDamage.CheckProjectionsRunTest do
     def apply(state, %Send{}), do: %{state | count: state.count + 1}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def always_fails(state, _cmd_or_event) do
       if state.count >= 1, do: PropertyDamage.fail!("check ran", count: state.count)
     end

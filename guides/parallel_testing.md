@@ -205,7 +205,7 @@ defmodule BalanceInvariant do
 
   def apply(state, _event), do: state
 
-  @trigger every: :command
+  @check every: :command
   def assert_balance_consistent(state, _event) do
     expected = state.deposits - state.withdrawals
 

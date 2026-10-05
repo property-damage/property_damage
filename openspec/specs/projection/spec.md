@@ -47,56 +47,56 @@ Projections SHALL receive both commands and events through their `apply/2` callb
 - **WHEN** events are produced from command execution
 - **THEN** the projection's `apply/2` is called with each event struct
 
-### Requirement: Synchronous Assertions via @trigger
+### Requirement: Synchronous Assertions via @check
 
-Projections SHALL support synchronous assertions decorated with the `@trigger` module attribute. Triggered assertions run immediately when their condition is met. Assertion functions take two arguments: the current projection state and the command or event that triggered the assertion.
+Projections SHALL support synchronous assertions decorated with the `@check` module attribute. Triggered assertions run immediately when their condition is met. Assertion functions take two arguments: the current projection state and the command or event that triggered the assertion.
 
-A `@trigger every:` assertion fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously — a resource-poller or injector-adapter event, a mock-service event, or a nemesis event — is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for assertions that should fire only after commands.
+A `@check every:` assertion fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously — a resource-poller or injector-adapter event, a mock-service event, or a nemesis event — is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for assertions that should fire only after commands.
 
 #### Scenario: Trigger every step
-- **WHEN** an assertion is decorated with `@trigger every: 1`
+- **WHEN** an assertion is decorated with `@check every: 1`
 - **THEN** it runs after every command and event processing step
 
 #### Scenario: Trigger every command
-- **WHEN** an assertion is decorated with `@trigger every: :command`
+- **WHEN** an assertion is decorated with `@check every: :command`
 - **THEN** it runs after any command is processed but not after events
 
 #### Scenario: Trigger every event
-- **WHEN** an assertion is decorated with `@trigger every: :event`
+- **WHEN** an assertion is decorated with `@check every: :event`
 - **THEN** it runs after any event is processed but not after commands
 - **AND** "any event" includes asynchronously-observed events (resource-poller, injector-adapter, mock-service, and nemesis events), not only a command's own returned events
 
 #### Scenario: Trigger fires on an asynchronously-observed event
-- **WHEN** a projection declares `@trigger every: :event` (or `every: 1`, or `every: SomeEvent`)
+- **WHEN** a projection declares `@check every: :event` (or `every: 1`, or `every: SomeEvent`)
 - **AND** an event matching the trigger is observed asynchronously (for example injected by a resource poller, an injector adapter, a mock service, or a nemesis)
 - **THEN** the assertion SHALL be evaluated on the projection state after that event is folded in
 
 #### Scenario: every: :command does not fire on events
-- **WHEN** a projection declares `@trigger every: :command`
+- **WHEN** a projection declares `@check every: :command`
 - **THEN** the assertion SHALL NOT be evaluated on any event, whether a command's own returned event or an asynchronously-observed one
 
 #### Scenario: Trigger on specific module
-- **WHEN** an assertion is decorated with `@trigger every: CreateOrder`
+- **WHEN** an assertion is decorated with `@check every: CreateOrder`
 - **THEN** it runs only when a `CreateOrder` command or event is processed
 
 #### Scenario: Trigger on module list
-- **WHEN** an assertion is decorated with `@trigger every: [Cmd1, Cmd2]`
+- **WHEN** an assertion is decorated with `@check every: [Cmd1, Cmd2]`
 - **THEN** it runs when any of the listed command or event modules is processed
 
 #### Scenario: Trigger every Nth step (sampling)
-- **WHEN** an assertion is decorated with `@trigger every: 10`
+- **WHEN** an assertion is decorated with `@check every: 10`
 - **THEN** it runs on every 10th processing step
 
 #### Scenario: Trigger every Nth command
-- **WHEN** an assertion is decorated with `@trigger every: {5, :command}`
+- **WHEN** an assertion is decorated with `@check every: {5, :command}`
 - **THEN** it runs on every 5th command
 
 #### Scenario: Trigger every Nth of specific module
-- **WHEN** an assertion is decorated with `@trigger every: {3, CreateOrder}`
+- **WHEN** an assertion is decorated with `@check every: {3, CreateOrder}`
 - **THEN** it runs on every 3rd occurrence of `CreateOrder`
 
 #### Scenario: Non-positive sampling count is rejected
-- **WHEN** an assertion is decorated with a sampling count of zero or negative (e.g. `@trigger every: {0, :command}` or `@trigger every: 0`)
+- **WHEN** an assertion is decorated with a sampling count of zero or negative (e.g. `@check every: {0, :command}` or `@check every: 0`)
 - **THEN** the framework raises an ArgumentError at compile time rather than allowing a runtime ArithmeticError
 
 #### Scenario: Assertion passes by returning without raising
@@ -107,12 +107,12 @@ A `@trigger every:` assertion fires on **every observed event** regardless of ho
 - **WHEN** a triggered assertion function raises an exception
 - **THEN** the assertion is considered to have failed
 
-### Requirement: Temporal Assertions via @poll_state
+### Requirement: Temporal Assertions via @eventually
 
-Projections SHALL support temporal assertions decorated with the `@poll_state` module attribute. These spawn background pollers when a trigger event occurs, periodically checking if a predicate becomes true within a timeout. The decorated function SHALL return a predicate function `(state -> boolean)`.
+Projections SHALL support temporal assertions decorated with the `@eventually` module attribute. These spawn background pollers when a trigger event occurs, periodically checking if a predicate becomes true within a timeout. The decorated function SHALL return a predicate function `(state -> boolean)`.
 
 #### Scenario: Poll state spawns poller on matching event
-- **WHEN** an assertion is decorated with `@poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}`
+- **WHEN** an assertion is decorated with `@eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}`
 - **AND** a `PaymentInitiated` event is processed
 - **THEN** the framework spawns a background poller
 
@@ -122,40 +122,40 @@ Projections SHALL support temporal assertions decorated with the `@poll_state` m
 - **AND** polling continues until the predicate returns true or the timeout expires
 
 #### Scenario: Poll state supports multiple trigger events
-- **WHEN** an assertion is decorated with `@poll_state after: [EventA, EventB], ...`
+- **WHEN** an assertion is decorated with `@eventually after: [EventA, EventB], ...`
 - **THEN** the poller spawns when either `EventA` or `EventB` is processed
 
 #### Scenario: Time values default to seconds
-- **WHEN** a `@poll_state` timeout or interval is specified as a bare integer
+- **WHEN** a `@eventually` timeout or interval is specified as a bare integer
 - **THEN** the value is interpreted as seconds
 
 #### Scenario: Time values support explicit units
-- **WHEN** a `@poll_state` timeout or interval is specified as `{value, :milliseconds}`
+- **WHEN** a `@eventually` timeout or interval is specified as `{value, :milliseconds}`
 - **THEN** the value is interpreted in the given unit
 - **AND** supported units are `:millisecond(s)`, `:second(s)`, and `:minute(s)` (singular and plural forms are both accepted)
 - **AND** an unrecognized unit raises an ArgumentError
 
-### Requirement: Lifecycle-Boundary Assertions via @trigger at:
+### Requirement: Lifecycle-Boundary Assertions via @check at:
 
-Projections SHALL support synchronous assertions whose timing is a lifecycle phase boundary, declared with the `at:` option on `@trigger`. Where `every:` samples an assertion during the command loop, `at:` fires it exactly once at a phase boundary. Supported phases are `:startup` (the initial `init/0` state, after `setup/1` and before the first command) and `:teardown` (the fully-settled final state, after all pollers have finalized and before `teardown/1`). Lifecycle-boundary assertions take the same two arguments as other synchronous assertions; because no command or event triggers them, the second argument is the phase atom.
+Projections SHALL support synchronous assertions whose timing is a lifecycle phase boundary, declared with the `at:` option on `@check`. Where `every:` samples an assertion during the command loop, `at:` fires it exactly once at a phase boundary. Supported phases are `:startup` (the initial `init/0` state, after `setup/1` and before the first command) and `:teardown` (the fully-settled final state, after all pollers have finalized and before `teardown/1`). Lifecycle-boundary assertions take the same two arguments as other synchronous assertions; because no command or event triggers them, the second argument is the phase atom.
 
 #### Scenario: Trigger at teardown evaluates the settled final state
-- **WHEN** an assertion is decorated with `@trigger at: :teardown`
+- **WHEN** an assertion is decorated with `@check at: :teardown`
 - **THEN** it runs exactly once, on the merged final projection state after every observed event has been folded in
 - **AND** the second argument passed to the assertion is `:teardown`
 
 #### Scenario: Trigger at startup evaluates the initial state
-- **WHEN** an assertion is decorated with `@trigger at: :startup`
+- **WHEN** an assertion is decorated with `@check at: :startup`
 - **THEN** it runs exactly once, on the initial `init/0` projection state before any command is processed
 - **AND** the second argument passed to the assertion is `:startup`
 
 #### Scenario: A safety bound is expressed as an at: :teardown assertion
 - **WHEN** a projection accumulates evidence of a safety property (for example a maximum observed value or a sticky violation flag)
-- **AND** an assertion decorated with `@trigger at: :teardown` checks that property
+- **AND** an assertion decorated with `@check at: :teardown` checks that property
 - **THEN** a violation that persists to the settled state is detected and reported as that named assertion failure
 
 #### Scenario: Unrecognized at: phase is rejected
-- **WHEN** an assertion is decorated with `@trigger at:` and a phase other than `:startup` or `:teardown`
+- **WHEN** an assertion is decorated with `@check at:` and a phase other than `:startup` or `:teardown`
 - **THEN** the framework raises an ArgumentError at compile time
 
 #### Scenario: Lifecycle-boundary assertion metadata
@@ -169,7 +169,7 @@ The framework SHALL detect assertions at compile time using an `@on_definition` 
 
 #### Scenario: Assertions discovered at compile time
 - **WHEN** a projection module is compiled
-- **THEN** all functions preceded by `@trigger` or `@poll_state` are recorded as assertions
+- **THEN** all functions preceded by `@check` or `@eventually` are recorded as assertions
 - **AND** their metadata is stored in the module's `__assertions__/0` function
 
 #### Scenario: Synchronous assertion metadata
@@ -178,7 +178,7 @@ The framework SHALL detect assertions at compile time using an `@on_definition` 
 
 #### Scenario: Polling assertion metadata
 - **WHEN** a polling assertion is detected
-- **THEN** its metadata includes the assertion name, type `:polling`, the function name, normalized poll_state spec, captured predicate source, and the `invariant_id` it validates (DR-026)
+- **THEN** its metadata includes the assertion name, type `:polling`, the function name, normalized eventually spec, captured predicate source, and the `invariant_id` it validates (DR-026)
 - **AND** the metadata shape is consistent with synchronous assertions (both carry `name`, `type`, `function_name`, and `invariant_id`, with the `assert_` prefix stripped from `name`)
 
 #### Scenario: Default invariant id (DR-026)
@@ -186,16 +186,16 @@ The framework SHALL detect assertions at compile time using an `@on_definition` 
 - **THEN** its `invariant_id` SHALL default to the assertion's `assert_`-stripped logical name, so every assertion validates a same-named invariant by default
 
 #### Scenario: At most one trigger attribute per assertion
-- **WHEN** an assertion function is decorated with more than one `@trigger` (or more than one `@poll_state`), or with both `@trigger` and `@poll_state`
+- **WHEN** an assertion function is decorated with more than one `@check` (or more than one `@eventually`), or with both `@check` and `@eventually`
 - **THEN** the compiler raises a CompileError rather than silently using one of them
 
-#### Scenario: At most one timing per @trigger assertion
-- **WHEN** a single `@trigger` declares both a `during-run` timing (`every:`) and a `lifecycle-boundary` timing (`at:`)
+#### Scenario: At most one timing per @check assertion
+- **WHEN** a single `@check` declares both a `during-run` timing (`every:`) and a `lifecycle-boundary` timing (`at:`)
 - **THEN** the compiler raises a CompileError, because an assertion SHALL carry exactly one timing
 
 ### Requirement: Invariant Declaration and Linking via @invariant and validates: (DR-026)
 
-An assertion validates a named **invariant** — a first-class entity with a stable `id`, a human-readable `name` defaulting to `id`, and an optional `description`, represented by `%PropertyDamage.Invariants.Invariant{}` and built by `Invariant.new!/1`. A projection MAY declare invariants centrally with an accumulating `@invariant` module attribute whose value is the `new!/1` keyword list, and an assertion links to one with `validates: :id` on `@trigger`/`@poll_state` or declares one inline with `id:` (plus optional `description:`). Invariant identity is scoped per projection: `id`s SHALL be unique within a projection and `validates:` SHALL resolve within the same projection. Invariant metadata SHALL be accessible via `__invariants__/0` returning a map of `id` to `%Invariant{}`. There is no `:kind` field on the struct; safety-versus-liveness is a property of a check, surfaced in the catalog.
+An assertion validates a named **invariant** — a first-class entity with a stable `id`, a human-readable `name` defaulting to `id`, and an optional `description`, represented by `%PropertyDamage.Invariants.Invariant{}` and built by `Invariant.new!/1`. A projection MAY declare invariants centrally with an accumulating `@invariant` module attribute whose value is the `new!/1` keyword list, and an assertion links to one with `validates: :id` on `@check`/`@eventually` or declares one inline with `id:` (plus optional `description:`). Invariant identity is scoped per projection: `id`s SHALL be unique within a projection and `validates:` SHALL resolve within the same projection. Invariant metadata SHALL be accessible via `__invariants__/0` returning a map of `id` to `%Invariant{}`. There is no `:kind` field on the struct; safety-versus-liveness is a property of a check, surfaced in the catalog.
 
 #### Scenario: Central declaration
 - **WHEN** a projection declares `@invariant id: :balance_nonneg, description: "Balance never drops below zero"`
@@ -203,12 +203,12 @@ An assertion validates a named **invariant** — a first-class entity with a sta
 - **AND** the `name` defaults to the `id` when not given
 
 #### Scenario: Linking a check to an invariant
-- **WHEN** an assertion is decorated with `@trigger every: 5, validates: :balance_nonneg`
+- **WHEN** an assertion is decorated with `@check every: 5, validates: :balance_nonneg`
 - **THEN** its metadata records `invariant_id: :balance_nonneg`
 - **AND** the invariant is exercised by that assertion
 
 #### Scenario: Inline declaration and check in one
-- **WHEN** an assertion is decorated with `@trigger every: 5, id: :balance_nonneg, description: "…"`
+- **WHEN** an assertion is decorated with `@check every: 5, id: :balance_nonneg, description: "…"`
 - **THEN** the invariant `:balance_nonneg` is declared and that assertion is registered as a check of it
 
 #### Scenario: Duplicate invariant id is rejected
@@ -235,19 +235,19 @@ An assertion validates a named **invariant** — a first-class entity with a sta
 
 ### Requirement: assert_* Prefix Convention and Enforcement
 
-Functions with an `assert_` prefix are conventionally used for assertions but the prefix is not required. However, a function named `assert_*` that takes two arguments and lacks a `@trigger` or `@poll_state` attribute SHALL raise a CompileError.
+Functions with an `assert_` prefix are conventionally used for assertions but the prefix is not required. However, a function named `assert_*` that takes two arguments and lacks a `@check` or `@eventually` attribute SHALL raise a CompileError.
 
 #### Scenario: assert_* without attribute raises CompileError
 - **WHEN** a two-argument function named `assert_something` is defined
-- **AND** it is not preceded by a `@trigger` or `@poll_state` attribute
+- **AND** it is not preceded by a `@check` or `@eventually` attribute
 - **THEN** the compiler raises a CompileError indicating the missing attribute
 
 #### Scenario: Non-assert_* name with trigger works
-- **WHEN** a function with a non-`assert_` name (e.g., `check_balance`) is preceded by `@trigger`
+- **WHEN** a function with a non-`assert_` name (e.g., `check_balance`) is preceded by `@check`
 - **THEN** it is registered as a valid assertion without error
 
 #### Scenario: assert_* with trigger works
-- **WHEN** a function named `assert_balance_positive` is preceded by `@trigger`
+- **WHEN** a function named `assert_balance_positive` is preceded by `@check`
 - **THEN** it is registered as a valid assertion without error
 
 ### Requirement: Simplified Assertion-Only Projections
@@ -255,7 +255,7 @@ Functions with an `assert_` prefix are conventionally used for assertions but th
 Projections MAY omit `init/0` and `apply/2` to serve purely as assertion containers. The framework SHALL provide default implementations that initialize to an empty map and return state unchanged.
 
 #### Scenario: Assertion-only projection
-- **WHEN** a projection defines only `@trigger`-decorated assertion functions
+- **WHEN** a projection defines only `@check`-decorated assertion functions
 - **AND** does not implement `init/0` or `apply/2`
 - **THEN** the projection compiles successfully with default implementations
 - **AND** assertions receive an empty map as state and the triggering command or event
@@ -281,7 +281,7 @@ Projections SHALL serve two distinct roles in models. The command sequence proje
 
 ### Requirement: Use Macro Infrastructure
 
-The `use PropertyDamage.Model.Projection` macro SHALL set up the assertion detection infrastructure including the `@behaviour` declaration, accumulating `@assertions` attribute, `@trigger` and `@poll_state` attribute registration, the `@on_definition` hook, and the `@before_compile` hook.
+The `use PropertyDamage.Model.Projection` macro SHALL set up the assertion detection infrastructure including the `@behaviour` declaration, accumulating `@assertions` attribute, `@check` and `@eventually` attribute registration, the `@on_definition` hook, and the `@before_compile` hook.
 
 #### Scenario: Use macro sets up behaviour
 - **WHEN** a module invokes `use PropertyDamage.Model.Projection`

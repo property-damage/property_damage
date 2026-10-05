@@ -92,9 +92,9 @@ One `###`-heading per invariant:
 
 ```yaml
 name: no_negative_balance
-kind: trigger              # trigger (immediate) | poll_state (eventual)
+kind: trigger              # trigger (immediate) | eventually (eventual)
 projection: BalanceInvariants
-after: every_step          # or an event name; poll_state: settling time too
+after: every_step          # or an event name; eventually: settling time too
 ```
 
 Prose: the assertion in domain language, and the severity of a violation.

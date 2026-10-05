@@ -121,7 +121,7 @@ defmodule PropertyDamage.Executor.Nemesis do
             active_faults
           end
 
-        # DR-025: assert @trigger every: on the nemesis + injector events folded
+        # DR-025: assert @check every: on the nemesis + injector events folded
         # above, incrementally, before the command's own checks.
         case Executor.check_async(
                model,
@@ -268,7 +268,7 @@ defmodule PropertyDamage.Executor.Nemesis do
           # DR-025 boundary: auto-restore re-injection is fault CLEARING (the
           # fault lifting on its own), not a SUT effect under test, so these
           # events are folded into projection state but not separately evaluated
-          # against @trigger every: assertions. The nemesis command-injection
+          # against @check every: assertions. The nemesis command-injection
           # path (execute_nemesis_command) is where injected-fault events are
           # asserted. This reduce is best-effort cleanup with no failure channel.
           {projections, event_log, fold_counter} =

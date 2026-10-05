@@ -5,7 +5,7 @@ defmodule ObanBench do
 
   Commands enqueue async jobs; the effect (a counter increment) only becomes
   visible after Oban drains its queue. Resource pollers observe the database
-  between commands and feed the values back, and a `@poll_state` invariant
+  between commands and feed the values back, and a `@eventually` invariant
   asserts the observed value eventually matches what was enqueued.
   """
 
@@ -56,7 +56,7 @@ defmodule ObanBench.Adapter do
       poll_fn: fn -> {ObanBench.DB.job_state(job.id), ObanBench.DB.value(name)} end,
       interval_ms: 20,
       timeout_ms: 3000,
-      # The @poll_state invariant is the oracle; the poller only streams
+      # The @eventually invariant is the oracle; the poller only streams
       # observations, so its own timeout should never fail the run.
       on_timeout: :ignore,
       handler: fn {state, value} ->

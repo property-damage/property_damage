@@ -5,7 +5,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
   Two failure modes are guarded here, in both directions:
 
   1. **Over-reporting (the bug this suite was born for).** The executor used to
-     run each branch's synchronous `@trigger` assertions against that branch's
+     run each branch's synchronous `@check` assertions against that branch's
      *forked* projection state. A fork omits the concurrently-executing sibling
      branches' effects, so a read that legally observed a sibling's write was
      flagged as a consistency violation: `Put k v ∥ Get k` reported as a race

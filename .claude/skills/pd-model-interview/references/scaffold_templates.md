@@ -188,7 +188,7 @@ defmodule MyStore.PD.Wallets.Projections.BalanceInvariants do
 
   # spec invariant: no_negative_balance (trigger, every step).
   # Severity: money leaves the books - catastrophic.
-  @trigger every: 1
+  @check every: 1
   def assert_no_negative_balance(state, _cmd_or_event) do
     case Enum.find(state.balances, fn {_id, balance} -> balance < 0 end) do
       nil -> :ok
@@ -198,10 +198,10 @@ defmodule MyStore.PD.Wallets.Projections.BalanceInvariants do
 end
 ```
 
-A `poll_state` invariant (eventual consistency) has this shape instead - the
+An `@eventually` invariant (eventual consistency) has this shape instead - the
 function returns a predicate polled until true or timeout:
 
-    @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+    @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
     def payment_confirmed(_state, %PaymentInitiated{id: id}) do
       fn state -> state.payments[id] == :confirmed end
     end

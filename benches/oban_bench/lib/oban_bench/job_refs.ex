@@ -150,7 +150,7 @@ defmodule ObanBench.JobRefs.Projection do
   # Oban.cancel_job/1 moves a scheduled job to `cancelled`; a cancel that no-ops
   # leaves it `scheduled`, which this catches. The state is read back
   # synchronously right after the cancel, so no settling is needed.
-  @trigger every: CancelJob
+  @check every: CancelJob
   def assert_cancelled_jobs_not_runnable(state, _command) do
     for {ref, st} <- state.cancel_states, st in JobRefs.runnable_states() do
       PropertyDamage.fail!("cancelled job left runnable",

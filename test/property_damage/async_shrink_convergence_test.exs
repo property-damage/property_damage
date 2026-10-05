@@ -1,14 +1,14 @@
 defmodule PropertyDamage.AsyncShrinkConvergenceTest do
   @moduledoc """
   End-to-end tests for continuous async-observation checking (DR-025): a
-  `@trigger every:` assertion fires on asynchronously-observed events (here, a
+  `@check every:` assertion fires on asynchronously-observed events (here, a
   resource poller's injected events), so a violation is reported AT the offending
   event with the injecting command's `command_index`, giving the shrinker a tight
   truncation target.
 
   These are written failing-first against the pre-DR-025 engine: today the
   asynchronous event paths fold events into projection state but never evaluate
-  `@trigger` assertions (the P2 finding), so the overshoot below is undetected and
+  `@check` assertions (the P2 finding), so the overshoot below is undetected and
   the run wrongly succeeds.
   """
   use ExUnit.Case, async: false
@@ -49,7 +49,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
 
     def apply(state, _), do: state
 
-    @trigger every: Bumped
+    @check every: Bumped
     def assert_count_at_most_one(state, _event) do
       if state.max > 1 do
         PropertyDamage.fail!("count exceeded 1", max: state.max)
@@ -172,7 +172,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     # COMMAND steps, never by an event (own or asynchronously-observed). So its
     # second argument is always the command; it must never be a %Bumped{}. This
     # is race-free regardless of when the poller's events fold in.
-    @trigger every: :command
+    @check every: :command
     def assert_triggered_only_by_commands(_state, command_or_event) do
       if match?(%Bumped{}, command_or_event) do
         PropertyDamage.fail!("every: :command was triggered by an event",

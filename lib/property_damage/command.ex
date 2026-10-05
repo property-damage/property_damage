@@ -294,8 +294,8 @@ defmodule PropertyDamage.Command do
   run, instead of folding it as ambient (`command_index: nil`).
 
   This is **pure correlation**: it never blocks and asserts nothing. Judgment
-  over the correlated set lives in projections (a `@poll_state` assertion for
-  liveness, a `@trigger`/`@invariant` for safety/cardinality). See
+  over the correlated set lives in projections (a `@eventually` assertion for
+  liveness, a `@check`/`@invariant` for safety/cardinality). See
   `PropertyDamage.Await` for the multiplicity rules (first-registered wins).
 
   Evaluated per command instance, after execution and placeholder capture, so

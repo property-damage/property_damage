@@ -60,7 +60,7 @@ defmodule KratosBench.State do
 
   # --- assertions ------------------------------------------------------------
 
-  @trigger every: IdentitiesListed, validates: :identity_set_faithful
+  @check every: IdentitiesListed, validates: :identity_set_faithful
   def assert_identity_set(state, %IdentitiesListed{identities: listed}) do
     expected = state.identities |> Map.keys() |> MapSet.new()
     actual = listed |> Map.keys() |> MapSet.new()
@@ -75,7 +75,7 @@ defmodule KratosBench.State do
     end
   end
 
-  @trigger every: IdentitiesListed, validates: :accepted_traits_faithful
+  @check every: IdentitiesListed, validates: :accepted_traits_faithful
   def assert_traits(state, %IdentitiesListed{identities: listed}) do
     for {email, %{role: expected_role}} <- state.identities, Map.has_key?(listed, email) do
       observed_role = get_in(listed, [email, :role])
@@ -90,7 +90,7 @@ defmodule KratosBench.State do
     end
   end
 
-  @trigger every: LoginAttempted, validates: :login_consistent
+  @check every: LoginAttempted, validates: :login_consistent
   def assert_login(state, %LoginAttempted{email: email, outcome: outcome}) do
     expected = if Map.has_key?(state.identities, email), do: :success, else: :failure
 

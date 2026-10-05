@@ -1385,7 +1385,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
       @impl true
       def check_projections do
-        # TODO: Add extra projections (with @trigger/@poll_state assertions)
+        # TODO: Add extra projections (with @check/@eventually assertions)
         # Example: [Projections.ResourceExists, Projections.ValidState]
         []
       end

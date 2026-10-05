@@ -43,7 +43,7 @@ defmodule PropertyDamage.SuggestionsTest do
     @impl true
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_balance_non_negative(_state, _cmd_or_event) do
       # No-op assertion that always passes
       :ok
@@ -566,7 +566,7 @@ defmodule PropertyDamage.SuggestionsTest do
       suggestion = %{type: :non_negative_check, field: :balance}
       code = Formatter.generate_example_code(suggestion)
 
-      assert code =~ "@trigger every: 1"
+      assert code =~ "@check every: 1"
       assert code =~ "def assert_balance_non_negative"
       assert code =~ "PropertyDamage.fail!"
     end

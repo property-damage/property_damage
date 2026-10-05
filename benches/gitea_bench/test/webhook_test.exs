@@ -4,7 +4,7 @@ defmodule GiteaBench.WebhookTest do
   (a Gitea `issues` webhook).
 
   The fast describe proves the DR-030 judgment *bites* with no SUT: the safety
-  `@trigger` raises on a duplicate delivery and the liveness `@poll_state`
+  `@check` raises on a duplicate delivery and the liveness `@eventually`
   predicate is false until the delivery arrives. The tagged `:webhook_e2e`
   describe drives real closes against the dedicated `gitea-webhook` instance and
   asserts every close produces exactly one correlated webhook.
@@ -26,7 +26,7 @@ defmodule GiteaBench.WebhookTest do
       assert state.webhooks == %{{"u0/r0", 1} => 2, {"u0/r1", 2} => 1}
     end
 
-    test "safety bites: a duplicate delivery fails @trigger at: :teardown" do
+    test "safety bites: a duplicate delivery fails @check at: :teardown" do
       duplicate = %{webhooks: %{{"u0/r0", 1} => 2}}
 
       assert_raise PropertyDamage.CheckFailed, fn ->

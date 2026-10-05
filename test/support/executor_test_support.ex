@@ -22,7 +22,7 @@ defmodule PropertyDamage.Test.Projections.FailingAssertion do
 
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_quantity_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 100 do
       PropertyDamage.fail!("Quantity exceeds limit", quantity: state.total_quantity, limit: 100)
@@ -208,7 +208,7 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
 
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_low_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 100 do
       PropertyDamage.fail!("Quantity exceeds low limit",
@@ -218,7 +218,7 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
     end
   end
 
-  @trigger every: 1
+  @check every: 1
   def assert_high_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 200 do
       PropertyDamage.fail!("Quantity exceeds high limit",
@@ -380,7 +380,7 @@ defmodule PropertyDamage.Test.Projections.LinkWeightAssertion do
 
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_weight_limit(state, _cmd_or_event) do
     unless state.total_weight <= 100 do
       PropertyDamage.fail!("Cumulative weight exceeds limit",

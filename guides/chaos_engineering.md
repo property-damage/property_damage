@@ -173,7 +173,7 @@ defmodule Cache.State do
   # Consistency holds whether or not a fault is active: a read returns the last
   # written value. (An in-memory cache is always fast, so there is no SLA to
   # relax here; see "Relaxing Invariants During Faults" below for that pattern.)
-  @trigger every: Cache.Events.KeyRead
+  @check every: Cache.Events.KeyRead
   def assert_reads_are_consistent(state, %KeyRead{key: key, value: value}) do
     expected = Map.get(state.store, key)
 
@@ -452,7 +452,7 @@ alias PropertyDamage.Nemesis.PacketLoss
 Some invariants don't apply during faults. Adjust checks accordingly:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_response_time_sla(state, _cmd_or_event) do
   # Don't check SLA during network partition
   if has_active_fault?(state, :network_partition) do

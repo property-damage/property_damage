@@ -504,13 +504,13 @@ defmodule PropertyDamage.Validation do
     end
   end
 
-  # Events an assertion observes. Synchronous (@trigger) assertions list them
-  # under trigger.modules; polling (@poll_state) assertions are spawned by the
-  # events in poll_state.after (and thus observe them). Polling assertions have
+  # Events an assertion observes. Synchronous (@check) assertions list them
+  # under trigger.modules; polling (@eventually) assertions are spawned by the
+  # events in eventually.after (and thus observe them). Polling assertions have
   # no :trigger key, so reaching for assertion.trigger blindly would crash.
   defp assertion_handled_modules(%{trigger: %{modules: modules}}), do: List.wrap(modules)
 
-  defp assertion_handled_modules(%{poll_state: %{after: after_events}}),
+  defp assertion_handled_modules(%{eventually: %{after: after_events}}),
     do: List.wrap(after_events)
 
   defp assertion_handled_modules(_assertion), do: []

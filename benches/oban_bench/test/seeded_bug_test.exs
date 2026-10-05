@@ -3,7 +3,7 @@ defmodule ObanBench.SeededBugTest do
   Non-vacuity proof for the eventual-consistency invariant. A deliberately
   buggy worker completes its job successfully but never performs the
   increment, so the database value never catches up to what was enqueued.
-  PropertyDamage must catch this via the `@poll_state` timeout and shrink it
+  PropertyDamage must catch this via the `@eventually` timeout and shrink it
   to the minimal reproduction (a single Increment is enough).
   """
   use ExUnit.Case, async: false

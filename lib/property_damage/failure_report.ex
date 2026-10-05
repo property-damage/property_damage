@@ -487,7 +487,7 @@ defmodule PropertyDamage.FailureReport do
 
   def idempotency_violation(%__MODULE__{}), do: nil
 
-  @doc "The poll-timeout info map for a `@poll_state` timeout, or `nil`."
+  @doc "The poll-timeout info map for a `@eventually` timeout, or `nil`."
   @spec poll_timeout_info(t()) :: map() | nil
   def poll_timeout_info(%__MODULE__{
         failure_reason: %Failure{type: %Assertion{kind: :poll_timeout, detail: info}}

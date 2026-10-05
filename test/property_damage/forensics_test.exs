@@ -60,7 +60,7 @@ defmodule PropertyDamage.ForensicsTest do
 
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_no_negative_amounts(state, _cmd_or_event) do
       negative = Enum.filter(state.order_amounts, fn {_id, amt} -> amt < 0 end)
 
@@ -92,7 +92,7 @@ defmodule PropertyDamage.ForensicsTest do
     def apply(state, %OrderCreated{amount: amount}), do: %{state | last_amount: amount}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_last_non_negative(%{last_amount: amount}, _cmd_or_event) do
       if is_number(amount) and amount < 0 do
         PropertyDamage.fail!("Negative amount", amount: amount)

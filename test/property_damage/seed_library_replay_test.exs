@@ -36,7 +36,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     def init, do: %{}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_mode(_state, _cmd_or_event) do
       case :persistent_term.get({__MODULE__, :mode}, :fail) do
         :fail -> PropertyDamage.fail!("switched to fail")

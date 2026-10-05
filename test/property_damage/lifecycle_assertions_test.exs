@@ -1,13 +1,13 @@
 defmodule PropertyDamage.LifecycleAssertionsTest do
   @moduledoc """
-  End-to-end tests for `@trigger at:` lifecycle-boundary assertions (DR-024)
+  End-to-end tests for `@check at:` lifecycle-boundary assertions (DR-024)
   through `Executor.run`.
 
   Covers the engine call sites: the `:startup` gate (on the initial `init/0`
   state, before command 1) and the `:teardown` checkpoint (on the fully-settled
   state, after both poller-finalize steps, before `Adapter.teardown/1`, on the
-  clean-completion path only). A genuine `@poll_state` liveness timeout preempts
-  the `:teardown` checkpoint; a `@poll_state` that passes still reaches it.
+  clean-completion path only). A genuine `@eventually` liveness timeout preempts
+  the `:teardown` checkpoint; a `@eventually` that passes still reaches it.
   """
   use ExUnit.Case, async: false
 
@@ -41,7 +41,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
 
     def apply(state, _), do: state
 
-    @trigger at: :teardown
+    @check at: :teardown
     def assert_count_at_most_one(state, _phase) do
       if state.max > 1 do
         PropertyDamage.fail!("count exceeded 1 at settle", max: state.max)
@@ -119,7 +119,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def init, do: %{}
 
-    @trigger at: :teardown
+    @check at: :teardown
     def assert_never(_state, _phase) do
       PropertyDamage.fail!("teardown must not run on an aborted run")
     end
@@ -210,7 +210,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
-  # Liveness (@poll_state) that never resolves, plus a teardown safety check
+  # Liveness (@eventually) that never resolves, plus a teardown safety check
   # that would always fail. A genuine liveness timeout preempts the checkpoint.
   defmodule LivenessAndSafetyProjection do
     use PropertyDamage.Model.Projection
@@ -220,12 +220,12 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def apply(state, %Initiated{}), do: state
     def apply(state, _), do: state
 
-    @poll_state after: Initiated, timeout: {150, :milliseconds}, interval: {10, :milliseconds}
+    @eventually after: Initiated, timeout: {150, :milliseconds}, interval: {10, :milliseconds}
     def confirmed_eventually(_state, %Initiated{}) do
       fn s -> s.confirmed end
     end
 
-    @trigger at: :teardown
+    @check at: :teardown
     def assert_would_fail(_state, _phase) do
       PropertyDamage.fail!("teardown should be preempted by the liveness timeout")
     end
@@ -251,7 +251,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def execute(%Initiate{}, _ctx, _runtime), do: {:ok, [%Initiated{}]}
   end
 
-  test "a genuine @poll_state liveness timeout preempts the teardown checkpoint" do
+  test "a genuine @eventually liveness timeout preempts the teardown checkpoint" do
     {:ok, result} = run_seq(Sequence.linear([%Initiate{}]), LivenessSafetyModel, SilentAdapter)
 
     refute result.success
@@ -300,12 +300,12 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def apply(state, %Confirmed{}), do: %{state | confirmed: true}
     def apply(state, _), do: state
 
-    @poll_state after: Initiated, timeout: {1000, :milliseconds}, interval: {10, :milliseconds}
+    @eventually after: Initiated, timeout: {1000, :milliseconds}, interval: {10, :milliseconds}
     def confirmed_eventually(_state, %Initiated{}) do
       fn s -> s.confirmed end
     end
 
-    @trigger at: :teardown
+    @check at: :teardown
     def assert_teardown_reached(_state, _phase) do
       PropertyDamage.fail!("teardown reached after liveness passed")
     end
@@ -319,7 +319,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def command_sequence_projection, do: ConfirmableProjection
   end
 
-  test "a @poll_state that resolves still reaches the teardown checkpoint" do
+  test "a @eventually that resolves still reaches the teardown checkpoint" do
     {:ok, result} = run_seq(Sequence.linear([%Initiate{}]), ConfirmableModel, ConfirmingAdapter)
 
     refute result.success
@@ -337,7 +337,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def init, do: %{ready: false}
 
-    @trigger at: :startup
+    @check at: :startup
     def assert_ready(state, _phase) do
       unless state.ready do
         PropertyDamage.fail!("startup precondition not met")
@@ -375,7 +375,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def executions(ctx), do: Agent.get(ctx.agent, & &1)
   end
 
-  test "a failing @trigger at: :startup check halts the run before command 1" do
+  test "a failing @check at: :startup check halts the run before command 1" do
     # Drive setup/teardown ourselves so we can inspect the execution counter.
     {:ok, ctx} = RecordingAdapter.setup(%{})
     {:ok, queue} = PropertyDamage.EventQueue.start_link()
@@ -407,7 +407,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def init, do: %{ready: true}
 
-    @trigger at: :startup
+    @check at: :startup
     def assert_ready(state, _phase) do
       unless state.ready, do: PropertyDamage.fail!("not ready")
     end
@@ -421,7 +421,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def command_sequence_projection, do: PassingStartupProjection
   end
 
-  test "a passing @trigger at: :startup check lets the run proceed" do
+  test "a passing @check at: :startup check lets the run proceed" do
     {:ok, result} = run_seq(Sequence.linear([%Bump{}]), PassingStartupModel, SingleBumpAdapter)
 
     assert result.success, "expected success, got: #{inspect(result.failure_reason)}"
@@ -557,7 +557,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def apply(%{count: c} = s, %Unbumped{}), do: %{s | count: c - 1}
     def apply(s, _), do: s
 
-    @trigger at: :teardown
+    @check at: :teardown
     def assert_never_exceeded_one(state, _phase) do
       if state.max > 1, do: PropertyDamage.fail!("max exceeded 1", max: state.max)
     end
@@ -582,7 +582,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def apply(%{count: c} = s, %Unbumped{}), do: %{s | count: c - 1}
     def apply(s, _), do: s
 
-    @trigger at: :teardown
+    @check at: :teardown
     def assert_never_exceeds_one(state, _phase) do
       if state.count > 1, do: PropertyDamage.fail!("count exceeded 1", count: state.count)
     end

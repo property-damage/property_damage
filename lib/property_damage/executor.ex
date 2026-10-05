@@ -405,7 +405,7 @@ defmodule PropertyDamage.Executor do
         mint
       )
 
-    # DR-024: @trigger at: :startup checks run on the initial init/0 state,
+    # DR-024: @check at: :startup checks run on the initial init/0 state,
     # after setup/1 and before command 1. A :halt failure aborts before any
     # command runs.
     case run_phase_assertions(initial_state, :startup) do
@@ -938,7 +938,7 @@ defmodule PropertyDamage.Executor do
       )
     end
 
-    # 7.7. DR-025: evaluate @trigger every: assertions on the async
+    # 7.7. DR-025: evaluate @check every: assertions on the async
     #      events just folded (injector + mock), incrementally.
     case check_async(
            model,
@@ -998,7 +998,7 @@ defmodule PropertyDamage.Executor do
                     assertion_failures: updated_failures
                   })
 
-                # Spawn pollers for any @poll_state assertions triggered by these events
+                # Spawn pollers for any @eventually assertions triggered by these events
                 new_state = maybe_spawn_pollers(new_state, events, model, index)
                 new_state = update_poller_state_getters(new_state)
 
@@ -1226,11 +1226,11 @@ defmodule PropertyDamage.Executor do
        ) do
     alias PropertyDamage.Model.Projection
 
-    # Only synchronous (@trigger) assertions run here; polling (@poll_state)
+    # Only synchronous (@check) assertions run here; polling (@eventually)
     # assertions have no :trigger key and are handled by the pollers. Without
     # this filter, accessing assertion.trigger on a polling assertion raised
     # a KeyError that crashed the run on the first command. Lifecycle-boundary
-    # assertions (@trigger at:, DR-024) are also synchronous but fire only at a
+    # assertions (@check at:, DR-024) are also synchronous but fire only at a
     # phase boundary, not during the command loop, so they are excluded here and
     # dispatched separately by run_phase_assertions/2.
     sync_assertions =
@@ -1279,10 +1279,10 @@ defmodule PropertyDamage.Executor do
   end
 
   # ============================================================================
-  # Lifecycle-Boundary Assertions (@trigger at:, DR-024)
+  # Lifecycle-Boundary Assertions (@check at:, DR-024)
   # ============================================================================
 
-  # Run every @trigger at: <phase> assertion once on the given projection state.
+  # Run every @check at: <phase> assertion once on the given projection state.
   # Unlike during-run (every:) assertions there is no step counter and no
   # should_run?/4 sampling: the timing IS the phase boundary. The triggering
   # command/event slot carries the phase atom (:startup | :teardown) so a
@@ -1383,7 +1383,7 @@ defmodule PropertyDamage.Executor do
     end)
   end
 
-  # The @trigger at: <phase> assertions declared on a projection. Lifecycle
+  # The @check at: <phase> assertions declared on a projection. Lifecycle
   # assertions stay type: :synchronous; the at: phase lives in the trigger spec.
   defp phase_assertions(projection, phase) do
     if function_exported?(projection, :__assertions__, 0) do
@@ -1543,10 +1543,10 @@ defmodule PropertyDamage.Executor do
   #
   # The asynchronous event paths (resource-poller / injector-adapter events,
   # mock-service events, nemesis events, and the finalize-time drains) fold
-  # events into projection state. DR-025 additionally evaluates `@trigger every:`
+  # events into projection state. DR-025 additionally evaluates `@check every:`
   # assertions on those events, so a violation is reported AT the offending event
   # (with that event's `command_index`) rather than only at the
-  # `@trigger at: :teardown` settled checkpoint, giving the shrinker a tight
+  # `@check at: :teardown` settled checkpoint, giving the shrinker a tight
   # truncation target.
   #
   # Evaluation is INCREMENTAL: each event is asserted on the state produced by
@@ -1560,7 +1560,7 @@ defmodule PropertyDamage.Executor do
   # keep their existing batch-against-final timing (run_checks); only the async
   # paths are incremental (the documented asymmetry, DR-025).
 
-  # Run `@trigger every:` assertions on the events folded since `log_before`
+  # Run `@check every:` assertions on the events folded since `log_before`
   # (newest-first prepended to `event_log`), incrementally on each event's
   # post-fold state. Returns `{:ok, counters, failures}`, or under `:halt`
   # `{:halt, name, reason, command_index, counters}` where `command_index`
@@ -1592,7 +1592,7 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Evaluate the synchronous (`@trigger every:`) dispatch for a single
+  # Evaluate the synchronous (`@check every:`) dispatch for a single
   # asynchronously-observed event, on its post-fold `projections`. Mirrors
   # `run_event_assertions`' counter bumps (`:step` / `:event` / module) so
   # `every: N` sampling counts async observations. `step_type` is `:event`, so
@@ -1621,7 +1621,7 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
 
   @doc false
-  # Spawn pollers for any @poll_state assertions triggered by the given events
+  # Spawn pollers for any @eventually assertions triggered by the given events
   # DR-030: build and register the awaits matchers a command declares. Pure
   # correlation: each %Await{match} becomes a registry entry carrying the
   # command's index + branch, appended in registration order (so first-registered
@@ -1667,7 +1667,7 @@ defmodule PropertyDamage.Executor do
 
       all_projections = [cmd_seq_projection | check_projections]
 
-      # For each event, check if any @poll_state assertions should be spawned.
+      # For each event, check if any @eventually assertions should be spawned.
       # Each spawned poller is paired with its (projection, assertion name) so
       # the spawn can be recorded as a firing (DR-026): spawning IS firing for a
       # liveness check (the after: event arrived and verification began), so a
@@ -1679,7 +1679,7 @@ defmodule PropertyDamage.Executor do
             function_exported?(projection, :__assertions__, 0),
             assertion <- projection.__assertions__(),
             assertion.type == :polling,
-            Projection.event_matches_poll_trigger?(assertion.poll_state, event_module) do
+            Projection.event_matches_poll_trigger?(assertion.eventually, event_module) do
           # Get current projection state
           projection_state = Map.get(state.projections, projection)
 
@@ -1700,8 +1700,8 @@ defmodule PropertyDamage.Executor do
               predicate: predicate,
               predicate_source: assertion.predicate_source,
               projection: projection,
-              interval_ms: assertion.poll_state.interval_ms,
-              timeout_ms: assertion.poll_state.timeout_ms,
+              interval_ms: assertion.eventually.interval_ms,
+              timeout_ms: assertion.eventually.timeout_ms,
               triggered_by: %{
                 event: event,
                 assertion_name: assertion.name,

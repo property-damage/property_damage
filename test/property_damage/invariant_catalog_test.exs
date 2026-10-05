@@ -3,7 +3,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   End-to-end tests for the invariant catalog and anti-vacuity coverage (DR-026).
 
   The headline guarantee: an assertion whose trigger never fires (e.g.
-  `@trigger every: NeverEmitted` where `NeverEmitted` is never observed) is a
+  `@check every: NeverEmitted` where `NeverEmitted` is never observed) is a
   silent vacuous pass today. Coverage turns its zero firings into a visible
   signal: `PropertyDamage.assertion_coverage/2` reports the never-fired
   invariant as uncovered while a normally-firing one is covered.
@@ -38,12 +38,12 @@ defmodule PropertyDamage.InvariantCatalogTest do
     def apply(state, _), do: state
 
     # Fires on every step: its invariant (default id :always_runs) is exercised.
-    @trigger every: 1
+    @check every: 1
     def assert_always_runs(_state, _cmd_or_event), do: :ok
 
     # Triggers only on a NeverEmitted observation, which never happens: its
     # invariant (default id :never_runs) is declared but never exercised.
-    @trigger every: NeverEmitted
+    @check every: NeverEmitted
     def assert_never_runs(_state, _cmd_or_event), do: :ok
   end
 
@@ -107,14 +107,14 @@ defmodule PropertyDamage.InvariantCatalogTest do
     # to the same invariant via validates: -- one invariant, two checks.
     @invariant id: :balanced, description: "Debits equal credits"
 
-    @trigger every: 1, validates: :balanced
+    @check every: 1, validates: :balanced
     def assert_balanced_each_step(_state, _), do: :ok
 
-    @trigger at: :teardown, validates: :balanced
+    @check at: :teardown, validates: :balanced
     def assert_balanced_at_end(_state, _phase), do: :ok
 
     # Inline declaration on the assertion itself.
-    @trigger every: :command, id: :command_seen, description: "A command was observed"
+    @check every: :command, id: :command_seen, description: "A command was observed"
     def assert_command_seen(_state, _), do: :ok
   end
 
@@ -152,7 +152,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def init, do: %{}
 
-    @trigger every: 1, id: :consistent
+    @check every: 1, id: :consistent
     def assert_a(_state, _), do: :ok
   end
 
@@ -161,7 +161,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def init, do: %{}
 
-    @trigger every: 1, id: :consistent
+    @check every: 1, id: :consistent
     def assert_b(_state, _), do: :ok
   end
 
@@ -198,7 +198,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def init, do: %{}
 
-    @trigger at: :teardown
+    @check at: :teardown
     def assert_settled(_state, _phase), do: :ok
   end
 
@@ -239,7 +239,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def init, do: %{}
 
-    @trigger every: 1, id: :never_negative, description: "The counter is never negative"
+    @check every: 1, id: :never_negative, description: "The counter is never negative"
     def assert_never_negative(_state, _) do
       PropertyDamage.fail!("boom")
     end
@@ -282,7 +282,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def init, do: %{}
 
-    @trigger every: :command
+    @check every: :command
     def assert_cmd(_state, _), do: :ok
   end
 
@@ -328,7 +328,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def init, do: %{}
 
-    @trigger every: :command
+    @check every: :command
     def assert_cmd(_state, _), do: :ok
   end
 
@@ -364,7 +364,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   # ===========================================================================
-  # Firing from the @poll_state spawn path (eventual-consistency, DR-026)
+  # Firing from the @eventually spawn path (eventual-consistency, DR-026)
   # ===========================================================================
 
   defmodule Started, do: defstruct([])
@@ -383,7 +383,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
 
     # Spawning the poller counts as firing (the after: event arrived and
     # verification began). The predicate passes immediately, so no timeout.
-    @poll_state after: Started, timeout: {200, :milliseconds}, interval: {10, :milliseconds}
+    @eventually after: Started, timeout: {200, :milliseconds}, interval: {10, :milliseconds}
     def eventually_ok(_state, %Started{}) do
       fn _s -> true end
     end
@@ -407,7 +407,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     def execute(%Start{}, _ctx, _runtime), do: {:ok, [%Started{}]}
   end
 
-  test "spawning a @poll_state poller counts as firing the invariant" do
+  test "spawning a @eventually poller counts as firing the invariant" do
     result =
       PropertyDamage.run(
         model: PollModel,

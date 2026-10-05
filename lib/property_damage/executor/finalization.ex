@@ -5,7 +5,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # Owns the finalize chain that runs after the last command of a (linear or
   # merged-branch) run, in order:
   #
-  #   finalize_pollers (@poll_state drain + async checks)
+  #   finalize_pollers (@eventually drain + async checks)
   #     -> finalize_resource_pollers
   #     -> settle_event_queue (drain queued injector/poller events + async checks)
   #     -> finalize_after_settle
@@ -74,13 +74,13 @@ defmodule PropertyDamage.Executor.Finalization do
 
   def finalize_result(state, linearization) do
     # Finalize all active state pollers - wait for them to complete. The drain
-    # also evaluates async @trigger every: assertions on events that arrive
-    # during the @poll_state await window (DR-025); a :halt violation there is
+    # also evaluates async @check every: assertions on events that arrive
+    # during the @eventually await window (DR-025); a :halt violation there is
     # surfaced as state.async_halt.
     {state, assertion_failures, halt_failure} = finalize_pollers(state)
 
     case Map.get(state, :async_halt) do
-      # DR-025: an async every: assertion tripped during the @poll_state await
+      # DR-025: an async every: assertion tripped during the @eventually await
       # drain under :halt mode. Report it at the observing event's command_index,
       # ahead of any poll timeout (a more proximate, more actionable failure).
       {name, reason, command_index} ->
@@ -134,11 +134,11 @@ defmodule PropertyDamage.Executor.Finalization do
         {state, resource_failures, resource_halt} = finalize_resource_pollers(state)
 
         # Fold any remaining queued events into the projections so the settled
-        # state is complete (DR-024), evaluating async `@trigger every:`
-        # assertions on each as it is folded (DR-025). When @poll_state pollers
+        # state is complete (DR-024), evaluating async `@check every:`
+        # assertions on each as it is folded (DR-025). When @eventually pollers
         # ran, drain_await_loop already folded events as they arrived; this final
         # drain catches the last resource-poller emissions and also covers runs
-        # that have resource pollers but no @poll_state poller to drive a drain.
+        # that have resource pollers but no @eventually poller to drive a drain.
         # `assertion_failures` carries the run's :record failures so far (newest
         # first); the async check prepends any it records.
         case settle_event_queue(state, assertion_failures) do
@@ -187,10 +187,10 @@ defmodule PropertyDamage.Executor.Finalization do
         )
 
       _ ->
-        # DR-024: the @trigger at: :teardown checkpoint runs here, on the
+        # DR-024: the @check at: :teardown checkpoint runs here, on the
         # fully-settled state (after both poller-finalize steps), on the
         # clean-completion path only and before Adapter.teardown/1. A genuine
-        # @poll_state liveness timeout has already preempted it above (no
+        # @eventually liveness timeout has already preempted it above (no
         # hoist): a liveness timeout is itself a not-settled outcome, so
         # there is no settled state to check.
         case Executor.run_phase_assertions(state, :teardown) do
@@ -242,7 +242,7 @@ defmodule PropertyDamage.Executor.Finalization do
       executed: state.executed,
       projections: state.projections,
       projections_before: Map.get(state, :projections_before),
-      # DR-030: a @poll_state liveness timeout reports at the command whose event
+      # DR-030: a @eventually liveness timeout reports at the command whose event
       # opened the window (nil for poll errors / resource pollers / older info).
       failed_at_index: poller_failure_index(failure_reason),
       failure_reason: failure_reason,
@@ -261,7 +261,7 @@ defmodule PropertyDamage.Executor.Finalization do
 
   defp poller_failure_index(_), do: nil
 
-  # Result shape for a failing @trigger at: :teardown safety check (DR-024).
+  # Result shape for a failing @check at: :teardown safety check (DR-024).
   # Like poller_failure_result but carries the assertion's named failure reason
   # and its stacktrace, so it reports as a synchronous assertion failure on the
   # settled state (failed_at_index nil — no command failed), distinct from a
@@ -284,7 +284,7 @@ defmodule PropertyDamage.Executor.Finalization do
     }
   end
 
-  # Result for a failing `@trigger every:` assertion observed asynchronously
+  # Result for a failing `@check every:` assertion observed asynchronously
   # during a finalize-time drain (DR-025). Like teardown_failure_result, but
   # carries the observing event's `command_index` as `failed_at_index` so the
   # shrinker can truncate to the command that caused it (nil for a pure injector
@@ -359,13 +359,13 @@ defmodule PropertyDamage.Executor.Finalization do
 
   # Drain any events still queued (typically late resource-poller emissions
   # that arrived after the last command) into the projections and event log, so
-  # the settled state used by the @trigger at: :teardown checkpoint and the
+  # the settled state used by the @check at: :teardown checkpoint and the
   # reported result reflects every observed event (DR-024). A no-op when the
   # queue is absent or empty.
   # Threads the run's accumulated :record `failures` (newest-first) through the
   # async check. Returns {:ok, state, failures} on a clean drain, or
   # {:halt, name, reason, command_index, state, failures} when an async
-  # `@trigger every:` assertion fails under :halt mode on a drained event
+  # `@check every:` assertion fails under :halt mode on a drained event
   # (DR-025). In :record/:log/:disabled modes it never halts; any :record
   # failures are prepended onto `failures`.
   defp settle_event_queue(state, failures) do
@@ -416,7 +416,7 @@ defmodule PropertyDamage.Executor.Finalization do
     if Enum.empty?(pollers) do
       {state, assertion_failures, nil}
     else
-      # Drain-and-refresh while awaiting: @poll_state predicates read
+      # Drain-and-refresh while awaiting: @eventually predicates read
       # projection state, which only advances as events (from injectors and
       # resource pollers) flow in. A blind await would freeze the projection
       # snapshot, so eventual-consistency predicates could never observe
@@ -478,7 +478,7 @@ defmodule PropertyDamage.Executor.Finalization do
         end
 
       updated_state = %{state | active_pollers: []}
-      # Use the post-drain failures so async @trigger every: violations recorded
+      # Use the post-drain failures so async @check every: violations recorded
       # during the await drain (DR-025, :record mode) are not dropped. Equal to
       # the pre-drain `assertion_failures` when the drain recorded nothing.
       {updated_state, Map.get(updated_state, :assertion_failures, []) ++ new_failures,
@@ -490,7 +490,7 @@ defmodule PropertyDamage.Executor.Finalization do
   # pollers promptly, long enough not to busy-spin.
   @poller_drain_tick_ms 20
 
-  # Await all @poll_state pollers while continuously feeding them: drain the
+  # Await all @eventually pollers while continuously feeding them: drain the
   # event queue into projections, refresh each poller's state getter, then
   # collect any results that arrived. Returns {results, updated_state} where
   # updated_state carries the events that arrived during the poll window.
@@ -505,7 +505,7 @@ defmodule PropertyDamage.Executor.Finalization do
 
   defp drain_await_loop(pollers, results, state, deadline) do
     # 1. Drain queue into projections / event log so predicates can observe
-    #    events that arrived since the last command, asserting @trigger every:
+    #    events that arrived since the last command, asserting @check every:
     #    assertions on each event as it folds (DR-025).
     projs_before = state.projections
     log_before = state.event_log
@@ -701,7 +701,7 @@ defmodule PropertyDamage.Executor.Finalization do
       reason: Failure.poll_timeout(info),
       command: nil,
       # DR-030: attribute the liveness timeout to the command whose event opened
-      # the @poll_state window, so the shrinker keeps locality (nil for older
+      # the @eventually window, so the shrinker keeps locality (nil for older
       # poll info that predates command_index threading).
       command_index: Map.get(info.triggered_by, :command_index),
       step_type: :event,

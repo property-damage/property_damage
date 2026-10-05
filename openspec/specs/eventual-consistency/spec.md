@@ -104,39 +104,39 @@ The system SHALL support command-triggered background polling of external resour
 
 ### Requirement: State Poller for Temporal Assertions
 
-The system SHALL support `@poll_state` temporal assertions that spawn a background poller to periodically check a predicate against projection state. The poller SHALL succeed when the predicate becomes true or fail on timeout.
+The system SHALL support `@eventually` temporal assertions that spawn a background poller to periodically check a predicate against projection state. The poller SHALL succeed when the predicate becomes true or fail on timeout.
 
 #### Scenario: Predicate becomes true
-- **WHEN** a `@poll_state` assertion is triggered by a matching event
+- **WHEN** a `@eventually` assertion is triggered by a matching event
 - **AND** the predicate evaluates to true within the timeout
 - **THEN** the state poller SHALL report success
 
 #### Scenario: Predicate times out
-- **WHEN** a `@poll_state` assertion is triggered
+- **WHEN** a `@eventually` assertion is triggered
 - **AND** the predicate never becomes true before the timeout
 - **THEN** the state poller SHALL report failure with diagnostic information
 - **AND** the report SHALL include the trigger event, predicate source, final state, elapsed time, and poll count
 
 #### Scenario: Poll timeout attributed to its triggering command (DR-030)
-- **WHEN** a `@poll_state` poller times out
+- **WHEN** a `@eventually` poller times out
 - **THEN** the failure's `failed_at_index` SHALL be the `command_index` of the command whose event opened the poll window, so the shrinker can truncate to it
 
 #### Scenario: Liveness over a correlated set (DR-030)
-- **WHEN** a command correlates an injector event via `awaits/2` and a `@poll_state` predicate asserts that the command's correlated set becomes non-empty
-- **THEN** the predicate observes the awaited event once it is folded and attributed, and the framework's existing `@poll_state` finalize drain (which already awaits the internal event queue) supplies the wait — no separate await loop exists
+- **WHEN** a command correlates an injector event via `awaits/2` and a `@eventually` predicate asserts that the command's correlated set becomes non-empty
+- **THEN** the predicate observes the awaited event once it is folded and attributed, and the framework's existing `@eventually` finalize drain (which already awaits the internal event queue) supplies the wait — no separate await loop exists
 
 #### Scenario: Configurable polling parameters
-- **WHEN** a `@poll_state` assertion specifies timeout and interval
+- **WHEN** a `@eventually` assertion specifies timeout and interval
 - **THEN** the poller SHALL use those values for its polling cycle
 
 #### Scenario: Poller spawn counts as invariant firing (DR-026)
-- **WHEN** a matching `after:` event is observed and a `@poll_state` poller is spawned
+- **WHEN** a matching `after:` event is observed and a `@eventually` poller is spawned
 - **THEN** the assertion SHALL be counted as having fired for invariant-coverage purposes, regardless of whether the poller later succeeds, times out, or remains pending at shutdown
-- **AND** an invariant whose `@poll_state` poller is never spawned (its `after:` event never occurred) SHALL be reported as uncovered
+- **AND** an invariant whose `@eventually` poller is never spawned (its `after:` event never occurred) SHALL be reported as uncovered
 
 ### Requirement: Settled State and Safety Assertions
 
-The system SHALL define a run's **settled state** as the projection state after both the state pollers (`@poll_state`) and the resource pollers have finalized: the point at which no poller is live and every observed event has been folded into projection state. The framework SHALL evaluate `@trigger at: :teardown` safety assertions (DR-024) on this settled state. Whereas `@poll_state` expresses liveness (a predicate that SHALL eventually become true), an `at: :teardown` assertion expresses safety (a property that SHALL hold on the settled state); the two are complementary.
+The system SHALL define a run's **settled state** as the projection state after both the state pollers (`@eventually`) and the resource pollers have finalized: the point at which no poller is live and every observed event has been folded into projection state. The framework SHALL evaluate `@check at: :teardown` safety assertions (DR-024) on this settled state. Whereas `@eventually` expresses liveness (a predicate that SHALL eventually become true), an `at: :teardown` assertion expresses safety (a property that SHALL hold on the settled state); the two are complementary.
 
 #### Scenario: Settled state reflects late asynchronous observations
 - **WHEN** a resource poller injects events after the last command, before the run finalizes
@@ -145,12 +145,12 @@ The system SHALL define a run's **settled state** as the projection state after 
 #### Scenario: Safety assertion catches a persistent over-application
 - **WHEN** an asynchronous effect over-applies and the over-application persists to the settled state
 - **AND** a projection accumulates evidence of it (for example a maximum observed value)
-- **THEN** an `@trigger at: :teardown` assertion SHALL detect it and report a named safety failure, distinct from a poll timeout
+- **THEN** an `@check at: :teardown` assertion SHALL detect it and report a named safety failure, distinct from a poll timeout
 
 #### Scenario: Liveness timeout preempts the settled checkpoint
-- **WHEN** a `@poll_state` assertion times out in a mode that halts the run
+- **WHEN** a `@eventually` assertion times out in a mode that halts the run
 - **THEN** the run SHALL report the poll timeout
-- **AND** `@trigger at: :teardown` assertions SHALL NOT be evaluated, because a liveness timeout is itself a not-settled outcome
+- **AND** `@check at: :teardown` assertions SHALL NOT be evaluated, because a liveness timeout is itself a not-settled outcome
 
 ### Requirement: Probe Command Semantics
 

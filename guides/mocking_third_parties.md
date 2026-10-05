@@ -212,7 +212,7 @@ defmodule PaymentInvariant do
   end
   def apply(state, _), do: state
 
-  @trigger every: PaymentDeclined
+  @check every: PaymentDeclined
   def assert_rollback_on_decline(state, %PaymentDeclined{order_id: id}) do
     order = state.orders[id]
     if order.status != :declined do
@@ -343,7 +343,7 @@ def handle_request(%{path: path, body: body} = req, state) do
 end
 
 # Check projection can check recorded requests
-@trigger every: 10
+@check every: 10
 def assert_no_duplicate_charges(state, _) do
   charges = Enum.filter(state.mock_requests, &(&1.path == "/charge"))
   order_ids = Enum.map(charges, & &1.body["order_id"])

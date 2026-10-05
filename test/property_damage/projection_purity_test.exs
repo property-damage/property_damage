@@ -46,7 +46,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
     def apply(state, %Pinged{amount: a}), do: %{state | sum: state.sum + a}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def under_limit(state, _item) do
       unless state.sum <= 100 do
         PropertyDamage.fail!("sum exceeds limit", sum: state.sum)

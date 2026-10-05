@@ -31,7 +31,7 @@ defmodule OpenapiBench.Consistency do
   @invariant id: :read_consistency,
              description: "Every read observes the model's latest write to that key (or :unset)"
 
-  @trigger every: GetValue, validates: :read_consistency
+  @check every: GetValue, validates: :read_consistency
   def assert_read_consistent(state, _command) do
     case state.last_read do
       {key, observed} ->

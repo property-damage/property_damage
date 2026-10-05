@@ -172,7 +172,7 @@ Commands SHALL control stutter/idempotency testing behavior via `command_spec/1`
 
 ### Requirement: Event Correlation via Awaits
 
-Commands MAY implement the optional `awaits/2` callback (DR-030) to correlate inbound injector events back to the command that semantically owns them. `awaits(state, command)` SHALL return a list of `PropertyDamage.Await` structs, each carrying a `match` predicate `(event -> boolean)` built from the command's resolved fields and captured response. This is **pure correlation**: a matching injector event is attributed to the declaring command's `command_index`; the callback SHALL NOT block, time out, or assert. Judgment over a command's correlated set is expressed in projections (a `@poll_state` for liveness, a `@trigger`/`@invariant` for safety). A command that does not implement `awaits/2` correlates nothing (default `[]`).
+Commands MAY implement the optional `awaits/2` callback (DR-030) to correlate inbound injector events back to the command that semantically owns them. `awaits(state, command)` SHALL return a list of `PropertyDamage.Await` structs, each carrying a `match` predicate `(event -> boolean)` built from the command's resolved fields and captured response. This is **pure correlation**: a matching injector event is attributed to the declaring command's `command_index`; the callback SHALL NOT block, time out, or assert. Judgment over a command's correlated set is expressed in projections (a `@eventually` for liveness, a `@check`/`@invariant` for safety). A command that does not implement `awaits/2` correlates nothing (default `[]`).
 
 #### Scenario: Awaits correlates an injector event to its command
 - **WHEN** a command implements `awaits/2` returning a `%Await{match: predicate}`

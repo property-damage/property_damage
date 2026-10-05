@@ -194,9 +194,9 @@ The failure signature SHALL be a tuple of `{type, check_name}` where type identi
 - **THEN** the signature SHALL contain the failure type and nil for the check name
 
 #### Scenario: Assertion failure signature includes the assertion name
-- **WHEN** a failure is a named assertion failure (`@trigger` / `@trigger at:` assertion)
+- **WHEN** a failure is a named assertion failure (`@check` / `@check at:` assertion)
 - **THEN** the signature SHALL record the assertion name as the check name, so failures of distinct assertions are not treated as equivalent (DR-025)
 
 #### Scenario: Asynchronously-observed assertion failure carries a location
-- **WHEN** an `@trigger every:` assertion fails on an asynchronously-observed event
+- **WHEN** an `@check every:` assertion fails on an asynchronously-observed event
 - **THEN** the failure SHALL carry the observing event's `command_index` as `failed_at_index`, so the shrinker's truncation can target it (the truncation is still verified to reproduce the failure before being accepted)

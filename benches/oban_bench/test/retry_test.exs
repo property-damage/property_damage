@@ -78,7 +78,7 @@ defmodule ObanBench.RetryTest do
                  verbose: false
                )
 
-      # A clean exactly-once safety violation: the @trigger at: :teardown check
+      # A clean exactly-once safety violation: the @check at: :teardown check
       # on the settled state saw the counter overshoot its expected value.
       assert %PropertyDamage.Failure{
                type: %PropertyDamage.Failure.Assertion{

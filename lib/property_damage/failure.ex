@@ -224,7 +224,7 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: %Assertion{kind: :linearization, detail: message}}
   end
 
-  @doc "A temporal (`@poll_state`) assertion timed out; `info` carries the details."
+  @doc "A temporal (`@eventually`) assertion timed out; `info` carries the details."
   @spec poll_timeout(map()) :: t()
   def poll_timeout(info) do
     name = get_in(info, [:triggered_by, :assertion_name])
@@ -280,7 +280,7 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: %Execution{kind: :resource_poller_error, detail: reason}}
   end
 
-  @doc "A `@poll_state` predicate raised while polling."
+  @doc "A `@eventually` predicate raised while polling."
   @spec poll_error(term()) :: t()
   def poll_error(reason) do
     %__MODULE__{type: %Execution{kind: :poll_error, detail: reason}}

@@ -220,7 +220,7 @@ defmodule PropertyDamage.DifferentialTest do
     @impl true
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_always_pass(_state, _cmd_or_event), do: :ok
   end
 
