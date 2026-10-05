@@ -62,7 +62,7 @@ All user-facing contracts are defined as behaviours:
 ### Execution flow
 
 1. **Symbolic phase**: Generate command sequence with symbolic refs (no SUT interaction). Model filters commands by `when:` predicates, selects by weight, generates via command generator + `overrides:` values.
-2. **Concrete phase**: Execute against SUT via Adapter, resolving symbolic refs to real values. Events flow through projections. Assertions fire at configured trigger points.
+2. **Concrete phase**: Execute against SUT via Adapter, resolving symbolic refs to real values. Events flow through projections. Checks fire at their configured `every:` or `at:` points.
 3. **Shrinking**: On failure, two-phase shrink — sequence shrinking then argument simplification. Preserves failure equivalence (same type, same or earlier location).
 
 ### Key subsystems
