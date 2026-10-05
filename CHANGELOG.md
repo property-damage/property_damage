@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Executor.Stepping.drain/2` and `finalize/2` (DR-044).** `drain/2` folds the
+  events waiting in the context's event queue into a stepped state, checking each
+  one as it folds. `finalize/2` finishes a stepped run into the result
+  `Executor.run/4` reports.
+- **Pollers, injectors and mocks in `Differential.run/1` (DR-044).**
+  `runtime.start_poller` is allowed in multi-target runs (the old refusal is gone),
+  and each target's `injectors:` and `mocks:` are honored. Each belongs to its own
+  variant.
+- **`PropertyDamage.Variant` and `PropertyDamage.Scheduler` (DR-044).** A variant
+  runs one target over a shared command sequence in its own process, through the
+  per-command engine; the scheduler advances the variants in lockstep and compares
+  them at every root. See the `BREAKING (DR-044)` entry under Changed.
+
 - **`mix pd.validate --targets` (DR-043).** `mix pd.validate MODEL --targets
   EXPR` validates the model against every target of a `targets:` list given as
   an Elixir expression. It warns when two targets use the same adapter with an
@@ -178,6 +191,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing the report.
 
 ### Changed
+
+- **BREAKING (DR-044): `Differential.run/1` runs every target as a variant in lockstep.**
+  - `execution:` is removed with no mapping (it took `:interleaved` or
+    `:sequential`). Use `concurrency:`: `:serial` (the default, one target at a
+    time) or `:parallel` (all targets at once; targets that share a system must
+    isolate their slices through `config:`). Passing `execution:` is an option error
+    that names `concurrency:`. `compare: :performance` and `:both` require
+    `concurrency: :serial`.
+  - `Differential.Result`: the `execution` field is replaced by `concurrency`;
+    there is a new `failure` field; `status` may be `:failed`; `divergences` are
+    listed oldest first. A divergence now has the keys `seed`, `run`, `root`,
+    `command`, `variant` (`%{index, name}`), `reference_result`, `divergent_result`
+    and `results`; `divergent_target` and `step` are gone. A failure is
+    `%{kind, variant, run, root, reason}` with `kind` one of `:check_failed`,
+    `:setup_failed` and `:execution_failed`, and it ends the campaign.
+  - `Executor.Stepping.step/4` returns the raw outcome of the command:
+    `{:ok, state, outcome}` or `{:error, failure, state, outcome}`, where it
+    returned `{:ok, state}` or `{:error, failure, state}` before.
+  - `Differential.run/1` calls `Adapter.setup/1` once per run per target, not once
+    per campaign, and tears every target down at the end of each run. `setup/1`
+    must be idempotent. Code that looped over `max_runs: 1` to force a fresh setup
+    no longer needs the loop.
 
 - **BREAKING (DR-043): targets carry every per-target resource, with no compatibility layer.**
     - The run-level options `adapter:`, `adapter_config:`, `injector_adapters:`

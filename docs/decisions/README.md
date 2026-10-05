@@ -57,8 +57,9 @@ Every record is **self-contained**: it carries enough context and rationale to s
 | [DR-039](DR-039-position-struct-unification.md) | Position Struct as the One Position Vocabulary | `%Sequence.Position{}` is the single position vocabulary end to end; persistence refuses pre-v5 files. Recorded at decision time. |
 | [DR-040](DR-040-per-step-state-timeline.md) | Per-Step State Timeline (Derived, Not Captured) | Per-step projection state is derived from the trace (faithful + canonical modes), not snapshotted; a purity check guards it; persistence v6 refuses pre-v6. Recorded at decision time. |
 | [DR-041](DR-041-structured-failure-vocabulary.md) | Structured Failure Vocabulary (`%Failure{}`) | One nested `%Failure{}` type (Assertion/Execution/Framework classes, globally-unique kinds) replaces the loose `failure_reason` tuples; shrinker signature is `{kind, name}`; six denormalized `FailureReport` fields become accessors; persistence v7 refuses pre-v7. Recorded at decision time. Amended by DR-042: `Failure.Assertion` is now `Failure.Check` and kind `:assertion_failed` is now `:check_failed`. |
-| [DR-042](DR-042-one-engine.md) | One Engine for Property-Based, Differential and Path-Equivalence Runs | One runner (`PropertyDamage.run/1`) executes a root sequence across one or more variants through the per-command engine; every root is a comparison boundary; the run mode is inferred, never an option; the `assertion` vocabulary becomes `check`, `with:` becomes `overrides:`, persistence v8. Recorded at decision time. |
+| [DR-042](DR-042-one-engine.md) | One Engine for Property-Based, Differential and Path-Equivalence Runs | One runner (`PropertyDamage.run/1`) executes a root sequence across one or more variants through the per-command engine; every root is a comparison boundary; the run mode is inferred, never an option; the `assertion` vocabulary becomes `check`, `with:` becomes `overrides:`, persistence v8. Recorded at decision time. Amended by DR-044: `Differential.run/1` stays as the multi-target entry point on top of the variant scheduler; `PropertyDamage.run/1` keeps its own loop for now. |
 | [DR-043](DR-043-targets.md) | Targets Carry Every Per-Target Resource | `targets:` is the only place a target is described: an entry is `Module` or `{Module, name:, config:, injectors:, mocks:}` and normalizes to `%PropertyDamage.Target{}`; the first entry is the reference (no `role:`); default names drop the index suffix and duplicates are errors; every entry point but `Differential.run/1` takes one entry; `adapter:`, `adapter_config:`, `injector_adapters:` and `mock_services:` are removed; isolation between targets on one system is the target's `config:`. Recorded at decision time. |
+| [DR-044](DR-044-variant-and-lockstep-scheduler.md) | Variants and the Lockstep Scheduler | A variant is one target over the shared sequence in its own process, through the per-command engine (`Executor.Stepping`); every root is a lockstep boundary; `concurrency: :serial \| :parallel` replaces `execution:` (`compare: :performance \| :both` require `:serial`); `Adapter.setup/1` runs per run per variant behind a barrier and must be idempotent; failures (`:check_failed`, `:setup_failed`, `:execution_failed`) name the variant; divergences are oldest first; `runtime.start_poller`, `injectors:` and `mocks:` work in multi-target runs; `Stepping.step/4` returns the outcome and gains `drain/2` and `finalize/2`. Recorded at decision time. |
 
 ## Which specs cite which DRs
 
@@ -66,11 +67,11 @@ Every record is **self-contained**: it carries enough context and rationale to s
 - `openspec/specs/command/spec.md`: DR-006, DR-008, DR-019
 - `openspec/specs/projection/spec.md`: DR-004, DR-005, DR-009, DR-012, DR-014, DR-024, DR-025, DR-026, DR-042
 - `openspec/specs/observability/spec.md`: DR-022, DR-026
-- `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-015, DR-016, DR-018, DR-024, DR-025, DR-026, DR-042, DR-043
+- `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-015, DR-016, DR-018, DR-024, DR-025, DR-026, DR-042, DR-043, DR-044
 - `openspec/specs/shrinking/spec.md`: DR-017, DR-025
-- `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024, DR-026
+- `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024, DR-026, DR-044
 - `openspec/specs/failure-analysis/spec.md`: DR-026, DR-033, DR-035, DR-040, DR-041
-- `openspec/specs/differential-testing/spec.md`: DR-021, DR-030, DR-033, DR-034, DR-035, DR-036, DR-040, DR-043
+- `openspec/specs/differential-testing/spec.md`: DR-021, DR-030, DR-033, DR-034, DR-035, DR-036, DR-040, DR-043, DR-044
 - `openspec/specs/export/spec.md`: DR-021, DR-028, DR-043
 - `openspec/specs/load-testing/spec.md`: DR-042
 - `openspec/specs/persistence/spec.md`: DR-020, DR-033, DR-039, DR-040, DR-041, DR-042

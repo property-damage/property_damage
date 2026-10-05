@@ -90,45 +90,72 @@ PropertyDamage.Differential.run(
 )
 ```
 
-## Execution Modes
+## How a Run Executes
 
-### Interleaved (Default for Correctness)
-
-Commands execute round-robin across targets:
+Each run generates one command sequence and runs it against every target in
+**lockstep**. Every command is a root. Every target executes root `r`, the
+comparison runs, and only then does any target start root `r + 1`:
 
 ```
 Target A: cmd1 → cmd2 → cmd3
 Target B: cmd1 → cmd2 → cmd3
-         ↓     ↓     ↓
+         ↓       ↓       ↓
       compare compare compare
 ```
 
-Divergences are detected immediately after each command.
+Each target runs as a **variant**: its own process, with its own projections,
+event queue, injectors, mocks and pollers. A variant runs the full engine, so
+checks, settle, stutter and nemesis work as they do in `PropertyDamage.run/1`.
 
-### Sequential (Default for Performance)
+A run stops at the first root where a target answers differently from the
+reference. That is a divergence. The next run starts from a fresh setup.
 
-Full sequence runs on each target:
+### Concurrency
 
-```
-Target A: cmd1 → cmd2 → cmd3 → cmd4 → cmd5
-                                         ↓
-Target B: cmd1 → cmd2 → cmd3 → cmd4 → cmd5
-                                         ↓
-                                     compare
-```
+`concurrency:` decides how the variants reach each boundary:
 
-Better for performance testing - no context switching overhead.
+| Value | Behavior |
+|-------|----------|
+| `:serial` (default) | One variant at a time, in target order. Commands never overlap. |
+| `:parallel` | All variants at once. The run takes about as long as its slowest target. |
 
-### Specifying Execution Mode
+Under `:parallel`, targets that share a system must isolate their slices of it
+through `config:` (a tenant or a key prefix per target). Otherwise one target's
+command changes what another observes.
 
 ```elixir
 PropertyDamage.Differential.run(
   model: MyModel,
   targets: [...],
   compare: :correctness,
-  execution: :sequential  # Override default
+  concurrency: :parallel
 )
 ```
+
+`compare: :performance` and `compare: :both` require `concurrency: :serial`,
+because overlapping targets would mix their load into each other's latency.
+
+The old `execution:` option is removed. Passing it raises an option error that
+names `concurrency:`.
+
+### Setup and teardown per run
+
+Every run sets every target up and tears it down again. Each variant calls
+`Adapter.setup/1` in its own process, one variant after another in target
+order. No variant executes the first command before every setup has returned.
+If a setup fails, the run ends with a failure that names the variant, and the
+variants already set up are torn down.
+
+So `setup/1` runs once per run per target, and it may find state that an
+earlier run left behind. Write it to be idempotent (see the `setup/1` notes in
+`PropertyDamage.Adapter`).
+
+### Pollers, injectors and mocks
+
+An adapter may call `runtime.start_poller` in a multi-target run, and a target
+may declare `injectors:` and `mocks:` in its `targets:` entry. Each belongs to
+its own variant: its events reach that variant only, and its pollers stop when
+the variant ends.
 
 ## Server-Generated Values (`external()`)
 
@@ -204,7 +231,7 @@ end
 
 # Check status
 result.status
-# => :equivalent | :divergent | :complete
+# => :equivalent | :divergent | :failed
 
 # The reference and every target are %{index: i, name: n}
 result.reference
@@ -215,10 +242,16 @@ if PropertyDamage.Differential.Result.divergent?(result) do
   IO.puts("Found #{length(result.divergences)} divergences")
 
   for div <- result.divergences do
-    IO.puts("Step #{div.step}: #{inspect(div.command)}")
+    IO.puts("Run #{div.run}, root #{div.root}: #{inspect(div.command)}")
     IO.puts("  Reference: #{inspect(div.reference_result)}")
-    IO.puts("  #{div.divergent_target}: #{inspect(div.divergent_result)}")
+    IO.puts("  #{div.variant.name}: #{inspect(div.divergent_result)}")
   end
+end
+
+# Check for a failure
+if result.status == :failed do
+  %{kind: kind, variant: variant, run: run, root: root, reason: reason} = result.failure
+  IO.puts("#{kind} in #{variant.name} (run #{run}, root #{inspect(root)}): #{inspect(reason)}")
 end
 
 # Get metrics per target
@@ -227,6 +260,51 @@ for %{name: name} <- result.targets do
   IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
 end
 ```
+
+### Divergences
+
+Each entry of `result.divergences` is a map with these keys:
+
+| Key | Meaning |
+|-----|---------|
+| `variant` | `%{index, name}` of the target that diverged |
+| `root` | 0-based index of the command where it diverged |
+| `run` | 0-based run that found it |
+| `command` | the command struct |
+| `reference_result` | the reference target's answer |
+| `divergent_result` | the divergent target's answer |
+| `results` | every target's answer, keyed by target name |
+| `seed` | the campaign seed |
+
+`result.divergences` lists the divergences oldest first. Nothing is shrunk: a
+divergence is the first differing root of its generated sequence.
+
+An answer is `{:ok, events}` (the events the command injected, then the events
+it returned; for a `:probe` or `:async` command, the events it settled to) or
+`{:error, reason}` (the adapter's own error). With two or more targets, an
+adapter error is an answer like any other: it is compared, and the target
+continues. With one target it ends the run, as in `PropertyDamage.run/1`.
+
+### Failures
+
+A failure ends the whole campaign: no later run starts. The result then has
+`status: :failed`, and divergences found in earlier runs stay listed.
+`result.failure` is a map:
+
+| Key | Meaning |
+|-----|---------|
+| `kind` | `:check_failed`, `:setup_failed` or `:execution_failed` |
+| `variant` | `%{index, name}` of the target it happened in |
+| `run` | 0-based run |
+| `root` | 0-based command index, or `nil` when no command is to blame |
+| `reason` | the `%PropertyDamage.Failure{}`, the exception the adapter raised, or what `setup/1` returned |
+
+- `:check_failed`: a check failed in that target, at a command, at the
+  `:startup` phase (`root` is `nil`), or while the run finished (an
+  `@eventually` timeout, a `:teardown` check).
+- `:setup_failed`: `setup/1` returned an error or raised.
+- `:execution_failed`: the adapter raised, a command could not be executed, or
+  the target's process crashed. A failure is never compared.
 
 ### Result Formatting
 
@@ -270,8 +348,11 @@ Each target may have the same adapter module with different configs for isolatio
 
 A bare module takes its last module segment as its name (`MyApp.ReferenceAdapter`
 is `"ReferenceAdapter"`). Two entries must not share a name, so give entries on the
-same adapter distinct `name:` values. Differential runs do not support `injectors:`
-or `mocks:` in an entry.
+same adapter distinct `name:` values.
+
+An entry may also carry `injectors:` (a list of injector adapter modules) and
+`mocks:` (a list of `Mod` or `{Mod, config_map}`). Both are set up per run for that
+target only.
 
 ### Isolating Targets on the Same System
 
@@ -300,7 +381,7 @@ configuration mistake. Fix it by giving each target its own config.
 | `:max_commands` | 50 | Maximum commands per sequence |
 | `:max_runs` | 100 | Number of test sequences |
 | `:seed` | random | Random seed for reproducibility |
-| `:execution` | auto | `:interleaved` or `:sequential` |
+| `:concurrency` | `:serial` | `:serial` or `:parallel` (see [Concurrency](#concurrency)) |
 | `:equivalence` | `:exact` | Equivalence strategy |
 | `:warmup_runs` | 0 | Runs to discard before measuring |
 | `:verbose` | false | Print progress |
@@ -309,8 +390,8 @@ configuration mistake. Fix it by giving each target its own config.
 ## Monitoring Progress
 
 Pass an `on_progress` function to observe a run as it happens. It receives a
-`%PropertyDamage.Progress{}` projection (DR-022): a `DifferentialUpdate` per run
-(interleaved) or per target (sequential), then a terminal `DifferentialResult`
+`%PropertyDamage.Progress{}` projection (DR-022): a `DifferentialUpdate` per run,
+then a terminal `DifferentialResult`
 carrying a copy of the final result. The same stream also drives `verbose:` and
 the `[:property_damage, :differential, :progress | :result]` telemetry events.
 
@@ -325,9 +406,6 @@ PropertyDamage.Differential.run(
   on_progress: fn
     %Progress{data: %DifferentialUpdate{phase: :run, run_number: n, total_runs: total}} ->
       IO.puts("run #{n}/#{total}")
-
-    %Progress{data: %DifferentialUpdate{phase: :target, target_name: name}} ->
-      IO.puts("running target #{name}")
 
     %Progress{data: %DifferentialResult{result: result}} ->
       IO.puts("done: #{result.status}")
@@ -371,6 +449,10 @@ defmodule MigrationTest do
       :divergent ->
         IO.puts("DIVERGENCE DETECTED!")
         IO.puts(PropertyDamage.Differential.Result.format(result, format: :full))
+
+      :failed ->
+        IO.puts("A target failed before the comparison finished.")
+        IO.puts(PropertyDamage.Differential.Result.format(result, format: :full))
     end
   end
 end
@@ -411,11 +493,13 @@ PropertyDamage.Differential.run(
 
 3. **Warmup for performance tests** - Discard initial runs to avoid JIT effects
 
-4. **Use interleaved for bug finding** - Detects divergences immediately
+4. **Keep `concurrency: :serial` for performance** - Overlapping targets mix
+   their load into each other's latency
 
-5. **Use sequential for performance** - Avoids context-switching overhead
+5. **Make `setup/1` idempotent** - Every run calls it again, and a crashed run
+   may have left state behind
 
-7. **Compare in CI** - Catch regressions before they reach production
+6. **Compare in CI** - Catch regressions before they reach production
 
 ## What Differential Testing Detects
 
@@ -423,7 +507,7 @@ PropertyDamage.Differential.run(
 - Performance regressions
 - Behavior changes between versions
 - Environment-specific bugs
-- Race conditions (with interleaved execution)
+- Race conditions (with `concurrency: :parallel`, when the targets are isolated)
 - Data migration errors
 
 ## Next Steps

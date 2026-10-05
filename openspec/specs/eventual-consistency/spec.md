@@ -4,7 +4,7 @@
 
 Defines the settle retry logic, resource polling, state polling, and probe command semantics that enable the PropertyDamage framework to test eventually consistent systems where operations may not produce immediate results.
 
-Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-030 (Command-Correlated Injector Events -- liveness over a correlated set, poll-timeout locality)
+Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-030 (Command-Correlated Injector Events -- liveness over a correlated set, poll-timeout locality), DR-044 (Variants and the Lockstep Scheduler -- pollers inside multi-target runs)
 
 ## Requirements
 
@@ -133,6 +133,32 @@ The system SHALL support `@eventually` temporal checks that spawn a background p
 - **WHEN** a matching `after:` event is observed and a `@eventually` poller is spawned
 - **THEN** the check SHALL be counted as having fired for invariant-coverage purposes, regardless of whether the poller later succeeds, times out, or remains pending at shutdown
 - **AND** an invariant whose `@eventually` poller is never spawned (its `after:` event never occurred) SHALL be reported as uncovered
+
+### Requirement: Pollers in Multi-Target Runs (DR-044)
+
+In a multi-target run (`PropertyDamage.Differential.run/1`), every `@eventually` state poller and every resource poller SHALL belong to the variant whose command started it. A poller SHALL read only that variant's projections, and the events it pushes SHALL reach only that variant's event queue. `runtime.start_poller` SHALL be allowed in a multi-target run. A variant SHALL finalize its own pollers at the end of the run, and its pollers SHALL stop when the variant process exits.
+
+#### Scenario: `@eventually` poller reads its own variant
+
+- **GIVEN** two variants and a `@eventually` check that a command's event opens
+- **WHEN** the check is triggered in one variant
+- **THEN** the poller SHALL evaluate its predicate against that variant's projections only
+
+#### Scenario: Resource poller events fold into their variant
+
+- **WHEN** an adapter calls `runtime.start_poller.(opts)` in one variant of a multi-target run and the handler returns `{:inject, event}`
+- **THEN** the event SHALL fold into that variant's projections at the next boundary drain
+- **AND** SHALL NOT reach any other variant
+
+#### Scenario: Poll timeout fails its own variant
+
+- **WHEN** a `@eventually` poller of one variant times out while the run finalizes
+- **THEN** the run's failure SHALL have the kind `:check_failed` and name that variant
+
+#### Scenario: Pollers end with their variant
+
+- **WHEN** the variant process exits, including by being killed
+- **THEN** every state poller and resource poller it started SHALL stop
 
 ### Requirement: Settled State and Safety Checks
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the differential testing and mutation testing subsystems that allow PropertyDamage to compare multiple implementations against the same command sequences and to measure test suite quality by injecting faults into adapter responses. This domain also defines run comparison (DR-035): the post-hoc comparison of two or more full run traces of the same plan, used to localize regressions and flakiness.
+Define the differential testing and mutation testing subsystems that allow PropertyDamage to compare multiple implementations against the same command sequences and to measure test suite quality by injecting faults into adapter responses. Multi-target runs execute each target as a variant in its own process and advance the variants in lockstep (DR-044). This domain also defines run comparison (DR-035): the post-hoc comparison of two or more full run traces of the same plan, used to localize regressions and flakiness.
 
 ## Requirements
 
@@ -43,20 +43,65 @@ The framework SHALL support three comparison modes: `:correctness`, `:performanc
 - **WHEN** `compare: :both` is configured
 - **THEN** the framework SHALL perform both correctness and performance comparison
 
-### Requirement: Execution Modes
+#### Scenario: Timed comparison requires serial concurrency (DR-044)
 
-The framework SHALL support interleaved and sequential execution modes.
+- **WHEN** `compare: :performance` or `compare: :both` is configured together with `concurrency: :parallel`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` naming `:concurrency` and stating that the comparison requires `concurrency: :serial`
+- **AND** no command SHALL execute
 
-#### Scenario: Interleaved execution
+### Requirement: Lockstep Concurrency (DR-044)
 
-- **WHEN** execution mode is `:interleaved` (default for correctness comparison)
-- **THEN** the framework SHALL execute each command round-robin across all targets before proceeding to the next command
-- **AND** this SHALL minimize environmental timing differences between targets
+`PropertyDamage.Differential.run/1` SHALL run each generated command sequence against every target in lockstep. Every command of the sequence is a root. For each root `r`, in order, every variant SHALL execute root `r` and stop at boundary `r`; only then SHALL the comparison run, and only after it SHALL any variant start root `r + 1`. The `concurrency:` option SHALL decide how the variants reach a boundary: `:serial` (the default) advances one variant at a time in target order, and `:parallel` advances all variants at the same time. Targets that share one system under `:parallel` MUST isolate their slices of it through `config:`. The option `execution:` MUST be rejected.
 
-#### Scenario: Sequential execution
+#### Scenario: Serial concurrency is the default
 
-- **WHEN** execution mode is `:sequential` (default for performance comparison)
-- **THEN** the framework SHALL execute the full command sequence on each target independently
+- **WHEN** `concurrency:` is not given
+- **THEN** the framework SHALL advance the variants one at a time in target order for each root
+- **AND** `result.concurrency` SHALL be `:serial`
+
+#### Scenario: Parallel concurrency
+
+- **WHEN** `concurrency: :parallel` is configured
+- **THEN** the framework SHALL execute root `r` in every variant at the same time
+- **AND** SHALL start no variant on root `r + 1` before every variant has reached boundary `r` and the comparison has run
+- **AND** `result.concurrency` SHALL be `:parallel`
+
+#### Scenario: Unknown concurrency value
+
+- **WHEN** `concurrency:` is any value other than `:serial` or `:parallel`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` naming `:concurrency`
+
+#### Scenario: Execution option is rejected
+
+- **WHEN** `PropertyDamage.Differential.run/1` is called with `execution:`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` with the message "`execution:` was removed; Differential runs every target in lockstep, use `concurrency:` (`:serial`, the default, or `:parallel`)"
+- **AND** no command SHALL execute
+
+### Requirement: Variant Isolation (DR-044)
+
+Each target of a multi-target run SHALL run as a variant: one target over the shared concrete sequence, in its own process, through the per-command engine (`PropertyDamage.Executor.Stepping`). A variant SHALL own its projections, event log, copy of the placeholder registry, event queue, injectors, mocks and pollers. Checks, settle, stutter and nemesis SHALL work in every variant as they do in `PropertyDamage.run/1`.
+
+#### Scenario: Variants do not share state
+
+- **GIVEN** two targets that run the same sequence
+- **WHEN** one variant's command changes its projections or its event queue
+- **THEN** the other variant's projections and event queue SHALL NOT change
+
+#### Scenario: Checks run in every variant
+
+- **WHEN** a model's check fails on a command in one variant
+- **THEN** the framework SHALL report a failure of kind `:check_failed` that names that variant
+
+#### Scenario: Pollers die with their variant
+
+- **WHEN** a variant process exits for any reason, including being killed
+- **THEN** every `@eventually` state poller and every resource poller that the variant started SHALL stop
+
+#### Scenario: Same seed, same adapter randomness
+
+- **WHEN** the same `seed:` is run twice and an adapter draws random values in `setup/1` or `execute/3`
+- **THEN** each variant SHALL draw the same values in both runs
+- **AND** two variants of one run SHALL draw different values, because each variant seeds its process with `:rand.seed(:exsss, :erlang.phash2({Generator.run_seed(seed, run_number), target.index}, 4_294_967_296))`
 
 ### Requirement: External Value Capture Per Target
 
@@ -65,13 +110,14 @@ The framework SHALL capture `external()` server-generated values and resolve the
 #### Scenario: Consumer resolved to its target's captured value
 
 - **WHEN** a command produces a value marked `external()` and a later command in the sequence consumes it
-- **THEN** the framework SHALL resolve the consumer to the concrete value captured from that target's events before executing it, on both interleaved and sequential modes
+- **THEN** the framework SHALL resolve the consumer to the concrete value captured from that target's events before executing it, under both `concurrency: :serial` and `concurrency: :parallel`
 - **AND** each target SHALL resolve the consumer to its own captured value, independent of the other targets
 
 #### Scenario: Producer that failed before capture
 
 - **WHEN** a target's producer command errors before its external value is captured, and a later command consumes that value
-- **THEN** the framework SHALL record the consumer as a failed command for that target rather than aborting the differential run
+- **THEN** the framework SHALL NOT call the adapter for the consumer in that target
+- **AND** SHALL observe the consumer as `{:error, {:placeholder_resolution_failed, reason}}` for that target, compare it like any other observation, and continue the run
 
 ### Requirement: Equivalence Strategies
 
@@ -94,19 +140,107 @@ The framework SHALL support multiple strategies for comparing results between ta
 - **THEN** the framework SHALL call the function with the reference result and target result
 - **AND** SHALL treat the command as equivalent if the function returns `true`
 
+### Requirement: Root Observation and Comparison (DR-044)
+
+A variant SHALL observe a root as `{:ok, events}`, the events the command injected followed by the events it returned (for a `:probe` or `:async` root, the events it settled to), or as `{:error, reason}`, the adapter's own error term. At each boundary the framework SHALL compare the observation of every non-reference variant with the reference variant's observation through the configured equivalence strategy, in one comparison function. With two or more variants, an adapter `{:error, _}` SHALL be an observation: the variant continues from the failed command's state. With one variant, an adapter `{:error, _}` SHALL end the run, as it does in `PropertyDamage.run/1`.
+
+#### Scenario: Observation of a command that injects events
+
+- **WHEN** a root's command returns events and an injector delivers events attributed to it
+- **THEN** its observation SHALL be `{:ok, events}` with the injected events first, then the returned events
+
+#### Scenario: Probe root
+
+- **WHEN** a root's command has `:probe` or `:async` semantics
+- **THEN** its observation SHALL be taken after the command settles
+
+#### Scenario: Adapter error with two variants
+
+- **WHEN** one of two variants answers `{:error, reason}` for a root
+- **THEN** the framework SHALL compare that observation with the other variant's observation
+- **AND** SHALL NOT end the run unless the observations are not equivalent
+
 ### Requirement: Divergence Recording
 
-The framework SHALL record which commands produced different results across targets, including the specific divergence details.
+The framework SHALL record the first root at which a non-reference variant's observation is not equivalent to the reference's observation, and SHALL end that run at the boundary. The next run SHALL start. `Result.divergences` SHALL list the divergences oldest first.
 
 #### Scenario: Recording a divergence
 
-- **WHEN** a command produces non-equivalent results across targets
-- **THEN** the framework SHALL record the command, its index in the sequence, the results from each target, and the target names involved
+- **WHEN** a root produces non-equivalent observations across variants
+- **THEN** the divergence SHALL be a map with the keys `seed`, `run` (0-based), `root` (0-based command index), `command`, `variant` (`%{index, name}` of the first non-equivalent variant in target order), `reference_result`, `divergent_result` and `results` (every variant's observation, keyed by target name)
+- **AND** the map SHALL NOT carry the keys `divergent_target` or `step`
 
-#### Scenario: Shrinking divergences
+#### Scenario: Oldest first
 
-- **WHEN** divergences are detected in a command sequence
-- **THEN** standard PropertyDamage shrinking SHALL apply to find the minimal command sequence that still produces the divergence
+- **WHEN** two runs of one campaign diverge
+- **THEN** `Result.divergences` SHALL list the divergence of the earlier run first
+
+#### Scenario: Divergences are not shrunk
+
+- **WHEN** a divergence is recorded
+- **THEN** the framework SHALL NOT shrink the command sequence
+
+### Requirement: Per-Run Setup and Teardown (DR-044)
+
+`PropertyDamage.Differential.run/1` SHALL call `Adapter.setup/1` once per run for every target, in the variant's own process, one variant after another in target order. No variant SHALL execute root 0 before every setup has returned and every `@check at: :startup` check has passed. At the end of the run, whether it passed or failed, every variant that was set up SHALL finalize its run and tear its adapter down. An adapter's `setup/1` MUST be idempotent, because it can find state that an earlier run or a crashed run left behind.
+
+#### Scenario: Setup once per run
+
+- **WHEN** a campaign runs `max_runs: 3` against two targets
+- **THEN** each target's `setup/1` SHALL be called three times, once per run
+- **AND** each target's `teardown/1` SHALL be called three times
+
+#### Scenario: Barrier before root 0
+
+- **WHEN** the second variant's `setup/1` is slow
+- **THEN** the first variant SHALL NOT execute root 0 before the second variant's `setup/1` has returned
+
+#### Scenario: Setup failure
+
+- **WHEN** a target's `setup/1` returns `{:error, reason}` or raises
+- **THEN** the framework SHALL end the run with a failure of kind `:setup_failed` that names that variant
+- **AND** SHALL tear down the variants that were already set up
+- **AND** SHALL NOT call `teardown/1` of the variant whose setup failed
+- **AND** no command SHALL execute
+
+### Requirement: Failures Name the Variant (DR-044)
+
+A failure SHALL be a map `%{kind, variant, run, root, reason}`, where `variant` is `%{index, name}`, `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is the `%PropertyDamage.Failure{}`, the exception the adapter raised, or the term `setup/1` returned. `kind` SHALL be one of `:check_failed`, `:setup_failed` and `:execution_failed`. A failure SHALL end the run at that boundary and SHALL end the `Differential.run/1` campaign: no later run starts, `Result.status` is `:failed`, `Result.failure` holds the failure, and divergences of earlier runs stay in `Result.divergences`. A failure SHALL NOT be compared.
+
+#### Scenario: Check failure
+
+- **WHEN** a check fails in one variant, at a command, at the `:startup` phase, or while the run finalizes (an `@eventually` timeout or an `@check at: :teardown` check)
+- **THEN** the failure kind SHALL be `:check_failed`
+- **AND** `root` SHALL be `nil` for a `:startup` check
+
+#### Scenario: Execution failure
+
+- **WHEN** a variant's adapter raises in `execute/3`, a command cannot be executed, or the variant process crashes
+- **THEN** the failure kind SHALL be `:execution_failed`
+- **AND** `reason` SHALL be the exception the adapter raised, where it raised
+
+#### Scenario: No next root after a failure
+
+- **WHEN** a failure occurs at root `r` under `concurrency: :serial`
+- **THEN** no variant after the failing one in target order SHALL execute root `r`
+- **AND** no variant SHALL start root `r + 1`
+
+### Requirement: Per-Target Injectors, Mocks and Pollers in Multi-Target Runs (DR-044)
+
+`PropertyDamage.Differential.run/1` SHALL honor each target's `injectors:` and `mocks:`: the framework SHALL set them up per run for that variant only, and their events SHALL reach only that variant's event queue. `runtime.start_poller` SHALL be allowed in multi-target runs, and a poller's events SHALL reach only the variant that started it.
+
+#### Scenario: Injector events stay in their variant
+
+- **GIVEN** two targets, only one of which declares an injector
+- **WHEN** the injector delivers an event during a run
+- **THEN** the event SHALL fold into the declaring variant's projections
+- **AND** SHALL NOT reach the other variant
+
+#### Scenario: Resource poller in a multi-target run
+
+- **WHEN** an adapter calls `runtime.start_poller` in one variant of a multi-target run
+- **THEN** the framework SHALL start the poller
+- **AND** the events it pushes SHALL fold into that variant only
 
 ### Requirement: Target Specification (DR-043)
 
@@ -167,16 +301,6 @@ Two entries of one `targets:` list that resolve to the same name, whether derive
 
 - **WHEN** `targets:` lists `{MyAdapter, name: "a"}` and `{MyAdapter, name: "b"}`
 - **THEN** the framework SHALL accept the list and treat the entries as distinct targets
-
-### Requirement: Differential Targets Reject Unsupported Entry Keys (DR-043)
-
-`PropertyDamage.Differential.run/1` drives each target's adapter directly and has no injection source or mock registry. It SHALL raise `NimbleOptions.ValidationError` for a target that sets `injectors:` or `mocks:` instead of ignoring the key.
-
-#### Scenario: Differential target with mocks
-
-- **WHEN** `PropertyDamage.Differential.run/1` is called with a target that has a non-empty `mocks:`
-- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` with the message "`mocks:` is not supported by PropertyDamage.Differential.run/1 (targets entry 0)" (the index is that of the offending entry)
-- **AND** no command SHALL execute
 
 ### Requirement: Mutation Testing Execution
 
