@@ -6,10 +6,10 @@ real bugs.
 
 ## How an Invariant Signals Failure
 
-A synchronous assertion (a `@check`-annotated function in an assertion
-projection) **fails by raising**. The executor runs your assertion and treats a
+A synchronous check (a `@check`-annotated function in a check
+projection) **fails by raising**. The executor runs your check and treats a
 raised exception as a violation; if the function returns without raising, the
-assertion passed. The return value is ignored.
+check passed. The return value is ignored.
 
 Use `PropertyDamage.fail!/2` to raise a structured failure:
 
@@ -23,7 +23,7 @@ end
 ```
 
 > **Do not** return `{:error, "..."}` to signal a violation. A returned tuple is
-> discarded, so the assertion silently passes and the bug is never caught. Raise
+> discarded, so the check silently passes and the bug is never caught. Raise
 > (via `PropertyDamage.fail!/2` or any exception) instead.
 
 ## What Makes a Good Invariant?
@@ -184,9 +184,9 @@ def assert_expiry_after_creation(state, _cmd_or_event) do
 end
 ```
 
-## Invariant Triggers
+## Check Triggers
 
-Control when invariants are checked using the `@check` attribute. The trigger
+Control when checks are run using the `@check` attribute. The trigger
 takes an `every:` key:
 
 ```elixir
@@ -217,7 +217,7 @@ expensive checks.
 ### Lifecycle-boundary checks (`at:`)
 
 `@check` has a second timing axis, `at:`, for a one-shot check at a lifecycle
-boundary instead of during the command loop. An assertion uses `every:` or
+boundary instead of during the command loop. A check uses `every:` or
 `at:`, never both.
 
 ```elixir
@@ -237,7 +237,7 @@ maximum, a sticky flag) rather than snapshot, or a self-healed transient slips
 past. See the [Async and Eventual Consistency](async_and_eventual_consistency.md)
 guide for the safety/liveness pairing and the accumulator contract.
 
-## Tracking State for Invariants
+## Tracking State for Checks
 
 Check projections can track their own state:
 

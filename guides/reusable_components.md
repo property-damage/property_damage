@@ -211,7 +211,7 @@ the main state projection's structure.
 Protocols add complexity. Use them when:
 
 - You have multiple models with genuinely different state structures
-- The same command/assertion logic needs to work across them
+- The same command/check logic needs to work across them
 - The benefit of reuse outweighs the protocol overhead
 
 For simpler cases, direct state access is fine:

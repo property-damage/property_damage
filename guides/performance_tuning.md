@@ -14,7 +14,7 @@ The main knobs in `PropertyDamage.run/1`:
 | `seed` | `pos_integer` | random | Seed for reproducibility |
 | `verbose` | `boolean` | `false` | Print progress and configuration |
 | `shrink` | `boolean` | `true` | Shrink failing sequences |
-| `assertion_mode` | atom | `:halt` | `:halt`, `:disabled`, `:record`, `:log` |
+| `check_mode` | atom | `:halt` | `:halt`, `:disabled`, `:record`, `:log` |
 
 ## Testing Profiles
 
@@ -214,22 +214,22 @@ Strategies:
 - **Multiple models**: For distinct scenarios, create separate models rather
   than one model with many low-weight commands.
 
-## Assertion Mode
+## Check Mode
 
-The `assertion_mode` option controls how assertion failures are handled:
+The `check_mode` option controls how check failures are handled:
 
 ```elixir
-# Initial exploration -- skip assertions, focus on crashes
-PropertyDamage.run(model: M, adapter: A, assertion_mode: :disabled)
+# Initial exploration -- skip checks, focus on crashes
+PropertyDamage.run(model: M, adapter: A, check_mode: :disabled)
 
 # Record all failures without stopping
-PropertyDamage.run(model: M, adapter: A, assertion_mode: :record)
+PropertyDamage.run(model: M, adapter: A, check_mode: :record)
 
 # Log as warnings -- useful for development
-PropertyDamage.run(model: M, adapter: A, assertion_mode: :log)
+PropertyDamage.run(model: M, adapter: A, check_mode: :log)
 
 # Stop on first failure (default) -- use for CI
-PropertyDamage.run(model: M, adapter: A, assertion_mode: :halt)
+PropertyDamage.run(model: M, adapter: A, check_mode: :halt)
 ```
 
 Use `:disabled` during initial development to find crashes before adding
@@ -242,10 +242,10 @@ for managing memory:
 
 - **Limit `max_commands`** -- 200 commands with complex events can consume
   significant memory. Start with 50 and increase only if needed.
-- **Use `:disabled` assertion mode for exploration** -- Check projections
+- **Use `:disabled` check mode for exploration** -- Check projections
   maintain their own state. Disabling them during initial exploration reduces
   memory overhead.
-- **Keep projection state lean** -- Store only what assertions need. Avoid
+- **Keep projection state lean** -- Store only what checks need. Avoid
   accumulating full event histories in projection state.
 - **Focus with targeted models** -- A model with 3 commands at 100 runs finds
   bugs faster than a model with 20 commands at 1000 runs.

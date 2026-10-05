@@ -189,7 +189,7 @@ differential path.
 
 An oracle that can never fail tells you nothing. The strongest demonstration is a
 bug in a property the model *deliberately doesn't specify*, so it can only be caught
-by comparing transports — not by any single-transport assertion.
+by comparing transports — not by any single-transport check.
 
 In the bench, a flag makes the UI adapter create labels with the **wrong color**.
 The model never asserts anything about color, so a single-transport run stays green;
@@ -210,7 +210,7 @@ refute ref.color == ui.color           # caught only by the oracle
 
 Without the flag, the same seeds are all `:equivalent` — so the divergence is the
 bug, not flakiness. This is the canonical argument for what an oracle buys you over
-single-transport assertions.
+single-transport checks.
 
 ## Running it
 

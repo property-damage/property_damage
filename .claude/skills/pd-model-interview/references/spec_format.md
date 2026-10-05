@@ -97,7 +97,7 @@ projection: BalanceInvariants
 after: every_step          # or an event name; eventually: settling time too
 ```
 
-Prose: the assertion in domain language, and the severity of a violation.
+Prose: the check in domain language, and the severity of a violation.
 Suggested-but-unadopted invariants do not go here - they go in section 7 as
 deferred.
 

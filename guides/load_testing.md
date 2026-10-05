@@ -153,7 +153,7 @@ write.
 | `arrival_jitter` | `{min_ms, max_ms}` jitter per arrival | `{0, 0}` |
 | `metrics_interval` | How often to sample metrics (snapshot cadence) | `{1, :seconds}` |
 | `on_progress` | Progress consumer: `LoadUpdate` snapshots + a terminal `LoadResult` | `nil` |
-| `assertion_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
+| `check_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
 | `run_nonce` | `non_neg_integer` seeding client-minted run-scoped values (DR-034); set it only for reproducible minted values | strong random entropy |
 
 ### Arrival Rate Formats
@@ -221,8 +221,8 @@ or custom reporting.
 | `by_command` | `%{command_module => %{count, latency_p50, latency_p95, latency_mean, error_count}}` |
 | `duration_ms` | Wall-clock length of the run |
 | `active_sessions` / `completed_sessions` | Session gauges at snapshot time |
-| `assertion_failures` / `assertion_failure_rate` / `failures_by_exception` | Populated when `assertion_mode` is not `:disabled` (`failures_by_exception` is `%{exception_module => count}`) |
-| `recent_assertion_failures` | Bounded list of recent assertion-failure detail maps |
+| `check_failures` / `check_failure_rate` / `failures_by_exception` | Populated when `check_mode` is not `:disabled` (`failures_by_exception` is `%{exception_module => count}`) |
+| `recent_check_failures` | Bounded list of recent check-failure detail maps |
 | `history` | Time series: a list of `%{timestamp, rps, latency_p95, active_sessions, error_rate}` points |
 
 `report.pool_stats` describes the dynamic worker pool:

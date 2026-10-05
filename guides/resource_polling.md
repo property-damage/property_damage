@@ -90,7 +90,7 @@ you can use an exception struct:
 ```
 
 When an exception is used, the framework will use `Exception.message/1` for
-cleaner log output in `:log` assertion mode.
+cleaner log output in `:log` check mode.
 
 ### Handler Patterns
 
@@ -235,7 +235,7 @@ its stacktrace and reported as `{:on_timeout_error, exception, stacktrace}`.
 
 ## Error Handling
 
-Errors from pollers are handled based on `assertion_mode`:
+Errors from pollers are handled based on `check_mode`:
 
 | Mode | Behavior |
 |------|----------|

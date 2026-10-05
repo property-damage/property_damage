@@ -140,7 +140,7 @@ and treats a raised exception (via `PropertyDamage.fail!/2`) as a violation. A
 returned value is ignored — an invariant signals failure only by raising.
 
 Our invariant is the classic bounds property: **no account balance is ever
-negative**. We name it with `@invariant` and link the assertion with
+negative**. We name it with `@invariant` and link the check with
 `validates:`, which lets the coverage report tell us the invariant actually
 fired.
 
@@ -357,13 +357,13 @@ coverage = PropertyDamage.coverage(result, Demo.Model)
 Kino.Markdown.new("```\n" <> PropertyDamage.Coverage.format(coverage, :summary) <> "\n```")
 ```
 
-`PropertyDamage.assertion_coverage/2` joins the run's assertion firings against
+`PropertyDamage.check_coverage/2` joins the run's check firings against
 the invariant catalog — an invariant that never fired is a *vacuous* guarantee.
 Here `balance_non_negative` should show `covered?: true` with a large fire count.
 
 ```elixir
 rows =
-  for inv <- PropertyDamage.assertion_coverage(result, Demo.Model) do
+  for inv <- PropertyDamage.check_coverage(result, Demo.Model) do
     %{invariant: inv.id, covered?: inv.covered?, fire_count: inv.fire_count}
   end
 

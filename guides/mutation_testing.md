@@ -22,7 +22,7 @@ property against the mutated responses:
    **survived** if they still pass (bad: the bug slipped through).
 
 The **mutation score** is the fraction of mutations killed. A low score means
-your invariants or assertions are not pinning down behaviour tightly enough.
+your invariants or checks are not pinning down behaviour tightly enough.
 
 ## Quick start
 

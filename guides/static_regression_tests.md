@@ -135,7 +135,7 @@ end
 
 **Limitations:**
 - More setup than direct adapter calls
-- Slightly more complex assertions
+- Slightly more complex checks
 
 ## Capturing Regression Test Sequences
 

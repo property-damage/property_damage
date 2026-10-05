@@ -23,7 +23,7 @@ The report includes:
 - **shrunk_sequence(failure)** - Minimal reproduction (after shrinking), read via the accessor `PropertyDamage.FailureReport.shrunk_sequence/1` (it is not a struct field)
 - **shrink_iterations** / **shrink_time_ms** - How much shrinking it took
 - **failure_reason** - a `%PropertyDamage.Failure{}` describing what failed (see below)
-- **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over `failure_reason`: which assertion failed and a human-readable description
+- **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over `failure_reason`: which check failed and a human-readable description
 - **state_at_failure** - Model state when failure occurred
 
 ### The `%Failure{}` reason
@@ -34,14 +34,14 @@ branch (if any) on the envelope:
 
 ```elixir
 %PropertyDamage.Failure{
-  type: %PropertyDamage.Failure.Assertion{kind: :assertion_failed, name: :balance_non_negative, detail: ...},
+  type: %PropertyDamage.Failure.Check{kind: :check_failed, name: :balance_non_negative, detail: ...},
   branch_id: nil
 }
 ```
 
 There are three **classes** (`PropertyDamage.Failure.class/1` returns the atom):
 
-- `:assertion` — a property or invariant did not hold (`:assertion_failed`,
+- `:check` — a property or invariant did not hold (`:check_failed`,
   `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`,
   `:projection_violation`). This is the class you usually want: it means the SUT
   misbehaved.
@@ -188,11 +188,11 @@ a replay-local outcome vocabulary (distinct from the run-level `failure_reason`)
 with three shapes:
 
 - `:ok` — the command executed and every check that ran passed.
-- `{:check_failed, name, exception}` — an assertion failed. `name` is the check
+- `{:check_failed, name, exception}` — a check failed. `name` is the check
   name (an atom, e.g. `:balance_non_negative`) and `exception` is the exception
-  struct the assertion raised. Only `:assertion_failed` failures take this shape.
+  struct the check raised. Only `:check_failed` failures take this shape.
 - `{:error, reason}` — any other failure: an adapter/execution error, or a
-  non-assertion failure (a poll/settle timeout, linearization, framework error).
+  non-check failure (a poll/settle timeout, linearization, framework error).
   `reason` is the underlying value.
 
 So the failing step is the one whose `result` is not `:ok`:
@@ -514,7 +514,7 @@ Enable verbose output to see what PropertyDamage generates and executes:
 Verbose mode shows:
 - Each generated command with field values and placeholders
 - Execution results (events returned by the adapter)
-- Assertion checks (which triggers fired, pass/fail)
+- Checks (which triggers fired, pass/fail)
 - Projection state updates
 
 This is useful when:

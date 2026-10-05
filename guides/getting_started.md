@@ -142,7 +142,7 @@ end
 
 ## Step 4: Define Invariants
 
-Invariants are checks that should always hold. Define them in assertion
+Invariants are checks that should always hold. Define them in check
 projections using `@check` and `assert_*` functions:
 
 <!-- pd-doc-verify: runnable -->
@@ -162,7 +162,7 @@ defmodule MyApp.Projections.UserInvariants do
 
   def apply(state, _), do: state
 
-  # Assertions use @check to specify when to run
+  # Checks use @check to specify when to run
   # and assert_* naming convention
   @check every: 1
   def assert_emails_unique(_state, _cmd_or_event) do
@@ -344,7 +344,7 @@ To see what PropertyDamage generates, add `verbose: true`:
 
 This prints a run-configuration summary and a per-run progress line (commands
 executed, pass/fail). For per-command detail (each command, its result, and the
-assertion checks) use step-by-step replay; see the
+checks) use step-by-step replay; see the
 [Debugging Failures](debugging_failures.md) guide.
 
 ## Understanding Results

@@ -200,7 +200,7 @@ result =
 IO.inspect(result, label: "run result")
 ```
 
-Running it prints a passing result whose `assertion_fires` count is the number of
+Running it prints a passing result whose `check_fires` count is the number of
 `AwaitWidget` probes that actually settled (your exact count varies with the seed
 and command mix):
 
@@ -208,7 +208,7 @@ and command mix):
 run result: {:ok,
  %{
    seed: 1,
-   assertion_fires: %{{Warehouse.State, :arrivals_were_shipped} => 116},
+   check_fires: %{{Warehouse.State, :arrivals_were_shipped} => 116},
    runs: 20,
    total_commands: 120
  }}
@@ -559,7 +559,7 @@ end
 
 **When to use `runtime.inject`:**
 
-- Model assertions depend on intermediate states
+- Model checks depend on intermediate states
 - Projections need to track resources before they settle
 - Event timeline accuracy matters for debugging/visualization
 - You want to emit `Created` event immediately, then `Settled` event after polling
@@ -767,7 +767,7 @@ overlap diagnostic is logged.
 
 `awaits/2` is **pure correlation** — it never blocks and asserts nothing.
 Express judgment over a command's correlated set with ordinary projection
-assertions:
+checks:
 
 - **liveness** ("the webhook must arrive") — a `@eventually` over the correlated
   set (e.g. `fn s -> s.webhooks[id] >= 1 end`). A timeout is reported at the
@@ -921,7 +921,7 @@ That settled checkpoint is `@check at: :teardown`. It runs once, on the merged
 final projection state, after both the state pollers (`@eventually`) and the
 resource pollers have finalized, and before `Adapter.teardown/1`. A persistent
 over-application (a counter left above its expected value, a job applied twice)
-is still visible there and reports as a clear, named assertion failure rather
+is still visible there and reports as a clear, named check failure rather
 than as a generic poll timeout. A genuine `@eventually` liveness timeout
 preempts the checkpoint (a timeout is itself a not-settled outcome).
 

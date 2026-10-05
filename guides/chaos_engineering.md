@@ -235,13 +235,13 @@ result =
 IO.inspect(result, label: "run result")
 ```
 
-It prints a passing result (your `assertion_fires` count varies with the seed):
+It prints a passing result (your `check_fires` count varies with the seed):
 
 ```
 run result: {:ok,
  %{
    seed: 7,
-   assertion_fires: %{{Cache.State, :reads_are_consistent} => 212},
+   check_fires: %{{Cache.State, :reads_are_consistent} => 212},
    runs: 20,
    total_commands: 240
  }}

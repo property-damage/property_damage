@@ -272,7 +272,7 @@ If the spec declares `securitySchemes`, the adapter also gets a
 ### Model — command weights, projection slots
 
 The model lists the commands with inferred weights (reads > creates > updates >
-deletes) and leaves you two `TODO`s: the state projection and any assertion
+deletes) and leaves you two `TODO`s: the state projection and any check
 projections.
 
 ```elixir
@@ -363,8 +363,8 @@ produces:
 
 # report.failure_reason:
 %PropertyDamage.Failure{
-  type: %PropertyDamage.Failure.Assertion{
-    kind: :assertion_failed,
+  type: %PropertyDamage.Failure.Check{
+    kind: :check_failed,
     name: :read_consistent,
     detail: %PropertyDamage.CheckFailed{
       message: "GET key=3 returned :unset, model expects 71",
@@ -388,7 +388,7 @@ projection and simulator are hand-written alongside it.
 
 ## Where to go next
 
-- **Writing Effective Invariants** — the projection assertions that catch bugs.
+- **Writing Effective Invariants** — the projection checks that catch bugs.
 - **Coverage and Invariant Catalogs** — prove your invariants are actually
   exercised (anti-vacuity).
 - **Writing Commands** — how `external()` values flow from one command to the

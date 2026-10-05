@@ -144,7 +144,7 @@ defmodule MyApp.Projections.BalanceInvariant do
   end
   def apply(state, _), do: state
 
-  # Synchronous assertion
+  # Synchronous check
   @check every: 1
   def assert_total_matches_sum(state, _cmd_or_event) do
     sum = state.balances |> Map.values() |> Enum.sum()
@@ -153,7 +153,7 @@ defmodule MyApp.Projections.BalanceInvariant do
     end
   end
 
-  # Temporal assertion (eventual consistency)
+  # Temporal check (eventual consistency)
   # @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
   # def payment_confirmed(_state, %PaymentInitiated{id: id}) do
   #   fn s -> s.payments[id] == :confirmed end
@@ -339,14 +339,14 @@ PropertyDamage.run(
 | `:neutral` | Default shrinking behavior |
 | `:prefer_keep` | Resistant to removal (important setup commands) |
 
-### Assertion Modes
+### Check Modes
 
 | Mode | Behavior |
 |------|----------|
-| `:halt` | Stop execution on first assertion failure (default) |
+| `:halt` | Stop execution on first check failure (default) |
 | `:record` | Record failures, continue execution, report all at end |
 | `:log` | Log failures to console, continue execution |
-| `:disabled` | Skip all assertions |
+| `:disabled` | Skip all checks |
 
 ### Return Values from Adapter.execute/3
 

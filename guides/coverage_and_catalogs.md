@@ -1,6 +1,6 @@
 # Coverage and Invariant Catalogs
 
-A property-based test that passes tells you less than it seems. If an assertion
+A property-based test that passes tells you less than it seems. If a check
 never actually ran, or a command was never generated, the green result is
 **vacuous** — it verified nothing. This guide covers PropertyDamage's
 anti-vacuity tools: command/transition/state coverage, the invariant catalog,
@@ -223,7 +223,7 @@ the option to set.
 ## The invariant catalog (DR-026)
 
 An **invariant** is a first-class, named property your model guarantees. You
-declare invariants on a projection with `@invariant` and link assertions to them
+declare invariants on a projection with `@invariant` and link checks to them
 with `validates:`:
 
 ```elixir
@@ -233,26 +233,26 @@ with `validates:`:
 def assert_balance_nonneg(state, _step), do: ...
 ```
 
-Three ways to attach an assertion to an invariant:
+Three ways to attach a check to an invariant:
 
 - **`validates: :id`** — link to an invariant declared with `@invariant`.
 - **Inline `id:`** on the `@check`/`@eventually` — declares the invariant *and*
-  registers this assertion as one of its checks, in one place.
-- **Neither** — the assertion owns an invariant whose `id` is its own name with
+  registers this check as one of its checks, in one place.
+- **Neither** — the check owns an invariant whose `id` is its own name with
   `assert_` stripped (so `assert_balance_nonneg` validates `:balance_nonneg` by
-  default). Every existing assertion therefore already has an invariant.
+  default). Every existing check therefore already has an invariant.
 
 `id` is unique per projection; the model-level catalog is the union across
 projections, keyed `{projection, id}`. Structural mistakes are caught at compile
 time: a duplicate `id` or a `validates:` pointing at an undeclared `id` is a
 `CompileError`, and an invariant with no checks warns (static vacuity).
 
-`PropertyDamage.assertion_catalog/1` returns the whole catalog, each entry
+`PropertyDamage.check_catalog/1` returns the whole catalog, each entry
 carrying the invariant and the checks (with their kind) that validate it:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
-for entry <- PropertyDamage.assertion_catalog(Bank.Model) do
+for entry <- PropertyDamage.check_catalog(Bank.Model) do
   checks = Enum.map_join(entry.checks, ", ", fn c -> "#{c.name}/#{c.kind}" end)
   IO.puts("#{inspect(entry.projection)} #{entry.id}: #{checks}")
 end
@@ -271,17 +271,17 @@ entries.
 ## Anti-vacuity: which invariants actually fired
 
 Naming invariants makes reports prettier; **coverage makes them trustworthy**.
-The engine counts, per run, how many times each assertion fired (ran at all,
+The engine counts, per run, how many times each check fired (ran at all,
 pass or fail) across every generated sequence. An invariant is *covered* when any
 of its checks fired at least once. One that never fired is a **dynamic vacuity** —
 a guarantee you declared but never tested.
 
-`PropertyDamage.assertion_coverage/2` joins the run's firings against the catalog
+`PropertyDamage.check_coverage/2` joins the run's firings against the catalog
 with no re-execution:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
-for inv <- PropertyDamage.assertion_coverage({:ok, stats}, Bank.Model) do
+for inv <- PropertyDamage.check_coverage({:ok, stats}, Bank.Model) do
   IO.puts("#{inv.id}: covered?=#{inv.covered?} fire_count=#{inv.fire_count} kinds=#{inspect(inv.kinds)}")
 end
 ```
@@ -315,31 +315,31 @@ progress reporter:
 ## Failing CI on low coverage
 
 `Coverage.meets_threshold?/2` turns coverage into a pass/fail gate. It checks
-command, transition, `min_commands`, and `assertion_coverage` thresholds
+command, transition, `min_commands`, and `check_coverage` thresholds
 together:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
 PropertyDamage.Coverage.meets_threshold?(stats.coverage, command: 100)
 #=> true
-PropertyDamage.Coverage.meets_threshold?(stats.coverage, assertion_coverage: 100)
+PropertyDamage.Coverage.meets_threshold?(stats.coverage, check_coverage: 100)
 #=> false  (closed_balance_zero was never exercised)
 ```
 
-`assertion_coverage: 100` is strict anti-vacuity: it fails unless every catalog
+`check_coverage: 100` is strict anti-vacuity: it fails unless every catalog
 invariant fired. Wire it into a test or a CI script:
 
 ```elixir
 {:ok, stats} = PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter, coverage: true)
 
 unless PropertyDamage.Coverage.meets_threshold?(stats.coverage,
-         command: 100, transition: 80, assertion_coverage: 100) do
+         command: 100, transition: 80, check_coverage: 100) do
   raise "coverage below threshold:\n" <> PropertyDamage.Coverage.format(stats.coverage, :full)
 end
 ```
 
 Failing a run on uncovered invariants is opt-in — declaring a rare invariant
-does not by itself break your build; the `assertion_coverage:` threshold is how
+does not by itself break your build; the `check_coverage:` threshold is how
 you choose to enforce it. `Coverage.to_json/1` serializes the metrics if you
 prefer to gate in a separate CI step.
 
@@ -395,6 +395,6 @@ See `PropertyDamage.Regression` for composing custom `on_failure` handlers.
 
 ## Where to go next
 
-- **Writing Effective Invariants** — designing assertions that catch real bugs.
+- **Writing Effective Invariants** — designing checks that catch real bugs.
 - **Static Regression Tests** — freezing failures into durable ExUnit tests.
 - **Debugging Failures** — reading, replaying, and exporting a failure.

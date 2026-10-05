@@ -10,7 +10,7 @@ PropertyDamage's architecture and gets you running fast.
 |---------------------|----------------|-------|
 | `state_machine` / `statem` | **Model** | Orchestrates commands, weights, preconditions |
 | `command` (generator + precondition) | **Command** (pure generator only) | No state dependency in Command; state logic lives in Model |
-| `postcondition` | **Projection** + `@check` assertions | Event-driven, not return-value-driven |
+| `postcondition` | **Projection** + `@check` checks | Event-driven, not return-value-driven |
 | `next_state` | **Projection** `apply/2` + **Simulator** | Projections reduce events; Simulator predicts events during generation |
 | `precondition` | Model's `when:` predicate | Declared per-command in `commands/0` |
 | `initial_state` | Projection `init/0` | Each projection has its own initial state |
@@ -36,8 +36,8 @@ Adapter defines HOW.
 predicts events so projections can build state for preconditions and overrides.
 During execution, real events from the SUT replace predictions.
 
-**Assertions are projection-based.** Instead of postconditions on return values,
-you define projections with `@check` attributes that fire assertions at
+**Checks are projection-based.** Instead of postconditions on return values,
+you define projections with `@check` attributes that fire checks at
 configurable intervals (every step, every N commands, on specific event types).
 
 ## Minimal Example
@@ -64,7 +64,7 @@ defmodule CreateAccount do
   end
 end
 
-# --- Projection (state tracking + assertion) ---
+# --- Projection (state tracking + check) ---
 defmodule AccountState do
   use PropertyDamage.Model.Projection
 
