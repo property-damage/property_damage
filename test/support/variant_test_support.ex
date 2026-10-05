@@ -15,7 +15,7 @@ defmodule PropertyDamage.Test.VariantSupport do
 
   def variant_module, do: Module.concat(PropertyDamage, Variant)
   def scheduler_module, do: Module.concat(PropertyDamage, Scheduler)
-  def stepping_module, do: Module.concat([PropertyDamage, Executor, Stepping])
+  def stepping_module, do: Module.concat([PropertyDamage, "Executor", "Stepping"])
 
   def start_variant(opts), do: variant_module().start_link(opts)
   def setup_variant(pid), do: variant_module().setup(pid)
