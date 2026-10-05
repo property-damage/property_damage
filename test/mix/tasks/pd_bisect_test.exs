@@ -125,6 +125,37 @@ defmodule Mix.Tasks.Pd.BisectTest do
     end
   end
 
+  describe "parse_bisect_output/1 (git output forms)" do
+    # git prints the verdict line with the term bare ("first bad commit") in
+    # older releases and quoted ("first 'bad' commit") in newer ones; the parser
+    # accepts both so the mix task works with whichever git is installed.
+    @sha "e385b269b2804a72012e720629587bf7a55a8a8a"
+
+    test "finds the first bad commit when git prints the term bare" do
+      output = "running 'sh' '-c' 'true'\n#{@sha} is the first bad commit\ncommit #{@sha}\n"
+      assert {:ok, %{kind: :found, sha: @sha}} = Bisect.parse_bisect_output(output)
+    end
+
+    test "finds the first bad commit when git quotes the term" do
+      output = "running 'sh' '-c' 'true'\n#{@sha} is the first 'bad' commit\ncommit #{@sha}\n"
+      assert {:ok, %{kind: :found, sha: @sha}} = Bisect.parse_bisect_output(output)
+    end
+
+    test "reports an ambiguous verdict in either form" do
+      bare =
+        "There are only 'skip'ped commits left to test.\nThe first bad commit could be any of:\n#{@sha}\n"
+
+      quoted = String.replace(bare, "first bad commit", "first 'bad' commit")
+      assert {:ok, %{kind: :ambiguous, candidates: [@sha]}} = Bisect.parse_bisect_output(bare)
+      assert {:ok, %{kind: :ambiguous, candidates: [@sha]}} = Bisect.parse_bisect_output(quoted)
+    end
+
+    test "returns the raw output when no verdict line is present" do
+      assert {:error, {:no_verdict, "nothing here\n"}} =
+               Bisect.parse_bisect_output("nothing here\n")
+    end
+  end
+
   describe "copy_to_tmp/1 and cleanup_tmp/1 (trap: tracked file vanishes on checkout)" do
     test "copies the failure outside the source dir and cleans up", %{repo: repo} do
       source = Path.join(repo, "failure.pd")
