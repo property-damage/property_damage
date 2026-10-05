@@ -16,8 +16,8 @@ defmodule PropertyDamage.ErrorOrigin do
 
   These failures almost certainly indicate bugs in the SUT:
 
-  - `:assertion_failed` - Invariant violations
-  - `:poll_timeout` - Temporal assertion timeout
+  - `:check_failed` - Invariant violations
+  - `:poll_timeout` - Eventually check timeout
   - `:idempotency_violation` - SUT not idempotent
   - `:linearization` - Race condition detected
 
@@ -34,7 +34,7 @@ defmodule PropertyDamage.ErrorOrigin do
 
   These failures could be either:
 
-  - Generic exceptions during assertion execution
+  - Generic exceptions during check execution
   - Adapter errors (could be bad adapter code or SUT returning unexpected data)
   """
 
@@ -58,8 +58,8 @@ defmodule PropertyDamage.ErrorOrigin do
 
   ## Examples
 
-      iex> ErrorOrigin.classify(Failure.assertion_failed(:NonNegativeBalance, "Balance is -50"))
-      %{origin: :sut_error, details: %{reason: "Assertion '...' failed", ...}}
+      iex> ErrorOrigin.classify(Failure.check_failed(:NonNegativeBalance, "Balance is -50"))
+      %{origin: :sut_error, details: %{reason: "Check '...' failed", ...}}
 
       iex> ErrorOrigin.classify(Failure.adapter_error(%UndefinedFunctionError{...}), stacktrace)
       %{origin: :test_code_error, details: %{reason: "Missing callback", ...}}
@@ -103,23 +103,23 @@ defmodule PropertyDamage.ErrorOrigin do
   # Per-kind classification
   # ============================================================================
 
-  defp classify_kind(:assertion_failed, failure, _stacktrace) do
-    assertion_name = Failure.name(failure)
+  defp classify_kind(:check_failed, failure, _stacktrace) do
+    check_name = Failure.name(failure)
     reason = Failure.detail(failure)
 
-    if assertion_code_crash?(reason) do
-      # The assertion function itself raised an unexpected exception (e.g. a
+    if check_code_crash?(reason) do
+      # The check function itself raised an unexpected exception (e.g. a
       # KeyError on a missing field) rather than calling fail!/raising
-      # CheckFailed. That is a bug in the assertion code, not the SUT.
+      # CheckFailed. That is a bug in the check code, not the SUT.
       %{
         origin: :test_code_error,
         details: %{
-          reason: "Assertion '#{assertion_name}' raised an unexpected exception",
+          reason: "Check '#{check_name}' raised an unexpected exception",
           evidence: %{
-            assertion_name: assertion_name,
+            check_name: check_name,
             reason: format_reason(reason),
             hint:
-              "The assertion code crashed. Fix the assertion (or call " <>
+              "The check code crashed. Fix the check (or call " <>
                 "PropertyDamage.fail!/2 to report a real SUT violation)."
           },
           confidence: :high
@@ -129,8 +129,8 @@ defmodule PropertyDamage.ErrorOrigin do
       %{
         origin: :sut_error,
         details: %{
-          reason: "Assertion '#{assertion_name}' failed",
-          evidence: %{assertion_name: assertion_name, reason: format_reason(reason)},
+          reason: "Check '#{check_name}' failed",
+          evidence: %{check_name: check_name, reason: format_reason(reason)},
           confidence: :high
         }
       }
@@ -143,9 +143,9 @@ defmodule PropertyDamage.ErrorOrigin do
     %{
       origin: :sut_error,
       details: %{
-        reason: "Temporal assertion timed out waiting for condition",
+        reason: "Eventually check timed out waiting for condition",
         evidence: %{
-          assertion_name: get_in(info, [:triggered_by, :assertion_name]),
+          check_name: get_in(info, [:triggered_by, :check_name]),
           timeout_ms: Map.get(info, :elapsed_ms),
           poll_count: Map.get(info, :poll_count)
         },
@@ -517,12 +517,12 @@ defmodule PropertyDamage.ErrorOrigin do
   defp format_reason(other), do: inspect(other, limit: 5)
 
   # An intentional failure raises PropertyDamage.CheckFailed (via fail!/2);
-  # anything else exception-shaped means the assertion code itself crashed.
-  defp assertion_code_crash?(%PropertyDamage.CheckFailed{}), do: false
-  defp assertion_code_crash?({%PropertyDamage.CheckFailed{}, _stacktrace}), do: false
-  defp assertion_code_crash?(exception) when is_exception(exception), do: true
-  defp assertion_code_crash?({exception, _stacktrace}) when is_exception(exception), do: true
-  defp assertion_code_crash?(_), do: false
+  # anything else exception-shaped means the check code itself crashed.
+  defp check_code_crash?(%PropertyDamage.CheckFailed{}), do: false
+  defp check_code_crash?({%PropertyDamage.CheckFailed{}, _stacktrace}), do: false
+  defp check_code_crash?(exception) when is_exception(exception), do: true
+  defp check_code_crash?({exception, _stacktrace}) when is_exception(exception), do: true
+  defp check_code_crash?(_), do: false
 
   defp get_command_name(%{command: %{__struct__: mod}}), do: module_name(mod)
   defp get_command_name(_), do: "unknown"

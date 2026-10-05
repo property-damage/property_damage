@@ -12,7 +12,7 @@ defmodule PropertyDamage.IntegrationTest do
 
     * Passing: `ExecutorModel` + `SimpleAdapter`, small budget (3 runs x 4 cmds).
     * Failing: `FailingModel` + `SimpleAdapter`, larger budget (5 runs x 60 cmds)
-      so the cumulative-quantity assertion (`every: 1`, limit 100) is reliably
+      so the cumulative-quantity check (`every: 1`, limit 100) is reliably
       tripped within the run.
 
   async: false because several tests print to stdout / write files.

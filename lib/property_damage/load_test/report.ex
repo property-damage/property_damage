@@ -52,7 +52,7 @@ defmodule PropertyDamage.LoadTest.Report do
     Throughput: #{format_float(m.requests_per_second)} cmd/sec
     Latency: p50=#{format_float(m.latency_p50)}ms, p95=#{format_float(m.latency_p95)}ms, p99=#{format_float(m.latency_p99)}ms
     Errors: #{m.total_errors} (#{format_float(m.error_rate)}%)
-    #{format_assertion_summary_line(m)}
+    #{format_check_summary_line(m)}
     """
   end
 
@@ -71,7 +71,7 @@ defmodule PropertyDamage.LoadTest.Report do
       terminal_pool_stats(report),
       terminal_latency(m),
       terminal_errors(m),
-      terminal_assertions(m),
+      terminal_checks(m),
       terminal_commands(m),
       terminal_chart(m),
       terminal_footer()
@@ -145,8 +145,8 @@ defmodule PropertyDamage.LoadTest.Report do
     """
   end
 
-  defp terminal_assertions(metrics) do
-    failures = Map.get(metrics, :assertion_failures, 0)
+  defp terminal_checks(metrics) do
+    failures = Map.get(metrics, :check_failures, 0)
     failures_by_exception = Map.get(metrics, :failures_by_exception, %{})
 
     if failures == 0 and map_size(failures_by_exception) == 0 do
@@ -165,10 +165,10 @@ defmodule PropertyDamage.LoadTest.Report do
           "none"
         end
 
-      failure_rate = Map.get(metrics, :assertion_failure_rate, 0.0)
+      failure_rate = Map.get(metrics, :check_failure_rate, 0.0)
 
       """
-      ┌─ Assertion Failures ─────────────────────────────────────────────────┐
+      ┌─ Check Failures ─────────────────────────────────────────────────┐
       │ Total Failures:  #{String.pad_trailing(to_string(failures), 51)}│
       │ Failure Rate:    #{String.pad_trailing(format_float(failure_rate) <> "%", 51)}│
       │ By Exception:    #{String.pad_trailing(failure_details, 51)}│
@@ -349,7 +349,7 @@ defmodule PropertyDamage.LoadTest.Report do
     - **Total Errors:** #{m.total_errors}
     #{format_errors_markdown(m.errors_by_type)}
 
-    #{format_assertions_markdown(m)}
+    #{format_checks_markdown(m)}
 
     ## Per-Command Breakdown
 
@@ -406,24 +406,24 @@ defmodule PropertyDamage.LoadTest.Report do
   defp format_duration(ms) when ms < 60_000, do: "#{Float.round(ms / 1000, 1)}s"
   defp format_duration(ms), do: "#{Float.round(ms / 60_000, 1)}m"
 
-  defp format_assertion_summary_line(metrics) do
-    case Map.get(metrics, :assertion_failures, 0) do
+  defp format_check_summary_line(metrics) do
+    case Map.get(metrics, :check_failures, 0) do
       0 ->
         ""
 
       failures ->
-        "Assertions: #{failures} failures (#{format_float(metrics.assertion_failure_rate)}%)"
+        "Checks: #{failures} failures (#{format_float(metrics.check_failure_rate)}%)"
     end
   end
 
-  defp format_assertions_markdown(metrics) do
-    failures = Map.get(metrics, :assertion_failures, 0)
+  defp format_checks_markdown(metrics) do
+    failures = Map.get(metrics, :check_failures, 0)
     failures_by_exception = Map.get(metrics, :failures_by_exception, %{})
 
     if failures == 0 and map_size(failures_by_exception) == 0 do
       ""
     else
-      failure_rate = Map.get(metrics, :assertion_failure_rate, 0.0)
+      failure_rate = Map.get(metrics, :check_failure_rate, 0.0)
 
       breakdown =
         if map_size(failures_by_exception) > 0 do
@@ -438,7 +438,7 @@ defmodule PropertyDamage.LoadTest.Report do
         end
 
       """
-      ## Assertion Failures
+      ## Check Failures
 
       - **Total Failures:** #{failures}
       - **Failure Rate:** #{format_float(failure_rate)}%

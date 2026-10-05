@@ -202,7 +202,7 @@ defmodule PropertyDamage.LinearizationTest do
         1 => [incr_entry(0, 1, 0)]
       }
 
-      # A lost update is refuted purely on event incompatibility (no assertion
+      # A lost update is refuted purely on event incompatibility (no check
       # is involved), so the refutation detail is nil.
       assert Linearization.check(
                branch_commands,

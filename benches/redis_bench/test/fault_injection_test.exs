@@ -77,7 +77,7 @@ defmodule RedisBench.FaultInjectionTest do
                )
 
       # The failure must be the honest adapter/connection error, never an
-      # assertion or linearization verdict (which would be a false positive:
+      # check or linearization verdict (which would be a false positive:
       # the SUT never gave an inconsistent answer, it was unreachable).
       refute redis_unavailable_misreported_as_inconsistency?(report)
       assert redis_unavailable?(report)
@@ -94,6 +94,6 @@ defmodule RedisBench.FaultInjectionTest do
     rendered = inspect(report, limit: :infinity)
 
     String.contains?(rendered, "no_linearization") or
-      String.contains?(rendered, "assertion_failed")
+      String.contains?(rendered, "check_failed")
   end
 end

@@ -158,7 +158,7 @@ defmodule RedisBench.ParallelLinearizationTest do
         assert {:error, failure} = run_lost_update(unquote(seed))
 
         assert %PropertyDamage.Failure{
-                 type: %PropertyDamage.Failure.Assertion{kind: :linearization}
+                 type: %PropertyDamage.Failure.Check{kind: :linearization}
                } = failure.failure_reason,
                "expected a linearization failure, got #{inspect(failure.failure_reason)}"
 
@@ -177,7 +177,7 @@ defmodule RedisBench.ParallelLinearizationTest do
              "expected the minimal two-write lost update, got: #{inspect(commands)}"
 
       assert %PropertyDamage.Failure{
-               type: %PropertyDamage.Failure.Assertion{kind: :linearization}
+               type: %PropertyDamage.Failure.Check{kind: :linearization}
              } = failure.failure_reason
     end
 

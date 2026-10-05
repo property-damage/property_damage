@@ -5,7 +5,7 @@ defmodule KratosBench.Events do
   `RegistrationHandled` is injected by the mock (via the MockServiceRegistry) when
   Kratos calls its web_hook: it records what the mock *decided*, i.e. the model's
   expectation of Kratos state. `IdentitiesListed` and `LoginAttempted` carry the
-  observed *reality* the adapter reads back from Kratos, and the assertions in
+  observed *reality* the adapter reads back from Kratos, and the checks in
   `KratosBench.State` check reality against expectation.
   """
 

@@ -3,15 +3,15 @@ defmodule PropertyDamage.Executor.Branching do
   # Branching (parallel) execution for the executor (DR-029).
   #
   # Owns the three-phase branching run: execute the prefix, fork the state and run
-  # each branch with synchronous assertions disabled, check linearizability of the
+  # each branch with synchronous checks disabled, check linearizability of the
   # observed events against the model, then merge the branch states and run the
   # suffix. Keeps its three-outcome merge: {:ok, ...}, {:error, ...} (a branch
   # raised/errored), and {:linearization_failed, ...} (no ordering reproduces the
-  # observed events while satisfying the assertions).
+  # observed events while satisfying the checks).
   #
   # The per-command/linear spine stays in PropertyDamage.Executor and is called
   # back: build_initial_state, execute_command, restore_remaining_faults,
-  # run_phase_assertions. Event folds come from Executor.Events, result
+  # run_phase_checks. Event folds come from Executor.Events, result
   # finalization from Executor.Finalization, and auto-restore from Executor.Nemesis.
 
   alias PropertyDamage.Executor
@@ -33,7 +33,7 @@ defmodule PropertyDamage.Executor.Branching do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode,
+        check_mode,
         external_markers,
         rng_seed \\ nil,
         mint \\ {nil, 0}
@@ -44,7 +44,7 @@ defmodule PropertyDamage.Executor.Branching do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode,
+        check_mode,
         external_markers,
         sequence.registry,
         rng_seed,
@@ -53,17 +53,17 @@ defmodule PropertyDamage.Executor.Branching do
 
     # DR-024: @check at: :startup runs once on the shared initial state,
     # before any branch. A :halt failure aborts before any command runs.
-    case Executor.run_phase_assertions(initial_state, :startup) do
+    case Executor.run_phase_checks(initial_state, :startup) do
       {:halt, name, reason, _counters} ->
         Finalization.finalize_result(
-          {:failed, nil, Failure.assertion_failed(name, reason), initial_state}
+          {:failed, nil, Failure.check_failed(name, reason), initial_state}
         )
 
       {:ok, startup_recorded, startup_counters} ->
         initial_state = %{
           initial_state
-          | assertion_failures: startup_recorded ++ initial_state.assertion_failures,
-            assertion_counters: startup_counters
+          | check_failures: startup_recorded ++ initial_state.check_failures,
+            check_counters: startup_counters
         }
 
         execute_branching_phases(
@@ -214,10 +214,10 @@ defmodule PropertyDamage.Executor.Branching do
   end
 
   # Translate a Linearization refutation into the {failed_index, reason} the
-  # report expects. When the cause is a specific synchronous assertion, mirror
-  # the linear path's shape exactly (a `%Failure{}` assertion_failed carrying the
+  # report expects. When the cause is a specific synchronous check, mirror
+  # the linear path's shape exactly (a `%Failure{}` check_failed carrying the
   # branch_id) so the report, shrinker, and formatter behave identically to a
-  # real assertion failure. A nil refutation means every ordering failed purely
+  # real check failure. A nil refutation means every ordering failed purely
   # on event compatibility (a classic race, e.g. a lost update): report it as a
   # linearization failure.
   defp linearization_failure(nil, branch_start_index) do
@@ -246,14 +246,14 @@ defmodule PropertyDamage.Executor.Branching do
       |> Enum.map(fn {branch_commands, branch_id} ->
         # Fork state for this branch.
         #
-        # Synchronous assertions are DISABLED inside branches on purpose. A
+        # Synchronous checks are DISABLED inside branches on purpose. A
         # forked branch only sees the prefix plus its own commands, never the
         # concurrently-executing sibling branches' effects, so running
-        # @check assertions against this partial state over-reports races
+        # @check functions against this partial state over-reports races
         # (e.g. a read that legally observed a sibling's write fails against a
         # model that never recorded it). Branch correctness is decided AFTER
-        # all branches run, by the assertion-aware Linearization.check below,
-        # which evaluates assertions against observed events and the model
+        # all branches run, by the check-aware Linearization.check below,
+        # which evaluates checks against observed events and the model
         # prediction drawn from one consistent ordering. Real execution errors
         # (adapter errors, ref-resolution failures, raised transition
         # invariants) are unaffected: those still halt the branch here.
@@ -261,7 +261,7 @@ defmodule PropertyDamage.Executor.Branching do
           prefix_state
           | event_log: [],
             branch_id: branch_id,
-            assertion_mode: :disabled
+            check_mode: :disabled
         }
 
         # Calculate command indices for this branch
@@ -334,7 +334,7 @@ defmodule PropertyDamage.Executor.Branching do
                prefix_state.projections,
                model,
                start_index: start_index,
-               counters: prefix_state.assertion_counters
+               counters: prefix_state.check_counters
              ) do
           {:ok, linearization} ->
             {:ok, successful_results, branch_event_logs, linearization}
@@ -346,8 +346,8 @@ defmodule PropertyDamage.Executor.Branching do
 
           {:no_linearization, refutation} ->
             # No ordering reproduces the observed events AND satisfies the
-            # assertions. `refutation` (when present) names the synchronous
-            # assertion that failed in the furthest-progressing ordering, so
+            # checks. `refutation` (when present) names the synchronous
+            # check that failed in the furthest-progressing ordering, so
             # the report can match the precision of a linear failure.
             {:linearization_failed, successful_results, branch_event_logs, refutation}
         end
@@ -425,19 +425,19 @@ defmodule PropertyDamage.Executor.Branching do
         acc + (state.step_count - prefix_state.step_count)
       end)
 
-    # Merge assertion counters: prefix value plus the sum of each branch's
+    # Merge check counters: prefix value plus the sum of each branch's
     # delta relative to the prefix
     merged_counters =
-      Enum.reduce(branch_results, prefix_state.assertion_counters, fn {_, state, _}, acc ->
-        Map.merge(acc, state.assertion_counters, fn key, acc_value, branch_value ->
-          acc_value + (branch_value - Map.get(prefix_state.assertion_counters, key, 0))
+      Enum.reduce(branch_results, prefix_state.check_counters, fn {_, state, _}, acc ->
+        Map.merge(acc, state.check_counters, fn key, acc_value, branch_value ->
+          acc_value + (branch_value - Map.get(prefix_state.check_counters, key, 0))
         end)
       end)
 
-    # Merge assertion failures from all branches
+    # Merge check failures from all branches
     merged_failures =
-      Enum.reduce(branch_results, prefix_state.assertion_failures, fn {_, state, _}, acc ->
-        acc ++ Map.get(state, :assertion_failures, [])
+      Enum.reduce(branch_results, prefix_state.check_failures, fn {_, state, _}, acc ->
+        acc ++ Map.get(state, :check_failures, [])
       end)
 
     # Pollers spawned during the prefix or inside branches all stay live
@@ -497,8 +497,8 @@ defmodule PropertyDamage.Executor.Branching do
         placeholder_registry: merged_registry,
         executed: merged_executed,
         step_count: total_steps,
-        assertion_counters: merged_counters,
-        assertion_failures: merged_failures,
+        check_counters: merged_counters,
+        check_failures: merged_failures,
         branch_id: nil,
         active_pollers: merged_pollers,
         active_resource_pollers: merged_resource_pollers,

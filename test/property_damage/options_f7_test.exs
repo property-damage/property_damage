@@ -221,7 +221,7 @@ defmodule PropertyDamage.OptionsF7Test do
           original_sequence: Sequence.linear([%TestCmd{id: "1"}]),
           shrunk_sequence: Sequence.linear([%TestCmd{id: "1"}]),
           failed_at_index: 0,
-          failure_reason: Failure.assertion_failed(:SomeCheck, "boom")
+          failure_reason: Failure.check_failed(:SomeCheck, "boom")
         )
 
       {:ok, report: report}

@@ -4,7 +4,7 @@ defmodule GiteaBench.State do
 
   During generation it is fed the simulator's predicted events so `when:`/`with:`
   can pick coherent targets; during execution it is fed the adapters' real events
-  and the `@check` assertions check fidelity. Because every field it keys on
+  and the `@check` functions check fidelity. Because every field it keys on
   (login, `owner/name`, per-repo issue number, label names) is client-chosen and
   identical across transports, the same projection logic serves both phases and
   both adapters.
@@ -21,7 +21,7 @@ defmodule GiteaBench.State do
     UserCreated
   }
 
-  # DR-026 invariant catalog: the properties the assertions below uphold.
+  # DR-026 invariant catalog: the properties the checks below uphold.
   @invariant id: :user_login_faithful,
              description: "The SUT creates the user under the requested login"
   @invariant id: :repo_name_faithful,
@@ -76,7 +76,7 @@ defmodule GiteaBench.State do
 
   def apply(state, _event), do: state
 
-  # --- SUT-fidelity assertions (non-vacuous even on a single transport) -------
+  # --- SUT-fidelity checks (non-vacuous even on a single transport) -------
 
   @check every: UserCreated, validates: :user_login_faithful
   def assert_user_login(_state, %UserCreated{login: login, requested_login: requested}) do

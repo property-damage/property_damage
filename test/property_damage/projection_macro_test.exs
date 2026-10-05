@@ -2,7 +2,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
   @moduledoc """
   Compile-time hazards in the check-projection DSL (`use
   PropertyDamage.Model.Projection`): dangling/misplaced `@check`, multi-clause
-  assertions, and mistyped trigger values that would silently never fire.
+  checks, and mistyped trigger values that would silently never fire.
   """
   use ExUnit.Case, async: true
 
@@ -22,7 +22,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
     end
   end
 
-  test "a trailing @check with no following assertion function raises" do
+  test "a trailing @check with no following check function raises" do
     assert_raise CompileError, ~r/dangling @check/, fn ->
       eval("""
       defmodule PDMT.TrailingTrigger do
@@ -35,8 +35,8 @@ defmodule PropertyDamage.ProjectionMacroTest do
     end
   end
 
-  test "a multi-clause assert_ function compiles and registers exactly one assertion" do
-    # Exercise both clauses inside the eval'd source so the assertions on a
+  test "a multi-clause assert_ function compiles and registers exactly one check" do
+    # Exercise both clauses inside the eval'd source so the checks on a
     # module that only exists at runtime carry no compile-time reference (which
     # would warn as undefined).
     {result, _} =
@@ -49,13 +49,13 @@ defmodule PropertyDamage.ProjectionMacroTest do
         def assert_x(_s, _), do: :ok
       end
 
-      {PDMT.MultiClause.__assertions__(), PDMT.MultiClause.assert_x(%{}, %{a: 1}),
+      {PDMT.MultiClause.__checks__(), PDMT.MultiClause.assert_x(%{}, %{a: 1}),
        PDMT.MultiClause.assert_x(%{}, %{})}
       """)
 
-    {assertions, clause_with_map, clause_catchall} = result
+    {checks, clause_with_map, clause_catchall} = result
 
-    assert [%{function_name: :assert_x, type: :synchronous}] = assertions
+    assert [%{function_name: :assert_x, type: :synchronous}] = checks
     # both clauses are live
     assert clause_with_map == :ok
     assert clause_catchall == :ok
@@ -94,7 +94,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         @check at: :teardown
         def assert_settled_ok(_s,_), do: :ok
       end
-      PDMT.TeardownTrigger.__assertions__()
+      PDMT.TeardownTrigger.__checks__()
       """)
 
     assert [
@@ -116,13 +116,13 @@ defmodule PropertyDamage.ProjectionMacroTest do
         @check at: :startup
         def assert_initial_ok(_s,_), do: :ok
       end
-      PDMT.StartupTrigger.__assertions__()
+      PDMT.StartupTrigger.__checks__()
       """)
 
     assert [%{trigger: %{type: :at, phase: :startup}, type: :synchronous}] = result
   end
 
-  test "declaring both every: and at: on one @check raises (one timing per assertion)" do
+  test "declaring both every: and at: on one @check raises (one timing per check)" do
     assert_raise CompileError, ~r/only.*one timing|both every: and at:/, fn ->
       eval("""
       defmodule PDMT.TwoTimings do
@@ -134,7 +134,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
     end
   end
 
-  test "a trailing @check at: with no following assertion function raises" do
+  test "a trailing @check at: with no following check function raises" do
     assert_raise CompileError, ~r/dangling @check/, fn ->
       eval("""
       defmodule PDMT.TrailingAt do
@@ -171,7 +171,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
     end
   end
 
-  test "stacking two @check attributes on one assertion raises" do
+  test "stacking two @check attributes on one check raises" do
     assert_raise CompileError, ~r/multiple @check/, fn ->
       eval("""
       defmodule PDMT.DoubleTrigger do
@@ -184,7 +184,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
     end
   end
 
-  test "combining @check and @eventually on one assertion raises" do
+  test "combining @check and @eventually on one check raises" do
     assert_raise CompileError, ~r/cannot combine both @check and @eventually/, fn ->
       eval("""
       defmodule PDMT.TriggerAndPoll do
@@ -200,7 +200,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
     end
   end
 
-  test "polling assertion metadata carries function_name and a stripped name, like synchronous ones" do
+  test "polling check metadata carries function_name and a stripped name, like synchronous ones" do
     {result, _} =
       eval("""
       defmodule PDMT.UnifiedPollEvent do
@@ -212,7 +212,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         @eventually after: PDMT.UnifiedPollEvent, timeout: 1, interval: 1
         def assert_eventually(_s, _), do: fn _ -> true end
       end
-      PDMT.UnifiedPoll.__assertions__()
+      PDMT.UnifiedPoll.__checks__()
       """)
 
     assert [%{name: :eventually, function_name: :assert_eventually, type: :polling}] = result
@@ -230,7 +230,7 @@ defmodule PropertyDamage.ProjectionMacroTest do
         @check every: PDMT.RealModuleEvent
         def assert_x(_s,_), do: :ok
       end
-      PDMT.RealModuleTrigger.__assertions__()
+      PDMT.RealModuleTrigger.__checks__()
       """)
 
     assert [%{trigger: %{type: :modules, modules: [PDMT.RealModuleEvent]}}] = result

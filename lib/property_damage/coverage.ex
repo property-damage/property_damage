@@ -7,7 +7,7 @@ defmodule PropertyDamage.Coverage do
   - **Command coverage**: Which commands have been tested?
   - **Transition coverage**: Which command sequences have been tested?
   - **State coverage**: Which projection states have been reached?
-  - **Assertion (invariant) coverage**: Which invariants were actually
+  - **Check (invariant) coverage**: Which invariants were actually
     exercised? (anti-vacuity, DR-026)
 
   ## Usage
@@ -34,8 +34,8 @@ defmodule PropertyDamage.Coverage do
   - **Command frequency**: How often each command was executed
   - **Transition coverage**: Which command pairs (A → B) have been tested
   - **State coverage**: Unique projection states reached (by hash)
-  - **Assertion coverage**: Per-assertion firing counts, keyed `{projection,
-    assertion}`, rolled up per invariant for anti-vacuity reporting (DR-026)
+  - **Check coverage**: Per-check firing counts, keyed `{projection,
+    check}`, rolled up per invariant for anti-vacuity reporting (DR-026)
 
   ## CI Integration
 
@@ -144,7 +144,7 @@ defmodule PropertyDamage.Coverage do
       result.sequence,
       result.event_log,
       result.projections,
-      Map.get(result, :assertion_fires, %{}),
+      Map.get(result, :check_fires, %{}),
       false
     )
   end
@@ -155,7 +155,7 @@ defmodule PropertyDamage.Coverage do
       PropertyDamage.FailureReport.shrunk_sequence(failure),
       PropertyDamage.FailureReport.event_log(failure),
       failure.state_at_failure || %{},
-      Map.get(failure, :assertion_fires, %{}),
+      Map.get(failure, :check_fires, %{}),
       true
     )
   end
@@ -259,25 +259,25 @@ defmodule PropertyDamage.Coverage do
   - `:command` - Minimum command coverage percentage (default: 0)
   - `:transition` - Minimum transition coverage percentage (default: 0)
   - `:min_commands` - Minimum total commands executed (default: 0)
-  - `:assertion_coverage` - Minimum invariant coverage percentage (default: 0).
-    `assertion_coverage: 100` fails unless every catalog invariant was exercised
+  - `:check_coverage` - Minimum invariant coverage percentage (default: 0).
+    `check_coverage: 100` fails unless every catalog invariant was exercised
     (strict anti-vacuity, DR-026).
 
   ## Example
 
       Coverage.meets_threshold?(coverage, command: 80, transition: 50)
-      Coverage.meets_threshold?(coverage, assertion_coverage: 100)
+      Coverage.meets_threshold?(coverage, check_coverage: 100)
   """
   @spec meets_threshold?(t(), keyword()) :: boolean()
   def meets_threshold?(tracker, opts \\ []) do
     command_threshold = Keyword.get(opts, :command, 0)
     transition_threshold = Keyword.get(opts, :transition, 0)
     min_commands = Keyword.get(opts, :min_commands, 0)
-    assertion_threshold = Keyword.get(opts, :assertion_coverage, 0)
+    check_threshold = Keyword.get(opts, :check_coverage, 0)
 
     command_coverage(tracker) >= command_threshold and
       transition_coverage(tracker) >= transition_threshold and
-      assertion_coverage(tracker) >= assertion_threshold and
+      check_coverage(tracker) >= check_threshold and
       tracker.total_commands >= min_commands
   end
 
@@ -288,8 +288,8 @@ defmodule PropertyDamage.Coverage do
   the invariant's checks fired at least once). Returns 100.0 when the model
   declares no invariants.
   """
-  @spec assertion_coverage(t()) :: float()
-  def assertion_coverage(%__MODULE__{check_hits: hits} = tracker) do
+  @spec check_coverage(t()) :: float()
+  def check_coverage(%__MODULE__{check_hits: hits} = tracker) do
     catalog = invariant_catalog(tracker)
     total = length(catalog)
     if total == 0, do: 100.0, else: count_covered_invariants(catalog, hits) / total * 100
@@ -310,7 +310,7 @@ defmodule PropertyDamage.Coverage do
   end
 
   defp invariant_catalog(%__MODULE__{model: model}) when is_atom(model) and model != nil do
-    PropertyDamage.Model.assertion_catalog(model)
+    PropertyDamage.Model.check_catalog(model)
   rescue
     _ -> []
   end
@@ -544,7 +544,7 @@ defmodule PropertyDamage.Coverage do
     #{untested_str}
 
     Invariant coverage:
-    #{format_assertion_coverage(tracker)}
+    #{format_check_coverage(tracker)}
     """
   end
 
@@ -771,7 +771,7 @@ defmodule PropertyDamage.Coverage do
          sequence,
          _event_log,
          projections,
-         assertion_fires,
+         check_fires,
          is_failure
        ) do
     commands = Sequence.to_list(sequence)
@@ -798,10 +798,10 @@ defmodule PropertyDamage.Coverage do
       |> Enum.map(fn {_proj, state} -> :erlang.phash2(state) end)
       |> Enum.reduce(tracker.state_hashes, &MapSet.put(&2, &1))
 
-    # Lift the per-assertion firings (DR-026) into check_hits. The fire counts
+    # Lift the per-check firings (DR-026) into check_hits. The fire counts
     # are already whole-run-aggregated by the run loop (or per-sequence when a
-    # single result is recorded directly), keyed {projection, assertion}.
-    check_hits = merge_counts(tracker.check_hits, assertion_fires)
+    # single result is recorded directly), keyed {projection, check}.
+    check_hits = merge_counts(tracker.check_hits, check_fires)
 
     # Track state class transitions if classifier is provided
     {state_class_counts, state_class_transitions, last_class} =
@@ -871,7 +871,7 @@ defmodule PropertyDamage.Coverage do
     module |> Module.split() |> List.last()
   end
 
-  defp format_assertion_coverage(tracker) do
+  defp format_check_coverage(tracker) do
     catalog = invariant_catalog(tracker)
 
     if catalog == [] do

@@ -201,7 +201,7 @@ defmodule PropertyDamage.Adapter do
   - Adapters that don't use `inject` continue to work unchanged
 
   This is particularly useful when your model needs to track intermediate states,
-  or when assertions depend on events appearing at the correct point in time.
+  or when checks depend on events appearing at the correct point in time.
   """
 
   @typedoc """

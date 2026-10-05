@@ -134,7 +134,7 @@ defmodule PropertyDamage.ExternalE2ETest do
   describe "generation-driven end to end" do
     test "no Use sees an unresolved external, and at least one consumes a real id" do
       # Find a seed whose generated sequence actually routes a placeholder into a
-      # Use command, so the assertion is non-vacuous rather than trivially true.
+      # Use command, so the check is non-vacuous rather than trivially true.
       seq =
         Enum.find_value(1..200, fn seed ->
           s =

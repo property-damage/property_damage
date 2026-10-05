@@ -281,7 +281,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
   describe "faithful derivation equals the runtime snapshot (branching)" do
     test "a branching run failing in the suffix re-derives through the branch merge" do
       # prefix Add 10, two branches each Add 10, suffix Add 85 -> sum 115 at the
-      # suffix command. Branch assertions are disabled; the suffix re-enables them
+      # suffix command. Branch checks are disabled; the suffix re-enables them
       # and Sum fires there, on the merged-then-suffix state.
       seq =
         Sequence.branching(

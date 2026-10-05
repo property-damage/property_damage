@@ -2,7 +2,7 @@ defmodule PropertyDamage.Test.Projections.ModelState do
   @moduledoc """
   Test projection that tracks model state for command preconditions.
 
-  Demonstrates basic Projection usage without assertions.
+  Demonstrates basic Projection usage without checks.
   """
   use PropertyDamage.Model.Projection
 
@@ -24,9 +24,9 @@ defmodule PropertyDamage.Test.Projections.ModelState do
   def apply(state, _), do: state
 end
 
-defmodule PropertyDamage.Test.Projections.TestAssertions do
+defmodule PropertyDamage.Test.Projections.TestChecks do
   @moduledoc """
-  Test check projection demonstrating all assertion features.
+  Test check projection demonstrating all check features.
 
   Includes:
   - @check every: 1 (every step)
@@ -59,7 +59,7 @@ defmodule PropertyDamage.Test.Projections.TestAssertions do
 
   def apply(state, _), do: state
 
-  # === Assertions ===
+  # === Checks ===
 
   @check every: 1
   def assert_quantity_non_negative(state, _cmd_or_event) do

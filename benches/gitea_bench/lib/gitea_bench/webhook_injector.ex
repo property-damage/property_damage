@@ -22,7 +22,7 @@ defmodule GiteaBench.WebhookInjector do
   On each `setup/1` we delete every admin hook and create exactly one **system
   webhook** (fires for all repositories) pointing at `/hook/<token>`, so no repo
   ever accumulates duplicate hooks (which would break the "at most one" safety
-  assertion). System-webhook creation via the admin API requires gitea 1.24+,
+  check). System-webhook creation via the admin API requires gitea 1.24+,
   which is why the demo runs against the dedicated `gitea-webhook` instance.
   """
 

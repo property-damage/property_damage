@@ -116,7 +116,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
       refute replayed.success
 
       assert match?(
-               %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :weight_limit}},
+               %Failure{type: %Failure.Check{kind: :check_failed, name: :weight_limit}},
                replayed.failure_reason
              )
     end
@@ -125,7 +125,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
   describe "nil failure signature hardening" do
     test "does not accept a self-inflicted dangling-placeholder error as a reproduction" do
       # Two Links where the second consumes the first's external id and carries
-      # all the weight. The real failure is the assertion firing on the heavy
+      # all the weight. The real failure is the check firing on the heavy
       # second command; removing the first command strands the second's
       # placeholder, which fails with a `:ref_resolution_error` — a pure shrink
       # artifact (unresolved placeholders flow through the same resolution-error
@@ -169,7 +169,7 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
              )
 
       assert match?(
-               %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :weight_limit}},
+               %Failure{type: %Failure.Check{kind: :check_failed, name: :weight_limit}},
                replayed.failure_reason
              )
     end

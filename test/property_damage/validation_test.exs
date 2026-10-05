@@ -230,10 +230,10 @@ defmodule PropertyDamage.ValidationTest do
     end
   end
 
-  # Regression: warn_orphan_events/1 used to read assertion.trigger blindly,
-  # which crashed (KeyError :trigger) on @eventually assertions, since those
+  # Regression: warn_orphan_events/1 used to read check.trigger blindly,
+  # which crashed (KeyError :trigger) on @eventually checks, since those
   # carry :eventually instead. Surfaced by the Oban (6b) bench, whose model
-  # validates a projection with a @eventually assertion. The event a poll
+  # validates a projection with a @eventually check. The event a poll
   # triggers on must also count as handled (not reported as an orphan).
   describe "validate!/3 with a @eventually check projection" do
     defmodule PollEvents do
@@ -287,7 +287,7 @@ defmodule PropertyDamage.ValidationTest do
       def execute(%PollCommand{}, _ctx, _runtime), do: {:ok, [%PollEvents.Started{}]}
     end
 
-    test "validation does not crash on a @eventually assertion" do
+    test "validation does not crash on a @eventually check" do
       assert {:ok, warnings} = Validation.validate!(PollModel, PollAdapter)
       assert is_list(warnings)
     end

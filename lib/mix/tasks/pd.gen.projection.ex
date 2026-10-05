@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
   @moduledoc """
   Generate a PropertyDamage projection module.
 
-  Projections track state and optionally define assertions using `@check` or
+  Projections track state and optionally define checks using `@check` or
   `@eventually` attributes.
 
   ## Usage
@@ -20,16 +20,16 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
 
   - `init/0` - Initialize projection state
   - `apply/2` - Apply commands/events to state (with example)
-  - `@check` assertion example (synchronous)
-  - `@eventually` assertion example (temporal/eventual consistency)
+  - `@check` check example (synchronous)
+  - `@eventually` check example (temporal/eventual consistency)
 
   ## More Information
 
   See `PropertyDamage.Model.Projection` for full documentation on:
 
   - State tracking with `apply/2`
-  - Synchronous assertions with `@check`
-  - Temporal assertions with `@eventually`
+  - Synchronous checks with `@check`
+  - Eventually checks with `@eventually`
   """
 
   use Mix.Task
@@ -68,7 +68,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
     Mix.shell().info("Next steps:")
     Mix.shell().info("  1. Add event aliases at the top")
     Mix.shell().info("  2. Implement apply/2 for each event to track state")
-    Mix.shell().info("  3. Add assertions with @check or @eventually attributes")
+    Mix.shell().info("  3. Add checks with @check or @eventually attributes")
   end
 
   defp module_to_path(module_name) do
@@ -84,7 +84,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
     """
     defmodule #{module_name} do
       @moduledoc \"\"\"
-      Projection for tracking state and defining assertions.
+      Projection for tracking state and defining checks.
 
       TODO: Add description of what this projection tracks/checks.
       \"\"\"
@@ -116,7 +116,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       def apply(state, _event), do: state
 
       # ============================================================================
-      # Synchronous Assertions (@check)
+      # Synchronous Checks (@check)
       # ============================================================================
 
       # Example: Check invariant after every step
@@ -136,7 +136,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       # end
 
       # ============================================================================
-      # Temporal Assertions (@eventually)
+      # Eventually Checks (@eventually)
       # ============================================================================
 
       # Example: Check eventual consistency after an event

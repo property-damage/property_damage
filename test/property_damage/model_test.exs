@@ -5,7 +5,7 @@ defmodule PropertyDamage.ModelTest do
   alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
   alias PropertyDamage.Test.{FullModel, MinimalModel, SimpleWeightModel, WeightedModel}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   describe "Model behaviour can be implemented" do
     test "full model with all callbacks" do
@@ -58,7 +58,7 @@ defmodule PropertyDamage.ModelTest do
     test "check_projections/0 returns projection list" do
       projections = FullModel.check_projections()
 
-      assert projections == [TestAssertions]
+      assert projections == [TestChecks]
     end
   end
 

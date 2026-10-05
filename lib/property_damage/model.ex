@@ -3,7 +3,7 @@ defmodule PropertyDamage.Model do
   Behaviour for models in stateful property-based testing.
 
   A model ties together all the components needed for testing: which commands
-  can be generated, which projections track state and assertions, and the
+  can be generated, which projections track state and checks, and the
   test lifecycle hooks.
 
   ## Required Callbacks
@@ -33,7 +33,7 @@ defmodule PropertyDamage.Model do
   6. **Update State**: Apply predicted events to the projection
   7. **Repeat**: Go to step 2 until sequence length reached
 
-  During execution, real events replace simulated predictions, and assertion
+  During execution, real events replace simulated predictions, and check
   projections verify invariants.
 
   ```
@@ -277,7 +277,7 @@ defmodule PropertyDamage.Model do
   Returns list of check projection modules.
 
   These projections verify invariants via `use PropertyDamage.Model.Projection`.
-  Their state is updated with each command and event, and assertions are run
+  Their state is updated with each command and event, and checks are run
   according to their `@check` conditions.
 
   Optional - defaults to `[]` if not implemented.
@@ -597,28 +597,28 @@ defmodule PropertyDamage.Model do
   The union of every projection's invariant registry (`__invariants__/0`), keyed
   by `{projection, id}` so two projections may reuse an `id` for distinct
   invariants. Each entry carries the `%PropertyDamage.Invariants.Invariant{}` and
-  the assertions that check it, with a per-check kind:
+  the checks that check it, with a per-check kind:
 
   - `:synchronous` - a during-run `@check every:` check
   - `:lifecycle` - a `@check at:` lifecycle-boundary check
-  - `:polling` - a temporal `@eventually` check
+  - `:eventual` - an `@eventually` check
 
   Returns a list deterministically ordered by `{inspect(projection), id}`.
   """
-  @spec assertion_catalog(module()) :: [
+  @spec check_catalog(module()) :: [
           %{
             projection: module(),
             id: atom(),
             invariant: PropertyDamage.Invariants.Invariant.t(),
-            checks: [%{name: atom(), kind: :synchronous | :lifecycle | :polling}]
+            checks: [%{name: atom(), kind: :synchronous | :lifecycle | :eventual}]
           }
         ]
-  def assertion_catalog(model) do
+  def check_catalog(model) do
     for projection <- projection_modules(model),
         function_exported?(projection, :__invariants__, 0),
         {id, invariant} <- projection.__invariants__() do
       checks =
-        projection.__assertions__()
+        projection.__checks__()
         |> Enum.filter(&(&1.invariant_id == id))
         |> Enum.map(fn a -> %{name: a.name, kind: check_kind(a)} end)
 
@@ -627,7 +627,7 @@ defmodule PropertyDamage.Model do
     |> Enum.sort_by(fn entry -> {inspect(entry.projection), entry.id} end)
   end
 
-  defp check_kind(%{type: :polling}), do: :polling
+  defp check_kind(%{type: :polling}), do: :eventual
   defp check_kind(%{type: :synchronous, trigger: %{type: :at}}), do: :lifecycle
   defp check_kind(%{type: :synchronous}), do: :synchronous
 end

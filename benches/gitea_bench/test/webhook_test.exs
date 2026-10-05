@@ -13,15 +13,15 @@ defmodule GiteaBench.WebhookTest do
   use ExUnit.Case, async: false
 
   alias GiteaBench.Events.{IssueClosed, IssueClosedWebhook}
-  alias GiteaBench.WebhookAssertions
+  alias GiteaBench.WebhookChecks
 
-  describe "WebhookAssertions judgment (no SUT)" do
+  describe "WebhookChecks judgment (no SUT)" do
     test "folds each delivered webhook into a per-issue delivery count" do
       state =
-        WebhookAssertions.init()
-        |> WebhookAssertions.apply(%IssueClosedWebhook{full_name: "u0/r0", number: 1})
-        |> WebhookAssertions.apply(%IssueClosedWebhook{full_name: "u0/r0", number: 1})
-        |> WebhookAssertions.apply(%IssueClosedWebhook{full_name: "u0/r1", number: 2})
+        WebhookChecks.init()
+        |> WebhookChecks.apply(%IssueClosedWebhook{full_name: "u0/r0", number: 1})
+        |> WebhookChecks.apply(%IssueClosedWebhook{full_name: "u0/r0", number: 1})
+        |> WebhookChecks.apply(%IssueClosedWebhook{full_name: "u0/r1", number: 2})
 
       assert state.webhooks == %{{"u0/r0", 1} => 2, {"u0/r1", 2} => 1}
     end
@@ -30,18 +30,18 @@ defmodule GiteaBench.WebhookTest do
       duplicate = %{webhooks: %{{"u0/r0", 1} => 2}}
 
       assert_raise PropertyDamage.CheckFailed, fn ->
-        WebhookAssertions.assert_at_most_one_webhook(duplicate, :teardown)
+        WebhookChecks.assert_at_most_one_webhook(duplicate, :teardown)
       end
     end
 
     test "safety passes on exactly one delivery per issue" do
       exactly_one = %{webhooks: %{{"u0/r0", 1} => 1, {"u0/r1", 2} => 1}}
-      assert WebhookAssertions.assert_at_most_one_webhook(exactly_one, :teardown) == []
+      assert WebhookChecks.assert_at_most_one_webhook(exactly_one, :teardown) == []
     end
 
     test "liveness predicate is false until the webhook arrives, then true" do
       closed = %IssueClosed{full_name: "u0/r0", number: 1, state: "closed"}
-      pred = WebhookAssertions.webhook_delivered(%{}, closed)
+      pred = WebhookChecks.webhook_delivered(%{}, closed)
 
       refute pred.(%{webhooks: %{}})
       assert pred.(%{webhooks: %{{"u0/r0", 1} => 1}})

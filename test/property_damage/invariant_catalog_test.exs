@@ -2,10 +2,10 @@ defmodule PropertyDamage.InvariantCatalogTest do
   @moduledoc """
   End-to-end tests for the invariant catalog and anti-vacuity coverage (DR-026).
 
-  The headline guarantee: an assertion whose trigger never fires (e.g.
+  The headline guarantee: a check whose trigger never fires (e.g.
   `@check every: NeverEmitted` where `NeverEmitted` is never observed) is a
   silent vacuous pass today. Coverage turns its zero firings into a visible
-  signal: `PropertyDamage.assertion_coverage/2` reports the never-fired
+  signal: `PropertyDamage.check_coverage/2` reports the never-fired
   invariant as uncovered while a normally-firing one is covered.
   """
   use ExUnit.Case, async: false
@@ -15,7 +15,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   # An event the model emits on every command.
   defmodule Ticked, do: defstruct([])
 
-  # An event/command module that is NEVER produced. An assertion triggered on
+  # An event/command module that is NEVER produced. A check triggered on
   # it can never fire, which is precisely the dynamic-vacuity case.
   defmodule NeverEmitted, do: defstruct([])
 
@@ -65,7 +65,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     def execute(%Tick{}, _ctx, _runtime), do: {:ok, [%Ticked{}]}
   end
 
-  test "a never-firing assertion is reported uncovered; a firing one is covered" do
+  test "a never-firing check is reported uncovered; a firing one is covered" do
     result =
       PropertyDamage.run(
         model: GateModel,
@@ -78,7 +78,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
 
     assert {:ok, _stats} = result
 
-    coverage = PropertyDamage.assertion_coverage(result, GateModel)
+    coverage = PropertyDamage.check_coverage(result, GateModel)
 
     always = Enum.find(coverage, &(&1.id == :always_runs))
     never = Enum.find(coverage, &(&1.id == :never_runs))
@@ -113,7 +113,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @check at: :teardown, validates: :balanced
     def assert_balanced_at_end(_state, _phase), do: :ok
 
-    # Inline declaration on the assertion itself.
+    # Inline declaration on the check itself.
     @check every: :command, id: :command_seen, description: "A command was observed"
     def assert_command_seen(_state, _), do: :ok
   end
@@ -129,7 +129,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   test "catalog enumerates default, inline, and validates-linked invariants" do
-    catalog = PropertyDamage.assertion_catalog(InlineModel)
+    catalog = PropertyDamage.check_catalog(InlineModel)
 
     balanced = Enum.find(catalog, &(&1.projection == InlineProjection and &1.id == :balanced))
     assert balanced.invariant.description == "Debits equal credits"
@@ -178,7 +178,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   test "two projections may reuse an id; the catalog keys by {projection, id} and dedups" do
-    catalog = PropertyDamage.assertion_catalog(ReuseModel)
+    catalog = PropertyDamage.check_catalog(ReuseModel)
 
     consistent = Enum.filter(catalog, &(&1.id == :consistent))
     projections = consistent |> Enum.map(& &1.projection) |> Enum.sort()
@@ -210,7 +210,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     def command_sequence_projection, do: LifecycleProjection
   end
 
-  test "a lifecycle at: assertion is counted as fired" do
+  test "a lifecycle at: check is counted as fired" do
     result =
       PropertyDamage.run(
         model: LifecycleModel,
@@ -224,7 +224,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     assert {:ok, _stats} = result
 
     settled =
-      Enum.find(PropertyDamage.assertion_coverage(result, LifecycleModel), &(&1.id == :settled))
+      Enum.find(PropertyDamage.check_coverage(result, LifecycleModel), &(&1.id == :settled))
 
     assert settled.covered?
     assert settled.fire_count > 0
@@ -274,7 +274,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   # ===========================================================================
-  # Per-assertion fire counts merge across parallel branches (execution-engine)
+  # Per-check fire counts merge across parallel branches (execution-engine)
   # ===========================================================================
 
   defmodule BranchProjection do
@@ -297,7 +297,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   test "fire counts ride the additive branch merge across the branch boundary" do
     alias PropertyDamage.{Executor, Sequence}
 
-    # Synchronous assertions are disabled INSIDE branches by design (branch
+    # Synchronous checks are disabled INSIDE branches by design (branch
     # correctness is decided by the linearization check, not per-branch
     # sampling), so branch commands contribute a zero delta. The merge must
     # nonetheless preserve the prefix and suffix firings exactly: prefix (1
@@ -315,7 +315,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
         PropertyDamage.EventQueue.stop(queue)
       end
 
-    fired = Map.get(result.assertion_counters, {:fired, BranchProjection, :cmd}, 0)
+    fired = Map.get(result.check_counters, {:fired, BranchProjection, :cmd}, 0)
     assert fired == 2
   end
 
@@ -354,7 +354,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
 
     assert {:ok, stats} = result
 
-    cmd = Enum.find(PropertyDamage.assertion_coverage(result, WholeRunModel), &(&1.id == :cmd))
+    cmd = Enum.find(PropertyDamage.check_coverage(result, WholeRunModel), &(&1.id == :cmd))
 
     # every: :command fires once per command, so the whole-run fire count equals
     # the total commands across ALL sequences. A single-result coverage would
@@ -421,9 +421,9 @@ defmodule PropertyDamage.InvariantCatalogTest do
     assert {:ok, _stats} = result
 
     inv =
-      Enum.find(PropertyDamage.assertion_coverage(result, PollModel), &(&1.id == :eventually_ok))
+      Enum.find(PropertyDamage.check_coverage(result, PollModel), &(&1.id == :eventually_ok))
 
-    assert inv.kinds == [:polling]
+    assert inv.kinds == [:eventual]
     assert inv.covered?
     assert inv.fire_count > 0
   end
@@ -432,7 +432,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   # coverage: true tracker + strict anti-vacuity via meets_threshold?
   # ===========================================================================
 
-  test "coverage: true attaches a whole-run tracker; strict assertion_coverage flags the vacuous one" do
+  test "coverage: true attaches a whole-run tracker; strict check_coverage flags the vacuous one" do
     result =
       PropertyDamage.run(
         model: GateModel,
@@ -449,8 +449,8 @@ defmodule PropertyDamage.InvariantCatalogTest do
 
     # GateModel exercises :always_runs but never :never_runs, so strict
     # anti-vacuity (100%) must fail while a 0% floor passes.
-    refute PropertyDamage.Coverage.meets_threshold?(stats.coverage, assertion_coverage: 100)
-    assert PropertyDamage.Coverage.meets_threshold?(stats.coverage, assertion_coverage: 0)
+    refute PropertyDamage.Coverage.meets_threshold?(stats.coverage, check_coverage: 100)
+    assert PropertyDamage.Coverage.meets_threshold?(stats.coverage, check_coverage: 0)
 
     assert {GateProjection, :never_runs} in PropertyDamage.Coverage.uncovered_invariants(
              stats.coverage

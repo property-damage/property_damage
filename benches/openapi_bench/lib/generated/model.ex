@@ -2,7 +2,7 @@ defmodule OpenapiBench.Generated.Model do
   @moduledoc """
   PropertyDamage model for API testing.
 
-  Generated from OpenAPI spec. Customize command weights and add projections/assertions.
+  Generated from OpenAPI spec. Customize command weights and add projections/checks.
   """
 
   @behaviour PropertyDamage.Model

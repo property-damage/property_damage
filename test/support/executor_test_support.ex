@@ -4,7 +4,7 @@ defmodule PropertyDamage.Test.ExecutorTestSupport do
   """
 end
 
-defmodule PropertyDamage.Test.Projections.FailingAssertion do
+defmodule PropertyDamage.Test.Projections.FailingCheck do
   @moduledoc """
   Check projection that fails when total_quantity exceeds threshold.
   """
@@ -39,7 +39,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   @impl true
   def commands do
@@ -58,7 +58,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def check_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def simulator, do: __MODULE__
@@ -82,7 +82,7 @@ defmodule PropertyDamage.Test.FailingModel do
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.ItemCreated
-  alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
+  alias PropertyDamage.Test.Projections.{FailingCheck, ModelState}
 
   @impl true
   def commands, do: [CreateItem]
@@ -91,7 +91,7 @@ defmodule PropertyDamage.Test.FailingModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def check_projections, do: [FailingAssertion]
+  def check_projections, do: [FailingCheck]
 
   @impl true
   def simulator, do: __MODULE__
@@ -183,7 +183,7 @@ end
 # Multi-Check Test Support (for failure equivalence testing)
 # ============================================================================
 
-defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
+defmodule PropertyDamage.Test.Projections.MultiCheckProjection do
   @moduledoc """
   Check projection with two different checks at different thresholds.
 
@@ -231,12 +231,12 @@ end
 
 defmodule PropertyDamage.Test.MultiCheckModel do
   @moduledoc """
-  Model with multiple assertion checks for testing failure equivalence.
+  Model with multiple checks for testing failure equivalence.
   """
   @behaviour PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.CreateItem
-  alias PropertyDamage.Test.Projections.{ModelState, MultiCheckAssertion}
+  alias PropertyDamage.Test.Projections.{ModelState, MultiCheckProjection}
 
   @impl true
   def commands, do: [CreateItem]
@@ -245,7 +245,7 @@ defmodule PropertyDamage.Test.MultiCheckModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def check_projections, do: [MultiCheckAssertion]
+  def check_projections, do: [MultiCheckProjection]
 end
 
 # ============================================================================
@@ -264,7 +264,7 @@ defmodule PropertyDamage.Test.ProbeModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
+  alias PropertyDamage.Test.Projections.{FailingCheck, ModelState}
 
   @impl true
   def commands, do: [CreateItem, ProbeItem]
@@ -273,7 +273,7 @@ defmodule PropertyDamage.Test.ProbeModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def check_projections, do: [FailingAssertion]
+  def check_projections, do: [FailingCheck]
 
   @impl true
   def simulator, do: __MODULE__
@@ -341,7 +341,7 @@ defmodule PropertyDamage.Test.Commands.Link do
   A command that optionally consumes a prior Link's external id (`:parent`), so
   chains of Links form a multi-level dependency graph. Each Link produces an
   external id via its `LinkAdded` event (DR-021); the `:weight` field feeds a
-  cumulative-sum assertion.
+  cumulative-sum check.
   """
   @behaviour PropertyDamage.Command
 
@@ -362,7 +362,7 @@ defmodule PropertyDamage.Test.Projections.LinkState do
   def apply(state, _), do: state
 end
 
-defmodule PropertyDamage.Test.Projections.LinkWeightAssertion do
+defmodule PropertyDamage.Test.Projections.LinkWeightCheck do
   @moduledoc """
   Fails once the cumulative weight of executed Links exceeds 100.
   """
@@ -393,7 +393,7 @@ end
 
 defmodule PropertyDamage.Test.LinkModel do
   @moduledoc """
-  Model wiring Link commands to the cumulative-weight assertion, with a
+  Model wiring Link commands to the cumulative-weight check, with a
   simulator so the shrinker's validity check (`Sequence.Validator.valid_sequence?/2`)
   has something to simulate.
   """
@@ -402,7 +402,7 @@ defmodule PropertyDamage.Test.LinkModel do
 
   alias PropertyDamage.Test.Commands.Link
   alias PropertyDamage.Test.Events.LinkAdded
-  alias PropertyDamage.Test.Projections.{LinkState, LinkWeightAssertion}
+  alias PropertyDamage.Test.Projections.{LinkState, LinkWeightCheck}
 
   @impl true
   def commands, do: [Link]
@@ -411,7 +411,7 @@ defmodule PropertyDamage.Test.LinkModel do
   def command_sequence_projection, do: LinkState
 
   @impl true
-  def check_projections, do: [LinkWeightAssertion]
+  def check_projections, do: [LinkWeightCheck]
 
   @impl true
   def simulator, do: __MODULE__
@@ -425,7 +425,7 @@ end
 defmodule PropertyDamage.Test.LinkAdapter do
   @moduledoc """
   Adapter for Link commands. Binds each Link's produced ref to a deterministic
-  per-run id (the ref value is irrelevant to the assertion; only `:weight` is).
+  per-run id (the ref value is irrelevant to the check; only `:weight` is).
   """
   use PropertyDamage.Adapter
 

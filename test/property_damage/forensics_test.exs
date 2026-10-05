@@ -46,7 +46,7 @@ defmodule PropertyDamage.ForensicsTest do
     def apply(state, _), do: state
   end
 
-  # Test check projection with assertions
+  # Test check projection with checks
   defmodule OrderInvariants do
     use PropertyDamage.Model.Projection
 
@@ -170,7 +170,7 @@ defmodule PropertyDamage.ForensicsTest do
       assert failure.failure_step == 1
 
       assert %Failure{
-               type: %Failure.Assertion{kind: :assertion_failed, name: :no_negative_amounts}
+               type: %Failure.Check{kind: :check_failed, name: :no_negative_amounts}
              } =
                failure.failure_reason
 
@@ -221,7 +221,7 @@ defmodule PropertyDamage.ForensicsTest do
       # Each violation carries the same detail shape as a stop-early failure.
       assert v0.failure_step == 0
 
-      assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :last_non_negative}} =
+      assert %Failure{type: %Failure.Check{kind: :check_failed, name: :last_non_negative}} =
                v0.failure_reason
 
       assert v0.event_at_failure == %OrderCreated{
@@ -239,7 +239,7 @@ defmodule PropertyDamage.ForensicsTest do
 
       assert v1.failure_step == 2
 
-      assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :last_non_negative}} =
+      assert %Failure{type: %Failure.Check{kind: :check_failed, name: :last_non_negative}} =
                v1.failure_reason
 
       assert v1.event_at_failure == %OrderCreated{
@@ -305,7 +305,7 @@ defmodule PropertyDamage.ForensicsTest do
   describe "format_report/1" do
     test "formats failure report as readable string" do
       failure = %{
-        failure_reason: Failure.assertion_failed(:no_negative_amounts, "Negative amounts found"),
+        failure_reason: Failure.check_failed(:no_negative_amounts, "Negative amounts found"),
         failure_step: 5,
         event_at_failure: %OrderCreated{order_id: "bad", amount: -100, currency: "USD"},
         state_before: %{},
@@ -328,7 +328,7 @@ defmodule PropertyDamage.ForensicsTest do
   describe "generate_regression_test/2" do
     test "generates valid Elixir test code" do
       failure = %{
-        failure_reason: Failure.assertion_failed(:some_check, "failed"),
+        failure_reason: Failure.check_failed(:some_check, "failed"),
         failure_step: 2,
         event_at_failure: %OrderCreated{order_id: "test", amount: 100, currency: "USD"},
         state_before: %{},
@@ -350,7 +350,7 @@ defmodule PropertyDamage.ForensicsTest do
 
     test "generated code compiles clean" do
       failure = %{
-        failure_reason: Failure.assertion_failed(:some_check, "failed"),
+        failure_reason: Failure.check_failed(:some_check, "failed"),
         failure_step: 2,
         event_at_failure: %OrderCreated{order_id: "test", amount: 100, currency: "USD"},
         state_before: %{},

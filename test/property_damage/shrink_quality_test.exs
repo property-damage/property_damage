@@ -11,7 +11,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
   This is the end-to-end counterpart to the unit-level shrinker tests: it
   measures shrink quality across the whole loop, not just `Shrinker.shrink/2`
   on a hand-built sequence. When shrink quality regresses, the exact
-  minimal-length assertions fail. That is the regression-tested metric this
+  minimal-length checks fail. That is the regression-tested metric this
   suite exists to provide.
 
   Scope: intentionally linear. Branching/parallel shrink quality is the subject

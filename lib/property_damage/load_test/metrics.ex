@@ -11,7 +11,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
     :latencies_table,
     :errors_table,
     :command_metrics_table,
-    :assertion_failures_table,
+    :check_failures_table,
     :recent_failures,
     :history,
     :start_time,
@@ -38,10 +38,10 @@ defmodule PropertyDamage.LoadTest.Metrics do
           by_command: %{module() => command_metrics()},
           duration_ms: non_neg_integer(),
           history: [history_point()],
-          assertion_failures: non_neg_integer(),
-          assertion_failure_rate: float(),
+          check_failures: non_neg_integer(),
+          check_failure_rate: float(),
           failures_by_exception: %{module() => non_neg_integer()},
-          recent_assertion_failures: [map()],
+          recent_check_failures: [map()],
           # Arrival metrics
           arrivals_spawned: non_neg_integer(),
           arrivals_completed: non_neg_integer(),
@@ -69,7 +69,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
   @total_errors 2
   @active_sessions 3
   @completed_sessions 4
-  @assertion_failures 5
+  @check_failures 5
   @arrivals_spawned 6
   @arrivals_completed 7
 
@@ -131,7 +131,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
   end
 
   @doc """
-  Record an assertion failure.
+  Record a check failure.
 
   ## Parameters
 
@@ -140,9 +140,9 @@ defmodule PropertyDamage.LoadTest.Metrics do
   - `command_module` - The command that was being executed
   - `failure` - Map with failure details (reason, command_index, etc.)
   """
-  @spec record_assertion_failure(pid(), module(), module(), map()) :: :ok
-  def record_assertion_failure(pid, exception_module, command_module, failure) do
-    GenServer.cast(pid, {:record_assertion_failure, exception_module, command_module, failure})
+  @spec record_check_failure(pid(), module(), module(), map()) :: :ok
+  def record_check_failure(pid, exception_module, command_module, failure) do
+    GenServer.cast(pid, {:record_check_failure, exception_module, command_module, failure})
   end
 
   @doc """
@@ -188,7 +188,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
     latencies_table = :ets.new(:load_test_latencies, [:set, :public])
     errors_table = :ets.new(:load_test_errors, [:set, :public])
     command_metrics_table = :ets.new(:load_test_command_metrics, [:set, :public])
-    assertion_failures_table = :ets.new(:load_test_assertion_failures, [:set, :public])
+    check_failures_table = :ets.new(:load_test_check_failures, [:set, :public])
 
     # Initialize counters
     :ets.insert(counters_table, {:counters, :atomics.new(@counter_count, signed: false)})
@@ -200,7 +200,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
       latencies_table: latencies_table,
       errors_table: errors_table,
       command_metrics_table: command_metrics_table,
-      assertion_failures_table: assertion_failures_table,
+      check_failures_table: check_failures_table,
       recent_failures: [],
       history: [],
       start_time: now,
@@ -256,14 +256,14 @@ defmodule PropertyDamage.LoadTest.Metrics do
   end
 
   @impl true
-  def handle_cast({:record_assertion_failure, exception_module, command_module, failure}, state) do
+  def handle_cast({:record_check_failure, exception_module, command_module, failure}, state) do
     counters = get_counters(state.counters_table)
 
-    # Increment assertion failure count
-    :atomics.add(counters, @assertion_failures, 1)
+    # Increment check failure count
+    :atomics.add(counters, @check_failures, 1)
 
     # Track by exception module
-    increment_assertion_failure(state.assertion_failures_table, exception_module)
+    increment_check_failure(state.check_failures_table, exception_module)
 
     # Add to recent failures (bounded)
     failure_record =
@@ -305,7 +305,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
     :ets.delete_all_objects(state.latencies_table)
     :ets.delete_all_objects(state.errors_table)
     :ets.delete_all_objects(state.command_metrics_table)
-    :ets.delete_all_objects(state.assertion_failures_table)
+    :ets.delete_all_objects(state.check_failures_table)
 
     # Reset counters
     counters = get_counters(state.counters_table)
@@ -341,7 +341,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
     :ets.delete(state.latencies_table)
     :ets.delete(state.errors_table)
     :ets.delete(state.command_metrics_table)
-    :ets.delete(state.assertion_failures_table)
+    :ets.delete(state.check_failures_table)
     :ok
   end
 
@@ -417,7 +417,7 @@ defmodule PropertyDamage.LoadTest.Metrics do
     end
   end
 
-  defp increment_assertion_failure(table, exception_module) do
+  defp increment_check_failure(table, exception_module) do
     case :ets.lookup(table, exception_module) do
       [] ->
         :ets.insert(table, {exception_module, 1})
@@ -553,18 +553,18 @@ defmodule PropertyDamage.LoadTest.Metrics do
       end)
       |> Map.new()
 
-    # Assertion failure stats
-    assertion_failures = :atomics.get(counters, @assertion_failures)
+    # Check failure stats
+    check_failures = :atomics.get(counters, @check_failures)
 
-    assertion_failure_rate =
+    check_failure_rate =
       if total_requests > 0 do
-        assertion_failures / total_requests * 100.0
+        check_failures / total_requests * 100.0
       else
         0.0
       end
 
     failures_by_exception =
-      :ets.tab2list(state.assertion_failures_table)
+      :ets.tab2list(state.check_failures_table)
       |> Map.new()
 
     # Arrival stats
@@ -595,10 +595,10 @@ defmodule PropertyDamage.LoadTest.Metrics do
       by_command: by_command,
       duration_ms: duration_ms,
       history: Enum.reverse(state.history),
-      assertion_failures: assertion_failures,
-      assertion_failure_rate: assertion_failure_rate,
+      check_failures: check_failures,
+      check_failure_rate: check_failure_rate,
       failures_by_exception: failures_by_exception,
-      recent_assertion_failures: Enum.reverse(state.recent_failures),
+      recent_check_failures: Enum.reverse(state.recent_failures),
       # Arrival metrics
       arrivals_spawned: arrivals_spawned,
       arrivals_completed: arrivals_completed,

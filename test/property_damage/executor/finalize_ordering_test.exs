@@ -8,12 +8,12 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
         -> finalize_resource_pollers
         -> settle_event_queue (drain injector/poller events + async checks)
         -> finalize_after_settle
-        -> run_phase_assertions(:teardown)
+        -> run_phase_checks(:teardown)
 
   When more than one failure is live at finalize time, a strict precedence
   decides which one is reported (DR-024/025/026):
 
-      async-halt (drain)  >  poll-timeout  >  settle-halt  >  resource-error  >  teardown-assertion
+      async-halt (drain)  >  poll-timeout  >  settle-halt  >  resource-error  >  teardown-check
 
   These tests pin that precedence (and the `command_index` carried by the two
   async cases) by constructing scenarios where two competing failures fire at
@@ -51,7 +51,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
   # ===========================================================================
   # Guard 1 - async-halt (a poller event folded during the @eventually await
-  # drain trips an `every:` assertion) preempts the poll timeout, and is
+  # drain trips an `every:` check) preempts the poll timeout, and is
   # reported at the injecting command's index.
   #
   # The chain checks `state.async_halt` (set inside finalize_pollers' drain)
@@ -122,12 +122,12 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
 
     assert result.failed_at_index == 0
 
-    refute match?(%Failure{type: %Failure.Assertion{kind: :poll_timeout}}, result.failure_reason),
+    refute match?(%Failure{type: %Failure.Check{kind: :poll_timeout}}, result.failure_reason),
            "async-halt must win over the poll timeout"
   end
 
@@ -182,10 +182,10 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+    assert %Failure{type: %Failure.Check{kind: :poll_timeout, detail: info}} =
              result.failure_reason
 
-    assert info.triggered_by.assertion_name == :confirm_eventually
+    assert info.triggered_by.check_name == :confirm_eventually
 
     refute match?(
              %Failure{type: %Failure.Execution{kind: :resource_poller_error}},
@@ -195,7 +195,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   end
 
   # ===========================================================================
-  # Guard 3 - a settle-halt (an `every:` assertion tripping on a poller event
+  # Guard 3 - a settle-halt (an `every:` check tripping on a poller event
   # folded during settle_event_queue) preempts a resource-poller error, and is
   # reported at the injecting command's index.
   #
@@ -269,7 +269,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
 
     assert result.failed_at_index == 0
@@ -284,7 +284,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   # ===========================================================================
   # Guard 4 - a resource-poller error preempts a teardown (@check at:) safety
   # check. finalize_after_settle inspects resource_halt BEFORE running the
-  # teardown checkpoint; reorder them and the named assertion wins instead.
+  # teardown checkpoint; reorder them and the named check wins instead.
   # ===========================================================================
   defmodule ResourceVsTeardownProjection do
     use PropertyDamage.Model.Projection
@@ -343,9 +343,9 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
              result.failure_reason
 
     refute match?(
-             %Failure{type: %Failure.Assertion{kind: :assertion_failed}},
+             %Failure{type: %Failure.Check{kind: :check_failed}},
              result.failure_reason
            ),
-           "the resource-poller error must preempt the teardown assertion"
+           "the resource-poller error must preempt the teardown check"
   end
 end

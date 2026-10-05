@@ -3,8 +3,8 @@ defmodule PropertyDamage.EventualConsistencyTest do
   End-to-end tests for the @eventually eventual-consistency pipeline through
   Executor.run. These exercise the R4 fixes:
 
-    1. @eventually assertions no longer crash the run on the first command
-       (the run_projection_assertions type filter)
+    1. @eventually checks no longer crash the run on the first command
+       (the run_projection_checks type filter)
     2. a poll predicate can observe events that arrive AFTER the last command
        (the drain-and-refresh finalization loop)
     3. a poll timeout produces a FailureReport instead of crashing
@@ -139,10 +139,10 @@ defmodule PropertyDamage.EventualConsistencyTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+    assert %Failure{type: %Failure.Check{kind: :poll_timeout, detail: info}} =
              result.failure_reason
 
-    assert info.triggered_by.assertion_name == :payment_eventually_confirmed
+    assert info.triggered_by.check_name == :payment_eventually_confirmed
     # The crash these fixes prevent was a missing :projections_before key
     assert Map.has_key?(result, :projections_before)
   end
@@ -234,7 +234,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
       )
 
     assert {:error, %PropertyDamage.FailureReport{} = report} = result
-    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout}} = report.failure_reason
+    assert %Failure{type: %Failure.Check{kind: :poll_timeout}} = report.failure_reason
 
     # DR-030: a @eventually liveness timeout is now attributed to the command
     # whose event opened the poll window (InitiatePayment at index 0), so the

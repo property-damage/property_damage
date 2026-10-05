@@ -6,7 +6,7 @@ defmodule ObanBench.ExactlyOnce do
   Exactly-once is two properties, and they now live in different places:
 
     * **safety** ("the counter never EXCEEDS its expected final value") is a
-      declarative `@check at: :teardown` assertion on each bench's projection,
+      declarative `@check at: :teardown` check on each bench's projection,
       evaluated on the fully-**settled** state (DR-024). The projection
       accumulates the expected value (counting `Enqueued`, with the uniqueness
       dedup rule applied in `apply/2`) and the maximum value ever observed (from

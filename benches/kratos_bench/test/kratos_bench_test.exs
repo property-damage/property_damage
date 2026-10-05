@@ -5,7 +5,7 @@ defmodule KratosBenchTest do
 
   With the mock behaving, every invariant holds across generated sequences that
   mix accepted / rejected / modified registrations, logins, listings and deletes.
-  The coverage assertion proves the `when:`-gated commands (`Login`,
+  The coverage check proves the `when:`-gated commands (`Login`,
   `DeleteIdentity`) were actually generated — i.e. the simulator populated the
   projection during the symbolic phase (the simulator trap).
   """

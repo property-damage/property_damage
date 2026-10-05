@@ -25,7 +25,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 50,
           timeout_ms: 5000,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj ->
             :counters.add(counter, 1, 1)
             %{}
@@ -51,7 +51,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 50,
           timeout_ms: 200,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :my_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :my_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -60,7 +60,7 @@ defmodule PropertyDamage.StatePollerTest do
       assert poller.projection == TestProjection
       assert poller.interval_ms == 50
       assert poller.timeout_ms == 200
-      assert poller.triggered_by.assertion_name == :my_assertion
+      assert poller.triggered_by.check_name == :my_check
 
       StatePoller.stop(poller)
     end
@@ -74,7 +74,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 1000,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -100,7 +100,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 1000,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -119,7 +119,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 50,
-          triggered_by: %{event: %TestEvent{id: "test"}, assertion_name: :failing_assertion},
+          triggered_by: %{event: %TestEvent{id: "test"}, check_name: :failing_check},
           get_state_fn: fn _proj -> %{items: %{"test" => :pending}} end
         )
 
@@ -128,7 +128,7 @@ defmodule PropertyDamage.StatePollerTest do
       assert {:timeout, id, info} = result
       assert id == poller.id
       assert info.projection == TestProjection
-      assert info.triggered_by.assertion_name == :failing_assertion
+      assert info.triggered_by.check_name == :failing_check
       assert info.triggered_by.event == %TestEvent{id: "test"}
       assert info.elapsed_ms >= 50
       assert info.poll_count > 0
@@ -143,7 +143,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 30,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -163,7 +163,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 100,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :succeeds},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :succeeds},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -173,7 +173,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 30,
-          triggered_by: %{event: %TestEvent{id: "2"}, assertion_name: :fails},
+          triggered_by: %{event: %TestEvent{id: "2"}, check_name: :fails},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -203,7 +203,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 100,
           timeout_ms: 5000,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -221,7 +221,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 1000,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -241,7 +241,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 100,
           timeout_ms: 5000,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -260,7 +260,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 100,
           timeout_ms: 5000,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -289,7 +289,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 1000,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: get_state_fn
         )
 
@@ -323,7 +323,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 50,
           timeout_ms: 200,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -371,7 +371,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 500,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 
@@ -416,7 +416,7 @@ defmodule PropertyDamage.StatePollerTest do
           projection: TestProjection,
           interval_ms: 10,
           timeout_ms: 500,
-          triggered_by: %{event: %TestEvent{id: "1"}, assertion_name: :test_assertion},
+          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
 

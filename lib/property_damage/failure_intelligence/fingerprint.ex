@@ -242,7 +242,7 @@ defmodule PropertyDamage.FailureIntelligence.Fingerprint do
     kind = FailureReport.failure_type(report)
 
     cond do
-      kind == :assertion_failed and FailureReport.check_name(report) != nil ->
+      kind == :check_failed and FailureReport.check_name(report) != nil ->
         :check_violation
 
       kind == :projection_violation ->

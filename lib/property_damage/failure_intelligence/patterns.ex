@@ -274,7 +274,7 @@ defmodule PropertyDamage.FailureIntelligence.Patterns do
     # cluster degraded to the generic "Failure".
     type_desc =
       case traits.failure_type do
-        :assertion_failed -> "Check failure"
+        :check_failed -> "Check failure"
         :projection_violation -> "Invariant violation"
         :idempotency_violation -> "Idempotency violation"
         :poll_timeout -> "Poll timeout"

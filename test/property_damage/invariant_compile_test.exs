@@ -57,7 +57,7 @@ defmodule PropertyDamage.InvariantCompileTest do
     assert output =~ "statically vacuous"
   end
 
-  test "declaring both id: and validates: on one assertion is a CompileError" do
+  test "declaring both id: and validates: on one check is a CompileError" do
     assert_raise CompileError, ~r/both id: and validates:/, fn ->
       Code.eval_string("""
       defmodule PropertyDamage.InvariantCompileTest.Both do

@@ -163,22 +163,13 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     |> Enum.flat_map(fn projection ->
       Code.ensure_loaded?(projection)
 
-      # Check for __assertions__/0 (new) or __checks__/0 (legacy)
-      cond do
-        function_exported?(projection, :__assertions__, 0) ->
-          projection.__assertions__()
-          |> Enum.map(fn check ->
-            Map.put(check, :projection, projection)
-          end)
-
-        function_exported?(projection, :__checks__, 0) ->
-          projection.__checks__()
-          |> Enum.map(fn check ->
-            Map.put(check, :projection, projection)
-          end)
-
-        true ->
-          []
+      if function_exported?(projection, :__checks__, 0) do
+        projection.__checks__()
+        |> Enum.map(fn check ->
+          Map.put(check, :projection, projection)
+        end)
+      else
+        []
       end
     end)
   end

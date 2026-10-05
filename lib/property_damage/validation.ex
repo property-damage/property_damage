@@ -205,14 +205,14 @@ defmodule PropertyDamage.Validation do
     IO.puts(io, "Extra Projections (#{length(extra_projs)}):")
 
     for proj <- extra_projs do
-      assertions =
-        if function_exported?(proj, :__assertions__, 0) do
-          proj.__assertions__()
+      checks =
+        if function_exported?(proj, :__checks__, 0) do
+          proj.__checks__()
         else
           []
         end
 
-      IO.puts(io, "  - #{inspect(proj)} (#{length(assertions)} assertions)")
+      IO.puts(io, "  - #{inspect(proj)} (#{length(checks)} checks)")
     end
 
     IO.puts(io, "")
@@ -473,9 +473,9 @@ defmodule PropertyDamage.Validation do
 
     handled_events =
       for proj <- extra_projs,
-          function_exported?(proj, :__assertions__, 0),
-          assertion <- proj.__assertions__(),
-          mod <- assertion_handled_modules(assertion) do
+          function_exported?(proj, :__checks__, 0),
+          check <- proj.__checks__(),
+          mod <- check_handled_modules(check) do
         mod
       end
       |> Enum.uniq()
@@ -504,16 +504,16 @@ defmodule PropertyDamage.Validation do
     end
   end
 
-  # Events an assertion observes. Synchronous (@check) assertions list them
-  # under trigger.modules; polling (@eventually) assertions are spawned by the
-  # events in eventually.after (and thus observe them). Polling assertions have
-  # no :trigger key, so reaching for assertion.trigger blindly would crash.
-  defp assertion_handled_modules(%{trigger: %{modules: modules}}), do: List.wrap(modules)
+  # Events a check observes. Synchronous (@check) checks list them
+  # under trigger.modules; polling (@eventually) checks are spawned by the
+  # events in eventually.after (and thus observe them). Polling checks have
+  # no :trigger key, so reaching for check.trigger blindly would crash.
+  defp check_handled_modules(%{trigger: %{modules: modules}}), do: List.wrap(modules)
 
-  defp assertion_handled_modules(%{eventually: %{after: after_events}}),
+  defp check_handled_modules(%{eventually: %{after: after_events}}),
     do: List.wrap(after_events)
 
-  defp assertion_handled_modules(_assertion), do: []
+  defp check_handled_modules(_check), do: []
 
   defp warn_no_check_projections(model) do
     extra_projs =

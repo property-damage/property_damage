@@ -126,11 +126,11 @@ defmodule PropertyDamage.LoadTestTest do
       Metrics.stop(metrics)
     end
 
-    test "tracks assertion failures" do
+    test "tracks check failures" do
       {:ok, metrics} = Metrics.start_link()
 
-      # Record some assertion failures (by exception module)
-      Metrics.record_assertion_failure(metrics, PropertyDamage.CheckFailed, CreateAccount, %{
+      # Record some check failures (by exception module)
+      Metrics.record_check_failure(metrics, PropertyDamage.CheckFailed, CreateAccount, %{
         reason: "balance -50",
         command_index: 5,
         step_type: :command,
@@ -138,7 +138,7 @@ defmodule PropertyDamage.LoadTestTest do
         timestamp: System.monotonic_time(:millisecond)
       })
 
-      Metrics.record_assertion_failure(metrics, PropertyDamage.CheckFailed, CreateAccount, %{
+      Metrics.record_check_failure(metrics, PropertyDamage.CheckFailed, CreateAccount, %{
         reason: "balance -100",
         command_index: 10,
         step_type: :event,
@@ -146,7 +146,7 @@ defmodule PropertyDamage.LoadTestTest do
         timestamp: System.monotonic_time(:millisecond)
       })
 
-      Metrics.record_assertion_failure(metrics, ArgumentError, DeleteAccount, %{
+      Metrics.record_check_failure(metrics, ArgumentError, DeleteAccount, %{
         reason: "orphaned order",
         command_index: 15,
         step_type: :command,
@@ -162,14 +162,14 @@ defmodule PropertyDamage.LoadTestTest do
       Process.sleep(50)
       snapshot = Metrics.snapshot(metrics)
 
-      assert snapshot.assertion_failures == 3
-      assert snapshot.assertion_failure_rate == 3.0
+      assert snapshot.check_failures == 3
+      assert snapshot.check_failure_rate == 3.0
       assert snapshot.failures_by_exception[PropertyDamage.CheckFailed] == 2
       assert snapshot.failures_by_exception[ArgumentError] == 1
-      assert length(snapshot.recent_assertion_failures) == 3
+      assert length(snapshot.recent_check_failures) == 3
 
       # Verify failure details
-      [first | _] = snapshot.recent_assertion_failures
+      [first | _] = snapshot.recent_check_failures
       assert first.exception_module in [PropertyDamage.CheckFailed, ArgumentError]
       assert Map.has_key?(first, :reason)
       assert Map.has_key?(first, :command_index)
@@ -177,12 +177,12 @@ defmodule PropertyDamage.LoadTestTest do
       Metrics.stop(metrics)
     end
 
-    test "bounds recent assertion failures" do
+    test "bounds recent check failures" do
       {:ok, metrics} = Metrics.start_link()
 
       # Record more failures than the max (100)
       for i <- 1..150 do
-        Metrics.record_assertion_failure(metrics, PropertyDamage.CheckFailed, TestCommand, %{
+        Metrics.record_check_failure(metrics, PropertyDamage.CheckFailed, TestCommand, %{
           reason: "failure #{i}",
           command_index: i,
           step_type: :command,
@@ -195,10 +195,10 @@ defmodule PropertyDamage.LoadTestTest do
       snapshot = Metrics.snapshot(metrics)
 
       # Total count should be all failures
-      assert snapshot.assertion_failures == 150
+      assert snapshot.check_failures == 150
 
       # But recent failures should be bounded
-      assert length(snapshot.recent_assertion_failures) <= 100
+      assert length(snapshot.recent_check_failures) <= 100
 
       Metrics.stop(metrics)
     end
@@ -368,10 +368,10 @@ defmodule PropertyDamage.LoadTestTest do
           },
           duration_ms: 60_000,
           history: [],
-          assertion_failures: 0,
-          assertion_failure_rate: 0.0,
+          check_failures: 0,
+          check_failure_rate: 0.0,
           failures_by_exception: %{},
-          recent_assertion_failures: []
+          recent_check_failures: []
         },
         pool_stats: %{
           total_created: 50,
@@ -534,9 +534,9 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   # Ordering-regression fixtures: a command whose event sets state the command's
-  # own `@check` reads back. Under load-test assertions this must observe the
+  # own `@check` reads back. Under load-test checks this must observe the
   # command's own event (matching the main Executor), so `last` is set when the
-  # command-level assertion fires. If the worker asserted before folding the
+  # command-level check fires. If the worker asserted before folding the
   # command's events, `last` would still be nil and every command would fail.
   defmodule OrderingEvent do
     defstruct [:n]
@@ -561,9 +561,7 @@ defmodule PropertyDamage.LoadTestTest do
     @check every: PropertyDamage.LoadTestTest.OrderingCommand
     def assert_sees_own_event(state, _cmd) do
       if state.last == nil do
-        PropertyDamage.fail!(
-          "command-level assertion ran before the command's own event was folded"
-        )
+        PropertyDamage.fail!("command-level check ran before the command's own event was folded")
       end
     end
   end
@@ -608,7 +606,7 @@ defmodule PropertyDamage.LoadTestTest do
   # ============================================================================
 
   describe "Worker" do
-    test "command-level assertions observe the command's own events (ordering regression)" do
+    test "command-level checks observe the command's own events (ordering regression)" do
       {:ok, metrics} = Metrics.start_link()
 
       {:ok, worker} =
@@ -619,18 +617,18 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :record
+          check_mode: :record
         )
 
       assert {:ok, stats} = Worker.execute_sequence(worker)
       assert stats.commands_run >= 1
 
       # The command's `@check` read its own event, so nothing failed. Before the
-      # worker folded events before command assertions, each command failed here.
-      assert stats.assertion_failures == 0
+      # worker folded events before command checks, each command failed here.
+      assert stats.check_failures == 0
 
       Process.sleep(20)
-      assert Metrics.snapshot(metrics).assertion_failures == 0
+      assert Metrics.snapshot(metrics).check_failures == 0
 
       Worker.stop(worker)
       Metrics.stop(metrics)
@@ -651,7 +649,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       worker_ref = Process.monitor(worker)
@@ -688,7 +686,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       assert is_pid(worker)
@@ -708,7 +706,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       # Execute a sequence
@@ -739,7 +737,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       assert {:ok, stats} = Worker.execute_sequence(worker)
@@ -770,7 +768,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       stats = WorkerPool.stats(pool)
@@ -792,7 +790,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       # Checkout first worker - should create one
@@ -847,7 +845,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       {:ok, worker} = WorkerPool.checkout(pool)
@@ -878,7 +876,7 @@ defmodule PropertyDamage.LoadTestTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       # Checkout 3 workers
@@ -1218,7 +1216,7 @@ defmodule PropertyDamage.LoadTestTest do
       end)
     end
 
-    # Model with check projections for testing assertion_mode option
+    # Model with check projections for testing check_mode option
     defmodule FailingCheckProjection do
       use PropertyDamage.Model.Projection
 
@@ -1230,14 +1228,14 @@ defmodule PropertyDamage.LoadTestTest do
 
       @check every: 1
       def assert_count_check(state, _cmd_or_event) do
-        # Fail every 3rd assertion to simulate intermittent failures
+        # Fail every 3rd check to simulate intermittent failures
         if rem(state.count, 3) == 0 do
           PropertyDamage.fail!("count is divisible by 3", count: state.count)
         end
       end
     end
 
-    defmodule MockModelWithAssertions do
+    defmodule MockModelWithChecks do
       @behaviour PropertyDamage.Model
 
       @impl true
@@ -1251,41 +1249,41 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     @tag :integration
-    test "runs load test with assertions disabled (default)" do
+    test "runs load test with checks disabled (default)" do
       capture_log(fn ->
         {:ok, report} =
           LoadTest.run(
-            model: MockModelWithAssertions,
+            model: MockModelWithChecks,
             adapter: MockAdapter,
             arrival_rate: 50,
             duration: {500, :milliseconds}
           )
 
-        # Should have requests but no assertion failures tracked
-        # (because assertion_mode defaults to :disabled)
+        # Should have requests but no check failures tracked
+        # (because check_mode defaults to :disabled)
         assert report.metrics.total_requests > 0
-        assert report.metrics.assertion_failures == 0
+        assert report.metrics.check_failures == 0
       end)
     end
 
     @tag :integration
-    test "runs load test with assertions enabled and tracks failures" do
+    test "runs load test with checks enabled and tracks failures" do
       capture_log(fn ->
         {:ok, report} =
           LoadTest.run(
-            model: MockModelWithAssertions,
+            model: MockModelWithChecks,
             adapter: MockAdapter,
             arrival_rate: 50,
             duration: {500, :milliseconds},
-            assertion_mode: :record
+            check_mode: :record
           )
 
-        # Should have requests and some assertion failures
+        # Should have requests and some check failures
         assert report.metrics.total_requests > 0
 
-        # Since we fail every 3rd assertion, we should have failures
-        assert report.metrics.assertion_failures > 0
-        assert report.metrics.assertion_failure_rate > 0
+        # Since we fail every 3rd check, we should have failures
+        assert report.metrics.check_failures > 0
+        assert report.metrics.check_failure_rate > 0
 
         # Should have tracked failures by exception module
         assert Map.has_key?(report.metrics.failures_by_exception, PropertyDamage.CheckFailed)

@@ -57,8 +57,8 @@ defmodule PropertyDamage.RunComparisonTest do
     end
 
     test "surfaces mixed failure signatures in the failing group" do
-      t1 = trace({:fail, Failure.assertion_failed(:InvA, "a")}, [])
-      t2 = trace({:fail, Failure.assertion_failed(:InvB, "b")}, [])
+      t1 = trace({:fail, Failure.check_failed(:InvA, "a")}, [])
+      t2 = trace({:fail, Failure.check_failed(:InvB, "b")}, [])
       c = RunComparison.compare([t1, t2])
       assert c.comparable?
       assert length(c.mixed_failure_signatures) == 2
@@ -90,7 +90,7 @@ defmodule PropertyDamage.RunComparisonTest do
       t1 = trace(:pass, [%Result{status: :ok, worker: 2}])
 
       t2 =
-        trace({:fail, Failure.assertion_failed(:Inv, "x")}, [%Result{status: :error, worker: 3}])
+        trace({:fail, Failure.check_failed(:Inv, "x")}, [%Result{status: :error, worker: 3}])
 
       c = RunComparison.compare([t0, t1, t2])
 
@@ -107,7 +107,7 @@ defmodule PropertyDamage.RunComparisonTest do
 
     test "N=2 (one pass, one fail) degrades to a pairwise diff: server-resolved diff discriminates" do
       t0 = trace(:pass, [%Result{status: :ok}])
-      t1 = trace({:fail, Failure.assertion_failed(:Inv, "x")}, [%Result{status: :error}])
+      t1 = trace({:fail, Failure.check_failed(:Inv, "x")}, [%Result{status: :error}])
 
       c = RunComparison.compare([t0, t1])
       assert find_field(c, [:status]).classification == :discriminating
@@ -119,7 +119,7 @@ defmodule PropertyDamage.RunComparisonTest do
       t0 = trace(:pass, [%Poll{n: 1}, %Poll{n: 2}])
 
       t1 =
-        trace({:fail, Failure.assertion_failed(:Inv, "x")}, [
+        trace({:fail, Failure.check_failed(:Inv, "x")}, [
           %Poll{n: 1},
           %Poll{n: 2},
           %Poll{n: 3}
@@ -156,7 +156,7 @@ defmodule PropertyDamage.RunComparisonTest do
           model: Model,
           executed: %{pos => %Cmd{request_id: "mint-B"}},
           event_log: entries([%Result{ref: "mint-B"}]),
-          outcome: {:fail, Failure.assertion_failed(:Inv, "x")}
+          outcome: {:fail, Failure.check_failed(:Inv, "x")}
         )
 
       c = RunComparison.compare([t0, t1])
@@ -188,7 +188,7 @@ defmodule PropertyDamage.RunComparisonTest do
           plan: plan,
           model: Model,
           executed: %{pos => %CmdNested{opts: %{request_id: "mint-B", kind: :x}}},
-          outcome: {:fail, Failure.assertion_failed(:Inv, "x")}
+          outcome: {:fail, Failure.check_failed(:Inv, "x")}
         )
 
       c = RunComparison.compare([t0, t1])

@@ -78,8 +78,8 @@ defmodule ObanBench.UniquenessTest do
       # saw the counter overshoot its deduplicated expected value (the duplicate
       # job ran a second time).
       assert %PropertyDamage.Failure{
-               type: %PropertyDamage.Failure.Assertion{
-                 kind: :assertion_failed,
+               type: %PropertyDamage.Failure.Check{
+                 kind: :check_failed,
                  name: :exactly_once,
                  detail: %PropertyDamage.CheckFailed{data: %{observed: 2, expected: 1}}
                }

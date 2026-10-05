@@ -71,12 +71,12 @@ defmodule PropertyDamage.MutationTest do
     def describe_mutation(_mutation), do: "counting"
   end
 
-  # A projection whose assertion always fails, used by the progress-projection
+  # A projection whose check always fails, used by the progress-projection
   # tests below. Mutation testing harvests sample events from a baseline run via
   # RunTrace.capture/1, which carries the full event log regardless of outcome,
   # so a passing model yields mutable events just as well (see the passing-model
   # regression test in "run/1 end-to-end").
-  defmodule AlwaysFailAssertion do
+  defmodule AlwaysFailCheck do
     use PropertyDamage.Model.Projection
 
     @impl true
@@ -106,7 +106,7 @@ defmodule PropertyDamage.MutationTest do
     def command_sequence_projection, do: ModelState
 
     @impl true
-    def check_projections, do: [AlwaysFailAssertion]
+    def check_projections, do: [AlwaysFailCheck]
 
     @impl true
     def simulator, do: __MODULE__
@@ -747,7 +747,7 @@ defmodule PropertyDamage.MutationTest do
   end
 
   # A model whose suite PASSES: the normal target of mutation testing. No
-  # failing assertion, so the baseline run succeeds. Before RunTrace-based event
+  # failing check, so the baseline run succeeds. Before RunTrace-based event
   # harvesting this produced zero sample events (PropertyDamage.run's success
   # result carries no event log) and therefore zero mutations.
   defmodule PassingModel do

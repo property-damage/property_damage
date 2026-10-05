@@ -1,7 +1,7 @@
-# Failure Investigation: assertion_failed
+# Failure Investigation: check_failed
 
 **Seed**: 1
-**Failure Type**: assertion_failed
+**Failure Type**: check_failed
 **Date**: 2025-01-01
 
 This notebook allows you to step through the command sequence that triggered a failure,

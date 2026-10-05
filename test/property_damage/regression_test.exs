@@ -49,7 +49,7 @@ defmodule PropertyDamage.RegressionTest do
   def make_failure(seed, opts \\ []) do
     failure_reason =
       Keyword.get_lazy(opts, :failure_reason, fn ->
-        Failure.assertion_failed(
+        Failure.check_failed(
           Keyword.get(opts, :check_name, :test_check),
           Keyword.get(opts, :message, "Test failure")
         )

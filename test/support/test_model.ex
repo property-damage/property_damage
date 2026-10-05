@@ -10,7 +10,7 @@ defmodule PropertyDamage.Test.FullModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   @impl true
   def commands do
@@ -31,7 +31,7 @@ defmodule PropertyDamage.Test.FullModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def check_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def injectable_events, do: [ItemCreated, ItemViewed]
@@ -114,7 +114,7 @@ defmodule PropertyDamage.Test.MinimalModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   @impl true
   def commands do
@@ -133,7 +133,7 @@ defmodule PropertyDamage.Test.MinimalModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def check_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def simulator, do: __MODULE__
@@ -157,7 +157,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   # Simple list - commands use default weight of 1
   @impl true
@@ -177,7 +177,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def check_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def simulator, do: __MODULE__
@@ -201,7 +201,7 @@ defmodule PropertyDamage.Test.WeightedModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   # Weighted list - CreateItem 3x more likely than ViewItem
   @impl true
@@ -222,7 +222,7 @@ defmodule PropertyDamage.Test.WeightedModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def check_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def simulator, do: __MODULE__

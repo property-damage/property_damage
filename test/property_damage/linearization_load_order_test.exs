@@ -9,7 +9,7 @@ defmodule PropertyDamage.LinearizationLoadOrderTest do
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.ItemCreated
   alias PropertyDamage.Test.FailingModel
-  alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
+  alias PropertyDamage.Test.Projections.{FailingCheck, ModelState}
 
   test "check resolves a model's simulator even when the module is not yet loaded" do
     # The flake reproduced deterministically: with the model purged from the VM,
@@ -35,7 +35,7 @@ defmodule PropertyDamage.LinearizationLoadOrderTest do
       ]
     }
 
-    projections = %{ModelState => ModelState.init(), FailingAssertion => FailingAssertion.init()}
+    projections = %{ModelState => ModelState.init(), FailingCheck => FailingCheck.init()}
 
     assert {:no_linearization, refutation} =
              Linearization.check(branch_commands, branch_events, projections, FailingModel)

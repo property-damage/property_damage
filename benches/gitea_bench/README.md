@@ -51,7 +51,7 @@ different state. Without the flag, the same sequences are equivalent.
 lib/gitea_bench/
   events.ex      shared event structs (both adapters emit the same shapes)
   commands.ex    six transport-agnostic command intents
-  state.ex       model state + DR-026 invariants + @check assertions
+  state.ex       model state + DR-026 invariants + @check functions
   model.ex       commands/0 (weight/when/with), simulator
   gitea.ex       readiness, per-run reset, REST mutations + neutral observers
   api_adapter.ex REST transport

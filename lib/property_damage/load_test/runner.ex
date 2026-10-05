@@ -31,7 +31,7 @@ defmodule PropertyDamage.LoadTest.Runner do
     :phase,
     :ramp_step_index,
     :awaiting,
-    :assertion_mode,
+    :check_mode,
     :in_flight
   ]
 
@@ -60,7 +60,7 @@ defmodule PropertyDamage.LoadTest.Runner do
   - `:metrics_interval` - Snapshot cadence for progress updates (default: {1, :seconds})
   - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` values: a
     `LoadUpdate` each interval and a terminal `LoadResult` (DR-022)
-  - `:assertion_mode` - How to handle assertions (default: :disabled)
+  - `:check_mode` - How to handle checks (default: :disabled)
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
@@ -120,7 +120,7 @@ defmodule PropertyDamage.LoadTest.Runner do
     ramp_down = opts[:ramp_down]
     think_time_range = opts[:think_time]
     metrics_interval = opts[:metrics_interval]
-    assertion_mode = opts[:assertion_mode]
+    check_mode = opts[:check_mode]
 
     # Run nonce for client-minted run-scoped values (DR-034). One nonce for the
     # whole load test; each worker derives a distinct mint_epoch from its
@@ -138,7 +138,7 @@ defmodule PropertyDamage.LoadTest.Runner do
            adapter_config: adapter_config,
            metrics: metrics,
            think_time_range: think_time_range,
-           assertion_mode: assertion_mode,
+           check_mode: check_mode,
            run_nonce: run_nonce
          ) do
       {:ok, pool} ->
@@ -183,7 +183,7 @@ defmodule PropertyDamage.LoadTest.Runner do
           phase: :ramp_up,
           ramp_step_index: 0,
           awaiting: nil,
-          assertion_mode: assertion_mode,
+          check_mode: check_mode,
           in_flight: MapSet.new()
         }
 

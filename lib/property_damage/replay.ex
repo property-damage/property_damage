@@ -9,7 +9,7 @@ defmodule PropertyDamage.Replay do
   Replay is a thin **stepping shell over the Executor**: every command runs
   through the exact same engine path as a real run (ref/placeholder resolution,
   settle for probe/async commands, nemesis injection, injector and mock events,
-  projection updates, `@check` assertions, and stutter). This is what makes a
+  projection updates, `@check` checks, and stutter). This is what makes a
   recorded failure replay to the identical step sequence and state.
 
   ## Usage Modes
@@ -221,7 +221,7 @@ defmodule PropertyDamage.Replay do
             event_queue: event_queue,
             stutter_config: opts[:stutter_config],
             external_markers: opts[:external_markers] || [],
-            assertion_mode: :halt,
+            check_mode: :halt,
             # Seed the placeholder registry from the failing sequence (DR-021),
             # so replaying a failure whose commands consume `external()` values
             # resolves them instead of raising "Unknown placeholder".
@@ -503,11 +503,11 @@ defmodule PropertyDamage.Replay do
     |> Enum.map(& &1.event)
   end
 
-  # Preserve the documented per-step `result` shape: an assertion failure (now
+  # Preserve the documented per-step `result` shape: a check failure (now
   # carried in a %Failure{}) surfaces as {:check_failed, name, exception} — a
   # replay-local outcome vocabulary distinct from the run-level failure_reason —
   # while everything else surfaces as {:error, reason}.
-  defp normalize_result(%Failure{type: %Failure.Assertion{kind: :assertion_failed} = t}) do
+  defp normalize_result(%Failure{type: %Failure.Check{kind: :check_failed} = t}) do
     exception =
       case t.detail do
         {exception, stacktrace} when is_list(stacktrace) -> exception

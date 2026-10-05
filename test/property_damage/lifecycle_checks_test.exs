@@ -1,6 +1,6 @@
-defmodule PropertyDamage.LifecycleAssertionsTest do
+defmodule PropertyDamage.LifecycleChecksTest do
   @moduledoc """
-  End-to-end tests for `@check at:` lifecycle-boundary assertions (DR-024)
+  End-to-end tests for `@check at:` lifecycle-boundary checks (DR-024)
   through `Executor.run`.
 
   Covers the engine call sites: the `:startup` gate (on the initial `init/0`
@@ -93,12 +93,12 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     def execute(%Bump{}, _ctx, _runtime), do: {:ok, [%Bumped{}]}
   end
 
-  test "a teardown check fails as a named assertion failure (not a poll timeout) when the settled state violates it" do
+  test "a teardown check fails as a named check failure (not a poll timeout) when the settled state violates it" do
     {:ok, result} = run_seq(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter)
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
 
     assert result.failed_at_index == nil
@@ -111,7 +111,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     assert result.success, "expected success, got: #{inspect(result.failure_reason)}"
   end
 
-  # A teardown assertion that always fails, paired with an adapter that errors:
+  # A teardown check that always fails, paired with an adapter that errors:
   # the run aborts before settling, so the teardown checkpoint must NOT run and
   # the reported failure is the proximate adapter error.
   defmodule NeverProjection do
@@ -152,7 +152,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
              result.failure_reason
 
     refute match?(
-             %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :never}},
+             %Failure{type: %Failure.Check{kind: :check_failed, name: :never}},
              result.failure_reason
            )
   end
@@ -191,7 +191,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     refute result.success,
            "expected the late poller bump to be folded into the settled state and trip the check"
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
 
     assert result.projections[MaxCountProjection].max == 2
@@ -256,13 +256,13 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+    assert %Failure{type: %Failure.Check{kind: :poll_timeout, detail: info}} =
              result.failure_reason
 
-    assert info.triggered_by.assertion_name == :confirmed_eventually
+    assert info.triggered_by.check_name == :confirmed_eventually
 
     refute match?(
-             %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :would_fail}},
+             %Failure{type: %Failure.Check{kind: :check_failed, name: :would_fail}},
              result.failure_reason
            )
   end
@@ -324,7 +324,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :teardown_reached}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :teardown_reached}} =
              result.failure_reason
   end
 
@@ -395,7 +395,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :ready}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :ready}} =
              result.failure_reason
 
     assert result.failed_at_index == nil
@@ -440,19 +440,19 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
   end
 
   # ===========================================================================
-  # Cluster 6 — assertion_mode for at: checks
+  # Cluster 6 — check_mode for at: checks
   # ===========================================================================
 
   defp run_seq_mode(seq, model, adapter, mode) do
     {:ok, queue} = PropertyDamage.EventQueue.start_link()
 
     try do
-      Executor.run(seq, model, adapter, event_queue: queue, assertion_mode: mode)
+      Executor.run(seq, model, adapter, event_queue: queue, check_mode: mode)
     after
       PropertyDamage.EventQueue.stop(queue)
     end
@@ -464,19 +464,19 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
   end
 
-  test ":record mode accumulates a teardown violation into assertion_failures" do
+  test ":record mode accumulates a teardown violation into check_failures" do
     {:ok, result} =
       run_seq_mode(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter, :record)
 
     refute result.success
     assert result.failure_reason == nil
 
-    assert Enum.any?(result.assertion_failures, fn f ->
-             f.assertion_name == :count_at_most_one and f.step_type == :teardown
+    assert Enum.any?(result.check_failures, fn f ->
+             f.check_name == :count_at_most_one and f.step_type == :teardown
            end)
   end
 
@@ -489,7 +489,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
           run_seq_mode(Sequence.linear([%Bump{}]), MaxCountModel, DoubleBumpAdapter, :log)
 
         assert result.success
-        assert result.assertion_failures == []
+        assert result.check_failures == []
       end)
 
     assert log =~ "count_at_most_one"
@@ -503,7 +503,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     assert result.success
   end
 
-  # A projection listed as BOTH the command-sequence projection and an assertion
+  # A projection listed as BOTH the command-sequence projection and a check
   # projection must have its teardown check evaluated only once.
   defmodule DoubleListedModel do
     @behaviour PropertyDamage.Model
@@ -522,8 +522,8 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     refute result.success
 
     teardown_failures =
-      Enum.filter(result.assertion_failures, fn f ->
-        f.assertion_name == :count_at_most_one and f.step_type == :teardown
+      Enum.filter(result.check_failures, fn f ->
+        f.check_name == :count_at_most_one and f.step_type == :teardown
       end)
 
     assert length(teardown_failures) == 1
@@ -601,7 +601,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :never_exceeded_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :never_exceeded_one}} =
              result.failure_reason
 
     assert result.projections[AccumulatorProjection].max == 2

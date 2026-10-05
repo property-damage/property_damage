@@ -63,14 +63,14 @@ and the gated commands are never generated). The headline test asserts via
 
 The mock injects `RegistrationHandled` (the model's *expectation*); the adapter
 reads the *reality* back from Kratos (`IdentitiesListed`, `LoginAttempted`), and
-the assertions compare the two.
+the checks compare the two.
 
 ### Non-vacuity (RED-first)
 
 `test/invariants_test.exs` proves each invariant bites, via a seed that only that
 invariant can catch, paired with a control on the same seeds proving no false
 positive. The bugs live in the mock's response or the adapter's login, not in the
-assertions:
+checks:
 
 - `reject_leaks` — the mock accepts a registration it should reject → caught by
   `identity_set_faithful`.

@@ -1360,7 +1360,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       @moduledoc \"\"\"
       PropertyDamage model for API testing.
 
-      Generated from OpenAPI spec. Customize command weights and add projections/assertions.
+      Generated from OpenAPI spec. Customize command weights and add projections/checks.
       \"\"\"
 
       @behaviour PropertyDamage.Model
@@ -1385,7 +1385,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
       @impl true
       def check_projections do
-        # TODO: Add extra projections (with @check/@eventually assertions)
+        # TODO: Add extra projections (with @check/@eventually checks)
         # Example: [Projections.ResourceExists, Projections.ValidState]
         []
       end

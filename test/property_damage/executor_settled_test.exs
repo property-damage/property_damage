@@ -2,7 +2,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
   @moduledoc """
   End-to-end characterization of `execute_regular_command`'s `{:settled, events}`
   arm (probe/async commands that settle via `Settle`) and of the `:record` /
-  `:log` assertion modes.
+  `:log` check modes.
 
   These are characterization tests: they pin down the observable behavior of the
   settled path and the record/log modes so the F1 refactor (folding the two
@@ -27,11 +27,11 @@ defmodule PropertyDamage.ExecutorSettledTest do
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
   alias PropertyDamage.Test.{FailingModel, SimpleAdapter, SimpleInjectorAdapter}
-  alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
+  alias PropertyDamage.Test.Projections.{FailingCheck, ModelState}
 
   # A probe command that settles after two {:retry, _} attempts. It carries the
   # same fields the sync CreateItem does so the produced event drives the exact
-  # same projections and @check every: assertion, making the settled path
+  # same projections and @check every: check, making the settled path
   # directly comparable to the sync path.
   defmodule SettledCreate do
     use PropertyDamage.Command,
@@ -74,7 +74,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
     end
   end
 
-  # Model wiring the probe command to the same FailingAssertion (@check every: 1,
+  # Model wiring the probe command to the same FailingCheck (@check every: 1,
   # fails once cumulative quantity exceeds 100) the sync FailingModel uses.
   defmodule SettledModel do
     @behaviour PropertyDamage.Model
@@ -89,7 +89,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
     def command_sequence_projection, do: ModelState
 
     @impl true
-    def check_projections, do: [FailingAssertion]
+    def check_projections, do: [FailingCheck]
 
     @impl true
     def simulator, do: __MODULE__
@@ -122,8 +122,8 @@ defmodule PropertyDamage.ExecutorSettledTest do
     end
   end
 
-  describe "{:settled, events} arm: @check every: assertion failure" do
-    test "a settled event that trips an every: assertion fails identically to the sync path" do
+  describe "{:settled, events} arm: @check every: check failure" do
+    test "a settled event that trips an every: check fails identically to the sync path" do
       # Sync equivalent: CreateItem over the same limit fails with this shape.
       {:ok, sync_result} =
         Executor.run([%CreateItem{name: "Big", quantity: 150}], FailingModel, SimpleAdapter)
@@ -131,8 +131,8 @@ defmodule PropertyDamage.ExecutorSettledTest do
       assert sync_result.success == false
 
       assert %Failure{
-               type: %Failure.Assertion{
-                 kind: :assertion_failed,
+               type: %Failure.Check{
+                 kind: :check_failed,
                  name: :quantity_limit,
                  detail: sync_exception
                }
@@ -141,7 +141,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
       assert %PropertyDamage.CheckFailed{} = sync_exception
 
       # Settled path: the probe command's settled event drives the same
-      # @check every: 1 assertion and must produce the same failure_reason shape.
+      # @check every: 1 check and must produce the same failure_reason shape.
       {:ok, settled_result} =
         Executor.run(
           [%SettledCreate{name: "Big", quantity: 150}],
@@ -153,8 +153,8 @@ defmodule PropertyDamage.ExecutorSettledTest do
       assert settled_result.failed_at_index == 0
 
       assert %Failure{
-               type: %Failure.Assertion{
-                 kind: :assertion_failed,
+               type: %Failure.Check{
+                 kind: :check_failed,
                  name: :quantity_limit,
                  detail: settled_exception
                }
@@ -197,24 +197,24 @@ defmodule PropertyDamage.ExecutorSettledTest do
     end
   end
 
-  describe "assertion_mode: :record (end-to-end)" do
+  describe "check_mode: :record (end-to-end)" do
     test "a check failure is recorded, the run completes, and success is false" do
       {:ok, result} =
         Executor.run(
           [%CreateItem{name: "Huge", quantity: 150}],
           FailingModel,
           SimpleAdapter,
-          assertion_mode: :record
+          check_mode: :record
         )
 
       # :record => run completes to a non-halted result with failure_reason nil,
-      # success false, and the failure captured in assertion_failures.
+      # success false, and the failure captured in check_failures.
       assert result.success == false
       assert result.failure_reason == nil
-      refute Enum.empty?(result.assertion_failures)
+      refute Enum.empty?(result.check_failures)
 
-      failure = hd(result.assertion_failures)
-      assert failure.assertion_name == :quantity_limit
+      failure = hd(result.check_failures)
+      assert failure.check_name == :quantity_limit
       assert failure.command_index == 0
 
       # The command still executed and its event is in the log.
@@ -222,7 +222,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
     end
   end
 
-  describe "assertion_mode: :log (end-to-end)" do
+  describe "check_mode: :log (end-to-end)" do
     test "a check failure is only logged: run completes, succeeds, nothing recorded" do
       {result, log} =
         with_log(fn ->
@@ -231,7 +231,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
               [%CreateItem{name: "Huge", quantity: 150}],
               FailingModel,
               SimpleAdapter,
-              assertion_mode: :log
+              check_mode: :log
             )
 
           result
@@ -240,10 +240,10 @@ defmodule PropertyDamage.ExecutorSettledTest do
       # :log => the failure is neither halted nor recorded; the run succeeds.
       assert result.success == true
       assert result.failure_reason == nil
-      assert result.assertion_failures == []
+      assert result.check_failures == []
 
       # The failure was emitted as a log warning.
-      assert log =~ "Assertion failed"
+      assert log =~ "Check failed"
       assert log =~ "quantity_limit"
 
       # The command still executed and its event is in the log.

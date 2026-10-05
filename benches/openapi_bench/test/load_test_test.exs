@@ -6,8 +6,8 @@ defmodule OpenapiBench.LoadTestTest do
 
     1. the report carries real, well-typed metrics (throughput, latency
        percentiles, error counts, per-command breakdown, worker-pool stats), and
-    2. invariant checking stays active under load — with `assertion_mode:
-       :record` a faithful SUT yields zero assertion failures (non-vacuity),
+    2. invariant checking stays active under load — with `check_mode:
+       :record` a faithful SUT yields zero check failures (non-vacuity),
        while the seeded dropped-write bug is caught many times over under load.
 
   The second pair is the RED/GREEN evidence: the same load configuration produces
@@ -28,7 +28,7 @@ defmodule OpenapiBench.LoadTestTest do
     adapter: OpenapiBench.LoadAdapter,
     arrival_rate: 150,
     duration: {2, :seconds},
-    assertion_mode: :record
+    check_mode: :record
   ]
 
   test "reports real throughput/latency/worker metrics and stays invariant-clean under load" do
@@ -79,9 +79,9 @@ defmodule OpenapiBench.LoadTestTest do
     assert p.total_created >= 2
     assert p.peak_in_use >= 2
 
-    # Invariant checking was active (assertion_mode: :record) yet the faithful
+    # Invariant checking was active (check_mode: :record) yet the faithful
     # SUT produced zero violations: the check is live but non-vacuous.
-    assert m.assertion_failures == 0
+    assert m.check_failures == 0
     assert m.failures_by_exception == %{}
   end
 
@@ -97,9 +97,9 @@ defmodule OpenapiBench.LoadTestTest do
 
     # Under the same load config that was clean above, the dropped-write bug is
     # caught by the read-your-write invariant many times over. A worker recorded
-    # the failures, proving assertions run under load.
+    # the failures, proving checks run under load.
     assert m.total_requests > 0
-    assert m.assertion_failures > 0
+    assert m.check_failures > 0
     assert map_size(m.failures_by_exception) > 0
     assert Map.has_key?(m.failures_by_exception, PropertyDamage.CheckFailed)
 

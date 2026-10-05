@@ -5,7 +5,7 @@ defmodule GiteaBench.WebhookModel do
   and `GiteaBench.Simulator`), but weights `CloseIssue` up so runs actually close
   issues, and adds the injector-side surface the base model omits:
 
-    * `check_projections/0` includes `GiteaBench.WebhookAssertions` (the
+    * `check_projections/0` includes `GiteaBench.WebhookChecks` (the
       liveness + safety judgment over delivered webhooks);
     * `injectable_events/0` declares `IssueClosedWebhook`, which validation checks
       against the injector's `@emits`.
@@ -43,7 +43,7 @@ defmodule GiteaBench.WebhookModel do
   def command_sequence_projection, do: GiteaBench.State
 
   @impl true
-  def check_projections, do: [GiteaBench.State, GiteaBench.WebhookAssertions]
+  def check_projections, do: [GiteaBench.State, GiteaBench.WebhookChecks]
 
   @impl true
   def simulator, do: GiteaBench.Simulator

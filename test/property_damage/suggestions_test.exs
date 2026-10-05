@@ -45,7 +45,7 @@ defmodule PropertyDamage.SuggestionsTest do
 
     @check every: 1
     def assert_balance_non_negative(_state, _cmd_or_event) do
-      # No-op assertion that always passes
+      # No-op check that always passes
       :ok
     end
   end

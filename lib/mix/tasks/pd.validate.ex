@@ -261,7 +261,7 @@ defmodule Mix.Tasks.Pd.Validate do
   end
 
   # Declared-but-unchecked invariants (static vacuity, DR-026): a guarantee the
-  # model claims but no assertion verifies.
+  # model claims but no check verifies.
   defp invariant_warnings(model) do
     for %{projection: projection, id: id, checks: []} <- safe_catalog(model) do
       "Invariant #{short_module(projection)}.#{id} declared but never checked (statically vacuous)"
@@ -269,7 +269,7 @@ defmodule Mix.Tasks.Pd.Validate do
   end
 
   defp safe_catalog(model) do
-    PropertyDamage.Model.assertion_catalog(model)
+    PropertyDamage.Model.check_catalog(model)
   rescue
     _ -> []
   end

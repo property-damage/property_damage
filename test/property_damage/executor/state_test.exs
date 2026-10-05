@@ -14,9 +14,9 @@ defmodule PropertyDamage.Executor.StateTest do
     :projections,
     # finalize chain / per-command engine / branching
     :projections_before,
-    :assertion_counters,
-    :assertion_failures,
-    :assertion_mode,
+    :check_counters,
+    :check_failures,
+    :check_mode,
     :active_pollers,
     :active_resource_pollers,
     :active_faults,
@@ -37,7 +37,7 @@ defmodule PropertyDamage.Executor.StateTest do
     %State{
       model: __MODULE__.NoModel,
       event_queue: nil,
-      assertion_mode: :halt,
+      check_mode: :halt,
       stutter_config: nil,
       mock_registry: nil,
       external_markers: [],

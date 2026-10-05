@@ -28,33 +28,33 @@ defmodule PropertyDamage.Linearization do
      at that point, and compare against the events the SUT actually produced
      for that command
   3. Advance the model state with the OBSERVED events and, at that same
-     position, run the model's synchronous (`@check`) assertions against the
+     position, run the model's synchronous (`@check`) checks against the
      advanced state
   4. Advance and continue
   5. If any interleaving is fully consistent (events compatible AND all
-     triggered assertions hold at every position), the execution is linearizable
+     triggered checks hold at every position), the execution is linearizable
 
   ## Soundness invariant (why this module exists)
 
   > A concurrent/branching execution is a failure ONLY if NO single ordering of
   > the branches can simultaneously (a) reproduce every command's observed
-  > events and (b) satisfy every triggered synchronous assertion at that
+  > events and (b) satisfy every triggered synchronous check at that
   > command's position. The observed events and the model-state prediction an
-  > assertion runs against MUST come from the SAME candidate ordering.
+  > check runs against MUST come from the SAME candidate ordering.
 
   This invariant is the antidote to a soundness bug that over-reported races:
-  the executor used to run each branch's synchronous assertions against that
+  the executor used to run each branch's synchronous checks against that
   branch's *forked* projection state. A fork is a partial view: it sees the
   prefix plus its own branch, never the concurrently-executing sibling
   branches' effects. So a read in one branch could observe a value written by a
   sibling's write (the real interleaving) while the reader's model state never
-  recorded that write, firing a spurious assertion. `Put k v ∥ Get k` was
+  recorded that write, firing a spurious check. `Put k v ∥ Get k` was
   flagged even though Put-then-Get is a perfectly legal serialization. The fix:
-  the executor disables those unsound per-branch assertions, and assertion
+  the executor disables those unsound per-branch checks, and check
   checking moves HERE, where it is evaluated against observed events and the
   model prediction drawn from one consistent ordering. `check/5` therefore
   refutes an execution only when every ordering fails, and its refutation
-  carries the specific assertion (when one is the cause) so the report is as
+  carries the specific check (when one is the cause) so the report is as
   precise as the old per-branch path was, without its false positives.
 
   ## Verification strength
@@ -113,7 +113,7 @@ defmodule PropertyDamage.Linearization do
 
   ## Options
 
-  - `:counters` - Assertion counters carried from the prefix, so `every: N`
+  - `:counters` - Check counters carried from the prefix, so `every: N`
     triggers continue counting across the branch region (default fresh zeros)
 
   ## Returns
@@ -123,7 +123,7 @@ defmodule PropertyDamage.Linearization do
     `refutation` is `nil` when every ordering failed purely on event
     incompatibility (a classic race, e.g. a lost update), or a map
     `%{branch_id:, position:, command:, check_name:, reason:}` describing the
-    synchronous assertion that failed in the furthest-progressing ordering, so
+    synchronous check that failed in the furthest-progressing ordering, so
     the executor can report it with the same precision as a linear failure.
   - `{:indeterminate, checked}` - Verification impossible (no simulator) or
     candidate cap reached without success
@@ -176,7 +176,7 @@ defmodule PropertyDamage.Linearization do
   end
 
   # Keep the refutation that progressed furthest through its ordering; on a tie,
-  # prefer an assertion-based refutation (non-nil) over a bare event mismatch,
+  # prefer a check-based refutation (non-nil) over a bare event mismatch,
   # since it carries an actionable check name for the report.
   defp best_refutation(nil, depth, refutation), do: {depth, refutation}
 
@@ -216,13 +216,13 @@ defmodule PropertyDamage.Linearization do
 
   # The single per-candidate decision procedure that enforces the soundness
   # invariant: at each command position the OBSERVED events and the model
-  # prediction (and the assertions run against it) all come from THIS ordering.
+  # prediction (and the checks run against it) all come from THIS ordering.
   #
   # Returns `:ok` when the whole ordering is consistent, or
   # `{:refuted, progressed, refutation}` where `progressed` is how many commands
   # passed before refutation (used to pick the most informative failure across
   # candidates) and `refutation` is `nil` for an event mismatch or a detail map
-  # for a failed synchronous assertion.
+  # for a failed synchronous check.
   @spec verify_candidate(
           linearization(),
           %{{non_neg_integer(), non_neg_integer()} => [struct()]},
@@ -245,7 +245,7 @@ defmodule PropertyDamage.Linearization do
       if events_compatible?(expected, observed_events) do
         advanced = advance(projections, command, observed_events)
 
-        case run_position_assertions(
+        case run_position_checks(
                advanced,
                all_projections,
                command,
@@ -269,7 +269,7 @@ defmodule PropertyDamage.Linearization do
       else
         # No ordering can reproduce this command's observed events from the
         # state THIS ordering reached: an event-level race (e.g. a lost
-        # update). Refuted with no assertion detail.
+        # update). Refuted with no check detail.
         {:halt, {:refuted, depth, nil}}
       end
     end)
@@ -288,13 +288,13 @@ defmodule PropertyDamage.Linearization do
   end
 
   # Run, against the already-advanced projection state, the synchronous
-  # assertions triggered by this command and then by each of its observed
+  # checks triggered by this command and then by each of its observed
   # events, mirroring the executor's run_checks counter/trigger scheme so a
   # branch position is judged exactly as the equivalent linear position would
   # be. Returns {:ok, counters} or {:refuted, check_name, reason}; `reason`
-  # is the `%Failure{}` assertion_failed value the executor's linear path
+  # is the `%Failure{}` check_failed value the executor's linear path
   # produces, so downstream reporting is identical.
-  defp run_position_assertions(projections, all_projections, command, observed_events, counters) do
+  defp run_position_checks(projections, all_projections, command, observed_events, counters) do
     command_module = command.__struct__
 
     counters =
@@ -305,7 +305,7 @@ defmodule PropertyDamage.Linearization do
 
     cmd_ctx = %{step_type: :command, module: command_module, command_or_event: command}
 
-    case run_sync_assertions(projections, all_projections, cmd_ctx, counters) do
+    case run_sync_checks(projections, all_projections, cmd_ctx, counters) do
       {:refuted, _, _} = refuted ->
         refuted
 
@@ -321,7 +321,7 @@ defmodule PropertyDamage.Linearization do
 
           event_ctx = %{step_type: :event, module: event_module, command_or_event: event}
 
-          case run_sync_assertions(projections, all_projections, event_ctx, counters) do
+          case run_sync_checks(projections, all_projections, event_ctx, counters) do
             :ok -> {:cont, {:ok, counters}}
             {:refuted, _, _} = refuted -> {:halt, refuted}
           end
@@ -329,36 +329,36 @@ defmodule PropertyDamage.Linearization do
     end
   end
 
-  defp run_sync_assertions(projections, all_projections, ctx, counters) do
+  defp run_sync_checks(projections, all_projections, ctx, counters) do
     Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       state = Map.get(projections, projection)
 
-      assertions =
-        if Code.ensure_loaded?(projection) and function_exported?(projection, :__assertions__, 0) do
-          Enum.filter(projection.__assertions__(), &(&1.type == :synchronous))
+      checks =
+        if Code.ensure_loaded?(projection) and function_exported?(projection, :__checks__, 0) do
+          Enum.filter(projection.__checks__(), &(&1.type == :synchronous))
         else
           []
         end
 
-      case run_projection_sync_assertions(projection, state, assertions, ctx, counters) do
+      case run_projection_sync_checks(projection, state, checks, ctx, counters) do
         :ok -> {:cont, :ok}
         {:refuted, _, _} = refuted -> {:halt, refuted}
       end
     end)
   end
 
-  defp run_projection_sync_assertions(projection, state, assertions, ctx, counters) do
+  defp run_projection_sync_checks(projection, state, checks, ctx, counters) do
     alias PropertyDamage.Model.Projection
 
-    Enum.reduce_while(assertions, :ok, fn assertion, :ok ->
-      if Projection.should_run?(assertion.trigger, ctx.step_type, ctx.module, counters) do
+    Enum.reduce_while(checks, :ok, fn check, :ok ->
+      if Projection.should_run?(check.trigger, ctx.step_type, ctx.module, counters) do
         try do
-          apply(projection, assertion.function_name, [state, ctx.command_or_event])
+          apply(projection, check.function_name, [state, ctx.command_or_event])
           {:cont, :ok}
         rescue
           e ->
-            reason = Failure.assertion_failed(assertion.name, {e, __STACKTRACE__})
-            {:halt, {:refuted, assertion.name, reason}}
+            reason = Failure.check_failed(check.name, {e, __STACKTRACE__})
+            {:halt, {:refuted, check.name, reason}}
         end
       else
         {:cont, :ok}

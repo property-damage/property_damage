@@ -73,7 +73,7 @@ defmodule PropertyDamage.IExTest do
       # Projections section lists the command-sequence projection and extras.
       assert output =~ "PROJECTIONS"
       assert output =~ "ModelState"
-      assert output =~ "TestAssertions"
+      assert output =~ "TestChecks"
     end
 
     test "reports (none) for a model without check projections" do

@@ -1,7 +1,7 @@
 defmodule OpenapiBench.Consistency do
   @moduledoc """
   Read-consistency invariant over the generated KV client (scaffold next-steps
-  4 & 6: the projection + assertion the scaffold leaves to the user).
+  4 & 6: the projection + check the scaffold leaves to the user).
 
   The model tallies what each key should hold from the `PutValueCompleted`
   events the generated adapter returns, and every `GetValue` must observe that

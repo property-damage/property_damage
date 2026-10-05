@@ -65,8 +65,8 @@ defmodule ObanBench.JobRefsShrinkTest do
 
     # A clean invariant violation: a cancelled job was observed still runnable.
     assert %PropertyDamage.Failure{
-             type: %PropertyDamage.Failure.Assertion{
-               kind: :assertion_failed,
+             type: %PropertyDamage.Failure.Check{
+               kind: :check_failed,
                name: name,
                detail: %PropertyDamage.CheckFailed{} = failure
              }

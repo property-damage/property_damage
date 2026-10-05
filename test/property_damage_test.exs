@@ -95,7 +95,7 @@ defmodule PropertyDamageTest do
     def to_event(_payload), do: :skip
   end
 
-  # A command + always-failing assertion, so run 0 always finds a failure and
+  # A command + always-failing check, so run 0 always finds a failure and
   # `handle_failure` (with its reproduction re-execution) is reached.
   defmodule AlwaysFailCmd do
     use PropertyDamage.Command
@@ -110,7 +110,7 @@ defmodule PropertyDamageTest do
     def apply(state, _), do: state
   end
 
-  defmodule AlwaysFailAssertion do
+  defmodule AlwaysFailCheck do
     use PropertyDamage.Model.Projection
     def init, do: %{}
     def apply(state, _), do: state
@@ -123,7 +123,7 @@ defmodule PropertyDamageTest do
     @behaviour PropertyDamage.Model
     def commands, do: [AlwaysFailCmd]
     def command_sequence_projection, do: AlwaysFailState
-    def check_projections, do: [AlwaysFailAssertion]
+    def check_projections, do: [AlwaysFailCheck]
   end
 
   # Setup succeeds on the exploration run and fails on the second call, which is

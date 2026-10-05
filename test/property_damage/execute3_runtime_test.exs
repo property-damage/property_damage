@@ -113,7 +113,7 @@ defmodule PropertyDamage.Execute3RuntimeTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       assert {:ok, _stats} = Worker.execute_sequence(worker)

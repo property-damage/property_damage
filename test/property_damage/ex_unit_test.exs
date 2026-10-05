@@ -11,7 +11,7 @@ defmodule PropertyDamage.ExUnitTest do
         original_commands: [%{type: :create}, %{type: :view}],
         shrunk_commands: [%{type: :create}],
         failed_at_index: 0,
-        failure_reason: Failure.assertion_failed(:invariant, "Value too large"),
+        failure_reason: Failure.check_failed(:invariant, "Value too large"),
         shrink_iterations: 5,
         shrink_time_ms: 10
       }
@@ -88,12 +88,12 @@ defmodule PropertyDamage.ExUnitTest do
           model: SomeModel,
           adapter: SomeAdapter,
           verbose: true,
-          assertion_mode: :record,
+          check_mode: :record,
           branching: [max_branches: 2]
         )
 
       assert opts[:verbose] == true
-      assert opts[:assertion_mode] == :record
+      assert opts[:check_mode] == :record
       assert opts[:branching] == [max_branches: 2]
     end
 

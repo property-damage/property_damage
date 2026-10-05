@@ -10,7 +10,7 @@ defmodule PropertyDamage.Model.Projection.Liveness do
 
   | Property Type | Example | Detection |
   |---------------|---------|-----------|
-  | Safety | "Balance never goes negative" | State assertion |
+  | Safety | "Balance never goes negative" | State check |
   | Liveness | "Every request eventually completes" | Timeout on pending |
 
   ## What This Projection Detects

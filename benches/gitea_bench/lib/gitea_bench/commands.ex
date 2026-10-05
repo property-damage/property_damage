@@ -109,7 +109,7 @@ defmodule GiteaBench.Commands do
     # DR-030 pure correlation: claim the `issues` (closed) webhook the SUT
     # delivers for *this* issue, keyed by the client-chosen {full_name, number}.
     # This attributes the delivery to this command's index (failure localization);
-    # the "exactly one webhook" judgment lives in GiteaBench.WebhookAssertions.
+    # the "exactly one webhook" judgment lives in GiteaBench.WebhookChecks.
     @impl true
     def awaits(_state, %__MODULE__{target: %{repo: full_name, number: number}}) do
       [

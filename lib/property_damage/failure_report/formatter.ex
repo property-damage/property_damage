@@ -156,7 +156,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   # Headline the invariant the failing check validates (DR-026), with the check
   # itself rendered as secondary detail just below. Empty when the failure has no
-  # resolved invariant (e.g. a non-assertion failure).
+  # resolved invariant (e.g. a non-check failure).
   defp invariant_section(report, color) do
     case FailureReport.invariant_name(report) do
       nil ->
@@ -178,7 +178,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     # Build the "Why It Failed" explanation
     {reason_text, why_text} =
       case FailureReport.failure_type(report) do
-        kind when kind in [:assertion_failed, :projection_violation] ->
+        kind when kind in [:check_failed, :projection_violation] ->
           reason =
             invariant_section(report, color) <>
               """
@@ -295,7 +295,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
       """
       #{label("Type", color)}          Poll Timeout
-      #{label("Assertion", color)}     #{cyan(color)}#{info.triggered_by.assertion_name}#{reset(color)}
+      #{label("Check", color)}         #{cyan(color)}#{info.triggered_by.check_name}#{reset(color)}
       #{label("Timeout", color)}       #{info.elapsed_ms}ms
       #{label("Poll Attempts", color)} #{info.poll_count}
 
@@ -310,7 +310,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         #{dim(color)}#{inspect(info.final_state, pretty: true, limit: 10)}#{reset(color)}
 
       #{yellow(color)}Why it failed:#{reset(color)} The predicate never returned true within the
-      timeout period. The temporal assertion expected the state to eventually
+      timeout period. The eventually check expected the state to eventually
       satisfy the condition, but it did not.
       """
     else
@@ -633,7 +633,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp markdown_failure_reason(report) do
     reason_text =
       case FailureReport.failure_type(report) do
-        kind when kind in [:assertion_failed, :projection_violation] ->
+        kind when kind in [:check_failed, :projection_violation] ->
           markdown_invariant_section(report) <>
             """
             **Check:** `#{FailureReport.check_name(report)}`
@@ -676,7 +676,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       """
       **Type:** Poll Timeout
 
-      **Assertion:** `#{info.triggered_by.assertion_name}`
+      **Check:** `#{info.triggered_by.check_name}`
 
       | Property | Value |
       |----------|-------|

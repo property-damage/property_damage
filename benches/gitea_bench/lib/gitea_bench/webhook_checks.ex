@@ -1,4 +1,4 @@
-defmodule GiteaBench.WebhookAssertions do
+defmodule GiteaBench.WebhookChecks do
   @moduledoc """
   The DR-030 judgment over the webhook-correlated set: exactly one delivered
   `issues` (closed) webhook per closed issue, split into its liveness and safety

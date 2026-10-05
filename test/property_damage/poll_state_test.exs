@@ -42,13 +42,13 @@ defmodule PropertyDamage.PollStateTest do
 
     def apply(state, _), do: state
 
-    # Synchronous assertion
+    # Synchronous check
     @check every: PaymentInitiated
     def assert_amount_positive(_state, %PaymentInitiated{amount: amt}) do
       if amt <= 0, do: PropertyDamage.fail!("amount must be positive")
     end
 
-    # Temporal assertion - payment should be confirmed within timeout
+    # Eventually check - payment should be confirmed within timeout
     @eventually after: PaymentInitiated, timeout: 1, interval: {50, :milliseconds}
     def payment_eventually_confirmed(_state, %PaymentInitiated{id: id}) do
       fn s -> s.payments[id] == :confirmed end
@@ -106,59 +106,59 @@ defmodule PropertyDamage.PollStateTest do
   # ============================================================================
 
   describe "projection @eventually compilation" do
-    test "captures @eventually assertion metadata" do
-      assertions = PaymentProjection.__assertions__()
+    test "captures @eventually check metadata" do
+      checks = PaymentProjection.__checks__()
 
-      poll_assertion =
-        Enum.find(assertions, fn a ->
+      poll_check =
+        Enum.find(checks, fn a ->
           a.name == :payment_eventually_confirmed
         end)
 
-      assert poll_assertion != nil
-      assert poll_assertion.type == :polling
-      assert poll_assertion.eventually.after == [PaymentInitiated]
-      assert poll_assertion.eventually.timeout_ms == 1000
-      assert poll_assertion.eventually.interval_ms == 50
-      assert poll_assertion.predicate_source != nil
+      assert poll_check != nil
+      assert poll_check.type == :polling
+      assert poll_check.eventually.after == [PaymentInitiated]
+      assert poll_check.eventually.timeout_ms == 1000
+      assert poll_check.eventually.interval_ms == 50
+      assert poll_check.predicate_source != nil
     end
 
-    test "captures synchronous @check assertion metadata" do
-      assertions = PaymentProjection.__assertions__()
+    test "captures synchronous @check metadata" do
+      checks = PaymentProjection.__checks__()
 
-      trigger_assertion =
-        Enum.find(assertions, fn a ->
+      trigger_check =
+        Enum.find(checks, fn a ->
           a.name == :amount_positive
         end)
 
-      assert trigger_assertion != nil
-      assert trigger_assertion.type == :synchronous
-      assert trigger_assertion.trigger != nil
+      assert trigger_check != nil
+      assert trigger_check.type == :synchronous
+      assert trigger_check.trigger != nil
     end
 
     test "captures multiple trigger events" do
-      assertions = MultiTriggerProjection.__assertions__()
+      checks = MultiTriggerProjection.__checks__()
 
-      poll_assertion =
-        Enum.find(assertions, fn a ->
+      poll_check =
+        Enum.find(checks, fn a ->
           a.name == :item_processed
         end)
 
-      assert poll_assertion != nil
-      assert poll_assertion.eventually.after == [PaymentInitiated, PaymentFailed]
+      assert poll_check != nil
+      assert poll_check.eventually.after == [PaymentInitiated, PaymentFailed]
     end
 
     test "normalizes time values correctly" do
-      assertions = FastTimeoutProjection.__assertions__()
+      checks = FastTimeoutProjection.__checks__()
 
-      poll_assertion =
-        Enum.find(assertions, fn a ->
+      poll_check =
+        Enum.find(checks, fn a ->
           a.name == :never_succeeds
         end)
 
       # 50 milliseconds
-      assert poll_assertion.eventually.timeout_ms == 50
+      assert poll_check.eventually.timeout_ms == 50
       # 10 milliseconds
-      assert poll_assertion.eventually.interval_ms == 10
+      assert poll_check.eventually.interval_ms == 10
     end
   end
 
@@ -191,17 +191,17 @@ defmodule PropertyDamage.PollStateTest do
 
   describe "predicate source capture" do
     test "captures simple fn expression" do
-      assertions = PaymentProjection.__assertions__()
+      checks = PaymentProjection.__checks__()
 
-      poll_assertion =
-        Enum.find(assertions, fn a ->
+      poll_check =
+        Enum.find(checks, fn a ->
           a.name == :payment_eventually_confirmed
         end)
 
       # Should contain the fn expression
-      assert poll_assertion.predicate_source =~ "fn"
-      assert poll_assertion.predicate_source =~ "payments"
-      assert poll_assertion.predicate_source =~ "confirmed"
+      assert poll_check.predicate_source =~ "fn"
+      assert poll_check.predicate_source =~ "payments"
+      assert poll_check.predicate_source =~ "confirmed"
     end
   end
 
@@ -236,27 +236,27 @@ defmodule PropertyDamage.PollStateTest do
     end
 
     test "defaults integers to seconds" do
-      assertions = TimeTestProjection.__assertions__()
-      assertion = Enum.find(assertions, &(&1.name == :seconds_default))
+      checks = TimeTestProjection.__checks__()
+      check = Enum.find(checks, &(&1.name == :seconds_default))
 
-      assert assertion.eventually.timeout_ms == 5000
-      assert assertion.eventually.interval_ms == 1000
+      assert check.eventually.timeout_ms == 5000
+      assert check.eventually.interval_ms == 1000
     end
 
     test "handles explicit seconds tuple" do
-      assertions = TimeTestProjection.__assertions__()
-      assertion = Enum.find(assertions, &(&1.name == :explicit_seconds))
+      checks = TimeTestProjection.__checks__()
+      check = Enum.find(checks, &(&1.name == :explicit_seconds))
 
-      assert assertion.eventually.timeout_ms == 3000
-      assert assertion.eventually.interval_ms == 500
+      assert check.eventually.timeout_ms == 3000
+      assert check.eventually.interval_ms == 500
     end
 
     test "handles minutes" do
-      assertions = TimeTestProjection.__assertions__()
-      assertion = Enum.find(assertions, &(&1.name == :minutes_test))
+      checks = TimeTestProjection.__checks__()
+      check = Enum.find(checks, &(&1.name == :minutes_test))
 
-      assert assertion.eventually.timeout_ms == 120_000
-      assert assertion.eventually.interval_ms == 30_000
+      assert check.eventually.timeout_ms == 120_000
+      assert check.eventually.interval_ms == 30_000
     end
 
     test "accepts singular time units" do
@@ -272,19 +272,19 @@ defmodule PropertyDamage.PollStateTest do
         end
       end
 
-      assertion =
-        Enum.find(SingularTimeProjection.__assertions__(), &(&1.name == :singular_units))
+      check =
+        Enum.find(SingularTimeProjection.__checks__(), &(&1.name == :singular_units))
 
-      assert assertion.eventually.timeout_ms == 2000
-      assert assertion.eventually.interval_ms == 1000
+      assert check.eventually.timeout_ms == 2000
+      assert check.eventually.interval_ms == 1000
     end
   end
 
   # ============================================================================
-  # Assertion Function Call Tests
+  # Check Function Call Tests
   # ============================================================================
 
-  describe "polling assertion function" do
+  describe "polling check function" do
     test "returns a predicate function when called" do
       state = %{payments: %{"pay_123" => :pending}}
       event = %PaymentInitiated{id: "pay_123", amount: 100}

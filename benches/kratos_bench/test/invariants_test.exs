@@ -5,7 +5,7 @@ defmodule KratosBench.InvariantsTest do
   the same seeds proving the unseeded bench stays green (no false positive).
 
   The bugs live in the mock's response or the adapter's login, not in the
-  assertions, so the same projection that passes the control catches the seeded
+  checks, so the same projection that passes the control catches the seeded
   fault — the honest proof the invariants are real.
 
     * `reject_leaks`    — the mock lies and accepts a registration it should
@@ -52,7 +52,7 @@ defmodule KratosBench.InvariantsTest do
       assert report, "expected the reject_leaks bug to be caught on some seed"
 
       assert PropertyDamage.FailureReport.check_name(report) == :identity_set,
-             "expected identity-set assertion, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
+             "expected identity-set check, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
     end
 
     test "control: no false positive without the bug" do
@@ -68,7 +68,7 @@ defmodule KratosBench.InvariantsTest do
       assert report, "expected the modify_ignored bug to be caught on some seed"
 
       assert PropertyDamage.FailureReport.check_name(report) == :traits,
-             "expected traits assertion, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
+             "expected traits check, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
     end
   end
 
@@ -78,7 +78,7 @@ defmodule KratosBench.InvariantsTest do
       assert report, "expected the login_broken bug to be caught on some seed"
 
       assert PropertyDamage.FailureReport.check_name(report) == :login,
-             "expected login assertion, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
+             "expected login check, got #{inspect(PropertyDamage.FailureReport.check_name(report))}"
     end
   end
 end

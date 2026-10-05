@@ -2,7 +2,7 @@ defmodule CachexBench.CoverageTest do
   @moduledoc """
   Exercises PropertyDamage's coverage metrics (feature 14) against the cache
   bench: command/transition coverage thresholds and DR-026 anti-vacuity
-  (assertion) coverage. These are the assertions a CI job would gate on to catch
+  (check) coverage. These are the checks a CI job would gate on to catch
   a suite that has silently stopped exercising part of the model.
   """
   use ExUnit.Case, async: false
@@ -12,7 +12,7 @@ defmodule CachexBench.CoverageTest do
 
   @moduletag timeout: 120_000
 
-  test "the suite meets command/transition/assertion coverage thresholds" do
+  test "the suite meets command/transition/check coverage thresholds" do
     assert {:ok, stats} =
              PropertyDamage.run(
                model: CachexBench.Model,
@@ -36,7 +36,7 @@ defmodule CachexBench.CoverageTest do
              command: 100,
              transition: 60,
              min_commands: 500,
-             assertion_coverage: 100
+             check_coverage: 100
            )
 
     # Every command has a non-trivial share of the executions.
@@ -46,7 +46,7 @@ defmodule CachexBench.CoverageTest do
 
     # DR-026 anti-vacuity, tracker rollup: the one declared invariant is
     # exercised, none left uncovered.
-    assert Coverage.assertion_coverage(coverage) == 100.0
+    assert Coverage.check_coverage(coverage) == 100.0
     assert Coverage.uncovered_invariants(coverage) == []
   end
 
@@ -63,9 +63,9 @@ defmodule CachexBench.CoverageTest do
 
     assert {:ok, _stats} = result
 
-    # PropertyDamage.assertion_coverage/2 reports per-invariant firing on the
-    # aggregate run result (joins assertion_fires against the model catalog).
-    entries = PropertyDamage.assertion_coverage(result, CachexBench.Model)
+    # PropertyDamage.check_coverage/2 reports per-invariant firing on the
+    # aggregate run result (joins check_fires against the model catalog).
+    entries = PropertyDamage.check_coverage(result, CachexBench.Model)
     assert [%{id: :read_consistent, covered?: true, fire_count: fires}] = entries
     assert fires > 0
   end

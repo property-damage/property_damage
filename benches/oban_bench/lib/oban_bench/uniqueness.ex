@@ -46,7 +46,7 @@ defmodule ObanBench.Uniqueness.Projection do
 
   The exactly-once oracle itself lives in the resource poller
   (`ObanBench.ExactlyOnce`): liveness via its timeout, safety via its overshoot
-  check. This projection carries no assertion, so it is purely descriptive.
+  check. This projection carries no check, so it is purely descriptive.
   """
   use PropertyDamage.Model.Projection
 

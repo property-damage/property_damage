@@ -522,7 +522,7 @@ defmodule PropertyDamage do
 
       :proceed ->
         # Whole-run coverage accumulator (DR-026). `fires` aggregates
-        # per-assertion firings across every generated sequence (always-on);
+        # per-check firings across every generated sequence (always-on);
         # `tracker` accumulates the heavier command/transition/state dimensions
         # only when `coverage: true` was requested.
         coverage_acc = %{
@@ -686,7 +686,7 @@ defmodule PropertyDamage do
                   commands_executed: command_count
                 })
 
-                # Accumulate this sequence's per-assertion firings into the whole-run
+                # Accumulate this sequence's per-check firings into the whole-run
                 # total (DR-026), and (only under coverage: true) fold its
                 # command/transition/state dimensions into the tracker.
                 coverage_acc = accumulate_coverage(coverage_acc, result, sequence)
@@ -771,19 +771,19 @@ defmodule PropertyDamage do
   # Whole-run coverage accumulation (DR-026)
   # ============================================================================
 
-  # Fold one sequence's result into the running coverage accumulator. Per-assertion
+  # Fold one sequence's result into the running coverage accumulator. Per-check
   # firings (always-on) are projected out of the executor's colocated counters
   # and summed; the heavier command/transition/state tracker (coverage: true
   # only) records the sequence via the existing Coverage path.
   defp accumulate_coverage(acc, result, sequence) do
-    run_fires = project_fires(Map.get(result, :assertion_counters, %{}))
+    run_fires = project_fires(Map.get(result, :check_counters, %{}))
     fires = merge_fires(acc.fires, run_fires)
 
     tracker =
       if acc.tracker do
         # Feed the tracker a result carrying the sequence (for command/transition
         # coverage) and this sequence's firings (lifted into check_hits).
-        record = result |> Map.put(:sequence, sequence) |> Map.put(:assertion_fires, run_fires)
+        record = result |> Map.put(:sequence, sequence) |> Map.put(:check_fires, run_fires)
         Coverage.record(acc.tracker, {:ok, record})
       else
         nil
@@ -792,7 +792,7 @@ defmodule PropertyDamage do
     %{acc | fires: fires, tracker: tracker}
   end
 
-  # Project the colocated {:fired, projection, name} keys out of the assertion
+  # Project the colocated {:fired, projection, name} keys out of the check
   # counters into the public %{{projection, name} => count} fire map, dropping
   # the sampling counters (:step/:command/:event/per-module) that share the map.
   defp project_fires(counters) do
@@ -806,17 +806,17 @@ defmodule PropertyDamage do
   end
 
   # Attach the whole-run coverage data to the success stats map: always the
-  # per-assertion fire totals, plus the command/transition/state tracker when
+  # per-check fire totals, plus the command/transition/state tracker when
   # coverage: true was requested.
   defp put_coverage_stats(stats, %{fires: fires, tracker: tracker}) do
-    stats = Map.put(stats, :assertion_fires, fires)
+    stats = Map.put(stats, :check_fires, fires)
     if tracker, do: Map.put(stats, :coverage, tracker), else: stats
   end
 
   # Anti-vacuity summary {covered, total} for the terse verbose footer (DR-026),
   # or nil when the model declares no invariants (nothing to report).
   defp invariant_summary(fires, model) do
-    catalog = PropertyDamage.Model.assertion_catalog(model)
+    catalog = PropertyDamage.Model.check_catalog(model)
 
     case length(catalog) do
       0 ->
@@ -1291,7 +1291,7 @@ defmodule PropertyDamage do
          run_number,
          run_nonce,
          stutter_config,
-         assertion_fires
+         check_fires
        ) do
     # Stutter failures are now shrinkable (DR-029): the shrinker reproduces them
     # with stutter forced on (probability 1.0), so they minimize to the offending
@@ -1406,7 +1406,7 @@ defmodule PropertyDamage do
         adapter: adapter,
         linearization: report_result.linearization,
         stacktrace: Map.get(report_result, :stacktrace),
-        assertion_fires: assertion_fires
+        check_fires: check_fires
       )
 
     # Terminal failure notification (DR-022): the verbose consumer renders this
@@ -1854,12 +1854,12 @@ defmodule PropertyDamage do
   @doc """
   Per-invariant anti-vacuity coverage for a run result (DR-026).
 
-  Joins the run's per-assertion firings (`result.assertion_fires`, accumulated
-  across every generated sequence) against the model's `assertion_catalog/1`,
+  Joins the run's per-check firings (`result.check_fires`, accumulated
+  across every generated sequence) against the model's `check_catalog/1`,
   with no re-execution. Each entry reports whether the invariant was exercised:
 
       result = PropertyDamage.run(model: M, adapter: A)
-      for inv <- PropertyDamage.assertion_coverage(result, M), not inv.covered? do
+      for inv <- PropertyDamage.check_coverage(result, M), not inv.covered? do
         IO.puts("never exercised: \#{inv.id}")
       end
 
@@ -1870,7 +1870,7 @@ defmodule PropertyDamage do
   failed run the fire map is partial by nature (anti-vacuity is a passing-run
   concern).
   """
-  @spec assertion_coverage({:ok, map()} | {:error, FailureReport.t()} | map(), module()) :: [
+  @spec check_coverage({:ok, map()} | {:error, FailureReport.t()} | map(), module()) :: [
           %{
             projection: module(),
             id: atom(),
@@ -1881,11 +1881,11 @@ defmodule PropertyDamage do
             covered?: boolean()
           }
         ]
-  def assertion_coverage(result, model) do
-    fires = extract_assertion_fires(result)
+  def check_coverage(result, model) do
+    fires = extract_check_fires(result)
 
     model
-    |> PropertyDamage.Model.assertion_catalog()
+    |> PropertyDamage.Model.check_catalog()
     |> Enum.map(fn %{projection: projection, id: id, invariant: invariant, checks: checks} ->
       fire_count =
         Enum.reduce(checks, 0, fn check, acc ->
@@ -1904,39 +1904,39 @@ defmodule PropertyDamage do
     end)
   end
 
-  defp extract_assertion_fires({:ok, stats}), do: Map.get(stats, :assertion_fires, %{})
+  defp extract_check_fires({:ok, stats}), do: Map.get(stats, :check_fires, %{})
 
-  defp extract_assertion_fires({:error, %FailureReport{assertion_fires: fires}}),
+  defp extract_check_fires({:error, %FailureReport{check_fires: fires}}),
     do: fires || %{}
 
-  defp extract_assertion_fires(%{assertion_fires: fires}), do: fires || %{}
-  defp extract_assertion_fires(_), do: %{}
+  defp extract_check_fires(%{check_fires: fires}), do: fires || %{}
+  defp extract_check_fires(_), do: %{}
 
   @doc """
   The model's invariant catalog (DR-026).
 
   The union of every projection's declared invariants, keyed `{projection, id}`,
   each entry carrying the `%PropertyDamage.Invariants.Invariant{}` and the checks
-  (with their kinds) that validate it. See `PropertyDamage.Model.assertion_catalog/1`.
+  (with their kinds) that validate it. See `PropertyDamage.Model.check_catalog/1`.
   """
-  @spec assertion_catalog(module()) :: [
+  @spec check_catalog(module()) :: [
           %{
             projection: module(),
             id: atom(),
             invariant: PropertyDamage.Invariants.Invariant.t(),
-            checks: [%{name: atom(), kind: :synchronous | :lifecycle | :polling}]
+            checks: [%{name: atom(), kind: :synchronous | :lifecycle | :eventual}]
           }
         ]
-  defdelegate assertion_catalog(model), to: PropertyDamage.Model
+  defdelegate check_catalog(model), to: PropertyDamage.Model
 
   # ============================================================================
-  # Assertion Helpers
+  # Check Helpers
   # ============================================================================
 
   @doc """
-  Convenience function to fail an assertion with a message and optional data.
+  Convenience function to fail a check with a message and optional data.
 
-  Use this in projection assertions when you don't need a custom exception type.
+  Use this in projection checks when you don't need a custom exception type.
 
   ## Examples
 
@@ -1946,7 +1946,7 @@ defmodule PropertyDamage do
       # With context data
       PropertyDamage.fail!("balance is negative", balance: -50, account_id: "acc_123")
 
-      # In a projection assertion
+      # In a projection check
       @check every: 1
       def assert_balance_positive(state, _cmd) do
         if state.balance < 0 do

@@ -196,7 +196,7 @@ defmodule PropertyDamage.AwaitsTest do
   end
 
   describe "safety via @check on the correlated set" do
-    test "a duplicate correlated webhook trips the cardinality assertion" do
+    test "a duplicate correlated webhook trips the cardinality check" do
       result =
         run([%CloseIssue{issue_id: "i1"}], fn queue ->
           EventQueue.push(queue, WebhookInjector, %IssueClosedWebhook{issue_id: "i1"})
@@ -207,7 +207,7 @@ defmodule PropertyDamage.AwaitsTest do
       refute result.success
 
       assert %Failure{
-               type: %Failure.Assertion{kind: :assertion_failed, name: :at_most_one_webhook}
+               type: %Failure.Check{kind: :check_failed, name: :at_most_one_webhook}
              } =
                result.failure_reason
 
@@ -257,7 +257,7 @@ defmodule PropertyDamage.AwaitsTest do
   end
 
   # A later, unrelated command whose adapter delivers the duplicate webhooks for
-  # issue "i1", so they are drained (and the assertion trips) during THIS
+  # issue "i1", so they are drained (and the check trips) during THIS
   # command's pipeline, not the awaiting command's.
   defmodule DeliverWebhooks do
     use PropertyDamage.Command
@@ -286,7 +286,7 @@ defmodule PropertyDamage.AwaitsTest do
   end
 
   describe "attribution of an async every: failure to an earlier command (DR-025)" do
-    test "a later command's drain trips the assertion but the failure names the awaiting command" do
+    test "a later command's drain trips the check but the failure names the awaiting command" do
       {:ok, queue} = EventQueue.start_link()
       seq = Sequence.linear([%CloseIssue{issue_id: "i1"}, %DeliverWebhooks{}])
 
@@ -301,11 +301,11 @@ defmodule PropertyDamage.AwaitsTest do
       refute result.success
 
       assert %Failure{
-               type: %Failure.Assertion{kind: :assertion_failed, name: :at_most_one_webhook}
+               type: %Failure.Check{kind: :check_failed, name: :at_most_one_webhook}
              } = result.failure_reason
 
       # The offending webhooks are correlated to CloseIssue (index 0); the
-      # assertion tripped while DeliverWebhooks (index 1) was draining them.
+      # check tripped while DeliverWebhooks (index 1) was draining them.
       # DR-025 command attribution must name the owning command, not the current.
       indices =
         result.event_log
@@ -393,10 +393,10 @@ defmodule PropertyDamage.AwaitsTest do
 
       refute result.success
 
-      assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+      assert %Failure{type: %Failure.Check{kind: :poll_timeout, detail: info}} =
                result.failure_reason
 
-      assert info.triggered_by.assertion_name == :webhook_eventually_arrives
+      assert info.triggered_by.check_name == :webhook_eventually_arrives
 
       # RED before P5: poll timeouts report failed_at_index: nil, losing the
       # link to the command whose liveness window opened.

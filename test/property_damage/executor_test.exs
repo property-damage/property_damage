@@ -140,7 +140,7 @@ defmodule PropertyDamage.ExecutorTest do
       assert result.success == false
       assert result.failed_at_index == 0
 
-      assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :quantity_limit}} =
+      assert %Failure{type: %Failure.Check{kind: :check_failed, name: :quantity_limit}} =
                result.failure_reason
     end
 
@@ -164,8 +164,8 @@ defmodule PropertyDamage.ExecutorTest do
       assert result.success == false
 
       %Failure{
-        type: %Failure.Assertion{
-          kind: :assertion_failed,
+        type: %Failure.Check{
+          kind: :check_failed,
           name: :quantity_limit,
           detail: exception
         }
@@ -177,7 +177,7 @@ defmodule PropertyDamage.ExecutorTest do
     end
   end
 
-  describe "record assertion mode" do
+  describe "record check mode" do
     test "recorded failures are returned in chronological order" do
       # total_quantity accumulates, so once it exceeds 100 every subsequent
       # command also fails. The recorded failures must read oldest-first.
@@ -188,11 +188,11 @@ defmodule PropertyDamage.ExecutorTest do
       ]
 
       {:ok, result} =
-        Executor.run(commands, FailingModel, SimpleAdapter, assertion_mode: :record)
+        Executor.run(commands, FailingModel, SimpleAdapter, check_mode: :record)
 
       assert result.success == false
 
-      indices = Enum.map(result.assertion_failures, & &1.command_index)
+      indices = Enum.map(result.check_failures, & &1.command_index)
       assert length(indices) >= 2
 
       assert indices == Enum.sort(indices),
@@ -361,7 +361,7 @@ defmodule PropertyDamage.ExecutorTest do
       # Should fail due to exceeding 100 quantity limit
       assert result.success == false
       # Branch failures carry the branch_id on the envelope; the type is the inner kind
-      assert %Failure{type: %Failure.Assertion{kind: :assertion_failed}, branch_id: 0} =
+      assert %Failure{type: %Failure.Check{kind: :check_failed}, branch_id: 0} =
                result.failure_reason
     end
 
