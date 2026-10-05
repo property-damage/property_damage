@@ -1,6 +1,6 @@
 # DR-044: Variants and the Lockstep Scheduler
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-045: `Differential.run/1` and `Differential.Result` are deleted and `PropertyDamage.run/1` takes several targets; a divergence is a shrunk failure that ends the run, with no `divergences` list; the failure kinds gain `:diverged`.
 **Date:** 2026-10-05
 
 ## Context

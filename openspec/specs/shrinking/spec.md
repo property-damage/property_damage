@@ -4,13 +4,13 @@
 
 Defines the two-phase shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
 
-Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking)
+Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets)
 
 ## Requirements
 
 ### Requirement: Failure Equivalence
 
-A shrunk sequence SHALL only be accepted if it reproduces the same failure as the original. Failure equivalence is determined by a failure signature consisting of the failure type and check name.
+A shrunk sequence SHALL only be accepted if it reproduces the same failure as the original. Failure equivalence is determined by a failure signature consisting of the failure kind, the check name and the index of the variant that failed (DR-045).
 
 #### Scenario: Same failure type and check name
 - **WHEN** a candidate shrunk sequence is executed
@@ -30,6 +30,10 @@ A shrunk sequence SHALL only be accepted if it reproduces the same failure as th
 #### Scenario: Same check observed synchronously or asynchronously is equivalent
 - **WHEN** the original failure and a candidate failure are the same named check
 - **THEN** they SHALL be equivalent regardless of whether the check fired on a command's own event, an asynchronously-observed event, or the `at: :teardown` settled checkpoint
+
+#### Scenario: Different variant or kind rejected (DR-045)
+- **WHEN** a candidate shrunk sequence fails in a variant other than the original's, or with a failure kind other than the original's
+- **THEN** the candidate SHALL be rejected, even if the check name is equal
 
 #### Scenario: Failure at same or earlier index
 - **WHEN** a candidate shrunk sequence produces the equivalent failure
@@ -183,20 +187,43 @@ The system SHALL support re-running the shrinker over an already-shrunk failure 
 
 ### Requirement: Failure Signature
 
-The failure signature SHALL be a tuple of `{type, check_name}` where type identifies the category of failure and check_name identifies the specific check (or nil for non-check failures).
+The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned by `Shrinker.failure_signature/2`, where kind identifies the category of failure, name identifies the specific check (or nil for non-check failures) and variant_index is the index of the target that failed. `Shrinker.equivalent_failures?/2` SHALL compare `{reason, variant_index}` pairs.
 
 #### Scenario: Check failure signature
 - **WHEN** a failure is caused by a check violation
-- **THEN** the signature SHALL contain the failure type and the check name
+- **THEN** the signature SHALL contain the failure kind, the check name and the variant index
 
 #### Scenario: Non-check failure signature
 - **WHEN** a failure is caused by a non-check condition (e.g., adapter error, linearization failure)
-- **THEN** the signature SHALL contain the failure type and nil for the check name
+- **THEN** the signature SHALL contain the failure kind, nil for the check name and the variant index
 
 #### Scenario: Check failure signature includes the check name
 - **WHEN** a failure is a named check failure (`@check` / `@check at:` check)
-- **THEN** the signature SHALL record the check name as the check name, so failures of distinct checks are not treated as equivalent (DR-025)
+- **THEN** the signature SHALL record the check name, so failures of distinct checks are not treated as equivalent (DR-025)
 
 #### Scenario: Asynchronously-observed check failure carries a location
 - **WHEN** an `@check every:` check fails on an asynchronously-observed event
 - **THEN** the failure SHALL carry the observing event's `command_index` as `failed_at_index`, so the shrinker's truncation can target it (the truncation is still verified to reproduce the failure before being accepted)
+
+### Requirement: Variant-Aware Shrinking (DR-045)
+
+The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run `setup_each/1`, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The reference target's sequence SHALL be the shrink target, because all targets run the same commands. A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:`, `equivalence:` and `check_mode:`.
+
+#### Scenario: Divergence is shrunk
+- **WHEN** a run fails with kind `:diverged`
+- **THEN** the shrinker SHALL remove commands while the same variant still diverges from the reference at the same or an earlier root
+- **AND** every candidate SHALL run in every target
+
+#### Scenario: Setup failures are not shrunk
+- **WHEN** a run fails with kind `:setup_failed`
+- **THEN** the framework SHALL report the original sequence without shrinking
+
+#### Scenario: Branching sequences keep the linear engine
+- **WHEN** a branching sequence fails (one target only)
+- **THEN** its run, shrink and reproduction SHALL use the linear engine
+
+#### Scenario: Re-shrink with several targets
+- **WHEN** `shrink_further/2` is called
+- **THEN** it SHALL use `report.targets` by default
+- **AND** SHALL accept a `targets:` override with one or more entries and the options `concurrency:` and `equivalence:`
+- **AND** export file names SHALL hash the signature triple

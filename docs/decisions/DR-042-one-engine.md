@@ -1,6 +1,6 @@
 # DR-042: One Engine for Property-Based, Differential and Path-Equivalence Runs
 
-**Status:** Accepted. Amended by DR-044: `Differential.run/1` stays as the multi-target entry point on top of the variant scheduler; `PropertyDamage.run/1` keeps its own loop for now.
+**Status:** Accepted. Amended by DR-044: `Differential.run/1` stays as the multi-target entry point on top of the variant scheduler; `PropertyDamage.run/1` keeps its own loop for now. Amended by DR-045: `Differential.run/1` is deleted and `PropertyDamage.run/1` runs every linear sequence through the scheduler.
 **Date:** 2026-10-05
 
 ## Decision

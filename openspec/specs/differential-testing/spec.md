@@ -2,19 +2,25 @@
 
 ## Purpose
 
-Define the differential testing and mutation testing subsystems that allow PropertyDamage to compare multiple implementations against the same command sequences and to measure test suite quality by injecting faults into adapter responses. Multi-target runs execute each target as a variant in its own process and advance the variants in lockstep (DR-044). This domain also defines run comparison (DR-035): the post-hoc comparison of two or more full run traces of the same plan, used to localize regressions and flakiness.
+Define the differential testing and mutation testing subsystems that allow PropertyDamage to compare multiple implementations against the same command sequences and to measure test suite quality by injecting faults into adapter responses. A multi-target run is `PropertyDamage.run/1` with several `targets:` entries (DR-045): each target runs as a variant in its own process and the variants advance in lockstep (DR-044). A divergence is a failure: it ends the run, is shrunk and reproduced, and is reported as a failure report (DR-045). This domain also defines run comparison (DR-035): the post-hoc comparison of two or more full run traces of the same plan, used to localize regressions and flakiness.
 
 ## Requirements
 
 ### Requirement: Multi-Target Execution
 
-The framework SHALL run the same command sequences against multiple adapter targets and compare their results.
+`PropertyDamage.run/1` SHALL run the same command sequences against every entry of `targets:` and compare their results (DR-045). One entry is a run without comparison; two or more entries compare every non-reference target with the first.
 
 #### Scenario: Oracle testing
 
-- **WHEN** differential testing is configured with a `targets:` list of two or more entries
+- **WHEN** `PropertyDamage.run/1` is called with a `targets:` list of two or more entries
 - **THEN** the framework SHALL execute the same command sequences against all targets
 - **AND** SHALL compare the results of every other target against the first target's results (DR-043)
+
+#### Scenario: Removed entry point
+
+- **WHEN** a caller looks for a separate differential entry point module
+- **THEN** none SHALL exist; the multi-target entry point is `PropertyDamage.run/1` (DR-045)
+- **AND** the equivalence strategies SHALL live in `PropertyDamage.Comparison`
 
 #### Scenario: Same adapter with different configurations
 
@@ -30,7 +36,7 @@ The framework SHALL support three comparison modes: `:correctness`, `:performanc
 
 - **WHEN** `compare: :correctness` is configured
 - **THEN** the framework SHALL compare the events returned by each target for equivalence
-- **AND** SHALL record divergences where results differ
+- **AND** SHALL report a divergence as a failure of kind `:diverged` where results differ
 
 #### Scenario: Performance comparison
 
@@ -42,6 +48,7 @@ The framework SHALL support three comparison modes: `:correctness`, `:performanc
 
 - **WHEN** `compare: :both` is configured
 - **THEN** the framework SHALL perform both correctness and performance comparison
+- **AND** `{:ok, stats}` SHALL carry `stats.metrics`, keyed by target name, under `:performance` and `:both`
 
 #### Scenario: Timed comparison requires serial concurrency (DR-044)
 
@@ -51,20 +58,20 @@ The framework SHALL support three comparison modes: `:correctness`, `:performanc
 
 ### Requirement: Lockstep Concurrency (DR-044)
 
-`PropertyDamage.Differential.run/1` SHALL run each generated command sequence against every target in lockstep. Every command of the sequence is a root. For each root `r`, in order, every variant SHALL execute root `r` and stop at boundary `r`; only then SHALL the comparison run, and only after it SHALL any variant start root `r + 1`. The `concurrency:` option SHALL decide how the variants reach a boundary: `:serial` (the default) advances one variant at a time in target order, and `:parallel` advances all variants at the same time. Targets that share one system under `:parallel` MUST isolate their slices of it through `config:`. The option `execution:` MUST be rejected.
+`PropertyDamage.run/1` SHALL run each generated linear command sequence against every target in lockstep, through `PropertyDamage.Scheduler` (DR-045). Every command of the sequence is a root. For each root `r`, in order, every variant SHALL execute root `r` and stop at boundary `r`; only then SHALL the comparison run, and only after it SHALL any variant start root `r + 1`. The `concurrency:` option SHALL decide how the variants reach a boundary: `:serial` (the default) advances one variant at a time in target order, and `:parallel` advances all variants at the same time. Targets that share one system under `:parallel` MUST isolate their slices of it through `config:`. The option `execution:` MUST be rejected.
 
 #### Scenario: Serial concurrency is the default
 
 - **WHEN** `concurrency:` is not given
 - **THEN** the framework SHALL advance the variants one at a time in target order for each root
-- **AND** `result.concurrency` SHALL be `:serial`
+- **AND** `report.concurrency` SHALL be `:serial` in a failure report
 
 #### Scenario: Parallel concurrency
 
 - **WHEN** `concurrency: :parallel` is configured
 - **THEN** the framework SHALL execute root `r` in every variant at the same time
 - **AND** SHALL start no variant on root `r + 1` before every variant has reached boundary `r` and the comparison has run
-- **AND** `result.concurrency` SHALL be `:parallel`
+- **AND** `report.concurrency` SHALL be `:parallel` in a failure report
 
 #### Scenario: Unknown concurrency value
 
@@ -73,8 +80,8 @@ The framework SHALL support three comparison modes: `:correctness`, `:performanc
 
 #### Scenario: Execution option is rejected
 
-- **WHEN** `PropertyDamage.Differential.run/1` is called with `execution:`
-- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` with the message "`execution:` was removed; Differential runs every target in lockstep, use `concurrency:` (`:serial`, the default, or `:parallel`)"
+- **WHEN** `PropertyDamage.run/1` is called with `execution:`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` with the message "`execution:` was removed; every target runs in lockstep, use `concurrency:` (`:serial`, the default, or `:parallel`)"
 - **AND** no command SHALL execute
 
 ### Requirement: Variant Isolation (DR-044)
@@ -105,7 +112,7 @@ Each target of a multi-target run SHALL run as a variant: one target over the sh
 
 ### Requirement: External Value Capture Per Target
 
-The framework SHALL capture `external()` server-generated values and resolve them into downstream commands during differential execution (DR-021), maintaining a separate placeholder registry per target so that the same consumer placeholder resolves to the value each target actually produced.
+The framework SHALL capture `external()` server-generated values and resolve them into downstream commands during a multi-target run (DR-021), maintaining a separate placeholder registry per target so that the same consumer placeholder resolves to the value each target actually produced.
 
 #### Scenario: Consumer resolved to its target's captured value
 
@@ -160,29 +167,34 @@ A variant SHALL observe a root as `{:ok, events}`, the events the command inject
 - **THEN** the framework SHALL compare that observation with the other variant's observation
 - **AND** SHALL NOT end the run unless the observations are not equivalent
 
-### Requirement: Divergence Recording
+### Requirement: A Divergence Is a Failure (DR-045)
 
-The framework SHALL record the first root at which a non-reference variant's observation is not equivalent to the reference's observation, and SHALL end that run at the boundary. The next run SHALL start. `Result.divergences` SHALL list the divergences oldest first.
+The framework SHALL treat the first root at which a non-reference variant's observation is not equivalent to the reference's observation under `equivalence:` as a failure of kind `:diverged`. The failure SHALL end the run at that boundary and the campaign: no later run starts. The framework SHALL shrink the command sequence, reproduce the shrunk sequence, and return `{:error, %PropertyDamage.FailureReport{}}` from `run/1`. There SHALL be no list of divergences and no run after a divergence. `{:ok, stats}` SHALL mean that no run failed in any kind.
 
-#### Scenario: Recording a divergence
+#### Scenario: Reporting a divergence
 
 - **WHEN** a root produces non-equivalent observations across variants
-- **THEN** the divergence SHALL be a map with the keys `seed`, `run` (0-based), `root` (0-based command index), `command`, `variant` (`%{index, name}` of the first non-equivalent variant in target order), `reference_result`, `divergent_result` and `results` (every variant's observation, keyed by target name)
-- **AND** the map SHALL NOT carry the keys `divergent_target` or `step`
+- **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :diverged`
+- **AND** `report.variant` SHALL be `%{index, name}` of the first non-equivalent variant in target order
+- **AND** `report.failed_at_index` SHALL be the 0-based index of the diverging root
+- **AND** the failure reason SHALL be a `%PropertyDamage.Failure{}` of type `Failure.Divergence` carrying `root`, `reference_result`, `divergent_result` and `results` (every variant's observation, keyed by target name)
 
-#### Scenario: Oldest first
+#### Scenario: A divergence is shrunk and reproduced
 
-- **WHEN** two runs of one campaign diverge
-- **THEN** `Result.divergences` SHALL list the divergence of the earlier run first
+- **WHEN** a divergence is found in a run
+- **THEN** the framework SHALL shrink the sequence with the reference's sequence as the shrink target, running every attempt through every target
+- **AND** SHALL accept a candidate only if it diverges in the same variant at the same or an earlier root
+- **AND** `FailureReport.shrunk_sequence/1` SHALL return the shrunk sequence
+- **AND** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries
 
-#### Scenario: Divergences are not shrunk
+#### Scenario: Record mode reports an earlier check failure
 
-- **WHEN** a divergence is recorded
-- **THEN** the framework SHALL NOT shrink the command sequence
+- **WHEN** `check_mode: :record` is configured and a check failure is recorded at or before the divergence root
+- **THEN** the report SHALL describe the check failure (`kind: :check_failed`) instead of the divergence
 
 ### Requirement: Per-Run Setup and Teardown (DR-044)
 
-`PropertyDamage.Differential.run/1` SHALL call `Adapter.setup/1` once per run for every target, in the variant's own process, one variant after another in target order. No variant SHALL execute root 0 before every setup has returned and every `@check at: :startup` check has passed. At the end of the run, whether it passed or failed, every variant that was set up SHALL finalize its run and tear its adapter down. An adapter's `setup/1` MUST be idempotent, because it can find state that an earlier run or a crashed run left behind.
+`PropertyDamage.run/1` SHALL call `Adapter.setup/1` once per run for every target, in the variant's own process, one variant after another in target order. No variant SHALL execute root 0 before every setup has returned and every `@check at: :startup` check has passed. At the end of the run, whether it passed or failed, every variant that was set up SHALL finalize its run and tear its adapter down. An adapter's `setup/1` MUST be idempotent, because it can find state that an earlier run or a crashed run left behind.
 
 #### Scenario: Setup once per run
 
@@ -199,13 +211,17 @@ The framework SHALL record the first root at which a non-reference variant's obs
 
 - **WHEN** a target's `setup/1` returns `{:error, reason}` or raises
 - **THEN** the framework SHALL end the run with a failure of kind `:setup_failed` that names that variant
+- **AND** `run/1` SHALL return `{:error, report}` with `report.kind == :setup_failed`, `report.variant` naming that variant and `report.failed_at_index` equal to `nil`
 - **AND** SHALL tear down the variants that were already set up
 - **AND** SHALL NOT call `teardown/1` of the variant whose setup failed
 - **AND** no command SHALL execute
+- **AND** an injector or mock setup that raises inside a target SHALL be a `:setup_failed` failure too
+- **AND** the setup failure SHALL go through `on_failure`, the regression handler and the seed-library append like any other failure
+- **AND** a setup failure SHALL NOT be shrunk
 
-### Requirement: Failures Name the Variant (DR-044)
+### Requirement: Failures Name the Variant (DR-044, DR-045)
 
-A failure SHALL be a map `%{kind, variant, run, root, reason}`, where `variant` is `%{index, name}`, `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is the `%PropertyDamage.Failure{}`, the exception the adapter raised, or the term `setup/1` returned. `kind` SHALL be one of `:check_failed`, `:setup_failed` and `:execution_failed`. A failure SHALL end the run at that boundary and SHALL end the `Differential.run/1` campaign: no later run starts, `Result.status` is `:failed`, `Result.failure` holds the failure, and divergences of earlier runs stay in `Result.divergences`. A failure SHALL NOT be compared.
+A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
 
 #### Scenario: Check failure
 
@@ -217,7 +233,8 @@ A failure SHALL be a map `%{kind, variant, run, root, reason}`, where `variant` 
 
 - **WHEN** a variant's adapter raises in `execute/3`, a command cannot be executed, or the variant process crashes
 - **THEN** the failure kind SHALL be `:execution_failed`
-- **AND** `reason` SHALL be the exception the adapter raised, where it raised
+- **AND** with one target, an adapter `{:error, _}` answer SHALL also be `:execution_failed`
+- **AND** with two or more targets, an adapter `{:error, _}` answer SHALL be an observation, not a failure of its own
 
 #### Scenario: No next root after a failure
 
@@ -225,9 +242,24 @@ A failure SHALL be a map `%{kind, variant, run, root, reason}`, where `variant` 
 - **THEN** no variant after the failing one in target order SHALL execute root `r`
 - **AND** no variant SHALL start root `r + 1`
 
+### Requirement: Failure Report Is the Result (DR-045)
+
+`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `coverage` when requested, and `metrics` keyed by target name under `compare: :performance | :both`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them) and `concurrency`, and SHALL NOT carry `adapter`. A `setup_once/1` or `setup_each/1` failure SHALL keep returning `{:error, %{setup_once_failed: _}}` or `{:error, %{setup_each_failed: _, run_number: _}}`. There SHALL be no `Differential.Result`.
+
+#### Scenario: Passing multi-target run
+
+- **GIVEN** a `targets:` list of `[{ImplA, name: "a"}, {ImplB, name: "b"}]`
+- **WHEN** no run fails
+- **THEN** `run/1` SHALL return `{:ok, stats}` with `stats.targets == [%{index: 0, name: "a"}, %{index: 1, name: "b"}]`
+
+#### Scenario: Reproduction names the targets
+
+- **WHEN** a failure report comes from a run with non-default target names, configs or `concurrency:`
+- **THEN** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries (non-default `name:` and `config:`) and the non-default `concurrency:`
+
 ### Requirement: Per-Target Injectors, Mocks and Pollers in Multi-Target Runs (DR-044)
 
-`PropertyDamage.Differential.run/1` SHALL honor each target's `injectors:` and `mocks:`: the framework SHALL set them up per run for that variant only, and their events SHALL reach only that variant's event queue. `runtime.start_poller` SHALL be allowed in multi-target runs, and a poller's events SHALL reach only the variant that started it.
+`PropertyDamage.run/1` SHALL honor each target's `injectors:` and `mocks:` in every run, one target or several: the framework SHALL set them up per run for that variant only, and their events SHALL reach only that variant's event queue. `runtime.start_poller` SHALL be allowed in multi-target runs, and a poller's events SHALL reach only the variant that started it.
 
 #### Scenario: Injector events stay in their variant
 
@@ -273,14 +305,14 @@ Each target SHALL be an entry of the `targets:` option: either an adapter module
 
 ### Requirement: The First Target Is the Reference (DR-043)
 
-The first entry of the `targets:` list SHALL be the reference target. The framework MUST NOT accept a per-target `role:` option, so a list has exactly one reference by construction. `PropertyDamage.Differential.Result` SHALL report the reference and the targets as `%{index, name}` pairs.
+The first entry of the `targets:` list SHALL be the reference target. The framework MUST NOT accept a per-target `role:` option, so a list has exactly one reference by construction. The failure report's `variant` and `targets` and the stats' `targets` SHALL identify targets by `%{index, name}`; the reference has index 0. `setup_once/1`, `setup_each/1` and their teardowns SHALL receive the reference target's config.
 
 #### Scenario: Reference by position
 
 - **GIVEN** a `targets:` list of `[{ImplA, name: "a"}, {ImplB, name: "b"}]`
-- **WHEN** a differential run completes
-- **THEN** the result's `reference` SHALL be `%{index: 0, name: "a"}`
-- **AND** its `targets` SHALL be `[%{index: 0, name: "a"}, %{index: 1, name: "b"}]`
+- **WHEN** a run of the list diverges in the second target
+- **THEN** `report.variant` SHALL be `%{index: 1, name: "b"}`
+- **AND** the reference SHALL be the target named "a", at index 0
 
 #### Scenario: Role option is removed
 

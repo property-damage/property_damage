@@ -21,19 +21,21 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 
 - **WHEN** a command sequence starts execution
 - **THEN** the system SHALL emit `[:property_damage, :sequence, :start]` with run_number, command_count, and branching flag
-- **AND** when the sequence completes, it SHALL emit `[:property_damage, :sequence, :stop]` with duration, success flag, and commands_executed count
+- **AND** when the sequence completes, it SHALL emit `[:property_damage, :sequence, :stop]` with duration, success flag, commands_executed count and `variant`, the failing target (`nil` when the run passed) (DR-045)
 
 #### Scenario: Command execution events
 
 - **WHEN** a command is executed against the SUT
-- **THEN** the system SHALL emit `[:property_damage, :command, :start]` with command module, index, and run_number
-- **AND** when the command completes, it SHALL emit `[:property_damage, :command, :stop]` with duration, success flag, and events_count
+- **THEN** the system SHALL emit `[:property_damage, :command, :start]` with command module, index, run_number and `variant` (`%{index, name}`)
+- **AND** when the command completes, it SHALL emit `[:property_damage, :command, :stop]` with duration, success flag, events_count and `variant`
+- **AND** shrink attempts and the reproduction run SHALL use `run_number: 0` (DR-045)
 
 #### Scenario: Check execution events
 
 - **WHEN** a check is evaluated
-- **THEN** the system SHALL emit `[:property_damage, :check, :start]` with check_name and projection module
-- **AND** when the check completes, it SHALL emit `[:property_damage, :check, :stop]` with duration, passed flag, and optional message
+- **THEN** the system SHALL emit `[:property_damage, :check, :start]` with check_name, projection module, `variant` and run_number
+- **AND** when the check completes, it SHALL emit `[:property_damage, :check, :stop]` with duration, passed flag, optional message, `variant` and run_number
+- **AND** `@eventually` polling SHALL emit no check events (DR-045)
 
 #### Scenario: Shrinking events
 
@@ -45,7 +47,7 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 #### Scenario: Coarse progress and result events
 
 - **WHEN** a long-running operation reports progress through the unified projection (DR-022) and a telemetry handler is attached
-- **THEN** the system SHALL emit a coarse `[:property_damage, <operation>, :progress]` event for each intermediate update and `[:property_damage, <operation>, :result]` at completion, where `<operation>` is one of `:test_run`, `:load_test`, `:mutation`, or `:differential`
+- **THEN** the system SHALL emit a coarse `[:property_damage, <operation>, :progress]` event for each intermediate update and `[:property_damage, <operation>, :result]` at completion, where `<operation>` is one of `:test_run`, `:load_test` or `:mutation`; no `:differential` operation or event exists (DR-045)
 - **AND** measurements SHALL be `%{at: integer(), elapsed_ms: non_neg_integer()}` and metadata SHALL be `%{data: <payload struct>, run_id: term()}`
 - **AND** for `run/1` these events SHALL be distinct from and additional to the fine-grained `sequence`/`command`/`check`/`shrink` events, which remain unchanged
 - **AND** these events SHALL fire only when a handler is attached, preserving the zero-cost-when-unobserved guarantee
@@ -132,7 +134,7 @@ The system SHALL expose the catalog of invariants a model verifies and report wh
 
 ### Requirement: Progress Reporting
 
-The system SHALL report progress for long-running operations (`PropertyDamage.run/1`, `PropertyDamage.Mutation.run/1`, `PropertyDamage.Differential.run/1`, and the load-test runner) through a single derived projection: a `%PropertyDamage.Progress{}` value fanned out to zero or more consumers. The projection SHALL be a view of authoritative state, never its source; an operation's return value remains the source of truth, and a terminal `*Result` payload carries a copy of it for consumers.
+The system SHALL report progress for long-running operations (`PropertyDamage.run/1`, `PropertyDamage.Mutation.run/1` and the load-test runner) through a single derived projection: a `%PropertyDamage.Progress{}` value fanned out to zero or more consumers. The projection SHALL be a view of authoritative state, never its source; an operation's return value remains the source of truth, and a terminal `*Result` payload carries a copy of it for consumers.
 
 #### Scenario: Progress envelope and payloads
 
@@ -153,7 +155,7 @@ The system SHALL report progress for long-running operations (`PropertyDamage.ru
 
 #### Scenario: Synchronous fan-out for batch operations
 
-- **WHEN** a batch operation (`run/1`, `Mutation.run/1`, `Differential.run/1`) reports progress
+- **WHEN** a batch operation (`run/1`, `Mutation.run/1`) reports progress
 - **THEN** consumers SHALL be invoked synchronously, in order, in the calling process, completing before the operation returns (a slow consumer only lengthens the run)
 
 #### Scenario: Non-blocking dispatch for load tests
@@ -166,7 +168,7 @@ The system SHALL report progress for long-running operations (`PropertyDamage.ru
 #### Scenario: Verbose output is a consumer
 
 - **WHEN** `verbose: true` is set
-- **THEN** the system SHALL install a built-in printing consumer that renders the progress stream to stdout: for `run/1` the run header (model, adapter, max_runs, max_commands, optional seed), per-run progress (current run number out of total, command count, and branch info if applicable, updated in-place with a carriage return), and the success or failure summary; for mutation and differential a status line per item
+- **THEN** the system SHALL install a built-in printing consumer that renders the progress stream to stdout: for `run/1` the run header (model, targets, max_runs, max_commands, optional seed), per-run progress (current run number out of total, command count, and branch info if applicable, updated in-place with a carriage return), and the success or failure summary; for mutation a status line per item
 - **AND** the printed output SHALL be identical to the prior `verbose:` output
 
 #### Scenario: User callback is a consumer
@@ -225,3 +227,16 @@ The system SHALL generate visual sequence diagrams from test executions in Merma
 
 - **WHEN** a diagram is generated
 - **THEN** the system SHALL accept options for title, show_state, show_timestamps, max_value_length (default 50), highlight_failure, and show_branches
+
+### Requirement: Progress and Telemetry Name the Variant (DR-045)
+
+Run telemetry metadata SHALL carry `targets: [%{index, name, adapter}]` instead of `adapter:`. `Progress.RunResult` SHALL carry `kind` and `variant`, and the verbose printer SHALL print the failure kind and the target name. `Progress.Printer.consumer/3` and `print_header/3` SHALL take the target list. Nothing SHALL be emitted unless a handler or consumer is attached.
+
+#### Scenario: Command event carries the variant
+- **WHEN** a telemetry handler is attached and a run of two targets executes a command in the second
+- **THEN** the `[:property_damage, :command, :stop]` event metadata SHALL carry `variant: %{index: 1, name: <name>}`
+
+#### Scenario: Differential events are removed
+- **WHEN** a multi-target run reports progress
+- **THEN** it SHALL use the `:test_run` operation
+- **AND** no `[:property_damage, :differential, :progress]` or `[:property_damage, :differential, :result]` event SHALL be emitted
