@@ -113,6 +113,28 @@ defmodule PropertyDamage.LockstepShrinkTest do
     def check_projections, do: [ArmGuard]
   end
 
+  # Divides by each Noise's n, which argument shrinking halves toward 0.
+  defmodule DivideTally do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{noise: 0}
+
+    @impl true
+    def apply(state, %Noise{n: n}), do: %{state | noise: state.noise + div(1, n)}
+    def apply(state, _), do: state
+  end
+
+  defmodule DivideModel do
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: [{Noise, weight: 3}, Flip]
+
+    @impl true
+    def command_sequence_projection, do: DivideTally
+  end
+
   # Config keys:
   #
   #   :skew       :after_two_noise | :always - answer Flip with value 1 instead
@@ -252,6 +274,23 @@ defmodule PropertyDamage.LockstepShrinkTest do
       assert Enum.map(shrunk, & &1.__struct__) == [Noise, Noise, Flip]
       assert report.failed_at_index == 2
       assert report.shrink_iterations > 0
+    end
+
+    test "rejects a candidate whose validation raises" do
+      seed =
+        find_seed(DivideModel, fn commands ->
+          root = divergent_root(commands)
+          is_integer(root) and root >= 3
+        end)
+
+      assert {:error, %FailureReport{} = report} = run(DivideModel, targets(), seed: seed)
+
+      assert report.kind == :diverged
+      assert report.variant == %{index: 1, name: "cand"}
+
+      shrunk = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
+      assert Enum.map(shrunk, & &1.__struct__) == [Noise, Noise, Flip]
+      assert [%Noise{n: 1}, %Noise{n: 1}, %Flip{}] = shrunk
     end
 
     test "rejects a candidate that fails with another kind in another target" do

@@ -1014,8 +1014,14 @@ defmodule PropertyDamage.Shrinker do
     |> Enum.map(fn {cmd, _idx} -> cmd end)
   end
 
+  # Validation runs the model's own projection, simulator and when: predicates
+  # over a candidate the shrinker made up, such as an argument halved to 0 or a
+  # key no earlier command created. Model code may raise on such a candidate;
+  # that makes the candidate invalid, not the run a failure.
   defp valid_candidate?(commands, state) do
     Validator.valid_sequence?(commands, state.model)
+  rescue
+    _ -> false
   end
 
   # A fresh mint epoch for the next shrink attempt (DR-034). Monotonic across

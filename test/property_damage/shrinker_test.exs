@@ -1201,4 +1201,96 @@ defmodule PropertyDamage.ShrinkerTest do
       assert total > 100
     end
   end
+
+  # ============================================================================
+  # A candidate whose validation raises
+  # ============================================================================
+
+  # Divide's divisor shrinks toward 0, and the model's projection divides by it,
+  # so argument shrinking makes up a candidate the projection raises on.
+  defmodule Divide do
+    use PropertyDamage.Command
+    defstruct [:by]
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{by: StreamData.integer(5..9)}
+      |> PropertyDamage.Generator.merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+
+  defmodule Divided, do: defstruct([:by])
+
+  defmodule Quotient do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{quotient: nil}
+
+    @impl true
+    def apply(state, %Divide{by: by}), do: %{state | quotient: div(100, by)}
+    def apply(state, _), do: state
+  end
+
+  defmodule NoDivisions do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{}
+
+    @impl true
+    def apply(state, _), do: state
+
+    @check every: Divided
+    def assert_no_division(_state, _event), do: PropertyDamage.fail!("divided")
+  end
+
+  defmodule DivideModel do
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: [Divide]
+
+    @impl true
+    def command_sequence_projection, do: Quotient
+
+    @impl true
+    def check_projections, do: [NoDivisions]
+  end
+
+  defmodule DivideAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(%Divide{by: by}, _ctx, _runtime), do: {:ok, [%Divided{by: by}]}
+  end
+
+  describe "a candidate whose validation raises" do
+    test "is rejected as invalid, and run/1 still returns the shrunk failure" do
+      assert {:error, %PropertyDamage.FailureReport{} = report} =
+               PropertyDamage.run(
+                 model: DivideModel,
+                 targets: [{DivideAdapter, name: "only", config: %{}}],
+                 max_runs: 1,
+                 max_commands: 5,
+                 seed: 1,
+                 validate: false
+               )
+
+      assert Failure.kind(report.failure_reason) == :check_failed
+
+      shrunk =
+        report |> PropertyDamage.FailureReport.shrunk_sequence() |> Sequence.to_list()
+
+      # Halving 5..9 reaches 1; the next halving, 0, makes the projection raise.
+      assert shrunk == [%Divide{by: 1}]
+    end
+  end
 end
