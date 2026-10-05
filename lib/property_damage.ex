@@ -2167,14 +2167,14 @@ defmodule PropertyDamage do
       end
 
   4. To make a later command consume a server-generated value, route a
-     placeholder out of state in the model's `with:` function. During
+     placeholder out of state in the model's `overrides:` function. During
      generation the projection holds placeholders, which
      `PropertyDamage.Generator.external_from/2` surfaces as a seeded choice:
 
       # in the model's command list
       {ViewOrder,
        when: fn state -> map_size(state.orders) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          %{order_id: PropertyDamage.Generator.external_from(state, path: [:id])}
        end}
 
@@ -2232,7 +2232,7 @@ defmodule PropertyDamage do
 
   Generation MUST be deterministic in `(seed, model, generation opts)`: all
   nondeterminism (clock, `:rand`, client-minted ids, environment) belongs
-  behind an execution-time seam, never in a generator / `when:` / `with:` /
+  behind an execution-time seam, never in a generator / `when:` / `overrides:` /
   projection. This realizes the model's generated sequence twice at each of N
   seeds and asserts the two are structurally equal, catching impurity at
   dev/CI time before it breaks `seed: N` reproduction and

@@ -104,7 +104,7 @@ result = PropertyDamage.run(
 ```
 
 > **If the seed does not reproduce**, generation is probably not a pure function
-> of the seed — an impure generator, `when:`/`with:`, or projection. Confirm and
+> of the seed — an impure generator, `when:`/`overrides:`, or projection. Confirm and
 > localize it with `mix pd.audit MyModel`; see the
 > [deterministic generation guide](deterministic_generation.md).
 

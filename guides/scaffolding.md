@@ -151,7 +151,7 @@ Generating model...
 Next steps:
   1. Review and customize generators in command generator/1 callbacks
   2. Define events/3 (command, status, response) to map responses to events
-  3. Add when:/with: options in Model's commands() for preconditions
+  3. Add when:/overrides: options in Model's commands() for preconditions
   4. Implement simulate/2 in Model for expected events
   5. Configure authentication in adapter
 ```
@@ -314,7 +314,7 @@ generated files' "next steps" footer lists exactly what is left:
    `command_sequence_projection/0`, and list check projections.
 
 4. **Add a simulator** (`simulate/2`) if you want state-dependent command
-   selection (`when:`/`with:`) during the symbolic phase.
+   selection (`when:`/`overrides:`) during the symbolic phase.
 
 5. **Point the adapter at your API** via `adapter_config: %{base_url: ...}` and
    any auth keys.

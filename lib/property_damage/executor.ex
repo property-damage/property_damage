@@ -1054,7 +1054,7 @@ defmodule PropertyDamage.Executor do
     Suggestions:
       - Ensure #{inspect(model)}.commands/0 returns a list of command modules, \
     {module, weight} tuples, or %{command: module, ...} maps.
-      - Give each command a positive integer weight, and check any `when:`/`with:` \
+      - Give each command a positive integer weight, and check any `when:`/`overrides:` \
     overrides have the expected shape.
       - Verify every listed command module is defined and uses `PropertyDamage.Command`.
     """

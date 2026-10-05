@@ -4,7 +4,7 @@ defmodule Mix.Tasks.Pd.Audit do
 
   Generation MUST be deterministic in `(seed, model, generation opts)`: all
   nondeterminism (the clock, `:rand`, client-minted ids, environment) belongs
-  behind an execution-time seam, never inside a generator, a `when:`/`with:`
+  behind an execution-time seam, never inside a generator, a `when:`/`overrides:`
   predicate, the command_sequence_projection, or the simulator. This task
   realizes the model's generated sequence twice at each of N seeds and checks
   the two are structurally identical, so impurity is caught at dev/CI time

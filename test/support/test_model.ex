@@ -19,7 +19,7 @@ defmodule PropertyDamage.Test.FullModel do
       {ViewItem,
        weight: 2,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end},
@@ -122,7 +122,7 @@ defmodule PropertyDamage.Test.MinimalModel do
       CreateItem,
       {ViewItem,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end}
@@ -166,7 +166,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
       CreateItem,
       {ViewItem,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end}
@@ -211,7 +211,7 @@ defmodule PropertyDamage.Test.WeightedModel do
       {ViewItem,
        weight: 1,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end}

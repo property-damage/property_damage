@@ -2,12 +2,12 @@ defmodule GiteaBench.Commands do
   @moduledoc """
   Transport-agnostic command intents. Each command is a pure semantic operation;
   all state-dependent wiring (which repo to act on, the next unique name, which
-  open issue to close) lives in `GiteaBench.Model`'s `when:`/`with:` options, not
+  open issue to close) lives in `GiteaBench.Model`'s `when:`/`overrides:` options, not
   here. The same struct is handed to whichever adapter is executing, so a command
   carries no notion of API-vs-UI.
 
   Base generators are intentionally `nil`: every field a command needs is supplied
-  by the model's `with:` override, derived from the generation-time projection
+  by the model's `overrides:` option, derived from the generation-time projection
   state (the standard PropertyDamage pattern, e.g. `test/support/test_model.ex`).
   """
 

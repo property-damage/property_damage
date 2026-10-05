@@ -4,7 +4,7 @@ defmodule PropertyDamage.GeneratorTest do
 
   alias PropertyDamage.Generator
 
-  # Fixtures for `with:` override no-op detection. CreateItem's fields are
+  # Fixtures for `overrides:` option no-op detection. CreateItem's fields are
   # [:name, :quantity]; an override targeting any other key is ineffective.
   defmodule UnknownKeyMapModel do
     @behaviour PropertyDamage.Model
@@ -12,7 +12,7 @@ defmodule PropertyDamage.GeneratorTest do
     alias PropertyDamage.Test.Projections.ModelState
 
     @impl true
-    def commands, do: [{CreateItem, with: %{bogus_field: StreamData.constant(1)}}]
+    def commands, do: [{CreateItem, overrides: %{bogus_field: StreamData.constant(1)}}]
 
     @impl true
     def command_sequence_projection, do: ModelState
@@ -25,7 +25,7 @@ defmodule PropertyDamage.GeneratorTest do
 
     @impl true
     def commands,
-      do: [{CreateItem, with: fn _state -> %{bogus_field: StreamData.constant(1)} end}]
+      do: [{CreateItem, overrides: fn _state -> %{bogus_field: StreamData.constant(1)} end}]
 
     @impl true
     def command_sequence_projection, do: ModelState
@@ -37,7 +37,7 @@ defmodule PropertyDamage.GeneratorTest do
     alias PropertyDamage.Test.Projections.ModelState
 
     @impl true
-    def commands, do: [{CreateItem, with: %{name: StreamData.constant("fixed")}}]
+    def commands, do: [{CreateItem, overrides: %{name: StreamData.constant("fixed")}}]
 
     @impl true
     def command_sequence_projection, do: ModelState
@@ -389,27 +389,27 @@ defmodule PropertyDamage.GeneratorTest do
     end
   end
 
-  describe "with: override no-op detection" do
+  describe "overrides: override no-op detection" do
     alias PropertyDamage.Sequence
     alias PropertyDamage.Test.Commands.CreateItem
 
-    test "raises a clear error when a static with: map targets an unknown field" do
+    test "raises a clear error when a static overrides: map targets an unknown field" do
       generator = Generator.generate_sequence(UnknownKeyMapModel, max_commands: 5)
 
-      assert_raise ArgumentError, ~r/with:.*CreateItem.*bogus_field/s, fn ->
+      assert_raise ArgumentError, ~r/overrides:.*CreateItem.*bogus_field/s, fn ->
         Enum.take(generator, 1)
       end
     end
 
-    test "raises a clear error when a with: function targets an unknown field" do
+    test "raises a clear error when a overrides: function targets an unknown field" do
       generator = Generator.generate_sequence(UnknownKeyFunModel, max_commands: 5)
 
-      assert_raise ArgumentError, ~r/with:.*CreateItem.*bogus_field/s, fn ->
+      assert_raise ArgumentError, ~r/overrides:.*CreateItem.*bogus_field/s, fn ->
         Enum.take(generator, 1)
       end
     end
 
-    test "accepts a with: override that targets a real command field" do
+    test "accepts a overrides: override that targets a real command field" do
       generator = Generator.generate_sequence(ValidOverrideModel, max_commands: 5)
       seq = generator |> Enum.take(1) |> hd()
 

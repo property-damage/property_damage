@@ -46,7 +46,7 @@ Models SHALL accept commands in multiple formats. All formats SHALL be normalize
 
 ### Requirement: Command Wiring Options
 
-Models SHALL support three wiring options for commands: `:weight` for relative selection frequency, `:when` for precondition filtering, and `:with` for generator overrides.
+Models SHALL support three wiring options for commands: `:weight` for relative selection frequency, `:when` for precondition filtering, and `:overrides` for generator overrides.
 
 #### Scenario: Weight controls selection frequency
 - **WHEN** command A has weight 3 and command B has weight 1
@@ -63,25 +63,25 @@ Models SHALL support three wiring options for commands: `:weight` for relative s
 - **THEN** it is always eligible for selection regardless of state
 
 #### Scenario: With function provides generator overrides
-- **WHEN** a command has a `with:` function
+- **WHEN** a command has an `overrides:` function
 - **THEN** the function receives the current projection state
 - **AND** returns a map of overrides passed to the command's generator
 - **AND** this enables state-dependent parameterization (e.g., selecting existing refs)
 
 #### Scenario: With defaults to empty map
-- **WHEN** a command does not specify a `with:` option
+- **WHEN** a command does not specify an `overrides:` option
 - **THEN** an empty map is passed as overrides to the command's generator
 
 ### Requirement: Command Sequence Generation Loop
 
-The framework SHALL generate command sequences through an iterative loop: check state, filter commands by `when:` predicates, select a command by weight, generate an instance using `with:` overrides, simulate execution to predict events, apply predicted events to the projection, and repeat.
+The framework SHALL generate command sequences through an iterative loop: check state, filter commands by `when:` predicates, select a command by weight, generate an instance using `overrides:` values, simulate execution to predict events, apply predicted events to the projection, and repeat.
 
 #### Scenario: Full generation cycle
 - **WHEN** the framework generates a command sequence
 - **THEN** it initializes the command sequence projection via `init/0`
 - **AND** filters available commands by evaluating each `when:` predicate against the current state
 - **AND** selects one command from valid candidates using weighted random selection
-- **AND** generates command data using the command's generator with `with:` overrides
+- **AND** generates command data using the command's generator with `overrides:` values
 - **AND** calls the simulator to predict resulting events
 - **AND** applies predicted events to the projection to update state
 - **AND** repeats until the configured maximum commands or `terminate_early?/3` returns true
@@ -210,7 +210,7 @@ Models SHALL NOT know transport details (HTTP, database, etc.). Commands SHALL N
 
 #### Scenario: Commands are reusable across models
 - **WHEN** the same command module is used in two different models
-- **AND** each model provides different `when:` and `with:` configurations
+- **AND** each model provides different `when:` and `overrides:` configurations
 - **THEN** the command works correctly in both models without modification
 
 ### Requirement: Command Spec Resolution

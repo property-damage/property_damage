@@ -47,7 +47,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
       CreateItem,
       {ViewItem,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end}

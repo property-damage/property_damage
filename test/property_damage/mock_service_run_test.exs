@@ -184,7 +184,7 @@ defmodule PropertyDamage.MockServiceRunTest do
     @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
     @impl true
-    def commands, do: [{Charge, with: fn _ -> %{amount: StreamData.constant(80)} end}]
+    def commands, do: [{Charge, overrides: fn _ -> %{amount: StreamData.constant(80)} end}]
     @impl true
     def command_sequence_projection, do: ChargeState
     @impl true

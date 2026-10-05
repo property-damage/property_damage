@@ -155,7 +155,7 @@ end
 ### 5. Define a Model
 
 The model ties everything together and owns the state-dependent logic:
-selection weights, `when:` preconditions, and `with:` generator overrides:
+selection weights, `when:` preconditions, and `overrides:` generator overrides:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -169,7 +169,7 @@ defmodule MyApp.TestModel do
       # {MyApp.Commands.DeleteUser,
       #  weight: 1,
       #  when: fn state -> map_size(state.users) > 0 end,
-      #  with: fn state -> %{id: StreamData.member_of(Map.keys(state.users))} end}
+      #  overrides: fn state -> %{id: StreamData.member_of(Map.keys(state.users))} end}
     ]
   end
 

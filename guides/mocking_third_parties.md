@@ -180,7 +180,7 @@ defmodule PaymentTestModel do
       {SubmitPayment,
         weight: 3,
         when: fn s -> map_size(s.orders) > 0 end,
-        with: fn s -> %{order_id: StreamData.member_of(Map.keys(s.orders))} end},
+        overrides: fn s -> %{order_id: StreamData.member_of(Map.keys(s.orders))} end},
       {ConfigurePaymentProvider, weight: 1}   # Low weight -- mostly success
     ]
   end

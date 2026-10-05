@@ -37,7 +37,7 @@ defmodule PropertyDamage.Sequence.Validator do
     command_sequence_projection = model.command_sequence_projection()
     initial_state = command_sequence_projection.init()
 
-    # Normalize the model's commands to get when:/with: options
+    # Normalize the model's commands to get when:/overrides: options
     normalized_commands =
       model.commands()
       |> Model.normalize_commands()

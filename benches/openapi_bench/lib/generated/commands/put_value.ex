@@ -7,7 +7,7 @@ defmodule OpenapiBench.Generated.Commands.PutValue do
   Generated from OpenAPI operationId: putValue
 
   Note: Preconditions and state-dependent overrides should be defined in the Model's
-  commands/0 using `when:` and `with:` options. Simulate logic belongs in the Model's
+  commands/0 using `when:` and `overrides:` options. Simulate logic belongs in the Model's
   `simulate/2` callback.
   """
 

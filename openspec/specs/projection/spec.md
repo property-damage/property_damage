@@ -267,7 +267,7 @@ Projections SHALL serve two distinct roles in models. The command sequence proje
 #### Scenario: Command sequence projection drives generation
 - **WHEN** a projection is designated as the command sequence projection
 - **THEN** its state is passed to `when:` predicates for command filtering
-- **AND** its state is passed to `with:` functions for generator overrides
+- **AND** its state is passed to `overrides:` functions for generator overrides
 - **AND** its state is passed to the simulator for event prediction
 
 #### Scenario: Check projections verify invariants

@@ -60,7 +60,7 @@ defmodule MyApp.TestModel do
       {CancelOrder,
         weight: 1,
         when: fn s -> map_size(s.orders) > 0 end,
-        with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+        overrides: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
     ]
   end
 

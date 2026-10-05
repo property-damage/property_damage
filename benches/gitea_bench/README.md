@@ -9,7 +9,7 @@ against [Gitea](https://about.gitea.com), a self-hosted git forge whose every
 operation exists both as a REST API call and as an equivalent web-UI interaction:
 
 - `GiteaBench.Model` defines a chain of intents — CreateUser → CreateRepo →
-  CreateIssue → CreateLabel → AddLabelToIssue → CloseIssue — with `when:`/`with:`
+  CreateIssue → CreateLabel → AddLabelToIssue → CloseIssue — with `when:`/`overrides:`
   wiring the dependencies and `GiteaBench.State` declaring the invariants. It never
   mentions API or UI.
 - `GiteaBench.ApiAdapter` realizes each intent against Gitea's **REST API**.

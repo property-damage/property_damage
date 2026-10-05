@@ -98,7 +98,7 @@ defmodule PropertyDamage.ExternalE2ETest do
         Create,
         {Use,
          when: fn state -> state.created != [] end,
-         with: fn state -> %{target: Generator.external_from(state, path: [:id])} end}
+         overrides: fn state -> %{target: Generator.external_from(state, path: [:id])} end}
       ]
     end
 

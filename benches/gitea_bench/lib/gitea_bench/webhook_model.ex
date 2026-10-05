@@ -30,12 +30,13 @@ defmodule GiteaBench.WebhookModel do
   @impl true
   def commands do
     [
-      {CreateUser, weight: 3, with: &Model.user_overrides/1},
-      {CreateRepo, weight: 2, when: &Model.has_users?/1, with: &Model.repo_overrides/1},
-      {CreateIssue, weight: 3, when: &Model.has_repos?/1, with: &Model.issue_overrides/1},
-      {CreateLabel, weight: 1, when: &Model.has_repos?/1, with: &Model.label_overrides/1},
-      {AddLabelToIssue, weight: 1, when: &Model.can_assign?/1, with: &Model.assign_overrides/1},
-      {CloseIssue, weight: 3, when: &Model.has_open_issue?/1, with: &Model.close_overrides/1}
+      {CreateUser, weight: 3, overrides: &Model.user_overrides/1},
+      {CreateRepo, weight: 2, when: &Model.has_users?/1, overrides: &Model.repo_overrides/1},
+      {CreateIssue, weight: 3, when: &Model.has_repos?/1, overrides: &Model.issue_overrides/1},
+      {CreateLabel, weight: 1, when: &Model.has_repos?/1, overrides: &Model.label_overrides/1},
+      {AddLabelToIssue,
+       weight: 1, when: &Model.can_assign?/1, overrides: &Model.assign_overrides/1},
+      {CloseIssue, weight: 3, when: &Model.has_open_issue?/1, overrides: &Model.close_overrides/1}
     ]
   end
 

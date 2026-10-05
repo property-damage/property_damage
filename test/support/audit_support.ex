@@ -69,9 +69,9 @@ end
 
 defmodule PropertyDamage.Test.Audit.ImpureSelectionModel do
   @moduledoc """
-  Model whose `with:` override reads process-global state, changing the
+  Model whose `overrides:` option reads process-global state, changing the
   generated command's arguments across two same-seed generations. Proves the
-  audit catches impurity in a `with:` predicate, not only in a raw generator.
+  audit catches impurity in an `overrides:` function, not only in a raw generator.
   """
   @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
@@ -83,7 +83,7 @@ defmodule PropertyDamage.Test.Audit.ImpureSelectionModel do
   def commands do
     [
       {Stable,
-       with: fn _state ->
+       overrides: fn _state ->
          # IMPURE: reads process-global state at generation time.
          %{amount: System.unique_integer([:monotonic, :positive])}
        end}

@@ -57,7 +57,7 @@ something the API didn't."
 
 Write commands at the altitude of *what the user means*, not *how a transport does
 it*. The Gitea chain is `CreateUser → CreateRepo → CreateIssue → CreateLabel →
-AddLabelToIssue → CloseIssue`, wired together with `when:`/`with:` so each command
+AddLabelToIssue → CloseIssue`, wired together with `when:`/`overrides:` so each command
 depends on state an earlier one produced (see
 [Writing Commands](writing_commands.md)). None of it knows about HTTP verbs or CSS
 selectors:
@@ -65,9 +65,9 @@ selectors:
 ```elixir
 def commands do
   [
-    {CreateUser, weight: 3, with: &user_overrides/1},
-    {CreateRepo, weight: 3, when: &has_users?/1, with: &repo_overrides/1},
-    {CreateIssue, weight: 3, when: &has_repos?/1, with: &issue_overrides/1},
+    {CreateUser, weight: 3, overrides: &user_overrides/1},
+    {CreateRepo, weight: 3, when: &has_users?/1, overrides: &repo_overrides/1},
+    {CreateIssue, weight: 3, when: &has_repos?/1, overrides: &issue_overrides/1},
     # ...
   ]
 end
@@ -242,6 +242,6 @@ test the transports separately.
 
 - [Differential Testing](differential_testing.md) — the full `Differential.run/1`
   API, equivalence strategies, and execution modes
-- [Writing Commands](writing_commands.md) — `when:`/`with:` wiring and `external()`
+- [Writing Commands](writing_commands.md) — `when:`/`overrides:` wiring and `external()`
 - [Integration Testing](integration_testing.md) — driving live services
 - `benches/gitea_bench/` — the complete, runnable example this guide is drawn from

@@ -199,7 +199,7 @@ defmodule Cache.ChaosModel do
       {GetKey,
        weight: 4,
        when: fn state -> map_size(state.store) > 0 end,
-       with: fn state -> %{key: StreamData.member_of(Map.keys(state.store))} end},
+       overrides: fn state -> %{key: StreamData.member_of(Map.keys(state.store))} end},
       # Low weight = occasional faults.
       {NetworkLatency, weight: 1}
     ]
@@ -272,7 +272,7 @@ PropertyDamage.Nemesis.simulated_event?(event)
 
 To make the fault real, point the nemesis at a running Toxiproxy. The repo ships a
 ready-made recipe at `benches/redis_bench/docker-compose.yml` (Redis behind a
-Toxiproxy on control port `8474`); bring it up with:
+Toxiproxy on control port `8474`); bring it up overrides:
 
 ```bash
 cd benches/redis_bench && docker compose up -d

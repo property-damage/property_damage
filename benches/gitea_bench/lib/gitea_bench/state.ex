@@ -2,7 +2,7 @@ defmodule GiteaBench.State do
   @moduledoc """
   The model's view of the forge, doubling as the check projection.
 
-  During generation it is fed the simulator's predicted events so `when:`/`with:`
+  During generation it is fed the simulator's predicted events so `when:`/`overrides:`
   can pick coherent targets; during execution it is fed the adapters' real events
   and the `@check` functions check fidelity. Because every field it keys on
   (login, `owner/name`, per-repo issue number, label names) is client-chosen and

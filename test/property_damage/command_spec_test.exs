@@ -99,7 +99,7 @@ defmodule PropertyDamage.CommandSpecTest do
       assert defaults.shrink == :neutral
       assert is_function(defaults.when, 1)
       assert defaults.when.(%{}) == true
-      assert defaults.with == %{}
+      assert defaults.overrides == %{}
       assert defaults.weight == 1
       assert defaults.observables == []
       assert defaults.idempotent == true

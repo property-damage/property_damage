@@ -29,7 +29,7 @@ Commands SHALL define a `generator/1` callback that accepts an overrides map and
 
 ### Requirement: Command Spec Pattern
 
-Commands SHALL support a `command_spec/1` callback that returns a complete specification map. The spec map SHALL contain the keys `:command`, `:execution`, `:settle`, `:shrink`, `:when`, `:with`, `:weight`, `:observables`, `:idempotent`, and `:acceptable_retry_events`. `command_spec/1` is the single surface for a command's static metadata (DR-028); there are no separate per-metadata callbacks.
+Commands SHALL support a `command_spec/1` callback that returns a complete specification map. The spec map SHALL contain the keys `:command`, `:execution`, `:settle`, `:shrink`, `:when`, `:overrides`, `:weight`, `:observables`, `:idempotent`, and `:acceptable_retry_events`. `command_spec/1` is the single surface for a command's static metadata (DR-028); there are no separate per-metadata callbacks.
 
 #### Scenario: Default spec from use macro
 - **WHEN** a module uses `PropertyDamage.Command` without options
@@ -39,7 +39,7 @@ Commands SHALL support a `command_spec/1` callback that returns a complete speci
 - **AND** `:shrink` defaults to `:neutral`
 - **AND** `:weight` defaults to `1`
 - **AND** `:when` defaults to a function that always returns true
-- **AND** `:with` defaults to an empty map
+- **AND** `:overrides` defaults to an empty map
 - **AND** `:observables` defaults to an empty list
 - **AND** `:idempotent` defaults to `true`
 - **AND** `:acceptable_retry_events` defaults to an empty list
@@ -218,7 +218,7 @@ Commands SHALL define WHAT operations exist and their fields. Models SHALL defin
 
 #### Scenario: Command reuse across models
 - **WHEN** two different Models reference the same command module
-- **AND** each Model provides different `when:` predicates and `with:` overrides
+- **AND** each Model provides different `when:` predicates and `overrides:` values
 - **THEN** the command works correctly in both contexts without modification
 
 #### Scenario: Command independence from adapter

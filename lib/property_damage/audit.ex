@@ -8,7 +8,7 @@ defmodule PropertyDamage.Audit do
   yields the same plan. All nondeterminism — the clock, `:rand`,
   `System.unique_integer/1`, server-assigned ids, environment — belongs behind
   an execution-time seam (an adapter reifying a seeded relative offset, or
-  `mint_per_run/1`), never inside a generator / `when:` / `with:` predicate /
+  `mint_per_run/1`), never inside a generator / `when:` / `overrides:` predicate /
   `command_sequence_projection` / simulator.
 
   Nothing enforces that contract for *user* code. A generator that reads
@@ -324,7 +324,7 @@ defmodule PropertyDamage.Audit do
 
   defp module_message(pos, m1, m2) do
     "at #{format_pos(pos)} two identical-seed generations selected different commands " <>
-      "(#{inspect(m1)} vs #{inspect(m2)}) — a `when:`/`with:` predicate or the " <>
+      "(#{inspect(m1)} vs #{inspect(m2)}) — a `when:`/`overrides:` predicate or the " <>
       "command_sequence_projection/simulator is likely reading the clock, `:rand`, or " <>
       "process state, changing command selection. #{guidance()}"
   end
@@ -333,7 +333,7 @@ defmodule PropertyDamage.Audit do
     field_names = fields |> Map.keys() |> Enum.map_join(", ", &inspect/1)
 
     "field(s) #{field_names} of #{inspect(module)} at #{format_pos(pos)} differ across two " <>
-      "identical-seed generations — a generator (or `when:`/`with:`) is likely reading the " <>
+      "identical-seed generations — a generator (or `when:`/`overrides:`) is likely reading the " <>
       "clock, `:rand`, `System.unique_integer/1`, or process state. #{guidance()}"
   end
 

@@ -153,9 +153,9 @@ PropertyDamage.run(
 )
 ```
 
-## Conditional Generation with `with:`
+## Conditional Generation with `overrides:`
 
-Use the `with:` option to bias generated values based on current state. This
+Use the `overrides:` option to bias generated values based on current state. This
 creates more realistic and targeted test scenarios.
 
 ```elixir
@@ -164,7 +164,7 @@ def commands do
     {CreateAccount, weight: 1},
     {Deposit, weight: 2,
      when: &has_accounts?/1,
-     with: fn state ->
+     overrides: fn state ->
        if state.total_balance > 10_000 do
          # Small amounts when balance is high -- test near limits
          %{amount: StreamData.integer(1..100)}
@@ -177,7 +177,7 @@ def commands do
 end
 ```
 
-The `with:` function receives the current projection state and returns a map of
+The `overrides:` function receives the current projection state and returns a map of
 field overrides. Each override value is a `StreamData` generator that replaces
 the command's default generator for that field.
 

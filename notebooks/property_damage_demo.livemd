@@ -78,7 +78,7 @@ Each command builds a map of `StreamData` generators, pipes it through
 state-derived values), and finishes with `StreamData.fixed_map/1`.
 
 `Credit` and `Debit` default `account_ref` to `nil`; the Model fills it from
-state via `with:`.
+state via `overrides:`.
 
 ```elixir
 defmodule Demo.Commands.OpenAccount do
@@ -106,7 +106,7 @@ defmodule Demo.Commands.Credit do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # account_ref is supplied by the Model's `with:` from live state.
+    # account_ref is supplied by the Model's `overrides:` from live state.
     %{account_ref: nil, amount: StreamData.integer(1..500)}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
@@ -236,7 +236,7 @@ end
 ### Model
 
 The model wires everything together: the weighted command list (with `when:`
-preconditions and `with:` state-derived overrides), the projection used for
+preconditions and `overrides:` state-derived overrides), the projection used for
 sequence state, the check projections, and the simulator.
 
 ```elixir
@@ -252,11 +252,11 @@ defmodule Demo.Model do
       {Credit,
        weight: 3,
        when: fn s -> map_size(s.accounts) > 0 end,
-       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
       {Debit,
        weight: 3,
        when: fn s -> map_size(s.accounts) > 0 end,
-       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end}
+       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end}
     ]
   end
 
@@ -582,11 +582,11 @@ defmodule Demo.ChaosModel do
       {Credit,
        weight: 3,
        when: fn s -> map_size(s.accounts) > 0 end,
-       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
       {Debit,
        weight: 3,
        when: fn s -> map_size(s.accounts) > 0 end,
-       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
       # Low weight = occasional faults.
       {NetworkLatency, weight: 1}
     ]

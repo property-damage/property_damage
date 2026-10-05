@@ -94,7 +94,7 @@ end
 
 Generator notes from the spec become StreamData generators. A field that
 references an existing entity (`wallet_id`) defaults to `nil` here; the
-model's `with:` option supplies it from projection state.
+model's `overrides:` option supplies it from projection state.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -121,7 +121,7 @@ defmodule MyStore.PD.Wallets.Commands.Deposit do
   @impl true
   def generator(overrides \\ %{}) do
     %{
-      # spec: "an existing wallet" -> supplied by the model's with: option
+      # spec: "an existing wallet" -> supplied by the model's overrides: option
       wallet_id: nil,
       # spec: "positive cents"
       amount: StreamData.positive_integer()
@@ -209,7 +209,7 @@ function returns a predicate polled until true or timeout:
 ## Model
 
 Spec `when:` prose becomes the `when:` guard; entity-reference fields get
-their `with:` override; spec weights carry over.
+their `overrides:` option; spec weights carry over.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -229,7 +229,7 @@ defmodule MyStore.PD.Wallets.Model do
        weight: 3,
        # spec: "at least one wallet exists"
        when: fn state -> map_size(state.wallets) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          %{wallet_id: StreamData.member_of(Map.keys(state.wallets))}
        end}
     ]

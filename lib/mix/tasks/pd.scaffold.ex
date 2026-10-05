@@ -122,7 +122,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   1. Review and customize generators in command `generator/1` callbacks
   2. Define events/3 (command, status, response) to map responses to your event structs
-  3. Add preconditions (when:) and overrides (with:) in the Model's commands()
+  3. Add preconditions (when:) and overrides (overrides:) in the Model's commands()
   4. Implement simulate/2 in the Model for expected events
   5. Configure authentication in the adapter
   6. Add invariants/projections to the model
@@ -602,7 +602,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       "  2. Define events/3 (command, status, response) to map responses to events"
     )
 
-    Mix.shell().info("  3. Add when:/with: options in Model's commands() for preconditions")
+    Mix.shell().info("  3. Add when:/overrides: options in Model's commands() for preconditions")
     Mix.shell().info("  4. Implement simulate/2 in Model for expected events")
     Mix.shell().info("  5. Configure authentication in adapter")
   end
@@ -630,7 +630,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       Generated from OpenAPI operationId: #{op.operation_id}
 
       Note: Preconditions and state-dependent overrides should be defined in the Model's
-      commands/0 using `when:` and `with:` options. Simulate logic belongs in the Model's
+      commands/0 using `when:` and `overrides:` options. Simulate logic belongs in the Model's
       `simulate/2` callback.
       \"\"\"
 

@@ -28,7 +28,7 @@ defmodule PropertyDamage.Model do
   1. **State Check**: Get current state from `command_sequence_projection/0`
   2. **Filter Commands**: Evaluate each command's `when:` precondition against state
   3. **Select Command**: Choose from valid commands based on `weight:`
-  4. **Generate Instance**: Call the selected command's `with:` generator with state
+  4. **Generate Instance**: Call the selected command's `overrides:` generator with state
   5. **Simulate Execution**: Call `simulate/2` to predict resulting events
   6. **Update State**: Apply predicted events to the projection
   7. **Repeat**: Go to step 2 until sequence length reached
@@ -40,7 +40,7 @@ defmodule PropertyDamage.Model do
   command_sequence_projection.init()
     → filter commands by `when:` predicate
     → select command (weighted random)
-    → generate command data (module generator + `with:` overrides)
+    → generate command data (module generator + `overrides:` values)
     → simulator.simulate(command, state)
     → synthetic events
     → command_sequence_projection.apply(events)
@@ -88,7 +88,7 @@ defmodule PropertyDamage.Model do
           {CancelOrder,
             weight: 1,
             when: fn state -> map_size(state.orders) > 0 end,
-            with: fn state -> %{order_ref: StreamData.member_of(Map.keys(state.orders))} end}
+            overrides: fn state -> %{order_ref: StreamData.member_of(Map.keys(state.orders))} end}
         ]
       end
 
@@ -96,7 +96,7 @@ defmodule PropertyDamage.Model do
 
   - `:weight` - Relative selection frequency (default: 1)
   - `:when` - Precondition function `(state -> boolean)` (default: always true)
-  - `:with` - Override function `(state -> map)` for command generation (default: %{})
+  - `:overrides` - Override function `(state -> map)` for command generation (default: %{})
 
   Weights express *relative* frequency among valid commands. If CreateOrder
   has weight 3 and CancelOrder has weight 1, and both pass their `when:` predicates,
@@ -201,12 +201,12 @@ defmodule PropertyDamage.Model do
 
   - `:weight` - Relative selection frequency (default: 1)
   - `:when` - Precondition function `(state -> boolean)` (default: always true)
-  - `:with` - Override function `(state -> map)` for command generation (default: %{})
+  - `:overrides` - Override function `(state -> map)` for command generation (default: %{})
   """
   @type command_opts :: [
           weight: pos_integer(),
           when: (map() -> boolean()),
-          with: (map() -> map())
+          overrides: (map() -> map())
         ]
 
   @typedoc """
@@ -220,7 +220,7 @@ defmodule PropertyDamage.Model do
   Each command can be specified as:
   - `Module` - Simple module, weight 1, always enabled
   - `{Module, weight}` - Module with custom weight
-  - `{Module, opts}` - Module with full options (weight, when, with)
+  - `{Module, opts}` - Module with full options (weight, when, overrides)
 
   ## Examples
 
@@ -231,7 +231,7 @@ defmodule PropertyDamage.Model do
           {CancelOrder,
             weight: 1,
             when: fn s -> map_size(s.orders) > 0 end,
-            with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+            overrides: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
         ]
       end
   """
@@ -242,7 +242,7 @@ defmodule PropertyDamage.Model do
 
   This projection's state is passed to:
   - `when:` predicates in command specs (preconditions)
-  - `with:` override functions in command specs (generators)
+  - `overrides:` functions in command specs (generators)
   - `simulate/2` for predicting expected events
 
   During sequence generation, the simulator predicts events and this projection
@@ -485,11 +485,16 @@ defmodule PropertyDamage.Model do
   end
 
   # Validate the resolved spec's selection/generation callbacks and return the
-  # `{weight, module, spec}` tuple. Bad `when:`/`with:` arities used to fail
+  # `{weight, module, spec}` tuple. Bad `when:`/`overrides:` arities used to fail
   # with an opaque CaseClauseError deep in generation; surface them here.
   defp finalize_spec(resolved, module) do
+    if Map.has_key?(resolved, :with) do
+      raise ArgumentError,
+            "Invalid `with:` for command #{inspect(module)}: `with:` was renamed `overrides:`."
+    end
+
     validate_when!(Map.get(resolved, :when), module)
-    validate_with!(Map.get(resolved, :with), module)
+    validate_overrides!(Map.get(resolved, :overrides), module)
     {validate_weight!(resolved.weight, module), module, resolved}
   end
 
@@ -523,22 +528,22 @@ defmodule PropertyDamage.Model do
             "expected a 1-arity function `fn state -> boolean end`, got #{inspect(other)}."
   end
 
-  # A `with:` override is either a map or invoked as `fun.(state)` to produce a
+  # An `overrides:` option is either a map or invoked as `fun.(state)` to produce a
   # map during generation; reject other shapes before they hit generation.
-  defp validate_with!(nil, _module), do: :ok
-  defp validate_with!(map, _module) when is_map(map), do: :ok
-  defp validate_with!(fun, _module) when is_function(fun, 1), do: :ok
+  defp validate_overrides!(nil, _module), do: :ok
+  defp validate_overrides!(map, _module) when is_map(map), do: :ok
+  defp validate_overrides!(fun, _module) when is_function(fun, 1), do: :ok
 
-  defp validate_with!(fun, module) when is_function(fun) do
+  defp validate_overrides!(fun, module) when is_function(fun) do
     raise ArgumentError,
-          "Invalid `with:` for command #{inspect(module)}: " <>
+          "Invalid `overrides:` for command #{inspect(module)}: " <>
             "expected a 1-arity function `fn state -> map end` or a map, " <>
             "got a function of arity #{fun_arity(fun)}."
   end
 
-  defp validate_with!(other, module) do
+  defp validate_overrides!(other, module) do
     raise ArgumentError,
-          "Invalid `with:` for command #{inspect(module)}: " <>
+          "Invalid `overrides:` for command #{inspect(module)}: " <>
             "expected a 1-arity function `fn state -> map end` or a map, got #{inspect(other)}."
   end
 

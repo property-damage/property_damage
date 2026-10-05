@@ -90,7 +90,7 @@ defmodule ObanBench.JobRefs.Commands.CancelJob do
 
   @impl true
   def generator(overrides) do
-    # job_ref is supplied by the model's `with:` (an external placeholder routed
+    # job_ref is supplied by the model's `overrides:` (an external placeholder routed
     # from state); the base generator only needs a valid shape.
     %{job_ref: StreamData.constant(nil)}
     |> merge_overrides(overrides)
@@ -132,7 +132,7 @@ defmodule ObanBench.JobRefs.Projection do
   @impl true
   def apply(state, %JobEnqueued{job_id: job_id}) do
     # During generation job_id is a %Placeholder{}; storing it here surfaces it
-    # to `Generator.external_from/2` so a consumer's `with:` can route it.
+    # to `Generator.external_from/2` so a consumer's `overrides:` can route it.
     %{state | jobs: [job_id | state.jobs]}
   end
 
@@ -190,8 +190,8 @@ defmodule ObanBench.JobRefs.Model do
   def commands do
     [
       EnqueueJob,
-      {CancelJob, when: &has_jobs?/1, with: &route_job/1},
-      {ReadJobState, when: &has_jobs?/1, with: &route_job/1}
+      {CancelJob, when: &has_jobs?/1, overrides: &route_job/1},
+      {ReadJobState, when: &has_jobs?/1, overrides: &route_job/1}
     ]
   end
 

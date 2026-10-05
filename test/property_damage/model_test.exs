@@ -95,17 +95,17 @@ defmodule PropertyDamage.ModelTest do
   end
 
   describe "command specifications" do
-    test "simple command list uses new format with when:/with:" do
+    test "simple command list uses new format with when:/overrides:" do
       commands = SimpleWeightModel.commands()
 
       # First command is simple module
       assert Enum.at(commands, 0) == CreateItem
 
-      # Second command has when:/with: options
+      # Second command has when:/overrides: options
       {module, opts} = Enum.at(commands, 1)
       assert module == ViewItem
       assert is_function(Keyword.get(opts, :when), 1)
-      assert is_function(Keyword.get(opts, :with), 1)
+      assert is_function(Keyword.get(opts, :overrides), 1)
     end
 
     test "weighted command list uses {Module, weight: n} format" do
@@ -275,7 +275,7 @@ defmodule PropertyDamage.ModelTest do
       assert Map.has_key?(spec, :settle)
       assert Map.has_key?(spec, :shrink)
       assert Map.has_key?(spec, :when)
-      assert Map.has_key?(spec, :with)
+      assert Map.has_key?(spec, :overrides)
       assert Map.has_key?(spec, :weight)
     end
   end

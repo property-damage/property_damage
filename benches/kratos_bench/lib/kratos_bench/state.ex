@@ -2,7 +2,7 @@ defmodule KratosBench.State do
   @moduledoc """
   The model's expectation of Kratos, doubling as the check projection.
 
-  During generation it is fed the simulator's predicted events so `when:`/`with:`
+  During generation it is fed the simulator's predicted events so `when:`/`overrides:`
   can pick coherent targets (an existing identity to log in as or delete); during
   execution it is fed the real events. `RegistrationHandled` (injected by the mock)
   advances the *expected* identity set: an accepted or modified registration adds

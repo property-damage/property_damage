@@ -166,7 +166,7 @@ defmodule Warehouse.Model do
       {AwaitWidget,
        weight: 3,
        when: fn state -> MapSet.size(state.shipped) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          %{sku: StreamData.member_of(MapSet.to_list(state.shipped))}
        end}
     ]
@@ -265,7 +265,7 @@ defmodule MyTest.Commands.GetOrder do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # Default to nil - Model provides actual order_id via with:
+    # Default to nil - Model provides actual order_id via overrides:
     %{order_id: nil}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
@@ -280,7 +280,7 @@ def commands do
   [
     {GetOrder,
       when: fn state -> map_size(state.orders) > 0 end,
-      with: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
+      overrides: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
   ]
 end
 ```
@@ -365,7 +365,7 @@ defmodule MyTest.Commands.CreateAuthorization do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # account_id provided via Model's with: option
+    # account_id provided via Model's overrides: option
     %{
       account_id: nil,
       amount: StreamData.integer(100..10000),
@@ -392,7 +392,7 @@ def commands do
   [
     {CreateAuthorization,
       when: fn state -> map_size(state.accounts) > 0 end,
-      with: fn state -> %{account_id: StreamData.member_of(Map.keys(state.accounts))} end}
+      overrides: fn state -> %{account_id: StreamData.member_of(Map.keys(state.accounts))} end}
   ]
 end
 ```
