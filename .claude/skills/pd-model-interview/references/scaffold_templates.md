@@ -302,7 +302,7 @@ not hunting bugs yet.
 {:ok, _stats} =
   PropertyDamage.run(
     model: MyStore.PD.Wallets.Model,
-    adapter: MyStore.PD.Wallets.Adapter,
+    targets: [MyStore.PD.Wallets.Adapter],
     max_runs: 15,
     max_commands: 8
   )

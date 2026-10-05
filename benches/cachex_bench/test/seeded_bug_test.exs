@@ -34,7 +34,7 @@ defmodule CachexBench.SeededBugTest do
     result =
       PropertyDamage.run(
         model: CachexBench.Model,
-        adapter: LyingAdapter,
+        targets: [LyingAdapter],
         max_commands: 30,
         max_runs: 200,
         verbose: false

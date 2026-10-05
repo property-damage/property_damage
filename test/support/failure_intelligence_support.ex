@@ -114,7 +114,7 @@ defmodule PropertyDamage.Test.FI.Adapter do
   @moduledoc """
   Seeded-bug adapter for the fix-verification fixture.
 
-  The bug switch lives in `adapter_config[:bug]`:
+  The bug switch lives in the target `config[:bug]`:
 
     * `:off` — never overdraws (the "fixed" SUT); every run passes.
     * `:always` — always overdraws (the unfixed SUT); every run fails.

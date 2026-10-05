@@ -121,7 +121,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
 
     try do
       Executor.run(sequence, model, Adapter,
-        adapter_config: %{event_queue: queue},
+        config: %{event_queue: queue},
         event_queue: queue
       )
     after

@@ -267,7 +267,7 @@ end
 
 If the spec declares `securitySchemes`, the adapter also gets a
 `build_auth_headers/1` helper and its moduledoc shows the matching
-`adapter_config` keys (`bearer_token:`, `api_key:`, `basic_auth:`).
+target `config:` keys (`bearer_token:`, `api_key:`, `basic_auth:`).
 
 ### Model — command weights, projection slots
 
@@ -316,7 +316,7 @@ generated files' "next steps" footer lists exactly what is left:
 4. **Add a simulator** (`simulate/2`) if you want state-dependent command
    selection (`when:`/`overrides:`) during the symbolic phase.
 
-5. **Point the adapter at your API** via `adapter_config: %{base_url: ...}` and
+5. **Point the adapter at your API** via `targets: [{Adapter, config: %{base_url: ...}}]` and
    any auth keys.
 
 ## 5. See it run against a real API
@@ -345,8 +345,7 @@ shrinker reduces it to the minimal reproduction:
 {:error, report} =
   PropertyDamage.run(
     model: OpenapiBench.Generated.Model,
-    adapter: OpenapiBench.Generated.Adapter,
-    adapter_config: %{base_url: OpenapiBench.Server.base_url(), bug: true},
+    targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: OpenapiBench.Server.base_url(), bug: true}}],
     max_commands: 25, max_runs: 50, seed: 1, verbose: false
   )
 

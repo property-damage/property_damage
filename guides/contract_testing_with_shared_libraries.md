@@ -91,7 +91,7 @@ config :property_damage, external_markers: [:__external__]
 # Or per-test (overrides + combines with config)
 PropertyDamage.run(
   model: OrderModel,
-  adapter: OrderAdapter,
+  targets: [OrderAdapter],
   external_markers: [:__external__]
 )
 ```
@@ -141,7 +141,7 @@ config :property_damage,
 ```elixir
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   external_markers: [:__external__]  # Combined with app config
 )
 ```
@@ -163,7 +163,7 @@ PropertyDamage tracks dependency versions in saved `.pd` files to help catch com
 When you save a failure, version metadata is automatically captured:
 
 ```elixir
-{:error, failure} = PropertyDamage.run(model: M, adapter: A)
+{:error, failure} = PropertyDamage.run(model: M, targets: [A])
 {:ok, path} = PropertyDamage.Persistence.save(failure, "failures/")
 ```
 
@@ -178,7 +178,7 @@ The saved file includes:
 case PropertyDamage.Persistence.load("failures/bug-123.pd") do
   {:ok, report} ->
     # Versions match, safe to replay (the adapter is taken from the report;
-    # pass adapter_config: if you need to override its setup config)
+    # pass targets: [{Adapter, config: map}] if you need to override its setup config)
     PropertyDamage.Replay.run(report)
 
   {:ok, report, warnings} ->
@@ -392,7 +392,7 @@ defmodule OrderTest do
   test "orders maintain valid state" do
     result = PropertyDamage.run(
       model: OrderModel,
-      adapter: OrderHttpAdapter,
+      targets: [OrderHttpAdapter],
       max_runs: 100,
       max_commands: 20,
       regression: [

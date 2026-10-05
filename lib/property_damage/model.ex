@@ -299,7 +299,7 @@ defmodule PropertyDamage.Model do
   Argument map delivered to every lifecycle callback.
 
   `:adapter_config` is guaranteed on every invocation of every lifecycle
-  callback: it is the `adapter_config` map passed to the run (defaulting to
+  callback: it holds the `config:` map of the run's target (defaulting to
   `%{}`). The remaining keys are path tags, present only on the paths that set
   them, so a robust callback destructures `adapter_config` and treats the rest
   as informational:

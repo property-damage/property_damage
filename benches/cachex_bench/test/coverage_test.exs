@@ -16,7 +16,7 @@ defmodule CachexBench.CoverageTest do
     assert {:ok, stats} =
              PropertyDamage.run(
                model: CachexBench.Model,
-               adapter: CachexBench.Adapter,
+               targets: [CachexBench.Adapter],
                coverage: true,
                max_commands: 30,
                max_runs: 150,
@@ -54,7 +54,7 @@ defmodule CachexBench.CoverageTest do
     result =
       PropertyDamage.run(
         model: CachexBench.Model,
-        adapter: CachexBench.Adapter,
+        targets: [CachexBench.Adapter],
         max_commands: 30,
         max_runs: 150,
         seed: 1,

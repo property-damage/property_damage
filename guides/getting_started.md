@@ -309,7 +309,7 @@ See the [Cheatsheet](cheatsheet.md) for complete adapter templates.
 ```elixir
 PropertyDamage.run(
   model: MyApp.TestModel,
-  adapter: MyApp.TestAdapter,
+  targets: [MyApp.TestAdapter],
   max_runs: 100,
   max_commands: 50
 )
@@ -325,7 +325,7 @@ defmodule MyApp.PropertyTest do
     assert {:ok, _stats} =
              PropertyDamage.run(
                model: MyApp.TestModel,
-               adapter: MyApp.TestAdapter,
+               targets: [MyApp.TestAdapter],
                max_runs: 100
              )
   end
@@ -338,7 +338,7 @@ To see what PropertyDamage generates, add `verbose: true`:
 
     PropertyDamage.run(
       model: OrderModel,
-      adapter: OrderAdapter,
+      targets: [OrderAdapter],
       verbose: true
     )
 

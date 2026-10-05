@@ -27,7 +27,7 @@ defmodule PropertyDamage.Validation do
   - `model` - Model module
   - `adapter` - Adapter module
   - `opts` - Options:
-    - `:injector_adapters` - List of InjectorAdapter modules
+    - `:injectors` - List of InjectorAdapter modules
 
   ## Returns
 
@@ -36,7 +36,7 @@ defmodule PropertyDamage.Validation do
   """
   @spec validate!(module(), module(), keyword()) :: {:ok, [String.t()]}
   def validate!(model, adapter, opts \\ []) do
-    injector_adapters = Keyword.get(opts, :injector_adapters, [])
+    injectors = Keyword.get(opts, :injectors, [])
 
     # Phase 1: Validate modules exist
     model_errors = validate_model_exists(model)
@@ -60,7 +60,7 @@ defmodule PropertyDamage.Validation do
     errors = []
     errors = errors ++ validate_commands(model)
     errors = errors ++ validate_projections(model)
-    errors = errors ++ validate_injectable_events(model, injector_adapters)
+    errors = errors ++ validate_injectable_events(model, injectors)
 
     unless Enum.empty?(errors) do
       error_msg = Enum.join(errors, "\n  - ")
@@ -76,6 +76,28 @@ defmodule PropertyDamage.Validation do
     warnings = warnings ++ warn_single_command(model)
 
     {:ok, warnings}
+  end
+
+  @doc """
+  Warns about targets that would share state.
+
+  Returns one warning for each pair of targets that use the same adapter with
+  an equal `config:`. Such variants talk to the same slice of the system under
+  test, so a comparison between them measures interference instead of a
+  difference between variants.
+  """
+  @spec target_warnings([PropertyDamage.Target.t()]) :: [String.t()]
+  def target_warnings(targets) do
+    for %{index: i} = a <- targets,
+        %{index: j} = b <- targets,
+        i < j,
+        a.adapter == b.adapter,
+        a.config == b.config do
+      "targets #{inspect(a.name)} (index #{i}) and #{inspect(b.name)} (index #{j}) " <>
+        "use the same adapter #{inspect(a.adapter)} with identical `config:`; " <>
+        "give each target its own `config:` (for example a tenant) so the variants " <>
+        "do not share state"
+    end
   end
 
   @doc """
@@ -405,10 +427,10 @@ defmodule PropertyDamage.Validation do
     end
   end
 
-  defp validate_injectable_events(model, injector_adapters) do
+  defp validate_injectable_events(model, injectors) do
     if function_exported?(model, :injectable_events, 0) do
       injectable = model.injectable_events()
-      emitted = collect_emitted_events(injector_adapters)
+      emitted = collect_emitted_events(injectors)
 
       for event <- injectable, event not in emitted, reduce: [] do
         acc ->
@@ -422,8 +444,8 @@ defmodule PropertyDamage.Validation do
     end
   end
 
-  defp collect_emitted_events(injector_adapters) do
-    Enum.flat_map(injector_adapters, fn adapter ->
+  defp collect_emitted_events(injectors) do
+    Enum.flat_map(injectors, fn adapter ->
       # Ensure the module is loaded before reflecting on it: an injector adapter
       # is passed by name and may never have been called yet, and
       # function_exported?/3 reports false for an unloaded module (it does not

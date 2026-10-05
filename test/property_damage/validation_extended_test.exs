@@ -92,7 +92,12 @@ defmodule PropertyDamage.ValidationExtendedTest do
 
   describe "Options.validate_load_test!/1" do
     test "accepts check_mode and rejects the retired assertion_mode key" do
-      base = [model: ValidModel, adapter: ValidAdapter, arrival_rate: 1, duration: {1, :seconds}]
+      base = [
+        model: ValidModel,
+        targets: [ValidAdapter],
+        arrival_rate: 1,
+        duration: {1, :seconds}
+      ]
 
       error =
         assert_raise NimbleOptions.ValidationError, fn ->
@@ -108,11 +113,11 @@ defmodule PropertyDamage.ValidationExtendedTest do
 
   describe "Options.validate_run!/1" do
     test "passes with valid options and returns keyword list with defaults" do
-      opts = [model: ValidModel, adapter: ValidAdapter]
+      opts = [model: ValidModel, targets: [ValidAdapter]]
       validated = Options.validate_run!(opts)
 
       assert validated[:model] == ValidModel
-      assert validated[:adapter] == ValidAdapter
+      assert [%{adapter: ValidAdapter}] = validated[:targets]
       assert validated[:max_commands] == 50
       assert validated[:max_runs] == 100
     end
@@ -120,36 +125,40 @@ defmodule PropertyDamage.ValidationExtendedTest do
     test "accepts check_mode and rejects the retired assertion_mode key" do
       error =
         assert_raise NimbleOptions.ValidationError, fn ->
-          Options.validate_run!(model: ValidModel, adapter: ValidAdapter, assertion_mode: :record)
+          Options.validate_run!(
+            model: ValidModel,
+            targets: [ValidAdapter],
+            assertion_mode: :record
+          )
         end
 
       assert error.key == :assertion_mode
       assert Exception.message(error) == "`assertion_mode:` was renamed `check_mode:`"
 
       validated =
-        Options.validate_run!(model: ValidModel, adapter: ValidAdapter, check_mode: :record)
+        Options.validate_run!(model: ValidModel, targets: [ValidAdapter], check_mode: :record)
 
       assert validated[:check_mode] == :record
     end
 
     test "raises on missing model" do
-      opts = [adapter: ValidAdapter]
+      opts = [targets: [ValidAdapter]]
 
       assert_raise NimbleOptions.ValidationError, ~r/required :model option not found/, fn ->
         Options.validate_run!(opts)
       end
     end
 
-    test "raises on missing adapter" do
+    test "raises on missing targets" do
       opts = [model: ValidModel]
 
-      assert_raise NimbleOptions.ValidationError, ~r/required :adapter option not found/, fn ->
+      assert_raise NimbleOptions.ValidationError, ~r/required :targets option not found/, fn ->
         Options.validate_run!(opts)
       end
     end
 
     test "raises on invalid max_commands" do
-      opts = [model: ValidModel, adapter: ValidAdapter, max_commands: -5]
+      opts = [model: ValidModel, targets: [ValidAdapter], max_commands: -5]
 
       assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
         Options.validate_run!(opts)
@@ -157,7 +166,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     test "raises on non-integer max_commands" do
-      opts = [model: ValidModel, adapter: ValidAdapter, max_commands: "abc"]
+      opts = [model: ValidModel, targets: [ValidAdapter], max_commands: "abc"]
 
       assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
         Options.validate_run!(opts)
@@ -165,7 +174,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     test "raises on invalid max_runs" do
-      opts = [model: ValidModel, adapter: ValidAdapter, max_runs: 0]
+      opts = [model: ValidModel, targets: [ValidAdapter], max_runs: 0]
 
       assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
         Options.validate_run!(opts)
@@ -173,7 +182,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     test "raises on invalid seed" do
-      opts = [model: ValidModel, adapter: ValidAdapter, seed: -1]
+      opts = [model: ValidModel, targets: [ValidAdapter], seed: -1]
 
       assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
         Options.validate_run!(opts)
@@ -183,7 +192,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     test "accepts valid optional parameters" do
       opts = [
         model: ValidModel,
-        adapter: ValidAdapter,
+        targets: [ValidAdapter],
         max_commands: 100,
         max_runs: 50,
         seed: 12_345
@@ -240,7 +249,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
 
   describe "edge cases" do
     test "nil model raises helpful error" do
-      opts = [model: nil, adapter: ValidAdapter]
+      opts = [model: nil, targets: [ValidAdapter]]
 
       assert_raise NimbleOptions.ValidationError, ~r/:model/, fn ->
         Options.validate_run!(opts)
@@ -248,15 +257,15 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     test "nil adapter raises helpful error" do
-      opts = [model: ValidModel, adapter: nil]
+      opts = [model: ValidModel, targets: [nil]]
 
-      assert_raise NimbleOptions.ValidationError, ~r/:adapter/, fn ->
+      assert_raise NimbleOptions.ValidationError, ~r/:targets.*got: nil/, fn ->
         Options.validate_run!(opts)
       end
     end
 
     test "zero max_commands raises" do
-      opts = [model: ValidModel, adapter: ValidAdapter, max_commands: 0]
+      opts = [model: ValidModel, targets: [ValidAdapter], max_commands: 0]
 
       assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
         Options.validate_run!(opts)
@@ -264,7 +273,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     test "float max_runs raises" do
-      opts = [model: ValidModel, adapter: ValidAdapter, max_runs: 10.5]
+      opts = [model: ValidModel, targets: [ValidAdapter], max_runs: 10.5]
 
       assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
         Options.validate_run!(opts)
@@ -278,12 +287,12 @@ defmodule PropertyDamage.ValidationExtendedTest do
 
   describe "Validation.runtime_warnings/1" do
     test "returns empty list for good defaults" do
-      opts = [model: ValidModel, adapter: ValidAdapter]
+      opts = [model: ValidModel, targets: [ValidAdapter]]
       assert Validation.runtime_warnings(opts) == []
     end
 
     test "warns about low max_runs" do
-      opts = [model: ValidModel, adapter: ValidAdapter, max_runs: 5]
+      opts = [model: ValidModel, targets: [ValidAdapter], max_runs: 5]
       warnings = Validation.runtime_warnings(opts)
 
       assert length(warnings) == 1
@@ -291,7 +300,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     test "warns about low max_commands" do
-      opts = [model: ValidModel, adapter: ValidAdapter, max_commands: 3]
+      opts = [model: ValidModel, targets: [ValidAdapter], max_commands: 3]
       warnings = Validation.runtime_warnings(opts)
 
       assert length(warnings) == 1
@@ -299,7 +308,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     test "warns when shrink is false" do
-      opts = [model: ValidModel, adapter: ValidAdapter, shrink: false]
+      opts = [model: ValidModel, targets: [ValidAdapter], shrink: false]
       warnings = Validation.runtime_warnings(opts)
 
       assert length(warnings) == 1
@@ -307,7 +316,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     end
 
     test "warns when validate is false" do
-      opts = [model: ValidModel, adapter: ValidAdapter, validate: false]
+      opts = [model: ValidModel, targets: [ValidAdapter], validate: false]
       warnings = Validation.runtime_warnings(opts)
 
       assert length(warnings) == 1
@@ -317,7 +326,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     test "accumulates multiple warnings" do
       opts = [
         model: ValidModel,
-        adapter: ValidAdapter,
+        targets: [ValidAdapter],
         max_runs: 2,
         max_commands: 2,
         shrink: false

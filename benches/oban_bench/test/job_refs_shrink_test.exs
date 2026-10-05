@@ -56,7 +56,7 @@ defmodule ObanBench.JobRefsShrinkTest do
     assert {:error, report} =
              PropertyDamage.run(
                model: Model,
-               adapter: BuggyCancelAdapter,
+               targets: [BuggyCancelAdapter],
                seed: 1,
                max_commands: 10,
                max_runs: 12,

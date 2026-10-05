@@ -153,13 +153,13 @@ defmodule PropertyDamage.MockServiceAdapter do
 
   ## Wiring a mock into a run
 
-  Declare mocks with the `:mock_services` option of `PropertyDamage.run/1`:
+  Declare mocks with the `mocks:` key of the `targets:` entry of
+  `PropertyDamage.run/1`:
 
       PropertyDamage.run(
         model: PaymentTestModel,
-        adapter: PaymentAdapter,
-        mock_services: [MyTest.PaymentMock]
-        # or, with config: mock_services: [{MyTest.PaymentMock, %{port: 4445}}]
+        targets: [{PaymentAdapter, mocks: [MyTest.PaymentMock]}]
+        # or, with config: mocks: [{MyTest.PaymentMock, %{port: 4445}}]
       )
 
   For each run the framework:

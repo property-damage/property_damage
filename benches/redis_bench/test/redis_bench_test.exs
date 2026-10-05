@@ -12,7 +12,7 @@ defmodule RedisBenchTest do
     assert {:ok, _stats} =
              PropertyDamage.run(
                model: RedisBench.Model,
-               adapter: RedisBench.Adapter,
+               targets: [RedisBench.Adapter],
                max_commands: 30,
                max_runs: 50,
                verbose: false

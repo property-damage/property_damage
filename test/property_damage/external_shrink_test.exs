@@ -106,7 +106,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
       |> Sequence.with_registry(reg)
 
     # Establish the original failure (adapter error at the Use command).
-    {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
+    {:ok, result} = Executor.run(full, Model, Adapter, config: %{})
     assert result.failed_at_index == 4
 
     assert match?(
@@ -121,8 +121,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        adapter: Adapter,
-        adapter_config: %{}
+        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
       )
 
     commands = Sequence.to_list(shrunk.sequence)
@@ -134,7 +133,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
     # And the shrunk sequence still reproduces the original failure, which is
     # only possible if its consumer's external resolved against the remapped
     # producer position.
-    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
+    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, config: %{})
 
     assert match?(
              %Failure{
@@ -159,7 +158,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
       |> Sequence.linear()
       |> Sequence.with_registry(reg)
 
-    {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
+    {:ok, result} = Executor.run(full, Model, Adapter, config: %{})
 
     assert match?(
              %Failure{
@@ -173,14 +172,13 @@ defmodule PropertyDamage.ExternalShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        adapter: Adapter,
-        adapter_config: %{}
+        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
       )
 
     commands = Sequence.to_list(shrunk.sequence)
     assert [%Create{}, %Use{}] = commands
 
-    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
+    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, config: %{})
 
     assert match?(
              %Failure{
@@ -209,7 +207,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
       )
       |> Sequence.with_registry(reg)
 
-    {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
+    {:ok, result} = Executor.run(full, Model, Adapter, config: %{})
 
     assert match?(
              %Failure{
@@ -223,8 +221,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        adapter: Adapter,
-        adapter_config: %{}
+        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
       )
 
     commands = Sequence.to_list(shrunk.sequence)
@@ -236,7 +233,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
     # And the shrunk sequence still reproduces the ORIGINAL failure on replay,
     # proving the consumer's external resolved against the remapped producer
     # position.
-    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
+    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, config: %{})
 
     assert match?(
              %Failure{
@@ -259,7 +256,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
       |> Sequence.linear()
       |> Sequence.with_registry(reg)
 
-    {:ok, result} = Executor.run(full, Model, Adapter, adapter_config: %{})
+    {:ok, result} = Executor.run(full, Model, Adapter, config: %{})
     assert result.failed_at_index == 1
 
     assert match?(
@@ -274,8 +271,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        adapter: Adapter,
-        adapter_config: %{}
+        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
       )
 
     commands = Sequence.to_list(shrunk.sequence)
@@ -284,7 +280,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
     # still reproduces the failure (only possible if the external resolved).
     assert [%AsyncCreate{}, %Use{}] = commands
 
-    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, adapter_config: %{})
+    {:ok, replay} = Executor.run(shrunk.sequence, Model, Adapter, config: %{})
 
     assert match?(
              %Failure{

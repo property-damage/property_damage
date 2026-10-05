@@ -4,7 +4,7 @@ defmodule CachexBenchTest do
 
   property_damage("Cachex put/get/del/clear behaves like its model",
     model: CachexBench.Model,
-    adapter: CachexBench.Adapter,
+    targets: [CachexBench.Adapter],
     max_commands: 30,
     max_runs: 150
   )

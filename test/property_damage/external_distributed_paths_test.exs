@@ -118,13 +118,15 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
           {:ok, _result} =
             Differential.run(
               model: RoutingModel,
-              targets: [{ProbingAdapter, name: "solo", opts: [prefix: "solo", name: "solo"]}],
+              targets: [
+                {ProbingAdapter,
+                 name: "solo", config: %{test_pid: self(), prefix: "solo", name: "solo"}}
+              ],
               compare: :correctness,
               execution: :interleaved,
               max_runs: 1,
               max_commands: 12,
-              seed: seed,
-              adapter_config: %{test_pid: self()}
+              seed: seed
             )
 
           case drain_used([]) do
@@ -155,15 +157,14 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
             Differential.run(
               model: RoutingModel,
               targets: [
-                {ProbingAdapter, name: "a", opts: [prefix: "a", name: "a"]},
-                {ProbingAdapter, name: "b", opts: [prefix: "b", name: "b"]}
+                {ProbingAdapter, name: "a", config: %{test_pid: self(), prefix: "a", name: "a"}},
+                {ProbingAdapter, name: "b", config: %{test_pid: self(), prefix: "b", name: "b"}}
               ],
               compare: :correctness,
               execution: :sequential,
               max_runs: 1,
               max_commands: 12,
-              seed: seed,
-              adapter_config: %{test_pid: self()}
+              seed: seed
             )
 
           targets = drain_used([])
@@ -195,8 +196,12 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
         Worker.start_link(
           worker_id: 1,
           model: RoutingModel,
-          adapter: ProbingAdapter,
-          adapter_config: %{test_pid: self(), prefix: "w", name: "w"},
+          target: %PropertyDamage.Target{
+            adapter: ProbingAdapter,
+            config: %{test_pid: self(), prefix: "w", name: "w"},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled

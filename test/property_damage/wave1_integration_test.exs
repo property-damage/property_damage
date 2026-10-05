@@ -169,7 +169,7 @@ defmodule PropertyDamage.Wave1IntegrationTest do
           Executor.run(sequence, Model, Adapter,
             event_queue: queue,
             stutter_config: stutter_config,
-            adapter_config: %{charge_counter: charge_counter}
+            config: %{charge_counter: charge_counter}
           )
 
         result

@@ -613,8 +613,12 @@ defmodule PropertyDamage.LoadTestTest do
         Worker.start_link(
           worker_id: 1,
           model: OrderingModel,
-          adapter: OrderingAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: OrderingAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :record
@@ -645,8 +649,12 @@ defmodule PropertyDamage.LoadTestTest do
         Worker.start_link(
           worker_id: 1,
           model: WorkerTestModel,
-          adapter: WorkerRaisingAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerRaisingAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled
@@ -682,8 +690,12 @@ defmodule PropertyDamage.LoadTestTest do
         Worker.start_link(
           worker_id: 1,
           model: WorkerTestModel,
-          adapter: WorkerTestAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerTestAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled
@@ -702,8 +714,12 @@ defmodule PropertyDamage.LoadTestTest do
         Worker.start_link(
           worker_id: 1,
           model: WorkerTestModel,
-          adapter: WorkerTestAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerTestAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled
@@ -733,8 +749,12 @@ defmodule PropertyDamage.LoadTestTest do
         Worker.start_link(
           worker_id: 1,
           model: WorkerTestModel,
-          adapter: WorkerInjectingAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerInjectingAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled
@@ -764,8 +784,12 @@ defmodule PropertyDamage.LoadTestTest do
       {:ok, pool} =
         WorkerPool.start_link(
           model: WorkerTestModel,
-          adapter: WorkerTestAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerTestAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled
@@ -786,8 +810,12 @@ defmodule PropertyDamage.LoadTestTest do
       {:ok, pool} =
         WorkerPool.start_link(
           model: WorkerTestModel,
-          adapter: WorkerTestAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerTestAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled
@@ -841,8 +869,12 @@ defmodule PropertyDamage.LoadTestTest do
       {:ok, pool} =
         WorkerPool.start_link(
           model: WorkerTestModel,
-          adapter: WorkerTestAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerTestAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled
@@ -872,8 +904,12 @@ defmodule PropertyDamage.LoadTestTest do
       {:ok, pool} =
         WorkerPool.start_link(
           model: WorkerTestModel,
-          adapter: WorkerTestAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerTestAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled
@@ -988,7 +1024,7 @@ defmodule PropertyDamage.LoadTestTest do
           Task.async(fn ->
             LoadTest.run(
               model: MockModel,
-              adapter: CrashingArrivalAdapter,
+              targets: [CrashingArrivalAdapter],
               arrival_rate: 50,
               duration: {200, :milliseconds}
             )
@@ -1015,7 +1051,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 50,
             duration: {500, :milliseconds}
           )
@@ -1032,7 +1068,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, runner} =
           LoadTest.start(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 50,
             duration: {300, :milliseconds}
           )
@@ -1060,7 +1096,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, runner} =
           LoadTest.start(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 50,
             duration: {10, :seconds}
           )
@@ -1082,7 +1118,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 50,
             duration: {600, :milliseconds},
             metrics_interval: {100, :milliseconds},
@@ -1120,7 +1156,7 @@ defmodule PropertyDamage.LoadTestTest do
       capture_log(fn ->
         LoadTest.run(
           model: MockModel,
-          adapter: MockAdapter,
+          targets: [MockAdapter],
           arrival_rate: 50,
           duration: {400, :milliseconds},
           metrics_interval: {100, :milliseconds}
@@ -1144,7 +1180,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, _report} =
           LoadTest.run(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 100,
             duration: {800, :milliseconds},
             ramp_up: {:linear, {400, :milliseconds}},
@@ -1174,7 +1210,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 100,
             duration: {500, :milliseconds},
             metrics_interval: {50, :milliseconds},
@@ -1202,7 +1238,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 200,
             duration: {300, :milliseconds}
           )
@@ -1254,7 +1290,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModelWithChecks,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 50,
             duration: {500, :milliseconds}
           )
@@ -1272,7 +1308,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModelWithChecks,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 50,
             duration: {500, :milliseconds},
             check_mode: :record
@@ -1310,7 +1346,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 100,
             duration: {1000, :milliseconds},
             ramp_up: {:linear, {500, :milliseconds}},
@@ -1350,7 +1386,7 @@ defmodule PropertyDamage.LoadTestTest do
         {:ok, report} =
           LoadTest.run(
             model: MockModel,
-            adapter: MockAdapter,
+            targets: [MockAdapter],
             arrival_rate: 100,
             duration: {500, :milliseconds},
             ramp_up: :immediate,

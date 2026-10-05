@@ -38,7 +38,7 @@ defmodule ObanBench.SeededBugTest do
     result =
       PropertyDamage.run(
         model: ObanBench.Model,
-        adapter: BuggyAdapter,
+        targets: [BuggyAdapter],
         max_commands: 8,
         max_runs: 20,
         verbose: false

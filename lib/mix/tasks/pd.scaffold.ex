@@ -1049,15 +1049,17 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
       ## Configuration
 
-      Pass configuration via `adapter_config`:
+      Pass configuration as the `config:` of the `targets:` entry:
 
           PropertyDamage.run(
             model: #{namespace}.Model,
-            adapter: #{namespace}.Adapter,
-            adapter_config: %{
-              base_url: "#{api_info.base_url}",
-              #{generate_auth_config_example(auth_schemes)}
-            }
+            targets: [
+              {#{namespace}.Adapter,
+               config: %{
+                 base_url: "#{api_info.base_url}",
+                 #{generate_auth_config_example(auth_schemes)}
+               }}
+            ]
           )
       \"\"\"
 
@@ -1267,7 +1269,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   defp generate_auth_config_example(schemes) do
     schemes
-    |> Enum.map_join(",\n              ", fn scheme ->
+    |> Enum.map_join(",\n" <> String.duplicate(" ", 13), fn scheme ->
       case scheme.type do
         "apiKey" ->
           "api_key: \"your-api-key\""

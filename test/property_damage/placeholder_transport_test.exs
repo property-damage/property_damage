@@ -69,7 +69,7 @@ defmodule PropertyDamage.PlaceholderTransportTest do
       |> Sequence.with_registry(reg)
 
     {:ok, _result} =
-      Executor.run(seq, Model, RecordingAdapter, adapter_config: %{test_pid: self()})
+      Executor.run(seq, Model, RecordingAdapter, config: %{test_pid: self()})
 
     assert_received {:executed, %UseExternal{order_id: "ord_123"}}
   end
@@ -82,7 +82,7 @@ defmodule PropertyDamage.PlaceholderTransportTest do
     seq = Sequence.linear([%UseExternal{order_id: ph}])
 
     {:ok, result} =
-      Executor.run(seq, Model, RecordingAdapter, adapter_config: %{test_pid: self()})
+      Executor.run(seq, Model, RecordingAdapter, config: %{test_pid: self()})
 
     refute_received {:executed, _}
     assert match?(%{failed_at_index: 0}, result)

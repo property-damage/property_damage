@@ -572,7 +572,7 @@ defmodule PropertyDamage.FailureReport do
   @spec reproduction_command(t()) :: String.t()
   def reproduction_command(%__MODULE__{seed: seed, model: model, adapter: adapter}) do
     model_str = if model, do: "model: #{inspect(model)}, ", else: ""
-    adapter_str = if adapter, do: "adapter: #{inspect(adapter)}, ", else: ""
+    adapter_str = if adapter, do: "targets: [#{inspect(adapter)}], ", else: ""
 
     "PropertyDamage.run(#{model_str}#{adapter_str}seed: #{seed}, max_runs: 1)"
   end

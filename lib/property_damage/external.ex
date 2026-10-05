@@ -101,7 +101,7 @@ defmodule PropertyDamage.External do
       end
 
       # In test project
-      PropertyDamage.run(model: M, adapter: A, external_markers: [:__external__])
+      PropertyDamage.run(model: M, targets: [A], external_markers: [:__external__])
 
   ## Limitations
 

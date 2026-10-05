@@ -141,7 +141,7 @@ defmodule PropertyDamage.Progress.Printer do
     IO.puts("  To Reproduce:")
     IO.puts("    PropertyDamage.run(")
     IO.puts("      model: YourModel,")
-    IO.puts("      adapter: YourAdapter,")
+    IO.puts("      targets: [YourAdapter],")
     IO.puts("      seed: #{report.seed},")
     IO.puts("      max_runs: 1")
     IO.puts("    )")

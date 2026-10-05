@@ -107,7 +107,7 @@ defmodule PropertyDamage.ReplayExternalsTest do
     failure = external_failure()
 
     assert {:ok, steps} =
-             Replay.run(failure, adapter_config: %{test_pid: self()})
+             Replay.run(failure, targets: [{Adapter, config: %{test_pid: self()}}])
 
     assert length(steps) == 2
 

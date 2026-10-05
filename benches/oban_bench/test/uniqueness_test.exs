@@ -50,7 +50,7 @@ defmodule ObanBench.UniquenessTest do
         assert {:ok, _stats} =
                  PropertyDamage.run(
                    model: Model,
-                   adapter: Adapter,
+                   targets: [Adapter],
                    seed: unquote(seed),
                    max_commands: 10,
                    max_runs: 8,
@@ -67,7 +67,7 @@ defmodule ObanBench.UniquenessTest do
       assert {:error, report} =
                PropertyDamage.run(
                  model: Model,
-                 adapter: NonUniqueAdapter,
+                 targets: [NonUniqueAdapter],
                  seed: @seed,
                  max_commands: 10,
                  max_runs: 8,

@@ -76,9 +76,11 @@ defmodule PropertyDamage.MintEnginesTest do
       {:ok, _result} =
         Differential.run(
           model: Model,
-          targets: [{TargetA, name: "a"}, {TargetB, name: "b"}],
+          targets: [
+            {TargetA, name: "a", config: %{test_pid: self()}},
+            {TargetB, name: "b", config: %{test_pid: self()}}
+          ],
           compare: :correctness,
-          adapter_config: %{test_pid: self()},
           run_nonce: 7,
           seed: 12_345,
           max_runs: 1,
@@ -103,8 +105,12 @@ defmodule PropertyDamage.MintEnginesTest do
       {:ok, pool} =
         WorkerPool.start_link(
           model: Model,
-          adapter: TargetA,
-          adapter_config: %{test_pid: self()},
+          target: %PropertyDamage.Target{
+            adapter: TargetA,
+            config: %{test_pid: self()},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           run_nonce: 42
         )
@@ -120,8 +126,12 @@ defmodule PropertyDamage.MintEnginesTest do
         Worker.start_link(
           worker_id: 3,
           model: Model,
-          adapter: TargetA,
-          adapter_config: %{test_pid: self()},
+          target: %PropertyDamage.Target{
+            adapter: TargetA,
+            config: %{test_pid: self()},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           run_nonce: 99
         )

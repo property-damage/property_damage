@@ -110,7 +110,7 @@ defmodule PropertyDamage.Test.Flake.Adapter do
 
     * `amount <= 33` — **broken**: always emits a Bad event (every run fails).
     * `34..66` — **flaky**: emits Ok/Bad alternately, driven by a shared
-      `:counters` reference passed in `adapter_config[:counter]`. Alternation
+      `:counters` reference passed in the target `config[:counter]`. Alternation
       over N >= 2 captures guarantees a passing/failing mix, so the seed is
       reliably reported flaky.
     * `amount >= 67` — **stable**: always emits an Ok event (every run passes).

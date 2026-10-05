@@ -13,8 +13,7 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   defstruct [
     :model,
-    :adapter,
-    :adapter_config,
+    :target,
     :arrival_rate,
     :arrival_jitter,
     :current_rate,
@@ -47,8 +46,7 @@ defmodule PropertyDamage.LoadTest.Runner do
   ## Options
 
   - `:model` - Model module (required)
-  - `:adapter` - Adapter module (required)
-  - `:adapter_config` - Adapter configuration (default: %{})
+  - `:targets` - A list with exactly one entry (required); see `PropertyDamage.Target`
   - `:arrival_rate` - Target arrival rate (required)
     - Integer: arrivals per second (e.g., `100`)
     - Tuple: `{count, {time, unit}}` (e.g., `{2, {15, :milliseconds}}`)
@@ -64,6 +62,18 @@ defmodule PropertyDamage.LoadTest.Runner do
   """
   @spec start_link(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(opts) do
+    # Validate in the caller so a bad option list raises here instead of
+    # crashing the runner process during init.
+    opts = Options.validate_load_test!(opts)
+
+    # The runner starts no injectors or mocks, so these entry keys would be
+    # silently ignored.
+    Options.reject_unsupported_target_keys!(
+      opts[:targets],
+      [:injectors, :mocks],
+      "PropertyDamage.LoadTest.run/1"
+    )
+
     GenServer.start_link(__MODULE__, opts)
   end
 
@@ -107,12 +117,9 @@ defmodule PropertyDamage.LoadTest.Runner do
 
   @impl true
   def init(opts) do
-    # Validate options with NimbleOptions
-    opts = Options.validate_load_test!(opts)
-
+    # `start_link/1` already validated the options.
     model = opts[:model]
-    adapter = opts[:adapter]
-    adapter_config = opts[:adapter_config]
+    [target] = opts[:targets]
     arrival_rate = opts[:arrival_rate]
     arrival_jitter = opts[:arrival_jitter]
     duration = opts[:duration]
@@ -134,8 +141,7 @@ defmodule PropertyDamage.LoadTest.Runner do
     case WorkerPool.start_link(
            owner: self(),
            model: model,
-           adapter: adapter,
-           adapter_config: adapter_config,
+           target: target,
            metrics: metrics,
            think_time_range: think_time_range,
            check_mode: check_mode,
@@ -165,8 +171,7 @@ defmodule PropertyDamage.LoadTest.Runner do
 
         state = %__MODULE__{
           model: model,
-          adapter: adapter,
-          adapter_config: adapter_config,
+          target: target,
           arrival_rate: arrival_rate,
           arrival_jitter: arrival_jitter,
           current_rate: {1, {1, :seconds}},
@@ -495,7 +500,7 @@ defmodule PropertyDamage.LoadTest.Runner do
       pool_stats: pool_stats,
       config: %{
         model: state.model,
-        adapter: state.adapter,
+        adapter: state.target.adapter,
         arrival_rate: state.arrival_rate,
         duration_ms: state.duration_ms
       }

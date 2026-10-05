@@ -16,7 +16,7 @@ defmodule PropertyDamage.Differential do
       PropertyDamage.Differential.run(
         model: MyModel,
         targets: [
-          {OracleAdapter, role: :reference},
+          OracleAdapter,
           {SUTAdapter, name: "new-impl"}
         ],
         compare: :correctness
@@ -34,16 +34,23 @@ defmodule PropertyDamage.Differential do
 
   ## Same Adapter, Different Configurations
 
-  A key use case is comparing the same adapter with different configurations:
+  A key use case is comparing the same adapter with different configurations.
+  Give each target a distinct `name:` and its own `config:`:
 
       PropertyDamage.Differential.run(
         model: MyModel,
         targets: [
-          {HTTPAdapter, role: :reference, opts: [base_url: "https://prod.example.com"]},
-          {HTTPAdapter, name: "staging", opts: [base_url: "https://staging.example.com"]}
+          {HTTPAdapter, name: "prod", config: %{base_url: "https://prod.example.com"}},
+          {HTTPAdapter, name: "staging", config: %{base_url: "https://staging.example.com"}}
         ],
         compare: :correctness
       )
+
+  When both targets run against one system, use `config:` to isolate their
+  slices of state (for example a tenant per target); otherwise the variants
+  share state and the comparison measures interference.
+
+  The first target is the reference: every other target is compared against it.
 
   ## Execution Modes
 
@@ -59,17 +66,13 @@ defmodule PropertyDamage.Differential do
   - Custom function - `fn ref_result, target_result -> boolean`
   """
 
-  alias PropertyDamage.Differential.{Equivalence, Result, Target}
+  alias PropertyDamage.Differential.{Equivalence, Result}
   alias PropertyDamage.{Generator, Options, PlaceholderRegistry, Runtime, Sequence, Telemetry}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate, Reporter}
   alias PropertyDamage.Sequence.Position
 
   @type compare_mode :: :correctness | :performance | :both
-
-  @type target_spec ::
-          {module()}
-          | {module(), keyword()}
 
   @type equivalence_strategy :: :exact | :structural | (term(), term() -> boolean())
 
@@ -79,22 +82,25 @@ defmodule PropertyDamage.Differential do
   ## Required Options
 
   - `:model` - Model module implementing PropertyDamage.Model
-  - `:targets` - List of target specifications (see Target Specification below)
+  - `:targets` - List of target entries (see Target Entries below)
   - `:compare` - Comparison mode: `:correctness`, `:performance`, or `:both`
 
-  ## Target Specification
+  ## Target Entries
 
-  Each target is a tuple of `{AdapterModule}` or `{AdapterModule, opts}`:
+  Each entry is an adapter module or `{AdapterModule, keyword}` (see
+  `PropertyDamage.Target`). The first entry is the reference.
 
-  - `name:` - Display name for reporting (default: derived from module)
-  - `role:` - Set to `:reference` for oracle testing
-  - `opts:` - Options passed to adapter's `setup/1`
+  - `name:` - Display name for reporting (default: last segment of the module name)
+  - `config:` - Map passed to the adapter's `setup/1`
+
+  `injectors:` and `mocks:` are not supported here; the run raises if any entry
+  sets them.
 
   Examples:
 
-      {MyAdapter}
+      MyAdapter
       {MyAdapter, name: "staging"}
-      {MyAdapter, role: :reference, opts: [url: "http://prod"]}
+      {MyAdapter, name: "prod", config: %{url: "http://prod"}}
 
   ## Optional Options
 
@@ -120,8 +126,17 @@ defmodule PropertyDamage.Differential do
   def run(opts) do
     opts = Options.validate_differential!(opts)
 
-    with {:ok, config} <- build_config(opts),
-         {:ok, targets} <- parse_targets(config.targets) do
+    # Differential drives each target's adapter directly: it has no injection
+    # source or mock registry, so these entry keys would be silently ignored.
+    Options.reject_unsupported_target_keys!(
+      opts[:targets],
+      [:injectors, :mocks],
+      "PropertyDamage.Differential.run/1"
+    )
+
+    with {:ok, config} <- build_config(opts) do
+      targets = config.targets
+
       # Determine execution mode (record it on config so the result reports the
       # mode actually used).
       execution_mode = determine_execution_mode(config)
@@ -184,8 +199,7 @@ defmodule PropertyDamage.Differential do
       metrics: opts[:metrics],
       percentiles: opts[:percentiles],
       warmup_runs: opts[:warmup_runs],
-      reporter: reporter,
-      adapter_config: opts[:adapter_config]
+      reporter: reporter
     }
 
     {:ok, config}
@@ -203,24 +217,6 @@ defmodule PropertyDamage.Differential do
 
       %Progress{} ->
         :ok
-    end
-  end
-
-  defp parse_targets(target_specs) do
-    targets =
-      target_specs
-      |> Enum.with_index()
-      |> Enum.map(fn {spec, index} ->
-        Target.parse(spec, index)
-      end)
-
-    # Validate: only one reference for correctness mode
-    references = Enum.filter(targets, &(&1.role == :reference))
-
-    if length(references) > 1 do
-      {:error, {:invalid_targets, "only one target can have role: :reference"}}
-    else
-      {:ok, targets}
     end
   end
 
@@ -252,7 +248,7 @@ defmodule PropertyDamage.Differential do
     :rand.seed(:exsss, config.seed)
 
     # Setup all targets
-    with {:ok, target_contexts} <- setup_all_targets(targets, config) do
+    with {:ok, target_contexts} <- setup_all_targets(targets) do
       try do
         result = run_interleaved_loop(config, targets, target_contexts, 0, [])
         {:ok, result}
@@ -409,10 +405,10 @@ defmodule PropertyDamage.Differential do
   end
 
   defp check_divergence(config, targets, target_results, command, index) do
-    # Find reference target
-    reference = Enum.find(targets, &(&1.role == :reference))
+    # The first target is the reference
+    reference = hd(targets)
 
-    if reference && config.compare in [:correctness, :both] do
+    if config.compare in [:correctness, :both] do
       ref_result = find_result(target_results, reference.name)
 
       # Check each non-reference target against reference
@@ -492,9 +488,7 @@ defmodule PropertyDamage.Differential do
 
   defp run_target_sequential(config, target, sequences) do
     # Setup target
-    adapter_opts = Map.merge(config.adapter_config, target.opts)
-
-    case target.adapter.setup(adapter_opts) do
+    case target.adapter.setup(target.config) do
       {:ok, context} ->
         try do
           runs =
@@ -609,31 +603,19 @@ defmodule PropertyDamage.Differential do
   end
 
   defp find_sequential_divergences(config, targets, target_results, sequences) do
-    # Find reference
-    reference = Enum.find(targets, &(&1.role == :reference))
+    # The first target is the reference; compare every other target against it
+    [reference | others] = targets
+    ref_data = %{runs: Map.get(target_results, reference.name).runs, name: reference.name}
 
-    ref_data =
-      if reference != nil do
-        # Compare against reference target
-        %{runs: Map.get(target_results, reference.name).runs, name: reference.name}
+    Enum.flat_map(others, fn target ->
+      target_data = Map.get(target_results, target.name)
+
+      if target_data.setup_success do
+        compare_run_results(config, ref_data, target, target_data, sequences)
+      else
+        []
       end
-
-    if ref_data do
-      # Compare each target's results against reference
-      targets
-      |> Enum.filter(fn t -> t.name != ref_data.name end)
-      |> Enum.flat_map(fn target ->
-        target_data = Map.get(target_results, target.name)
-
-        if target_data.setup_success do
-          compare_run_results(config, ref_data, target, target_data, sequences)
-        else
-          []
-        end
-      end)
-    else
-      []
-    end
+    end)
   end
 
   defp compare_run_results(config, ref_data, target, target_data, sequences) do
@@ -740,18 +722,18 @@ defmodule PropertyDamage.Differential do
         :equivalent
       end
 
-    reference = Enum.find(targets, &(&1.role == :reference))
+    [reference | _] = targets
 
     %Result{
       mode: config.compare,
       execution: config.execution_mode,
       runs: config.max_runs,
       seed: config.seed,
-      reference: if(reference, do: reference.name, else: nil),
+      reference: %{index: reference.index, name: reference.name},
       status: status,
       divergences: divergences,
       metrics: metrics,
-      targets: Enum.map(targets, & &1.name)
+      targets: Enum.map(targets, &%{index: &1.index, name: &1.name})
     }
   end
 
@@ -759,12 +741,10 @@ defmodule PropertyDamage.Differential do
   # Helpers
   # ============================================================================
 
-  defp setup_all_targets(targets, config) do
+  defp setup_all_targets(targets) do
     results =
       for target <- targets do
-        adapter_opts = Map.merge(config.adapter_config, target.opts)
-
-        case target.adapter.setup(adapter_opts) do
+        case target.adapter.setup(target.config) do
           {:ok, context} -> {:ok, target.name, context}
           {:error, reason} -> {:error, target.name, reason}
         end

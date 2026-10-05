@@ -12,8 +12,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   defstruct [
     :worker_id,
     :model,
-    :adapter,
-    :adapter_config,
+    :target,
     :adapter_context,
     :metrics,
     :think_time_range,
@@ -48,8 +47,7 @@ defmodule PropertyDamage.LoadTest.Worker do
 
   - `:worker_id` - Unique worker ID (required)
   - `:model` - Model module (required)
-  - `:adapter` - Adapter module (required)
-  - `:adapter_config` - Adapter configuration (default: %{})
+  - `:target` - `PropertyDamage.Target` to run against (required)
   - `:metrics` - Metrics collector pid (required)
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:check_mode` - How to handle checks (default: :disabled)
@@ -100,21 +98,19 @@ defmodule PropertyDamage.LoadTest.Worker do
   def init(opts) do
     worker_id = Keyword.fetch!(opts, :worker_id)
     model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    target = Keyword.fetch!(opts, :target)
     metrics = Keyword.fetch!(opts, :metrics)
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
     check_mode = Keyword.get(opts, :check_mode, :disabled)
     run_nonce = Keyword.get(opts, :run_nonce)
 
     # Setup adapter ONCE - this context will be reused for all sequences
-    case adapter.setup(adapter_config) do
+    case target.adapter.setup(target.config) do
       {:ok, adapter_context} ->
         state = %__MODULE__{
           worker_id: worker_id,
           model: model,
-          adapter: adapter,
-          adapter_config: adapter_config,
+          target: target,
           adapter_context: adapter_context,
           metrics: metrics,
           think_time_range: think_time_range,
@@ -161,7 +157,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   def terminate(_reason, state) do
     # Teardown adapter context on worker shutdown
     if state.adapter_context do
-      state.adapter.teardown(state.adapter_context)
+      state.target.adapter.teardown(state.adapter_context)
     end
 
     :ok
@@ -323,7 +319,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     case PlaceholderRegistry.resolve_data(registry, command, mint) do
       {:ok, resolved_command} ->
         # Get timeout from adapter
-        timeout_ms = Timeout.normalize_timeout(state.adapter.timeout(resolved_command))
+        timeout_ms = Timeout.normalize_timeout(state.target.adapter.timeout(resolved_command))
 
         # Per-command injection sink (DR-027), opened via the shared
         # Runtime.InjectionWindow. The inject closure captures the sink pid, so it
@@ -342,7 +338,7 @@ defmodule PropertyDamage.LoadTest.Worker do
               # worker -> pool -> runner -> caller instead of being recorded as a
               # single failed command.
               try do
-                state.adapter.execute(resolved_command, state.adapter_context, runtime)
+                state.target.adapter.execute(resolved_command, state.adapter_context, runtime)
               rescue
                 exception -> {:error, {:adapter_error, exception}}
               catch

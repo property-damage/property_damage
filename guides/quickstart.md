@@ -139,7 +139,7 @@ Run it:
 ```elixir
 PropertyDamage.run(
   model: AccountModel,
-  adapter: AccountAdapter,
+  targets: [AccountAdapter],
   max_commands: 20,
   max_runs: 50
 )
@@ -198,15 +198,15 @@ In these snippets `M` and `A` are your model and adapter modules -- e.g.
 
 ```elixir
 # Basic
-PropertyDamage.run(model: M, adapter: A)
+PropertyDamage.run(model: M, targets: [A])
 
 # Seeded (reproducible)
-PropertyDamage.run(model: M, adapter: A, seed: 42)
+PropertyDamage.run(model: M, targets: [A], seed: 42)
 
 # Parallel / branching (race condition detection)
 PropertyDamage.run(
   model: M,
-  adapter: A,
+  targets: [A],
   branching: [
     branch_probability: 0.3,
     max_branches: 3,
@@ -220,7 +220,7 @@ PropertyDamage.run(
 # stutter working, not a framework bug. Point it at an idempotent SUT for a pass.
 PropertyDamage.run(
   model: M,
-  adapter: A,
+  targets: [A],
   stutter: [
     probability: 0.2,
     max_repeats: 3,
@@ -231,7 +231,7 @@ PropertyDamage.run(
 # Load test
 PropertyDamage.run(
   model: M,
-  adapter: A,
+  targets: [A],
   max_commands: 500,
   max_runs: 1000,
   verbose: true
@@ -239,5 +239,5 @@ PropertyDamage.run(
 
 # Chaos / fault injection: nemeses are added to the model's commands/0 list
 # (with low weights), not passed as a run option. See the Chaos Engineering guide.
-PropertyDamage.run(model: ChaosModel, adapter: A)
+PropertyDamage.run(model: ChaosModel, targets: [A])
 ```

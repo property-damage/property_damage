@@ -10,7 +10,7 @@ When a test fails, PropertyDamage returns a failure report:
 ```elixir
 {:error, failure} = PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   max_runs: 100
 )
 
@@ -98,7 +98,7 @@ Use the seed to reproduce exactly:
 # Run with the same seed
 result = PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   seed: failure.seed
 )
 ```
@@ -299,8 +299,8 @@ same seed (same seed and model ⇒ same plan ⇒ comparable):
 alias PropertyDamage.{RunTrace, RunComparison}
 
 # Same model and seed on both sides: identical plan, different SUT behavior.
-before = RunTrace.capture(model: MyModel, adapter: MyAdapter.Fixed, seed: failure.seed)
-after_ = RunTrace.capture(model: MyModel, adapter: MyAdapter.Buggy, seed: failure.seed)
+before = RunTrace.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
+after_ = RunTrace.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
 
 comparison = RunComparison.compare([before, after_])
 ```
@@ -340,7 +340,7 @@ shared SUT:
 {_traces, comparison} =
   RunComparison.investigate(
     runs: 10,
-    capture: [model: MyModel, adapter: MyAdapter, seed: failure.seed]
+    capture: [model: MyModel, targets: [MyAdapter], seed: failure.seed]
   )
 ```
 
@@ -354,7 +354,7 @@ verdicts =
   RunComparison.scan(
     seeds: Enum.to_list(1..100),
     runs: 5,
-    capture: [model: MyModel, adapter: MyAdapter]
+    capture: [model: MyModel, targets: [MyAdapter]]
   )
 
 for {seed, v} <- verdicts, v.flaky? do
@@ -468,7 +468,7 @@ row), not a durable corpus — for a durable regression, export the failure to a
 ExUnit test, which freezes the concrete sequence.
 
 ```elixir
-PropertyDamage.run(model: M, adapter: A, seed_library: "seeds.json")
+PropertyDamage.run(model: M, targets: [A], seed_library: "seeds.json")
 ```
 
 ## Step 9: Verify the Fix
@@ -480,16 +480,16 @@ After fixing the bug:
 assert {:ok, _stats} =
          PropertyDamage.run(
            model: MyModel,
-           adapter: MyAdapter,
+           targets: [MyAdapter],
            seed: failure.seed
          )
 
 # Use fix verification for a comprehensive check. The model is positional;
-# :adapter and :max_variations go in the opts.
+# :targets and :max_variations go in the opts.
 verification = PropertyDamage.FailureIntelligence.verify_fix(
   failure,
   MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   max_variations: 50  # Test with seed variations
 )
 
@@ -507,7 +507,7 @@ Enable verbose output to see what PropertyDamage generates and executes:
 
     PropertyDamage.run(
       model: MyModel,
-      adapter: MyAdapter,
+      targets: [MyAdapter],
       verbose: true
     )
 
@@ -624,7 +624,7 @@ failing runs diverge (see [Comparing Runs](#comparing-runs) above):
 {_traces, comparison} =
   PropertyDamage.RunComparison.investigate(
     runs: 10,
-    capture: [model: MyModel, adapter: MyAdapter, seed: failure.seed]
+    capture: [model: MyModel, targets: [MyAdapter], seed: failure.seed]
   )
 
 summary = PropertyDamage.RunComparison.outcome_summary(comparison)

@@ -781,7 +781,7 @@ defmodule PropertyDamage.MutationTest do
       {:ok, report} =
         Mutation.run(
           model: FixtureModel,
-          adapter: PropertyDamage.Test.TestAdapter,
+          targets: [PropertyDamage.Test.TestAdapter],
           operators: [:value],
           mutations_per_command: 1,
           max_runs: 1
@@ -795,7 +795,7 @@ defmodule PropertyDamage.MutationTest do
       {:ok, report} =
         Mutation.run(
           model: PassingModel,
-          adapter: PropertyDamage.Test.TestAdapter,
+          targets: [PropertyDamage.Test.TestAdapter],
           operators: [:value],
           mutations_per_command: 3,
           max_runs: 2
@@ -822,7 +822,7 @@ defmodule PropertyDamage.MutationTest do
       {:ok, report} =
         Mutation.run(
           model: FixtureModel,
-          adapter: PropertyDamage.Test.TestAdapter,
+          targets: [PropertyDamage.Test.TestAdapter],
           operators: [:value],
           mutations_per_command: 1,
           max_runs: 1,
@@ -858,7 +858,7 @@ defmodule PropertyDamage.MutationTest do
 
       Mutation.run(
         model: FixtureModel,
-        adapter: PropertyDamage.Test.TestAdapter,
+        targets: [PropertyDamage.Test.TestAdapter],
         operators: [:value],
         mutations_per_command: 1,
         max_runs: 1

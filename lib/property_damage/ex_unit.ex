@@ -16,13 +16,13 @@ defmodule PropertyDamage.ExUnit do
 
         property_damage "system maintains invariants",
           model: MyApp.TestModel,
-          adapter: MyApp.TestAdapter,
+          targets: [MyApp.TestAdapter],
           max_commands: 50,
           max_runs: 100
 
         property_damage "handles concurrent access",
           model: MyApp.TestModel,
-          adapter: MyApp.ConcurrentAdapter,
+          targets: [MyApp.ConcurrentAdapter],
           max_commands: 100
       end
 
@@ -32,17 +32,16 @@ defmodule PropertyDamage.ExUnit do
 
   **Required:**
   - `:model` - Model module (required)
-  - `:adapter` - Adapter module (required)
+  - `:targets` - A list with exactly one entry (required): an adapter module or
+    `{AdapterModule, name:, config:, injectors:, mocks:}`; see `PropertyDamage.Target`
 
   **Optional:** every other `PropertyDamage.run/1` option is forwarded as-is,
   including:
   - `:max_commands` - Max commands per sequence (default: 50)
   - `:max_runs` - Number of test sequences (default: 100)
   - `:seed` - Fixed seed for reproducibility
-  - `:injector_adapters` - List of injector adapter modules (default: [])
   - `:shrink` - Whether to shrink failures (default: true)
   - `:validate` - Whether to validate config (default: true)
-  - `:adapter_config` - Config passed to adapter.setup/1 (default: %{})
   - `:verbose`, `:check_mode`, `:branching`, `:stutter`,
     `:external_markers`, `:on_failure`, and the rest of the `run/1` surface
 
@@ -89,7 +88,7 @@ defmodule PropertyDamage.ExUnit do
 
         property_damage "test name",
           model: MyModel,
-          adapter: MyAdapter,
+          targets: [MyAdapter],
           max_runs: 10
       end
   """
@@ -115,19 +114,19 @@ defmodule PropertyDamage.ExUnit do
       # Basic usage
       property_damage "basic test",
         model: MyModel,
-        adapter: MyAdapter
+        targets: [MyAdapter]
 
       # With options
       property_damage "custom test",
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         max_commands: 100,
         max_runs: 50
 
       # With fixed seed for reproduction
       property_damage "reproducible test",
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         seed: 12345
   """
   defmacro property_damage(name, opts \\ []) do
@@ -150,7 +149,7 @@ defmodule PropertyDamage.ExUnit do
   Assemble the options forwarded to `PropertyDamage.run/1` for a
   `property_damage/2` test.
 
-  `:model` and `:adapter` are required (a missing one raises `KeyError` with a
+  `:model` and `:targets` are required (a missing one raises `KeyError` with a
   clear message); every other option is forwarded verbatim, so the full
   `run/1` surface (`verbose:`, `check_mode:`, `branching:`, `stutter:`,
   `external_markers:`, `on_failure:`, ...) is reachable from the ExUnit macro.
@@ -162,7 +161,10 @@ defmodule PropertyDamage.ExUnit do
   def build_run_opts(opts) do
     # Required options: fail fast with a clear KeyError rather than letting
     # run/1 surface a less obvious validation message.
-    Enum.each([:model, :adapter], &Keyword.fetch!(opts, &1))
+    # A retired run-level key (`adapter:`, ...) is reported by name with its
+    # replacement before the missing `:targets` is.
+    PropertyDamage.Options.reject_retired_targets!(opts)
+    Enum.each([:model, :targets], &Keyword.fetch!(opts, &1))
 
     case Keyword.fetch(opts, :seed) do
       {:ok, nil} -> Keyword.delete(opts, :seed)

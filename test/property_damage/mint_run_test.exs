@@ -48,7 +48,7 @@ defmodule PropertyDamage.MintRunTest do
   end
 
   # A non-resetting SUT: every execution records the request_ids it received to
-  # a recorder Agent supplied via adapter_config, which persists across the
+  # a recorder Agent supplied via the target config, which persists across the
   # run's many executions (exploration, shrink attempts, reproduction).
   defmodule RecordingAdapter do
     use PropertyDamage.Adapter
@@ -71,7 +71,7 @@ defmodule PropertyDamage.MintRunTest do
     {:error, r1} =
       PropertyDamage.run(
         model: Model,
-        adapter: no_op_adapter(),
+        targets: [no_op_adapter()],
         seed: 12_345,
         max_runs: 1,
         shrink: false
@@ -82,7 +82,7 @@ defmodule PropertyDamage.MintRunTest do
     {:error, r2} =
       PropertyDamage.run(
         model: Model,
-        adapter: no_op_adapter(),
+        targets: [no_op_adapter()],
         seed: 12_345,
         max_runs: 1,
         shrink: false
@@ -96,7 +96,7 @@ defmodule PropertyDamage.MintRunTest do
     {:error, report} =
       PropertyDamage.run(
         model: Model,
-        adapter: no_op_adapter(),
+        targets: [no_op_adapter()],
         seed: 12_345,
         run_nonce: 7_777_777,
         max_runs: 1,
@@ -116,8 +116,7 @@ defmodule PropertyDamage.MintRunTest do
     {:error, _report} =
       PropertyDamage.run(
         model: Model,
-        adapter: RecordingAdapter,
-        adapter_config: %{recorder: recorder},
+        targets: [{RecordingAdapter, config: %{recorder: recorder}}],
         seed: 12_345,
         run_nonce: 555,
         max_runs: 1,

@@ -249,7 +249,7 @@ defmodule PropertyDamage.Error do
     Example:
       PropertyDamage.run(
         model: MyApp.TestModel,
-        adapter: MyApp.TestAdapter
+        targets: [MyApp.TestAdapter]
       )
     """
     |> String.trim()
@@ -259,12 +259,12 @@ defmodule PropertyDamage.Error do
     """
     Configuration Error: Missing Adapter
 
-    The :adapter option is required but was not provided.
+    The :targets option is required but was not provided.
 
     Example:
       PropertyDamage.run(
         model: MyApp.TestModel,
-        adapter: MyApp.TestAdapter
+        targets: [MyApp.TestAdapter]
       )
     """
     |> String.trim()
@@ -279,7 +279,7 @@ defmodule PropertyDamage.Error do
     Example:
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         max_commands: 50
       )
     """
@@ -295,7 +295,7 @@ defmodule PropertyDamage.Error do
     Example:
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         max_runs: 100
       )
     """
@@ -311,7 +311,7 @@ defmodule PropertyDamage.Error do
     Example:
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         seed: 12345
       )
     """

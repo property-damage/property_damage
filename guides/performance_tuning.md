@@ -23,7 +23,7 @@ The main knobs in `PropertyDamage.run/1`:
 ```elixir
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   max_commands: 20,
   max_runs: 30,
   shrinker_config: PropertyDamage.Shrinker.Config.new(
@@ -38,7 +38,7 @@ PropertyDamage.run(
 ```elixir
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   max_commands: 50,
   max_runs: 100,
   shrinker_config: PropertyDamage.Shrinker.Config.new(
@@ -53,7 +53,7 @@ PropertyDamage.run(
 ```elixir
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   max_commands: 200,
   max_runs: 1000,
   shrinker_config: PropertyDamage.Shrinker.Config.new(
@@ -148,7 +148,7 @@ Run the concurrency-focused model with parallel branches:
 ```elixir
 PropertyDamage.run(
   model: HighConcurrencyModel,
-  adapter: AccountAdapter,
+  targets: [AccountAdapter],
   branching: [max_branches: 3, max_branch_length: 5]
 )
 ```
@@ -220,16 +220,16 @@ The `check_mode` option controls how check failures are handled:
 
 ```elixir
 # Initial exploration -- skip checks, focus on crashes
-PropertyDamage.run(model: M, adapter: A, check_mode: :disabled)
+PropertyDamage.run(model: M, targets: [A], check_mode: :disabled)
 
 # Record all failures without stopping
-PropertyDamage.run(model: M, adapter: A, check_mode: :record)
+PropertyDamage.run(model: M, targets: [A], check_mode: :record)
 
 # Log as warnings -- useful for development
-PropertyDamage.run(model: M, adapter: A, check_mode: :log)
+PropertyDamage.run(model: M, targets: [A], check_mode: :log)
 
 # Stop on first failure (default) -- use for CI
-PropertyDamage.run(model: M, adapter: A, check_mode: :halt)
+PropertyDamage.run(model: M, targets: [A], check_mode: :halt)
 ```
 
 Use `:disabled` during initial development to find crashes before adding
@@ -264,7 +264,7 @@ defmodule OrderPropertyTest do
   test "order lifecycle properties" do
     PropertyDamage.run(
       model: OrderModel,
-      adapter: OrderAdapter,
+      targets: [OrderAdapter],
       max_commands: 50,
       max_runs: 100,
       branching: [max_branches: 2, max_branch_length: 3],

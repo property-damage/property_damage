@@ -23,8 +23,7 @@ defmodule OpenapiBench.SeededBugTest do
     assert {:error, report} =
              PropertyDamage.run(
                model: Model,
-               adapter: Adapter,
-               adapter_config: %{base_url: Server.base_url(), bug: true},
+               targets: [{Adapter, config: %{base_url: Server.base_url(), bug: true}}],
                max_commands: 25,
                max_runs: 50,
                seed: 1,
@@ -44,8 +43,7 @@ defmodule OpenapiBench.SeededBugTest do
     assert {:error, report} =
              PropertyDamage.run(
                model: Model,
-               adapter: Adapter,
-               adapter_config: %{base_url: Server.base_url(), bug: true},
+               targets: [{Adapter, config: %{base_url: Server.base_url(), bug: true}}],
                max_commands: 25,
                max_runs: 50,
                seed: 1,

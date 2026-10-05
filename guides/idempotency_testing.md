@@ -34,7 +34,7 @@ Pass a `:stutter` keyword list to `PropertyDamage.run/1`:
 ```elixir
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   stutter: [
     probability: 0.3,
     max_repeats: 2,
@@ -289,7 +289,7 @@ To debug violations:
 # Run with stutter testing, ignoring timestamps in comparison
 PropertyDamage.run(
   model: OrderModel,
-  adapter: OrderApiAdapter,
+  targets: [OrderApiAdapter],
   max_runs: 200,
   stutter: [
     probability: 0.3,

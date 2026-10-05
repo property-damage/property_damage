@@ -153,7 +153,12 @@ defmodule PropertyDamage.ShrinkerTest do
           failed_at_index: 1,
           failure_reason: failure_reason,
           model: MultiCheckModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -180,7 +185,12 @@ defmodule PropertyDamage.ShrinkerTest do
           failed_at_index: 1,
           # No failure_reason provided
           model: MultiCheckModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -210,7 +220,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 1,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -234,7 +249,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 2,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -255,7 +275,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 1,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -273,7 +298,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          }
         )
 
       assert is_integer(result.iterations)
@@ -287,7 +317,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          }
         )
 
       assert is_integer(result.time_ms)
@@ -301,7 +336,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          }
         )
 
       assert %Sequence{} = result.sequence
@@ -317,7 +357,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: true)
         )
 
@@ -336,7 +381,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: true)
         )
 
@@ -361,7 +411,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: true)
         )
 
@@ -379,7 +434,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: true)
         )
 
@@ -395,7 +455,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -420,7 +485,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 3,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(max_iterations: 5, shrink_arguments: false)
         )
 
@@ -434,7 +504,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(max_time_ms: 100)
         )
 
@@ -468,7 +543,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -494,7 +574,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 1,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -532,7 +617,12 @@ defmodule PropertyDamage.ShrinkerTest do
           # Branch-relative index the executor would mint for B (branch1, pos 0).
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config:
             Config.new(
               shrink_arguments: false,
@@ -565,7 +655,12 @@ defmodule PropertyDamage.ShrinkerTest do
           failed_at_index: 1,
           failure_reason: Failure.check_failed(:quantity_limit, "exceeds limit"),
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -600,7 +695,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 1,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -631,7 +731,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 3,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -655,7 +760,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -678,7 +788,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          }
         )
 
       assert %Sequence{} = result.sequence
@@ -696,7 +811,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          }
         )
 
       assert is_integer(result.iterations)
@@ -715,7 +835,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          }
         )
 
       assert is_integer(result.time_ms)
@@ -736,7 +861,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 0,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: true)
         )
 
@@ -778,7 +908,12 @@ defmodule PropertyDamage.ShrinkerTest do
           failed_at_index: 0,
           failure_reason: failure_reason,
           model: FailingModel,
-          adapter: SimpleAdapter,
+          target: %PropertyDamage.Target{
+            adapter: SimpleAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -821,7 +956,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 2,
           model: ProbeModel,
-          adapter: ProbeAdapter,
+          target: %PropertyDamage.Target{
+            adapter: ProbeAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -851,7 +991,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 4,
           model: ProbeModel,
-          adapter: ProbeAdapter,
+          target: %PropertyDamage.Target{
+            adapter: ProbeAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -885,7 +1030,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 1,
           model: ProbeModel,
-          adapter: ProbeAdapter,
+          target: %PropertyDamage.Target{
+            adapter: ProbeAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 
@@ -912,7 +1062,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(commands,
           failed_at_index: 4,
           model: ProbeModel,
-          adapter: ProbeAdapter,
+          target: %PropertyDamage.Target{
+            adapter: ProbeAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false, max_iterations: 10)
         )
 
@@ -947,7 +1102,12 @@ defmodule PropertyDamage.ShrinkerTest do
         Shrinker.shrink(seq,
           failed_at_index: 0,
           model: ProbeModel,
-          adapter: ProbeAdapter,
+          target: %PropertyDamage.Target{
+            adapter: ProbeAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           config: Config.new(shrink_arguments: false)
         )
 

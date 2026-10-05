@@ -276,12 +276,12 @@ defmodule PropertyDamage.Nemesis.ToxiproxyTest do
       # is what proves the seam. (End-of-run cleanup will additionally DELETE.)
       commands = [%NetworkLatency{latency_ms: 100, jitter_ms: 0, duration_ms: 600_000}]
 
-      adapter_config = %{
+      config = %{
         toxiproxy: %{proxy_name: "engine", api_url: Fixture.base_url(fixture)}
       }
 
       assert {:ok, result} =
-               Executor.run(commands, Model, SeamAdapter, adapter_config: adapter_config)
+               Executor.run(commands, Model, SeamAdapter, config: config)
 
       # The injected event went through the LIVE path, not simulated.
       injected =

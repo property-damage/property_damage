@@ -17,7 +17,7 @@ defmodule GiteaBench.UiAdapter do
   form-submit reload, a live-update redirect) can never land on the next
   command's page and navigate it away mid-interaction. See `page_for/2`.
 
-  Config (`opts`/`adapter_config`): `:base_url` (required), `:admin_user`,
+  Config (`config:` in the `targets:` entry): `:base_url` (required), `:admin_user`,
   `:admin_password`, and `:seed_bug` (when true, label creation fills the wrong
   colour: a deliberate transport bug the oracle is meant to catch).
   """

@@ -28,12 +28,12 @@ defmodule PropertyDamageTest do
   describe "run/1 validation" do
     test "requires model option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :model option not found/, fn ->
-        PropertyDamage.run(adapter: SimpleAdapter)
+        PropertyDamage.run(targets: [SimpleAdapter])
       end
     end
 
-    test "requires adapter option" do
-      assert_raise NimbleOptions.ValidationError, ~r/required :adapter option not found/, fn ->
+    test "requires targets option" do
+      assert_raise NimbleOptions.ValidationError, ~r/required :targets option not found/, fn ->
         PropertyDamage.run(model: ExecutorModel)
       end
     end
@@ -44,7 +44,7 @@ defmodule PropertyDamageTest do
       result =
         PropertyDamage.run(
           model: ExecutorModel,
-          adapter: SimpleAdapter,
+          targets: [SimpleAdapter],
           max_runs: 3,
           max_commands: 5,
           validate: false
@@ -59,7 +59,7 @@ defmodule PropertyDamageTest do
     test "respects seed for reproducibility" do
       opts = [
         model: ExecutorModel,
-        adapter: SimpleAdapter,
+        targets: [SimpleAdapter],
         max_runs: 3,
         max_commands: 5,
         seed: 12_345,
@@ -145,8 +145,7 @@ defmodule PropertyDamageTest do
       assert_raise RuntimeError, ~r/injector setup boom/, fn ->
         PropertyDamage.run(
           model: ExecutorModel,
-          adapter: SimpleAdapter,
-          injector_adapters: [LeakProbeInjector],
+          targets: [{SimpleAdapter, injectors: [LeakProbeInjector]}],
           max_runs: 1,
           max_commands: 3,
           validate: false
@@ -161,8 +160,7 @@ defmodule PropertyDamageTest do
       result =
         PropertyDamage.run(
           model: ExecutorModel,
-          adapter: PropertyDamage.Test.FailingAdapter,
-          adapter_config: %{fail_setup: true},
+          targets: [{PropertyDamage.Test.FailingAdapter, config: %{fail_setup: true}}],
           max_runs: 1,
           max_commands: 3,
           validate: false
@@ -179,8 +177,7 @@ defmodule PropertyDamageTest do
       result =
         PropertyDamage.run(
           model: AlwaysFailModel,
-          adapter: SecondSetupFailsAdapter,
-          adapter_config: %{setup_counter: ref},
+          targets: [{SecondSetupFailsAdapter, config: %{setup_counter: ref}}],
           max_runs: 1,
           max_commands: 3,
           shrink: false,
@@ -197,8 +194,7 @@ defmodule PropertyDamageTest do
     test "an injector whose setup raises does not leak the EventQueue" do
       assert_raise RuntimeError, ~r/injector setup boom/, fn ->
         PropertyDamage.execute([],
-          adapter: SimpleAdapter,
-          injector_adapters: [LeakProbeInjector]
+          targets: [{SimpleAdapter, injectors: [LeakProbeInjector]}]
         )
       end
 
@@ -255,11 +251,10 @@ defmodule PropertyDamageTest do
 
       PropertyDamage.run(
         model: LifecycleModel,
-        adapter: SimpleAdapter,
+        targets: [{SimpleAdapter, config: %{test_pid: pid}}],
         max_runs: 1,
         max_commands: 2,
-        validate: false,
-        adapter_config: %{test_pid: pid}
+        validate: false
       )
 
       assert_received {:lifecycle, :setup_once, setup_config}
@@ -274,11 +269,10 @@ defmodule PropertyDamageTest do
 
       PropertyDamage.run(
         model: LifecycleModel,
-        adapter: SimpleAdapter,
+        targets: [{SimpleAdapter, config: %{test_pid: pid}}],
         max_runs: 3,
         max_commands: 2,
-        validate: false,
-        adapter_config: %{test_pid: pid}
+        validate: false
       )
 
       for n <- 0..2 do
@@ -304,7 +298,7 @@ defmodule PropertyDamageTest do
       result =
         PropertyDamage.run(
           model: FailingModel,
-          adapter: SimpleAdapter,
+          targets: [SimpleAdapter],
           seed: 42,
           max_runs: 100,
           max_commands: 50,
@@ -330,7 +324,7 @@ defmodule PropertyDamageTest do
       result =
         PropertyDamage.run(
           model: FailingModel,
-          adapter: SimpleAdapter,
+          targets: [SimpleAdapter],
           seed: 42,
           max_runs: 100,
           max_commands: 50,
@@ -351,7 +345,7 @@ defmodule PropertyDamageTest do
       result =
         PropertyDamage.run(
           model: FailingModel,
-          adapter: SimpleAdapter,
+          targets: [SimpleAdapter],
           seed: 42,
           max_runs: 100,
           max_commands: 50,
@@ -381,7 +375,7 @@ defmodule PropertyDamageTest do
         ExUnit.CaptureIO.capture_io(fn ->
           PropertyDamage.run(
             model: ExecutorModel,
-            adapter: SimpleAdapter,
+            targets: [SimpleAdapter],
             max_runs: 2,
             max_commands: 3,
             validate: true,
@@ -402,7 +396,7 @@ defmodule PropertyDamageTest do
       assert {:ok, _stats} =
                PropertyDamage.run(
                  model: ExecutorModel,
-                 adapter: SimpleAdapter,
+                 targets: [SimpleAdapter],
                  max_runs: 2,
                  max_commands: 3,
                  validate: false,
@@ -427,7 +421,7 @@ defmodule PropertyDamageTest do
       assert {:error, _report} =
                PropertyDamage.run(
                  model: FailingModel,
-                 adapter: SimpleAdapter,
+                 targets: [SimpleAdapter],
                  seed: 42,
                  max_runs: 100,
                  max_commands: 50,
@@ -455,7 +449,7 @@ defmodule PropertyDamageTest do
 
       PropertyDamage.run(
         model: ExecutorModel,
-        adapter: SimpleAdapter,
+        targets: [SimpleAdapter],
         max_runs: 1,
         max_commands: 2,
         validate: false

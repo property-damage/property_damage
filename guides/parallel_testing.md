@@ -80,7 +80,7 @@ Pass a `:branching` keyword list to `PropertyDamage.run/1`:
 ```elixir
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   branching: [
     max_branches: 3,
     max_branch_length: 5,
@@ -225,7 +225,7 @@ Run with parallel branches:
 ```elixir
 PropertyDamage.run(
   model: AccountModel,
-  adapter: AccountApiAdapter,
+  targets: [AccountApiAdapter],
   max_runs: 200,
   branching: [
     max_branches: 2,
@@ -261,7 +261,7 @@ idempotency:
 ```elixir
 PropertyDamage.run(
   model: AccountModel,
-  adapter: AccountApiAdapter,
+  targets: [AccountApiAdapter],
   branching: [max_branches: 2, max_branch_length: 4],
   stutter: [probability: 0.2, max_repeats: 1]
 )

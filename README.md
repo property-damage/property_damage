@@ -229,7 +229,7 @@ end
 ```elixir
 case PropertyDamage.run(
        model: MyApp.TestModel,
-       adapter: MyApp.TestAdapter,
+       targets: [MyApp.TestAdapter],
        max_commands: 50,
        max_runs: 100
      ) do
@@ -249,7 +249,7 @@ When PropertyDamage finds a failure, it provides rich tools for understanding wh
 ### Understanding Failure Reports
 
 ```elixir
-{:error, failure} = PropertyDamage.run(model: M, adapter: A)
+{:error, failure} = PropertyDamage.run(model: M, targets: [A])
 
 # The shrunk, minimal reproduction with full diagnostics
 IO.inspect(failure, pretty: true)
@@ -317,8 +317,8 @@ diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
 IO.puts(diagram)  # Paste into GitHub markdown, Notion, etc.
 
 # Compare full traces of the same plan to localize where the runs diverge
-before = PropertyDamage.RunTrace.capture(model: MyModel, adapter: MyAdapter.Fixed, seed: failure.seed)
-after_ = PropertyDamage.RunTrace.capture(model: MyModel, adapter: MyAdapter.Buggy, seed: failure.seed)
+before = PropertyDamage.RunTrace.capture(model: MyModel, targets: [MyAdapter.Fixed], seed: failure.seed)
+after_ = PropertyDamage.RunTrace.capture(model: MyModel, targets: [MyAdapter.Buggy], seed: failure.seed)
 comparison = PropertyDamage.RunComparison.compare([before, after_])
 IO.inspect(comparison.ranking)  # most discriminating field first
 ```
@@ -331,7 +331,7 @@ Save failures for later analysis or to build a regression suite:
 
 ```elixir
 # Save a failure
-{:error, failure} = PropertyDamage.run(model: M, adapter: A)
+{:error, failure} = PropertyDamage.run(model: M, targets: [A])
 {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
 # => {:ok, "failures/20251226T143000-check_failed-UniqueEmails-seed512902757.pd"}
 
@@ -360,10 +360,10 @@ a row (default 3); flaky seeds keep failing and self-retain.
 # Enable the working set (default file). Previously-failing seeds replay first;
 # if any still fail, exploration is skipped and the run halts with a summary.
 # A new failure found during exploration is appended automatically.
-PropertyDamage.run(model: M, adapter: A, seed_library: true)
+PropertyDamage.run(model: M, targets: [A], seed_library: true)
 
 # Or point at an explicit file, and tune the prune threshold:
-PropertyDamage.run(model: M, adapter: A,
+PropertyDamage.run(model: M, targets: [A],
   seed_library: "seeds.json",
   seed_library_prune_after: 5
 )
@@ -377,7 +377,7 @@ Track how thoroughly your model is being exercised:
 alias PropertyDamage.Coverage
 
 # Single run coverage
-result = PropertyDamage.run(model: M, adapter: A)
+result = PropertyDamage.run(model: M, targets: [A])
 coverage = PropertyDamage.coverage(result, M)
 IO.puts(Coverage.format(coverage))
 
@@ -513,7 +513,8 @@ This checks:
 ```elixir
 PropertyDamage.run(
   model: MyApp.TestModel,
-  adapter: MyApp.TestAdapter,
+  # System under test: the adapter, with the config its setup/1 receives
+  targets: [{MyApp.TestAdapter, config: %{base_url: "http://localhost:4000"}}],
 
   # Generation
   max_commands: 50,        # Max commands per sequence
@@ -525,10 +526,7 @@ PropertyDamage.run(
   max_shrink_iterations: 1000,
 
   # Idempotency (see the idempotency guide)
-  stutter: [probability: 0.1],
-
-  # Adapter
-  adapter_config: %{base_url: "http://localhost:4000"}
+  stutter: [probability: 0.1]
 )
 ```
 
@@ -565,7 +563,7 @@ verifies that results are linearizable.
 ```elixir
 PropertyDamage.run(
   model: MyApp.TestModel,
-  adapter: MyApp.TestAdapter,
+  targets: [MyApp.TestAdapter],
   max_commands: 50,
   max_runs: 100,
   branching: [
@@ -884,7 +882,7 @@ Generate sequence diagrams from failure reports to visualize command flows and p
 
 ```elixir
 # From a failure report
-{:error, report} = PropertyDamage.run(model: MyModel, adapter: MyAdapter)
+{:error, report} = PropertyDamage.run(model: MyModel, targets: [MyAdapter])
 diagram = PropertyDamage.Diagram.from_failure_report(report, :mermaid)
 IO.puts(diagram)
 
@@ -944,8 +942,8 @@ pure data-in/data-out and never runs a SUT.
 alias PropertyDamage.{RunTrace, RunComparison}
 
 # Same model and seed on both sides ⇒ identical plan (comparable by fingerprint).
-before = RunTrace.capture(model: M, adapter: A.Fixed, seed: 123)
-after_ = RunTrace.capture(model: M, adapter: A.Buggy, seed: 123)
+before = RunTrace.capture(model: M, targets: [A.Fixed], seed: 123)
+after_ = RunTrace.capture(model: M, targets: [A.Buggy], seed: 123)
 
 comparison = RunComparison.compare([before, after_])
 
@@ -985,7 +983,7 @@ client-minted values never collide on a shared SUT:
 {_traces, comparison} =
   RunComparison.investigate(
     runs: 10,
-    capture: [model: M, adapter: A, seed: 123]
+    capture: [model: M, targets: [A], seed: 123]
   )
 ```
 
@@ -995,7 +993,7 @@ traces are discarded before the next, and only flaky seeds keep their full
 comparison):
 
 ```elixir
-verdicts = RunComparison.scan(seeds: Enum.to_list(1..100), runs: 5, capture: [model: M, adapter: A])
+verdicts = RunComparison.scan(seeds: Enum.to_list(1..100), runs: 5, capture: [model: M, targets: [A]])
 flaky = for {seed, v} <- verdicts, v.flaky?, do: seed
 ```
 
@@ -1029,7 +1027,7 @@ Convert failure reports into portable artifacts for sharing, regression testing,
 ### Basic Usage
 
 ```elixir
-{:error, failure} = PropertyDamage.run(model: MyModel, adapter: MyAdapter)
+{:error, failure} = PropertyDamage.run(model: MyModel, targets: [MyAdapter])
 
 # Generate ExUnit regression test
 test_code = PropertyDamage.Export.to_exunit(failure)
@@ -1190,7 +1188,7 @@ Use the `:regression` option in `PropertyDamage.run/1`:
 ```elixir
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   regression: [
     save_failures: "failures/",           # Save failure files
     seed_library: "seeds.json",           # Add to seed library
@@ -1213,7 +1211,7 @@ Avoid noise from multiple runs finding the same bug:
 ```elixir
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   regression: [
     save_failures: "failures/",
     dedup: true,                 # Enable deduplication
@@ -1232,14 +1230,14 @@ alias PropertyDamage.Regression
 # Single handler
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   on_failure: Regression.save_failure("failures/")
 )
 
 # Compose multiple handlers
 PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   on_failure: Regression.compose([
     Regression.save_failure("failures/"),
     Regression.add_to_library("seeds.json", tags: [:critical]),
@@ -1288,11 +1286,11 @@ regression testing.
 ### Basic Usage
 
 ```elixir
-# Oracle testing - compare against reference implementation
+# Oracle testing - the first target is the reference implementation
 PropertyDamage.Differential.run(
   model: MyModel,
   targets: [
-    {ReferenceAdapter, role: :reference},
+    ReferenceAdapter,
     {SUTAdapter, name: "new-impl"}
   ],
   compare: :correctness,
@@ -1313,8 +1311,8 @@ PropertyDamage.Differential.run(
 PropertyDamage.Differential.run(
   model: MyModel,
   targets: [
-    {HTTPAdapter, role: :reference, opts: [base_url: "https://prod.example.com"]},
-    {HTTPAdapter, name: "staging", opts: [base_url: "https://staging.example.com"]}
+    {HTTPAdapter, name: "prod", config: %{base_url: "https://prod.example.com"}},
+    {HTTPAdapter, name: "staging", config: %{base_url: "https://staging.example.com"}}
   ],
   compare: :correctness
 )

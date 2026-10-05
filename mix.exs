@@ -146,6 +146,7 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.Export.Script
         ],
         Differential: [
+          PropertyDamage.Target,
           PropertyDamage.Differential,
           PropertyDamage.Differential.Result
         ],

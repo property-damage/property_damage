@@ -226,7 +226,7 @@ end
 result =
   PropertyDamage.run(
     model: Cache.ChaosModel,
-    adapter: Cache.Adapter,
+    targets: [Cache.Adapter],
     max_commands: 12,
     max_runs: 20,
     seed: 7

@@ -42,16 +42,16 @@ sequence against both and compares the results:
 PropertyDamage.Differential.run(
   model: GiteaBench.Model,
   targets: [
-    {GiteaBench.ApiAdapter, role: :reference, opts: [base_url: api_url]},
-    {GiteaBench.UiAdapter, name: "ui", opts: [base_url: ui_url]}
+    {GiteaBench.ApiAdapter, name: "api", config: %{base_url: api_url}},
+    {GiteaBench.UiAdapter, name: "ui", config: %{base_url: ui_url}}
   ],
   compare: :correctness,
   equivalence: :structural
 )
 ```
 
-The reference target is the oracle: divergences are reported as "the UI did
-something the API didn't."
+The first target in the `targets:` list is the oracle: divergences are reported
+as "the UI did something the API didn't."
 
 ## The model is the intent
 
@@ -169,7 +169,10 @@ for seed <- 1..20 do
   {:ok, result} =
     PropertyDamage.Differential.run(
       model: GiteaBench.Model,
-      targets: [{ApiAdapter, role: :reference, opts: api_opts}, {UiAdapter, name: "ui", opts: ui_opts}],
+      targets: [
+        {ApiAdapter, name: "api", config: Map.new(api_opts)},
+        {UiAdapter, name: "ui", config: Map.new(ui_opts)}
+      ],
       compare: :correctness,
       equivalence: :structural,
       max_commands: 12,

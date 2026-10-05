@@ -11,7 +11,7 @@ defmodule ObanBenchTest do
     assert {:ok, _stats} =
              PropertyDamage.run(
                model: ObanBench.Model,
-               adapter: ObanBench.Adapter,
+               targets: [ObanBench.Adapter],
                max_commands: 20,
                max_runs: 25,
                verbose: false

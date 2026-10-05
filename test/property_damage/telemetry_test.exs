@@ -239,7 +239,7 @@ defmodule PropertyDamage.TelemetryTest do
 
       PropertyDamage.run(
         model: ExecutorModel,
-        adapter: SimpleAdapter,
+        targets: [SimpleAdapter],
         max_runs: 2,
         max_commands: 3,
         validate: false

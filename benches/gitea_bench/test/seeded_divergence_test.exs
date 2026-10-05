@@ -31,8 +31,8 @@ defmodule SeededDivergenceTest do
       PropertyDamage.Differential.run(
         model: GiteaBench.Model,
         targets: [
-          {GiteaBench.ApiAdapter, role: :reference, opts: api_opts()},
-          {GiteaBench.UiAdapter, name: "ui", opts: ui_opts(ui_extra)}
+          {GiteaBench.ApiAdapter, name: "api", config: Map.new(api_opts())},
+          {GiteaBench.UiAdapter, name: "ui", config: Map.new(ui_opts(ui_extra))}
         ],
         compare: :correctness,
         equivalence: :structural,

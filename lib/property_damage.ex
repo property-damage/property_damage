@@ -39,7 +39,7 @@ defmodule PropertyDamage do
 
         property_damage "system maintains invariants",
           model: MyApp.TestModel,
-          adapter: MyApp.TestAdapter,
+          targets: [MyApp.TestAdapter],
           max_commands: 50,
           max_runs: 100
       end
@@ -48,7 +48,7 @@ defmodule PropertyDamage do
 
       PropertyDamage.run(
         model: MyApp.TestModel,
-        adapter: MyApp.TestAdapter,
+        targets: [MyApp.TestAdapter],
         max_commands: 50,
         max_runs: 100
       )
@@ -57,7 +57,7 @@ defmodule PropertyDamage do
 
   When a test fails, PropertyDamage provides rich tools for understanding what went wrong:
 
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:error, failure} = PropertyDamage.run(model: M, targets: [A])
 
       # Understand why each command in the shrunk sequence is needed
       explanation = PropertyDamage.explain(failure)
@@ -91,7 +91,7 @@ defmodule PropertyDamage do
   (for durable regressions, export to an ExUnit test):
 
       # Replay failing seeds first; append any new failure's seed automatically
-      PropertyDamage.run(model: M, adapter: A, seed_library: true)
+      PropertyDamage.run(model: M, targets: [A], seed_library: true)
 
   See `PropertyDamage.SeedLibrary` for details.
 
@@ -112,7 +112,7 @@ defmodule PropertyDamage do
       {_traces, comparison} =
         PropertyDamage.RunComparison.investigate(
           runs: 10,
-          capture: [model: Model, adapter: Adapter, seed: seed]
+          capture: [model: Model, targets: [Adapter], seed: seed]
         )
 
   Scan a whole corpus of seeds with `PropertyDamage.RunComparison.scan/1`. See
@@ -193,23 +193,17 @@ defmodule PropertyDamage do
   ## Required Options
 
   - `:model` - Model module implementing PropertyDamage.Model
-  - `:adapter` - Adapter module implementing PropertyDamage.Adapter
+  - `:targets` - A list with exactly one entry: the system under test, as an
+    adapter module implementing PropertyDamage.Adapter or
+    `{AdapterModule, name:, config:, injectors:, mocks:}`. See
+    `PropertyDamage.Target`. To compare several targets, use
+    `PropertyDamage.Differential.run/1`.
 
   ## Optional Options
 
   - `:max_commands` - Maximum commands per sequence (default: 50)
   - `:max_runs` - Number of test sequences to run (default: 100)
   - `:seed` - Random seed for reproducibility (default: random)
-  - `:injector_adapters` - List of InjectorAdapter modules (default: [])
-  - `:mock_services` - Mock third-party services the SUT calls (default: []).
-    A list of `PropertyDamage.MockServiceAdapter` modules or `{module, config}`
-    tuples. Per run the framework starts a `PropertyDamage.MockServiceRegistry`,
-    registers and sets up each mock, drives `on_command/2` before each command,
-    folds mock-injected events after, and tears each mock down. The registry pid
-    is handed to the adapter on the `PropertyDamage.Runtime` handle
-    (`runtime.mock_registry`) so `execute/3` can drive `handle_request/2`. See
-    the "Mocking Third-Party Services" guide.
-  - `:adapter_config` - Config passed to adapter.setup/1 (default: %{})
   - `:shrink` - Whether to shrink failing sequences (default: true)
   - `:seed_library` - Ephemeral replay working set (DR-023): `false` (default,
     disabled), `true` (default file), or a path. Previously-failing seeds are
@@ -263,6 +257,8 @@ defmodule PropertyDamage do
   - `:dedup` - Skip if similar failure exists (default: false)
   - `:dedup_threshold` - Similarity threshold for dedup (default: 0.90)
   - `:verbose` - Print regression actions (default: false)
+  - `:targets` - Single-entry target for generated regression tests (default:
+    the run's target)
 
   This option integrates with `:on_failure` - both can be used together.
 
@@ -271,15 +267,30 @@ defmodule PropertyDamage do
   - `{:ok, stats}` - All runs passed
   - `{:error, failure_report}` - A run failed
 
+  ## Target Entry Keys
+
+  - `:name` - Label used in reports (default: last segment of the module name)
+  - `:config` - Map passed to `adapter.setup/1` (default: `%{}`)
+  - `:injectors` - List of InjectorAdapter modules for event injection
+    (default: `[]`)
+  - `:mocks` - Mock third-party services the SUT calls (default: `[]`).
+    A list of `PropertyDamage.MockServiceAdapter` modules or `{module, config}`
+    tuples. Per run the framework starts a `PropertyDamage.MockServiceRegistry`,
+    registers and sets up each mock, drives `on_command/2` before each command,
+    folds mock-injected events after, and tears each mock down. The registry pid
+    is handed to the adapter on the `PropertyDamage.Runtime` handle
+    (`runtime.mock_registry`) so `execute/3` can drive `handle_request/2`. See
+    the "Mocking Third-Party Services" guide.
+
   ## Examples
 
       # Basic usage
-      PropertyDamage.run(model: MyModel, adapter: MyAdapter)
+      PropertyDamage.run(model: MyModel, targets: [MyAdapter])
 
       # With options
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         max_commands: 100,
         max_runs: 1000,
         seed: 12345
@@ -288,7 +299,7 @@ defmodule PropertyDamage do
       # With failure callback
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         on_failure: fn failure_report ->
           IO.puts("Failed at command \#{PropertyDamage.FailureReport.failure_index(failure_report)}")
         end
@@ -297,7 +308,7 @@ defmodule PropertyDamage do
       # With automatic regression management
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         regression: [
           save_failures: "failures/",
           seed_library: "seeds.json",
@@ -312,7 +323,8 @@ defmodule PropertyDamage do
     opts = Options.validate_run!(opts)
 
     model = opts[:model]
-    adapter = opts[:adapter]
+    [target] = opts[:targets]
+    adapter = target.adapter
     max_commands = opts[:max_commands]
     max_runs = opts[:max_runs]
     # Resolution order (DR-034): explicit option, else environment variable
@@ -326,11 +338,6 @@ defmodule PropertyDamage do
       opts[:run_nonce] || env_int("PD_RUN_NONCE") ||
         :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
 
-    injector_adapters = opts[:injector_adapters]
-    # Declared mock third-party services (WP-C5), already normalized by the
-    # options validator to a list of {module, config} tuples. Empty when unused.
-    mock_services = opts[:mock_services]
-    adapter_config = opts[:adapter_config]
     shrink = opts[:shrink]
     shrinker_config = opts[:shrinker_config] || ShrinkerConfig.new()
     on_failure = build_on_failure_callback(opts)
@@ -358,7 +365,7 @@ defmodule PropertyDamage do
 
     # Validate configuration
     if validate do
-      {:ok, warnings} = Validation.validate!(model, adapter, injector_adapters: injector_adapters)
+      {:ok, warnings} = Validation.validate!(model, adapter, injectors: target.injectors)
 
       if verbose do
         Validation.print_summary(model, adapter, warnings)
@@ -383,7 +390,7 @@ defmodule PropertyDamage do
     # Setup once (if model implements it)
     setup_once_result =
       if function_exported?(model, :setup_once, 1) do
-        model.setup_once(%{adapter_config: adapter_config})
+        model.setup_once(%{adapter_config: target.config})
       else
         :ok
       end
@@ -406,14 +413,11 @@ defmodule PropertyDamage do
           result =
             do_run(
               model,
-              adapter,
+              target,
               max_commands,
               max_runs,
               seed,
               run_nonce,
-              injector_adapters,
-              mock_services,
-              adapter_config,
               shrink,
               shrinker_config,
               on_failure,
@@ -452,7 +456,7 @@ defmodule PropertyDamage do
         after
           # Teardown once
           if function_exported?(model, :teardown_once, 1) do
-            model.teardown_once(%{adapter_config: adapter_config})
+            model.teardown_once(%{adapter_config: target.config})
           end
         end
 
@@ -463,14 +467,11 @@ defmodule PropertyDamage do
 
   defp do_run(
          model,
-         adapter,
+         target,
          max_commands,
          max_runs,
          seed,
          run_nonce,
-         injector_adapters,
-         mock_services,
-         adapter_config,
          shrink,
          shrinker_config,
          on_failure,
@@ -504,10 +505,7 @@ defmodule PropertyDamage do
     replay_ctx = %{
       generator: generator,
       model: model,
-      adapter: adapter,
-      adapter_config: adapter_config,
-      injector_adapters: injector_adapters,
-      mock_services: mock_services,
+      target: target,
       shrink: shrink,
       shrinker_config: shrinker_config,
       on_failure: on_failure,
@@ -533,13 +531,10 @@ defmodule PropertyDamage do
         run_loop(
           generator,
           model,
-          adapter,
+          target,
           max_runs,
           seed,
           run_nonce,
-          injector_adapters,
-          mock_services,
-          adapter_config,
           shrink,
           shrinker_config,
           on_failure,
@@ -555,13 +550,10 @@ defmodule PropertyDamage do
   defp run_loop(
          _generator,
          model,
-         _adapter,
+         _target,
          max_runs,
          seed,
          _run_nonce,
-         _injector_adapters,
-         _mock_services,
-         _adapter_config,
          _shrink,
          _shrinker_config,
          _on_failure,
@@ -592,13 +584,10 @@ defmodule PropertyDamage do
   defp run_loop(
          generator,
          model,
-         adapter,
+         target,
          max_runs,
          seed,
          run_nonce,
-         injector_adapters,
-         mock_services,
-         adapter_config,
          shrink,
          shrinker_config,
          on_failure,
@@ -638,7 +627,7 @@ defmodule PropertyDamage do
     # Setup each (if model implements it)
     setup_each_result =
       if function_exported?(model, :setup_each, 1) do
-        model.setup_each(%{adapter_config: adapter_config, run_number: run_number})
+        model.setup_each(%{adapter_config: target.config, run_number: run_number})
       else
         :ok
       end
@@ -652,18 +641,18 @@ defmodule PropertyDamage do
 
         try do
           # Setup injector adapters
-          setup_injectors(injector_adapters, event_queue)
+          setup_injectors(target.injectors, event_queue)
 
           # Setup declared mock services (WP-C5): a per-run registry, one per run
           # like the event queue, reused across this run's shrink attempts and the
           # reproduction re-execution (mock_registry is nil when none declared).
-          {mock_registry, mock_contexts} = setup_mocks(mock_services, event_queue)
+          {mock_registry, mock_contexts} = setup_mocks(target.mocks, event_queue)
 
           try do
             # Execute the sequence
             run_result =
-              Executor.run(sequence, model, adapter,
-                adapter_config: adapter_config,
+              Executor.run(sequence, model, target.adapter,
+                config: target.config,
                 event_queue: event_queue,
                 mock_registry: mock_registry,
                 stutter_config: stutter_config,
@@ -696,13 +685,10 @@ defmodule PropertyDamage do
                   run_loop(
                     generator,
                     model,
-                    adapter,
+                    target,
                     max_runs,
                     seed,
                     run_nonce,
-                    injector_adapters,
-                    mock_services,
-                    adapter_config,
                     shrink,
                     shrinker_config,
                     on_failure,
@@ -720,8 +706,7 @@ defmodule PropertyDamage do
                     sequence,
                     result,
                     model,
-                    adapter,
-                    adapter_config,
+                    target,
                     event_queue,
                     mock_registry,
                     shrink,
@@ -747,11 +732,11 @@ defmodule PropertyDamage do
             # is stopped by the outer `after` so it is released even if injector
             # or mock setup raised before this inner try was entered (A6).
             teardown_mocks(mock_registry, mock_contexts)
-            teardown_injectors(injector_adapters)
+            teardown_injectors(target.injectors)
 
             # Teardown each
             if function_exported?(model, :teardown_each, 1) do
-              model.teardown_each(%{adapter_config: adapter_config, run_number: run_number})
+              model.teardown_each(%{adapter_config: target.config, run_number: run_number})
             end
           end
         after
@@ -834,16 +819,16 @@ defmodule PropertyDamage do
     _ -> nil
   end
 
-  defp setup_injectors(injector_adapters, event_queue) do
-    for adapter <- injector_adapters do
+  defp setup_injectors(injectors, event_queue) do
+    for adapter <- injectors do
       if function_exported?(adapter, :setup, 1) do
         adapter.setup(%{event_queue: event_queue})
       end
     end
   end
 
-  defp teardown_injectors(injector_adapters) do
-    for adapter <- injector_adapters do
+  defp teardown_injectors(injectors) do
+    for adapter <- injectors do
       if function_exported?(adapter, :teardown, 1) do
         adapter.teardown(%{})
       end
@@ -862,11 +847,11 @@ defmodule PropertyDamage do
   # queue's per-run lifecycle; the pid is reused across this run's shrink attempts.
   defp setup_mocks([], _event_queue), do: {nil, []}
 
-  defp setup_mocks(mock_services, event_queue) do
+  defp setup_mocks(mocks, event_queue) do
     {:ok, registry} = MockServiceRegistry.start_link([])
 
     contexts =
-      for {module, config} <- mock_services do
+      for {module, config} <- mocks do
         :ok = MockServiceRegistry.register(registry, module)
 
         context =
@@ -1057,8 +1042,7 @@ defmodule PropertyDamage do
             sequence,
             exec_result,
             ctx.model,
-            ctx.adapter,
-            ctx.adapter_config,
+            ctx.target,
             event_queue,
             mock_registry,
             ctx.shrink,
@@ -1093,7 +1077,7 @@ defmodule PropertyDamage do
 
     setup_each_result =
       if function_exported?(ctx.model, :setup_each, 1) do
-        ctx.model.setup_each(%{adapter_config: ctx.adapter_config, run_number: 0})
+        ctx.model.setup_each(%{adapter_config: ctx.target.config, run_number: 0})
       else
         :ok
       end
@@ -1106,13 +1090,13 @@ defmodule PropertyDamage do
         {:ok, event_queue} = EventQueue.start_link()
 
         try do
-          setup_injectors(ctx.injector_adapters, event_queue)
-          {mock_registry, mock_contexts} = setup_mocks(ctx.mock_services, event_queue)
+          setup_injectors(ctx.target.injectors, event_queue)
+          {mock_registry, mock_contexts} = setup_mocks(ctx.target.mocks, event_queue)
 
           try do
             run_result =
-              Executor.run(sequence, ctx.model, ctx.adapter,
-                adapter_config: ctx.adapter_config,
+              Executor.run(sequence, ctx.model, ctx.target.adapter,
+                config: ctx.target.config,
                 event_queue: event_queue,
                 mock_registry: mock_registry,
                 stutter_config: ctx.stutter_config,
@@ -1139,10 +1123,10 @@ defmodule PropertyDamage do
             # even if injector or mock setup raised before this inner try was
             # entered (A6).
             teardown_mocks(mock_registry, mock_contexts)
-            teardown_injectors(ctx.injector_adapters)
+            teardown_injectors(ctx.target.injectors)
 
             if function_exported?(ctx.model, :teardown_each, 1) do
-              ctx.model.teardown_each(%{adapter_config: ctx.adapter_config, run_number: 0})
+              ctx.model.teardown_each(%{adapter_config: ctx.target.config, run_number: 0})
             end
           end
         after
@@ -1279,8 +1263,7 @@ defmodule PropertyDamage do
          sequence,
          result,
          model,
-         adapter,
-         adapter_config,
+         target,
          event_queue,
          mock_registry,
          shrink,
@@ -1310,8 +1293,7 @@ defmodule PropertyDamage do
             failed_at_index: result.failed_at_index,
             failure_reason: result.failure_reason,
             model: model,
-            adapter: adapter,
-            adapter_config: adapter_config,
+            target: target,
             config: shrinker_config,
             event_queue: event_queue,
             mock_registry: mock_registry,
@@ -1337,7 +1319,7 @@ defmodule PropertyDamage do
 
     fresh_opts =
       [
-        adapter_config: adapter_config,
+        config: target.config,
         event_queue: event_queue,
         mock_registry: mock_registry,
         run_nonce: run_nonce,
@@ -1346,7 +1328,7 @@ defmodule PropertyDamage do
         stutter_repro_run_opts(result.failure_reason, stutter_config, seed)
 
     fresh_result =
-      case Executor.run(shrunk_sequence, model, adapter, fresh_opts) do
+      case Executor.run(shrunk_sequence, model, target.adapter, fresh_opts) do
         {:ok, fresh} ->
           fresh
 
@@ -1403,7 +1385,7 @@ defmodule PropertyDamage do
         projections_before: report_result.projections_before,
         command_fold_ordinals: Map.get(report_result, :command_fold_ordinals, %{}),
         model: model,
-        adapter: adapter,
+        adapter: target.adapter,
         linearization: report_result.linearization,
         stacktrace: Map.get(report_result, :stacktrace),
         check_fires: check_fires
@@ -1468,7 +1450,8 @@ defmodule PropertyDamage do
     cond do
       # Both options specified - compose them
       on_failure != nil and regression != nil ->
-        regression_handler = PropertyDamage.Regression.handler(regression)
+        regression_handler =
+          PropertyDamage.Regression.handler(Options.with_target_entries(regression))
 
         fn failure_report ->
           on_failure.(failure_report)
@@ -1481,7 +1464,7 @@ defmodule PropertyDamage do
 
       # Only regression specified
       regression != nil ->
-        PropertyDamage.Regression.handler(regression)
+        PropertyDamage.Regression.handler(Options.with_target_entries(regression))
 
       # Neither specified
       true ->
@@ -1509,7 +1492,9 @@ defmodule PropertyDamage do
   - `:max_iterations` - Maximum shrink attempts (default: from `:strategy`)
   - `:max_time_ms` - Maximum time for shrinking in ms (default: from `:strategy`)
   - `:shrink_arguments` - Whether to shrink argument values (default: true)
-  - `:adapter_config` - Adapter configuration (uses report's adapter if not specified)
+  - `:targets` - Single-entry target list overriding the system to re-execute
+    against (default: the report's adapter with an empty `config:`); see
+    `PropertyDamage.Target`
 
   ## Returns
 
@@ -1518,7 +1503,7 @@ defmodule PropertyDamage do
 
   ## Example
 
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:error, failure} = PropertyDamage.run(model: M, targets: [A])
 
       # Try harder to shrink
       {:ok, smaller} = PropertyDamage.shrink_further(failure,
@@ -1537,7 +1522,7 @@ defmodule PropertyDamage do
     if is_nil(model) or is_nil(adapter) do
       {:error, :missing_model_or_adapter}
     else
-      adapter_config = Keyword.get(opts, :adapter_config, %{})
+      target = Options.override_target!(opts, adapter, "PropertyDamage.shrink_further/2")
 
       # Build shrinker config from options
       strategy = Keyword.get(opts, :strategy, :thorough)
@@ -1568,8 +1553,7 @@ defmodule PropertyDamage do
             failed_at_index: report.failed_at_index,
             failure_reason: report.failure_reason,
             model: model,
-            adapter: adapter,
-            adapter_config: adapter_config,
+            target: target,
             config: shrinker_config,
             event_queue: event_queue,
             run_nonce: run_nonce,
@@ -1579,8 +1563,8 @@ defmodule PropertyDamage do
         fresh_epoch = :atomics.add_get(mint_epoch_counter, 1, 1)
 
         # Re-execute to get fresh state
-        case Executor.run(shrink_result.sequence, model, adapter,
-               adapter_config: adapter_config,
+        case Executor.run(shrink_result.sequence, model, target.adapter,
+               config: target.config,
                event_queue: event_queue,
                run_nonce: run_nonce,
                mint_epoch: fresh_epoch
@@ -1625,7 +1609,7 @@ defmodule PropertyDamage do
                   projections_before: fresh_result.projections_before,
                   command_fold_ordinals: Map.get(fresh_result, :command_fold_ordinals, %{}),
                   model: model,
-                  adapter: adapter,
+                  adapter: target.adapter,
                   linearization: fresh_result.linearization,
                   stacktrace: Map.get(fresh_result, :stacktrace)
                 )
@@ -1693,7 +1677,7 @@ defmodule PropertyDamage do
 
   ## Examples
 
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:error, failure} = PropertyDamage.run(model: M, targets: [A])
 
       # Save with auto-generated name
       {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
@@ -1755,12 +1739,13 @@ defmodule PropertyDamage do
 
   ## Options
 
-  - `:adapter_config` - Override adapter configuration
+  - `:targets` - Single-entry target list overriding the system to replay
+    against (default: the report's adapter with an empty `config:`)
   - `:stop_on_failure` - Stop at first failure (default: true)
 
   ## Example
 
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:error, failure} = PropertyDamage.run(model: M, targets: [A])
       {:ok, steps} = PropertyDamage.replay(failure)
 
       Enum.each(steps, fn step ->
@@ -1817,7 +1802,7 @@ defmodule PropertyDamage do
 
   ## Example
 
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:error, failure} = PropertyDamage.run(model: M, targets: [A])
       {:ok, library} = PropertyDamage.add_to_seed_library(library, failure,
         tags: [:currency_mismatch],
         description: "Capture with different currency than authorization"
@@ -1843,7 +1828,7 @@ defmodule PropertyDamage do
 
   ## Example
 
-      result = PropertyDamage.run(model: M, adapter: A, coverage: true)
+      result = PropertyDamage.run(model: M, targets: [A], coverage: true)
       coverage = PropertyDamage.coverage(result, M)
       IO.puts(PropertyDamage.Coverage.format(coverage))
   """
@@ -1858,7 +1843,7 @@ defmodule PropertyDamage do
   across every generated sequence) against the model's `check_catalog/1`,
   with no re-execution. Each entry reports whether the invariant was exercised:
 
-      result = PropertyDamage.run(model: M, adapter: A)
+      result = PropertyDamage.run(model: M, targets: [A])
       for inv <- PropertyDamage.check_coverage(result, M), not inv.covered? do
         IO.puts("never exercised: \#{inv.id}")
       end
@@ -1993,9 +1978,11 @@ defmodule PropertyDamage do
 
   ## Options
 
-  - `:adapter` - Adapter module (required)
-  - `:injector_adapters` - List of injector adapter modules (default: `[]`)
-  - `:adapter_config` - Config passed to `adapter.setup/1` (default: `%{}`)
+  - `:targets` - A list with exactly one entry (required): an adapter module or
+    `{AdapterModule, config:, injectors:}`. `config:` is passed to
+    `adapter.setup/1` (default: `%{}`); `injectors:` lists injector adapter
+    modules (default: `[]`). `mocks:` is not supported here and raises. See
+    `PropertyDamage.Target`.
 
   ## Returns
 
@@ -2010,7 +1997,7 @@ defmodule PropertyDamage do
         %CreateOrder{user_id: 1, amount: 100}
       ]
 
-      {:ok, events} = PropertyDamage.execute(commands, adapter: MyAdapter)
+      {:ok, events} = PropertyDamage.execute(commands, targets: [MyAdapter])
 
       # Assert on returned events
       assert length(events) == 2
@@ -2021,9 +2008,11 @@ defmodule PropertyDamage do
   When testing end-to-end flows with webhooks or async callbacks:
 
       {:ok, events} = PropertyDamage.execute(commands,
-        adapter: MyAdapter,
-        injector_adapters: [WebhookAdapter],
-        adapter_config: %{base_url: "http://localhost:4000"}
+        targets: [
+          {MyAdapter,
+           injectors: [WebhookAdapter],
+           config: %{base_url: "http://localhost:4000"}}
+        ]
       )
 
       # Assert on injected webhook events
@@ -2050,9 +2039,9 @@ defmodule PropertyDamage do
   def execute(commands, opts) when is_list(commands) do
     opts = Options.validate_execute!(opts)
 
-    adapter = opts[:adapter]
-    injector_adapters = opts[:injector_adapters]
-    adapter_config = opts[:adapter_config]
+    [target] = opts[:targets]
+    Options.reject_unsupported_target_keys!([target], [:mocks], "PropertyDamage.execute/2")
+    %{adapter: adapter, injectors: injectors, config: config} = target
 
     # Start event queue for injectors. Its stop is guaranteed by the outer
     # `after` below so that a raise in injector or adapter setup cannot leak it
@@ -2061,10 +2050,10 @@ defmodule PropertyDamage do
 
     try do
       # Setup injector adapters
-      setup_injectors(injector_adapters, event_queue)
+      setup_injectors(injectors, event_queue)
 
       # Setup main adapter
-      case adapter.setup(adapter_config) do
+      case adapter.setup(config) do
         {:ok, adapter_context} ->
           context = %{
             adapter_context: adapter_context,
@@ -2078,13 +2067,13 @@ defmodule PropertyDamage do
           after
             # Cleanup. The event queue is stopped by the outer `after`.
             adapter.teardown(adapter_context)
-            teardown_injectors(injector_adapters)
+            teardown_injectors(injectors)
           end
 
         {:error, reason} ->
           # Cleanup injectors on setup failure; the event queue is stopped by
           # the outer `after`.
-          teardown_injectors(injector_adapters)
+          teardown_injectors(injectors)
           {:error, {:adapter_setup_failed, reason}}
       end
     after

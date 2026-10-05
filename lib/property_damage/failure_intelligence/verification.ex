@@ -9,7 +9,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   """
 
   alias PropertyDamage.FailureIntelligence.{Fingerprint, Patterns}
-  alias PropertyDamage.FailureReport
+  alias PropertyDamage.{FailureReport, Options}
 
   @type verification_result :: %{
           status: :verified | :still_failing | :partially_fixed | :flaky,
@@ -25,8 +25,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
         }
 
   @type options :: [
-          adapter: module(),
-          adapter_config: map(),
+          targets: [module() | {module(), keyword()}],
           max_variations: non_neg_integer(),
           variation_range: integer(),
           include_similar: boolean(),
@@ -41,8 +40,9 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
 
   ## Options
 
-  - `:adapter` - The adapter module to use (required)
-  - `:adapter_config` - Configuration for the adapter
+  - `:targets` - A list with exactly one entry (required): the adapter to re-run
+    against, as a module or `{AdapterModule, config: map, ...}`; see
+    `PropertyDamage.Target`
   - `:max_variations` - Maximum number of seed variations to test (default: 10)
   - `:variation_range` - Range for generating seed variations (default: 1000)
   - `:include_similar` - Whether to test similar failure patterns (default: true)
@@ -50,20 +50,19 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   """
   @spec verify_fix(FailureReport.t(), module(), options()) :: verification_result()
   def verify_fix(%FailureReport{} = failure, model, opts \\ []) do
-    adapter = Keyword.fetch!(opts, :adapter)
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    target = Options.required_target!(opts)
     max_variations = Keyword.get(opts, :max_variations, @default_max_variations)
     variation_range = Keyword.get(opts, :variation_range, @default_variation_range)
 
     # Test original seed
-    original_result = run_seed(failure.seed, model, adapter, adapter_config)
+    original_result = run_seed(failure.seed, model, target)
 
     # Generate and test variations
     variations = generate_variations(failure.seed, max_variations, variation_range)
 
     variation_results =
       Enum.map(variations, fn seed ->
-        {seed, run_seed(seed, model, adapter, adapter_config)}
+        {seed, run_seed(seed, model, target)}
       end)
 
     # Collect similar failures if any variations fail
@@ -106,11 +105,24 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   Quick check if a single seed still fails.
   """
   @spec still_fails?(integer(), module(), module(), map()) :: boolean()
-  def still_fails?(seed, model, adapter, adapter_config \\ %{}) do
-    case run_seed(seed, model, adapter, adapter_config) do
+  def still_fails?(seed, model, adapter, config \\ %{}) do
+    case run_seed(seed, model, seed_target(adapter, config)) do
       :ok -> false
       {:error, _} -> true
     end
+  end
+
+  @doc false
+  # The target a single-seed re-run executes against: the adapter with the
+  # default name every other entry point gives a bare adapter.
+  @spec seed_target(module(), map()) :: PropertyDamage.Target.t()
+  def seed_target(adapter, config) do
+    %PropertyDamage.Target{
+      adapter: adapter,
+      config: config,
+      name: PropertyDamage.Target.default_name(adapter),
+      index: 0
+    }
   end
 
   @doc """
@@ -127,8 +139,8 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
 
   ## Options
 
-  - `:adapter` - The adapter module to use (required to re-run members)
-  - `:adapter_config` - Configuration for the adapter (default: `%{}`)
+  - `:targets` - A list with exactly one entry: the adapter to re-run members
+    against (required to re-run them); see `PropertyDamage.Target`
   """
   @spec verify_cluster(Patterns.cluster(), module(), options()) :: %{
           cluster_id: String.t(),
@@ -140,12 +152,11 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
           remaining_failures: [Fingerprint.t()]
         }
   def verify_cluster(cluster, model, opts \\ []) do
-    adapter = Keyword.get(opts, :adapter)
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    target = Options.override_target!(opts, nil, "verify_cluster/3", [])
 
     results =
       Enum.map(cluster.fingerprints, fn fp ->
-        {fp, verify_member(fp, model, adapter, adapter_config)}
+        {fp, verify_member(fp, model, target)}
       end)
 
     fixed = Enum.count(results, fn {_, status} -> status == :fixed end)
@@ -177,11 +188,11 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   end
 
   # A member can only be re-run when it carries a seed and an adapter was given.
-  defp verify_member(%Fingerprint{seed: nil}, _model, _adapter, _config), do: :unknown
-  defp verify_member(_fp, _model, nil, _config), do: :unknown
+  defp verify_member(%Fingerprint{seed: nil}, _model, _target), do: :unknown
+  defp verify_member(_fp, _model, %{adapter: nil}), do: :unknown
 
-  defp verify_member(%Fingerprint{seed: seed}, model, adapter, config) do
-    if still_fails?(seed, model, adapter, config), do: :remaining, else: :fixed
+  defp verify_member(%Fingerprint{seed: seed}, model, target) do
+    if run_seed(seed, model, target) == :ok, do: :fixed, else: :remaining
   end
 
   @doc """
@@ -218,12 +229,11 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   # Private Implementation
   # ============================================================================
 
-  defp run_seed(seed, model, adapter, adapter_config) do
+  defp run_seed(seed, model, target) do
     result =
       PropertyDamage.run(
         model: model,
-        adapter: adapter,
-        adapter_config: adapter_config,
+        targets: [PropertyDamage.Target.to_entry(target)],
         seed: seed,
         max_runs: 1,
         verbose: false

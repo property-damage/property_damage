@@ -15,8 +15,7 @@ defmodule PropertyDamage.Mutation do
       # Run mutation testing
       {:ok, report} = PropertyDamage.Mutation.run(
         model: MyModel,
-        adapter: MyAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
+        targets: [{MyAdapter, config: %{base_url: "http://localhost:4000"}}],
         target_score: 0.80
       )
 
@@ -43,8 +42,9 @@ defmodule PropertyDamage.Mutation do
   ## Options
 
   - `:model` - The model module (required)
-  - `:adapter` - The adapter module (required)
-  - `:adapter_config` - Configuration for the adapter
+  - `:targets` - A list with exactly one entry (required): an adapter module or
+    `{AdapterModule, config: map}`; see `PropertyDamage.Target`. `injectors:` and
+    `mocks:` are not supported and raise.
   - `:operators` - List of operator names (default: all)
   - `:mutations_per_command` - Max mutations per command (default: 5)
   - `:max_runs` - Property test runs per mutation (default: 10)
@@ -64,7 +64,7 @@ defmodule PropertyDamage.Mutation do
 
       {:ok, report} = PropertyDamage.Mutation.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         operators: [:value, :omission],
         target_score: 0.80
       )

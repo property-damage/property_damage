@@ -122,7 +122,7 @@ defmodule PropertyDamage.ExternalE2ETest do
         |> Sequence.with_registry(reg)
 
       {:ok, result} =
-        Executor.run(seq, PlainModel, Adapter, adapter_config: %{test_pid: self()})
+        Executor.run(seq, PlainModel, Adapter, config: %{test_pid: self()})
 
       assert result.failed_at_index == nil
       assert_received {:used, target}
@@ -150,7 +150,7 @@ defmodule PropertyDamage.ExternalE2ETest do
       assert seq, "no seed produced a Use carrying a placeholder target"
 
       {:ok, result} =
-        Executor.run(seq, RoutingModel, Adapter, adapter_config: %{test_pid: self()})
+        Executor.run(seq, RoutingModel, Adapter, config: %{test_pid: self()})
 
       assert result.failed_at_index == nil
 
@@ -187,7 +187,7 @@ defmodule PropertyDamage.ExternalE2ETest do
       }
 
       {:ok, result} =
-        Executor.run(seq, PlainModel, Adapter, adapter_config: %{test_pid: self()})
+        Executor.run(seq, PlainModel, Adapter, config: %{test_pid: self()})
 
       assert result.failed_at_index == nil
 
@@ -236,7 +236,7 @@ defmodule PropertyDamage.ExternalE2ETest do
       # flowing through capture/merge (resolution itself is asserted by the
       # hand-built branching test above).
       {:ok, result} =
-        Executor.run(seq, PlainModel, Adapter, adapter_config: %{test_pid: self()})
+        Executor.run(seq, PlainModel, Adapter, config: %{test_pid: self()})
 
       assert result.failed_at_index == nil
     end
@@ -278,7 +278,7 @@ defmodule PropertyDamage.ExternalE2ETest do
         |> Sequence.with_registry(reg)
 
       {:ok, result} =
-        Executor.run(seq, PlainModel, InjectingAdapter, adapter_config: %{test_pid: self()})
+        Executor.run(seq, PlainModel, InjectingAdapter, config: %{test_pid: self()})
 
       assert result.failed_at_index == nil
       assert_received {:used, target}

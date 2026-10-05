@@ -20,8 +20,7 @@ defmodule KratosBenchTest do
     assert {:ok, stats} =
              PropertyDamage.run(
                model: KratosBench.Model,
-               adapter: KratosBench.Adapter,
-               adapter_config: KratosBench.adapter_config(),
+               targets: [{KratosBench.Adapter, config: KratosBench.target_config()}],
                max_commands: 20,
                max_runs: 6,
                coverage: true

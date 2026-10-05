@@ -66,7 +66,7 @@ defmodule PropertyDamage.CheckProjectionsRunTest do
     result =
       PropertyDamage.run(
         model: Model,
-        adapter: NoOpAdapter,
+        targets: [NoOpAdapter],
         seed: 12_345,
         max_runs: 1,
         shrink: false

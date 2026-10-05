@@ -30,8 +30,7 @@ your invariants or checks are not pinning down behaviour tightly enough.
 {:ok, report} =
   PropertyDamage.Mutation.run(
     model: MyApp.Model,
-    adapter: MyApp.Adapter,
-    adapter_config: %{base_url: "http://localhost:4000"},
+    targets: [{MyApp.Adapter, config: %{base_url: "http://localhost:4000"}}],
     target_score: 0.80
   )
 
@@ -57,7 +56,7 @@ By default all operators run. Narrow the set with `operators:`:
 ```elixir
 PropertyDamage.Mutation.run(
   model: MyApp.Model,
-  adapter: MyApp.Adapter,
+  targets: [MyApp.Adapter],
   operators: [:value, :boundary]
 )
 ```
@@ -110,7 +109,7 @@ alias PropertyDamage.Progress.{MutationResult, MutationUpdate}
 
 PropertyDamage.Mutation.run(
   model: MyApp.Model,
-  adapter: MyApp.Adapter,
+  targets: [MyApp.Adapter],
   on_progress: fn
     %Progress{data: %MutationUpdate{result: outcome, command: command}} ->
       IO.puts("#{outcome}: #{inspect(command)}")
@@ -129,8 +128,7 @@ The authoritative report is still the `{:ok, report}` return value;
 | Option | Default | Description |
 |--------|---------|-------------|
 | `:model` | required | Model module implementing `PropertyDamage.Model` |
-| `:adapter` | required | Adapter module implementing `PropertyDamage.Adapter` |
-| `:adapter_config` | `%{}` | Configuration passed to `adapter.setup/1` |
+| `:targets` | required | List with one target: `[Adapter]` or `[{Adapter, config: %{...}}]` |
 | `:operators` | all | Mutation operators to use |
 | `:mutations_per_command` | 5 | Max mutations generated per command type |
 | `:max_runs` | 10 | Property test runs per mutation |

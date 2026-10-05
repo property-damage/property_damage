@@ -92,7 +92,7 @@ defmodule PropertyDamage.Stutter do
 
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         stutter: [
           probability: 0.1,      # 10% of commands stuttered
           max_repeats: 2,        # Up to 2 retries (3 total executions)

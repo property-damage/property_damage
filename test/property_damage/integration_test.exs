@@ -34,8 +34,7 @@ defmodule PropertyDamage.IntegrationTest do
     Keyword.merge(
       [
         model: ExecutorModel,
-        adapter: SimpleAdapter,
-        adapter_config: %{},
+        targets: [{SimpleAdapter, config: %{}}],
         max_runs: @pass_runs,
         max_commands: @pass_commands,
         verbose: false
@@ -48,8 +47,7 @@ defmodule PropertyDamage.IntegrationTest do
     Keyword.merge(
       [
         model: FailingModel,
-        adapter: SimpleAdapter,
-        adapter_config: %{},
+        targets: [{SimpleAdapter, config: %{}}],
         max_runs: @fail_runs,
         max_commands: @fail_commands,
         verbose: false
@@ -136,8 +134,7 @@ defmodule PropertyDamage.IntegrationTest do
       assert {:ok, bugs} =
                Integration.hunt_bugs(
                  model: FailingModel,
-                 adapter: SimpleAdapter,
-                 adapter_config: %{},
+                 targets: [{SimpleAdapter, config: %{}}],
                  stop_after: 1,
                  max_runs: 30,
                  verbose: false
@@ -160,8 +157,7 @@ defmodule PropertyDamage.IntegrationTest do
       assert {:ok, bugs} =
                Integration.hunt_bugs(
                  model: ExecutorModel,
-                 adapter: SimpleAdapter,
-                 adapter_config: %{},
+                 targets: [{SimpleAdapter, config: %{}}],
                  stop_after: 5,
                  max_runs: 3,
                  verbose: false
@@ -183,8 +179,7 @@ defmodule PropertyDamage.IntegrationTest do
       assert {:ok, bugs} =
                Integration.hunt_bugs(
                  model: FailingModel,
-                 adapter: SimpleAdapter,
-                 adapter_config: %{},
+                 targets: [{SimpleAdapter, config: %{}}],
                  stop_after: 1,
                  max_runs: 30,
                  save_to: dir,

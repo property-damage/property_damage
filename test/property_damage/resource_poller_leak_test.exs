@@ -66,8 +66,7 @@ defmodule PropertyDamage.ResourcePollerLeakTest do
       result =
         PropertyDamage.run(
           model: PollerModel,
-          adapter: FailingPollerAdapter,
-          adapter_config: %{test_pid: self()},
+          targets: [{FailingPollerAdapter, config: %{test_pid: self()}}],
           max_runs: 1,
           max_commands: 3,
           shrink: false,
@@ -152,7 +151,7 @@ defmodule PropertyDamage.ResourcePollerLeakTest do
       {:ok, result} =
         Executor.run(seq, BranchModel, BranchAdapter,
           event_queue: queue,
-          adapter_config: %{test_pid: self()}
+          config: %{test_pid: self()}
         )
 
       refute result.success

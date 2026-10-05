@@ -14,7 +14,7 @@ defmodule PropertyDamage.Regression do
 
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         regression: [
           save_failures: "failures/",
           seed_library: "seeds.json",
@@ -30,7 +30,7 @@ defmodule PropertyDamage.Regression do
 
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         on_failure: PropertyDamage.Regression.handler([
           save_failures: "failures/",
           seed_library: "seeds.json"
@@ -43,7 +43,7 @@ defmodule PropertyDamage.Regression do
 
       PropertyDamage.run(
         model: MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         on_failure: PropertyDamage.Regression.compose([
           PropertyDamage.Regression.save_failure("failures/"),
           PropertyDamage.Regression.add_to_library("seeds.json"),
@@ -105,7 +105,9 @@ defmodule PropertyDamage.Regression do
   - `:dedup_source` - Where to check for duplicates. Only `:failures` (saved
     failure files) is supported.
   - `:verbose` - Print actions taken (default: false)
-  - `:adapter` - Adapter module for generated-test HTTP-spec mapping
+  - `:targets` - A list with exactly one entry: the target the generated tests
+    run against (defaults to the failure report's adapter); see
+    `PropertyDamage.Target`
 
   ## Example
 
@@ -116,7 +118,7 @@ defmodule PropertyDamage.Regression do
         verbose: true
       )
 
-      PropertyDamage.run(model: M, adapter: A, on_failure: handler)
+      PropertyDamage.run(model: M, targets: [A], on_failure: handler)
   """
   @spec handler(regression_opts()) :: handler()
   def handler(opts \\ []) do
@@ -125,7 +127,7 @@ defmodule PropertyDamage.Regression do
     opts = PropertyDamage.Options.validate_regression_opts!(opts)
 
     fn failure_report ->
-      handle_failure(failure_report, opts)
+      handle_failure(failure_report, PropertyDamage.Options.with_target_entries(opts))
     end
   end
 
@@ -158,7 +160,7 @@ defmodule PropertyDamage.Regression do
     # Check for duplicates first
     {should_skip, skip_reason} =
       if dedup do
-        check_duplicate(failure, opts)
+        check_duplicate(failure, PropertyDamage.Options.with_target_entries(opts))
       else
         {false, nil}
       end
@@ -203,7 +205,7 @@ defmodule PropertyDamage.Regression do
 
       PropertyDamage.run(
         model: M,
-        adapter: A,
+        targets: [A],
         on_failure: PropertyDamage.Regression.save_failure("failures/")
       )
   """
@@ -228,7 +230,7 @@ defmodule PropertyDamage.Regression do
 
       PropertyDamage.run(
         model: M,
-        adapter: A,
+        targets: [A],
         on_failure: PropertyDamage.Regression.add_to_library("seeds.json",
           tags: [:balance_bug]
         )
@@ -247,16 +249,16 @@ defmodule PropertyDamage.Regression do
   Creates a handler that generates ExUnit regression tests.
 
   Options are the ExUnit export options (validated at factory time via the same
-  schema as `PropertyDamage.Export.to_exunit/2`): `:adapter`, `:model`,
-  `:module_name`, `:test_name`, `:adapter_config`, `:expect_fixed`.
+  schema as `PropertyDamage.Export.to_exunit/2`): `:targets`, `:model`,
+  `:module_name`, `:test_name`, `:expect_fixed`.
 
   ## Example
 
       PropertyDamage.run(
         model: M,
-        adapter: A,
+        targets: [A],
         on_failure: PropertyDamage.Regression.generate_test("test/regressions/",
-          adapter: MyHTTPAdapter
+          targets: [MyHTTPAdapter]
         )
       )
   """
@@ -268,7 +270,12 @@ defmodule PropertyDamage.Regression do
     opts = PropertyDamage.Options.validate_export_exunit!(opts)
 
     fn failure_report ->
-      Export.save(failure_report, directory, :exunit, opts)
+      Export.save(
+        failure_report,
+        directory,
+        :exunit,
+        PropertyDamage.Options.with_target_entries(opts)
+      )
     end
   end
 
@@ -282,7 +289,7 @@ defmodule PropertyDamage.Regression do
 
       PropertyDamage.run(
         model: M,
-        adapter: A,
+        targets: [A],
         on_failure: PropertyDamage.Regression.compose([
           PropertyDamage.Regression.save_failure("failures/"),
           PropertyDamage.Regression.add_to_library("seeds.json"),
@@ -378,7 +385,7 @@ defmodule PropertyDamage.Regression do
         is_dup =
           dedup and
             (find_duplicate(failure, seen, threshold) != nil or
-               elem(check_duplicate(failure, opts), 0))
+               elem(check_duplicate(failure, PropertyDamage.Options.with_target_entries(opts)), 0))
 
         if is_dup do
           result = %{
@@ -392,7 +399,12 @@ defmodule PropertyDamage.Regression do
 
           {[result | results], seen}
         else
-          result = handle_failure(failure, Keyword.put(opts, :dedup, false))
+          result =
+            handle_failure(
+              failure,
+              opts |> PropertyDamage.Options.with_target_entries() |> Keyword.put(:dedup, false)
+            )
+
           result = Map.put(result, :seed, failure.seed)
           {[result | results], [failure | seen]}
         end
@@ -500,10 +512,16 @@ defmodule PropertyDamage.Regression do
 
       directory ->
         # Forward the full option set to the exporter. The ExUnit generator reads
-        # the keys it understands (e.g. :adapter, :adapter_config) and ignores the
+        # the keys it understands (e.g. :targets, :model) and ignores the
         # regression-control keys, so a caller can shape the generated test rather
-        # than only supply :adapter.
-        result = Export.save(failure, directory, :exunit, opts)
+        # than only supply :targets.
+        result =
+          Export.save(
+            failure,
+            directory,
+            :exunit,
+            PropertyDamage.Options.with_target_entries(opts)
+          )
 
         if verbose do
           case result do

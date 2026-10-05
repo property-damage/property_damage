@@ -25,7 +25,6 @@ defmodule OpenapiBench.LoadTestTest do
   # concurrently (the point of a load test), while staying a few seconds long.
   @load [
     model: OpenapiBench.LoadModel,
-    adapter: OpenapiBench.LoadAdapter,
     arrival_rate: 150,
     duration: {2, :seconds},
     check_mode: :record
@@ -36,7 +35,8 @@ defmodule OpenapiBench.LoadTestTest do
 
     assert {:ok, report} =
              PropertyDamage.LoadTest.run(
-               @load ++ [adapter_config: %{base_url: Server.base_url()}]
+               @load ++
+                 [targets: [{OpenapiBench.LoadAdapter, config: %{base_url: Server.base_url()}}]]
              )
 
     m = report.metrics
@@ -90,7 +90,8 @@ defmodule OpenapiBench.LoadTestTest do
 
     assert {:ok, report} =
              PropertyDamage.LoadTest.run(
-               @load ++ [adapter_config: %{base_url: Server.base_url()}]
+               @load ++
+                 [targets: [{OpenapiBench.LoadAdapter, config: %{base_url: Server.base_url()}}]]
              )
 
     m = report.metrics

@@ -19,8 +19,7 @@ defmodule PropertyDamage.FailureIntelligence do
 
       # Verify a fix is robust
       result = PropertyDamage.FailureIntelligence.verify_fix(failure, MyModel,
-        adapter: MyAdapter,
-        adapter_config: %{}
+        targets: [{MyAdapter, config: %{}}]
       )
 
   ## Pattern Detection
@@ -39,7 +38,7 @@ defmodule PropertyDamage.FailureIntelligence do
   When you believe a bug is fixed, verify it:
 
       result = PropertyDamage.FailureIntelligence.verify_fix(failure, MyModel,
-        adapter: MyAdapter,
+        targets: [MyAdapter],
         max_variations: 20
       )
 
@@ -273,16 +272,16 @@ defmodule PropertyDamage.FailureIntelligence do
 
   ## Options
 
-  - `:adapter` - The adapter module to use (required)
-  - `:adapter_config` - Configuration for the adapter
+  - `:targets` - A list with exactly one entry (required): the adapter to re-run
+    against, as a module or `{AdapterModule, config: map}`; see
+    `PropertyDamage.Target`
   - `:max_variations` - Maximum number of seed variations to test (default: 10)
   - `:variation_range` - Range for generating seed variations (default: 1000)
 
   ## Example
 
       result = PropertyDamage.FailureIntelligence.verify_fix(failure, MyModel,
-        adapter: MyAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
+        targets: [{MyAdapter, config: %{base_url: "http://localhost:4000"}}],
         max_variations: 20
       )
 
@@ -325,7 +324,7 @@ defmodule PropertyDamage.FailureIntelligence do
   ## Example
 
       results = PropertyDamage.FailureIntelligence.verify_fixes(failures, MyModel,
-        adapter: MyAdapter
+        targets: [MyAdapter]
       )
 
       Enum.each(results, fn {failure, result} ->
@@ -347,7 +346,7 @@ defmodule PropertyDamage.FailureIntelligence do
       end
   """
   @spec still_fails?(integer(), module(), module(), map()) :: boolean()
-  defdelegate still_fails?(seed, model, adapter, adapter_config \\ %{}), to: Verification
+  defdelegate still_fails?(seed, model, adapter, config \\ %{}), to: Verification
 
   @doc """
   Formats a verification result for display.

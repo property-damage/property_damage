@@ -2,6 +2,292 @@ defmodule PropertyDamage.Options do
   @moduledoc false
 
   # ============================================================================
+  # Targets (shared by every entry point that runs commands)
+  # ============================================================================
+
+  @target_schema_definition [
+    name: [
+      type: :string,
+      doc: "Label used in reports. Defaults to the last segment of the adapter module name."
+    ],
+    config: [
+      type: {:map, :any, :any},
+      default: %{},
+      doc: "Passed to `adapter.setup/1` unchanged."
+    ],
+    injectors: [
+      type: {:list, :atom},
+      default: [],
+      doc: "Injector adapter modules that push events into the run."
+    ],
+    mocks: [
+      type: {:custom, __MODULE__, :validate_mock_services, []},
+      default: [],
+      doc: """
+      Mock third-party services the SUT calls, as a list where each entry is a
+      `PropertyDamage.MockServiceAdapter` module or a `{module, config}` tuple.
+
+      Per run the framework starts a `PropertyDamage.MockServiceRegistry`,
+      registers each mock (`init_state/0`) and calls its `setup/1` with the
+      entry's config merged with `%{registry: pid, event_queue: pid}`, drives
+      `on_command/2` before each command, folds the events mocks push
+      (`source: :mock`) into projections after each command, and tears each mock
+      down at the end. The registry pid is handed to the adapter on the
+      `PropertyDamage.Runtime` handle (`runtime.mock_registry`) so `execute/3`
+      can drive `handle_request/2`. See `PropertyDamage.MockServiceAdapter`.
+      """
+    ]
+  ]
+
+  @target_schema NimbleOptions.new!(@target_schema_definition)
+
+  @targets_doc """
+  The system variants to run against. Each entry is an adapter module or
+  `{AdapterModule, keyword}`; see `PropertyDamage.Target`. The first entry is the
+  reference. Entry keys:
+
+  #{NimbleOptions.docs(@target_schema)}
+  """
+
+  @single_target_doc """
+  The system variant to run against, as a list with exactly one entry: an
+  adapter module or `{AdapterModule, keyword}`; see `PropertyDamage.Target`.
+  Entry keys:
+
+  #{NimbleOptions.docs(@target_schema)}
+  """
+
+  @optional_target_doc """
+  Optional single-entry override of the system variant to run against: an
+  adapter module or `{AdapterModule, keyword}`; see `PropertyDamage.Target`.
+  Entry keys:
+
+  #{NimbleOptions.docs(@target_schema)}
+  """
+
+  # The four run-level keys that `targets:` replaced. Each message names the
+  # replacement shape.
+  @retired_target_keys %{
+    adapter:
+      "`adapter:` was replaced by `targets:`; pass the adapter module as a `targets:` entry",
+    adapter_config:
+      "`adapter_config:` was replaced by `targets:`; pass the map as `config:` in a `targets:` entry",
+    injector_adapters:
+      "`injector_adapters:` was replaced by `targets:`; pass the modules as `injectors:` in a `targets:` entry",
+    mock_services:
+      "`mock_services:` was replaced by `targets:`; pass the entries as `mocks:` in a `targets:` entry"
+  }
+
+  @retired_entry_keys %{
+    role: "`role:` was removed; the first `targets:` entry is the reference",
+    opts: "`opts:` was renamed `config:`"
+  }
+
+  @doc false
+  # `targets:` option type: validates a list of entries and returns
+  # `{:ok, [%PropertyDamage.Target{}]}`.
+  def validate_targets(value) when is_list(value) do
+    with :ok <- check_non_empty(value),
+         {:ok, targets} <- build_targets(value),
+         :ok <- check_unique_names(targets) do
+      {:ok, targets}
+    end
+  end
+
+  def validate_targets(value) do
+    {:error, "expected a list of targets, got: #{inspect(value)}"}
+  end
+
+  defp check_non_empty([]), do: {:error, "expected a non-empty list of targets, got: []"}
+  defp check_non_empty(_), do: :ok
+
+  defp build_targets(entries) do
+    entries
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {entry, index}, {:ok, acc} ->
+      case build_target(entry, index) do
+        {:ok, target} -> {:cont, {:ok, [target | acc]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      error -> error
+    end
+  end
+
+  defp build_target(adapter, index) when is_atom(adapter) and adapter != nil,
+    do: build_target({adapter, []}, index)
+
+  defp build_target({adapter, kw}, index)
+       when is_atom(adapter) and adapter != nil and is_list(kw) do
+    if Keyword.keyword?(kw) do
+      with :ok <- reject_retired_entry_keys(kw, index),
+           {:ok, validated} <- validate_entry(kw, index) do
+        {:ok,
+         %PropertyDamage.Target{
+           adapter: adapter,
+           name: Keyword.get(validated, :name) || PropertyDamage.Target.default_name(adapter),
+           index: index,
+           config: validated[:config],
+           injectors: validated[:injectors],
+           mocks: validated[:mocks]
+         }}
+      end
+    else
+      {:error, malformed_entry(kw, index)}
+    end
+  end
+
+  defp build_target(other, index), do: {:error, malformed_entry(other, index)}
+
+  defp malformed_entry(other, index) do
+    "targets entry #{index} is malformed: expected an adapter module or " <>
+      "`{AdapterModule, keyword}`, got: #{inspect(other)}"
+  end
+
+  defp reject_retired_entry_keys(kw, index) do
+    case Enum.find(kw, fn {key, _} -> Map.has_key?(@retired_entry_keys, key) end) do
+      nil -> :ok
+      {key, _} -> {:error, "targets entry #{index}: #{Map.fetch!(@retired_entry_keys, key)}"}
+    end
+  end
+
+  defp validate_entry(kw, index) do
+    case NimbleOptions.validate(kw, @target_schema) do
+      {:ok, validated} -> {:ok, validated}
+      {:error, error} -> {:error, "targets entry #{index}: #{Exception.message(error)}"}
+    end
+  end
+
+  defp check_unique_names(targets) do
+    targets
+    |> Enum.group_by(& &1.name)
+    |> Enum.find(fn {_name, group} -> length(group) > 1 end)
+    |> case do
+      nil ->
+        :ok
+
+      {name, _} ->
+        {:error,
+         "two `targets:` entries resolve to name: #{inspect(name)}; give each a distinct `name:`"}
+    end
+  end
+
+  @doc false
+  # Raises unless `opts[:targets]` holds exactly one entry. Entry points other
+  # than `PropertyDamage.Differential.run/1` run a single variant. A missing
+  # `:targets` (optional schemas) passes.
+  @spec validate_single_target!(keyword()) :: keyword()
+  def validate_single_target!(opts) do
+    case Keyword.get(opts, :targets) do
+      [_one] ->
+        opts
+
+      nil ->
+        opts
+
+      targets ->
+        raise NimbleOptions.ValidationError,
+          key: :targets,
+          value: targets,
+          message:
+            "expected exactly one `targets:` entry (a single-variant run), got " <>
+              "#{length(targets)}; use `PropertyDamage.Differential.run/1` to compare several targets"
+    end
+  end
+
+  @doc false
+  # Entry points that cannot honor a target key raise instead of ignoring it.
+  # `keys` lists the entry keys (`:injectors`, `:mocks`) the caller cannot use.
+  @spec reject_unsupported_target_keys!([PropertyDamage.Target.t()], [atom()], String.t()) :: :ok
+  def reject_unsupported_target_keys!(targets, keys, entry_point) do
+    for key <- keys, target <- targets, Map.fetch!(target, key) != [] do
+      raise NimbleOptions.ValidationError,
+        key: :targets,
+        value: Map.fetch!(target, key),
+        message: "`#{key}:` is not supported by #{entry_point} (targets entry #{target.index})"
+    end
+
+    :ok
+  end
+
+  @doc false
+  # Converts the validated targets in `opts` back to entry form, for internal
+  # callers that hand validated options to another validating entry point.
+  @spec with_target_entries(keyword()) :: keyword()
+  def with_target_entries(opts) do
+    case Keyword.fetch(opts, :targets) do
+      {:ok, targets} when is_list(targets) ->
+        Keyword.put(opts, :targets, Enum.map(targets, &PropertyDamage.Target.to_entry/1))
+
+      _ ->
+        opts
+    end
+  end
+
+  @targets_only_schema NimbleOptions.new!(
+                         targets: [
+                           type: {:custom, __MODULE__, :validate_targets, []},
+                           required: true
+                         ]
+                       )
+
+  @doc false
+  # Resolves the single target for entry points that take an optional `targets:`
+  # override and otherwise fall back to `default_adapter` (typically the
+  # adapter recorded in a failure report) with an empty config. Raises on a
+  # retired run-level key, a malformed entry, more than one entry, or a key in
+  # `unsupported` (entry keys the caller cannot honor) set on the entry.
+  @spec override_target!(keyword(), module() | nil, String.t(), [atom()]) ::
+          PropertyDamage.Target.t()
+  def override_target!(opts, default_adapter, entry_point, unsupported \\ [:injectors, :mocks]) do
+    reject_retired_targets!(opts)
+
+    case Keyword.fetch(opts, :targets) do
+      {:ok, entries} ->
+        target = single_target!(entries)
+        reject_unsupported_target_keys!([target], unsupported, entry_point)
+        target
+
+      :error ->
+        %PropertyDamage.Target{
+          adapter: default_adapter,
+          name: PropertyDamage.Target.default_name(default_adapter),
+          index: 0
+        }
+    end
+  end
+
+  @doc false
+  # Validates a required `targets:` entry list for entry points with no
+  # NimbleOptions schema of their own and returns the single target.
+  @spec required_target!(keyword()) :: PropertyDamage.Target.t()
+  def required_target!(opts) do
+    reject_retired_targets!(opts)
+    opts |> Keyword.take([:targets]) |> validated_single_target!()
+  end
+
+  @doc false
+  # Validates a raw `targets:` list holding exactly one
+  # entry and returns that target. A missing list raises like any other
+  # required option.
+  @spec single_target!(term()) :: PropertyDamage.Target.t()
+  def single_target!(entries), do: validated_single_target!(targets: entries)
+
+  defp validated_single_target!(targets_opt) do
+    validated = NimbleOptions.validate!(targets_opt, @targets_only_schema)
+    [target] = validate_single_target!(validated)[:targets]
+    target
+  end
+
+  # NimbleOptions validates the whole option list before it reaches the shared
+  # single-target check, so a bad entry is reported before a bad count.
+  defp validate_single!(opts, schema) do
+    opts |> NimbleOptions.validate!(schema) |> validate_single_target!()
+  end
+
+  # ============================================================================
   # PropertyDamage.run/1 Schema
   # ============================================================================
 
@@ -12,10 +298,10 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: "Model module implementing `PropertyDamage.Model` behaviour."
     ],
-    adapter: [
-      type: {:custom, __MODULE__, :validate_module, []},
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
-      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
+      doc: @single_target_doc
     ],
 
     # Optional - Basic
@@ -93,28 +379,6 @@ defmodule PropertyDamage.Options do
     ],
 
     # Optional - Advanced
-    injector_adapters: [
-      type: {:list, :atom},
-      default: [],
-      doc: "List of InjectorAdapter modules for event injection."
-    ],
-    mock_services: [
-      type: {:custom, __MODULE__, :validate_mock_services, []},
-      default: [],
-      doc: """
-      Mock third-party services the SUT calls, as a list where each entry is a
-      `PropertyDamage.MockServiceAdapter` module or a `{module, config}` tuple.
-
-      Per run the framework starts a `PropertyDamage.MockServiceRegistry`,
-      registers each mock (`init_state/0`) and calls its `setup/1` with the
-      entry's config merged with `%{registry: pid, event_queue: pid}`, drives
-      `on_command/2` before each command, folds the events mocks push
-      (`source: :mock`) into projections after each command, and tears each mock
-      down at the end. The registry pid is handed to the adapter on the
-      `PropertyDamage.Runtime` handle (`runtime.mock_registry`) so `execute/3`
-      can drive `handle_request/2`. See `PropertyDamage.MockServiceAdapter`.
-      """
-    ],
     external_markers: [
       type: {:list, :atom},
       default: [],
@@ -128,16 +392,11 @@ defmodule PropertyDamage.Options do
           defstruct [id: :__external__, :amount]
 
           # In test project
-          PropertyDamage.run(model: M, adapter: A, external_markers: [:__external__])
+          PropertyDamage.run(model: M, targets: [A], external_markers: [:__external__])
 
       This run option is the sole source of atom markers; there is no ambient
       app-config channel (DR-032).
       """
-    ],
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Configuration passed to `adapter.setup/1`."
     ],
     shrinker_config: [
       type: :any,
@@ -269,11 +528,11 @@ defmodule PropertyDamage.Options do
           default: false,
           doc: "Print regression actions."
         ],
-        adapter: [
-          type: :atom,
+        targets: [
+          type: {:custom, __MODULE__, :validate_targets, []},
           doc:
-            "Adapter module supplying `http_spec/2` for generated regression tests " <>
-              "(defaults to the run's adapter via the failure report)."
+            "Single-entry target for generated regression tests (defaults to the " <>
+              "run's target); see `PropertyDamage.Target`."
         ]
       ]
     ]
@@ -283,13 +542,14 @@ defmodule PropertyDamage.Options do
 
   # Option keys that were renamed. The old key is never translated: passing it
   # raises a validation error that names the replacement.
-  @retired_run_keys %{assertion_mode: :check_mode}
-  @retired_load_test_keys %{assertion_mode: :check_mode}
+  @retired_run_keys Map.put(@retired_target_keys, :assertion_mode, :check_mode)
+  @retired_load_test_keys Map.put(@retired_target_keys, :assertion_mode, :check_mode)
 
   @doc false
   # Raises `NimbleOptions.ValidationError` for the first retired key present in
-  # `opts`. `retired` maps each retired key to its replacement.
-  @spec reject_retired_keys!(keyword(), %{atom() => atom()}) :: :ok
+  # `opts`. `retired` maps each retired key to its replacement atom or to the
+  # full message.
+  @spec reject_retired_keys!(keyword(), %{atom() => atom() | String.t()}) :: :ok
   def reject_retired_keys!(opts, retired) do
     case Enum.find(opts, fn {key, _value} -> Map.has_key?(retired, key) end) do
       nil ->
@@ -299,9 +559,19 @@ defmodule PropertyDamage.Options do
         raise NimbleOptions.ValidationError,
           key: key,
           value: value,
-          message: "`#{key}:` was renamed `#{Map.fetch!(retired, key)}:`"
+          message: retired_message(key, Map.fetch!(retired, key))
     end
   end
+
+  defp retired_message(key, replacement) when is_atom(replacement),
+    do: "`#{key}:` was renamed `#{replacement}:`"
+
+  defp retired_message(_key, message) when is_binary(message), do: message
+
+  @doc false
+  # Rejects the run-level keys that `targets:` replaced.
+  @spec reject_retired_targets!(keyword()) :: :ok
+  def reject_retired_targets!(opts), do: reject_retired_keys!(opts, @retired_target_keys)
 
   @doc """
   Returns the compiled NimbleOptions schema for `PropertyDamage.run/1`.
@@ -326,10 +596,23 @@ defmodule PropertyDamage.Options do
   @spec validate_run!(keyword()) :: keyword()
   def validate_run!(opts) do
     reject_retired_keys!(opts, @retired_run_keys)
+    reject_retired_regression_keys!(opts)
 
-    opts
-    |> NimbleOptions.validate!(@run_schema)
-    |> validate_branching_bounds!()
+    validated = validate_single!(opts, @run_schema)
+
+    case Keyword.get(validated, :regression) do
+      regression when is_list(regression) -> validate_single_target!(regression)
+      _ -> :ok
+    end
+
+    validate_branching_bounds!(validated)
+  end
+
+  defp reject_retired_regression_keys!(opts) do
+    case Keyword.get(opts, :regression) do
+      regression when is_list(regression) -> reject_retired_targets!(regression)
+      _ -> :ok
+    end
   end
 
   # Cross-field check NimbleOptions can't express: branching cannot begin until
@@ -361,10 +644,10 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: "Model module implementing `PropertyDamage.Model` behaviour."
     ],
-    adapter: [
-      type: {:custom, __MODULE__, :validate_module, []},
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
-      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
+      doc: @single_target_doc
     ],
     run_nonce: [
       type: :non_neg_integer,
@@ -390,11 +673,6 @@ defmodule PropertyDamage.Options do
     ],
 
     # Optional
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Configuration passed to `adapter.setup/1`."
-    ],
     arrival_jitter: [
       type: {:custom, __MODULE__, :validate_range, []},
       default: {0, 0},
@@ -474,7 +752,7 @@ defmodule PropertyDamage.Options do
   @spec validate_load_test!(keyword()) :: keyword()
   def validate_load_test!(opts) do
     reject_retired_keys!(opts, @retired_load_test_keys)
-    NimbleOptions.validate!(opts, @load_test_schema)
+    validate_single!(opts, @load_test_schema)
   end
 
   # ============================================================================
@@ -482,10 +760,9 @@ defmodule PropertyDamage.Options do
   # ============================================================================
 
   @replay_schema_definition [
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Override adapter configuration."
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
+      doc: @optional_target_doc
     ],
     stop_on_failure: [
       type: :boolean,
@@ -506,7 +783,8 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_replay!(keyword()) :: keyword()
   def validate_replay!(opts) do
-    NimbleOptions.validate!(opts, @replay_schema)
+    reject_retired_targets!(opts)
+    validate_single!(opts, @replay_schema)
   end
 
   # ============================================================================
@@ -546,15 +824,10 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: "Model module implementing `PropertyDamage.Model` behaviour."
     ],
-    adapter: [
-      type: {:custom, __MODULE__, :validate_module, []},
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
-      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
-    ],
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Configuration passed to `adapter.setup/1`."
+      doc: @single_target_doc
     ],
     operators: [
       type: {:list, {:in, [:value, :omission, :status, :event, :boundary]}},
@@ -599,7 +872,8 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_mutation!(keyword()) :: keyword()
   def validate_mutation!(opts) do
-    NimbleOptions.validate!(opts, @mutation_schema)
+    reject_retired_targets!(opts)
+    validate_single!(opts, @mutation_schema)
   end
 
   # ============================================================================
@@ -620,9 +894,9 @@ defmodule PropertyDamage.Options do
           "strong random entropy."
     ],
     targets: [
-      type: {:custom, __MODULE__, :validate_non_empty_list, []},
+      type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
-      doc: "List of target specifications: `{AdapterModule}` or `{AdapterModule, opts}`."
+      doc: @targets_doc
     ],
     compare: [
       type: {:in, [:correctness, :performance, :both]},
@@ -675,11 +949,6 @@ defmodule PropertyDamage.Options do
     on_progress: [
       type: {:fun, 1},
       doc: "Progress consumer (DR-022); called with a `%PropertyDamage.Progress{}`."
-    ],
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Default adapter configuration."
     ]
   ]
 
@@ -690,6 +959,7 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_differential!(keyword()) :: keyword()
   def validate_differential!(opts) do
+    reject_retired_targets!(opts)
     NimbleOptions.validate!(opts, @differential_schema)
   end
 
@@ -702,9 +972,11 @@ defmodule PropertyDamage.Options do
       type: :atom,
       doc: "Model module (defaults to report.model)."
     ],
-    adapter: [
-      type: :atom,
-      doc: "Adapter module (defaults to report.adapter)."
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
+      doc:
+        "Single-entry target the generated test runs against (defaults to the " <>
+          "report's adapter with an empty config); see `PropertyDamage.Target`."
     ],
     module_name: [
       type: {:or, [:string, :atom]},
@@ -713,11 +985,6 @@ defmodule PropertyDamage.Options do
     test_name: [
       type: :string,
       doc: "Custom test name."
-    ],
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Adapter configuration map."
     ],
     expect_fixed: [
       type: :boolean,
@@ -733,7 +1000,8 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_export_exunit!(keyword()) :: keyword()
   def validate_export_exunit!(opts) do
-    NimbleOptions.validate!(opts, @export_exunit_schema)
+    reject_retired_targets!(opts)
+    validate_single!(opts, @export_exunit_schema)
   end
 
   @export_script_schema_definition [
@@ -809,20 +1077,10 @@ defmodule PropertyDamage.Options do
   # ============================================================================
 
   @execute_schema_definition [
-    adapter: [
-      type: {:custom, __MODULE__, :validate_module, []},
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
-      doc: "Adapter module for executing commands."
-    ],
-    injector_adapters: [
-      type: {:list, :atom},
-      default: [],
-      doc: "List of injector adapter modules."
-    ],
-    adapter_config: [
-      type: :map,
-      default: %{},
-      doc: "Configuration passed to `adapter.setup/1`."
+      doc: @single_target_doc
     ]
   ]
 
@@ -848,7 +1106,8 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_execute!(keyword()) :: keyword()
   def validate_execute!(opts) do
-    NimbleOptions.validate!(opts, @execute_schema)
+    reject_retired_targets!(opts)
+    validate_single!(opts, @execute_schema)
   end
 
   # ============================================================================
@@ -861,15 +1120,10 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: "Model module implementing `PropertyDamage.Model` behaviour."
     ],
-    adapter: [
-      type: {:custom, __MODULE__, :validate_module, []},
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
-      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
-    ],
-    adapter_config: [
-      type: :map,
-      required: true,
-      doc: "Configuration passed to `adapter.setup/1`."
+      doc: @single_target_doc
     ],
     max_runs: [
       type: :pos_integer,
@@ -916,7 +1170,8 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_integration_run!(keyword()) :: keyword()
   def validate_integration_run!(opts) do
-    NimbleOptions.validate!(opts, @integration_run_schema)
+    reject_retired_targets!(opts)
+    validate_single!(opts, @integration_run_schema)
   end
 
   @integration_hunt_bugs_schema_definition [
@@ -925,15 +1180,10 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: "Model module implementing `PropertyDamage.Model` behaviour."
     ],
-    adapter: [
-      type: {:custom, __MODULE__, :validate_module, []},
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
-      doc: "Adapter module implementing `PropertyDamage.Adapter` behaviour."
-    ],
-    adapter_config: [
-      type: :map,
-      required: true,
-      doc: "Configuration passed to `adapter.setup/1`."
+      doc: @single_target_doc
     ],
     stop_after: [
       type: :pos_integer,
@@ -963,7 +1213,8 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_integration_hunt_bugs!(keyword()) :: keyword()
   def validate_integration_hunt_bugs!(opts) do
-    NimbleOptions.validate!(opts, @integration_hunt_bugs_schema)
+    reject_retired_targets!(opts)
+    validate_single!(opts, @integration_hunt_bugs_schema)
   end
 
   @integration_health_check_schema_definition [
@@ -1069,7 +1320,7 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: """
       Options forwarded to `PropertyDamage.RunTrace.capture/1` (requires
-      `:model`, `:adapter`, `:seed`). Passed through rather than duplicated
+      `:model`, `:targets`, `:seed`). Passed through rather than duplicated
       here so `RunTrace`'s surface stays single-sourced; a fresh `:run_nonce`
       is injected per capture.
       """
@@ -1108,7 +1359,7 @@ defmodule PropertyDamage.Options do
       required: true,
       doc: """
       Options forwarded to `PropertyDamage.RunTrace.capture/1` (requires
-      `:model` and `:adapter`; `:seed` is supplied per scanned seed). A fresh
+      `:model` and `:targets`; `:seed` is supplied per scanned seed). A fresh
       `:run_nonce` is injected per capture.
       """
     ]
@@ -1172,13 +1423,9 @@ defmodule PropertyDamage.Options do
       default: false,
       doc: "Print regression actions."
     ],
-    adapter: [
-      type: :atom,
-      doc: "Adapter module for generated test HTTP-spec mapping."
-    ],
-    adapter_config: [
-      type: :any,
-      doc: "Adapter config embedded in the generated regression test's run opts."
+    targets: [
+      type: {:custom, __MODULE__, :validate_targets, []},
+      doc: @optional_target_doc
     ]
   ]
 
@@ -1190,7 +1437,8 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_regression_opts!(keyword()) :: keyword()
   def validate_regression_opts!(opts) do
-    NimbleOptions.validate!(opts, @regression_opts_schema)
+    reject_retired_targets!(opts)
+    validate_single!(opts, @regression_opts_schema)
   end
 
   @regression_save_failure_schema_definition [
@@ -1347,19 +1595,6 @@ defmodule PropertyDamage.Options do
     {:error,
      "expected a range tuple like {min, max} where min >= 0 and max >= min, " <>
        "got: #{inspect(value)}"}
-  end
-
-  @doc false
-  def validate_non_empty_list([]) do
-    {:error, "expected a non-empty list, got: []"}
-  end
-
-  def validate_non_empty_list(value) when is_list(value) do
-    {:ok, value}
-  end
-
-  def validate_non_empty_list(value) do
-    {:error, "expected a non-empty list, got: #{inspect(value)}"}
   end
 
   @doc false

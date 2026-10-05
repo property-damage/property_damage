@@ -16,8 +16,8 @@ defmodule KratosBench.RegistrationMock do
 
   ## How the mock reaches a run
 
-  `PropertyDamage.run/1` can own the registry lifecycle via its `:mock_services`
-  option (see README, "Wiring note"); this bench predates that option and has
+  `PropertyDamage.run/1` can own the registry lifecycle via the `mocks:` key of a
+  `targets:` entry (see README, "Wiring note"); this bench predates that option and has
   `KratosBench.Adapter` own the registry lifecycle using the registry's documented
   public API. This listener is the transport glue: on each inbound web_hook it
   reads the mock's state from the registry (`get_handler_state/2`), calls

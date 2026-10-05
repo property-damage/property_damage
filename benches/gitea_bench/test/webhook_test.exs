@@ -56,13 +56,15 @@ defmodule GiteaBench.WebhookTest do
       assert {:ok, _stats} =
                PropertyDamage.run(
                  model: GiteaBench.WebhookModel,
-                 adapter: GiteaBench.ApiAdapter,
-                 adapter_config: %{
-                   base_url: Application.fetch_env!(:gitea_bench, :webhook_url),
-                   admin_user: Application.fetch_env!(:gitea_bench, :admin_user),
-                   admin_password: Application.fetch_env!(:gitea_bench, :admin_password)
-                 },
-                 injector_adapters: [GiteaBench.WebhookInjector],
+                 targets: [
+                   {GiteaBench.ApiAdapter,
+                    config: %{
+                      base_url: Application.fetch_env!(:gitea_bench, :webhook_url),
+                      admin_user: Application.fetch_env!(:gitea_bench, :admin_user),
+                      admin_password: Application.fetch_env!(:gitea_bench, :admin_password)
+                    },
+                    injectors: [GiteaBench.WebhookInjector]}
+                 ],
                  max_commands: 12,
                  max_runs: 3
                )

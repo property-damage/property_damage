@@ -12,15 +12,15 @@ The framework SHALL run the same command sequences against multiple adapter targ
 
 #### Scenario: Oracle testing
 
-- **WHEN** differential testing is configured with a reference target (`role: :reference`) and one or more SUT targets
+- **WHEN** differential testing is configured with a `targets:` list of two or more entries
 - **THEN** the framework SHALL execute the same command sequences against all targets
-- **AND** SHALL compare SUT results against the reference target's results
+- **AND** SHALL compare the results of every other target against the first target's results (DR-043)
 
 #### Scenario: Same adapter with different configurations
 
-- **WHEN** multiple targets use the same adapter module with different `opts:`
+- **WHEN** multiple targets use the same adapter module with different `name:` and `config:` values
 - **THEN** the framework SHALL treat them as distinct targets
-- **AND** SHALL execute commands against each target's configured endpoint independently
+- **AND** SHALL execute commands against each target's configured endpoint independently, passing each target's `config:` to its own `setup/1`
 
 ### Requirement: Comparison Modes
 
@@ -108,22 +108,75 @@ The framework SHALL record which commands produced different results across targ
 - **WHEN** divergences are detected in a command sequence
 - **THEN** standard PropertyDamage shrinking SHALL apply to find the minimal command sequence that still produces the divergence
 
-### Requirement: Target Specification
+### Requirement: Target Specification (DR-043)
 
-Each target SHALL be specified as a tuple of `{AdapterModule}` or `{AdapterModule, opts}` with optional `name:`, `role:`, and `opts:` keywords.
+Each target SHALL be an entry of the `targets:` option: either an adapter module or `{AdapterModule, keyword}`, the same idiom the model's `commands/0` uses. The keyword MAY carry `name:`, `config:`, `injectors:` and `mocks:`; any other key, including `expansion:` until a decision record introduces expansions, MUST be rejected as an unknown option. The framework SHALL normalize every entry to a `%PropertyDamage.Target{}` with the fields `adapter`, `name`, `index`, `config`, `injectors` and `mocks`, where `index` is the zero-based position of the entry in the list.
 
 #### Scenario: Minimal target specification
 
-- **WHEN** a target is specified as `{MyAdapter}`
-- **THEN** the framework SHALL derive a display name from the module name
-- **AND** SHALL pass no additional options to `setup/1`
+- **WHEN** a target is specified as `MyAdapter` or `{MyAdapter, []}`
+- **THEN** the framework SHALL name the target after the last segment of the module name, with no index suffix
+- **AND** SHALL pass `%{}` to `setup/1`
+- **AND** SHALL give the target no injectors and no mocks
 
-#### Scenario: Named target with role
+#### Scenario: Named target with configuration
 
-- **WHEN** a target is specified as `{MyAdapter, role: :reference, name: "prod", opts: [url: "http://prod"]}`
-- **THEN** the framework SHALL use "prod" as the display name
-- **AND** SHALL designate this target as the reference for oracle testing
-- **AND** SHALL pass `[url: "http://prod"]` to the adapter's `setup/1`
+- **WHEN** a target is specified as `{MyAdapter, name: "prod", config: %{url: "http://prod"}}`
+- **THEN** the framework SHALL use "prod" as the name
+- **AND** SHALL pass `%{url: "http://prod"}` to the adapter's `setup/1` unchanged
+
+#### Scenario: Keyword configuration is rejected
+
+- **WHEN** a target's `config:` is a keyword list instead of a map
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` naming `config:`
+- **AND** SHALL NOT convert the keyword list to a map
+
+#### Scenario: Default name is stable under reordering
+
+- **WHEN** the entries of a `targets:` list are reordered
+- **THEN** every target without `name:` SHALL keep the name derived from its module
+- **AND** only its `index` SHALL change
+
+### Requirement: The First Target Is the Reference (DR-043)
+
+The first entry of the `targets:` list SHALL be the reference target. The framework MUST NOT accept a per-target `role:` option, so a list has exactly one reference by construction. `PropertyDamage.Differential.Result` SHALL report the reference and the targets as `%{index, name}` pairs.
+
+#### Scenario: Reference by position
+
+- **GIVEN** a `targets:` list of `[{ImplA, name: "a"}, {ImplB, name: "b"}]`
+- **WHEN** a differential run completes
+- **THEN** the result's `reference` SHALL be `%{index: 0, name: "a"}`
+- **AND** its `targets` SHALL be `[%{index: 0, name: "a"}, %{index: 1, name: "b"}]`
+
+#### Scenario: Role option is removed
+
+- **WHEN** a target entry carries `role:`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` with the message "targets entry 0: `role:` was removed; the first `targets:` entry is the reference" (the index is that of the offending entry)
+
+### Requirement: Target Names Are Unique (DR-043)
+
+Two entries of one `targets:` list that resolve to the same name, whether derived or given, MUST be rejected before any command executes.
+
+#### Scenario: Same adapter twice without names
+
+- **WHEN** `targets:` lists `MyAdapter` twice
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` whose message states that two `targets:` entries resolve to the name "MyAdapter" and asks for a distinct `name:` on each
+- **AND** no command SHALL execute
+
+#### Scenario: Same adapter twice with distinct names
+
+- **WHEN** `targets:` lists `{MyAdapter, name: "a"}` and `{MyAdapter, name: "b"}`
+- **THEN** the framework SHALL accept the list and treat the entries as distinct targets
+
+### Requirement: Differential Targets Reject Unsupported Entry Keys (DR-043)
+
+`PropertyDamage.Differential.run/1` drives each target's adapter directly and has no injection source or mock registry. It SHALL raise `NimbleOptions.ValidationError` for a target that sets `injectors:` or `mocks:` instead of ignoring the key.
+
+#### Scenario: Differential target with mocks
+
+- **WHEN** `PropertyDamage.Differential.run/1` is called with a target that has a non-empty `mocks:`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` with the message "`mocks:` is not supported by PropertyDamage.Differential.run/1 (targets entry 0)" (the index is that of the offending entry)
+- **AND** no command SHALL execute
 
 ### Requirement: Mutation Testing Execution
 

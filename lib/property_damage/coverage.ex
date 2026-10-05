@@ -14,11 +14,11 @@ defmodule PropertyDamage.Coverage do
 
       # Enable the heavier whole-run command/transition/state accumulation. The
       # tracker is attached to the success stats as `:coverage`.
-      {:ok, stats} = PropertyDamage.run(model: M, adapter: A, coverage: true)
+      {:ok, stats} = PropertyDamage.run(model: M, targets: [A], coverage: true)
       IO.puts(PropertyDamage.Coverage.format(stats.coverage))
 
       # Or derive a tracker from any single result (no `coverage: true` needed)
-      result = PropertyDamage.run(model: M, adapter: A)
+      result = PropertyDamage.run(model: M, targets: [A])
       coverage = PropertyDamage.Coverage.from_result(result, M)
       IO.puts(PropertyDamage.Coverage.format(coverage))
 

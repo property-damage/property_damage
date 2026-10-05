@@ -10,7 +10,7 @@ defmodule GiteaBench.WebhookModel do
     * `injectable_events/0` declares `IssueClosedWebhook`, which validation checks
       against the injector's `@emits`.
 
-  Drive it with `injector_adapters: [GiteaBench.WebhookInjector]` against the
+  Drive it with `injectors: [GiteaBench.WebhookInjector]` in the `targets:` entry against the
   dedicated gitea 1.24 instance (`:webhook_url`).
   """
 

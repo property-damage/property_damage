@@ -372,7 +372,7 @@ Use mutation testing to verify your invariants catch bugs:
 ```elixir
 {:ok, report} = PropertyDamage.Mutation.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   target_score: 0.80
 )
 
@@ -398,7 +398,7 @@ alias PropertyDamage.Progress.{MutationResult, MutationUpdate}
 
 PropertyDamage.Mutation.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   on_progress: fn
     %Progress{data: %MutationUpdate{result: outcome, command: command}} ->
       IO.puts("#{outcome}: #{inspect(command)}")

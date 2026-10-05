@@ -163,9 +163,7 @@ defmodule PropertyDamage.ValidationTest do
     test "validates injectable events coverage" do
       # ExecutorModel may have injectable_events that need coverage
       {:ok, _warnings} =
-        Validation.validate!(ExecutorModel, SimpleAdapter,
-          injector_adapters: [SimpleInjectorAdapter]
-        )
+        Validation.validate!(ExecutorModel, SimpleAdapter, injectors: [SimpleInjectorAdapter])
     end
 
     test "covers injectable events even when the injector module is not yet loaded" do
@@ -181,9 +179,7 @@ defmodule PropertyDamage.ValidationTest do
       refute :erlang.module_loaded(UnloadedEmitsInjector)
 
       assert {:ok, _warnings} =
-               Validation.validate!(FullModel, SimpleAdapter,
-                 injector_adapters: [UnloadedEmitsInjector]
-               )
+               Validation.validate!(FullModel, SimpleAdapter, injectors: [UnloadedEmitsInjector])
     end
   end
 

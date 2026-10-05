@@ -49,7 +49,7 @@ defmodule PropertyDamage.FlakyFailureReportTest do
   # run/1 lifecycle, then succeeds forever. So run 1 (exploration) fails at
   # index 0 with a real `:adapter_error` (detail `:flaky_boom`); the post-shrink re-run
   # passes -- the fresh result is success/nil, the shape that used to render as
-  # "Unknown Failure". The execution counter lives in adapter_config so it
+  # "Unknown Failure". The execution counter lives in the target config so it
   # survives across the exploration run and the confirmation re-run.
   defmodule FlakyOnceAdapter do
     use PropertyDamage.Adapter
@@ -79,8 +79,7 @@ defmodule PropertyDamage.FlakyFailureReportTest do
     assert {:error, %FailureReport{} = report} =
              PropertyDamage.run(
                model: Model,
-               adapter: FlakyOnceAdapter,
-               adapter_config: %{counter: counter},
+               targets: [{FlakyOnceAdapter, config: %{counter: counter}}],
                max_commands: 4,
                max_runs: 1,
                seed: 1,

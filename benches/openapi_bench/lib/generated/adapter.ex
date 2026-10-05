@@ -6,15 +6,17 @@ defmodule OpenapiBench.Generated.Adapter do
 
   ## Configuration
 
-  Pass configuration via `adapter_config`:
+  Pass configuration as the `config:` of the `targets:` entry:
 
       PropertyDamage.run(
         model: OpenapiBench.Generated.Model,
-        adapter: OpenapiBench.Generated.Adapter,
-        adapter_config: %{
-          base_url: "http://localhost:4010",
-          # No authentication configured
-        }
+        targets: [
+          {OpenapiBench.Generated.Adapter,
+           config: %{
+             base_url: "http://localhost:4010",
+             # No authentication configured
+           }}
+        ]
       )
   """
 

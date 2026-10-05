@@ -31,16 +31,19 @@ defmodule PropertyDamage.Differential.Result do
           optional(:reason) => term()
         }
 
+  @typedoc "A compared target: its zero-based position in `targets:` and its name."
+  @type variant :: %{index: non_neg_integer(), name: String.t()}
+
   @type t :: %__MODULE__{
           mode: :correctness | :performance | :both,
           execution: :interleaved | :sequential,
           runs: non_neg_integer(),
           seed: integer(),
-          reference: String.t() | nil,
+          reference: variant(),
           status: :equivalent | :divergent | :complete,
           divergences: [divergence()],
           metrics: %{String.t() => metrics()},
-          targets: [String.t()]
+          targets: [variant()]
         }
 
   defstruct [
@@ -109,8 +112,8 @@ defmodule PropertyDamage.Differential.Result do
     Runs: #{result.runs}
     Seed: #{result.seed}
     Status: #{format_status(result.status)}
-    #{if result.reference, do: "Reference: #{result.reference}\n", else: ""}
-    Targets: #{Enum.join(result.targets, ", ")}
+    Reference: #{format_variant(result.reference)}
+    Targets: #{Enum.map_join(result.targets, ", ", &format_variant/1)}
     #{if result.status == :divergent, do: "Divergences: #{length(result.divergences)}\n", else: ""}
     """
   end
@@ -197,6 +200,8 @@ defmodule PropertyDamage.Differential.Result do
       #{div.divergent_target}: #{inspect(div.divergent_result)}
     """
   end
+
+  defp format_variant(%{index: index, name: name}), do: "[#{index}] #{name}"
 
   defp format_status(:equivalent), do: "EQUIVALENT ✓"
   defp format_status(:divergent), do: "DIVERGENT ✗"
