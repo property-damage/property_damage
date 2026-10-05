@@ -174,11 +174,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING**: Renamed the model callback `assertion_projections/0` to
-  `check_projections/0`, the exception `PropertyDamage.AssertionFailed` to
-  `PropertyDamage.CheckFailed` (still raised by `PropertyDamage.fail!/2`), and the
-  model callback `terminate?/3` to `terminate_early?/3`. The old names are not
-  recognized. `mix pd.gen.model` now takes `--check-projections`.
+- **BREAKING (DR-042): vocabulary renames, with no compatibility layer.** The
+  old names are not recognized.
+    - The "assertion" identifier family becomes "check": the model callback
+      `assertion_projections/0` is `check_projections/0`; the exception
+      `PropertyDamage.AssertionFailed` is `PropertyDamage.CheckFailed` (still
+      raised by `PropertyDamage.fail!/2`); the run option `assertion_mode:` is
+      `check_mode:`; `%Failure.Assertion{}` is `%Failure.Check{}` (class `:check`,
+      kind `:check_failed`); `assertion_coverage/2` is `check_coverage/2`;
+      `assertion_catalog/1` is `check_catalog/1` (report kinds `:synchronous`,
+      `:lifecycle`, `:eventual`); `assertion_fires` is `check_fires`;
+      `Projection.__assertions__/0` is `Projection.__checks__/0`; the LoadTest
+      failure metrics are now `check_failures` and `check_failure_rate`; the `Statistics` option
+      `assertions:` is `checks:`.
+    - The projection attributes `@trigger` and `@poll_state` become `@check` and
+      `@eventually`, with the same `every:`, `at:`, `after:`, `timeout:` and
+      `interval:` options.
+    - The model callback `terminate?/3` is `terminate_early?/3`.
+    - The command-spec option `with:` is `overrides:`.
+    - A retired key raises an error that names its replacement. The messages are:
+      "`assertion_mode:` was renamed `check_mode:`", "`assertions:` was renamed
+      `checks:`" and "Invalid `with:` for command M: `with:` was renamed
+      `overrides:`."
+    - The persisted `.pd` format moves to version `8`; older files are refused
+      with `{:error, {:unsupported_format_version, version, 8}}`.
+    - `mix pd.gen.model` now takes `--check-projections`.
 
 - **`failure_reason` is a `%PropertyDamage.Failure{}` everywhere it flowed as a
   raw tuple (BREAKING, DR-041).** Every producer (the executor, branching,
@@ -355,10 +375,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **BREAKING**: Removed Differential baseline files: the `baseline:` and
-  `export_to:` options, `PropertyDamage.Differential.Baseline`, and the `:baseline`
-  field of `PropertyDamage.Differential.Result`. Passing either option now raises
-  the unknown-option validation error.
+- **BREAKING (DR-042)**: Removed Differential baseline comparison: the `baseline:`
+  and `export_to:` options, `PropertyDamage.Differential.Baseline` and its JSON
+  file format, and the `:baseline` field of `PropertyDamage.Differential.Result`.
+  Passing either option now raises the unknown-option validation error. Recorded
+  runs can return, designed against the replay artifact format.
 
 - **BREAKING:** removed `PropertyDamage.Flakiness` and its facade delegates
   `check_determinism/4` and `discover_flaky_seeds/3`.

@@ -1,6 +1,6 @@
 # DR-014: Assertion Modes
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed). Amended by DR-042: `assertion_mode:` is now `check_mode:`.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
 
 ## Decision

@@ -1,6 +1,6 @@
 # DR-012: Trigger-Based Assertions
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed). Amended by DR-042: `@trigger` is now `@check` and `@poll_state` is now `@eventually`.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
 
 ## Decision

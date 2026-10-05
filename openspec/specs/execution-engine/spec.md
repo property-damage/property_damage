@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ The system SHALL execute command sequences in two distinct phases: a symbolic ge
 
 ### Requirement: Adapter Lifecycle
 
-The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is called once to establish context, `execute/3` is called for each command in the sequence, and `teardown/1` is called once for cleanup. `teardown/1` receives the `setup/1` return exactly (the `user_context`). Lifecycle-boundary assertions (DR-024) are evaluated at the edges of this lifecycle: `@check at: :startup` assertions after `setup/1` and before the first command, and `@check at: :teardown` assertions on the settled state before `teardown/1`.
+The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is called once to establish context, `execute/3` is called for each command in the sequence, and `teardown/1` is called once for cleanup. `teardown/1` receives the `setup/1` return exactly (the `user_context`). Lifecycle-boundary checks (DR-024) are evaluated at the edges of this lifecycle: `@check at: :startup` checks after `setup/1` and before the first command, and `@check at: :teardown` checks on the settled state before `teardown/1`.
 
 #### Scenario: Normal adapter lifecycle
 - **WHEN** a command sequence is executed
@@ -41,33 +41,33 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 - **WHEN** the shrinker re-executes a candidate sequence
 - **THEN** the framework SHALL run the full setup/execute/teardown lifecycle for each shrink attempt
 
-#### Scenario: Startup assertions gate the initial state
-- **WHEN** a projection declares an `@check at: :startup` assertion
+#### Scenario: Startup checks gate the initial state
+- **WHEN** a projection declares an `@check at: :startup` check
 - **THEN** the framework SHALL evaluate it on the initial `init/0` state after `setup/1` and before the first `execute/3`
-- **AND** a failing startup assertion SHALL halt the run before any command is executed
+- **AND** a failing startup check SHALL halt the run before any command is executed
 
-#### Scenario: Teardown assertions evaluate the settled state
-- **WHEN** a run completes cleanly and a projection declares an `@check at: :teardown` assertion
+#### Scenario: Teardown checks evaluate the settled state
+- **WHEN** a run completes cleanly and a projection declares an `@check at: :teardown` check
 - **THEN** the framework SHALL evaluate it once on the merged final projection state after both state pollers and resource pollers have finalized
 - **AND** it SHALL be evaluated before `teardown/1` is called
-- **AND** `teardown/1` SHALL still be called regardless of the assertion's verdict
+- **AND** `teardown/1` SHALL still be called regardless of the check's verdict
 
-#### Scenario: Teardown assertions do not run on early abort
+#### Scenario: Teardown checks do not run on early abort
 - **WHEN** a run aborts before reaching the settled state (for example an adapter error, a synchronous `@check` failure, or a reference-resolution error)
-- **THEN** `@check at: :teardown` assertions SHALL NOT be evaluated
-- **AND** the framework SHALL report the proximate failure rather than a settled-state assertion result
+- **THEN** `@check at: :teardown` checks SHALL NOT be evaluated
+- **AND** the framework SHALL report the proximate failure rather than a settled-state check result
 
 ### Requirement: Finalize-Chain Ordering and Precedence (DR-029)
 
 After the last command of a run (linear or merged-branch), the framework SHALL finalize the run through a fixed chain of stages in this order: finalize `@eventually` pollers (draining the event queue and evaluating async checks during the await window), finalize resource pollers, drain the settled-state event queue (evaluating async checks on the folded events), then evaluate the `@check at: :teardown` checkpoint on the settled state. When more than one failure is live at finalize time, the framework SHALL report exactly one, by this precedence (highest first): an async `@check every:` violation observed during the `@eventually` await drain, then a `@eventually` poll timeout/error, then an async `@check every:` violation observed during the settled-state drain, then a resource-poller error, then a failing `@check at: :teardown` checkpoint. The two async violations SHALL carry the observing event's `command_index` as the reported failure index. This ordering is an internal invariant (no observable-behavior change); it is owned by `PropertyDamage.Executor.Finalization` and locked by dedicated ordering-guard tests so the chain cannot be silently reordered.
 
 #### Scenario: An async drain violation preempts a concurrent poll timeout
-- **WHEN** an async `@check every:` assertion trips on an event folded during the `@eventually` await drain while a `@eventually` poller is also timing out
-- **THEN** the framework SHALL report the async assertion violation, at the observing event's `command_index`, rather than the poll timeout
+- **WHEN** an async `@check every:` check trips on an event folded during the `@eventually` await drain while a `@eventually` poller is also timing out
+- **THEN** the framework SHALL report the async check violation, at the observing event's `command_index`, rather than the poll timeout
 
 #### Scenario: A settled-state drain violation preempts a resource-poller error
-- **WHEN** an async `@check every:` assertion trips on an event folded during the settled-state drain while a resource poller has also errored
-- **THEN** the framework SHALL report the async assertion violation, at the observing event's `command_index`, rather than the resource-poller error
+- **WHEN** an async `@check every:` check trips on an event folded during the settled-state drain while a resource poller has also errored
+- **THEN** the framework SHALL report the async check violation, at the observing event's `command_index`, rather than the resource-poller error
 
 ### Requirement: Explicit Stutter RNG and Determinism (DR-029)
 
@@ -86,7 +86,7 @@ Because stutter decisions are reproducible, stutter failures (idempotency violat
 - **THEN** the shrinker SHALL reproduce the violation with stutter forced on and minimize the sequence to the offending command
 
 #### Scenario: Non-stutter shrinking is not perturbed by stutter
-- **WHEN** a run fails for a non-stutter reason (for example a `@check` assertion)
+- **WHEN** a run fails for a non-stutter reason (for example a `@check` check)
 - **THEN** the shrinker SHALL re-run candidates without stutter, exactly as for a run with stutter disabled
 
 ### Requirement: Adapter Execute Arguments (user_context and runtime)
@@ -177,7 +177,7 @@ The system SHALL provide a shared event queue where injector adapters push incom
 - **WHEN** a command finishes executing
 - **THEN** the executor SHALL drain all pending events from the queue
 - **AND** drained events SHALL be processed through projections
-- **AND** drained events SHALL be evaluated against `@check every:` assertions (DR-025)
+- **AND** drained events SHALL be evaluated against `@check every:` checks (DR-025)
 - **AND** each entry SHALL record the source adapter module and timestamp
 
 #### Scenario: Correlated injector events attributed to their command (DR-030)
@@ -210,48 +210,48 @@ The system SHALL support mock service adapters that stand in for third-party ser
 - **WHEN** the SUT calls the mock and events are pushed into the registry
 - **THEN** after the command the framework SHALL flush those events, fold them into projection state (recording them with `source: :mock`), and notify each mock via `on_event/2`
 
-### Requirement: Assertions on Asynchronously-Observed Events
+### Requirement: Checks on Asynchronously-Observed Events
 
-The executor SHALL evaluate `@check every:` assertions on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, mock-service events, and nemesis events, as well as events folded during the finalize-time drains (the `@eventually` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-assertion dispatch **incrementally** — one event at a time, on the state produced by folding that event — with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Assertion mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.
+The executor SHALL evaluate `@check every:` checks on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, mock-service events, and nemesis events, as well as events folded during the finalize-time drains (the `@eventually` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-check dispatch **incrementally** — one event at a time, on the state produced by folding that event — with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Check mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.
 
-#### Scenario: Assertion fires on a poller-observed event
-- **WHEN** a resource poller injects an event that matches an `@check every:` assertion
-- **THEN** the executor SHALL evaluate that assertion on the projection state after the event is folded in
+#### Scenario: Check fires on a poller-observed event
+- **WHEN** a resource poller injects an event that matches an `@check every:` check
+- **THEN** the executor SHALL evaluate that check on the projection state after the event is folded in
 - **AND** the per-event counters SHALL advance as for a command's own event
 
 #### Scenario: Violation reported at the observing event
-- **WHEN** an `@check every:` assertion fails on an asynchronously-observed event
-- **THEN** the failure SHALL be reported as a named assertion failure located at that event's `command_index`
+- **WHEN** an `@check every:` check fails on an asynchronously-observed event
+- **THEN** the failure SHALL be reported as a named check failure located at that event's `command_index`
 - **AND** it SHALL be distinct from an `@check at: :teardown` settled-state failure (which has no position) and from a `@eventually` poll timeout
 
 #### Scenario: Halt mode stops mid-drain
-- **WHEN** assertion mode is `:halt` and an `@check every:` assertion fails while draining asynchronously-observed events
+- **WHEN** check mode is `:halt` and an `@check every:` check fails while draining asynchronously-observed events
 - **THEN** the executor SHALL stop draining and fail the run at the offending event
 - **AND** subsequent queued events SHALL NOT be folded or asserted
 
 #### Scenario: Finalize-time drains are checked
 - **WHEN** events are folded during the finalize-time drains (the `@eventually` await drain or the settled-state drain)
-- **THEN** those events SHALL be evaluated against `@check every:` assertions, and a violation SHALL surface as a run failure rather than being folded silently
+- **THEN** those events SHALL be evaluated against `@check every:` checks, and a violation SHALL surface as a run failure rather than being folded silently
 
-### Requirement: Per-Assertion Firing and Whole-Run Coverage Accumulation (DR-026)
+### Requirement: Per-Check Firing and Whole-Run Coverage Accumulation (DR-026)
 
-The executor SHALL record how many times each assertion actually fired during a run, keyed by its owning projection and name. An assertion counts as fired whenever its function is invoked, regardless of whether it passes or fails, at every evaluation site: synchronous dispatch on commands and observed events (including the asynchronous paths of DR-025), lifecycle `at:` boundaries (DR-024), and `@eventually` poller spawn. Per-assertion firing counts SHALL merge across parallel branches the same way the existing assertion counters do. Firing counts SHALL be accumulated across all generated sequences of the run and attached to the result as `result.assertion_fires`.
+The executor SHALL record how many times each check actually fired during a run, keyed by its owning projection and name. a check counts as fired whenever its function is invoked, regardless of whether it passes or fails, at every evaluation site: synchronous dispatch on commands and observed events (including the asynchronous paths of DR-025), lifecycle `at:` boundaries (DR-024), and `@eventually` poller spawn. Per-check firing counts SHALL merge across parallel branches the same way the existing check counters do. Firing counts SHALL be accumulated across all generated sequences of the run and attached to the result as `result.check_fires`.
 
 #### Scenario: Firing recorded at every evaluation site
-- **WHEN** an assertion is evaluated via `every:`, an `at:` boundary, an asynchronously-observed event, or a spawned `@eventually` poller
-- **THEN** the executor SHALL increment that assertion's firing count, regardless of pass or fail
+- **WHEN** a check is evaluated via `every:`, an `at:` boundary, an asynchronously-observed event, or a spawned `@eventually` poller
+- **THEN** the executor SHALL increment that check's firing count, regardless of pass or fail
 
 #### Scenario: Poller spawn counts as firing
 - **WHEN** a `@eventually` poller is spawned because a matching `after:` event was observed
-- **THEN** the executor SHALL count the assertion as having fired, even if the poller later times out or remains pending at shutdown
+- **THEN** the executor SHALL count the check as having fired, even if the poller later times out or remains pending at shutdown
 
 #### Scenario: Firing accumulates across the whole run
 - **WHEN** a run executes multiple generated sequences
-- **THEN** `result.assertion_fires` SHALL reflect firing counts summed across all sequences, not a single representative sequence
+- **THEN** `result.check_fires` SHALL reflect firing counts summed across all sequences, not a single representative sequence
 
-#### Scenario: Per-assertion firing merges across branches
-- **WHEN** execution branches in parallel and assertions fire in different branches
-- **THEN** the per-assertion firing counts SHALL merge by the same delta-from-prefix rule as the existing assertion counters
+#### Scenario: Per-check firing merges across branches
+- **WHEN** execution branches in parallel and checks fire in different branches
+- **THEN** the per-check firing counts SHALL merge by the same delta-from-prefix rule as the existing check counters
 
 ### Requirement: Pre-Run Validation
 
@@ -264,6 +264,15 @@ The system SHALL verify model and adapter configuration before beginning executi
 #### Scenario: Validation passes for correct configuration
 - **WHEN** the model and adapter are correctly configured
 - **THEN** validation SHALL succeed and execution SHALL proceed
+
+### Requirement: Retired Run Option Keys Are Rejected (DR-042)
+
+The system SHALL reject the retired run option `assertion_mode:` before any command executes, with a validation error that names its replacement `check_mode:`. No alias is kept.
+
+#### Scenario: Run started with `assertion_mode:`
+- **WHEN** `PropertyDamage.run/1` is called with `assertion_mode:` in its options
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` with the message "`assertion_mode:` was renamed `check_mode:`"
+- **AND** no command SHALL execute
 
 ### Requirement: Seed Library Replay Phase
 

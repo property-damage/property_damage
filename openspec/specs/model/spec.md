@@ -4,7 +4,7 @@
 
 Models orchestrate stateful property-based tests by defining which commands run, when they are valid, how they are parameterized, and the test lifecycle. A model ties together commands, projections, and optional simulators without knowing transport details or command internals.
 
-Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage)
+Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs)
 
 ## Requirements
 
@@ -62,7 +62,7 @@ Models SHALL support three wiring options for commands: `:weight` for relative s
 - **WHEN** a command does not specify a `when:` option
 - **THEN** it is always eligible for selection regardless of state
 
-#### Scenario: With function provides generator overrides
+#### Scenario: Overrides function provides generator values
 - **WHEN** a command has an `overrides:` function
 - **THEN** the function receives the current projection state
 - **AND** returns a map of overrides passed to the command's generator
@@ -71,6 +71,15 @@ Models SHALL support three wiring options for commands: `:weight` for relative s
 #### Scenario: With defaults to empty map
 - **WHEN** a command does not specify an `overrides:` option
 - **THEN** an empty map is passed as overrides to the command's generator
+
+### Requirement: Retired Command Option Keys Are Rejected (DR-042)
+
+The framework SHALL reject the retired command-spec key `with:` with an error that names its replacement `overrides:`. No alias is kept.
+
+#### Scenario: Command listed with the retired `with:` key
+- **WHEN** a model lists a command whose spec carries `with:`
+- **THEN** the framework SHALL raise an `ArgumentError` whose message names the command module and states that `with:` was renamed `overrides:`
+- **AND** the command SHALL NOT be accepted with `with:` treated as `overrides:`
 
 ### Requirement: Command Sequence Generation Loop
 
@@ -175,7 +184,7 @@ Models MAY implement `check_projections/0` returning a list of invariant-checkin
 #### Scenario: Check projections declared
 - **WHEN** a model implements `check_projections/0`
 - **THEN** the returned projection modules verify invariants during execution
-- **AND** their assertions fire according to their trigger configurations
+- **AND** their checks fire according to their trigger configurations
 
 #### Scenario: No check projections
 - **WHEN** a model does not implement `check_projections/0`
@@ -188,10 +197,10 @@ Models MAY implement `check_projections/0` returning a list of invariant-checkin
 
 ### Requirement: Invariant Catalog Enumeration (DR-026)
 
-The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.assertion_catalog(model)` SHALL walk the model's projections — the command-sequence projection plus any check projections, deduplicated — union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
+The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.check_catalog(model)` SHALL walk the model's projections — the command-sequence projection plus any check projections, deduplicated — union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
 
 #### Scenario: Catalog unions across projections
-- **WHEN** `assertion_catalog/1` is called on a model whose projections declare invariants
+- **WHEN** `check_catalog/1` is called on a model whose projections declare invariants
 - **THEN** the result SHALL include every invariant from every projection
 - **AND** a projection listed both as the command-sequence projection and as a check projection SHALL be visited once (deduplicated)
 

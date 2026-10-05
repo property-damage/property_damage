@@ -102,17 +102,17 @@ The system SHALL support command-triggered background polling of external resour
 - **THEN** the poller SHALL stop
 - **AND** the timeout behavior SHALL be determined by the `on_timeout` option (default: `:fail`)
 
-### Requirement: State Poller for Temporal Assertions
+### Requirement: State Poller for Temporal Checks
 
-The system SHALL support `@eventually` temporal assertions that spawn a background poller to periodically check a predicate against projection state. The poller SHALL succeed when the predicate becomes true or fail on timeout.
+The system SHALL support `@eventually` temporal checks that spawn a background poller to periodically check a predicate against projection state. The poller SHALL succeed when the predicate becomes true or fail on timeout.
 
 #### Scenario: Predicate becomes true
-- **WHEN** a `@eventually` assertion is triggered by a matching event
+- **WHEN** a `@eventually` check is triggered by a matching event
 - **AND** the predicate evaluates to true within the timeout
 - **THEN** the state poller SHALL report success
 
 #### Scenario: Predicate times out
-- **WHEN** a `@eventually` assertion is triggered
+- **WHEN** a `@eventually` check is triggered
 - **AND** the predicate never becomes true before the timeout
 - **THEN** the state poller SHALL report failure with diagnostic information
 - **AND** the report SHALL include the trigger event, predicate source, final state, elapsed time, and poll count
@@ -126,31 +126,31 @@ The system SHALL support `@eventually` temporal assertions that spawn a backgrou
 - **THEN** the predicate observes the awaited event once it is folded and attributed, and the framework's existing `@eventually` finalize drain (which already awaits the internal event queue) supplies the wait — no separate await loop exists
 
 #### Scenario: Configurable polling parameters
-- **WHEN** a `@eventually` assertion specifies timeout and interval
+- **WHEN** a `@eventually` check specifies timeout and interval
 - **THEN** the poller SHALL use those values for its polling cycle
 
 #### Scenario: Poller spawn counts as invariant firing (DR-026)
 - **WHEN** a matching `after:` event is observed and a `@eventually` poller is spawned
-- **THEN** the assertion SHALL be counted as having fired for invariant-coverage purposes, regardless of whether the poller later succeeds, times out, or remains pending at shutdown
+- **THEN** the check SHALL be counted as having fired for invariant-coverage purposes, regardless of whether the poller later succeeds, times out, or remains pending at shutdown
 - **AND** an invariant whose `@eventually` poller is never spawned (its `after:` event never occurred) SHALL be reported as uncovered
 
-### Requirement: Settled State and Safety Assertions
+### Requirement: Settled State and Safety Checks
 
-The system SHALL define a run's **settled state** as the projection state after both the state pollers (`@eventually`) and the resource pollers have finalized: the point at which no poller is live and every observed event has been folded into projection state. The framework SHALL evaluate `@check at: :teardown` safety assertions (DR-024) on this settled state. Whereas `@eventually` expresses liveness (a predicate that SHALL eventually become true), an `at: :teardown` assertion expresses safety (a property that SHALL hold on the settled state); the two are complementary.
+The system SHALL define a run's **settled state** as the projection state after both the state pollers (`@eventually`) and the resource pollers have finalized: the point at which no poller is live and every observed event has been folded into projection state. The framework SHALL evaluate `@check at: :teardown` safety checks (DR-024) on this settled state. Whereas `@eventually` expresses liveness (a predicate that SHALL eventually become true), an `at: :teardown` check expresses safety (a property that SHALL hold on the settled state); the two are complementary.
 
 #### Scenario: Settled state reflects late asynchronous observations
 - **WHEN** a resource poller injects events after the last command, before the run finalizes
 - **THEN** those events SHALL be folded into projection state before the settled state is evaluated
 
-#### Scenario: Safety assertion catches a persistent over-application
+#### Scenario: Safety check catches a persistent over-application
 - **WHEN** an asynchronous effect over-applies and the over-application persists to the settled state
 - **AND** a projection accumulates evidence of it (for example a maximum observed value)
-- **THEN** an `@check at: :teardown` assertion SHALL detect it and report a named safety failure, distinct from a poll timeout
+- **THEN** an `@check at: :teardown` check SHALL detect it and report a named safety failure, distinct from a poll timeout
 
 #### Scenario: Liveness timeout preempts the settled checkpoint
-- **WHEN** a `@eventually` assertion times out in a mode that halts the run
+- **WHEN** a `@eventually` check times out in a mode that halts the run
 - **THEN** the run SHALL report the poll timeout
-- **AND** `@check at: :teardown` assertions SHALL NOT be evaluated, because a liveness timeout is itself a not-settled outcome
+- **AND** `@check at: :teardown` checks SHALL NOT be evaluated, because a liveness timeout is itself a not-settled outcome
 
 ### Requirement: Probe Command Semantics
 
