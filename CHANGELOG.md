@@ -231,7 +231,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     removed: `run/1` returns `{:ok, stats}` or `{:error, %FailureReport{}}`, and a
     divergence is a report with `kind: :diverged`. There is no `divergences` list
     and no run after a divergence.
-  - `Differential.Equivalence` is renamed `PropertyDamage.Comparison`
+  - `Differential.Equivalence` is renamed PropertyDamage.Comparison (an internal module)
     (`equivalent?/3`, `normalize/1`, `ignore_fields/1`, `only_fields/1`).
   - `Progress.DifferentialUpdate`, `Progress.DifferentialResult`, the
     `:differential` progress operation, the

@@ -105,7 +105,7 @@ defmodule PropertyDamage.FailureReport do
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
 
-  @typedoc "A `targets:` entry, as `PropertyDamage.Target.to_entry/1` returns it."
+  @typedoc "A `targets:` entry in its normalized form: the adapter module and its options."
   @type target_entry :: {module(), keyword()}
 
   @type t :: %__MODULE__{
@@ -121,7 +121,7 @@ defmodule PropertyDamage.FailureReport do
           concurrency: :serial | :parallel,
 
           # The run options a reproduction needs (see "Reproduction inputs").
-          equivalence: PropertyDamage.Comparison.strategy() | nil,
+          equivalence: :exact | :structural | (term(), term() -> boolean()) | nil,
           stutter: keyword() | nil,
           max_commands: pos_integer() | nil,
 
@@ -225,7 +225,7 @@ defmodule PropertyDamage.FailureReport do
   - `:shrink_iterations` - Number of shrink attempts
   - `:shrink_time_ms` - Time spent shrinking
   - `:model` - Model module
-  - `:targets` - The run's `targets:` entries (`PropertyDamage.Target.to_entry/1`
+  - `:targets` - The run's `targets:` entries (normalized to `{adapter, options}`
     form), the reference first (default `[]`)
   - `:variant` - The target the failure happened in, `%{index:, name:}`
     (default: the reference target, or `nil` without targets)
