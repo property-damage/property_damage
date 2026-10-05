@@ -622,6 +622,9 @@ defmodule PropertyDamage.Executor do
         adapter_context,
         event_queue
       ) do
+    # Only a command that reaches the adapter's execute/3 records a time.
+    state = %{state | last_execute_us: nil}
+
     if Nemesis.nemesis_command?(command) do
       PropertyDamage.Executor.Nemesis.execute_nemesis_command(
         command,
@@ -672,7 +675,7 @@ defmodule PropertyDamage.Executor do
       {:ok, resolved_command} ->
         # 2. Per-command injection/poller sink (DR-027), opened via the shared
         # Runtime.InjectionWindow so the sink lifecycle lives in one place (the
-        # same window the differential and load-test paths use). The engine seeds
+        # same window the load-test path uses). The engine seeds
         # a rich context its inject folds projections into, and starts real
         # resource pollers; those closures below are the engine's contribution to
         # the shared window.
@@ -731,27 +734,36 @@ defmodule PropertyDamage.Executor do
             Map.get(state.command_specs, command.__struct__)
           end
 
+        # The adapter's wall-clock, every settle attempt and the waits between
+        # them included, is timed here and nothing after it answered.
         execute_fn = fn runtime ->
-          try do
-            Settle.execute_with_settle(
-              resolved_command,
-              adapter,
-              adapter_context,
-              runtime,
-              command_spec
-            )
-          rescue
-            # A raise outside the adapter's Task (for example in its timeout/1)
-            # is tagged like one inside it.
-            e -> {:raised, e, __STACKTRACE__}
-          end
+          started = System.monotonic_time(:microsecond)
+
+          result =
+            try do
+              Settle.execute_with_settle(
+                resolved_command,
+                adapter,
+                adapter_context,
+                runtime,
+                command_spec
+              )
+            rescue
+              # A raise outside the adapter's Task (for example in its timeout/1)
+              # is tagged like one inside it.
+              e -> {:raised, e, __STACKTRACE__}
+            end
+
+          {result, System.monotonic_time(:microsecond) - started}
         end
 
         # The window drains the accumulated injection context and any resource
         # pollers started during execution, then stops the sink (even if the
         # adapter raises).
-        {result, final_injection_ctx, started_resource_pollers} =
+        {{result, execute_us}, final_injection_ctx, started_resource_pollers} =
           Runtime.InjectionWindow.run(initial_ctx, build_runtime, execute_fn)
+
+        state = %{state | last_execute_us: execute_us}
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections

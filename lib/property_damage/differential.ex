@@ -52,10 +52,41 @@ defmodule PropertyDamage.Differential do
 
   The first target is the reference: every other target is compared against it.
 
-  ## Execution Modes
+  ## Lockstep runs
 
-  - `:interleaved` - Execute commands round-robin across targets (default for correctness)
-  - `:sequential` - Execute full sequence on each target (default for performance)
+  Each run generates one command sequence and runs it against every target in
+  lockstep (`PropertyDamage.Scheduler`): every target executes command `r`,
+  the targets' answers to it are compared, and only then does any target start
+  command `r + 1`. Each target runs in its own process with the full engine:
+  checks, settle, nemesis, stutter, and its own per-target `injectors:` and
+  `mocks:`. An adapter may start resource pollers through
+  `runtime.start_poller`; their events reach that target only.
+
+  `concurrency:` decides how the targets reach each command boundary:
+
+  - `:serial` (default) - one target at a time, in target order
+  - `:parallel` - all targets at once; targets that share a system need
+    isolated slices of it through their `config:`. `compare: :performance`
+    and `:both` require `:serial`, because overlapping targets would mix their
+    load into each other's latency.
+
+  Every target is set up at the start of every run and torn down at its end,
+  each in its own process, setups one after another in target order. An
+  adapter's `setup/1` therefore runs once per run and must be idempotent.
+
+  ## Divergences and failures
+
+  A target diverges at the first command whose answer is not equivalent to the
+  reference's answer. The run stops there, the divergence is recorded, and the
+  next run starts; `divergences` lists them oldest first. Each divergence names
+  the run, the command index (`root`), the command, the divergent target
+  (`variant: %{index, name}`), both answers, and every target's answer by name.
+
+  A failure in any target ends the whole campaign (later runs are not started):
+  a setup error (`:setup_failed`), a failing check (`:check_failed`), or an
+  adapter raise (`:execution_failed`). The result then has `status: :failed`
+  and a `failure` map naming the target, run and command index; divergences
+  found in earlier runs stay listed. Nothing is shrunk.
 
   ## Equivalence Strategies
 
@@ -66,11 +97,10 @@ defmodule PropertyDamage.Differential do
   - Custom function - `fn ref_result, target_result -> boolean`
   """
 
-  alias PropertyDamage.Differential.{Equivalence, Result}
-  alias PropertyDamage.{Generator, Options, PlaceholderRegistry, Runtime, Sequence, Telemetry}
+  alias PropertyDamage.Differential.Result
+  alias PropertyDamage.{Generator, Options, Scheduler, Sequence, Telemetry}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate, Reporter}
-  alias PropertyDamage.Sequence.Position
 
   @type compare_mode :: :correctness | :performance | :both
 
@@ -92,9 +122,8 @@ defmodule PropertyDamage.Differential do
 
   - `name:` - Display name for reporting (default: last segment of the module name)
   - `config:` - Map passed to the adapter's `setup/1`
-
-  `injectors:` and `mocks:` are not supported here; the run raises if any entry
-  sets them.
+  - `injectors:` - Injector adapters set up for this target only, per run
+  - `mocks:` - Mock services set up for this target only, per run
 
   Examples:
 
@@ -107,64 +136,38 @@ defmodule PropertyDamage.Differential do
   - `:max_commands` - Maximum commands per sequence (default: 50)
   - `:max_runs` - Number of test sequences to run (default: 100)
   - `:seed` - Random seed for reproducibility
-  - `:execution` - `:interleaved` or `:sequential`
+  - `:concurrency` - `:serial` (default) or `:parallel`; see "Lockstep runs"
   - `:equivalence` - Equivalence strategy (default: `:exact`)
   - `:metrics` - Performance metrics to collect (default: `[:latency, :throughput]`)
   - `:percentiles` - Latency percentiles (default: `[50, 95, 99]`)
   - `:warmup_runs` - Runs to discard before measuring (default: 0)
   - `:verbose` - Print progress (default: false)
   - `:on_progress` - Progress consumer (DR-022). A 1-arity function called with a
-    `%PropertyDamage.Progress{}` per run/target (`data: %DifferentialUpdate{}`)
-    and once at the end with the terminal result (`data: %DifferentialResult{}`).
+    `%PropertyDamage.Progress{}` per run (`data: %DifferentialUpdate{}`) and
+    once at the end with the terminal result (`data: %DifferentialResult{}`).
 
   ## Returns
 
-  - `{:ok, %Result{}}` - Differential testing completed
-  - `{:error, reason}` - Setup or validation failed
+  `{:ok, %Result{}}`. `status` is `:equivalent`, `:divergent` (see
+  `divergences`, oldest first) or `:failed` (see `failure`). Under
+  `compare: :performance` or `:both`, `metrics` holds each target's latency of
+  every command in the measured runs, keyed by target name.
   """
-  @spec run(keyword()) :: {:ok, Result.t()} | {:error, term()}
+  @spec run(keyword()) :: {:ok, Result.t()}
   def run(opts) do
-    opts = Options.validate_differential!(opts)
+    config = opts |> Options.validate_differential!() |> build_config()
 
-    # Differential drives each target's adapter directly: it has no injection
-    # source or mock registry, so these entry keys would be silently ignored.
-    Options.reject_unsupported_target_keys!(
-      opts[:targets],
-      [:injectors, :mocks],
-      "PropertyDamage.Differential.run/1"
-    )
+    # Execution-time randomness of the caller; sequence generation is seeded
+    # explicitly per run, and each target seeds its own process.
+    :rand.seed(:exsss, config.seed)
 
-    with {:ok, config} <- build_config(opts) do
-      targets = config.targets
+    result = config |> run_campaign() |> build_result(config)
 
-      # Determine execution mode (record it on config so the result reports the
-      # mode actually used).
-      execution_mode = determine_execution_mode(config)
-      config = Map.put(config, :execution_mode, execution_mode)
+    # Terminal notification (DR-022): a copy of the authoritative result for
+    # consumers. The returned `{:ok, result}` remains the source of truth.
+    Reporter.emit(config.reporter, fn -> %DifferentialResult{result: result} end)
 
-      # Run the appropriate execution strategy
-      result =
-        case execution_mode do
-          :interleaved ->
-            run_interleaved(config, targets)
-
-          :sequential ->
-            run_sequential(config, targets)
-        end
-
-      case result do
-        {:ok, result} ->
-          # Terminal notification (DR-022): a copy of the authoritative result
-          # for consumers, emitted once for both execution modes. The returned
-          # `{:ok, result}` remains the source of truth.
-          Reporter.emit(config.reporter, fn -> %DifferentialResult{result: result} end)
-
-          {:ok, result}
-
-        error ->
-          error
-      end
-    end
+    {:ok, result}
   end
 
   # ============================================================================
@@ -183,7 +186,7 @@ defmodule PropertyDamage.Differential do
         Telemetry.progress_consumer([:differential])
       ])
 
-    config = %{
+    %{
       model: opts[:model],
       targets: opts[:targets],
       compare: opts[:compare],
@@ -194,485 +197,138 @@ defmodule PropertyDamage.Differential do
       # byte-identical client-minted requests (correct like-for-like), yet the
       # values are unique per differential run on a shared SUT.
       run_nonce: opts[:run_nonce] || :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned(),
-      execution: opts[:execution],
+      concurrency: opts[:concurrency],
       equivalence: opts[:equivalence],
-      metrics: opts[:metrics],
-      percentiles: opts[:percentiles],
       warmup_runs: opts[:warmup_runs],
+      measure_latency: opts[:compare] in [:performance, :both],
       reporter: reporter
     }
-
-    {:ok, config}
   end
 
-  # The `verbose:` consumer: one line per heartbeat, matching the prior inline
-  # output exactly. The terminal DifferentialResult has no verbose rendering.
+  # The `verbose:` consumer: one line per run heartbeat. The terminal
+  # DifferentialResult has no verbose rendering.
   defp verbose_consumer do
     fn
       %Progress{data: %DifferentialUpdate{phase: :run} = update} ->
         IO.puts("Run #{update.run_number}/#{update.total_runs}: #{update.command_count} commands")
-
-      %Progress{data: %DifferentialUpdate{phase: :target} = update} ->
-        IO.puts("Running target: #{update.target_name}")
 
       %Progress{} ->
         :ok
     end
   end
 
-  defp determine_execution_mode(config) do
-    cond do
-      # Explicit setting
-      config.execution != nil ->
-        config.execution
-
-      # Default based on comparison mode
-      config.compare == :performance ->
-        :sequential
-
-      config.compare == :both ->
-        :sequential
-
-      true ->
-        :interleaved
-    end
-  end
-
   # ============================================================================
-  # Interleaved Execution
+  # Runs
   # ============================================================================
 
-  defp run_interleaved(config, targets) do
-    # Seed the process RNG (execution-time randomness only; sequence
-    # generation is seeded explicitly per run)
-    :rand.seed(:exsss, config.seed)
+  # Runs one sequence after another until max_runs or the first failure.
+  # Returns the divergences (oldest first), the failure (or nil), and the
+  # measurements of every measured run.
+  defp run_campaign(config) do
+    generator = Generator.generate_sequence(config.model, max_commands: config.max_commands)
+    initial = %{divergences: [], failure: nil, samples: []}
 
-    # Setup all targets
-    with {:ok, target_contexts} <- setup_all_targets(targets) do
-      try do
-        result = run_interleaved_loop(config, targets, target_contexts, 0, [])
-        {:ok, result}
-      after
-        teardown_all_targets(targets, target_contexts)
-      end
-    end
-  end
+    0..(config.max_runs - 1)//1
+    |> Enum.reduce_while(initial, fn run_number, acc ->
+      commands =
+        generator
+        |> Generator.generate_value(Generator.run_seed(config.seed, run_number))
+        |> Sequence.to_list()
 
-  defp run_interleaved_loop(config, targets, _target_contexts, run_number, divergences)
-       when run_number >= config.max_runs do
-    # All runs complete
-    build_result(config, targets, divergences, %{})
-  end
-
-  defp run_interleaved_loop(config, targets, target_contexts, run_number, divergences) do
-    # Generate a command sequence, deterministically derived from the seed
-    generator_opts = [max_commands: config.max_commands]
-    generator = Generator.generate_sequence(config.model, generator_opts)
-    sequence = generate_one(generator, Generator.run_seed(config.seed, run_number))
-    commands = Sequence.to_list(sequence)
-
-    # Per-run heartbeat (DR-022). run_number is reported 1-based for consumers.
-    Reporter.emit(config.reporter, fn ->
-      %DifferentialUpdate{
-        phase: :run,
-        run_number: run_number + 1,
-        total_runs: config.max_runs,
-        command_count: length(commands)
-      }
-    end)
-
-    # Execute interleaved
-    case execute_interleaved(config, targets, target_contexts, commands) do
-      {:ok, _results} ->
-        # No divergence, continue
-        run_interleaved_loop(config, targets, target_contexts, run_number + 1, divergences)
-
-      {:divergence, divergence} ->
-        # Found a divergence
-        new_divergences = [divergence | divergences]
-
-        # For correctness mode, we might want to stop on first divergence
-        # or collect multiple - for now, collect all
-        run_interleaved_loop(config, targets, target_contexts, run_number + 1, new_divergences)
-    end
-  end
-
-  defp execute_interleaved(config, targets, target_contexts, commands) do
-    # Each target produces its own external() values, so each carries its own
-    # placeholder registry (DR-021): the same consumer placeholder resolves to a
-    # different concrete value per adapter. The registries share immutable
-    # initial content; per-target captures fork independent copies.
-    registry = PlaceholderRegistry.build(commands)
-
-    # Initialize state for each target
-    initial_states =
-      for target <- targets, into: %{} do
-        {target.name,
-         %{
-           projections: init_projections(config.model),
-           event_log: [],
-           results: [],
-           registry: registry
-         }}
-      end
-
-    # Execute each command on all targets
-    execute_interleaved_commands(config, targets, target_contexts, commands, initial_states, 0)
-  end
-
-  defp execute_interleaved_commands(_config, _targets, _target_contexts, [], states, _index) do
-    {:ok, states}
-  end
-
-  defp execute_interleaved_commands(
-         config,
-         targets,
-         target_contexts,
-         [command | rest],
-         states,
-         index
-       ) do
-    # Execute command on each target and collect results. Resolution is against
-    # the target's own registry, so a consumer placeholder picks up the value
-    # that target produced earlier (DR-021).
-    target_results =
-      for target <- targets do
-        context = Map.get(target_contexts, target.name)
-        registry = Map.get(states, target.name).registry
-
-        case PlaceholderRegistry.resolve_data(registry, command, {config.run_nonce, 0}) do
-          {:ok, resolved_command} ->
-            start_time = System.monotonic_time(:microsecond)
-            result = execute_target_command(target.adapter, context, resolved_command)
-            end_time = System.monotonic_time(:microsecond)
-            latency_us = end_time - start_time
-
-            {target.name, result, latency_us, resolved_command}
-
-          {:error, reason} ->
-            # An unresolved consumer (its producer errored before capturing the
-            # external) is a real per-target failure; surface it as an error
-            # result so divergence checks see it rather than crashing the run.
-            {target.name, {:error, {:placeholder_resolution_failed, reason}}, 0, command}
-        end
-      end
-
-    # Check for divergences
-    case check_divergence(config, targets, target_results, command, index) do
-      :ok ->
-        # Update states with results
-        new_states =
-          Enum.reduce(target_results, states, fn {name, result, _latency, _cmd}, acc ->
-            state = Map.get(acc, name)
-
-            new_state =
-              case result do
-                {:ok, events} ->
-                  # Capture this target's external() values, keyed by the
-                  # command's linear position, so later commands resolve them.
-                  registry =
-                    PlaceholderRegistry.capture(state.registry, Position.prefix(index), events)
-
-                  projections = apply_events(state.projections, events)
-
-                  %{
-                    state
-                    | projections: projections,
-                      event_log: state.event_log ++ events,
-                      results: state.results ++ [result],
-                      registry: registry
-                  }
-
-                {:error, _reason} ->
-                  %{state | results: state.results ++ [result]}
-              end
-
-            Map.put(acc, name, new_state)
-          end)
-
-        execute_interleaved_commands(
-          config,
-          targets,
-          target_contexts,
-          rest,
-          new_states,
-          index + 1
-        )
-
-      {:divergence, divergence} ->
-        {:divergence, divergence}
-    end
-  end
-
-  defp check_divergence(config, targets, target_results, command, index) do
-    # The first target is the reference
-    reference = hd(targets)
-
-    if config.compare in [:correctness, :both] do
-      ref_result = find_result(target_results, reference.name)
-
-      # Check each non-reference target against reference
-      divergent =
-        Enum.find(target_results, fn {name, result, _latency, _cmd} ->
-          name != reference.name &&
-            !Equivalence.equivalent?(ref_result, result, config.equivalence)
-        end)
-
-      case divergent do
-        nil ->
-          :ok
-
-        {name, result, _latency, _cmd} ->
-          {:divergence,
-           %{
-             seed: config.seed,
-             command: command,
-             step: index,
-             reference_result: ref_result,
-             results: Map.new(target_results, fn {n, r, _l, _c} -> {n, r} end),
-             divergent_target: name,
-             divergent_result: result
-           }}
-      end
-    else
-      # No correctness check needed
-      :ok
-    end
-  end
-
-  defp find_result(target_results, name) do
-    case Enum.find(target_results, fn {n, _r, _l, _c} -> n == name end) do
-      {_, result, _, _} -> result
-      nil -> nil
-    end
-  end
-
-  # ============================================================================
-  # Sequential Execution
-  # ============================================================================
-
-  defp run_sequential(config, targets) do
-    # Seed the process RNG (execution-time randomness only; sequence
-    # generation is seeded explicitly per run)
-    :rand.seed(:exsss, config.seed)
-
-    # Pre-generate all sequences
-    sequences = generate_sequences(config)
-
-    # Run each target sequentially
-    target_results =
-      for target <- targets do
-        # Per-target heartbeat (DR-022).
-        Reporter.emit(config.reporter, fn ->
-          %DifferentialUpdate{phase: :target, target_name: target.name}
-        end)
-
-        run_data = run_target_sequential(config, target, sequences)
-        {target.name, run_data}
-      end
-      |> Map.new()
-
-    # Compare results
-    compare_sequential_results(config, targets, target_results, sequences)
-  end
-
-  defp generate_sequences(config) do
-    generator_opts = [max_commands: config.max_commands]
-    generator = Generator.generate_sequence(config.model, generator_opts)
-
-    for run_number <- 0..(config.max_runs - 1)//1 do
-      sequence = generate_one(generator, Generator.run_seed(config.seed, run_number))
-      Sequence.to_list(sequence)
-    end
-  end
-
-  defp run_target_sequential(config, target, sequences) do
-    # Setup target
-    case target.adapter.setup(target.config) do
-      {:ok, context} ->
-        try do
-          runs =
-            sequences
-            |> Enum.with_index()
-            |> Enum.map(fn {commands, run_index} ->
-              is_warmup = run_index < config.warmup_runs
-
-              run_data = run_single_sequence(config, target, context, commands)
-              Map.put(run_data, :is_warmup, is_warmup)
-            end)
-
-          %{
-            runs: runs,
-            setup_success: true
-          }
-        after
-          target.adapter.teardown(context)
-        end
-
-      {:error, reason} ->
-        %{
-          runs: [],
-          setup_success: false,
-          setup_error: reason
+      # Per-run heartbeat (DR-022). run_number is reported 1-based for consumers.
+      Reporter.emit(config.reporter, fn ->
+        %DifferentialUpdate{
+          phase: :run,
+          run_number: run_number + 1,
+          total_runs: config.max_runs,
+          command_count: length(commands)
         }
-    end
-  end
-
-  defp run_single_sequence(config, target, context, commands) do
-    initial_state = %{
-      projections: init_projections(config.model),
-      event_log: [],
-      results: [],
-      timings: [],
-      # external() values this target produces resolve into later commands (DR-021)
-      registry: PlaceholderRegistry.build(commands)
-    }
-
-    final_state =
-      commands
-      |> Enum.with_index()
-      |> Enum.reduce(initial_state, fn {command, index}, state ->
-        case PlaceholderRegistry.resolve_data(state.registry, command, {config.run_nonce, 0}) do
-          {:ok, resolved_command} ->
-            start_time = System.monotonic_time(:microsecond)
-            result = execute_target_command(target.adapter, context, resolved_command)
-            end_time = System.monotonic_time(:microsecond)
-            latency_us = end_time - start_time
-
-            case result do
-              {:ok, events} ->
-                registry =
-                  PlaceholderRegistry.capture(state.registry, Position.prefix(index), events)
-
-                projections = apply_events(state.projections, events)
-
-                %{
-                  state
-                  | projections: projections,
-                    event_log: Enum.reverse(events) ++ state.event_log,
-                    results: [result | state.results],
-                    timings: [latency_us | state.timings],
-                    registry: registry
-                }
-
-              {:error, _reason} ->
-                %{
-                  state
-                  | results: [result | state.results],
-                    timings: [latency_us | state.timings]
-                }
-            end
-
-          {:error, reason} ->
-            # Unresolved consumer (producer errored before capture): record a
-            # failed command for this target rather than crashing the run. No
-            # adapter call happened, so attribute zero latency.
-            result = {:error, {:placeholder_resolution_failed, reason}}
-            %{state | results: [result | state.results], timings: [0 | state.timings]}
-        end
       end)
 
-    # Accumulators are built newest-first (prepend) during the reduce; restore
-    # command order once, at the single consumption point.
-    %{
+      {:ok, run} = Scheduler.run(scheduler_opts(config, commands, run_number))
+      acc = record_run(acc, config, run_number, run)
+
+      if run.failure, do: {:halt, %{acc | failure: run.failure}}, else: {:cont, acc}
+    end)
+    |> Map.update!(:divergences, &Enum.reverse/1)
+  end
+
+  defp scheduler_opts(config, commands, run_number) do
+    [
+      model: config.model,
+      targets: config.targets,
       commands: commands,
-      results: Enum.reverse(final_state.results),
-      timings: Enum.reverse(final_state.timings),
-      event_log: Enum.reverse(final_state.event_log)
-    }
+      seed: config.seed,
+      run_number: run_number,
+      run_nonce: config.run_nonce,
+      concurrency: config.concurrency,
+      compare: config.compare,
+      equivalence: config.equivalence,
+      measure_latency: config.measure_latency
+    ]
   end
 
-  defp compare_sequential_results(config, targets, target_results, sequences) do
-    # Calculate metrics for each target
-    metrics =
-      for target <- targets, into: %{} do
-        run_data = Map.get(target_results, target.name)
-        target_metrics = calculate_metrics(config, run_data)
-        {target.name, target_metrics}
-      end
-
-    # Check for divergences in correctness mode
+  defp record_run(acc, config, run_number, run) do
     divergences =
-      if config.compare in [:correctness, :both] do
-        find_sequential_divergences(config, targets, target_results, sequences)
+      if run.divergence, do: [run.divergence | acc.divergences], else: acc.divergences
+
+    samples =
+      if config.measure_latency and run_number >= config.warmup_runs do
+        [run_samples(config, run) | acc.samples]
       else
-        []
+        acc.samples
       end
 
-    {:ok, build_result(config, targets, divergences, metrics)}
+    %{acc | divergences: divergences, samples: samples}
   end
 
-  defp find_sequential_divergences(config, targets, target_results, sequences) do
-    # The first target is the reference; compare every other target against it
-    [reference | others] = targets
-    ref_data = %{runs: Map.get(target_results, reference.name).runs, name: reference.name}
-
-    Enum.flat_map(others, fn target ->
-      target_data = Map.get(target_results, target.name)
-
-      if target_data.setup_success do
-        compare_run_results(config, ref_data, target, target_data, sequences)
-      else
-        []
-      end
+  # Each set-up target's per-command latencies and observations of one run,
+  # keyed by target name.
+  defp run_samples(config, run) do
+    [config.targets, run.latencies, run.observations]
+    |> Enum.zip()
+    |> Map.new(fn {target, latencies, observations} ->
+      {target.name,
+       %{
+         timings: Enum.map(latencies, &elem(&1, 1)),
+         results: Enum.map(observations, &elem(&1, 1))
+       }}
     end)
   end
 
-  defp compare_run_results(config, ref_data, target, target_data, sequences) do
-    ref_data.runs
-    |> Enum.zip(target_data.runs)
-    |> Enum.zip(sequences)
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {{{ref_run, target_run}, commands}, run_index} ->
-      ref_run.results
-      |> Enum.zip(target_run.results)
-      |> Enum.zip(commands)
-      |> Enum.with_index()
-      |> Enum.filter(fn {{{ref_result, target_result}, _cmd}, _idx} ->
-        !Equivalence.equivalent?(ref_result, target_result, config.equivalence)
-      end)
-      |> Enum.map(fn {{{ref_result, target_result}, command}, step} ->
-        %{
-          seed: config.seed,
-          run_index: run_index,
-          command: command,
-          step: step,
-          reference_result: ref_result,
-          reference_name: ref_data.name,
-          divergent_target: target.name,
-          divergent_result: target_result
-        }
-      end)
-    end)
+  # ============================================================================
+  # Metrics
+  # ============================================================================
+
+  defp calculate_metrics(%{measure_latency: false}, _samples), do: %{}
+
+  defp calculate_metrics(config, samples) do
+    for target <- config.targets, into: %{} do
+      runs = for run <- samples, data = run[target.name], do: data
+      {target.name, target_metrics(runs)}
+    end
   end
 
-  defp calculate_metrics(_config, run_data) do
-    # Filter out warmup runs and failed setups
-    if run_data.setup_success do
-      valid_runs = Enum.filter(run_data.runs, fn run -> !run.is_warmup end)
+  defp target_metrics(runs) do
+    all_timings =
+      runs
+      |> Enum.flat_map(& &1.timings)
+      |> Enum.sort()
 
-      all_timings =
-        valid_runs
-        |> Enum.flat_map(& &1.timings)
-        |> Enum.sort()
-
-      if all_timings != [] do
-        %{
-          latency_p50: percentile(all_timings, 50),
-          latency_p95: percentile(all_timings, 95),
-          latency_p99: percentile(all_timings, 99),
-          latency_mean: mean(all_timings),
-          latency_min: Enum.min(all_timings),
-          latency_max: Enum.max(all_timings),
-          total_commands: length(all_timings),
-          error_count: count_errors(valid_runs),
-          error_rate: error_rate(valid_runs)
-        }
-      else
-        %{error: :no_data}
-      end
+    if all_timings != [] do
+      %{
+        latency_p50: percentile(all_timings, 50),
+        latency_p95: percentile(all_timings, 95),
+        latency_p99: percentile(all_timings, 99),
+        latency_mean: mean(all_timings),
+        latency_min: Enum.min(all_timings),
+        latency_max: Enum.max(all_timings),
+        total_commands: length(all_timings),
+        error_count: count_errors(runs),
+        error_rate: error_rate(runs)
+      }
     else
-      %{error: :setup_failed, reason: run_data.setup_error}
+      %{error: :no_data}
     end
   end
 
@@ -714,116 +370,24 @@ defmodule PropertyDamage.Differential do
   # Result Building
   # ============================================================================
 
-  defp build_result(config, targets, divergences, metrics) do
-    status =
-      if divergences != [] do
-        :divergent
-      else
-        :equivalent
-      end
-
-    [reference | _] = targets
+  defp build_result(campaign, config) do
+    [reference | _] = config.targets
 
     %Result{
       mode: config.compare,
-      execution: config.execution_mode,
+      concurrency: config.concurrency,
       runs: config.max_runs,
       seed: config.seed,
       reference: %{index: reference.index, name: reference.name},
-      status: status,
-      divergences: divergences,
-      metrics: metrics,
-      targets: Enum.map(targets, &%{index: &1.index, name: &1.name})
+      status: status(campaign),
+      divergences: campaign.divergences,
+      failure: campaign.failure,
+      metrics: calculate_metrics(config, campaign.samples),
+      targets: Enum.map(config.targets, &%{index: &1.index, name: &1.name})
     }
   end
 
-  # ============================================================================
-  # Helpers
-  # ============================================================================
-
-  defp setup_all_targets(targets) do
-    results =
-      for target <- targets do
-        case target.adapter.setup(target.config) do
-          {:ok, context} -> {:ok, target.name, context}
-          {:error, reason} -> {:error, target.name, reason}
-        end
-      end
-
-    errors = Enum.filter(results, &match?({:error, _, _}, &1))
-
-    if errors != [] do
-      # Teardown any that succeeded
-      for {:ok, name, ctx} <- results do
-        target = Enum.find(targets, &(&1.name == name))
-        target.adapter.teardown(ctx)
-      end
-
-      {:error, name} = hd(errors)
-      {:error, {:target_setup_failed, name}}
-    else
-      contexts = Map.new(results, fn {:ok, name, ctx} -> {name, ctx} end)
-      {:ok, contexts}
-    end
-  end
-
-  defp teardown_all_targets(targets, contexts) do
-    for target <- targets do
-      context = Map.get(contexts, target.name)
-
-      if context do
-        target.adapter.teardown(context)
-      end
-    end
-
-    :ok
-  end
-
-  defp generate_one(generator, run_seed) do
-    Generator.generate_value(generator, run_seed)
-  end
-
-  defp init_projections(model) do
-    command_sequence_projection = model.command_sequence_projection()
-
-    check_projections =
-      if function_exported?(model, :check_projections, 0) do
-        model.check_projections()
-      else
-        []
-      end
-
-    all_projections = [command_sequence_projection | check_projections]
-
-    for projection <- all_projections, into: %{} do
-      {projection, projection.init()}
-    end
-  end
-
-  # Execute one command against one target through a working Runtime (DR-027).
-  # Differential never wired inject before; the sink makes it available. A target
-  # adapter that injects mid-execution has those events folded into its result
-  # ahead of the events it returns (mirroring the main executor and load-test
-  # paths), so projections, capture, and divergence all see one uniform stream.
-  # A non-injecting adapter leaves the sink empty, so its result is unchanged.
-  defp execute_target_command(adapter, context, resolved_command) do
-    {result, injected} =
-      Runtime.InjectionWindow.run_accumulating(
-        fn runtime -> adapter.execute(resolved_command, context, runtime) end,
-        "Runtime.start_poller is not supported in Differential targets"
-      )
-
-    case result do
-      {:ok, events} when is_list(events) -> {:ok, injected ++ events}
-      other -> other
-    end
-  end
-
-  defp apply_events(projections, events) do
-    Enum.reduce(events, projections, fn event, projs ->
-      for {projection, state} <- projs, into: %{} do
-        {projection, projection.apply(state, event)}
-      end
-    end)
-  end
+  defp status(%{failure: failure}) when failure != nil, do: :failed
+  defp status(%{divergences: []}), do: :equivalent
+  defp status(_campaign), do: :divergent
 end

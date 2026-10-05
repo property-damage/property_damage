@@ -72,6 +72,12 @@ defmodule PropertyDamage.Executor.State do
       the ordinal at which each command was itself folded into projections (the
       command fold has no `EventLog.Entry` of its own, so its ordinal is homed
       here). Feeds `RunTrace.command_fold_ordinals`.
+    * `:last_execute_us` - wall-clock microseconds the adapter's `execute/3`
+      took for the most recent command, every settle attempt and the waits
+      between them included; `nil` when that command never reached the adapter
+      (a nemesis command, an unresolved placeholder). Written on every command:
+      two monotonic clock reads, so a run that ignores it pays nothing
+      measurable. `PropertyDamage.Variant` reads it for latency comparison.
   """
 
   @enforce_keys [
@@ -112,7 +118,8 @@ defmodule PropertyDamage.Executor.State do
     async_failed_index: :unset,
     await_matchers: [],
     fold_counter: 0,
-    command_fold_ordinals: %{}
+    command_fold_ordinals: %{},
+    last_execute_us: nil
   ]
 
   @type t :: %__MODULE__{
@@ -143,6 +150,7 @@ defmodule PropertyDamage.Executor.State do
           async_failed_index: non_neg_integer() | nil | :unset,
           await_matchers: [map()],
           fold_counter: non_neg_integer(),
-          command_fold_ordinals: %{term() => non_neg_integer()}
+          command_fold_ordinals: %{term() => non_neg_integer()},
+          last_execute_us: non_neg_integer() | nil
         }
 end

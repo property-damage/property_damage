@@ -6,22 +6,19 @@ defmodule PropertyDamage.Progress.DifferentialUpdate do
 
   ## Phases
 
-  - `:run` — emitted per generated sequence in interleaved execution, carrying the
-    1-based `run_number`, `total_runs`, and `command_count`.
-  - `:target` — emitted per target in sequential execution, carrying the
-    `target_name` currently being run.
+  - `:run` — emitted once per generated sequence, before its targets run,
+    carrying the 1-based `run_number`, `total_runs`, and `command_count`.
   """
 
-  @type phase :: :run | :target
+  @type phase :: :run
 
   @type t :: %__MODULE__{
           phase: phase(),
           run_number: pos_integer() | nil,
           total_runs: pos_integer() | nil,
-          command_count: non_neg_integer() | nil,
-          target_name: String.t() | nil
+          command_count: non_neg_integer() | nil
         }
 
   @enforce_keys [:phase]
-  defstruct [:phase, :run_number, :total_runs, :command_count, :target_name]
+  defstruct [:phase, :run_number, :total_runs, :command_count]
 end

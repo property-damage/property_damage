@@ -17,7 +17,7 @@ defmodule PropertyDamage.Mint do
   2. Generation reifies it with its `(position, path)` coordinates (DR-036),
      baked into the command struct so the value is stable under shrinking.
   3. The executor's resolution pass (and `PlaceholderRegistry.resolve_data/2` for
-     the Differential/LoadTest engines) derives the concrete value from
+     the LoadTest engine) derives the concrete value from
      `(run_nonce, mint_epoch, position, path, kind)`.
   """
 

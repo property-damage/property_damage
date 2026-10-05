@@ -80,6 +80,10 @@ defmodule PropertyDamage.Variant do
     * `{:error, reason}` - the adapter's error term, reported only under
       `on_adapter_error: :continue`, where the variant keeps going from the
       failed command's state
+    * `{:error, {:placeholder_resolution_failed, reason}}` - under
+      `on_adapter_error: :continue`, a command whose placeholder could not be
+      resolved (its producer errored earlier); the adapter was not called and
+      the variant keeps going
 
   Anything that ends the variant returns `{:failed, failure}`, where `failure`
   is `%{kind: kind, root: index | nil, reason: reason}`:
@@ -141,11 +145,25 @@ defmodule PropertyDamage.Variant do
     * `:on_adapter_error` - `:halt` (default) ends the variant at an adapter
       `{:error, _}`, as the linear engine does; `:continue` reports it as an
       observation and keeps stepping from the failed command's state
+    * `:measure_latency` - when `true`, record the wall-clock time of every
+      command's `execute/3` (see `latencies/1`); default `false`
 
   The process RNG is seeded here, before `setup/1` can call the adapter.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+  @doc """
+  Start a variant process that is not linked to the caller, with the options of
+  `start_link/1`.
+
+  A crash of the variant then reaches the caller only as an exit from the call
+  it is waiting on, which the caller can catch. The variant monitors the caller
+  instead: when the caller exits, the variant releases everything it owns, as
+  `stop/1` does, and exits too.
+  """
+  @spec start(keyword()) :: GenServer.on_start()
+  def start(opts), do: GenServer.start(__MODULE__, Keyword.put(opts, :owner, self()))
 
   @doc """
   Set the variant up, in the variant process.
@@ -203,6 +221,20 @@ defmodule PropertyDamage.Variant do
   @spec stop(pid()) :: :ok
   def stop(pid), do: GenServer.call(pid, :stop, :infinity)
 
+  @doc """
+  The wall-clock time of every adapter call so far, as `[{index, microseconds}]` in
+  index order, when the variant was started with `measure_latency: true`
+  (otherwise `[]`).
+
+  A command's time is what a client of the target experiences: the wall-clock
+  of the adapter's `execute/3`, every retry of a `:probe` or `:async` command
+  and the waits between them included, and nothing after the adapter answered
+  (projections, checks and stutter are not timed). A command that never reached
+  the adapter (a nemesis command, an unresolved placeholder) has no entry.
+  """
+  @spec latencies(pid()) :: [{non_neg_integer(), non_neg_integer()}]
+  def latencies(pid), do: GenServer.call(pid, :latencies, :infinity)
+
   # ==========================================================================
   # Process
   # ==========================================================================
@@ -217,6 +249,12 @@ defmodule PropertyDamage.Variant do
     # Seed before anything can draw: setup/1 is the first adapter call.
     :rand.seed(:exsss, :erlang.phash2({run_seed, target.index}, 4_294_967_296))
 
+    owner_ref =
+      case Keyword.get(opts, :owner) do
+        nil -> nil
+        owner -> Process.monitor(owner)
+      end
+
     state = %{
       target: target,
       model: Keyword.fetch!(opts, :model),
@@ -227,6 +265,9 @@ defmodule PropertyDamage.Variant do
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
       on_adapter_error: Keyword.get(opts, :on_adapter_error, :halt),
+      measure_latency: Keyword.get(opts, :measure_latency, false),
+      latencies: [],
+      owner_ref: owner_ref,
       guardian: start_guardian(self()),
       phase: :new,
       event_queue: nil,
@@ -282,6 +323,9 @@ defmodule PropertyDamage.Variant do
 
   def handle_call(:finish, _from, state), do: {:reply, {:error, :not_set_up}, state}
 
+  def handle_call(:latencies, _from, state),
+    do: {:reply, Enum.reverse(state.latencies), state}
+
   def handle_call(:stop, _from, state) do
     release(state)
     {:stop, :normal, :ok, state}
@@ -291,6 +335,14 @@ defmodule PropertyDamage.Variant do
   def handle_info({tag, _id, _result} = message, state)
       when tag in [:poller_result, :resource_poller_result] do
     {:noreply, %{state | stash: [message | state.stash]}}
+  end
+
+  # The process that started the variant with start/1 is gone: nobody will
+  # call stop/1, so release everything now.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state)
+      when ref != nil do
+    release(state)
+    {:stop, :normal, state}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -416,7 +468,10 @@ defmodule PropertyDamage.Variant do
     command = elem(state.commands, index)
     before = state.exec
 
-    case Stepping.step(command, index, before, state.ctx) do
+    stepped = Stepping.step(command, index, before, state.ctx)
+    state = record_latency(state, index, stepped)
+
+    case stepped do
       {:ok, exec, _outcome} ->
         observation = {:ok, root_events(exec.event_log, before.event_log, index)}
         {:cont, after_step(state, exec, index), observation}
@@ -425,9 +480,25 @@ defmodule PropertyDamage.Variant do
       when state.on_adapter_error == :continue ->
         {:cont, after_step(state, failed, index), {:error, reason}}
 
+      # A consumer of a value an errored producer never minted: every variant
+      # that errored alike observes the same unresolved placeholder.
+      {:error, %Failure{type: %Failure.Framework{detail: reason}}, failed, :not_called}
+      when state.on_adapter_error == :continue ->
+        {:cont, after_step(state, failed, index),
+         {:error, {:placeholder_resolution_failed, reason}}}
+
       {:error, failure, failed, outcome} ->
         {:halt,
          halt(state, {:failed, index, failure, failed}, failure_of(index, failure, outcome))}
+    end
+  end
+
+  defp record_latency(%{measure_latency: false} = state, _index, _stepped), do: state
+
+  defp record_latency(state, index, stepped) do
+    case elem(stepped, tuple_size(stepped) - 2).last_execute_us do
+      nil -> state
+      elapsed -> %{state | latencies: [{index, elapsed} | state.latencies]}
     end
   end
 

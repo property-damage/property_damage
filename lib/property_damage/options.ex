@@ -917,9 +917,14 @@ defmodule PropertyDamage.Options do
       type: :pos_integer,
       doc: "Random seed for reproducibility."
     ],
-    execution: [
-      type: {:in, [:interleaved, :sequential]},
-      doc: "Execution mode: `:interleaved` or `:sequential`."
+    concurrency: [
+      type: {:in, [:serial, :parallel]},
+      default: :serial,
+      doc:
+        "How the targets advance to each command boundary: `:serial` steps one " <>
+          "target at a time in target order; `:parallel` steps every target at " <>
+          "once (targets sharing a system need isolated slices through `config:`). " <>
+          "`compare: :performance` and `:both` require `:serial`."
     ],
     equivalence: [
       type: :any,
@@ -954,13 +959,39 @@ defmodule PropertyDamage.Options do
 
   @differential_schema NimbleOptions.new!(@differential_schema_definition)
 
+  @retired_differential_keys %{
+    execution:
+      "`execution:` was removed; Differential runs every target in lockstep, " <>
+        "use `concurrency:` (`:serial`, the default, or `:parallel`)"
+  }
+
   @doc """
   Validates options for `PropertyDamage.Differential.run/1`.
   """
   @spec validate_differential!(keyword()) :: keyword()
   def validate_differential!(opts) do
     reject_retired_targets!(opts)
-    NimbleOptions.validate!(opts, @differential_schema)
+    reject_retired_keys!(opts, @retired_differential_keys)
+
+    opts
+    |> NimbleOptions.validate!(@differential_schema)
+    |> reject_timed_parallel!()
+  end
+
+  # Latency measured while other targets execute at the same moment would mix
+  # their load into every sample.
+  defp reject_timed_parallel!(opts) do
+    if opts[:concurrency] == :parallel and opts[:compare] in [:performance, :both] do
+      raise NimbleOptions.ValidationError,
+        key: :concurrency,
+        value: :parallel,
+        message:
+          "`compare: #{inspect(opts[:compare])}` requires `concurrency: :serial`; " <>
+            "under `concurrency: :parallel` the targets execute at the same time, " <>
+            "so their load would mix into each other's latency"
+    end
+
+    opts
   end
 
   # ============================================================================

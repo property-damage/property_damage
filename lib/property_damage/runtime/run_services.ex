@@ -13,7 +13,7 @@ defmodule PropertyDamage.Runtime.RunServices do
   # Call setup/1 on each injector adapter with the run's event queue.
   def setup_injectors(injectors, event_queue) do
     for adapter <- injectors do
-      if function_exported?(adapter, :setup, 1) do
+      if exports?(adapter, :setup) do
         adapter.setup(%{event_queue: event_queue})
       end
     end
@@ -22,7 +22,7 @@ defmodule PropertyDamage.Runtime.RunServices do
   @doc false
   def teardown_injectors(injectors) do
     for adapter <- injectors do
-      if function_exported?(adapter, :teardown, 1) do
+      if exports?(adapter, :teardown) do
         adapter.teardown(%{})
       end
     end
@@ -45,7 +45,7 @@ defmodule PropertyDamage.Runtime.RunServices do
         :ok = MockServiceRegistry.register(registry, module)
 
         context =
-          if function_exported?(module, :setup, 1) do
+          if exports?(module, :setup) do
             case module.setup(Map.merge(config, %{registry: registry, event_queue: event_queue})) do
               {:ok, ctx} -> ctx
               :ok -> %{}
@@ -67,7 +67,7 @@ defmodule PropertyDamage.Runtime.RunServices do
 
   def teardown_mocks(registry, contexts) do
     for {module, context} <- Enum.reverse(contexts) do
-      if function_exported?(module, :teardown, 1) do
+      if exports?(module, :teardown) do
         module.teardown(context)
       end
     end
@@ -75,4 +75,9 @@ defmodule PropertyDamage.Runtime.RunServices do
     MockServiceRegistry.stop(registry)
     :ok
   end
+
+  # `function_exported?/3` does not load the module, so an injector or mock
+  # that nothing has called yet would look like it has no callback.
+  defp exports?(module, fun),
+    do: Code.ensure_loaded?(module) and function_exported?(module, fun, 1)
 end
