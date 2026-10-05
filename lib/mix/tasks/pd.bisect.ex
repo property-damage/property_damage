@@ -244,12 +244,15 @@ defmodule Mix.Tasks.Pd.Bisect do
     git(repo, ["bisect", "reset"])
   end
 
-  defp parse_bisect_output(output) do
+  # git prints the term bare ("first bad commit") or quoted ("first 'bad'
+  # commit") depending on its release, so both spellings are verdicts.
+  @doc false
+  def parse_bisect_output(output) do
     cond do
-      match = Regex.run(~r/^([0-9a-f]{7,40}) is the first bad commit/m, output) ->
+      match = Regex.run(~r/^([0-9a-f]{7,40}) is the first '?bad'? commit/m, output) ->
         {:ok, %{kind: :found, sha: Enum.at(match, 1)}}
 
-      String.contains?(output, "first bad commit could be any of") ->
+      Regex.match?(~r/first '?bad'? commit could be any of/, output) ->
         {:ok, %{kind: :ambiguous, candidates: parse_candidates(output)}}
 
       true ->
