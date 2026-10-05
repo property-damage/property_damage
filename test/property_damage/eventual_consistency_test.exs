@@ -210,7 +210,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
 
     {:ok, result} =
       Executor.run(seq, ProbeModel, RetryThenSucceedAdapter,
-        adapter_config: %{},
+        config: %{},
         # short interval so the two retries resolve quickly
         event_queue: nil
       )
@@ -225,7 +225,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     result =
       PropertyDamage.run(
         model: PaymentModel,
-        adapter: SilentAdapter,
+        targets: [SilentAdapter],
         seed: 1,
         max_commands: 1,
         max_runs: 1,

@@ -384,25 +384,25 @@ defmodule PropertyDamage.RegressionTest do
 
   describe "Regression.handle_failure/2 generate_tests export opts (H5)" do
     @tag :tmp_dir
-    test "forwards a non-adapter export opt (adapter_config) to the generated test",
+    test "forwards a target config to the generated test",
          %{tmp_dir: tmp_dir} do
       failure = make_failure(4242)
-      adapter_config = %{base_url: "http://h5-export-optcheck.test:9999"}
+      config = %{base_url: "http://h5-export-optcheck.test:9999"}
 
       result =
         Regression.handle_failure(failure,
           generate_tests: tmp_dir,
-          adapter_config: adapter_config
+          targets: [{PropertyDamage.Test.SimpleAdapter, config: config}]
         )
 
       assert {:ok, path} = result.generated_test
       contents = File.read!(path)
 
-      assert contents =~ "adapter_config:",
-             "expected the generated regression test to carry adapter_config"
+      assert contents =~ "targets: [{Adapter, config:",
+             "expected the generated regression test to carry the target config"
 
       assert contents =~ "h5-export-optcheck.test:9999",
-             "expected the adapter_config value to reach the generated test"
+             "expected the config value to reach the generated test"
     end
   end
 

@@ -73,10 +73,9 @@ defmodule PropertyDamage.CaptureInjectorsTest do
     trace =
       RunTrace.capture(
         model: Model,
-        adapter: Adapter,
+        targets: [{Adapter, injectors: [Injector]}],
         seed: 1,
-        max_commands: 3,
-        injector_adapters: [Injector]
+        max_commands: 3
       )
 
     injected = RunTrace.async_entries(trace)
@@ -85,8 +84,8 @@ defmodule PropertyDamage.CaptureInjectorsTest do
            "expected the injector's async event in the captured trace"
   end
 
-  test "without injector_adapters the trace has no injected events" do
-    trace = RunTrace.capture(model: Model, adapter: Adapter, seed: 1, max_commands: 3)
+  test "without injectors the trace has no injected events" do
+    trace = RunTrace.capture(model: Model, targets: [Adapter], seed: 1, max_commands: 3)
     refute Enum.any?(RunTrace.async_entries(trace), &match?(%{event: %Injected{}}, &1))
   end
 end

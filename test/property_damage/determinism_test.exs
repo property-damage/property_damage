@@ -62,13 +62,12 @@ defmodule PropertyDamage.DeterminismTest do
   defp run_and_record(seed) do
     {:ok, recorder} = Agent.start_link(fn -> %{commands: [], counter: 0} end)
 
-    # Smuggle the shared recorder in via adapter_config so we can read it
+    # Smuggle the shared recorder in via the target config so we can read it
     # back after the run (setup/1 receives the config).
     result =
       PropertyDamage.run(
         model: FullModel,
-        adapter: __MODULE__.SharedRecorderAdapter,
-        adapter_config: %{recorder: recorder},
+        targets: [{__MODULE__.SharedRecorderAdapter, config: %{recorder: recorder}}],
         seed: seed,
         max_commands: 15,
         max_runs: 3,

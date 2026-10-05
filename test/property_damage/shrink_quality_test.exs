@@ -73,7 +73,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
   defp run_seeded(adapter, seed) do
     PropertyDamage.run(
       model: Model,
-      adapter: adapter,
+      targets: [adapter],
       seed: seed,
       max_commands: 20,
       max_runs: 150,
@@ -82,7 +82,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
   end
 
   defp reproduces?(sequence, adapter) do
-    {:ok, replay} = Executor.run(sequence, Model, adapter, adapter_config: %{})
+    {:ok, replay} = Executor.run(sequence, Model, adapter, config: %{})
     not replay.success
   end
 
@@ -91,7 +91,7 @@ defmodule PropertyDamage.ShrinkQualityTest do
       assert {:ok, _stats} =
                PropertyDamage.run(
                  model: Model,
-                 adapter: CorrectAdapter,
+                 targets: [CorrectAdapter],
                  seed: 1,
                  max_commands: 30,
                  max_runs: 200,

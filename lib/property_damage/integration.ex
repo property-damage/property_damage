@@ -16,16 +16,14 @@ defmodule PropertyDamage.Integration do
       # Basic integration test
       {:ok, result} = PropertyDamage.Integration.run(
         model: MyModel,
-        adapter: MyAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
+        targets: [{MyAdapter, config: %{base_url: "http://localhost:4000"}}],
         max_runs: 100
       )
 
       # Bug hunting mode
       {:ok, bugs} = PropertyDamage.Integration.hunt_bugs(
         model: MyModel,
-        adapter: MyAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
+        targets: [{MyAdapter, config: %{base_url: "http://localhost:4000"}}],
         stop_after: 10  # Stop after 10 unique bugs
       )
 
@@ -74,8 +72,8 @@ defmodule PropertyDamage.Integration do
   ## Options
 
   - `:model` - The model module (required)
-  - `:adapter` - The adapter module (required)
-  - `:adapter_config` - Configuration for the adapter (required)
+  - `:targets` - A list with exactly one entry (required): an adapter module or
+    `{AdapterModule, config:, injectors:, mocks:}`; see `PropertyDamage.Target`
   - `:max_runs` - Number of test runs (default: 100)
   - `:max_commands` - Max commands per run (default: 50)
   - `:health_check` - Health check configuration (optional)
@@ -94,8 +92,7 @@ defmodule PropertyDamage.Integration do
   def run(opts) do
     opts = PropertyDamage.Options.validate_integration_run!(opts)
     model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
-    adapter_config = Keyword.fetch!(opts, :adapter_config)
+    [target] = Keyword.fetch!(opts, :targets)
     max_runs = Keyword.get(opts, :max_runs, 100)
     max_commands = Keyword.get(opts, :max_commands, 50)
     verbose = Keyword.get(opts, :verbose, true)
@@ -103,7 +100,7 @@ defmodule PropertyDamage.Integration do
     save_failures = Keyword.get(opts, :save_failures)
 
     if verbose do
-      print_header(model, adapter, adapter_config, max_runs)
+      print_header(model, target, max_runs)
     end
 
     # Health check
@@ -118,8 +115,7 @@ defmodule PropertyDamage.Integration do
     result =
       run_tests(
         model: model,
-        adapter: adapter,
-        adapter_config: adapter_config,
+        target: target,
         max_runs: max_runs,
         max_commands: max_commands,
         verbose: verbose,
@@ -155,8 +151,8 @@ defmodule PropertyDamage.Integration do
   ## Options
 
   - `:model` - The model module (required)
-  - `:adapter` - The adapter module (required)
-  - `:adapter_config` - Configuration for the adapter (required)
+  - `:targets` - A list with exactly one entry (required): an adapter module or
+    `{AdapterModule, config:, injectors:, mocks:}`; see `PropertyDamage.Target`
   - `:stop_after` - Stop after finding this many unique bugs (default: 10)
   - `:max_runs` - Maximum runs before giving up (default: :unlimited)
   - `:save_to` - Directory to save discovered bugs (optional)
@@ -170,8 +166,7 @@ defmodule PropertyDamage.Integration do
   def hunt_bugs(opts) do
     opts = PropertyDamage.Options.validate_integration_hunt_bugs!(opts)
     model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
-    adapter_config = Keyword.fetch!(opts, :adapter_config)
+    [target] = Keyword.fetch!(opts, :targets)
     stop_after = Keyword.get(opts, :stop_after, 10)
     max_runs = Keyword.get(opts, :max_runs, :unlimited)
     save_to = Keyword.get(opts, :save_to)
@@ -190,8 +185,7 @@ defmodule PropertyDamage.Integration do
 
     hunt_loop(
       model: model,
-      adapter: adapter,
-      adapter_config: adapter_config,
+      target: target,
       stop_after: stop_after,
       max_runs: max_runs,
       save_to: save_to,
@@ -274,7 +268,7 @@ defmodule PropertyDamage.Integration do
   # Private Functions
   # ============================================================================
 
-  defp print_header(model, adapter, adapter_config, max_runs) do
+  defp print_header(model, %{adapter: adapter, config: config}, max_runs) do
     IO.puts("\n")
     IO.puts(String.duplicate("═", 65))
     IO.puts(String.pad_leading("PROPERTYDAMAGE INTEGRATION TEST", 48))
@@ -283,8 +277,8 @@ defmodule PropertyDamage.Integration do
     IO.puts("Model:      #{inspect(model)}")
     IO.puts("Adapter:    #{inspect(adapter)}")
 
-    if Map.has_key?(adapter_config, :base_url) do
-      IO.puts("Target:     #{adapter_config.base_url}")
+    if Map.has_key?(config, :base_url) do
+      IO.puts("Target:     #{config.base_url}")
     end
 
     IO.puts("Runs:       #{max_runs}")
@@ -389,8 +383,7 @@ defmodule PropertyDamage.Integration do
 
   defp run_tests(opts) do
     model = opts[:model]
-    adapter = opts[:adapter]
-    adapter_config = opts[:adapter_config]
+    target = opts[:target]
     max_runs = opts[:max_runs]
     max_commands = opts[:max_commands]
     verbose = opts[:verbose]
@@ -408,8 +401,7 @@ defmodule PropertyDamage.Integration do
         result =
           PropertyDamage.run(
             model: model,
-            adapter: adapter,
-            adapter_config: adapter_config,
+            targets: [PropertyDamage.Options.target_entry(target)],
             max_commands: max_commands,
             max_runs: 1
           )
@@ -449,7 +441,7 @@ defmodule PropertyDamage.Integration do
       failed: results.failed,
       failures: Enum.reverse(results.failures),
       model: model,
-      adapter: adapter
+      adapter: target.adapter
     }
   end
 
@@ -566,8 +558,7 @@ defmodule PropertyDamage.Integration do
         result =
           PropertyDamage.run(
             model: opts[:model],
-            adapter: opts[:adapter],
-            adapter_config: opts[:adapter_config],
+            targets: [PropertyDamage.Options.target_entry(opts[:target])],
             max_commands: 50,
             max_runs: 1
           )

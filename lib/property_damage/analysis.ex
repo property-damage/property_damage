@@ -13,7 +13,7 @@ defmodule PropertyDamage.Analysis do
 
   ## Usage
 
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:error, failure} = PropertyDamage.run(model: M, targets: [A])
 
       # Understand why each command is needed
       PropertyDamage.Analysis.explain(failure)
@@ -28,6 +28,7 @@ defmodule PropertyDamage.Analysis do
   alias PropertyDamage.{
     Executor,
     FailureReport,
+    Options,
     Placeholder,
     PlaceholderRegistry,
     RunTrace,
@@ -312,6 +313,12 @@ defmodule PropertyDamage.Analysis do
   It tries variations of the failing command to find the smallest change that
   makes the failure disappear.
 
+  ## Options
+
+  - `:targets` - Single-entry target list overriding the system to re-execute
+    against (default: the report's adapter with an empty `config:`); see
+    `PropertyDamage.Target`
+
   ## Returns
 
   A map containing:
@@ -353,8 +360,9 @@ defmodule PropertyDamage.Analysis do
         {:error, :missing_model_or_adapter}
 
       true ->
-        # Get adapter config from opts or use empty
-        adapter_config = Keyword.get(opts, :adapter_config, %{})
+        # The target comes from opts, else the report's adapter with no config
+        target =
+          Options.override_target!(opts, adapter, "PropertyDamage.Analysis.isolate_trigger/2")
 
         # Try variations of the trigger command
         changes =
@@ -363,8 +371,7 @@ defmodule PropertyDamage.Analysis do
             commands,
             failed_at,
             model,
-            adapter,
-            adapter_config
+            target
           )
 
         likely_cause = infer_cause(changes, trigger_cmd, commands, report)
@@ -379,7 +386,7 @@ defmodule PropertyDamage.Analysis do
     end
   end
 
-  defp find_eliminating_changes(trigger_cmd, commands, failed_at, model, adapter, adapter_config) do
+  defp find_eliminating_changes(trigger_cmd, commands, failed_at, model, target) do
     trigger_cmd
     |> Map.from_struct()
     |> Enum.reject(fn {k, _v} -> k in [:__struct__, :idempotency_key] end)
@@ -391,8 +398,7 @@ defmodule PropertyDamage.Analysis do
         commands,
         failed_at,
         model,
-        adapter,
-        adapter_config
+        target
       )
     end)
   end
@@ -404,8 +410,7 @@ defmodule PropertyDamage.Analysis do
          commands,
          failed_at,
          model,
-         adapter,
-         adapter_config
+         target
        ) do
     # Skip placeholder fields - can't change those without breaking dependencies
     if match?(%Placeholder{}, original) do
@@ -424,10 +429,10 @@ defmodule PropertyDamage.Analysis do
 
           # Call setup_each before testing
           if function_exported?(model, :setup_each, 1) do
-            model.setup_each(%{adapter_config: adapter_config})
+            model.setup_each(%{adapter_config: target.config})
           end
 
-          case Executor.run(modified_commands, model, adapter, adapter_config: adapter_config) do
+          case Executor.run(modified_commands, model, target.adapter, config: target.config) do
             {:ok, result} ->
               if result.success do
                 [
@@ -599,7 +604,7 @@ defmodule PropertyDamage.Analysis do
         # Run the exact sequence that triggered the failure
         result = PropertyDamage.run(
           model: #{inspect(report.model)},
-          adapter: #{inspect(report.adapter)},
+          targets: [#{inspect(report.adapter)}],
           seed: #{report.seed},
           max_runs: 1
         )
@@ -634,7 +639,7 @@ defmodule PropertyDamage.Analysis do
     # Option 1: Re-run with same seed
     result = PropertyDamage.run(
       model: #{inspect(report.model)},
-      adapter: #{inspect(report.adapter)},
+      targets: [#{inspect(report.adapter)}],
       seed: #{report.seed},
       max_runs: 1
     )
@@ -664,7 +669,7 @@ defmodule PropertyDamage.Analysis do
     ```elixir
     PropertyDamage.run(
       model: #{inspect(report.model)},
-      adapter: #{inspect(report.adapter)},
+      targets: [#{inspect(report.adapter)}],
       seed: #{report.seed},
       max_runs: 1
     )

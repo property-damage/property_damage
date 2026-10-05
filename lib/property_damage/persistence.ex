@@ -13,7 +13,7 @@ defmodule PropertyDamage.Persistence do
   ## Usage
 
       # Save a failure
-      {:error, failure} = PropertyDamage.run(model: M, adapter: A)
+      {:error, failure} = PropertyDamage.run(model: M, targets: [A])
       {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
 
       # Load and replay later

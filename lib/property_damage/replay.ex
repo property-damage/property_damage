@@ -81,7 +81,7 @@ defmodule PropertyDamage.Replay do
     :commands,
     :model,
     :adapter,
-    :adapter_config,
+    :config,
     :event_queue,
     :adapter_context,
     :exec_state,
@@ -105,7 +105,7 @@ defmodule PropertyDamage.Replay do
           commands: [struct()],
           model: module(),
           adapter: module(),
-          adapter_config: map(),
+          config: map(),
           event_queue: pid() | nil,
           adapter_context: map() | nil,
           exec_state: map() | nil,
@@ -126,7 +126,9 @@ defmodule PropertyDamage.Replay do
 
   ## Options
 
-  - `:adapter_config` - Override adapter configuration
+  - `:targets` - Single-entry target list overriding the system to replay
+    against (default: the report's adapter with an empty `config:`); see
+    `PropertyDamage.Target`
   - `:stop_on_failure` - Stop at first failure (default: true)
   - `:stutter_config` - Stutter config to apply during replay (not stored in the report)
   - `:external_markers` - External markers to apply during replay (not stored in the report)
@@ -184,7 +186,15 @@ defmodule PropertyDamage.Replay do
   def start(%FailureReport{} = failure, opts \\ []) do
     opts = Options.validate_replay!(opts)
     model = failure.model
-    adapter = failure.adapter
+    target = replay_target(opts, failure.adapter)
+
+    Options.reject_unsupported_target_keys!(
+      [target],
+      [:injectors, :mocks],
+      "PropertyDamage.Replay"
+    )
+
+    adapter = target.adapter
 
     cond do
       is_nil(model) ->
@@ -197,24 +207,31 @@ defmodule PropertyDamage.Replay do
         {:error, :branching_replay_unsupported}
 
       true ->
-        do_start(failure, model, adapter, opts)
+        do_start(failure, model, target, opts)
     end
   end
 
-  defp do_start(failure, model, adapter, opts) do
-    adapter_config = opts[:adapter_config] || %{}
+  # `opts` is already validated, so `:targets` holds zero or one target.
+  defp replay_target(opts, default_adapter) do
+    case opts[:targets] do
+      [target] -> target
+      nil -> %PropertyDamage.Target{adapter: default_adapter, name: "adapter", index: 0}
+    end
+  end
+
+  defp do_start(failure, model, %{adapter: adapter, config: config}, opts) do
     sequence = FailureReport.shrunk_sequence(failure)
     commands = Sequence.to_list(sequence)
 
     # Mirror the run loop: model.setup_each runs before adapter setup so the
     # SUT starts in the same per-run state the original failure observed.
     if function_exported?(model, :setup_each, 1) do
-      model.setup_each(%{adapter_config: adapter_config, replay: true})
+      model.setup_each(%{adapter_config: config, replay: true})
     end
 
     {:ok, event_queue} = EventQueue.start_link()
 
-    case adapter.setup(adapter_config) do
+    case adapter.setup(config) do
       {:ok, adapter_context} ->
         exec_state =
           Stepping.init_state(model,
@@ -233,7 +250,7 @@ defmodule PropertyDamage.Replay do
           commands: commands,
           model: model,
           adapter: adapter,
-          adapter_config: adapter_config,
+          config: config,
           event_queue: event_queue,
           adapter_context: adapter_context,
           exec_state: exec_state,
@@ -402,7 +419,7 @@ defmodule PropertyDamage.Replay do
 
     if session.model && function_exported?(session.model, :teardown_each, 1) do
       try do
-        session.model.teardown_each(%{adapter_config: session.adapter_config, replay: true})
+        session.model.teardown_each(%{adapter_config: session.config, replay: true})
       rescue
         _ -> :ok
       end

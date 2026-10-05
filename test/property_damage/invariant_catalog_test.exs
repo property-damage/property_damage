@@ -69,7 +69,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     result =
       PropertyDamage.run(
         model: GateModel,
-        adapter: TickAdapter,
+        targets: [TickAdapter],
         max_runs: 5,
         max_commands: 5,
         validate: false,
@@ -214,7 +214,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     result =
       PropertyDamage.run(
         model: LifecycleModel,
-        adapter: TickAdapter,
+        targets: [TickAdapter],
         max_runs: 3,
         max_commands: 3,
         validate: false,
@@ -257,7 +257,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     result =
       PropertyDamage.run(
         model: FailingModel,
-        adapter: TickAdapter,
+        targets: [TickAdapter],
         max_runs: 5,
         max_commands: 5,
         validate: false,
@@ -344,7 +344,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     result =
       PropertyDamage.run(
         model: WholeRunModel,
-        adapter: TickAdapter,
+        targets: [TickAdapter],
         max_runs: 4,
         max_commands: 6,
         seed: 4242,
@@ -411,7 +411,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     result =
       PropertyDamage.run(
         model: PollModel,
-        adapter: PollAdapter,
+        targets: [PollAdapter],
         max_runs: 3,
         max_commands: 3,
         validate: false,
@@ -436,7 +436,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     result =
       PropertyDamage.run(
         model: GateModel,
-        adapter: TickAdapter,
+        targets: [TickAdapter],
         max_runs: 4,
         max_commands: 4,
         coverage: true,

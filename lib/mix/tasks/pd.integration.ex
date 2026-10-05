@@ -135,8 +135,7 @@ defmodule Mix.Tasks.Pd.Integration do
 
     integration_opts = [
       model: model_module,
-      adapter: adapter_module,
-      adapter_config: %{base_url: url},
+      targets: [{adapter_module, config: %{base_url: url}}],
       max_runs: runs,
       max_commands: commands,
       verbose: verbose,
@@ -186,7 +185,7 @@ defmodule Mix.Tasks.Pd.Integration do
       # it accepts (its schema is strict) rather than the full integration_opts.
       hunt_opts =
         integration_opts
-        |> Keyword.take([:model, :adapter, :adapter_config, :verbose])
+        |> Keyword.take([:model, :targets, :verbose])
         |> Keyword.merge(stop_after: opts[:hunt], max_runs: :unlimited)
 
       # Only set :save_to when a directory was given; the schema rejects nil.

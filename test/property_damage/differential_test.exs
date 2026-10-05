@@ -8,7 +8,7 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   alias PropertyDamage.Differential
-  alias PropertyDamage.Differential.{Equivalence, Result, Target}
+  alias PropertyDamage.Differential.{Equivalence, Result}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate}
 
@@ -247,52 +247,6 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   # ============================================================================
-  # Target Parsing Tests
-  # ============================================================================
-
-  describe "Target.parse/2" do
-    test "parses minimal target spec" do
-      target = Target.parse({ReferenceAdapter}, 0)
-
-      assert target.adapter == ReferenceAdapter
-      assert target.name == "reference_0"
-      assert target.role == :candidate
-      assert target.opts == %{}
-    end
-
-    test "parses target with name" do
-      target = Target.parse({ReferenceAdapter, name: "my-adapter"}, 0)
-
-      assert target.name == "my-adapter"
-    end
-
-    test "parses target with role" do
-      target = Target.parse({ReferenceAdapter, role: :reference}, 0)
-
-      assert target.role == :reference
-    end
-
-    test "parses target with opts" do
-      target = Target.parse({ReferenceAdapter, opts: [url: "http://test"]}, 0)
-
-      assert target.opts == %{url: "http://test"}
-    end
-
-    test "parses full specification" do
-      target =
-        Target.parse(
-          {ReferenceAdapter, name: "prod", role: :reference, opts: [pool_size: 10]},
-          0
-        )
-
-      assert target.adapter == ReferenceAdapter
-      assert target.name == "prod"
-      assert target.role == :reference
-      assert target.opts == %{pool_size: 10}
-    end
-  end
-
-  # ============================================================================
   # Equivalence Tests
   # ============================================================================
 
@@ -366,7 +320,7 @@ defmodule PropertyDamage.DifferentialTest do
   describe "run/1 validation" do
     test "requires model option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :model option not found/, fn ->
-        Differential.run(targets: [{ReferenceAdapter}], compare: :correctness)
+        Differential.run(targets: [ReferenceAdapter], compare: :correctness)
       end
     end
 
@@ -378,7 +332,7 @@ defmodule PropertyDamage.DifferentialTest do
 
     test "requires compare option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :compare option not found/, fn ->
-        Differential.run(model: TestModel, targets: [{ReferenceAdapter}])
+        Differential.run(model: TestModel, targets: [ReferenceAdapter])
       end
     end
 
@@ -386,7 +340,7 @@ defmodule PropertyDamage.DifferentialTest do
       assert_raise NimbleOptions.ValidationError, ~r/:compare.*expected one of/, fn ->
         Differential.run(
           model: TestModel,
-          targets: [{ReferenceAdapter}],
+          targets: [ReferenceAdapter],
           compare: :invalid
         )
       end
@@ -396,18 +350,6 @@ defmodule PropertyDamage.DifferentialTest do
       assert_raise NimbleOptions.ValidationError, ~r/expected a non-empty list/, fn ->
         Differential.run(model: TestModel, targets: [], compare: :correctness)
       end
-    end
-
-    test "rejects multiple references" do
-      assert {:error, {:invalid_targets, _}} =
-               Differential.run(
-                 model: TestModel,
-                 targets: [
-                   {ReferenceAdapter, role: :reference},
-                   {IdenticalAdapter, role: :reference}
-                 ],
-                 compare: :correctness
-               )
     end
   end
 
@@ -421,7 +363,7 @@ defmodule PropertyDamage.DifferentialTest do
         Differential.run(
           model: TestModel,
           targets: [
-            {ReferenceAdapter, role: :reference},
+            ReferenceAdapter,
             {IdenticalAdapter, name: "identical"}
           ],
           compare: :correctness,
@@ -433,8 +375,7 @@ defmodule PropertyDamage.DifferentialTest do
       assert result.mode == :correctness
       assert result.status == :equivalent
       assert result.divergences == []
-      assert "reference_0" in result.targets
-      assert "identical" in result.targets
+      assert Enum.map(result.targets, & &1.name) == ["ReferenceAdapter", "identical"]
     end
 
     test "detects divergence when targets produce different results" do
@@ -442,7 +383,7 @@ defmodule PropertyDamage.DifferentialTest do
         Differential.run(
           model: TestModel,
           targets: [
-            {ReferenceAdapter, role: :reference},
+            ReferenceAdapter,
             {DivergentAdapter, name: "divergent"}
           ],
           compare: :correctness,
@@ -466,7 +407,7 @@ defmodule PropertyDamage.DifferentialTest do
         Differential.run(
           model: TestModel,
           targets: [
-            {ReferenceAdapter, role: :reference},
+            ReferenceAdapter,
             {IdenticalAdapter, name: "identical"}
           ],
           compare: :correctness,
@@ -491,7 +432,7 @@ defmodule PropertyDamage.DifferentialTest do
           model: TestModel,
           targets: [
             {ReferenceAdapter, name: "fast"},
-            {SlowAdapter, name: "slow", opts: %{delay_ms: 5}}
+            {SlowAdapter, name: "slow", config: %{delay_ms: 5}}
           ],
           compare: :performance,
           max_runs: 3,
@@ -515,7 +456,7 @@ defmodule PropertyDamage.DifferentialTest do
           model: TestModel,
           targets: [
             {ReferenceAdapter, name: "fast"},
-            {SlowAdapter, name: "slow", opts: %{delay_ms: 10}}
+            {SlowAdapter, name: "slow", config: %{delay_ms: 10}}
           ],
           compare: :performance,
           max_runs: 3,
@@ -578,11 +519,11 @@ defmodule PropertyDamage.DifferentialTest do
         execution: :interleaved,
         runs: 100,
         seed: 12_345,
-        reference: "oracle",
+        reference: %{index: 0, name: "oracle"},
         status: :equivalent,
         divergences: [],
         metrics: %{},
-        targets: ["oracle", "sut"]
+        targets: [%{index: 0, name: "oracle"}, %{index: 1, name: "sut"}]
       }
 
       output = Result.format(result)
@@ -597,13 +538,13 @@ defmodule PropertyDamage.DifferentialTest do
   # ============================================================================
 
   describe "same adapter with different configs" do
-    test "can compare same adapter with different opts" do
+    test "can compare same adapter with different configs" do
       {:ok, result} =
         Differential.run(
           model: TestModel,
           targets: [
-            {SlowAdapter, name: "fast-config", opts: %{delay_ms: 1}},
-            {SlowAdapter, name: "slow-config", opts: %{delay_ms: 20}}
+            {SlowAdapter, name: "fast-config", config: %{delay_ms: 1}},
+            {SlowAdapter, name: "slow-config", config: %{delay_ms: 20}}
           ],
           compare: :performance,
           max_runs: 2,
@@ -611,8 +552,7 @@ defmodule PropertyDamage.DifferentialTest do
           seed: 12_345
         )
 
-      assert "fast-config" in result.targets
-      assert "slow-config" in result.targets
+      assert Enum.map(result.targets, & &1.name) == ["fast-config", "slow-config"]
 
       # Verify different configs were used
       fast_latency = result.metrics["fast-config"].latency_p50
@@ -632,8 +572,8 @@ defmodule PropertyDamage.DifferentialTest do
         Differential.run(
           model: TestModel,
           targets: [
-            {ReferenceAdapter, role: :reference},
-            {IdenticalAdapter}
+            ReferenceAdapter,
+            IdenticalAdapter
           ],
           compare: :correctness,
           max_runs: 2,
@@ -649,8 +589,8 @@ defmodule PropertyDamage.DifferentialTest do
         Differential.run(
           model: TestModel,
           targets: [
-            {ReferenceAdapter},
-            {IdenticalAdapter}
+            ReferenceAdapter,
+            IdenticalAdapter
           ],
           compare: :performance,
           max_runs: 2,
@@ -666,8 +606,8 @@ defmodule PropertyDamage.DifferentialTest do
         Differential.run(
           model: TestModel,
           targets: [
-            {ReferenceAdapter, role: :reference},
-            {IdenticalAdapter}
+            ReferenceAdapter,
+            IdenticalAdapter
           ],
           compare: :correctness,
           execution: :sequential,
@@ -688,7 +628,7 @@ defmodule PropertyDamage.DifferentialTest do
             Differential.run([
               {unquote(key), "x.json"},
               model: TestModel,
-              targets: [{ReferenceAdapter, role: :reference}, {IdenticalAdapter}],
+              targets: [ReferenceAdapter, IdenticalAdapter],
               compare: :correctness,
               max_runs: 1,
               max_commands: 2,
@@ -713,7 +653,7 @@ defmodule PropertyDamage.DifferentialTest do
         Differential.run(
           model: TestModel,
           targets: [
-            {ReferenceAdapter, role: :reference},
+            ReferenceAdapter,
             {IdenticalAdapter, name: "identical"}
           ],
           compare: :correctness,
@@ -744,7 +684,7 @@ defmodule PropertyDamage.DifferentialTest do
         Differential.run(
           model: TestModel,
           targets: [
-            {ReferenceAdapter},
+            ReferenceAdapter,
             {IdenticalAdapter, name: "identical"}
           ],
           compare: :performance,
@@ -760,7 +700,7 @@ defmodule PropertyDamage.DifferentialTest do
         for %Progress{data: %DifferentialUpdate{phase: :target, target_name: name}} <- progresses,
             do: name
 
-      assert "reference_0" in target_names
+      assert "ReferenceAdapter" in target_names
       assert "identical" in target_names
 
       assert %Progress{data: %DifferentialResult{result: ^result}} = List.last(progresses)
@@ -785,7 +725,7 @@ defmodule PropertyDamage.DifferentialTest do
       Differential.run(
         model: TestModel,
         targets: [
-          {ReferenceAdapter, role: :reference},
+          ReferenceAdapter,
           {IdenticalAdapter, name: "identical"}
         ],
         compare: :correctness,
@@ -820,7 +760,7 @@ defmodule PropertyDamage.DifferentialTest do
           Differential.run(
             model: TestModel,
             targets: [
-              {PreCombinedAdapter, role: :reference},
+              PreCombinedAdapter,
               {InjectingCandidateAdapter, name: "injecting"}
             ],
             compare: :correctness,
@@ -841,7 +781,7 @@ defmodule PropertyDamage.DifferentialTest do
           Differential.run(
             model: TestModel,
             targets: [
-              {ReturnedOnlyAdapter, role: :reference},
+              ReturnedOnlyAdapter,
               {InjectingCandidateAdapter, name: "injecting"}
             ],
             compare: :correctness,

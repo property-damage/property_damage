@@ -121,7 +121,7 @@ defmodule PropertyDamage.GeneratorValidationTest do
       assert_raise ArgumentError, ~r/min_prefix_length.*max_commands/, fn ->
         Options.validate_run!(
           model: PropertyDamage.Test.ExecutorModel,
-          adapter: PropertyDamage.Test.SimpleAdapter,
+          targets: [PropertyDamage.Test.SimpleAdapter],
           max_commands: 3,
           branching: [min_prefix_length: 10]
         )
@@ -132,7 +132,7 @@ defmodule PropertyDamage.GeneratorValidationTest do
       opts =
         Options.validate_run!(
           model: PropertyDamage.Test.ExecutorModel,
-          adapter: PropertyDamage.Test.SimpleAdapter,
+          targets: [PropertyDamage.Test.SimpleAdapter],
           max_commands: 20,
           branching: [min_prefix_length: 3]
         )

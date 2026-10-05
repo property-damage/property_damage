@@ -13,7 +13,7 @@ defmodule PropertyDamage.OptionsF7Test do
 
   describe "Options.validate_integration_run!/1" do
     test "applies defaults on the happy path" do
-      opts = Options.validate_integration_run!(model: M, adapter: A, adapter_config: %{})
+      opts = Options.validate_integration_run!(model: M, targets: [{A, config: %{}}])
       assert opts[:max_runs] == 100
       assert opts[:max_commands] == 50
       assert opts[:verbose] == true
@@ -22,51 +22,51 @@ defmodule PropertyDamage.OptionsF7Test do
 
     test "rejects an unknown option" do
       assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:bogus\]/, fn ->
-        Options.validate_integration_run!(model: M, adapter: A, adapter_config: %{}, bogus: 1)
+        Options.validate_integration_run!(model: M, targets: [{A, config: %{}}], bogus: 1)
       end
     end
 
     test "rejects a type violation" do
       assert_raise NimbleOptions.ValidationError, ~r/expected positive integer/, fn ->
-        Options.validate_integration_run!(model: M, adapter: A, adapter_config: %{}, max_runs: -1)
+        Options.validate_integration_run!(model: M, targets: [{A, config: %{}}], max_runs: -1)
       end
     end
   end
 
-  describe "Options.validate_run!/1 :mock_services (WP-C5)" do
+  describe "Options.validate_run!/1 target mocks (WP-C5)" do
     test "defaults to an empty list" do
-      opts = Options.validate_run!(model: M, adapter: A)
-      assert opts[:mock_services] == []
+      opts = Options.validate_run!(model: M, targets: [A])
+      assert [%{mocks: []}] = opts[:targets]
     end
 
     test "normalizes bare modules to {module, %{}} tuples" do
-      opts = Options.validate_run!(model: M, adapter: A, mock_services: [PayMock])
-      assert opts[:mock_services] == [{PayMock, %{}}]
+      opts = Options.validate_run!(model: M, targets: [{A, mocks: [PayMock]}])
+      assert [%{mocks: [{PayMock, %{}}]}] = opts[:targets]
     end
 
     test "keeps {module, config} tuples and preserves config" do
       opts =
-        Options.validate_run!(model: M, adapter: A, mock_services: [{PayMock, %{port: 4445}}])
+        Options.validate_run!(model: M, targets: [{A, mocks: [{PayMock, %{port: 4445}}]}])
 
-      assert opts[:mock_services] == [{PayMock, %{port: 4445}}]
+      assert [%{mocks: [{PayMock, %{port: 4445}}]}] = opts[:targets]
     end
 
     test "rejects a malformed entry" do
       assert_raise NimbleOptions.ValidationError, ~r/module or \{module, config_map\}/, fn ->
-        Options.validate_run!(model: M, adapter: A, mock_services: ["not-a-module"])
+        Options.validate_run!(model: M, targets: [{A, mocks: ["not-a-module"]}])
       end
     end
 
     test "rejects a non-list value" do
       assert_raise NimbleOptions.ValidationError, ~r/list of mock services/, fn ->
-        Options.validate_run!(model: M, adapter: A, mock_services: PayMock)
+        Options.validate_run!(model: M, targets: [{A, mocks: PayMock}])
       end
     end
   end
 
   describe "Options.validate_integration_hunt_bugs!/1" do
     test "accepts :unlimited for max_runs and defaults stop_after" do
-      opts = Options.validate_integration_hunt_bugs!(model: M, adapter: A, adapter_config: %{})
+      opts = Options.validate_integration_hunt_bugs!(model: M, targets: [{A, config: %{}}])
       assert opts[:stop_after] == 10
       assert opts[:max_runs] == :unlimited
     end
@@ -75,8 +75,7 @@ defmodule PropertyDamage.OptionsF7Test do
       assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:health_check\]/, fn ->
         Options.validate_integration_hunt_bugs!(
           model: M,
-          adapter: A,
-          adapter_config: %{},
+          targets: [{A, config: %{}}],
           health_check: %{}
         )
       end
@@ -127,14 +126,14 @@ defmodule PropertyDamage.OptionsF7Test do
       end
 
       opts =
-        Options.validate_run_comparison_investigate!(capture: [model: M, adapter: A, seed: 1])
+        Options.validate_run_comparison_investigate!(capture: [model: M, targets: [A], seed: 1])
 
       assert opts[:runs] == 5
     end
 
     test "scan/1 requires :seeds and :capture and defaults :runs" do
       assert_raise NimbleOptions.ValidationError, ~r/required :seeds option not found/, fn ->
-        Options.validate_run_comparison_scan!(capture: [model: M, adapter: A])
+        Options.validate_run_comparison_scan!(capture: [model: M, targets: [A]])
       end
 
       assert_raise NimbleOptions.ValidationError, ~r/required :capture option not found/, fn ->
@@ -142,7 +141,7 @@ defmodule PropertyDamage.OptionsF7Test do
       end
 
       opts =
-        Options.validate_run_comparison_scan!(seeds: [1, 2], capture: [model: M, adapter: A])
+        Options.validate_run_comparison_scan!(seeds: [1, 2], capture: [model: M, targets: [A]])
 
       assert opts[:runs] == 5
     end
@@ -184,28 +183,28 @@ defmodule PropertyDamage.OptionsF7Test do
     end
   end
 
-  # ---- regression: run-option :adapter parity (WP-C4 c) ---------------------
+  # ---- regression: run-option :targets parity (WP-C4 c) ---------------------
 
-  describe "run/1 :regression option accepts :adapter" do
-    test "the run schema validates regression: [adapter: ...] and preserves it" do
-      # RED against baseline: the run-level :regression keys omitted :adapter, so
-      # NimbleOptions rejected it as an unknown key and the generated regression
-      # test silently fell back to report.adapter. Regression.handler/1 accepts
-      # :adapter, so the run option must reach it.
+  describe "run/1 :regression option accepts :targets" do
+    test "the run schema validates regression: [targets: [...]] and preserves it" do
+      # The run-level :regression keys must accept :targets, or NimbleOptions
+      # rejects it as an unknown key and the generated regression test silently
+      # falls back to report.adapter. Regression.handler/1 accepts :targets, so
+      # the run option must reach it.
       opts =
         Options.validate_run!(
           model: __MODULE__,
-          adapter: __MODULE__,
-          regression: [generate_tests: "dir", adapter: __MODULE__]
+          targets: [__MODULE__],
+          regression: [generate_tests: "dir", targets: [__MODULE__]]
         )
 
-      assert get_in(opts, [:regression, :adapter]) == __MODULE__
+      assert [%{adapter: __MODULE__}] = get_in(opts, [:regression, :targets])
     end
 
     test "the value survives Regression.handler/1's own validation" do
-      # The umbrella handler schema already accepts :adapter; prove the two
+      # The umbrella handler schema already accepts :targets; prove the two
       # schemas agree so the threaded value is not dropped on the way down.
-      handler = Regression.handler(generate_tests: "dir", adapter: __MODULE__)
+      handler = Regression.handler(generate_tests: "dir", targets: [__MODULE__])
       assert is_function(handler, 1)
     end
   end

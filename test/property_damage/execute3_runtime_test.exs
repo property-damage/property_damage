@@ -67,7 +67,7 @@ defmodule PropertyDamage.Execute3RuntimeTest do
       seq = Sequence.linear([%Cmd{value: 1}])
 
       {:ok, _result} =
-        Executor.run(seq, Model, PurityAdapter, adapter_config: %{test_pid: self()})
+        Executor.run(seq, Model, PurityAdapter, config: %{test_pid: self()})
 
       assert_received {:user_context, user_context}
       assert user_context == %{marker: :only_mine, test_pid: self()}
@@ -109,8 +109,12 @@ defmodule PropertyDamage.Execute3RuntimeTest do
         Worker.start_link(
           worker_id: 1,
           model: Model,
-          adapter: WorkerInjectAdapter,
-          adapter_config: %{},
+          target: %PropertyDamage.Target{
+            adapter: WorkerInjectAdapter,
+            config: %{},
+            name: "adapter",
+            index: 0
+          },
           metrics: metrics,
           think_time_range: {0, 0},
           check_mode: :disabled

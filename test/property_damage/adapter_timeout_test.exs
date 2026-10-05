@@ -126,7 +126,7 @@ defmodule PropertyDamage.AdapterTimeoutTest do
     run_pid = self()
     seq = Sequence.linear([%Cmd{value: 1}])
 
-    {:ok, result} = Executor.run(seq, Model, CallersAdapter, adapter_config: %{test_pid: run_pid})
+    {:ok, result} = Executor.run(seq, Model, CallersAdapter, config: %{test_pid: run_pid})
 
     assert result.success
     assert_received {:callers, callers}

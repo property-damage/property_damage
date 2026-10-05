@@ -10,8 +10,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
   defstruct [
     # Configuration
     :model,
-    :adapter,
-    :adapter_config,
+    :target,
     :metrics,
     :think_time_range,
     :check_mode,
@@ -42,8 +41,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
   ## Options
 
   - `:model` - Model module (required)
-  - `:adapter` - Adapter module (required)
-  - `:adapter_config` - Adapter configuration (default: %{})
+  - `:target` - `PropertyDamage.Target` to run against (required)
   - `:metrics` - Metrics collector pid (required)
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
   - `:check_mode` - How to handle checks (default: :disabled)
@@ -106,16 +104,14 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     Process.flag(:trap_exit, true)
 
     model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    target = Keyword.fetch!(opts, :target)
     metrics = Keyword.fetch!(opts, :metrics)
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
     check_mode = Keyword.get(opts, :check_mode, :disabled)
 
     state = %__MODULE__{
       model: model,
-      adapter: adapter,
-      adapter_config: adapter_config,
+      target: target,
       metrics: metrics,
       think_time_range: think_time_range,
       check_mode: check_mode,
@@ -298,8 +294,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     case Worker.start_link(
            worker_id: worker_id,
            model: state.model,
-           adapter: state.adapter,
-           adapter_config: state.adapter_config,
+           target: state.target,
            metrics: state.metrics,
            think_time_range: state.think_time_range,
            check_mode: state.check_mode,

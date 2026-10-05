@@ -146,9 +146,8 @@ defmodule PropertyDamage.Executor do
 
   ## Options
 
-  - `:adapter_config` - Config passed to adapter.setup/1
+  - `:config` - Config passed to adapter.setup/1
   - `:event_queue` - EventQueue pid for injector events (optional)
-  - `:injector_adapters` - List of injector adapter modules (optional)
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
   - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
   - `:check_mode` - How to handle checks (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
@@ -163,7 +162,7 @@ defmodule PropertyDamage.Executor do
   def run(sequence_or_commands, model, adapter, opts \\ [])
 
   def run(%Sequence{} = sequence, model, adapter, opts) do
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    config = Keyword.get(opts, :config, %{})
     event_queue = Keyword.get(opts, :event_queue)
     stutter_config = Keyword.get(opts, :stutter_config)
     mock_registry = Keyword.get(opts, :mock_registry)
@@ -174,7 +173,7 @@ defmodule PropertyDamage.Executor do
     # mint epoch for this SUT execution (default epoch 0 = the recorded run).
     mint = {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
 
-    with {:ok, adapter_context} <- adapter.setup(adapter_config) do
+    with {:ok, adapter_context} <- adapter.setup(config) do
       try do
         result =
           execute_sequence(

@@ -86,7 +86,7 @@ defmodule PropertyDamage.ExUnitTest do
       opts =
         PropertyDamage.ExUnit.build_run_opts(
           model: SomeModel,
-          adapter: SomeAdapter,
+          targets: [SomeAdapter],
           verbose: true,
           check_mode: :record,
           branching: [max_branches: 2]
@@ -99,7 +99,7 @@ defmodule PropertyDamage.ExUnitTest do
 
     test "requires :model and :adapter" do
       assert_raise KeyError, fn ->
-        PropertyDamage.ExUnit.build_run_opts(adapter: SomeAdapter)
+        PropertyDamage.ExUnit.build_run_opts(targets: [SomeAdapter])
       end
 
       assert_raise KeyError, fn ->
@@ -111,7 +111,7 @@ defmodule PropertyDamage.ExUnitTest do
       refute Keyword.has_key?(
                PropertyDamage.ExUnit.build_run_opts(
                  model: SomeModel,
-                 adapter: SomeAdapter,
+                 targets: [SomeAdapter],
                  seed: nil
                ),
                :seed
@@ -119,7 +119,7 @@ defmodule PropertyDamage.ExUnitTest do
 
       assert PropertyDamage.ExUnit.build_run_opts(
                model: SomeModel,
-               adapter: SomeAdapter,
+               targets: [SomeAdapter],
                seed: 7
              )[:seed] == 7
     end
@@ -133,7 +133,7 @@ defmodule PropertyDamage.ExUnitTest.BasicPropertyTest do
 
   property_damage("basic test passes",
     model: PropertyDamage.Test.ExecutorModel,
-    adapter: PropertyDamage.Test.SimpleAdapter,
+    targets: [PropertyDamage.Test.SimpleAdapter],
     max_runs: 3,
     max_commands: 5,
     validate: false
@@ -146,7 +146,7 @@ defmodule PropertyDamage.ExUnitTest.WithOptionsPropertyTest do
 
   property_damage("with options",
     model: PropertyDamage.Test.ExecutorModel,
-    adapter: PropertyDamage.Test.SimpleAdapter,
+    targets: [PropertyDamage.Test.SimpleAdapter],
     max_commands: 3,
     max_runs: 2,
     validate: false
@@ -159,7 +159,7 @@ defmodule PropertyDamage.ExUnitTest.SeedPropertyTest do
 
   property_damage("with fixed seed",
     model: PropertyDamage.Test.ExecutorModel,
-    adapter: PropertyDamage.Test.SimpleAdapter,
+    targets: [PropertyDamage.Test.SimpleAdapter],
     seed: 42,
     max_runs: 2,
     max_commands: 3,

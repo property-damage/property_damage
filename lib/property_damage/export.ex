@@ -80,17 +80,18 @@ defmodule PropertyDamage.Export do
   ## Options
 
   - `:model` - Model module (defaults to report.model)
-  - `:adapter` - Adapter module (defaults to report.adapter)
+  - `:targets` - A list with exactly one entry: the target the generated test
+    runs against (defaults to report.adapter with an empty config); see
+    `PropertyDamage.Target`
   - `:module_name` - Module name for the test
   - `:test_name` - Custom test name
-  - `:adapter_config` - Adapter configuration map
   - `:expect_fixed` - If true, expect the test to pass (default: false)
 
   ## Example
 
       test_code = PropertyDamage.Export.to_exunit(failure,
         model: MyModel,
-        adapter: MyHTTPAdapter
+        targets: [MyHTTPAdapter]
       )
 
       File.write!("test/regressions/seed_123_test.exs", test_code)

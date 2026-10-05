@@ -22,8 +22,7 @@ defmodule PropertyDamage.LoadTest do
       # Run a 2-minute load test at 100 arrivals/second
       {:ok, report} = PropertyDamage.LoadTest.run(
         model: MyApp.TestModel,
-        adapter: MyApp.HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
+        targets: [{MyApp.HTTPAdapter, config: %{base_url: "http://localhost:4000"}}],
         arrival_rate: 100,
         duration: {2, :minutes}
       )
@@ -35,8 +34,7 @@ defmodule PropertyDamage.LoadTest do
 
       {:ok, report} = PropertyDamage.LoadTest.run(
         model: MyApp.TestModel,
-        adapter: MyApp.HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
+        targets: [{MyApp.HTTPAdapter, config: %{base_url: "http://localhost:4000"}}],
 
         # Load configuration
         arrival_rate: 100,  # 100 arrivals/second
@@ -141,14 +139,16 @@ defmodule PropertyDamage.LoadTest do
   ## Required Options
 
   - `:model` - Model module implementing PropertyDamage.Model
-  - `:adapter` - Adapter module implementing PropertyDamage.Adapter
+  - `:targets` - A list with exactly one entry: an adapter module implementing
+    PropertyDamage.Adapter, or `{AdapterModule, config: map}` (`config:` is passed to
+    `adapter.setup/1`; default `%{}`). `injectors:` and `mocks:` are not supported
+    and raise. See `PropertyDamage.Target`.
   - `:arrival_rate` - Target arrival rate: an integer (arrivals per second, e.g.
     `100`) or a `{count, {time, unit}}` tuple (e.g. `{2, {15, :milliseconds}}`)
   - `:duration` - Test duration as `{value, unit}` tuple
 
   ## Optional Options
 
-  - `:adapter_config` - Configuration passed to adapter.setup/1 (default: %{})
   - `:arrival_jitter` - {min, max} ms jitter added per arrival (default: {0, 0})
   - `:ramp_up` - Strategy for ramping up load (default: :immediate)
   - `:ramp_down` - Strategy for ramping down load (default: :immediate)
@@ -173,8 +173,7 @@ defmodule PropertyDamage.LoadTest do
       # Basic load test
       {:ok, report} = PropertyDamage.LoadTest.run(
         model: MyApp.Model,
-        adapter: MyApp.HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
+        targets: [{MyApp.HTTPAdapter, config: %{base_url: "http://localhost:4000"}}],
         arrival_rate: 50,
         duration: {2, :minutes}
       )
@@ -182,8 +181,7 @@ defmodule PropertyDamage.LoadTest do
       # With ramping and callbacks
       {:ok, report} = PropertyDamage.LoadTest.run(
         model: MyApp.Model,
-        adapter: MyApp.HTTPAdapter,
-        adapter_config: %{base_url: "http://localhost:4000"},
+        targets: [{MyApp.HTTPAdapter, config: %{base_url: "http://localhost:4000"}}],
         arrival_rate: 100,
         duration: {5, :minutes},
         ramp_up: {:linear, {60, :seconds}},

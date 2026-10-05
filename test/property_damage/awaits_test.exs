@@ -293,7 +293,7 @@ defmodule PropertyDamage.AwaitsTest do
       {:ok, result} =
         Executor.run(seq, LaterDeliveryModel, LaterDeliveryAdapter,
           event_queue: queue,
-          adapter_config: %{event_queue: queue}
+          config: %{event_queue: queue}
         )
 
       EventQueue.stop(queue)
@@ -367,7 +367,7 @@ defmodule PropertyDamage.AwaitsTest do
           {:ok, r} =
             Executor.run(seq, OverlapModel, OverlapAdapter,
               event_queue: queue,
-              adapter_config: %{event_queue: queue}
+              config: %{event_queue: queue}
             )
 
           r

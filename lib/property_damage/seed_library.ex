@@ -31,10 +31,10 @@ defmodule PropertyDamage.SeedLibrary do
 
       # Enable the working set (default file) — failing seeds are replayed first
       # on the next run, and any new failure's seed is appended.
-      PropertyDamage.run(model: M, adapter: A, seed_library: true)
+      PropertyDamage.run(model: M, targets: [A], seed_library: true)
 
       # Or an explicit file
-      PropertyDamage.run(model: M, adapter: A, seed_library: "seeds.json")
+      PropertyDamage.run(model: M, targets: [A], seed_library: "seeds.json")
 
   See DR-023 for the full design.
 

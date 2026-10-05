@@ -68,7 +68,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
         result =
           PropertyDamage.run(
             model: Model,
-            adapter: CorrectAdapter,
+            targets: [CorrectAdapter],
             seed: unquote(seed),
             max_commands: 20,
             max_runs: 60,
@@ -87,7 +87,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
       assert {:ok, _stats} =
                PropertyDamage.run(
                  model: Model,
-                 adapter: CorrectAdapter,
+                 targets: [CorrectAdapter],
                  seed: 1,
                  max_commands: 40,
                  max_runs: 100,
@@ -103,7 +103,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
       assert {:error, failure} =
                PropertyDamage.run(
                  model: Model,
-                 adapter: StaleSnapshotAdapter,
+                 targets: [StaleSnapshotAdapter],
                  seed: @seed,
                  max_commands: 20,
                  max_runs: 60,
@@ -125,7 +125,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
       assert {:error, failure} =
                PropertyDamage.run(
                  model: Model,
-                 adapter: StaleSnapshotAdapter,
+                 targets: [StaleSnapshotAdapter],
                  seed: @seed,
                  max_commands: 20,
                  max_runs: 60,
@@ -138,7 +138,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
           PropertyDamage.FailureReport.shrunk_sequence(failure),
           Model,
           StaleSnapshotAdapter,
-          adapter_config: %{}
+          config: %{}
         )
 
       refute replay.success
@@ -149,7 +149,7 @@ defmodule PropertyDamage.EtsLinearizationTest do
         {:error, f} =
           PropertyDamage.run(
             model: Model,
-            adapter: StaleSnapshotAdapter,
+            targets: [StaleSnapshotAdapter],
             seed: @seed,
             max_commands: 20,
             max_runs: 60,

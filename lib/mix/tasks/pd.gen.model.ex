@@ -81,7 +81,10 @@ defmodule Mix.Tasks.Pd.Gen.Model do
     Mix.shell().info("  1. Create command modules listed in commands/0")
     Mix.shell().info("  2. Create projection modules (use: mix pd.gen.projection)")
     Mix.shell().info("  3. Create an adapter module")
-    Mix.shell().info("  4. Run: PropertyDamage.run(model: #{module_name}, adapter: YourAdapter)")
+
+    Mix.shell().info(
+      "  4. Run: PropertyDamage.run(model: #{module_name}, targets: [YourAdapter])"
+    )
   end
 
   defp parse_list(""), do: []
@@ -118,7 +121,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
 
           PropertyDamage.run(
             model: #{module_name},
-            adapter: #{namespace}.Adapter,
+            targets: [#{namespace}.Adapter],
             max_runs: 100
           )
       \"\"\"

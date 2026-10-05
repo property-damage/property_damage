@@ -272,7 +272,7 @@ defmodule PropertyDamage.ReplayTest do
         )
 
       # Replay.run starts a session (setup_each) and stops it (teardown_each).
-      {:ok, _steps} = Replay.run(failure, adapter_config: %{test_pid: pid})
+      {:ok, _steps} = Replay.run(failure, targets: [{CounterAdapter, config: %{test_pid: pid}}])
 
       assert_received {:lifecycle, :setup_each, setup_config}
       assert setup_config == %{adapter_config: %{test_pid: pid}, replay: true}

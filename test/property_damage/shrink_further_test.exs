@@ -159,6 +159,8 @@ defmodule PropertyDamage.ShrinkFurtherTest do
     report = report_of_length(8, adapter: SetupGuardAdapter)
 
     assert {:error, %{adapter_setup_failed: :setup_failed}} =
-             PropertyDamage.shrink_further(report, adapter_config: %{fail_setup: true})
+             PropertyDamage.shrink_further(report,
+               targets: [{SetupGuardAdapter, config: %{fail_setup: true}}]
+             )
   end
 end

@@ -11,7 +11,7 @@ defmodule PropertyDamage.RunComparison do
 
   The comparator is pure data-in/data-out and never runs a SUT:
 
-      traces = for _ <- 1..5, do: RunTrace.capture(model: M, adapter: A, seed: 1)
+      traces = for _ <- 1..5, do: RunTrace.capture(model: M, targets: [A], seed: 1)
       comparison = RunComparison.compare(traces)
 
   This is the flakiness tool. `investigate/1` handles a single known seed:
@@ -209,7 +209,7 @@ defmodule PropertyDamage.RunComparison do
   ## Options
 
   - `:capture` (required) - options forwarded to `RunTrace.capture/1` (must
-    include `:model`, `:adapter`, `:seed`; may include `:run_number`, etc.). A
+    include `:model`, `:targets`, `:seed`; may include `:run_number`, etc.). A
     fresh `:run_nonce` is injected per capture.
   - `:runs` - number of captures (default 5).
   - `:event_identity` - forwarded to `compare/2`.
@@ -218,7 +218,7 @@ defmodule PropertyDamage.RunComparison do
 
       RunComparison.investigate(
         runs: 5,
-        capture: [model: MyModel, adapter: MyAdapter, seed: 3]
+        capture: [model: MyModel, targets: [MyAdapter], seed: 3]
       )
   """
   @spec investigate(keyword()) :: {[RunTrace.t()], t()}
@@ -254,7 +254,7 @@ defmodule PropertyDamage.RunComparison do
   - `:seeds` (required) - the list of seeds to scan.
   - `:runs` - captures per seed (default 5).
   - `:capture` (required) - options forwarded to `RunTrace.capture/1` (must
-    include `:model` and `:adapter`; the `:seed` is supplied per scanned seed,
+    include `:model` and `:targets`; the `:seed` is supplied per scanned seed,
     so any `:seed` here is ignored). A fresh `:run_nonce` is injected per
     capture.
   - `:event_identity` - forwarded to `compare/2`.
@@ -264,7 +264,7 @@ defmodule PropertyDamage.RunComparison do
       RunComparison.scan(
         seeds: Enum.to_list(1..100),
         runs: 5,
-        capture: [model: MyModel, adapter: MyAdapter]
+        capture: [model: MyModel, targets: [MyAdapter]]
       )
   """
   @spec scan(keyword()) :: %{integer() => Verdict.t()}

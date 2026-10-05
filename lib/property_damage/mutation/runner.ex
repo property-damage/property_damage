@@ -12,8 +12,9 @@ defmodule PropertyDamage.Mutation.Runner do
   ## Options
 
   - `:model` - The model module (required)
-  - `:adapter` - The adapter module (required)
-  - `:adapter_config` - Configuration for the adapter
+  - `:targets` - A list with exactly one entry (required): an adapter module or
+    `{AdapterModule, name:, config:}`. `injectors:` and `mocks:` are not supported
+    and raise. See `PropertyDamage.Target`.
   - `:operators` - List of operator names to use (default: all)
   - `:mutations_per_command` - Max mutations per command type (default: 5)
   - `:max_runs` - Property test runs per mutation (default: 10)
@@ -27,6 +28,13 @@ defmodule PropertyDamage.Mutation.Runner do
   @spec run(keyword()) :: {:ok, Report.t()} | {:error, term()}
   def run(opts) do
     opts = Options.validate_mutation!(opts)
+    [target] = opts[:targets]
+
+    Options.reject_unsupported_target_keys!(
+      [target],
+      [:injectors, :mocks],
+      "PropertyDamage.Mutation.run/1"
+    )
 
     # Unified progress projection (DR-022): one reporter fans out to the verbose
     # printer (if any), the user `on_progress:` callback (if any), and telemetry
@@ -41,8 +49,7 @@ defmodule PropertyDamage.Mutation.Runner do
 
     config = %{
       model: opts[:model],
-      adapter: opts[:adapter],
-      adapter_config: opts[:adapter_config],
+      target: target,
       operators: opts[:operators],
       mutations_per_command: opts[:mutations_per_command],
       max_runs: opts[:max_runs],
@@ -57,7 +64,7 @@ defmodule PropertyDamage.Mutation.Runner do
       Report.new(
         target_score: config.target_score,
         model: config.model,
-        adapter: config.adapter
+        adapter: config.target.adapter
       )
 
     # Get command types from the model
@@ -135,8 +142,7 @@ defmodule PropertyDamage.Mutation.Runner do
     trace =
       PropertyDamage.RunTrace.capture(
         model: config.model,
-        adapter: config.adapter,
-        adapter_config: config.adapter_config,
+        targets: [Options.target_entry(config.target)],
         seed: :erlang.unique_integer([:positive]),
         max_commands: 10
       )
@@ -166,7 +172,7 @@ defmodule PropertyDamage.Mutation.Runner do
     # Create a mutating adapter
     mutating_adapter =
       MutatingAdapter.new(
-        inner_adapter: config.adapter,
+        inner_adapter: config.target.adapter,
         target_command: command,
         mutation: mutation,
         operator: operator
@@ -224,13 +230,17 @@ defmodule PropertyDamage.Mutation.Runner do
     task =
       Task.async(fn ->
         # The MutatingAdapter is passed as the adapter *module* with its struct
-        # threaded through adapter_config under :__mutating_adapter__; its setup/1
-        # extracts the struct from there (a struct cannot be an :adapter value,
-        # which must be a module the executor can dispatch on).
+        # threaded through the target config under :__mutating_adapter__; its
+        # setup/1 extracts the struct from there (a struct cannot be a target
+        # adapter, which must be a module the executor can dispatch on). The
+        # wrapper keeps the user target's name.
         PropertyDamage.run(
           model: config.model,
-          adapter: MutatingAdapter,
-          adapter_config: Map.put(config.adapter_config, :__mutating_adapter__, mutating_adapter),
+          targets: [
+            {MutatingAdapter,
+             name: config.target.name,
+             config: Map.put(config.target.config, :__mutating_adapter__, mutating_adapter)}
+          ],
           max_runs: config.max_runs,
           max_commands: 20
         )

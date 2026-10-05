@@ -108,7 +108,7 @@ defmodule PropertyDamage.Shrinker do
     failed_at_index: 5,
     failure_reason: PropertyDamage.Failure.check_failed(:balance_invariant, "..."),
     model: MyModel,
-    adapter: MyAdapter,
+    target: %PropertyDamage.Target{adapter: MyAdapter, name: "MyAdapter", index: 0},
     config: config
   )
   ```
@@ -211,8 +211,7 @@ defmodule PropertyDamage.Shrinker do
     - `:failed_at_index` - Index where the failure occurred (required)
     - `:failure_reason` - Original failure reason for equivalence checking (optional but recommended)
     - `:model` - Model module (required)
-    - `:adapter` - Adapter module (required)
-    - `:adapter_config` - Config for adapter setup (default: %{})
+    - `:target` - `PropertyDamage.Target` to re-execute against (required)
     - `:config` - Shrinker.Config struct (default: Config.new())
     - `:event_queue` - EventQueue pid for injector events (optional)
 
@@ -245,8 +244,7 @@ defmodule PropertyDamage.Shrinker do
   defp shrink_linear(sequence, opts) do
     failed_at_index = Keyword.fetch!(opts, :failed_at_index)
     model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    target = Keyword.fetch!(opts, :target)
     config = Keyword.get(opts, :config, Config.new())
     event_queue = Keyword.get(opts, :event_queue)
     original_failure = Keyword.get(opts, :failure_reason)
@@ -272,8 +270,7 @@ defmodule PropertyDamage.Shrinker do
       positions: original_positions(commands),
       registry: sequence.registry,
       model: model,
-      adapter: adapter,
-      adapter_config: adapter_config,
+      target: target,
       config: config,
       event_queue: event_queue,
       # Per-run mock registry (WP-C5), reused across shrink attempts so a
@@ -376,8 +373,7 @@ defmodule PropertyDamage.Shrinker do
   defp shrink_branching(sequence, opts) do
     failed_at_index = Keyword.fetch!(opts, :failed_at_index)
     model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
+    target = Keyword.fetch!(opts, :target)
     config = Keyword.get(opts, :config, Config.new())
     event_queue = Keyword.get(opts, :event_queue)
     original_failure = Keyword.get(opts, :failure_reason)
@@ -406,8 +402,7 @@ defmodule PropertyDamage.Shrinker do
       # analogue of shrink_linear's parallel `positions` list.
       positions: initial_branch_positions(sequence),
       model: model,
-      adapter: adapter,
-      adapter_config: adapter_config,
+      target: target,
       config: config,
       event_queue: event_queue,
       # Per-run mock registry (WP-C5); see shrink_linear.
@@ -528,8 +523,7 @@ defmodule PropertyDamage.Shrinker do
             shrink_linear(linear_seq,
               failed_at_index: linear_failed_at_index,
               model: state.model,
-              adapter: state.adapter,
-              adapter_config: state.adapter_config,
+              target: state.target,
               config: state.config,
               event_queue: state.event_queue,
               mock_registry: state.mock_registry,
@@ -1019,7 +1013,7 @@ defmodule PropertyDamage.Shrinker do
 
   defp still_fails?(commands, positions, state) do
     # Call setup_each to reset SUT state before each shrink attempt
-    setup_each_result = call_setup_each(state.model, state.adapter_config)
+    setup_each_result = call_setup_each(state.model, state.target.config)
 
     case setup_each_result do
       :ok ->
@@ -1035,8 +1029,8 @@ defmodule PropertyDamage.Shrinker do
             remap_registry(state.registry, positions)
           )
 
-        case Executor.run(candidate_sequence, state.model, state.adapter,
-               adapter_config: state.adapter_config,
+        case Executor.run(candidate_sequence, state.model, state.target.adapter,
+               config: state.target.config,
                event_queue: state.event_queue,
                mock_registry: state.mock_registry,
                stutter_config: state.stutter_config,
@@ -1073,13 +1067,13 @@ defmodule PropertyDamage.Shrinker do
   # truncation), or `:no_reproduce` otherwise. Used only at the
   # convert-to-linear seam; the other branch strategies need only the boolean.
   defp linear_run_result(sequence, state) do
-    case call_setup_each(state.model, state.adapter_config) do
+    case call_setup_each(state.model, state.target.config) do
       :ok ->
         # Regenerate idempotency keys to ensure fresh SUT state
         sequence = regenerate_sequence_idempotency_keys(sequence)
 
-        case Executor.run(sequence, state.model, state.adapter,
-               adapter_config: state.adapter_config,
+        case Executor.run(sequence, state.model, state.target.adapter,
+               config: state.target.config,
                event_queue: state.event_queue,
                mock_registry: state.mock_registry,
                stutter_config: state.stutter_config,
@@ -1120,7 +1114,7 @@ defmodule PropertyDamage.Shrinker do
 
   defp still_fails_branch?(sequence, positions, state) do
     # Call setup_each to reset SUT state before each shrink attempt
-    setup_each_result = call_setup_each(state.model, state.adapter_config)
+    setup_each_result = call_setup_each(state.model, state.target.config)
 
     case setup_each_result do
       :ok ->
@@ -1136,8 +1130,8 @@ defmodule PropertyDamage.Shrinker do
             remap_branch_registry(state.registry, positions, sequence)
           )
 
-        case Executor.run(sequence, state.model, state.adapter,
-               adapter_config: state.adapter_config,
+        case Executor.run(sequence, state.model, state.target.adapter,
+               config: state.target.config,
                event_queue: state.event_queue,
                mock_registry: state.mock_registry,
                stutter_config: state.stutter_config,
@@ -1166,9 +1160,9 @@ defmodule PropertyDamage.Shrinker do
   end
 
   # Call setup_each if the model implements it
-  defp call_setup_each(model, adapter_config) do
+  defp call_setup_each(model, config) do
     if function_exported?(model, :setup_each, 1) do
-      model.setup_each(%{adapter_config: adapter_config})
+      model.setup_each(%{adapter_config: config})
     else
       :ok
     end

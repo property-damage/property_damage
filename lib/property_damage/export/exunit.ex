@@ -11,8 +11,8 @@ defmodule PropertyDamage.Export.ExUnit do
 
   - `:module_name` - Module name for the test (optional, auto-generated)
   - `:model` - Model module to use (falls back to report.model)
-  - `:adapter` - Adapter module to use (falls back to report.adapter)
-  - `:adapter_config` - Adapter configuration map (optional)
+  - `:targets` - Validated single-entry target list the generated test runs
+    against (falls back to report.adapter with an empty config)
   - `:test_name` - Custom test name (optional)
   - `:expect_fixed` - If true, expect the test to pass (default: false)
   """
@@ -20,17 +20,17 @@ defmodule PropertyDamage.Export.ExUnit do
   def generate(%FailureReport{} = report, opts \\ []) do
     metadata = Common.extract_metadata(report)
     model = Keyword.get(opts, :model, metadata.model)
-    adapter = Keyword.get(opts, :adapter, metadata.adapter)
+    target = target_for(opts, metadata)
+    adapter = target.adapter
 
     module_name = Keyword.get(opts, :module_name, generate_module_name(metadata))
     test_name = Keyword.get(opts, :test_name, generate_test_name(metadata))
-    adapter_config = Keyword.get(opts, :adapter_config)
     expect_fixed = Keyword.get(opts, :expect_fixed, false)
 
     [
       generate_moduledoc(metadata),
       generate_module_header(module_name, model, adapter),
-      generate_test(report, test_name, model, adapter, adapter_config, expect_fixed),
+      generate_test(report, test_name, model, target, expect_fixed),
       generate_module_footer()
     ]
     |> Enum.join("\n")
@@ -80,10 +80,10 @@ defmodule PropertyDamage.Export.ExUnit do
     """
   end
 
-  defp generate_test(report, test_name, model, adapter, adapter_config, expect_fixed) do
+  defp generate_test(report, test_name, model, target, expect_fixed) do
     seed = report.seed
     commands_code = generate_commands_code(report)
-    run_opts = generate_run_opts(model, adapter, adapter_config, seed)
+    run_opts = generate_run_opts(model, target, seed)
 
     assertion =
       if expect_fixed do
@@ -199,22 +199,50 @@ defmodule PropertyDamage.Export.ExUnit do
   # Run Options
   # ============================================================================
 
-  defp generate_run_opts(_model, _adapter, adapter_config, seed) do
+  defp generate_run_opts(_model, target, seed) do
     opts = [
       "model: Model",
-      "adapter: Adapter",
+      "targets: [#{target_entry_source(target)}]",
       "seed: #{seed}",
       "max_runs: 1"
     ]
 
-    opts =
-      if adapter_config do
-        opts ++ ["adapter_config: #{inspect(adapter_config)}"]
-      else
-        opts
-      end
-
     Enum.join(opts, ",\n          ")
+  end
+
+  # The target entry as source: the aliased module alone, or a tuple carrying
+  # only the keys that differ from the entry defaults.
+  defp target_entry_source(target) do
+    extras =
+      [
+        if(target.name != default_name(target.adapter), do: "name: #{inspect(target.name)}"),
+        if(target.config != %{}, do: "config: #{inspect(target.config)}"),
+        if(target.injectors != [], do: "injectors: #{inspect(target.injectors)}"),
+        if(target.mocks != [], do: "mocks: #{inspect(target.mocks)}")
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    case extras do
+      [] -> "Adapter"
+      extras -> "{Adapter, #{Enum.join(extras, ", ")}}"
+    end
+  end
+
+  defp default_name(nil), do: nil
+  defp default_name(adapter), do: adapter |> Module.split() |> List.last()
+
+  defp target_for(opts, metadata) do
+    case Keyword.get(opts, :targets) do
+      nil ->
+        %PropertyDamage.Target{
+          adapter: metadata.adapter,
+          name: default_name(metadata.adapter),
+          index: 0
+        }
+
+      entries ->
+        PropertyDamage.Options.single_target!(entries)
+    end
   end
 
   # ============================================================================

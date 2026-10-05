@@ -129,7 +129,7 @@ defmodule PropertyDamage.ExecuteTest do
     test "executes a single command and returns event log" do
       commands = [%{action: :create}]
 
-      {:ok, events} = PropertyDamage.execute(commands, adapter: TestAdapter)
+      {:ok, events} = PropertyDamage.execute(commands, targets: [TestAdapter])
 
       assert length(events) == 1
       assert hd(events).event == %{type: :created, id: 1}
@@ -144,7 +144,7 @@ defmodule PropertyDamage.ExecuteTest do
         %{action: :delete, id: 1}
       ]
 
-      {:ok, events} = PropertyDamage.execute(commands, adapter: TestAdapter)
+      {:ok, events} = PropertyDamage.execute(commands, targets: [TestAdapter])
 
       assert length(events) == 3
 
@@ -163,7 +163,7 @@ defmodule PropertyDamage.ExecuteTest do
     test "handles commands that return multiple events" do
       commands = [%{action: :multi_event}]
 
-      {:ok, events} = PropertyDamage.execute(commands, adapter: TestAdapter)
+      {:ok, events} = PropertyDamage.execute(commands, targets: [TestAdapter])
 
       assert length(events) == 2
       assert Enum.at(events, 0).event == %{type: :event_a}
@@ -173,13 +173,13 @@ defmodule PropertyDamage.ExecuteTest do
     test "handles commands that return no events" do
       commands = [%{action: :no_events}]
 
-      {:ok, events} = PropertyDamage.execute(commands, adapter: TestAdapter)
+      {:ok, events} = PropertyDamage.execute(commands, targets: [TestAdapter])
 
       assert events == []
     end
 
     test "returns empty list for empty command sequence" do
-      {:ok, events} = PropertyDamage.execute([], adapter: TestAdapter)
+      {:ok, events} = PropertyDamage.execute([], targets: [TestAdapter])
 
       assert events == []
     end
@@ -197,7 +197,7 @@ defmodule PropertyDamage.ExecuteTest do
                   partial_events: []
                 }
               }} =
-               PropertyDamage.execute(commands, adapter: TestAdapter)
+               PropertyDamage.execute(commands, targets: [TestAdapter])
     end
 
     test "returns error with partial events when failure occurs mid-sequence" do
@@ -215,7 +215,7 @@ defmodule PropertyDamage.ExecuteTest do
                   partial_events: partial_events
                 }
               }} =
-               PropertyDamage.execute(commands, adapter: TestAdapter)
+               PropertyDamage.execute(commands, targets: [TestAdapter])
 
       # Should have events from the first successful command
       assert length(partial_events) == 1
@@ -226,7 +226,7 @@ defmodule PropertyDamage.ExecuteTest do
       commands = [%{action: :create}]
 
       assert {:error, {:adapter_setup_failed, :setup_failed}} =
-               PropertyDamage.execute(commands, adapter: FailingSetupAdapter)
+               PropertyDamage.execute(commands, targets: [FailingSetupAdapter])
     end
 
     test "includes custom error reason from adapter" do
@@ -240,12 +240,12 @@ defmodule PropertyDamage.ExecuteTest do
                   partial_events: []
                 }
               }} =
-               PropertyDamage.execute(commands, adapter: TestAdapter)
+               PropertyDamage.execute(commands, targets: [TestAdapter])
     end
   end
 
-  describe "execute/2 with adapter_config" do
-    test "passes adapter_config to adapter setup" do
+  describe "execute/2 with a target config" do
+    test "passes the target config to adapter setup" do
       defmodule ConfigTrackingAdapter do
         use PropertyDamage.Adapter
 
@@ -265,7 +265,7 @@ defmodule PropertyDamage.ExecuteTest do
       config = %{base_url: "http://example.com", api_key: "secret"}
 
       {:ok, _} =
-        PropertyDamage.execute([], adapter: ConfigTrackingAdapter, adapter_config: config)
+        PropertyDamage.execute([], targets: [{ConfigTrackingAdapter, config: config}])
 
       assert_received {:adapter_setup, ^config}
     end
@@ -299,9 +299,7 @@ defmodule PropertyDamage.ExecuteTest do
 
       {:ok, events} =
         PropertyDamage.execute(commands,
-          adapter: InjectingAdapter,
-          injector_adapters: [TestInjectorAdapter],
-          adapter_config: %{}
+          targets: [{InjectingAdapter, config: %{}, injectors: [TestInjectorAdapter]}]
         )
 
       # Should have both command event and injector event
@@ -319,23 +317,22 @@ defmodule PropertyDamage.ExecuteTest do
   end
 
   describe "execute/2 options validation" do
-    test "requires adapter option" do
-      assert_raise NimbleOptions.ValidationError, ~r/required :adapter option/, fn ->
+    test "requires targets option" do
+      assert_raise NimbleOptions.ValidationError, ~r/required :targets option/, fn ->
         PropertyDamage.execute([], [])
       end
     end
 
-    test "validates adapter is an atom" do
-      assert_raise NimbleOptions.ValidationError, ~r/expected a module/, fn ->
-        PropertyDamage.execute([], adapter: "not_an_atom")
+    test "validates a target entry is a module or a module with options" do
+      assert_raise NimbleOptions.ValidationError, ~r/expected an adapter module or/, fn ->
+        PropertyDamage.execute([], targets: ["not_an_atom"])
       end
     end
 
-    test "accepts optional injector_adapters" do
+    test "accepts optional injectors" do
       {:ok, _} =
         PropertyDamage.execute([],
-          adapter: TestAdapter,
-          injector_adapters: [TestInjectorAdapter]
+          targets: [{TestAdapter, injectors: [TestInjectorAdapter]}]
         )
     end
   end
@@ -350,8 +347,7 @@ defmodule PropertyDamage.ExecuteTest do
 
       {:ok, _events} =
         PropertyDamage.execute(commands,
-          adapter: ExternalAdapter,
-          adapter_config: %{test_pid: self()}
+          targets: [{ExternalAdapter, config: %{test_pid: self()}}]
         )
 
       assert_received {:consumed, target}
@@ -365,8 +361,7 @@ defmodule PropertyDamage.ExecuteTest do
 
       result =
         PropertyDamage.execute([%Consume{target: ph}],
-          adapter: ExternalAdapter,
-          adapter_config: %{test_pid: self()}
+          targets: [{ExternalAdapter, config: %{test_pid: self()}}]
         )
 
       # The unresolved placeholder surfaces as a placeholder_resolution framework

@@ -933,8 +933,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     test ":verified when the bug is fixed and every variation passes" do
       result =
         Verification.verify_fix(fi_report(100_000), FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: :off}
+          targets: [{FI.Adapter, config: %{bug: :off}}]
         )
 
       assert result.status == :verified
@@ -947,8 +946,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     test ":still_failing when the original seed still reproduces" do
       result =
         Verification.verify_fix(fi_report(100_000), FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: :always}
+          targets: [{FI.Adapter, config: %{bug: :always}}]
         )
 
       assert result.status == :still_failing
@@ -960,8 +958,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       # nearby variation seed draws amount <= 20 -> 1 failure (<= 25%).
       result =
         Verification.verify_fix(fi_report(100_000), FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: {:overdraw_when_amount_lte, 20}}
+          targets: [{FI.Adapter, config: %{bug: {:overdraw_when_amount_lte, 20}}}]
         )
 
       assert result.status == :flaky
@@ -974,8 +971,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       # its nearby variation seeds draw amount <= 44 -> > 25% failures.
       result =
         Verification.verify_fix(fi_report(200_000), FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: {:overdraw_when_amount_lte, 44}}
+          targets: [{FI.Adapter, config: %{bug: {:overdraw_when_amount_lte, 44}}}]
         )
 
       assert result.status == :partially_fixed
@@ -994,8 +990,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
       results =
         Verification.verify_fixes([f1, f2], FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: :off}
+          targets: [{FI.Adapter, config: %{bug: :off}}]
         )
 
       assert [{^f1, r1}, {^f2, r2}] = results
@@ -1038,8 +1033,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       # bug fixed, real verification must report all three members fixed.
       result =
         Verification.verify_cluster(seeded_cluster(), FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: :off}
+          targets: [{FI.Adapter, config: %{bug: :off}}]
         )
 
       assert result.status == :fully_fixed
@@ -1053,8 +1047,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     test ":not_fixed when every seeded member still fails" do
       result =
         Verification.verify_cluster(seeded_cluster(), FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: :always}
+          targets: [{FI.Adapter, config: %{bug: :always}}]
         )
 
       assert result.status == :not_fixed
@@ -1067,8 +1060,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       # amount: 100_000 -> 29 (fails at t=44), 200_000 -> 45, 300_000 -> 54 (pass).
       result =
         Verification.verify_cluster(seeded_cluster(), FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: {:overdraw_when_amount_lte, 44}}
+          targets: [{FI.Adapter, config: %{bug: {:overdraw_when_amount_lte, 44}}}]
         )
 
       assert result.status == :partially_fixed
@@ -1086,8 +1078,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
 
       result =
         Verification.verify_cluster(cluster, FI.Model,
-          adapter: FI.Adapter,
-          adapter_config: %{bug: :off}
+          targets: [{FI.Adapter, config: %{bug: :off}}]
         )
 
       assert result.status == :unknown

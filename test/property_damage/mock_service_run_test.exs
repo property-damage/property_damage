@@ -206,8 +206,7 @@ defmodule PropertyDamage.MockServiceRunTest do
     assert {:ok, stats} =
              PropertyDamage.run(
                model: HappyModel,
-               adapter: ChargeAdapter,
-               mock_services: [FraudMock],
+               targets: [{ChargeAdapter, mocks: [FraudMock]}],
                max_runs: 3,
                max_commands: 4,
                seed: 1,
@@ -224,8 +223,7 @@ defmodule PropertyDamage.MockServiceRunTest do
     assert {:error, report} =
              PropertyDamage.run(
                model: BuggyModel,
-               adapter: ChargeAdapter,
-               mock_services: [{FraudMock, %{buggy: true}}],
+               targets: [{ChargeAdapter, mocks: [{FraudMock, %{buggy: true}}]}],
                max_runs: 5,
                max_commands: 6,
                seed: 7
@@ -242,8 +240,7 @@ defmodule PropertyDamage.MockServiceRunTest do
     assert {:ok, _stats} =
              PropertyDamage.run(
                model: HappyModel,
-               adapter: ChargeAdapter,
-               mock_services: [{FraudMock, %{}}],
+               targets: [{ChargeAdapter, mocks: [{FraudMock, %{}}]}],
                max_runs: 1,
                max_commands: 2,
                seed: 3,

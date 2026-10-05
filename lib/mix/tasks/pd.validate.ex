@@ -8,6 +8,13 @@ defmodule Mix.Tasks.Pd.Validate do
   ## Usage
 
       mix pd.validate MyApp.TestModel MyApp.TestAdapter
+      mix pd.validate MyApp.TestModel --targets "[MyApp.TestAdapter]"
+
+  `--targets` takes the same list as the `targets:` option of
+  `PropertyDamage.run/1` and `PropertyDamage.Differential.run/1`, as an Elixir
+  expression (see `PropertyDamage.Target`). The model is validated against every
+  target's adapter and injectors. It cannot be combined with a positional
+  adapter.
 
   ## What Gets Checked
 
@@ -22,11 +29,14 @@ defmodule Mix.Tasks.Pd.Validate do
   - Commands that declare no `:observables` in their `command_spec/1`
   - Events produced but not handled by check projections
   - Missing optional callbacks that may be useful
+  - Two targets with the same adapter and an identical `config:`: such targets
+    share state, so give each its own `config:` (for example a tenant)
 
   ## Options
 
-      --verbose    Show detailed information about the model
-      --strict     Treat warnings as errors
+      --verbose         Show detailed information about the model
+      --strict          Treat warnings as errors
+      --targets EXPR    Validate against a `targets:` list instead of a positional adapter
 
   ## Examples
 
@@ -38,6 +48,10 @@ defmodule Mix.Tasks.Pd.Validate do
 
       # Fail on warnings
       mix pd.validate MyApp.TestModel MyApp.TestAdapter --strict
+
+      # Two variants of one adapter, isolated by tenant
+      mix pd.validate MyApp.TestModel --targets \
+        "[{MyApp.HTTPAdapter, config: %{tenant: 1}}, {MyApp.HTTPAdapter, name: \"b\", config: %{tenant: 2}}]"
   """
 
   use Mix.Task
@@ -56,11 +70,44 @@ defmodule Mix.Tasks.Pd.Validate do
   @doc false
   @spec exec([String.t()]) :: :ok | :error
   def exec(args) do
-    {opts, argv, _} = OptionParser.parse(args, strict: [verbose: :boolean, strict: :boolean])
+    {opts, argv, _} =
+      OptionParser.parse(args, strict: [verbose: :boolean, strict: :boolean, targets: :string])
+
     verbose = Keyword.get(opts, :verbose, false)
     strict = Keyword.get(opts, :strict, false)
 
-    dispatch(argv, verbose, strict)
+    case Keyword.fetch(opts, :targets) do
+      {:ok, expr} -> dispatch_targets(argv, expr, verbose, strict)
+      :error -> dispatch(argv, verbose, strict)
+    end
+  end
+
+  defp dispatch_targets([model_str], expr, verbose, strict) do
+    Mix.Task.run("compile", [])
+
+    case evaluate_targets(expr) do
+      {:ok, targets} ->
+        validate_and_report(parse_module(model_str), targets, verbose, strict)
+
+      {:error, message} ->
+        print_color(:red, "ERROR: invalid --targets: #{message}\n")
+        :error
+    end
+  end
+
+  defp dispatch_targets(_argv, _expr, _verbose, _strict) do
+    print_color(:red, "Error: --targets takes a model and no positional adapter\n")
+    print_usage()
+    :error
+  end
+
+  # Evaluates the `--targets` expression and validates it with the same rules
+  # as the `targets:` option.
+  defp evaluate_targets(expr) do
+    {entries, _binding} = Code.eval_string(expr)
+    PropertyDamage.Options.validate_targets(entries)
+  rescue
+    e -> {:error, Exception.message(e)}
   end
 
   defp dispatch([model_str, adapter_str], verbose, strict) do
@@ -71,7 +118,8 @@ defmodule Mix.Tasks.Pd.Validate do
     model = parse_module(model_str)
     adapter = parse_module(adapter_str)
 
-    validate_and_report(model, adapter, verbose, strict)
+    target = %PropertyDamage.Target{adapter: adapter, name: short_module(adapter), index: 0}
+    validate_and_report(model, [target], verbose, strict)
   end
 
   defp dispatch([model_str], verbose, strict) do
@@ -105,14 +153,14 @@ defmodule Mix.Tasks.Pd.Validate do
     |> String.to_atom()
   end
 
-  defp validate_and_report(model, adapter, verbose, strict) do
+  defp validate_and_report(model, targets, verbose, strict) do
     IO.puts("\n")
     print_header("PropertyDamage Validation")
     IO.puts("")
 
     # Check if modules exist
     model_exists = Code.ensure_loaded?(model)
-    adapter_exists = Code.ensure_loaded?(adapter)
+    missing_adapter = Enum.find(targets, &(not Code.ensure_loaded?(&1.adapter)))
 
     cond do
       not model_exists ->
@@ -120,34 +168,53 @@ defmodule Mix.Tasks.Pd.Validate do
         print_hint("Make sure the module is defined and the project is compiled.")
         :error
 
-      not adapter_exists ->
-        print_color(:red, "ERROR: Adapter module #{inspect(adapter)} does not exist\n")
+      missing_adapter != nil ->
+        print_color(
+          :red,
+          "ERROR: Adapter module #{inspect(missing_adapter.adapter)} does not exist\n"
+        )
+
         print_hint("Make sure the module is defined and the project is compiled.")
         :error
 
       true ->
-        # Run validation
-        case PropertyDamage.Validation.validate!(model, adapter) do
-          {:ok, base_warnings} ->
-            # Surface declared-but-unchecked invariants (static vacuity, DR-026)
-            # so they fail under --strict alongside the other warnings.
-            warnings = base_warnings ++ invariant_warnings(model)
+        # Run validation against every target's adapter and injectors; the
+        # model-level warnings repeat per target, so keep each one once.
+        base_warnings =
+          targets
+          |> Enum.flat_map(fn target ->
+            {:ok, target_warnings} =
+              PropertyDamage.Validation.validate!(model, target.adapter,
+                injectors: target.injectors
+              )
 
-            if verbose do
-              PropertyDamage.Validation.print_summary(model, adapter, base_warnings)
-              print_invariant_catalog(model)
-            end
+            target_warnings
+          end)
+          |> Enum.uniq()
 
-            print_validation_results(model, adapter, warnings, verbose)
+        # Surface declared-but-unchecked invariants (static vacuity, DR-026)
+        # so they fail under --strict alongside the other warnings.
+        warnings =
+          base_warnings ++
+            invariant_warnings(model) ++ PropertyDamage.Validation.target_warnings(targets)
 
-            if strict and warnings != [] do
-              IO.puts("")
-              print_color(:red, "FAILED: #{length(warnings)} warning(s) in strict mode\n")
-              :error
-            else
-              print_color(:green, "\nVALIDATION PASSED\n")
-              :ok
-            end
+        if verbose do
+          for target <- targets do
+            PropertyDamage.Validation.print_summary(model, target.adapter, base_warnings)
+          end
+
+          print_invariant_catalog(model)
+        end
+
+        print_validation_results(model, targets, warnings, verbose)
+
+        if strict and warnings != [] do
+          IO.puts("")
+          print_color(:red, "FAILED: #{length(warnings)} warning(s) in strict mode\n")
+          :error
+        else
+          print_color(:green, "\nVALIDATION PASSED\n")
+          :ok
         end
     end
   rescue
@@ -307,7 +374,7 @@ defmodule Mix.Tasks.Pd.Validate do
     Enum.each(warnings, fn warning -> IO.puts("  - #{warning}") end)
   end
 
-  defp print_validation_results(model, adapter, warnings, _verbose) do
+  defp print_validation_results(model, targets, warnings, _verbose) do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
 
     extra_projs =
@@ -318,7 +385,7 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     IO.puts("Model:      #{inspect(model)}")
-    IO.puts("Adapter:    #{inspect(adapter)}")
+    print_targets(targets)
     IO.puts("Commands:   #{length(commands)}")
     IO.puts("Extra:      #{length(extra_projs)}")
 
@@ -329,6 +396,16 @@ defmodule Mix.Tasks.Pd.Validate do
       for warning <- warnings do
         IO.puts("  - #{warning}")
       end
+    end
+  end
+
+  defp print_targets([%{adapter: adapter}]), do: IO.puts("Adapter:    #{inspect(adapter)}")
+
+  defp print_targets(targets) do
+    IO.puts("Targets:")
+
+    for target <- targets do
+      IO.puts("  [#{target.index}] #{target.name} (#{inspect(target.adapter)})")
     end
   end
 
@@ -412,7 +489,7 @@ defmodule Mix.Tasks.Pd.Validate do
   defp print_usage do
     IO.puts("""
 
-    Usage: mix pd.validate MODEL [ADAPTER] [OPTIONS]
+    Usage: mix pd.validate MODEL [ADAPTER | --targets EXPR] [OPTIONS]
 
     Arguments:
       MODEL     The model module (e.g., MyApp.TestModel)
@@ -421,6 +498,7 @@ defmodule Mix.Tasks.Pd.Validate do
     Options:
       --verbose    Show detailed information about the configuration
       --strict     Treat warnings as errors (exit code 1)
+      --targets    A `targets:` list as an Elixir expression (instead of ADAPTER)
 
     Examples:
       mix pd.validate MyApp.TestModel MyApp.HTTPAdapter

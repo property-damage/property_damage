@@ -66,7 +66,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
         result =
           PropertyDamage.run(
             model: ShrinkQuality.Model,
-            adapter: ShrinkQuality.CorrectAdapter,
+            targets: [ShrinkQuality.CorrectAdapter],
             seed: unquote(seed),
             max_commands: 20,
             max_runs: 60,
@@ -240,7 +240,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
         assert {:error, failure} =
                  PropertyDamage.run(
                    model: ShrinkQuality.Model,
-                   adapter: LyingDeleteAdapter,
+                   targets: [LyingDeleteAdapter],
                    seed: unquote(seed),
                    max_commands: 20,
                    max_runs: 150,
@@ -315,7 +315,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
     |> Enum.any?(fn ordering ->
       seq = %Sequence{prefix: ordering, branches: nil, suffix: []}
 
-      case Executor.run(seq, model, adapter, adapter_config: %{}) do
+      case Executor.run(seq, model, adapter, config: %{}) do
         {:ok, result} -> result.success
         _ -> false
       end

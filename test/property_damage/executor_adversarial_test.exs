@@ -122,7 +122,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
 
   defp run(model, behaviour) do
     seq = Sequence.linear([%Cmd{tag: :x}])
-    Executor.run(seq, model, Adversary, adapter_config: %{behaviour: behaviour})
+    Executor.run(seq, model, Adversary, config: %{behaviour: behaviour})
   end
 
   test "a raising adapter becomes a graceful adapter_error, not a crash" do
@@ -233,7 +233,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
     seq = Sequence.linear([%Cmd{tag: :x}])
 
     assert_raise ArgumentError, ~r/command specs for model/, fn ->
-      Executor.run(seq, BadCommandSpecModel, Adversary, adapter_config: %{behaviour: :ok})
+      Executor.run(seq, BadCommandSpecModel, Adversary, config: %{behaviour: :ok})
     end
   end
 

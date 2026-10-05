@@ -45,7 +45,7 @@ defmodule PropertyDamage.OnFailureGuardTest do
     result =
       PropertyDamage.run(
         model: Model,
-        adapter: Adapter,
+        targets: [Adapter],
         max_runs: 3,
         max_commands: 3,
         shrink: false,

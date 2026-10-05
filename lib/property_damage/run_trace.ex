@@ -52,7 +52,7 @@ defmodule PropertyDamage.RunTrace do
   """
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{EventQueue, Executor, Generator}
+  alias PropertyDamage.{EventQueue, Executor, Generator, Options}
   alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence
 
@@ -163,18 +163,27 @@ defmodule PropertyDamage.RunTrace do
 
   ## Options
 
-  Required: `:model`, `:adapter`, `:seed`.
+  Required: `:model`, `:targets` (exactly one entry; `mocks:` is not supported),
+  `:seed`.
 
   Optional: `:run_number` (default 0), `:run_nonce` (default fresh crypto
-  entropy, DR-034), `:mint_epoch` (default 0), `:adapter_config`,
-  `:max_commands` (default 50), `:branching`, `:injector_adapters` (fault/async
-  injectors, set up around the run so their events land in the trace),
-  `:source_revision` (default detected).
+  entropy, DR-034), `:mint_epoch` (default 0),
+  `:max_commands` (default 50), `:branching`, `:source_revision` (default
+  detected). The target's `injectors:` (fault/async injectors) are set up around
+  the run so their events land in the trace.
   """
   @spec capture(keyword()) :: t()
   def capture(opts) do
     model = Keyword.fetch!(opts, :model)
-    adapter = Keyword.fetch!(opts, :adapter)
+    target = Options.required_target!(opts)
+
+    Options.reject_unsupported_target_keys!(
+      [target],
+      [:mocks],
+      "PropertyDamage.RunTrace.capture/1"
+    )
+
+    %{adapter: adapter, config: config, injectors: injectors} = target
     seed = Keyword.fetch!(opts, :seed)
     run_number = Keyword.get(opts, :run_number, 0)
 
@@ -183,10 +192,8 @@ defmodule PropertyDamage.RunTrace do
         :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
 
     mint_epoch = Keyword.get(opts, :mint_epoch, 0)
-    adapter_config = Keyword.get(opts, :adapter_config, %{})
     max_commands = Keyword.get(opts, :max_commands, 50)
     branching = Keyword.get(opts, :branching)
-    injector_adapters = Keyword.get(opts, :injector_adapters, [])
 
     gen_opts =
       [max_commands: max_commands] ++ if(branching, do: [branching: branching], else: [])
@@ -195,16 +202,16 @@ defmodule PropertyDamage.RunTrace do
     plan = model |> Generator.generate_sequence(gen_opts) |> Generator.generate_value(run_seed)
 
     if function_exported?(model, :setup_each, 1) do
-      model.setup_each(%{adapter_config: adapter_config, run_number: run_number, capture: true})
+      model.setup_each(%{adapter_config: config, run_number: run_number, capture: true})
     end
 
     {:ok, event_queue} = EventQueue.start_link()
-    setup_injectors(injector_adapters, event_queue)
+    setup_injectors(injectors, event_queue)
 
     try do
       {:ok, result} =
         Executor.run(plan, model, adapter,
-          adapter_config: adapter_config,
+          config: config,
           event_queue: event_queue,
           rng_seed: run_seed,
           run_nonce: run_nonce,
@@ -229,25 +236,25 @@ defmodule PropertyDamage.RunTrace do
         outcome: outcome_of(result)
       )
     after
-      teardown_injectors(injector_adapters)
+      teardown_injectors(injectors)
       EventQueue.stop(event_queue)
 
       if function_exported?(model, :teardown_each, 1) do
-        model.teardown_each(%{adapter_config: adapter_config, run_number: run_number})
+        model.teardown_each(%{adapter_config: config, run_number: run_number})
       end
     end
   end
 
   # Injector-adapter lifecycle for capture (mirrors the exploration run loop):
   # setup receives the event queue so injected events land in the run's log.
-  defp setup_injectors(injector_adapters, event_queue) do
-    for adapter <- injector_adapters, function_exported?(adapter, :setup, 1) do
+  defp setup_injectors(injectors, event_queue) do
+    for adapter <- injectors, function_exported?(adapter, :setup, 1) do
       adapter.setup(%{event_queue: event_queue})
     end
   end
 
-  defp teardown_injectors(injector_adapters) do
-    for adapter <- injector_adapters, function_exported?(adapter, :teardown, 1) do
+  defp teardown_injectors(injectors) do
+    for adapter <- injectors, function_exported?(adapter, :teardown, 1) do
       adapter.teardown(%{})
     end
   end

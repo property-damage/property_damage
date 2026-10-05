@@ -124,7 +124,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
 
   defp run(opts) do
     PropertyDamage.run(
-      [model: Model, adapter: Adapter, max_commands: 2, shrink: false, validate: false] ++ opts
+      [model: Model, targets: [Adapter], max_commands: 2, shrink: false, validate: false] ++ opts
     )
   end
 
@@ -244,7 +244,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
       result =
         PropertyDamage.run(
           model: Model,
-          adapter: SetupFailAdapter,
+          targets: [SetupFailAdapter],
           max_commands: 2,
           shrink: false,
           validate: false,
@@ -263,8 +263,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
       assert_raise RuntimeError, ~r/injector setup boom/, fn ->
         PropertyDamage.run(
           model: Model,
-          adapter: Adapter,
-          injector_adapters: [LeakProbeInjector],
+          targets: [{Adapter, injectors: [LeakProbeInjector]}],
           max_commands: 2,
           shrink: false,
           validate: false,
@@ -290,13 +289,12 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
       assert {:error, _} =
                PropertyDamage.run(
                  model: LifecycleModel,
-                 adapter: Adapter,
+                 targets: [{Adapter, config: %{test_pid: pid}}],
                  max_commands: 2,
                  shrink: false,
                  validate: false,
                  seed_library: path,
-                 max_runs: 1,
-                 adapter_config: %{test_pid: pid}
+                 max_runs: 1
                )
 
       assert_received {:lifecycle, :setup_each,

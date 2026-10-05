@@ -21,7 +21,7 @@ defmodule PropertyDamage.RunComparison.ScanTest do
     RunComparison.scan(
       seeds: seeds,
       runs: runs,
-      capture: [model: Model, adapter: Adapter, adapter_config: config]
+      capture: [model: Model, targets: [{Adapter, config: config}]]
     )
   end
 
@@ -80,7 +80,7 @@ defmodule PropertyDamage.RunComparison.ScanTest do
 
     test "requires :seeds and :capture and defaults :runs", %{config: config} do
       assert_raise NimbleOptions.ValidationError, fn ->
-        RunComparison.scan(capture: [model: Model, adapter: Adapter, adapter_config: config])
+        RunComparison.scan(capture: [model: Model, targets: [{Adapter, config: config}]])
       end
 
       assert_raise NimbleOptions.ValidationError, fn ->
@@ -95,7 +95,7 @@ defmodule PropertyDamage.RunComparison.ScanTest do
       {_traces, comparison} =
         RunComparison.investigate(
           runs: 4,
-          capture: [model: Model, adapter: Adapter, seed: @flaky_seed, adapter_config: config]
+          capture: [model: Model, targets: [{Adapter, config: config}], seed: @flaky_seed]
         )
 
       summary = RunComparison.outcome_summary(comparison)

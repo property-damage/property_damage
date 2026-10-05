@@ -122,7 +122,7 @@ defmodule PropertyDamage.ErrorTest do
       result = Error.format_config_error(:missing_adapter, nil)
 
       assert result =~ "Missing Adapter"
-      assert result =~ ":adapter option is required"
+      assert result =~ ":targets option is required"
     end
 
     test "formats invalid_max_commands" do
