@@ -257,6 +257,18 @@ defmodule PropertyDamage.Options do
   end
 
   @doc false
+  # Resolves the targets for entry points that re-run every target of a
+  # failure (`PropertyDamage.shrink_further/2`): the `targets:` override (one or
+  # more entries, reference first) or else `default_entries` (the report's
+  # `targets`). Raises on a retired run-level key or a malformed entry.
+  @spec override_targets!(keyword(), [term()]) :: [PropertyDamage.Target.t()]
+  def override_targets!(opts, default_entries) do
+    reject_retired_targets!(opts)
+    entries = Keyword.get(opts, :targets, default_entries)
+    NimbleOptions.validate!([targets: entries], @targets_only_schema)[:targets]
+  end
+
+  @doc false
   # Validates a required `targets:` entry list for entry points with no
   # NimbleOptions schema of their own and returns the single target.
   @spec required_target!(keyword()) :: PropertyDamage.Target.t()

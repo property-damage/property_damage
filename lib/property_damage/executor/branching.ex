@@ -36,7 +36,8 @@ defmodule PropertyDamage.Executor.Branching do
         check_mode,
         external_markers,
         rng_seed \\ nil,
-        mint \\ {nil, 0}
+        mint \\ {nil, 0},
+        telemetry \\ nil
       ) do
     initial_state =
       Executor.build_initial_state(
@@ -48,7 +49,8 @@ defmodule PropertyDamage.Executor.Branching do
         external_markers,
         sequence.registry,
         rng_seed,
-        mint
+        mint,
+        telemetry
       )
 
     # DR-024: @check at: :startup runs once on the shared initial state,

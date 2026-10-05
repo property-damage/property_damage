@@ -13,15 +13,17 @@ defmodule Mix.Tasks.Pd.Reshrink do
 
       mix pd.reshrink path/to/failure.pd [--strategy exhaustive] [--output smaller.pd]
 
-  The failure file records which model and adapter produced it, so no
+  The failure file records which model and targets produced it, so no
   `--model` / `--adapter` flags are needed. Those modules must be compiled and
-  loadable in the current project, otherwise the file cannot be decoded.
+  loadable in the current project, otherwise the file cannot be decoded. The
+  re-shrink runs every target the failure records, with the failure's
+  `concurrency`, and keeps the failure's kind and failing target.
 
   ## Cost
 
   Unlike a single replay, re-shrinking exercises the System Under Test heavily:
-  the shrinker sets up the adapter and executes many candidate sub-sequences, and
-  a final run re-checks the result. Against a live or HTTP-backed adapter this
+  the shrinker sets every target up and executes many candidate sub-sequences,
+  and a final run re-checks the result. Against a live or HTTP-backed adapter this
   hits the real service repeatedly. Against an in-memory adapter it is cheap.
 
   ## Output

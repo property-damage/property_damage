@@ -59,6 +59,14 @@ defmodule PropertyDamage.Variant do
   one-variant run therefore folds the same events in the same order as
   `PropertyDamage.Executor.run/4` on the same sequence.
 
+  ## Telemetry
+
+  Every command the variant steps and every check it evaluates emits the
+  `[:property_damage, :command, ...]` and `[:property_damage, :check, ...]`
+  events (`PropertyDamage.Telemetry`) with `variant: %{index, name}` naming
+  this target and the run number. Whether a handler listens is decided once,
+  when the variant sets up.
+
   ## Randomness
 
   A new process draws its own entropy for `:rand`. Before anything runs, the
@@ -118,7 +126,8 @@ defmodule PropertyDamage.Variant do
     Generator,
     ResourcePoller,
     StatePoller,
-    Target
+    Target,
+    Telemetry
   }
 
   alias PropertyDamage.Executor.Stepping
@@ -275,6 +284,7 @@ defmodule PropertyDamage.Variant do
       commands: opts |> Keyword.fetch!(:commands) |> List.to_tuple(),
       placeholder_registry: Keyword.fetch!(opts, :placeholder_registry),
       run_seed: run_seed,
+      run_number: run_number,
       run_nonce: Keyword.get(opts, :run_nonce),
       mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
@@ -419,7 +429,12 @@ defmodule PropertyDamage.Variant do
         rng_seed: state.run_seed,
         run_nonce: state.run_nonce,
         mint_epoch: state.mint_epoch,
-        on_resource_poller_start: guard_now_fun(state.guardian)
+        on_resource_poller_start: guard_now_fun(state.guardian),
+        telemetry:
+          Telemetry.engine_context(
+            %{index: state.target.index, name: state.target.name},
+            state.run_number
+          )
       )
 
     ctx = %Stepping.Context{

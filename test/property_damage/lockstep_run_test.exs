@@ -168,7 +168,11 @@ defmodule PropertyDamage.LockstepRunTest do
 
   describe "root observations and divergences" do
     test "a divergence names the root, the variant and both observations, injected events first" do
-      report = failure!([step("a", %{behavior: :inject}), step("b", %{behavior: :inject_shift})])
+      # Unshrunk, so the observations are those of the generated command.
+      report =
+        failure!([step("a", %{behavior: :inject}), step("b", %{behavior: :inject_shift})],
+          shrink: false
+        )
 
       assert report.kind == :diverged
       divergence = Failure.detail(report.failure_reason)
@@ -240,12 +244,17 @@ defmodule PropertyDamage.LockstepRunTest do
       recorder = start_recorder()
 
       report =
-        failure!([step("a"), step("b", %{behavior: :shift, recorder: recorder})], max_runs: 4)
+        failure!([step("a"), step("b", %{behavior: :shift, recorder: recorder})],
+          max_runs: 4,
+          shrink: false
+        )
 
       assert report.kind == :diverged
       assert report.run_number == 0
       assert report.failed_at_index == 0
-      assert entered(recorder, "b") == [0]
+      # Run 0 stepped root 0 and stopped; the second 0 is the failure's
+      # reproduction, a re-execution of run 0. No later run started.
+      assert entered(recorder, "b") == [0, 0]
     end
 
     test "a probe root that retries before settling is compared on its settled events" do
@@ -299,7 +308,8 @@ defmodule PropertyDamage.LockstepRunTest do
             step("c", %{recorder: recorder})
           ],
           model: GuardedStepModel,
-          equivalence: Comparison.ignore_fields([:mark])
+          equivalence: Comparison.ignore_fields([:mark]),
+          shrink: false
         )
 
       assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} = report
@@ -308,9 +318,10 @@ defmodule PropertyDamage.LockstepRunTest do
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =
                report.failure_reason
 
-      assert entered(recorder, "a") == [0, 1]
-      assert entered(recorder, "b") == [0, 1]
-      assert entered(recorder, "c") == [0]
+      # The run, then the failure's reproduction, each stopping at root 1.
+      assert entered(recorder, "a") == [0, 1, 0, 1]
+      assert entered(recorder, "b") == [0, 1, 0, 1]
+      assert entered(recorder, "c") == [0, 0]
     end
 
     test "under :parallel a check failure stops the run before the next root starts" do
@@ -354,13 +365,17 @@ defmodule PropertyDamage.LockstepRunTest do
             step("a", %{counter: counter}),
             step("b", %{counter: counter, raise_on_run: 2})
           ],
-          max_runs: 5
+          max_runs: 5,
+          shrink: false
         )
 
       assert %{kind: :execution_failed, run_number: 2, variant: %{index: 1}} = report
 
-      # No run after the failing one was started.
-      assert Agent.get(counter, & &1) == %{"a" => 3, "b" => 3}
+      # Runs 0 to 2, then the reproduction of run 2 (which does not raise, so
+      # the report keeps the original run). No run after the failing one was
+      # started.
+      assert Agent.get(counter, & &1) == %{"a" => 4, "b" => 4}
+      assert report.trace.plan_source == :generated
     end
   end
 

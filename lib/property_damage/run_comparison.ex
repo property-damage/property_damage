@@ -378,7 +378,11 @@ defmodule PropertyDamage.RunComparison do
     if length(sigs) > 1, do: sigs, else: []
   end
 
-  defp failure_signature({:fail, reason}), do: PropertyDamage.Shrinker.failure_signature(reason)
+  # A trace records one target's run, so every failure it holds happened in
+  # target 0.
+  defp failure_signature({:fail, reason}),
+    do: PropertyDamage.Shrinker.failure_signature(reason, 0)
+
   defp failure_signature(_), do: nil
 
   # ---- Field extraction -----------------------------------------------------

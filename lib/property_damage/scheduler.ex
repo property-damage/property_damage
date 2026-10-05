@@ -128,6 +128,10 @@ defmodule PropertyDamage.Scheduler do
     * `:mint_epoch` - the mint epoch every target's run uses for client-minted
       values (DR-034); optional, default `0`, the exploration run's epoch
     * `:stutter_config`, `:check_mode` - passed to every variant (optional)
+    * `:placeholder_registry` - the registry the commands' placeholders resolve
+      against (DR-021); optional, default the registry built from `:commands`.
+      A shrunk sequence passes its own registry, whose producer positions were
+      remapped onto the shrunk command list.
 
   Returns `{:ok, run}`; see `t:run/0`.
   """
@@ -163,7 +167,7 @@ defmodule PropertyDamage.Scheduler do
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
       on_adapter_error: if(length(targets) > 1, do: :continue, else: :halt),
-      registry: PlaceholderRegistry.build(commands)
+      registry: Keyword.get(opts, :placeholder_registry) || PlaceholderRegistry.build(commands)
     }
   end
 

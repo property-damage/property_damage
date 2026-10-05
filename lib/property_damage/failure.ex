@@ -103,7 +103,7 @@ defmodule PropertyDamage.Failure do
   A `%Failure{}` is the single public vocabulary for *why* a run stopped. It
   replaces the loose family of `{:tag, ...}` tuples that earlier versions used as
   `failure_reason`. Every consumer that once matched a raw tuple
-  (`Shrinker.failure_signature/1`, `FailureReport`, the formatter, the exporters,
+  (`Shrinker.failure_signature/2`, `FailureReport`, the formatter, the exporters,
   `FailureIntelligence`) now reads a `%Failure{}`.
 
   ## Shape
@@ -438,10 +438,11 @@ defmodule PropertyDamage.Failure do
   ]
 
   @doc """
-  Build a minimal `%Failure{}` carrying only a `{kind, name}` signature.
+  Build a minimal `%Failure{}` carrying only a kind and a name.
 
-  Used by the shrinker to reconstruct a comparable failure from a signature; the
-  `detail` is left `nil`. Names are only retained for `Check` kinds.
+  Used by the shrinker to reconstruct a comparable failure from the kind and
+  name of a failure signature; the `detail` is left `nil`. Names are only
+  retained for `Check` kinds.
   """
   @spec from_signature(kind(), atom() | nil) :: t()
   def from_signature(kind, name) when kind in @check_kinds do

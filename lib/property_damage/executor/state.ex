@@ -84,6 +84,9 @@ defmodule PropertyDamage.Executor.State do
       linked to the process that started it (a per-command Task), so an owner
       that must reap every poller even when it is killed mid-command
       (`PropertyDamage.Variant`) learns of it here. `nil` everywhere else.
+    * `:telemetry` - `nil`, or the context command and check telemetry is
+      emitted with (`%{variant: %{index, name}, run_number: n}`, see
+      `PropertyDamage.Telemetry`); `nil` when nothing listens.
   """
 
   @enforce_keys [
@@ -126,7 +129,8 @@ defmodule PropertyDamage.Executor.State do
     fold_counter: 0,
     command_fold_ordinals: %{},
     last_execute_us: nil,
-    on_resource_poller_start: nil
+    on_resource_poller_start: nil,
+    telemetry: nil
   ]
 
   @type t :: %__MODULE__{
@@ -159,6 +163,7 @@ defmodule PropertyDamage.Executor.State do
           fold_counter: non_neg_integer(),
           command_fold_ordinals: %{term() => non_neg_integer()},
           last_execute_us: non_neg_integer() | nil,
-          on_resource_poller_start: (pid() -> term()) | nil
+          on_resource_poller_start: (pid() -> term()) | nil,
+          telemetry: map() | nil
         }
 end

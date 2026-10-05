@@ -392,7 +392,8 @@ defmodule PropertyDamage.Executor.Finalization do
            event_log,
            state.check_counters,
            mode,
-           failures
+           failures,
+           Map.get(state, :telemetry)
          ) do
       {:ok, counters, failures} ->
         {:ok, %{state | check_counters: counters}, failures}
@@ -527,7 +528,8 @@ defmodule PropertyDamage.Executor.Finalization do
            event_log,
            state.check_counters,
            mode,
-           Map.get(state, :check_failures, [])
+           Map.get(state, :check_failures, []),
+           Map.get(state, :telemetry)
          ) do
       # DR-025: an async every: check tripped during the await window under
       # :halt mode. Stop pollers and surface via :async_halt (checked in

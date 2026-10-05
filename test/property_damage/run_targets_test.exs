@@ -9,7 +9,7 @@ defmodule PropertyDamage.RunTargetsTest do
   alias PropertyDamage.{EventQueue, Failure, FailureReport, Generator, Persistence, Sequence}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.RunResult
-  alias PropertyDamage.RunTargetsTest.{Sink, SinkModel}
+  alias PropertyDamage.RunTargetsTest.{HookModel, Sink, SinkModel}
 
   alias PropertyDamage.Test.Lockstep.{
     GuardedStepModel,
@@ -62,8 +62,8 @@ defmodule PropertyDamage.RunTargetsTest do
         assert report.kind == :diverged
         assert report.variant == %{index: 1, name: "b"}
         assert report.failed_at_index == 0
-        assert report.shrink_iterations == 0
-        assert FailureReport.shrunk_sequence(report) == report.original_sequence
+        # Shrunk to the divergent root alone, in the same target.
+        assert report |> FailureReport.shrunk_sequence() |> Sequence.command_count() == 1
 
         assert %Failure{} = reason = report.failure_reason
         assert Failure.kind(reason) == :diverged
@@ -353,6 +353,52 @@ defmodule PropertyDamage.RunTargetsTest do
   # Helpers
   # ==========================================================================
 
+  describe "run hooks and check mode" do
+    test "check_mode: :record keeps executing after a failing check and reports the first one" do
+      sequence = generated(GuardedStepModel, @seed, 0, 6)
+      assert Sequence.command_count(sequence) >= 3
+
+      assert {:error, report} =
+               run([step("rec", %{bad_at: 1})],
+                 model: GuardedStepModel,
+                 max_commands: 6,
+                 check_mode: :record,
+                 shrink: false
+               )
+
+      assert report.kind == :check_failed
+      assert report.failed_at_index == 1
+
+      assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =
+               report.failure_reason
+
+      # Under :halt the run stops at command 1; under :record every command ran.
+      assert report.state_at_failure[Ledger].commands == Sequence.command_count(sequence)
+    end
+
+    test "teardown_each runs at the end of each run, before the next setup_each" do
+      assert {:ok, %{runs: 3}} =
+               run([step("hooks", %{hook_pid: self()})], model: HookModel, max_runs: 3)
+
+      assert hook_calls([]) == [
+               {:setup_each, 0},
+               {:teardown_each, 0},
+               {:setup_each, 1},
+               {:teardown_each, 1},
+               {:setup_each, 2},
+               {:teardown_each, 2}
+             ]
+    end
+  end
+
+  defp hook_calls(acc) do
+    receive do
+      {:hook, call, run_number} -> hook_calls([{call, run_number} | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
   defp last_progress do
     collect_progress([]) |> List.last()
   end
@@ -418,5 +464,27 @@ defmodule PropertyDamage.RunTargetsTest do
 
     @impl true
     def check_projections, do: [PropertyDamage.RunTargetsTest.Sink]
+  end
+
+  defmodule HookModel do
+    @moduledoc false
+    # Reports each setup_each/teardown_each call with its run number.
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: [Step]
+
+    @impl true
+    def command_sequence_projection, do: Ledger
+
+    def setup_each(%{adapter_config: config, run_number: run}) do
+      send(config.hook_pid, {:hook, :setup_each, run})
+      :ok
+    end
+
+    def teardown_each(%{adapter_config: config, run_number: run}) do
+      send(config.hook_pid, {:hook, :teardown_each, run})
+      :ok
+    end
   end
 end

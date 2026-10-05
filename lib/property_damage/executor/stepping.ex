@@ -106,6 +106,8 @@ defmodule PropertyDamage.Executor.Stepping do
     * `:on_resource_poller_start` - called with each resource poller's pid as
       soon as an adapter starts it, from the process running `execute/3`
       (default `nil`; see `PropertyDamage.Executor.State`)
+    * `:telemetry` - the context `step/4` emits command and check telemetry
+      with (see `PropertyDamage.Telemetry`); default `nil`, which emits none
   """
   @spec init_state(module(), keyword()) :: map()
   def init_state(model, opts \\ []) do
@@ -119,7 +121,8 @@ defmodule PropertyDamage.Executor.Stepping do
         Keyword.get(opts, :external_markers, []),
         Keyword.get(opts, :placeholder_registry),
         Keyword.get(opts, :rng_seed),
-        {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
+        {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)},
+        Keyword.get(opts, :telemetry)
       )
 
     %{state | on_resource_poller_start: Keyword.get(opts, :on_resource_poller_start)}
@@ -225,7 +228,8 @@ defmodule PropertyDamage.Executor.Stepping do
            event_log,
            state.check_counters,
            state.check_mode,
-           state.check_failures
+           state.check_failures,
+           state.telemetry
          ) do
       {:ok, counters, failures} ->
         drained = %{drained | check_counters: counters, check_failures: failures}

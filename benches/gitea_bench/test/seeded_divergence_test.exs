@@ -59,8 +59,10 @@ defmodule SeededDivergenceTest do
     divergence = Failure.detail(divergent.failure_reason)
     assert is_integer(divergence.root)
 
+    # The report describes the shrunk reproduction, so its root indexes the
+    # shrunk sequence.
     assert %CreateLabel{} =
-             Enum.at(Sequence.to_list(divergent.original_sequence), divergence.root)
+             Enum.at(Sequence.to_list(FailureReport.shrunk_sequence(divergent)), divergence.root)
 
     assert divergent.variant == %{index: 1, name: "ui"}
 

@@ -138,13 +138,14 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
           failed_at_index: result.failed_at_index,
           failure_reason: result.failure_reason,
           model: Model,
-          target: %PropertyDamage.Target{
-            adapter: PollerOvershootAdapter,
-            config: %{},
-            name: "adapter",
-            index: 0
-          },
-          event_queue: queue
+          targets: [
+            %PropertyDamage.Target{
+              adapter: PollerOvershootAdapter,
+              config: %{},
+              name: "adapter",
+              index: 0
+            }
+          ]
         )
       after
         EventQueue.stop(queue)

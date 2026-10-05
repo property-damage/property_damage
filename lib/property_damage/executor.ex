@@ -151,6 +151,8 @@ defmodule PropertyDamage.Executor do
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
   - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
   - `:check_mode` - How to handle checks (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
+  - `:telemetry` - The context command and check telemetry is emitted with
+    (`PropertyDamage.Telemetry`); default `nil`, which emits none
 
   ## Returns
 
@@ -172,6 +174,7 @@ defmodule PropertyDamage.Executor do
     # Client-minted run-scoped value inputs (DR-034): the run nonce and the
     # mint epoch for this SUT execution (default epoch 0 = the recorded run).
     mint = {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
+    telemetry = Keyword.get(opts, :telemetry)
 
     with {:ok, adapter_context} <- adapter.setup(config) do
       try do
@@ -187,7 +190,8 @@ defmodule PropertyDamage.Executor do
             check_mode,
             external_markers,
             rng_seed,
-            mint
+            mint,
+            telemetry
           )
 
         {:ok, result}
@@ -266,7 +270,8 @@ defmodule PropertyDamage.Executor do
           check_mode(),
           [atom()],
           integer() | nil,
-          {non_neg_integer() | nil, non_neg_integer()}
+          {non_neg_integer() | nil, non_neg_integer()},
+          map() | nil
         ) ::
           result()
   def execute_sequence(
@@ -280,7 +285,8 @@ defmodule PropertyDamage.Executor do
         check_mode \\ :halt,
         external_markers \\ [],
         rng_seed \\ nil,
-        mint \\ {nil, 0}
+        mint \\ {nil, 0},
+        telemetry \\ nil
       )
 
   def execute_sequence(
@@ -294,7 +300,8 @@ defmodule PropertyDamage.Executor do
         check_mode,
         external_markers,
         rng_seed,
-        mint
+        mint,
+        telemetry
       ) do
     # Linear sequence: just execute prefix ++ suffix
     commands = Sequence.to_list(sequence)
@@ -311,7 +318,8 @@ defmodule PropertyDamage.Executor do
       external_markers,
       sequence.registry,
       rng_seed,
-      mint
+      mint,
+      telemetry
     )
   end
 
@@ -326,7 +334,8 @@ defmodule PropertyDamage.Executor do
         check_mode,
         external_markers,
         rng_seed,
-        mint
+        mint,
+        telemetry
       ) do
     # Branching sequence: execute prefix, branches, suffix
     Branching.execute_branching(
@@ -340,7 +349,8 @@ defmodule PropertyDamage.Executor do
       check_mode,
       external_markers,
       rng_seed,
-      mint
+      mint,
+      telemetry
     )
   end
 
@@ -356,7 +366,8 @@ defmodule PropertyDamage.Executor do
         check_mode,
         external_markers,
         rng_seed,
-        mint
+        mint,
+        telemetry
       )
       when is_list(commands) do
     execute_linear(
@@ -371,7 +382,8 @@ defmodule PropertyDamage.Executor do
       external_markers,
       nil,
       rng_seed,
-      mint
+      mint,
+      telemetry
     )
   end
 
@@ -391,7 +403,8 @@ defmodule PropertyDamage.Executor do
          external_markers,
          registry,
          rng_seed,
-         mint
+         mint,
+         telemetry
        ) do
     initial_state =
       build_initial_state(
@@ -403,7 +416,8 @@ defmodule PropertyDamage.Executor do
         external_markers,
         registry,
         rng_seed,
-        mint
+        mint,
+        telemetry
       )
 
     case run_startup_checks(initial_state) do
@@ -533,7 +547,8 @@ defmodule PropertyDamage.Executor do
         external_markers,
         registry,
         rng_seed \\ nil,
-        mint \\ {nil, 0}
+        mint \\ {nil, 0},
+        telemetry \\ nil
       ) do
     {run_nonce, mint_epoch} = mint
 
@@ -566,7 +581,8 @@ defmodule PropertyDamage.Executor do
       model: model,
       external_markers: external_markers,
       event_queue: event_queue,
-      command_specs: build_command_specs(model)
+      command_specs: build_command_specs(model),
+      telemetry: telemetry
     }
   end
 
@@ -625,6 +641,12 @@ defmodule PropertyDamage.Executor do
     # Only a command that reaches the adapter's execute/3 records a time.
     state = %{state | last_execute_us: nil}
 
+    PropertyDamage.Telemetry.command_span(state.telemetry, command, index, fn ->
+      execute_any_command(command, index, state, model, adapter, adapter_context, event_queue)
+    end)
+  end
+
+  defp execute_any_command(command, index, state, model, adapter, adapter_context, event_queue) do
     if Nemesis.nemesis_command?(command) do
       PropertyDamage.Executor.Nemesis.execute_nemesis_command(
         command,
@@ -1025,7 +1047,8 @@ defmodule PropertyDamage.Executor do
            event_log,
            state.check_counters,
            check_mode,
-           check_failures
+           check_failures,
+           state.telemetry
          ) do
       {:halt, async_name, async_reason, async_index, async_counters} ->
         # DR-025: attribute the failure to the offending event's command_index
@@ -1045,7 +1068,8 @@ defmodule PropertyDamage.Executor do
           command_index: index,
           step_count: state.step_count + 1,
           projections: projections,
-          branch_id: state.branch_id
+          branch_id: state.branch_id,
+          telemetry: state.telemetry
         }
 
         case run_checks(
@@ -1254,7 +1278,8 @@ defmodule PropertyDamage.Executor do
                  projection_state,
                  checks,
                  step_ctx,
-                 counters
+                 counters,
+                 Map.get(check_ctx, :telemetry)
                ) do
             {:ok, new_counters} ->
               {:cont, {:ok, new_counters, failures}}
@@ -1300,7 +1325,8 @@ defmodule PropertyDamage.Executor do
          projection_state,
          checks,
          step_ctx,
-         counters
+         counters,
+         telemetry
        ) do
     alias PropertyDamage.Model.Projection
 
@@ -1329,17 +1355,15 @@ defmodule PropertyDamage.Executor do
         # observation path (DR-025), which dispatches through run_step_checks/7.
         fired = bump_fired(acc_counters, projection, check.name)
 
-        # Execute check - checks raise on failure
-        try do
-          check_fn = check.function_name
-          apply(projection, check_fn, [projection_state, step_ctx.command_or_event])
-          # Success: no exception raised
-          {:cont, {:ok, fired}}
-        rescue
-          e ->
-            # Check failed by raising exception - capture stacktrace
-            stacktrace = __STACKTRACE__
-            {:halt, {:error, check.name, {e, stacktrace}, fired}}
+        # Execute check - checks raise on failure, captured with the stacktrace
+        case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
+               apply(projection, check.function_name, [
+                 projection_state,
+                 step_ctx.command_or_event
+               ])
+             end) do
+          :ok -> {:cont, {:ok, fired}}
+          {:raised, e, stacktrace} -> {:halt, {:error, check.name, {e, stacktrace}, fired}}
         end
       else
         {:cont, {:ok, acc_counters}}
@@ -1401,8 +1425,8 @@ defmodule PropertyDamage.Executor do
                checks,
                phase,
                check_mode,
-               recorded,
-               acc_counters
+               {recorded, acc_counters},
+               Map.get(state, :telemetry)
              ) do
           {:ok, new_recorded, new_counters} -> {:cont, {:ok, new_recorded, new_counters}}
           {:halt, name, reason, halt_counters} -> {:halt, {:halt, name, reason, halt_counters}}
@@ -1417,8 +1441,8 @@ defmodule PropertyDamage.Executor do
          checks,
          phase,
          check_mode,
-         recorded,
-         counters
+         {recorded, counters},
+         telemetry
        ) do
     require Logger
 
@@ -1428,13 +1452,13 @@ defmodule PropertyDamage.Executor do
       # still counts as exercised.
       fired = bump_fired(acc_counters, projection, check.name)
 
-      try do
-        apply(projection, check.function_name, [projection_state, phase])
-        {:cont, {:ok, acc_recorded, fired}}
-      rescue
-        e ->
-          stacktrace = __STACKTRACE__
+      case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
+             apply(projection, check.function_name, [projection_state, phase])
+           end) do
+        :ok ->
+          {:cont, {:ok, acc_recorded, fired}}
 
+        {:raised, e, stacktrace} ->
           case check_mode do
             :halt ->
               {:halt, {:halt, check.name, {e, stacktrace}, fired}}
@@ -1645,10 +1669,30 @@ defmodule PropertyDamage.Executor do
   # locates the offending event for the shrinker (nil for a pure injector event).
   # Shared with PropertyDamage.Executor.Finalization (settle/drain). DR-029.
   @doc false
-  def check_async(_model, _projs_before, _log_before, _event_log, counters, :disabled, failures),
-    do: {:ok, counters, failures}
+  def check_async(
+        model,
+        projs_before,
+        log_before,
+        event_log,
+        counters,
+        mode,
+        failures,
+        telemetry \\ nil
+      )
 
-  def check_async(model, projs_before, log_before, event_log, counters, mode, failures) do
+  def check_async(
+        _model,
+        _projs_before,
+        _log_before,
+        _event_log,
+        counters,
+        :disabled,
+        failures,
+        _
+      ),
+      do: {:ok, counters, failures}
+
+  def check_async(model, projs_before, log_before, event_log, counters, mode, failures, telemetry) do
     new_count = length(event_log) - length(log_before)
 
     new_entries = event_log |> Enum.take(new_count) |> Enum.reverse()
@@ -1658,7 +1702,7 @@ defmodule PropertyDamage.Executor do
                                                                             {projs, c, f} ->
         projs = Events.update_projections(projs, entry.event)
 
-        case check_async_event(model, projs, entry.event, entry.command_index, c, mode, f) do
+        case check_async_event(model, projs, entry, c, mode, f, telemetry) do
           {:ok, c, f} -> {:cont, {projs, c, f}}
           {:halt, name, reason, c} -> {:halt, {:halt, name, reason, entry.command_index, c}}
         end
@@ -1676,7 +1720,8 @@ defmodule PropertyDamage.Executor do
   # `every: N` sampling counts async observations. `step_type` is `:event`, so
   # `every: :command` checks do NOT fire (the opt-out) while `every: :event`
   # / `every: 1` / `every: Module` do.
-  defp check_async_event(model, projections, event, command_index, counters, mode, failures) do
+  defp check_async_event(model, projections, entry, counters, mode, failures, telemetry) do
+    event = entry.event
     module = event.__struct__
 
     counters =
@@ -1686,7 +1731,7 @@ defmodule PropertyDamage.Executor do
       |> Map.update(module, 1, &(&1 + 1))
 
     step_ctx = %{step_type: :event, module: module, command_or_event: event}
-    check_ctx = %{command: nil, command_index: command_index}
+    check_ctx = %{command: nil, command_index: entry.command_index, telemetry: telemetry}
 
     case run_step_checks(model, projections, step_ctx, counters, mode, failures, check_ctx) do
       {:ok, counters, failures} -> {:ok, counters, failures}
