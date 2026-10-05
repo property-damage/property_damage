@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -118,7 +118,7 @@ Because stutter decisions are reproducible, stutter failures (idempotency violat
 The system SHALL support injector adapters that receive events from external sources (webhooks, callbacks, message queues) and push them to a shared event queue for the executor to process.
 
 #### Scenario: Injector adapter lifecycle
-- **WHEN** injector adapters are configured
+- **WHEN** the run's target lists `injectors:` (DR-043)
 - **THEN** each injector adapter SHALL have its `setup/1` called to start listening
 - **AND** incoming payloads SHALL be transformed via `to_event/1` and pushed to the event queue
 - **AND** `teardown/1` SHALL be called to stop listening after the run completes
@@ -188,10 +188,10 @@ The system SHALL provide a shared event queue where injector adapters push incom
 
 ### Requirement: Mock Service Adapter
 
-The system SHALL support mock service adapters that stand in for third-party services the SUT calls, allowing the SUT to reach controlled mock endpoints instead of real services. Mock adapters SHALL maintain state, respond to SUT requests, and optionally inject events. Mock services SHALL be reachable through the public `PropertyDamage.run/1` API via the `mock_services:` option, which accepts a list of mock adapter modules or `{module, config}` tuples.
+The system SHALL support mock service adapters that stand in for third-party services the SUT calls, allowing the SUT to reach controlled mock endpoints instead of real services. Mock adapters SHALL maintain state, respond to SUT requests, and optionally inject events. Mock services SHALL be reachable through the public `PropertyDamage.run/1` API via the `mocks:` key of the run's target (DR-043), which accepts a list of mock adapter modules or `{module, config_map}` tuples.
 
 #### Scenario: Framework owns the per-run mock lifecycle
-- **WHEN** a run declares `mock_services:`
+- **WHEN** a run's target declares `mocks:`
 - **THEN** the framework SHALL start a mock service registry for the run, register each declared mock (initializing its state), and call each mock's `setup/1` with the entry's config merged with the framework channels (`:registry` and `:event_queue`)
 - **AND** the framework SHALL call each mock's `teardown/1` and stop the registry at the end of the run
 - **AND** the same registry SHALL be reused across a failure's shrink attempts and the reproduction re-execution, so a mock-dependent failure keeps reproducing as it minimizes
@@ -273,6 +273,69 @@ The system SHALL reject the retired run option `assertion_mode:` before any comm
 - **WHEN** `PropertyDamage.run/1` is called with `assertion_mode:` in its options
 - **THEN** the system SHALL raise `NimbleOptions.ValidationError` with the message "`assertion_mode:` was renamed `check_mode:`"
 - **AND** no command SHALL execute
+
+### Requirement: Targets Carry Every Per-Target Resource (DR-043)
+
+The adapter, its setup configuration, its injector adapters and its mock services SHALL be described only by entries of the `targets:` option. An entry SHALL be an adapter module or `{AdapterModule, keyword}` with the optional keys `name:` (string), `config:` (map, default `%{}`), `injectors:` (list of injector adapter modules, default `[]`) and `mocks:` (list of mock modules or `{module, config_map}` tuples, default `[]`). The system SHALL normalize every entry to a `%PropertyDamage.Target{}` before any command executes.
+
+#### Scenario: Entry defaults
+- **WHEN** `PropertyDamage.run/1` is called with `targets: [MyAdapter]`
+- **THEN** the target SHALL be named `"MyAdapter"`, have index 0, `config: %{}`, `injectors: []` and `mocks: []`
+
+#### Scenario: Config reaches setup unchanged
+- **WHEN** a target declares `config: %{tenant: "t-1"}`
+- **THEN** the adapter's `setup/1` SHALL receive exactly `%{tenant: "t-1"}`, without conversion or merged framework keys
+
+#### Scenario: Mock entries
+- **WHEN** a target declares `mocks: [PayMock, {RiskMock, %{latency_ms: 5}}]`
+- **THEN** each mock SHALL be registered for the run
+- **AND** a bare module SHALL be treated as `{module, %{}}`
+
+### Requirement: Single-Variant Entry Points Take One Target (DR-043)
+
+Every entry point that runs commands, other than `PropertyDamage.Differential.run/1`, SHALL require `targets:` to hold exactly one entry. An entry point whose engine cannot honor a target's `injectors:` or `mocks:` SHALL raise instead of ignoring the key.
+
+#### Scenario: More than one target
+- **WHEN** `PropertyDamage.run/1` is called with a `targets:` list of two entries
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` with the message "expected exactly one `targets:` entry (a single-variant run), got 2; use `PropertyDamage.Differential.run/1` to compare several targets"
+- **AND** no command SHALL execute
+
+#### Scenario: Empty or missing targets
+- **WHEN** `PropertyDamage.run/1` is called with `targets: []` or without `targets:`
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` naming `:targets`
+
+#### Scenario: Unsupported entry key
+- **WHEN** an entry point that starts no mock registry (for example `PropertyDamage.LoadTest.run/1`) receives a target with `mocks:`
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` with the message "`mocks:` is not supported by PropertyDamage.LoadTest.run/1 (targets entry 0)"
+
+### Requirement: Retired Target Keys Are Rejected (DR-043)
+
+The system SHALL reject the run-level options `adapter:`, `adapter_config:`, `injector_adapters:` and `mock_services:`, the per-target options `role:` and `opts:`, and `{Module}` 1-tuple entries before any command executes. Each error SHALL name the replacement. No alias is kept.
+
+#### Scenario: Run started with `adapter:`
+- **WHEN** `PropertyDamage.run/1` is called with `adapter:` in its options
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` with the message "`adapter:` was replaced by `targets:`; pass the adapter module as a `targets:` entry"
+- **AND** the same SHALL hold for `adapter_config:` (replacement `config:`), `injector_adapters:` (replacement `injectors:`) and `mock_services:` (replacement `mocks:`), each message naming `targets:` and the entry key
+
+#### Scenario: Per-target `opts:`
+- **WHEN** a target entry carries `opts:`
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` with the message "targets entry 0: `opts:` was renamed `config:`" (the index is that of the offending entry)
+
+#### Scenario: One-element tuple
+- **WHEN** a target entry is `{MyAdapter}`
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` stating that the entry is malformed and expects an adapter module or `{AdapterModule, keyword}`
+
+### Requirement: Isolation Warning for Targets That Share State (DR-043)
+
+Two targets that run against one system isolate their slices of state through `config:` (for example a tenant, an account or a path prefix). The framework SHALL document this and SHALL NOT provide the isolation itself. `mix pd.validate --targets` SHALL warn for each pair of targets that use the same adapter with an equal `config:`.
+
+#### Scenario: Same adapter and identical config
+- **WHEN** `mix pd.validate MyModel --targets "[{MyAdapter, name: \"a\"}, {MyAdapter, name: \"b\"}]"` is run
+- **THEN** the task SHALL print a warning naming both targets with their indexes, the shared adapter, and advice to give each target its own `config:`
+
+#### Scenario: Same adapter and distinct config
+- **WHEN** the two targets carry different `config:` maps (for example distinct tenants)
+- **THEN** the task SHALL print no isolation warning
 
 ### Requirement: Seed Library Replay Phase
 

@@ -1,6 +1,6 @@
 # DR-035: Run Comparison over Full Traces
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-043: the `adapter:` option of `RunTrace.capture/1` and `RunComparison.investigate/1` is now a `targets:` entry.
 **Date:** 2026-07-02
 
 > Part of the run-comparison campaign (with DR-033, DR-034, DR-036).

@@ -50,7 +50,7 @@ Every record is **self-contained**: it carries enough context and rationale to s
 | [DR-032](DR-032-core-adapter-timeout-and-ambient-state-removal.md) | Core Adapter Timeout + Ambient-State Removal | Per-command adapter timeout in the core engine; the last ambient-state seams are removed. Recorded at decision time. |
 | [DR-033](DR-033-run-trace-execution-record.md) | Run Trace as the Execution Record | A `%RunTrace{}` is the one execution record (plan, event log, executed map); `FailureReport` deep structures become accessors over it. Recorded at decision time. |
 | [DR-034](DR-034-reproducible-run-inputs-and-minted-values.md) | Reproducible Run Inputs and Client-Minted Values | Run inputs (seed, nonce, mint epoch) fully determine a run; client-minted run-scoped values are reproducible. Recorded at decision time. |
-| [DR-035](DR-035-run-comparison.md) | Run Comparison over Full Traces | `RunComparison.compare/2` / `investigate/1` rank field-level divergence across full traces of the same plan. Recorded at decision time. |
+| [DR-035](DR-035-run-comparison.md) | Run Comparison over Full Traces | `RunComparison.compare/2` / `investigate/1` rank field-level divergence across full traces of the same plan. Recorded at decision time. Amended by DR-043: the `adapter:` option of `RunTrace.capture/1` and `RunComparison.investigate/1` is now a `targets:` entry. |
 | [DR-036](DR-036-deterministic-placeholder-identity.md) | Deterministic Symbolic Identity and Plan Fingerprint | Placeholder identity is a deterministic function of coordinates; a stable plan fingerprint follows. Recorded at decision time. |
 | [DR-037](DR-037-generation-determinism-audit.md) | Generation Determinism Audit | `PropertyDamage.audit/2` / `mix pd.audit` check that generation is deterministic across the documented seams. Recorded at decision time. |
 | [DR-038](DR-038-nemesis-toxiproxy-config-and-partition.md) | Nemesis Toxiproxy Config and Partition | Live-path Toxiproxy config source and `:full` partition semantics for the nemesis integration. Recorded at decision time. |
@@ -58,6 +58,7 @@ Every record is **self-contained**: it carries enough context and rationale to s
 | [DR-040](DR-040-per-step-state-timeline.md) | Per-Step State Timeline (Derived, Not Captured) | Per-step projection state is derived from the trace (faithful + canonical modes), not snapshotted; a purity check guards it; persistence v6 refuses pre-v6. Recorded at decision time. |
 | [DR-041](DR-041-structured-failure-vocabulary.md) | Structured Failure Vocabulary (`%Failure{}`) | One nested `%Failure{}` type (Assertion/Execution/Framework classes, globally-unique kinds) replaces the loose `failure_reason` tuples; shrinker signature is `{kind, name}`; six denormalized `FailureReport` fields become accessors; persistence v7 refuses pre-v7. Recorded at decision time. Amended by DR-042: `Failure.Assertion` is now `Failure.Check` and kind `:assertion_failed` is now `:check_failed`. |
 | [DR-042](DR-042-one-engine.md) | One Engine for Property-Based, Differential and Path-Equivalence Runs | One runner (`PropertyDamage.run/1`) executes a root sequence across one or more variants through the per-command engine; every root is a comparison boundary; the run mode is inferred, never an option; the `assertion` vocabulary becomes `check`, `with:` becomes `overrides:`, persistence v8. Recorded at decision time. |
+| [DR-043](DR-043-targets.md) | Targets Carry Every Per-Target Resource | `targets:` is the only place a target is described: an entry is `Module` or `{Module, name:, config:, injectors:, mocks:}` and normalizes to `%PropertyDamage.Target{}`; the first entry is the reference (no `role:`); default names drop the index suffix and duplicates are errors; every entry point but `Differential.run/1` takes one entry; `adapter:`, `adapter_config:`, `injector_adapters:` and `mock_services:` are removed; isolation between targets on one system is the target's `config:`. Recorded at decision time. |
 
 ## Which specs cite which DRs
 
@@ -65,10 +66,12 @@ Every record is **self-contained**: it carries enough context and rationale to s
 - `openspec/specs/command/spec.md`: DR-006, DR-008, DR-019
 - `openspec/specs/projection/spec.md`: DR-004, DR-005, DR-009, DR-012, DR-014, DR-024, DR-025, DR-026, DR-042
 - `openspec/specs/observability/spec.md`: DR-022, DR-026
-- `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-015, DR-016, DR-018, DR-024, DR-025, DR-026, DR-042
+- `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-015, DR-016, DR-018, DR-024, DR-025, DR-026, DR-042, DR-043
 - `openspec/specs/shrinking/spec.md`: DR-017, DR-025
 - `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024, DR-026
 - `openspec/specs/failure-analysis/spec.md`: DR-026, DR-033, DR-035, DR-040, DR-041
+- `openspec/specs/differential-testing/spec.md`: DR-021, DR-030, DR-033, DR-034, DR-035, DR-036, DR-040, DR-043
+- `openspec/specs/export/spec.md`: DR-021, DR-028, DR-043
 - `openspec/specs/load-testing/spec.md`: DR-042
 - `openspec/specs/persistence/spec.md`: DR-020, DR-033, DR-039, DR-040, DR-041, DR-042
 

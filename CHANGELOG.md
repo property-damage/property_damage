@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mix pd.validate --targets` (DR-043).** `mix pd.validate MODEL --targets
+  EXPR` validates the model against every target of a `targets:` list given as
+  an Elixir expression. It warns when two targets use the same adapter with an
+  identical `config:`, because such targets share state; give each target its
+  own `config:` (for example a tenant).
 - **Structured failure vocabulary: `%PropertyDamage.Failure{}` (DR-041).** A run's
   `failure_reason` is now one nested, public type instead of a loose family of
   `{:tag, ...}` tuples. It carries a class struct under `type`
@@ -173,6 +178,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing the report.
 
 ### Changed
+
+- **BREAKING (DR-043): targets carry every per-target resource, with no compatibility layer.**
+    - The run-level options `adapter:`, `adapter_config:`, `injector_adapters:`
+      and `mock_services:` are removed. Describe the target in `targets:`
+      instead: `targets: [{MyAdapter, config: %{...}, injectors: [...],
+      mocks: [...]}]`. Each removed key raises an error that names `targets:` and
+      the entry key that replaces it.
+    - The per-target `role:` is removed: the first `targets:` entry is the
+      reference. The per-target `opts:` is renamed `config:` and is a map that
+      reaches `Adapter.setup/1` unchanged, with no conversion from a keyword
+      list.
+    - `{Module}` 1-tuples are no longer accepted; write `Module` or
+      `{Module, keyword}`.
+    - A target without `name:` is named after the last segment of its adapter
+      module, with no index suffix, so reordering `targets:` never renames a
+      target. Two entries that resolve to the same name are an error that asks
+      for a distinct `name:`.
+    - Every entry point other than `PropertyDamage.Differential.run/1` takes
+      exactly one `targets:` entry. An engine that cannot honor a target's
+      `injectors:` or `mocks:` raises instead of ignoring the key.
+    - `PropertyDamage.Differential.Target` is replaced by
+      `PropertyDamage.Target`, with the fields `adapter`, `name`, `index`,
+      `config`, `injectors` and `mocks`.
+    - `PropertyDamage.Differential.Result` fields `reference` and `targets`
+      hold `%{index, name}` maps.
+    - The `Executor.run/4` option for the adapter's setup configuration is
+      `config:`.
 
 - **BREAKING (DR-042): vocabulary renames, with no compatibility layer.** The
   old names are not recognized.

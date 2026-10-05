@@ -169,8 +169,9 @@ The system SHALL provide macros for running PropertyDamage property tests within
 #### Scenario: Test configuration
 
 - **WHEN** a `property_damage` test is defined
-- **THEN** it MUST accept `:model` and `:adapter` as required options
-- **AND** it SHOULD accept optional `:max_commands`, `:max_runs`, `:seed`, `:shrink`, and `:adapter_config`
+- **THEN** it MUST accept `:model` and `:targets` (exactly one entry, DR-043) as required options
+- **AND** it SHOULD accept optional `:max_commands`, `:max_runs`, `:seed` and `:shrink`
+- **AND** the adapter's setup configuration SHALL be given as `config:` in the `targets:` entry
 
 #### Scenario: Failure output formatting
 
