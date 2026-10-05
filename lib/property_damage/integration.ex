@@ -401,7 +401,7 @@ defmodule PropertyDamage.Integration do
         result =
           PropertyDamage.run(
             model: model,
-            targets: [PropertyDamage.Options.target_entry(target)],
+            targets: [PropertyDamage.Target.to_entry(target)],
             max_commands: max_commands,
             max_runs: 1
           )
@@ -558,7 +558,7 @@ defmodule PropertyDamage.Integration do
         result =
           PropertyDamage.run(
             model: opts[:model],
-            targets: [PropertyDamage.Options.target_entry(opts[:target])],
+            targets: [PropertyDamage.Target.to_entry(opts[:target])],
             max_commands: 50,
             max_runs: 1
           )

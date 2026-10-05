@@ -142,7 +142,7 @@ defmodule PropertyDamage.Mutation.Runner do
     trace =
       PropertyDamage.RunTrace.capture(
         model: config.model,
-        targets: [Options.target_entry(config.target)],
+        targets: [PropertyDamage.Target.to_entry(config.target)],
         seed: :erlang.unique_integer([:positive]),
         max_commands: 10
       )

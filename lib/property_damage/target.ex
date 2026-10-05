@@ -51,4 +51,21 @@ defmodule PropertyDamage.Target do
         }
 
   defstruct [:adapter, :name, :index, config: %{}, injectors: [], mocks: []]
+
+  @doc false
+  # The name a target gets when its entry sets none: the last segment of the
+  # adapter module name.
+  @spec default_name(module() | nil) :: String.t() | nil
+  def default_name(nil), do: nil
+  def default_name(adapter) when is_atom(adapter), do: adapter |> Module.split() |> List.last()
+
+  @doc false
+  # Rebuilds the `targets:` entry that validates back into `target`, for
+  # internal callers that re-enter a validating entry point with a target they
+  # already hold.
+  @spec to_entry(t()) :: {module(), keyword()}
+  def to_entry(%__MODULE__{} = target) do
+    {target.adapter,
+     name: target.name, config: target.config, injectors: target.injectors, mocks: target.mocks}
+  end
 end

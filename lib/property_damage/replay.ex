@@ -155,7 +155,7 @@ defmodule PropertyDamage.Replay do
   def run(%FailureReport{} = failure, opts \\ []) do
     opts = Options.validate_replay!(opts)
 
-    case start(failure, opts) do
+    case start(failure, Options.with_target_entries(opts)) do
       {:ok, session} ->
         run_all_steps(session, opts)
 
@@ -220,14 +220,11 @@ defmodule PropertyDamage.Replay do
       nil ->
         %PropertyDamage.Target{
           adapter: default_adapter,
-          name: default_name(default_adapter),
+          name: PropertyDamage.Target.default_name(default_adapter),
           index: 0
         }
     end
   end
-
-  defp default_name(nil), do: nil
-  defp default_name(adapter), do: adapter |> Module.split() |> List.last()
 
   defp do_start(failure, model, %{adapter: adapter, config: config}, opts) do
     sequence = FailureReport.shrunk_sequence(failure)

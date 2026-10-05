@@ -106,12 +106,23 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
   """
   @spec still_fails?(integer(), module(), module(), map()) :: boolean()
   def still_fails?(seed, model, adapter, config \\ %{}) do
-    target = %PropertyDamage.Target{adapter: adapter, config: config, name: "adapter", index: 0}
-
-    case run_seed(seed, model, target) do
+    case run_seed(seed, model, seed_target(adapter, config)) do
       :ok -> false
       {:error, _} -> true
     end
+  end
+
+  @doc false
+  # The target a single-seed re-run executes against: the adapter with the
+  # default name every other entry point gives a bare adapter.
+  @spec seed_target(module(), map()) :: PropertyDamage.Target.t()
+  def seed_target(adapter, config) do
+    %PropertyDamage.Target{
+      adapter: adapter,
+      config: config,
+      name: PropertyDamage.Target.default_name(adapter),
+      index: 0
+    }
   end
 
   @doc """
@@ -222,7 +233,7 @@ defmodule PropertyDamage.FailureIntelligence.Verification do
     result =
       PropertyDamage.run(
         model: model,
-        targets: [Options.target_entry(target)],
+        targets: [PropertyDamage.Target.to_entry(target)],
         seed: seed,
         max_runs: 1,
         verbose: false

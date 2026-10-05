@@ -118,7 +118,12 @@ defmodule Mix.Tasks.Pd.Validate do
     model = parse_module(model_str)
     adapter = parse_module(adapter_str)
 
-    target = %PropertyDamage.Target{adapter: adapter, name: short_module(adapter), index: 0}
+    target = %PropertyDamage.Target{
+      adapter: adapter,
+      name: PropertyDamage.Target.default_name(adapter),
+      index: 0
+    }
+
     validate_and_report(model, [target], verbose, strict)
   end
 

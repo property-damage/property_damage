@@ -127,7 +127,7 @@ defmodule PropertyDamage.Regression do
     opts = PropertyDamage.Options.validate_regression_opts!(opts)
 
     fn failure_report ->
-      handle_failure(failure_report, opts)
+      handle_failure(failure_report, PropertyDamage.Options.with_target_entries(opts))
     end
   end
 
@@ -160,7 +160,7 @@ defmodule PropertyDamage.Regression do
     # Check for duplicates first
     {should_skip, skip_reason} =
       if dedup do
-        check_duplicate(failure, opts)
+        check_duplicate(failure, PropertyDamage.Options.with_target_entries(opts))
       else
         {false, nil}
       end
@@ -270,7 +270,12 @@ defmodule PropertyDamage.Regression do
     opts = PropertyDamage.Options.validate_export_exunit!(opts)
 
     fn failure_report ->
-      Export.save(failure_report, directory, :exunit, opts)
+      Export.save(
+        failure_report,
+        directory,
+        :exunit,
+        PropertyDamage.Options.with_target_entries(opts)
+      )
     end
   end
 
@@ -380,7 +385,7 @@ defmodule PropertyDamage.Regression do
         is_dup =
           dedup and
             (find_duplicate(failure, seen, threshold) != nil or
-               elem(check_duplicate(failure, opts), 0))
+               elem(check_duplicate(failure, PropertyDamage.Options.with_target_entries(opts)), 0))
 
         if is_dup do
           result = %{
@@ -394,7 +399,12 @@ defmodule PropertyDamage.Regression do
 
           {[result | results], seen}
         else
-          result = handle_failure(failure, Keyword.put(opts, :dedup, false))
+          result =
+            handle_failure(
+              failure,
+              opts |> PropertyDamage.Options.with_target_entries() |> Keyword.put(:dedup, false)
+            )
+
           result = Map.put(result, :seed, failure.seed)
           {[result | results], [failure | seen]}
         end
@@ -505,7 +515,13 @@ defmodule PropertyDamage.Regression do
         # the keys it understands (e.g. :targets, :model) and ignores the
         # regression-control keys, so a caller can shape the generated test rather
         # than only supply :targets.
-        result = Export.save(failure, directory, :exunit, opts)
+        result =
+          Export.save(
+            failure,
+            directory,
+            :exunit,
+            PropertyDamage.Options.with_target_entries(opts)
+          )
 
         if verbose do
           case result do

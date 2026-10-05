@@ -99,7 +99,7 @@ defmodule PropertyDamage.Export do
   @spec to_exunit(FailureReport.t(), keyword()) :: String.t()
   def to_exunit(%FailureReport{} = report, opts \\ []) do
     opts = Options.validate_export_exunit!(opts)
-    ExUnit.generate(report, opts)
+    ExUnit.generate(report, Options.with_target_entries(opts))
   end
 
   @doc """

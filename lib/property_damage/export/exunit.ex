@@ -215,7 +215,9 @@ defmodule PropertyDamage.Export.ExUnit do
   defp target_entry_source(target) do
     extras =
       [
-        if(target.name != default_name(target.adapter), do: "name: #{inspect(target.name)}"),
+        if(target.name != PropertyDamage.Target.default_name(target.adapter),
+          do: "name: #{inspect(target.name)}"
+        ),
         if(target.config != %{}, do: "config: #{inspect(target.config)}"),
         if(target.injectors != [], do: "injectors: #{inspect(target.injectors)}"),
         if(target.mocks != [], do: "mocks: #{inspect(target.mocks)}")
@@ -228,15 +230,12 @@ defmodule PropertyDamage.Export.ExUnit do
     end
   end
 
-  defp default_name(nil), do: nil
-  defp default_name(adapter), do: adapter |> Module.split() |> List.last()
-
   defp target_for(opts, metadata) do
     case Keyword.get(opts, :targets) do
       nil ->
         %PropertyDamage.Target{
           adapter: metadata.adapter,
-          name: default_name(metadata.adapter),
+          name: PropertyDamage.Target.default_name(metadata.adapter),
           index: 0
         }
 

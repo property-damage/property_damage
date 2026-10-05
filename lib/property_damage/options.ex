@@ -116,11 +116,6 @@ defmodule PropertyDamage.Options do
     end
   end
 
-  # An already-validated target re-enters through its entry form, so validated
-  # option lists can be passed on to another validating entry point.
-  defp build_target(%PropertyDamage.Target{} = target, index),
-    do: build_target(target_entry(target), index)
-
   defp build_target(adapter, index) when is_atom(adapter) and adapter != nil,
     do: build_target({adapter, []}, index)
 
@@ -132,7 +127,7 @@ defmodule PropertyDamage.Options do
         {:ok,
          %PropertyDamage.Target{
            adapter: adapter,
-           name: Keyword.get(validated, :name) || default_target_name(adapter),
+           name: Keyword.get(validated, :name) || PropertyDamage.Target.default_name(adapter),
            index: index,
            config: validated[:config],
            injectors: validated[:injectors],
@@ -164,8 +159,6 @@ defmodule PropertyDamage.Options do
       {:error, error} -> {:error, "targets entry #{index}: #{Exception.message(error)}"}
     end
   end
-
-  defp default_target_name(adapter), do: adapter |> Module.split() |> List.last()
 
   defp check_unique_names(targets) do
     targets
@@ -220,13 +213,17 @@ defmodule PropertyDamage.Options do
   end
 
   @doc false
-  # Rebuilds the `targets:` entry that validates back into `target`, for
-  # internal callers that re-enter a public entry point with a target they
-  # already hold.
-  @spec target_entry(PropertyDamage.Target.t()) :: {module(), keyword()}
-  def target_entry(%PropertyDamage.Target{} = target) do
-    {target.adapter,
-     name: target.name, config: target.config, injectors: target.injectors, mocks: target.mocks}
+  # Converts the validated targets in `opts` back to entry form, for internal
+  # callers that hand validated options to another validating entry point.
+  @spec with_target_entries(keyword()) :: keyword()
+  def with_target_entries(opts) do
+    case Keyword.fetch(opts, :targets) do
+      {:ok, targets} when is_list(targets) ->
+        Keyword.put(opts, :targets, Enum.map(targets, &PropertyDamage.Target.to_entry/1))
+
+      _ ->
+        opts
+    end
   end
 
   @targets_only_schema NimbleOptions.new!(
@@ -256,7 +253,7 @@ defmodule PropertyDamage.Options do
       :error ->
         %PropertyDamage.Target{
           adapter: default_adapter,
-          name: default_adapter && default_target_name(default_adapter),
+          name: PropertyDamage.Target.default_name(default_adapter),
           index: 0
         }
     end
@@ -272,7 +269,7 @@ defmodule PropertyDamage.Options do
   end
 
   @doc false
-  # Validates a raw or already-validated `targets:` list holding exactly one
+  # Validates a raw `targets:` list holding exactly one
   # entry and returns that target. A missing list raises like any other
   # required option.
   @spec single_target!(term()) :: PropertyDamage.Target.t()

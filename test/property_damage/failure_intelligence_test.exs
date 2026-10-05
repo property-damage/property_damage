@@ -1009,6 +1009,13 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     test "returns false when the seed no longer fails" do
       refute Verification.still_fails?(100_000, FI.Model, FI.Adapter, %{bug: :off})
     end
+
+    test "re-runs the adapter under its default target name" do
+      target = Verification.seed_target(FI.Adapter, %{bug: :off})
+
+      assert target.name == "Adapter"
+      assert target.config == %{bug: :off}
+    end
   end
 
   describe "FailureIntelligence.Verification.verify_cluster/3" do
