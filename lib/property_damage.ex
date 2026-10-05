@@ -1450,7 +1450,8 @@ defmodule PropertyDamage do
     cond do
       # Both options specified - compose them
       on_failure != nil and regression != nil ->
-        regression_handler = PropertyDamage.Regression.handler(regression)
+        regression_handler =
+          PropertyDamage.Regression.handler(Options.with_target_entries(regression))
 
         fn failure_report ->
           on_failure.(failure_report)
@@ -1463,7 +1464,7 @@ defmodule PropertyDamage do
 
       # Only regression specified
       regression != nil ->
-        PropertyDamage.Regression.handler(regression)
+        PropertyDamage.Regression.handler(Options.with_target_entries(regression))
 
       # Neither specified
       true ->

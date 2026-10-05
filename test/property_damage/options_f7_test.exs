@@ -201,6 +201,19 @@ defmodule PropertyDamage.OptionsF7Test do
       assert [%{adapter: __MODULE__}] = get_in(opts, [:regression, :targets])
     end
 
+    test "a run hands its validated regression targets to the handler" do
+      # run/1 validates :regression with the rest of its options, so the
+      # handler receives normalized targets and must accept them.
+      assert {:ok, _stats} =
+               PropertyDamage.run(
+                 model: PropertyDamage.Test.ExecutorModel,
+                 targets: [PropertyDamage.Test.SimpleAdapter],
+                 max_runs: 1,
+                 max_commands: 1,
+                 regression: [targets: [PropertyDamage.Test.SimpleAdapter]]
+               )
+    end
+
     test "the value survives Regression.handler/1's own validation" do
       # The umbrella handler schema already accepts :targets; prove the two
       # schemas agree so the threaded value is not dropped on the way down.
