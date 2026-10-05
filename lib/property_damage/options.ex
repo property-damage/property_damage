@@ -176,8 +176,8 @@ defmodule PropertyDamage.Options do
 
   @doc false
   # Raises unless `opts[:targets]` holds exactly one entry. Entry points other
-  # than `PropertyDamage.Differential.run/1` run a single variant. A missing
-  # `:targets` (optional schemas) passes.
+  # than `PropertyDamage.run/1` run a single variant. A missing `:targets`
+  # (optional schemas) passes.
   @spec validate_single_target!(keyword()) :: keyword()
   def validate_single_target!(opts) do
     case Keyword.get(opts, :targets) do
@@ -193,7 +193,7 @@ defmodule PropertyDamage.Options do
           value: targets,
           message:
             "expected exactly one `targets:` entry (a single-variant run), got " <>
-              "#{length(targets)}; use `PropertyDamage.Differential.run/1` to compare several targets"
+              "#{length(targets)}; use `PropertyDamage.run/1` to run several targets"
     end
   end
 
@@ -235,13 +235,14 @@ defmodule PropertyDamage.Options do
 
   @doc false
   # Resolves the single target for entry points that take an optional `targets:`
-  # override and otherwise fall back to `default_adapter` (typically the
-  # adapter recorded in a failure report) with an empty config. Raises on a
-  # retired run-level key, a malformed entry, more than one entry, or a key in
+  # override and otherwise fall back to `default` (typically the reference
+  # target recorded in a failure report, see
+  # `PropertyDamage.FailureReport.reference_target/1`). Raises on a retired
+  # run-level key, a malformed entry, more than one entry, or a key in
   # `unsupported` (entry keys the caller cannot honor) set on the entry.
-  @spec override_target!(keyword(), module() | nil, String.t(), [atom()]) ::
+  @spec override_target!(keyword(), PropertyDamage.Target.t() | nil, String.t(), [atom()]) ::
           PropertyDamage.Target.t()
-  def override_target!(opts, default_adapter, entry_point, unsupported \\ [:injectors, :mocks]) do
+  def override_target!(opts, default, entry_point, unsupported \\ [:injectors, :mocks]) do
     reject_retired_targets!(opts)
 
     case Keyword.fetch(opts, :targets) do
@@ -251,11 +252,7 @@ defmodule PropertyDamage.Options do
         target
 
       :error ->
-        %PropertyDamage.Target{
-          adapter: default_adapter,
-          name: PropertyDamage.Target.default_name(default_adapter),
-          index: 0
-        }
+        default || %PropertyDamage.Target{index: 0}
     end
   end
 
@@ -301,7 +298,7 @@ defmodule PropertyDamage.Options do
     targets: [
       type: {:custom, __MODULE__, :validate_targets, []},
       required: true,
-      doc: @single_target_doc
+      doc: @targets_doc
     ],
 
     # Optional - Basic
@@ -413,6 +410,42 @@ defmodule PropertyDamage.Options do
       progress projection: ordered `RunUpdate`s during the run and a terminal
       `RunResult`. See `PropertyDamage.Progress` (DR-022).
       """
+    ],
+    concurrency: [
+      type: {:in, [:serial, :parallel]},
+      default: :serial,
+      doc:
+        "How the targets advance to each command boundary: `:serial` steps one " <>
+          "target at a time in target order; `:parallel` steps every target at " <>
+          "once (targets sharing a system need isolated slices through `config:`). " <>
+          "`compare: :performance` and `:both` require `:serial`."
+    ],
+    compare: [
+      type: {:in, [:correctness, :performance, :both]},
+      default: :correctness,
+      doc:
+        "Comparison mode: `:correctness` compares every target's answers with the " <>
+          "reference's, `:performance` measures each target's latency, `:both` does both."
+    ],
+    equivalence: [
+      type: :any,
+      default: :exact,
+      doc: "Equivalence strategy: `:exact`, `:structural`, or custom function."
+    ],
+    metrics: [
+      type: {:list, {:in, [:latency, :throughput]}},
+      default: [:latency, :throughput],
+      doc: "Performance metrics to collect."
+    ],
+    percentiles: [
+      type: {:list, :pos_integer},
+      default: [50, 95, 99],
+      doc: "Latency percentiles to calculate."
+    ],
+    warmup_runs: [
+      type: :non_neg_integer,
+      default: 0,
+      doc: "Runs to discard before measuring."
     ],
     check_mode: [
       type: {:in, [:disabled, :halt, :record, :log]},
@@ -542,7 +575,12 @@ defmodule PropertyDamage.Options do
 
   # Option keys that were renamed. The old key is never translated: passing it
   # raises a validation error that names the replacement.
-  @retired_run_keys Map.put(@retired_target_keys, :assertion_mode, :check_mode)
+  @retired_run_keys Map.merge(@retired_target_keys, %{
+                      assertion_mode: :check_mode,
+                      execution:
+                        "`execution:` was removed; every target runs in lockstep, " <>
+                          "use `concurrency:` (`:serial`, the default, or `:parallel`)"
+                    })
   @retired_load_test_keys Map.put(@retired_target_keys, :assertion_mode, :check_mode)
 
   @doc false
@@ -598,14 +636,49 @@ defmodule PropertyDamage.Options do
     reject_retired_keys!(opts, @retired_run_keys)
     reject_retired_regression_keys!(opts)
 
-    validated = validate_single!(opts, @run_schema)
+    validated = NimbleOptions.validate!(opts, @run_schema)
 
     case Keyword.get(validated, :regression) do
       regression when is_list(regression) -> validate_single_target!(regression)
       _ -> :ok
     end
 
-    validate_branching_bounds!(validated)
+    validated
+    |> reject_multi_target_branching!()
+    |> reject_timed_parallel!()
+    |> validate_branching_bounds!()
+  end
+
+  # Branching sequences run their branches in parallel inside one system; the
+  # lockstep comparison steps every target one command at a time, so it has no
+  # boundary to compare at inside a branch.
+  defp reject_multi_target_branching!(opts) do
+    if is_list(opts[:branching]) and length(opts[:targets]) > 1 do
+      raise NimbleOptions.ValidationError,
+        key: :branching,
+        value: opts[:branching],
+        message:
+          "`branching:` sequences run against one target only; got " <>
+            "#{length(opts[:targets])} `targets:` entries"
+    end
+
+    opts
+  end
+
+  # Latency measured while other targets execute at the same moment would mix
+  # their load into every sample.
+  defp reject_timed_parallel!(opts) do
+    if opts[:concurrency] == :parallel and opts[:compare] in [:performance, :both] do
+      raise NimbleOptions.ValidationError,
+        key: :concurrency,
+        value: :parallel,
+        message:
+          "`compare: #{inspect(opts[:compare])}` requires `concurrency: :serial`; " <>
+            "under `concurrency: :parallel` the targets execute at the same time, " <>
+            "so their load would mix into each other's latency"
+    end
+
+    opts
   end
 
   defp reject_retired_regression_keys!(opts) do
@@ -877,124 +950,6 @@ defmodule PropertyDamage.Options do
   end
 
   # ============================================================================
-  # PropertyDamage.Differential.run/1 Schema
-  # ============================================================================
-
-  @differential_schema_definition [
-    model: [
-      type: {:custom, __MODULE__, :validate_module, []},
-      required: true,
-      doc: "Model module implementing `PropertyDamage.Model` behaviour."
-    ],
-    run_nonce: [
-      type: :non_neg_integer,
-      doc:
-        "Nonce seeding client-minted run-scoped values (DR-034), shared by all " <>
-          "targets so each receives byte-identical minted requests. Defaults to " <>
-          "strong random entropy."
-    ],
-    targets: [
-      type: {:custom, __MODULE__, :validate_targets, []},
-      required: true,
-      doc: @targets_doc
-    ],
-    compare: [
-      type: {:in, [:correctness, :performance, :both]},
-      required: true,
-      doc: "Comparison mode: `:correctness`, `:performance`, or `:both`."
-    ],
-    max_commands: [
-      type: :pos_integer,
-      default: 50,
-      doc: "Maximum commands per sequence."
-    ],
-    max_runs: [
-      type: :pos_integer,
-      default: 100,
-      doc: "Number of test sequences to run."
-    ],
-    seed: [
-      type: :pos_integer,
-      doc: "Random seed for reproducibility."
-    ],
-    concurrency: [
-      type: {:in, [:serial, :parallel]},
-      default: :serial,
-      doc:
-        "How the targets advance to each command boundary: `:serial` steps one " <>
-          "target at a time in target order; `:parallel` steps every target at " <>
-          "once (targets sharing a system need isolated slices through `config:`). " <>
-          "`compare: :performance` and `:both` require `:serial`."
-    ],
-    equivalence: [
-      type: :any,
-      default: :exact,
-      doc: "Equivalence strategy: `:exact`, `:structural`, or custom function."
-    ],
-    metrics: [
-      type: {:list, {:in, [:latency, :throughput]}},
-      default: [:latency, :throughput],
-      doc: "Performance metrics to collect."
-    ],
-    percentiles: [
-      type: {:list, :pos_integer},
-      default: [50, 95, 99],
-      doc: "Latency percentiles to calculate."
-    ],
-    warmup_runs: [
-      type: :non_neg_integer,
-      default: 0,
-      doc: "Runs to discard before measuring."
-    ],
-    verbose: [
-      type: :boolean,
-      default: false,
-      doc: "Print progress."
-    ],
-    on_progress: [
-      type: {:fun, 1},
-      doc: "Progress consumer (DR-022); called with a `%PropertyDamage.Progress{}`."
-    ]
-  ]
-
-  @differential_schema NimbleOptions.new!(@differential_schema_definition)
-
-  @retired_differential_keys %{
-    execution:
-      "`execution:` was removed; Differential runs every target in lockstep, " <>
-        "use `concurrency:` (`:serial`, the default, or `:parallel`)"
-  }
-
-  @doc """
-  Validates options for `PropertyDamage.Differential.run/1`.
-  """
-  @spec validate_differential!(keyword()) :: keyword()
-  def validate_differential!(opts) do
-    reject_retired_targets!(opts)
-    reject_retired_keys!(opts, @retired_differential_keys)
-
-    opts
-    |> NimbleOptions.validate!(@differential_schema)
-    |> reject_timed_parallel!()
-  end
-
-  # Latency measured while other targets execute at the same moment would mix
-  # their load into every sample.
-  defp reject_timed_parallel!(opts) do
-    if opts[:concurrency] == :parallel and opts[:compare] in [:performance, :both] do
-      raise NimbleOptions.ValidationError,
-        key: :concurrency,
-        value: :parallel,
-        message:
-          "`compare: #{inspect(opts[:compare])}` requires `concurrency: :serial`; " <>
-            "under `concurrency: :parallel` the targets execute at the same time, " <>
-            "so their load would mix into each other's latency"
-    end
-
-    opts
-  end
-
-  # ============================================================================
   # PropertyDamage.Export Schemas
   # ============================================================================
 
@@ -1007,7 +962,7 @@ defmodule PropertyDamage.Options do
       type: {:custom, __MODULE__, :validate_targets, []},
       doc:
         "Single-entry target the generated test runs against (defaults to the " <>
-          "report's adapter with an empty config); see `PropertyDamage.Target`."
+          "report's reference target); see `PropertyDamage.Target`."
     ],
     module_name: [
       type: {:or, [:string, :atom]},

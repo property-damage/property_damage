@@ -1,4 +1,4 @@
-defmodule PropertyDamage.DifferentialTest do
+defmodule PropertyDamage.ComparisonTest do
   use ExUnit.Case, async: true
 
   # Module-function telemetry handler (avoids the local-function performance
@@ -7,10 +7,9 @@ defmodule PropertyDamage.DifferentialTest do
     send(parent, {:telemetry, event, measurements, metadata})
   end
 
-  alias PropertyDamage.Differential
-  alias PropertyDamage.Differential.{Equivalence, Result}
+  alias PropertyDamage.{Comparison, FailureReport}
   alias PropertyDamage.Progress
-  alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate}
+  alias PropertyDamage.Progress.{RunResult, RunUpdate}
 
   # ============================================================================
   # Test Support - Adapters
@@ -250,26 +249,26 @@ defmodule PropertyDamage.DifferentialTest do
   # Equivalence Tests
   # ============================================================================
 
-  describe "Equivalence.equivalent?/3" do
+  describe "Comparison.equivalent?/3" do
     test "exact equivalence requires identical results" do
       result = {:ok, [%TestEvent{value: 1, id: 1}]}
 
-      assert Equivalence.equivalent?(result, result, :exact)
-      refute Equivalence.equivalent?(result, {:ok, [%TestEvent{value: 2, id: 1}]}, :exact)
+      assert Comparison.equivalent?(result, result, :exact)
+      refute Comparison.equivalent?(result, {:ok, [%TestEvent{value: 2, id: 1}]}, :exact)
     end
 
     test "structural equivalence ignores id and timestamp" do
       ref = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 1, timestamp: 1000}]}
       sut = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 999, timestamp: 9999}]}
 
-      assert Equivalence.equivalent?(ref, sut, :structural)
+      assert Comparison.equivalent?(ref, sut, :structural)
     end
 
     test "structural equivalence detects value differences" do
       ref = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 1}]}
       sut = {:ok, [%TestEvent{value: 2, item_ref: "a", id: 1}]}
 
-      refute Equivalence.equivalent?(ref, sut, :structural)
+      refute Comparison.equivalent?(ref, sut, :structural)
     end
 
     test "custom equivalence function" do
@@ -281,64 +280,71 @@ defmodule PropertyDamage.DifferentialTest do
       close = {:ok, [%TestEvent{value: 105}]}
       far = {:ok, [%TestEvent{value: 200}]}
 
-      assert Equivalence.equivalent?(ref, close, custom)
-      refute Equivalence.equivalent?(ref, far, custom)
+      assert Comparison.equivalent?(ref, close, custom)
+      refute Comparison.equivalent?(ref, far, custom)
     end
 
     test "error results compared correctly" do
-      assert Equivalence.equivalent?({:error, :timeout}, {:error, :timeout}, :exact)
-      refute Equivalence.equivalent?({:error, :timeout}, {:error, :other}, :exact)
+      assert Comparison.equivalent?({:error, :timeout}, {:error, :timeout}, :exact)
+      refute Comparison.equivalent?({:error, :timeout}, {:error, :other}, :exact)
     end
   end
 
-  describe "Equivalence.ignore_fields/1" do
+  describe "Comparison.ignore_fields/1" do
     test "creates strategy ignoring specific fields" do
-      strategy = Equivalence.ignore_fields([:request_id, :correlation_id])
+      strategy = Comparison.ignore_fields([:request_id, :correlation_id])
 
       ref = {:ok, [%{value: 1, request_id: "abc", correlation_id: "xyz"}]}
       sut = {:ok, [%{value: 1, request_id: "def", correlation_id: "uvw"}]}
 
-      assert Equivalence.equivalent?(ref, sut, strategy)
+      assert Comparison.equivalent?(ref, sut, strategy)
     end
   end
 
-  describe "Equivalence.only_fields/1" do
+  describe "Comparison.only_fields/1" do
     test "creates strategy comparing only specific fields" do
-      strategy = Equivalence.only_fields([:value, :item_ref])
+      strategy = Comparison.only_fields([:value, :item_ref])
 
       ref = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 1, timestamp: 1000}]}
       sut = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 999, timestamp: 9999}]}
 
-      assert Equivalence.equivalent?(ref, sut, strategy)
+      assert Comparison.equivalent?(ref, sut, strategy)
     end
   end
 
   # ============================================================================
-  # Differential.run/1 Validation Tests
+  # run/1 with several targets
   # ============================================================================
+
+  defp run_targets(opts), do: PropertyDamage.run(Keyword.put_new(opts, :validate, false))
 
   describe "run/1 validation" do
     test "requires model option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :model option not found/, fn ->
-        Differential.run(targets: [ReferenceAdapter], compare: :correctness)
+        run_targets(targets: [ReferenceAdapter], compare: :correctness)
       end
     end
 
     test "requires targets option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :targets option not found/, fn ->
-        Differential.run(model: TestModel, compare: :correctness)
+        run_targets(model: TestModel, compare: :correctness)
       end
     end
 
-    test "requires compare option" do
-      assert_raise NimbleOptions.ValidationError, ~r/required :compare option not found/, fn ->
-        Differential.run(model: TestModel, targets: [ReferenceAdapter])
-      end
+    test "compare defaults to :correctness" do
+      assert {:error, %FailureReport{kind: :diverged}} =
+               run_targets(
+                 model: TestModel,
+                 targets: [ReferenceAdapter, {DivergentAdapter, name: "divergent"}],
+                 max_runs: 1,
+                 max_commands: 2,
+                 seed: 12_345
+               )
     end
 
     test "validates compare mode" do
       assert_raise NimbleOptions.ValidationError, ~r/:compare.*expected one of/, fn ->
-        Differential.run(
+        run_targets(
           model: TestModel,
           targets: [ReferenceAdapter],
           compare: :invalid
@@ -348,7 +354,7 @@ defmodule PropertyDamage.DifferentialTest do
 
     test "rejects empty targets" do
       assert_raise NimbleOptions.ValidationError, ~r/expected a non-empty list/, fn ->
-        Differential.run(model: TestModel, targets: [], compare: :correctness)
+        run_targets(model: TestModel, targets: [], compare: :correctness)
       end
     end
   end
@@ -358,66 +364,55 @@ defmodule PropertyDamage.DifferentialTest do
   # ============================================================================
 
   describe "run/1 with correctness mode" do
-    test "returns equivalent when targets produce same results" do
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            ReferenceAdapter,
-            {IdenticalAdapter, name: "identical"}
-          ],
-          compare: :correctness,
-          max_runs: 5,
-          max_commands: 3,
-          seed: 12_345
-        )
+    test "passes when targets produce same results" do
+      assert {:ok, stats} =
+               run_targets(
+                 model: TestModel,
+                 targets: [
+                   ReferenceAdapter,
+                   {IdenticalAdapter, name: "identical"}
+                 ],
+                 compare: :correctness,
+                 max_runs: 5,
+                 max_commands: 3,
+                 seed: 12_345
+               )
 
-      assert result.mode == :correctness
-      assert result.status == :equivalent
-      assert result.divergences == []
-      assert Enum.map(result.targets, & &1.name) == ["ReferenceAdapter", "identical"]
+      assert stats.runs == 5
+      assert Enum.map(stats.targets, & &1.name) == ["ReferenceAdapter", "identical"]
     end
 
     test "detects divergence when targets produce different results" do
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            ReferenceAdapter,
-            {DivergentAdapter, name: "divergent"}
-          ],
-          compare: :correctness,
-          max_runs: 5,
-          max_commands: 3,
-          seed: 12_345
-        )
+      assert {:error, %FailureReport{kind: :diverged} = report} =
+               run_targets(
+                 model: TestModel,
+                 targets: [
+                   ReferenceAdapter,
+                   {DivergentAdapter, name: "divergent"}
+                 ],
+                 compare: :correctness,
+                 max_runs: 5,
+                 max_commands: 3,
+                 seed: 12_345
+               )
 
-      assert result.status == :divergent
-      assert result.divergences != []
-
-      [div | _] = result.divergences
-      assert div.variant == %{index: 1, name: "divergent"}
+      assert report.variant == %{index: 1, name: "divergent"}
     end
 
     test "uses structural equivalence when specified" do
-      # DivergentAdapter changes id and timestamp but structural ignores those
-      # Actually DivergentAdapter changes the value too, so let's use a different test
-
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            ReferenceAdapter,
-            {IdenticalAdapter, name: "identical"}
-          ],
-          compare: :correctness,
-          equivalence: :structural,
-          max_runs: 3,
-          max_commands: 2,
-          seed: 12_345
-        )
-
-      assert result.status == :equivalent
+      assert {:ok, _stats} =
+               run_targets(
+                 model: TestModel,
+                 targets: [
+                   ReferenceAdapter,
+                   {IdenticalAdapter, name: "identical"}
+                 ],
+                 compare: :correctness,
+                 equivalence: :structural,
+                 max_runs: 3,
+                 max_commands: 2,
+                 seed: 12_345
+               )
     end
   end
 
@@ -427,8 +422,8 @@ defmodule PropertyDamage.DifferentialTest do
 
   describe "run/1 with performance mode" do
     test "collects latency metrics" do
-      {:ok, result} =
-        Differential.run(
+      {:ok, stats} =
+        run_targets(
           model: TestModel,
           targets: [
             {ReferenceAdapter, name: "fast"},
@@ -440,19 +435,18 @@ defmodule PropertyDamage.DifferentialTest do
           seed: 12_345
         )
 
-      assert result.mode == :performance
-      assert Map.has_key?(result.metrics, "fast")
-      assert Map.has_key?(result.metrics, "slow")
+      assert Map.has_key?(stats.metrics, "fast")
+      assert Map.has_key?(stats.metrics, "slow")
 
-      fast_metrics = result.metrics["fast"]
+      fast_metrics = stats.metrics["fast"]
       assert Map.has_key?(fast_metrics, :latency_p50)
       assert Map.has_key?(fast_metrics, :latency_p95)
       assert Map.has_key?(fast_metrics, :latency_p99)
     end
 
     test "slow adapter has higher latency" do
-      {:ok, result} =
-        Differential.run(
+      {:ok, stats} =
+        run_targets(
           model: TestModel,
           targets: [
             {ReferenceAdapter, name: "fast"},
@@ -464,16 +458,16 @@ defmodule PropertyDamage.DifferentialTest do
           seed: 12_345
         )
 
-      fast_p50 = result.metrics["fast"].latency_p50
-      slow_p50 = result.metrics["slow"].latency_p50
+      fast_p50 = stats.metrics["fast"].latency_p50
+      slow_p50 = stats.metrics["slow"].latency_p50
 
       # Slow adapter should have higher latency
       assert slow_p50 > fast_p50
     end
 
     test "counts errors correctly" do
-      {:ok, result} =
-        Differential.run(
+      {:ok, stats} =
+        run_targets(
           model: TestModel,
           targets: [
             {ReferenceAdapter, name: "working"},
@@ -485,53 +479,11 @@ defmodule PropertyDamage.DifferentialTest do
           seed: 12_345
         )
 
-      working_metrics = result.metrics["working"]
-      broken_metrics = result.metrics["broken"]
+      working_metrics = stats.metrics["working"]
+      broken_metrics = stats.metrics["broken"]
 
       assert working_metrics.error_count == 0
       assert broken_metrics.error_count > 0
-    end
-  end
-
-  # ============================================================================
-  # Result Tests
-  # ============================================================================
-
-  describe "Result" do
-    test "equivalent?/1 returns true for equivalent status" do
-      result = %Result{status: :equivalent, divergences: [], metrics: %{}, targets: []}
-      assert Result.equivalent?(result)
-    end
-
-    test "divergent?/1 returns true for divergent status" do
-      result = %Result{status: :divergent, divergences: [%{}], metrics: %{}, targets: []}
-      assert Result.divergent?(result)
-    end
-
-    test "divergence_count/1 returns correct count" do
-      result = %Result{divergences: [%{}, %{}, %{}], metrics: %{}, targets: []}
-      assert Result.divergence_count(result) == 3
-    end
-
-    test "format/1 produces readable output" do
-      result =
-        struct(Result,
-          mode: :correctness,
-          concurrency: :serial,
-          runs: 100,
-          seed: 12_345,
-          reference: %{index: 0, name: "oracle"},
-          status: :equivalent,
-          divergences: [],
-          metrics: %{},
-          targets: [%{index: 0, name: "oracle"}, %{index: 1, name: "sut"}]
-        )
-
-      output = Result.format(result)
-      assert output =~ "Differential Testing Result"
-      assert output =~ "correctness"
-      assert output =~ "Concurrency: serial"
-      assert output =~ "EQUIVALENT"
     end
   end
 
@@ -541,8 +493,8 @@ defmodule PropertyDamage.DifferentialTest do
 
   describe "same adapter with different configs" do
     test "can compare same adapter with different configs" do
-      {:ok, result} =
-        Differential.run(
+      {:ok, stats} =
+        run_targets(
           model: TestModel,
           targets: [
             {SlowAdapter, name: "fast-config", config: %{delay_ms: 1}},
@@ -554,11 +506,11 @@ defmodule PropertyDamage.DifferentialTest do
           seed: 12_345
         )
 
-      assert Enum.map(result.targets, & &1.name) == ["fast-config", "slow-config"]
+      assert Enum.map(stats.targets, & &1.name) == ["fast-config", "slow-config"]
 
       # Verify different configs were used
-      fast_latency = result.metrics["fast-config"].latency_p50
-      slow_latency = result.metrics["slow-config"].latency_p50
+      fast_latency = stats.metrics["fast-config"].latency_p50
+      slow_latency = stats.metrics["slow-config"].latency_p50
 
       assert slow_latency > fast_latency
     end
@@ -569,21 +521,29 @@ defmodule PropertyDamage.DifferentialTest do
   # ============================================================================
 
   describe "concurrency" do
-    test "serial is the default" do
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            ReferenceAdapter,
-            IdenticalAdapter
-          ],
-          compare: :correctness,
-          max_runs: 2,
-          max_commands: 2,
-          seed: 12_345
-        )
+    test "serial is the default and a report records the run's concurrency" do
+      assert {:error, serial} =
+               run_targets(
+                 model: TestModel,
+                 targets: [ReferenceAdapter, DivergentAdapter],
+                 max_runs: 2,
+                 max_commands: 2,
+                 seed: 12_345
+               )
 
-      assert Map.get(result, :concurrency) == :serial
+      assert serial.concurrency == :serial
+
+      assert {:error, parallel} =
+               run_targets(
+                 model: TestModel,
+                 targets: [ReferenceAdapter, DivergentAdapter],
+                 concurrency: :parallel,
+                 max_runs: 2,
+                 max_commands: 2,
+                 seed: 12_345
+               )
+
+      assert parallel.concurrency == :parallel
     end
   end
 
@@ -592,7 +552,7 @@ defmodule PropertyDamage.DifferentialTest do
       test "#{key}: is rejected as an unknown option" do
         error =
           assert_raise NimbleOptions.ValidationError, fn ->
-            Differential.run([
+            run_targets([
               {unquote(key), "x.json"},
               model: TestModel,
               targets: [ReferenceAdapter, IdenticalAdapter],
@@ -616,8 +576,8 @@ defmodule PropertyDamage.DifferentialTest do
     test "on_progress receives :run updates then a terminal result" do
       test_pid = self()
 
-      {:ok, result} =
-        Differential.run(
+      {:ok, stats} =
+        run_targets(
           model: TestModel,
           targets: [
             ReferenceAdapter,
@@ -633,25 +593,28 @@ defmodule PropertyDamage.DifferentialTest do
       progresses = drain_progress([])
 
       run_updates =
-        Enum.filter(progresses, &match?(%Progress{data: %DifferentialUpdate{phase: :run}}, &1))
+        Enum.filter(progresses, &match?(%Progress{data: %RunUpdate{phase: :run}}, &1))
 
       assert length(run_updates) == 3
 
-      assert %Progress{data: %DifferentialUpdate{phase: :run, run_number: 1, total_runs: 3}} =
+      assert %Progress{data: %RunUpdate{phase: :run, run_number: 1, total_runs: 3}} =
                hd(run_updates)
 
-      assert %Progress{data: %DifferentialResult{result: ^result}} = List.last(progresses)
+      assert %Progress{data: %RunResult{outcome: :ok, runs_completed: runs}} =
+               List.last(progresses)
+
+      assert runs == stats.runs
     end
 
-    test "emits coarse differential progress and result telemetry events" do
+    test "emits the test_run progress and result telemetry events" do
       parent = self()
-      handler_id = "pd-differential-progress-#{System.unique_integer([:positive])}"
+      handler_id = "pd-targets-progress-#{System.unique_integer([:positive])}"
 
       :telemetry.attach_many(
         handler_id,
         [
-          [:property_damage, :differential, :progress],
-          [:property_damage, :differential, :result]
+          [:property_damage, :test_run, :progress],
+          [:property_damage, :test_run, :result]
         ],
         &__MODULE__.forward_telemetry/4,
         parent
@@ -659,7 +622,7 @@ defmodule PropertyDamage.DifferentialTest do
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
-      Differential.run(
+      run_targets(
         model: TestModel,
         targets: [
           ReferenceAdapter,
@@ -671,11 +634,11 @@ defmodule PropertyDamage.DifferentialTest do
         seed: 12_345
       )
 
-      assert_received {:telemetry, [:property_damage, :differential, :progress], _m,
-                       %{data: %DifferentialUpdate{}}}
+      assert_received {:telemetry, [:property_damage, :test_run, :progress], _m,
+                       %{data: %RunUpdate{}}}
 
-      assert_received {:telemetry, [:property_damage, :differential, :result], _m,
-                       %{data: %DifferentialResult{}}}
+      assert_received {:telemetry, [:property_damage, :test_run, :result], _m,
+                       %{data: %RunResult{}}}
     end
   end
 
@@ -690,44 +653,38 @@ defmodule PropertyDamage.DifferentialTest do
   # ============================================================================
   describe "injected-event folding (characterization)" do
     test "an injected event is folded ahead of returned events" do
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            PreCombinedAdapter,
-            {InjectingCandidateAdapter, name: "injecting"}
-          ],
-          compare: :correctness,
-          max_runs: 3,
-          max_commands: 3,
-          seed: 12_345
-        )
-
       # The injecting target's result equals [injected, returned], matching the
       # reference that returns that stream directly: no divergence.
-      assert result.status == :equivalent
-      assert result.divergences == []
+      assert {:ok, _stats} =
+               run_targets(
+                 model: TestModel,
+                 targets: [
+                   PreCombinedAdapter,
+                   {InjectingCandidateAdapter, name: "injecting"}
+                 ],
+                 compare: :correctness,
+                 max_runs: 3,
+                 max_commands: 3,
+                 seed: 12_345
+               )
     end
 
     test "the injected event is actually observed (negative control)" do
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            ReturnedOnlyAdapter,
-            {InjectingCandidateAdapter, name: "injecting"}
-          ],
-          compare: :correctness,
-          max_runs: 3,
-          max_commands: 3,
-          seed: 12_345
-        )
-
       # Reference emits only the returned event; the injecting target additionally
       # carries the injected event, so the streams diverge. This proves the
       # positive test above is not passing by silently dropping injected events.
-      assert result.status == :divergent
-      assert result.divergences != []
+      assert {:error, %FailureReport{kind: :diverged}} =
+               run_targets(
+                 model: TestModel,
+                 targets: [
+                   ReturnedOnlyAdapter,
+                   {InjectingCandidateAdapter, name: "injecting"}
+                 ],
+                 compare: :correctness,
+                 max_runs: 3,
+                 max_commands: 3,
+                 seed: 12_345
+               )
     end
   end
 

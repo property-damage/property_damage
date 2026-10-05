@@ -84,7 +84,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       failed_at_index: failed_at,
       state_at_failure: Keyword.get(opts, :state, %{accounts: %{"acc_1" => %{balance: -100}}}),
       model: Keyword.get(opts, :model, nil),
-      adapter: Keyword.get(opts, :adapter, nil)
+      targets: for(adapter <- List.wrap(Keyword.get(opts, :adapter, nil)), do: {adapter, []})
     }
   end
 

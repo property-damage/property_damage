@@ -225,7 +225,7 @@ defmodule PropertyDamage.ExecuteTest do
     test "returns error when adapter setup fails" do
       commands = [%{action: :create}]
 
-      assert {:error, {:adapter_setup_failed, :setup_failed}} =
+      assert {:error, %Failure{type: %Failure.Setup{detail: :setup_failed}}} =
                PropertyDamage.execute(commands, targets: [FailingSetupAdapter])
     end
 

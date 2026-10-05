@@ -106,7 +106,7 @@ defmodule PropertyDamage.Regression do
     failure files) is supported.
   - `:verbose` - Print actions taken (default: false)
   - `:targets` - A list with exactly one entry: the target the generated tests
-    run against (defaults to the failure report's adapter); see
+    run against (defaults to the failure report's reference target); see
     `PropertyDamage.Target`
 
   ## Example

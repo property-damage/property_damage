@@ -150,6 +150,10 @@ defmodule PropertyDamage.Variant do
       built once per run from `:commands`
     * `:seed`, `:run_number` (required) - the campaign seed and the 0-based run
     * `:run_nonce` - the run nonce for client-minted values (DR-034)
+    * `:mint_epoch` - the mint epoch for client-minted values (DR-034); default
+      `0`, the exploration run's epoch. A re-execution of the same sequence
+      passes a fresh epoch so it never sends the values an earlier execution
+      sent.
     * `:stutter_config` - stutter configuration (default `nil`)
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
     * `:on_adapter_error` - `:halt` (default) ends the variant at an adapter
@@ -272,6 +276,7 @@ defmodule PropertyDamage.Variant do
       placeholder_registry: Keyword.fetch!(opts, :placeholder_registry),
       run_seed: run_seed,
       run_nonce: Keyword.get(opts, :run_nonce),
+      mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
       on_adapter_error: Keyword.get(opts, :on_adapter_error, :halt),
@@ -413,7 +418,7 @@ defmodule PropertyDamage.Variant do
         placeholder_registry: state.placeholder_registry,
         rng_seed: state.run_seed,
         run_nonce: state.run_nonce,
-        mint_epoch: 0,
+        mint_epoch: state.mint_epoch,
         on_resource_poller_start: guard_now_fun(state.guardian)
       )
 

@@ -11,8 +11,7 @@ defmodule Mix.Tasks.Pd.Validate do
       mix pd.validate MyApp.TestModel --targets "[MyApp.TestAdapter]"
 
   `--targets` takes the same list as the `targets:` option of
-  `PropertyDamage.run/1` and `PropertyDamage.Differential.run/1`, as an Elixir
-  expression (see `PropertyDamage.Target`). The model is validated against every
+  `PropertyDamage.run/1`, as an Elixir expression (see `PropertyDamage.Target`). The model is validated against every
   target's adapter and injectors. It cannot be combined with a positional
   adapter.
 

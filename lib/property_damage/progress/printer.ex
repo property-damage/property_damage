@@ -10,17 +10,17 @@ defmodule PropertyDamage.Progress.Printer do
 
   Returns a `(PropertyDamage.Progress.t -> :ok)` that renders the progress
   stream to stdout: the `:start` update prints the configuration header (closing
-  over `model`/`adapter`/`opts`), `:run` updates print per-run progress, and the
+  over `model`/`targets`/`opts`), `:run` updates print per-run progress, and the
   terminal `RunResult` prints the success or failure summary. This is the single
   printing path; `run/1` no longer prints progress inline.
   """
-  @spec consumer(module(), module(), keyword()) :: (Progress.t() -> :ok)
-  def consumer(model, adapter, opts) do
-    fn %Progress{data: data} -> render(data, model, adapter, opts) end
+  @spec consumer(module(), [PropertyDamage.Target.t()], keyword()) :: (Progress.t() -> :ok)
+  def consumer(model, targets, opts) do
+    fn %Progress{data: data} -> render(data, model, targets, opts) end
   end
 
-  defp render(%RunUpdate{phase: :start}, model, adapter, opts) do
-    print_header(model, adapter, opts)
+  defp render(%RunUpdate{phase: :start}, model, targets, opts) do
+    print_header(model, targets, opts)
   end
 
   defp render(%RunUpdate{phase: :run} = update, _model, _adapter, _opts) do
@@ -44,10 +44,11 @@ defmodule PropertyDamage.Progress.Printer do
   defp render(_data, _model, _adapter, _opts), do: :ok
 
   @doc """
-  Print the test run header showing what's being tested.
+  Print the test run header showing what's being tested: the model, then every
+  target in order (`[index] name: adapter`), the reference first.
   """
-  @spec print_header(module(), module(), keyword()) :: :ok
-  def print_header(model, adapter, opts \\ []) do
+  @spec print_header(module(), [PropertyDamage.Target.t()], keyword()) :: :ok
+  def print_header(model, targets, opts \\ []) do
     max_runs = Keyword.get(opts, :max_runs, 100)
     max_commands = Keyword.get(opts, :max_commands, 50)
 
@@ -57,7 +58,12 @@ defmodule PropertyDamage.Progress.Printer do
     IO.puts("=" |> String.duplicate(60))
     IO.puts("")
     IO.puts("  Model:        #{inspect(model)}")
-    IO.puts("  Adapter:      #{inspect(adapter)}")
+    IO.puts("  Targets:")
+
+    for target <- targets do
+      IO.puts("    [#{target.index}] #{target.name}: #{inspect(target.adapter)}")
+    end
+
     IO.puts("  Max Runs:     #{max_runs}")
     IO.puts("  Max Commands: #{max_commands}")
 
@@ -99,6 +105,12 @@ defmodule PropertyDamage.Progress.Printer do
     IO.puts("")
 
     # Basic failure info
+    if report.kind, do: IO.puts("  Kind:         #{report.kind}")
+
+    if variant = report.variant do
+      IO.puts("  Target:       [#{variant.index}] #{variant.name}")
+    end
+
     IO.puts("  Run:          #{report.run_number + 1}")
     IO.puts("  Seed:         #{report.seed}")
 

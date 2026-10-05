@@ -251,8 +251,9 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
           seed_library: path
         )
 
-      assert {:error, %{adapter_setup_failed: :setup_failed, phase: :seed_library_replay}} =
-               result
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} = result
+      assert PropertyDamage.Failure.detail(report.failure_reason) == :setup_failed
+      assert report.seed == 4242
     end
 
     @tag :capture_log

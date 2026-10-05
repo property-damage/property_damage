@@ -30,7 +30,7 @@ defmodule PropertyDamage.Export.Common do
       failed_at_index: report.failed_at_index,
       timestamp: report.timestamp,
       model: report.model,
-      adapter: report.adapter
+      target: FailureReport.reference_target(report)
     }
   end
 

@@ -6,7 +6,8 @@ defmodule PropertyDamage.Scheduler do
   Each target runs as a `PropertyDamage.Variant`: its own process with its own
   executor state, event queue, injectors, mocks and pollers. The scheduler only
   tells the variants how far to go and looks at what they observed.
-  `PropertyDamage.Differential.run/1` calls `run/1` once per generated sequence.
+  `PropertyDamage.run/1` calls `run/1` once per generated linear sequence, for
+  one target or several.
 
   ## Lockstep
 
@@ -45,63 +46,59 @@ defmodule PropertyDamage.Scheduler do
   first target is the reference. At each boundary, each other target's
   observation is compared with the reference's under the run's equivalence
   strategy (`:exact`, `:structural` or a 2-arity function); the first target (in target order)
-  that is not equivalent is the run's divergence, and the run stops at that
-  boundary. One function holds this comparison, so the observation compared at
+  that is not equivalent is the run's divergence, a failure of kind `:diverged`,
+  and the run stops at that boundary. One function holds this comparison, so the observation compared at
   a boundary can be changed in one place. With one target there is no
   comparison, and an adapter `{:error, _}` ends the run as it does in
   `PropertyDamage.run/1`; with two or more it is an observation like any other.
 
   ## Failures
 
-  A failure ends the run and names the target it happened in:
+  A failure ends the run and names the target it happened in. Its `reason` is
+  always a `%PropertyDamage.Failure{}`:
 
-    * `:setup_failed` - a target's `setup/1` returned an error or raised.
-      Targets already set up are torn down; the failing one is not.
+    * `:diverged` - a target answered a root differently from the reference
+      (`PropertyDamage.Failure.diverged/4`).
+    * `:setup_failed` - a target's `setup/1` returned an error or raised
+      (`PropertyDamage.Failure.setup_failed/1`, holding the error term or the
+      exception). Targets already set up are torn down; the failing one is not.
     * `:check_failed` - a check failed in a target: at a command, at the
       `:startup` phase, or while the run finalized (an `@eventually` timeout,
       a `:teardown` check).
     * `:execution_failed` - a target's adapter raised, a command could not be
-      executed, or the target's process crashed.
+      executed (the failure the target's engine reported for it), or the
+      target's process crashed (`PropertyDamage.Failure.unknown/1` holding the
+      exit reason).
 
   Under `:serial` no other target executes the failing root after the failure;
   under `:parallel` the commands already running finish. In both, no target
   starts the next root.
   """
 
-  alias PropertyDamage.Differential.Equivalence
-  alias PropertyDamage.{Failure, PlaceholderRegistry, Target, Variant}
+  alias PropertyDamage.{Comparison, Failure, PlaceholderRegistry, Target, Variant}
 
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
 
-  @typedoc "What ended a run, naming the target it happened in."
+  @typedoc """
+  What ended a run, naming the target it happened in. `root` is the command the
+  failure belongs to, `nil` for a setup failure or a failed `:startup` check.
+  """
   @type failure :: %{
-          kind: :check_failed | :setup_failed | :execution_failed,
+          kind: :check_failed | :setup_failed | :execution_failed | :diverged,
           variant: variant(),
           run: non_neg_integer(),
           root: non_neg_integer() | nil,
-          reason: term()
-        }
-
-  @typedoc "The first root at which a target answered differently from the reference."
-  @type divergence :: %{
-          seed: integer(),
-          run: non_neg_integer(),
-          root: non_neg_integer(),
-          command: struct(),
-          variant: variant(),
-          reference_result: Variant.observation(),
-          divergent_result: Variant.observation(),
-          results: %{String.t() => Variant.observation()}
+          reason: Failure.t()
         }
 
   @typedoc """
   The outcome of one run. `results`, `observations` and `latencies` hold one
   entry per target in target order, for every target that was set up (all of
-  them unless setup failed, then none).
+  them unless setup failed, then none). Each result is what
+  `PropertyDamage.Executor.run/4` reports for that target's run.
   """
   @type run :: %{
-          divergence: divergence() | nil,
           failure: failure() | nil,
           results: [map()],
           observations: [[{non_neg_integer(), Variant.observation()}]],
@@ -128,6 +125,8 @@ defmodule PropertyDamage.Scheduler do
     * `:equivalence` - `:exact`, `:structural` or a 2-arity function
     * `:measure_latency` - record the wall-clock time of each target's `execute/3` per command
       into `latencies` (optional, default `false`)
+    * `:mint_epoch` - the mint epoch every target's run uses for client-minted
+      values (DR-034); optional, default `0`, the exploration run's epoch
     * `:stutter_config`, `:check_mode` - passed to every variant (optional)
 
   Returns `{:ok, run}`; see `t:run/0`.
@@ -160,6 +159,7 @@ defmodule PropertyDamage.Scheduler do
       compare?: Keyword.fetch!(opts, :compare) in [:correctness, :both] and length(targets) > 1,
       equivalence: Keyword.fetch!(opts, :equivalence),
       measure_latency: Keyword.get(opts, :measure_latency, false),
+      mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
       on_adapter_error: if(length(targets) > 1, do: :continue, else: :halt),
@@ -168,7 +168,7 @@ defmodule PropertyDamage.Scheduler do
   end
 
   defp empty_run(failure) do
-    %{divergence: nil, failure: failure, results: [], observations: [], latencies: []}
+    %{failure: failure, results: [], observations: [], latencies: []}
   end
 
   # ==========================================================================
@@ -187,6 +187,7 @@ defmodule PropertyDamage.Scheduler do
 
         {:error, reason} ->
           Enum.each(ready, &stop_variant/1)
+          reason = Failure.setup_failed(reason)
           {:halt, {:error, failure(config, target, :setup_failed, nil, reason)}}
       end
     end)
@@ -209,7 +210,8 @@ defmodule PropertyDamage.Scheduler do
         stutter_config: config.stutter_config,
         check_mode: config.check_mode,
         on_adapter_error: config.on_adapter_error,
-        measure_latency: config.measure_latency
+        measure_latency: config.measure_latency,
+        mint_epoch: config.mint_epoch
       )
 
     variant = %{pid: pid, target: target, observations: []}
@@ -235,30 +237,30 @@ defmodule PropertyDamage.Scheduler do
   # Lockstep
   # ==========================================================================
 
-  # Returns {variants, divergence, failure}, the variants carrying what they
-  # observed so far.
+  # Returns {variants, failure}, the variants carrying what they observed so
+  # far; a divergence is the failure of the boundary it was found at.
   defp lockstep(config, variants) do
     # The barrier: every setup returned and every :startup check passed before
     # any variant executes command 0.
     case advance_all(config, variants, @before_first_root) do
       {:ok, variants} -> step_roots(config, variants)
-      {:failed, variants, failure} -> {variants, nil, failure}
+      {:failed, variants, failure} -> {variants, failure}
     end
   end
 
   defp step_roots(config, variants) do
     config.commands
     |> Enum.with_index()
-    |> Enum.reduce_while({variants, nil, nil}, fn {command, root}, {variants, nil, nil} ->
+    |> Enum.reduce_while({variants, nil}, fn {_command, root}, {variants, nil} ->
       case advance_all(config, variants, root) do
         {:ok, variants} ->
-          case compare_boundary(config, variants, command, root) do
-            nil -> {:cont, {variants, nil, nil}}
-            divergence -> {:halt, {variants, divergence, nil}}
+          case compare_boundary(config, variants, root) do
+            nil -> {:cont, {variants, nil}}
+            divergence -> {:halt, {variants, divergence}}
           end
 
         {:failed, variants, failure} ->
-          {:halt, {variants, nil, failure}}
+          {:halt, {variants, failure}}
       end
     end)
   end
@@ -310,6 +312,7 @@ defmodule PropertyDamage.Scheduler do
 
       {:crashed, reason} ->
         variant = %{variant | pid: nil}
+        reason = Failure.unknown(reason)
         {:failed, variant, failure(config, variant.target, :execution_failed, root(root), reason)}
     end
   end
@@ -322,31 +325,24 @@ defmodule PropertyDamage.Scheduler do
   # ==========================================================================
 
   # The one place a boundary is compared: each non-reference variant's
-  # observation of `root` against the reference's. Returns the divergence of
-  # the first non-equivalent variant, or nil.
-  defp compare_boundary(%{compare?: false}, _variants, _command, _root), do: nil
+  # observation of `root` against the reference's. Returns the `:diverged`
+  # failure of the first non-equivalent variant, or nil.
+  defp compare_boundary(%{compare?: false}, _variants, _root), do: nil
 
-  defp compare_boundary(config, variants, command, root) do
+  defp compare_boundary(config, variants, root) do
     observed = Enum.map(variants, &{&1.target, observation_at(&1, root)})
     [{_reference, reference_result} | others] = observed
 
     case Enum.find(others, fn {_target, result} ->
-           not Equivalence.equivalent?(reference_result, result, config.equivalence)
+           not Comparison.equivalent?(reference_result, result, config.equivalence)
          end) do
       nil ->
         nil
 
       {target, divergent_result} ->
-        %{
-          seed: config.seed,
-          run: config.run_number,
-          root: root,
-          command: command,
-          variant: variant_of(target),
-          reference_result: reference_result,
-          divergent_result: divergent_result,
-          results: Map.new(observed, fn {target, result} -> {target.name, result} end)
-        }
+        results = Map.new(observed, fn {target, result} -> {target.name, result} end)
+        reason = Failure.diverged(root, reference_result, divergent_result, results)
+        failure(config, target, :diverged, root, reason)
     end
   end
 
@@ -357,17 +353,18 @@ defmodule PropertyDamage.Scheduler do
   # End of run
   # ==========================================================================
 
-  defp finish_run(config, {variants, divergence, failure}) do
+  defp finish_run(config, {variants, failure}) do
     {results, latencies, failure} =
       Enum.reduce(variants, {[], [], failure}, fn variant, {results, latencies, failure} ->
         {result, latency, failure} = finish_variant(config, variant, failure)
         {[result | results], [latency | latencies], failure}
       end)
 
+    results = Enum.reverse(results)
+
     %{
-      divergence: divergence,
-      failure: failure,
-      results: Enum.reverse(results),
+      failure: with_failure_reason(failure, results),
+      results: results,
       observations: Enum.map(variants, &Enum.reverse(&1.observations)),
       latencies: Enum.reverse(latencies)
     }
@@ -383,10 +380,10 @@ defmodule PropertyDamage.Scheduler do
     case call(variant.pid, &Variant.finish/1) do
       {:ok, result} ->
         stop_variant(variant)
-        {result, latency, failure || finalize_failure(config, variant.target, result)}
+        {result, latency, run_failure(config, variant.target, result, failure)}
 
       {:crashed, reason} ->
-        crash = failure(config, variant.target, :execution_failed, nil, reason)
+        crash = failure(config, variant.target, :execution_failed, nil, Failure.unknown(reason))
         {nil, latency, failure || crash}
     end
   end
@@ -408,6 +405,44 @@ defmodule PropertyDamage.Scheduler do
   end
 
   defp finalize_failure(_config, _target, _result), do: nil
+
+  # The run's failure after one more variant finished. A finalize-time failure
+  # counts when the run has none. Under `check_mode: :record` a check failure
+  # the variant recorded at or before the root a divergence was found at
+  # happened first: the check failed while that root was stepped, before the
+  # boundary was compared.
+  defp run_failure(config, target, result, nil), do: finalize_failure(config, target, result)
+
+  defp run_failure(config, target, result, %{kind: :diverged, root: root} = divergence) do
+    case result do
+      %{success: false, failure_reason: nil, check_failures: [_ | _]} ->
+        case finalize_failure(config, target, result) do
+          %{root: failed_root} = recorded when is_integer(failed_root) and failed_root <= root ->
+            recorded
+
+          _ ->
+            divergence
+        end
+
+      _ ->
+        divergence
+    end
+  end
+
+  defp run_failure(_config, _target, _result, failure), do: failure
+
+  # A variant reports an adapter raise by the exception alone; the failing
+  # variant's finished result holds the `%Failure{}` the engine built for it
+  # (the exception with its stacktrace), and the run reports that one.
+  defp with_failure_reason(%{reason: %Failure{}} = failure, _results), do: failure
+  defp with_failure_reason(nil, _results), do: nil
+
+  defp with_failure_reason(failure, results) do
+    case Enum.at(results, failure.variant.index) do
+      %{failure_reason: %Failure{} = reason} -> %{failure | reason: reason}
+      _ -> %{failure | reason: Failure.adapter_error(failure.reason)}
+    end
+  end
 
   # A recorded check that raised keeps `{exception, stacktrace}`; a halting run
   # reports the exception alone, and so does this.

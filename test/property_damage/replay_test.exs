@@ -115,7 +115,7 @@ defmodule PropertyDamage.ReplayTest do
         projections: result.projections,
         projections_before: result.projections_before,
         model: CounterModel,
-        adapter: CounterAdapter
+        targets: [{CounterAdapter, []}]
       )
 
     {failure, result}
@@ -213,12 +213,12 @@ defmodule PropertyDamage.ReplayTest do
 
   describe "guards" do
     test "missing model" do
-      failure = %FailureReport{model: nil, adapter: CounterAdapter}
+      failure = %FailureReport{model: nil, targets: [{CounterAdapter, []}]}
       assert {:error, :missing_model} = Replay.start(failure)
     end
 
     test "missing adapter" do
-      failure = %FailureReport{model: CounterModel, adapter: nil}
+      failure = %FailureReport{model: CounterModel, targets: []}
       assert {:error, :missing_adapter} = Replay.start(failure)
     end
 
@@ -227,7 +227,7 @@ defmodule PropertyDamage.ReplayTest do
 
       failure = %FailureReport{
         model: CounterModel,
-        adapter: CounterAdapter,
+        targets: [{CounterAdapter, []}],
         trace: PropertyDamage.RunTrace.new(plan: branching)
       }
 
@@ -268,7 +268,7 @@ defmodule PropertyDamage.ReplayTest do
           projections: result.projections,
           projections_before: result.projections_before,
           model: LifecycleCounterModel,
-          adapter: CounterAdapter
+          targets: [{CounterAdapter, []}]
         )
 
       # Replay.run starts a session (setup_each) and stops it (teardown_each).

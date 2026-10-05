@@ -46,8 +46,8 @@ defmodule PropertyDamage.Adapter do
   ### `setup/1` must be idempotent
 
   `setup/1` runs before every run and every shrink attempt, not once per test.
-  In `PropertyDamage.Differential.run/1` it runs once per run for each target,
-  each in that target's own process, one target after another in target order.
+  In `PropertyDamage.run/1` it runs once per run for each target, each in that
+  target's own process, one target after another in target order.
   A run that crashed may not have reached `teardown/1`, so `setup/1` can find
   the state that run left behind: make it reset or reuse that state rather than
   fail on it. When several targets share one system, give each its own slice
@@ -239,8 +239,8 @@ defmodule PropertyDamage.Adapter do
 
   Use for creating HTTP clients, connecting to databases, starting processes.
   It runs again for every run and shrink attempt (and once per run per target
-  in `PropertyDamage.Differential.run/1`, each in the target's own process,
-  in target order) and may find state a crashed run left, so it must be
+  in `PropertyDamage.run/1`, each in the target's own process, in target
+  order) and may find state a crashed run left, so it must be
   idempotent; when targets share a system, reset only the slice the target's
   `config:` names.
   The returned `user_context()` is handed back unchanged to `execute/3` (second

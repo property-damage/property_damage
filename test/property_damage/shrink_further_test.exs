@@ -104,7 +104,7 @@ defmodule PropertyDamage.ShrinkFurtherTest do
         shrink_iterations: 7,
         shrink_time_ms: 11,
         model: FailingModel,
-        adapter: FailingAdapter
+        targets: [{FailingAdapter, []}]
       ]
       |> Keyword.merge(overrides)
     )
@@ -150,15 +150,16 @@ defmodule PropertyDamage.ShrinkFurtherTest do
     assert {:error, :missing_model_or_adapter} = PropertyDamage.shrink_further(report)
   end
 
-  test "returns {:error, :missing_model_or_adapter} when the adapter is nil" do
-    report = report_of_length(8, adapter: nil)
+  test "returns {:error, :missing_model_or_adapter} when the report records no target" do
+    report = report_of_length(8, targets: [])
     assert {:error, :missing_model_or_adapter} = PropertyDamage.shrink_further(report)
   end
 
   test "re-execution adapter setup failure surfaces as an error, not a MatchError (A4)" do
-    report = report_of_length(8, adapter: SetupGuardAdapter)
+    report = report_of_length(8, targets: [{SetupGuardAdapter, []}])
 
-    assert {:error, %{adapter_setup_failed: :setup_failed}} =
+    assert {:error,
+            %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{detail: :setup_failed}}} =
              PropertyDamage.shrink_further(report,
                targets: [{SetupGuardAdapter, config: %{fail_setup: true}}]
              )

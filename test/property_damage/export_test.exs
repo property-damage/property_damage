@@ -159,7 +159,7 @@ defmodule PropertyDamage.ExportTest do
         PropertyDamage.RunTrace.new(plan: %Sequence{prefix: commands, branches: nil, suffix: []}),
       timestamp: ~U[2025-12-26 14:30:00Z],
       model: TestModel,
-      adapter: TestHTTPAdapter
+      targets: [{TestHTTPAdapter, []}]
     }
   end
 
@@ -312,7 +312,7 @@ defmodule PropertyDamage.ExportTest do
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
           ),
         model: TestModelStub,
-        adapter: TestHTTPAdapter,
+        targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
       }
 
@@ -385,7 +385,7 @@ defmodule PropertyDamage.ExportTest do
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
           ),
         model: TestModelStub,
-        adapter: TestHTTPAdapter,
+        targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
       }
 
@@ -419,7 +419,7 @@ defmodule PropertyDamage.ExportTest do
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
           ),
         model: TestModelStub,
-        adapter: TestHTTPAdapter,
+        targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
       }
 
@@ -481,7 +481,7 @@ defmodule PropertyDamage.ExportTest do
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
           ),
         model: TestModelStub,
-        adapter: TestHTTPAdapter,
+        targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
       }
 
@@ -536,7 +536,7 @@ defmodule PropertyDamage.ExportTest do
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
           ),
         model: TestModelStub,
-        adapter: TestHTTPAdapter,
+        targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
       }
     end
@@ -602,7 +602,7 @@ defmodule PropertyDamage.ExportTest do
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
           ),
         model: TestModelStub,
-        adapter: TestHTTPAdapter,
+        targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
       }
     end
@@ -705,7 +705,7 @@ defmodule PropertyDamage.ExportTest do
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
           ),
         model: TestModelStub,
-        adapter: TestHTTPAdapter
+        targets: [{TestHTTPAdapter, []}]
       }
 
       code = Export.to_exunit(failure, module_name: PDExportPidCheck)
@@ -967,7 +967,7 @@ defmodule PropertyDamage.ExportTest do
             plan: %Sequence{prefix: commands, branches: nil, suffix: []}
           ),
         model: TestModelStub,
-        adapter: TestHTTPAdapter,
+        targets: [{TestHTTPAdapter, []}],
         timestamp: ~U[2025-01-01 00:00:00Z]
       }
     end

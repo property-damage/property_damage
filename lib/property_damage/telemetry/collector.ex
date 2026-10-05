@@ -202,7 +202,7 @@ defmodule PropertyDamage.Telemetry.Collector do
   defp handle_telemetry_event([:property_damage, :run, :start], _measurements, metadata, state) do
     current_run = %{
       model: metadata[:model],
-      adapter: metadata[:adapter],
+      targets: metadata[:targets],
       max_runs: metadata[:max_runs],
       max_commands: metadata[:max_commands],
       seed: metadata[:seed],

@@ -13,15 +13,17 @@ defmodule PropertyDamage.Telemetry do
 
   - `[:property_damage, :run, :start]` - Test run started
     - Measurements: `%{system_time: integer()}`
-    - Metadata: `%{model: module(), adapter: module(), max_runs: integer(), max_commands: integer(), seed: integer()}`
+    - Metadata: `%{model: module(), targets: [target()], max_runs: integer(), max_commands: integer(), seed: integer()}`,
+      where each `target()` is `%{index: non_neg_integer(), name: String.t(), adapter: module()}`
+      (the run's `targets:` in order, the reference first)
 
   - `[:property_damage, :run, :stop]` - Test run completed
     - Measurements: `%{duration: integer(), total_commands: integer()}`
-    - Metadata: `%{model: module(), adapter: module(), result: :ok | :error, runs_completed: integer()}`
+    - Metadata: `%{model: module(), targets: [target()], result: :ok | :error, runs_completed: integer()}`
 
   - `[:property_damage, :run, :exception]` - Test run crashed
     - Measurements: `%{duration: integer()}`
-    - Metadata: `%{model: module(), adapter: module(), kind: atom(), reason: term(), stacktrace: list()}`
+    - Metadata: `%{model: module(), targets: [target()], kind: atom(), reason: term(), stacktrace: list()}`
 
   ### Sequence Execution
 
@@ -99,14 +101,6 @@ defmodule PropertyDamage.Telemetry do
   - `[:property_damage, :mutation, :result]` - The terminal mutation report
     - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
     - Metadata: `%{data: PropertyDamage.Progress.MutationResult.t(), run_id: term()}`
-
-  - `[:property_damage, :differential, :progress]` - A differential run update
-    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
-    - Metadata: `%{data: PropertyDamage.Progress.DifferentialUpdate.t(), run_id: term()}`
-
-  - `[:property_damage, :differential, :result]` - The terminal differential result
-    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
-    - Metadata: `%{data: PropertyDamage.Progress.DifferentialResult.t(), run_id: term()}`
 
   These events fire only when a handler is attached for them, preserving the
   zero-cost-when-unobserved guarantee on the hot loop.

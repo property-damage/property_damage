@@ -138,6 +138,7 @@ defmodule PropertyDamage do
     Failure,
     FailureReport,
     Generator,
+    LatencyMetrics,
     Options,
     Progress.Printer,
     Progress.ReplayUpdate,
@@ -145,6 +146,7 @@ defmodule PropertyDamage do
     Progress.RunResult,
     Progress.RunUpdate,
     RunTrace,
+    Scheduler,
     SeedLibrary,
     Sequence,
     Shrinker,
@@ -160,9 +162,13 @@ defmodule PropertyDamage do
   Result statistics from a successful run.
   """
   @type stats :: %{
-          runs: non_neg_integer(),
-          total_commands: non_neg_integer(),
-          seed: integer()
+          required(:runs) => non_neg_integer(),
+          required(:total_commands) => non_neg_integer(),
+          required(:seed) => integer(),
+          required(:targets) => [%{index: non_neg_integer(), name: String.t()}],
+          optional(:check_fires) => %{{module(), atom()} => non_neg_integer()},
+          optional(:coverage) => term(),
+          optional(:metrics) => %{String.t() => map()}
         }
 
   @typedoc """
@@ -193,11 +199,12 @@ defmodule PropertyDamage do
   ## Required Options
 
   - `:model` - Model module implementing PropertyDamage.Model
-  - `:targets` - A list with exactly one entry: the system under test, as an
-    adapter module implementing PropertyDamage.Adapter or
-    `{AdapterModule, name:, config:, injectors:, mocks:}`. See
-    `PropertyDamage.Target`. To compare several targets, use
-    `PropertyDamage.Differential.run/1`.
+  - `:targets` - The systems under test, as a list of adapter modules
+    implementing PropertyDamage.Adapter or
+    `{AdapterModule, name:, config:, injectors:, mocks:}` entries. See
+    `PropertyDamage.Target`. With one entry the run tests that system; with
+    several, the first is the reference and every other target is compared
+    with it command by command (see "Several Targets" below).
 
   ## Optional Options
 
@@ -215,8 +222,43 @@ defmodule PropertyDamage do
   - `:regression` - Keyword list for automatic regression test management (see below)
   - `:verbose` - Print progress and configuration (default: false)
   - `:validate` - Run configuration validation first (default: true)
-  - `:branching` - Keyword list for parallel branching (see below)
+  - `:branching` - Keyword list for parallel branching (see below); one
+    target only
   - `:stutter` - Keyword list for idempotency testing (see below)
+  - `:check_mode` - How a failing check is handled: `:halt` (default),
+    `:record`, `:log` or `:disabled`
+  - `:concurrency` - How the targets reach each command boundary: `:serial`
+    (default) steps one target at a time in target order; `:parallel` steps
+    every target at once
+  - `:compare` - `:correctness` (default) compares every target's answers with
+    the reference's; `:performance` measures each target's latency instead;
+    `:both` does both
+  - `:equivalence` - How two answers are compared: `:exact` (default),
+    `:structural` (ignores identifier and timestamp fields), or a function
+    `fn reference_answer, target_answer -> boolean end`
+  - `:metrics`, `:percentiles`, `:warmup_runs` - Parameters of
+    `compare: :performance | :both`; `warmup_runs` (default 0) runs are left
+    out of the metrics
+
+  ## Several Targets
+
+  Each linear run executes its command sequence against every target in
+  lockstep (`PropertyDamage.Scheduler`): every target executes command `r`,
+  their answers are compared, and only then does any target start command
+  `r + 1`. Each target runs in its own process with its own event queue,
+  injectors, mocks and pollers, and is set up and torn down once per run.
+  `compare: :performance | :both` requires `concurrency: :serial`, because
+  overlapping targets would mix their load into each other's latency.
+
+  The first failure ends the campaign: a target answering differently from the
+  reference (`kind: :diverged`), a failing check in any target, a setup failure
+  or an execution failure. The report names the target in `variant`. With two
+  or more targets an adapter `{:error, _}` answer is compared like any other
+  answer. A failure in a run with two or more targets is reported as found,
+  without shrinking.
+
+  The model's `setup_once/1`, `setup_each/1` and their teardowns receive the
+  reference target's config.
 
   ## Branching Options
 
@@ -264,8 +306,13 @@ defmodule PropertyDamage do
 
   ## Returns
 
-  - `{:ok, stats}` - All runs passed
-  - `{:error, failure_report}` - A run failed
+  - `{:ok, stats}` - All runs passed. `stats` holds `runs`, `total_commands`,
+    `seed`, `targets` (`[%{index:, name:}]`), the coverage keys, and under
+    `compare: :performance | :both` the latency `metrics` of each target,
+    keyed by target name
+  - `{:error, failure_report}` - A run failed; see `PropertyDamage.FailureReport`
+    for its `kind` and the failing `variant`. A target whose adapter `setup/1`
+    fails is a report of kind `:setup_failed`
 
   ## Target Entry Keys
 
@@ -323,8 +370,8 @@ defmodule PropertyDamage do
     opts = Options.validate_run!(opts)
 
     model = opts[:model]
-    [target] = opts[:targets]
-    adapter = target.adapter
+    targets = opts[:targets]
+    [reference | _] = targets
     max_commands = opts[:max_commands]
     max_runs = opts[:max_runs]
     # Resolution order (DR-034): explicit option, else environment variable
@@ -334,18 +381,13 @@ defmodule PropertyDamage do
     # The run nonce seeds ONLY client-minted run-scoped values (mint_per_run).
     # Its random default is drawn from crypto entropy, NEVER the process RNG:
     # ExUnit pins :rand under `--seed N`, which would re-mint colliding values.
+    # Every target of a run shares it, so all of them receive byte-identical
+    # client-minted requests.
     run_nonce =
       opts[:run_nonce] || env_int("PD_RUN_NONCE") ||
         :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned()
 
-    shrink = opts[:shrink]
-    shrinker_config = opts[:shrinker_config] || ShrinkerConfig.new()
-    on_failure = build_on_failure_callback(opts)
     verbose = opts[:verbose]
-    validate = opts[:validate]
-    branching = opts[:branching]
-    coverage = opts[:coverage]
-    stutter_config = Stutter.parse_config(opts[:stutter])
 
     # Seed-library replay working set (DR-023). `nil` when disabled; otherwise a
     # small config map driving the pre-exploration replay phase.
@@ -358,17 +400,44 @@ defmodule PropertyDamage do
     # run loop builds no %Progress{}.
     reporter =
       Reporter.new([
-        if(verbose, do: Printer.consumer(model, adapter, opts)),
+        if(verbose, do: Printer.consumer(model, targets, opts)),
         opts[:on_progress],
         Telemetry.progress_consumer([:test_run])
       ])
 
-    # Validate configuration
-    if validate do
-      {:ok, warnings} = Validation.validate!(model, adapter, injectors: target.injectors)
+    ctx = %{
+      model: model,
+      targets: targets,
+      target_entries: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
+      target: reference,
+      max_commands: max_commands,
+      max_runs: max_runs,
+      seed: seed,
+      run_nonce: run_nonce,
+      shrink: opts[:shrink],
+      shrinker_config: opts[:shrinker_config] || ShrinkerConfig.new(),
+      on_failure: build_on_failure_callback(opts),
+      reporter: reporter,
+      branching: opts[:branching],
+      stutter_config: Stutter.parse_config(opts[:stutter]),
+      check_mode: opts[:check_mode],
+      seed_library: seed_library,
+      coverage: opts[:coverage],
+      concurrency: opts[:concurrency],
+      compare: opts[:compare],
+      equivalence: opts[:equivalence],
+      warmup_runs: opts[:warmup_runs],
+      measure_latency: opts[:compare] in [:performance, :both]
+    }
 
-      if verbose do
-        Validation.print_summary(model, adapter, warnings)
+    # Validate configuration against every target's adapter and injectors
+    if opts[:validate] do
+      for target <- targets do
+        {:ok, warnings} = Validation.validate!(model, target.adapter, injectors: target.injectors)
+
+        if verbose do
+          Validation.print_summary(model, target.adapter, warnings)
+        end
       end
     end
 
@@ -387,10 +456,11 @@ defmodule PropertyDamage do
       end
     end
 
-    # Setup once (if model implements it)
+    # Setup once (if model implements it). The model hooks receive the
+    # reference target's config.
     setup_once_result =
       if function_exported?(model, :setup_once, 1) do
-        model.setup_once(%{adapter_config: target.config})
+        model.setup_once(%{adapter_config: reference.config})
       else
         :ok
       end
@@ -400,7 +470,7 @@ defmodule PropertyDamage do
         # Emit telemetry for run start
         telemetry_metadata = %{
           model: model,
-          adapter: adapter,
+          targets: Enum.map(targets, &%{index: &1.index, name: &1.name, adapter: &1.adapter}),
           max_runs: max_runs,
           max_commands: max_commands,
           seed: seed
@@ -410,23 +480,7 @@ defmodule PropertyDamage do
         Telemetry.run_start(telemetry_metadata)
 
         try do
-          result =
-            do_run(
-              model,
-              target,
-              max_commands,
-              max_runs,
-              seed,
-              run_nonce,
-              shrink,
-              shrinker_config,
-              on_failure,
-              reporter,
-              branching,
-              stutter_config,
-              seed_library,
-              coverage
-            )
+          result = do_run(ctx)
 
           # Auto-append a new exploration failure's seed to the working set
           # (DR-023); deduplicated by seed, so a replayed halt is a no-op.
@@ -456,7 +510,7 @@ defmodule PropertyDamage do
         after
           # Teardown once
           if function_exported?(model, :teardown_once, 1) do
-            model.teardown_once(%{adapter_config: target.config})
+            model.teardown_once(%{adapter_config: reference.config})
           end
         end
 
@@ -465,56 +519,31 @@ defmodule PropertyDamage do
     end
   end
 
-  defp do_run(
-         model,
-         target,
-         max_commands,
-         max_runs,
-         seed,
-         run_nonce,
-         shrink,
-         shrinker_config,
-         on_failure,
-         reporter,
-         branching,
-         stutter_config,
-         seed_library,
-         coverage
-       ) do
+  defp do_run(ctx) do
     # Seed the process RNG (consumed by execution-time randomness such as
     # stutter decisions; sequence generation is seeded explicitly per run
     # via Generator.generate_value/2, NOT through the process RNG)
-    :rand.seed(:exsss, seed)
+    :rand.seed(:exsss, ctx.seed)
 
     # Campaign start (DR-022): the verbose consumer renders this as the header.
-    Reporter.emit(reporter, fn ->
-      %RunUpdate{phase: :start, run_number: 0, total_runs: max_runs}
+    Reporter.emit(ctx.reporter, fn ->
+      %RunUpdate{phase: :start, run_number: 0, total_runs: ctx.max_runs}
     end)
 
     # Generate sequences and run
-    generator_opts = [max_commands: max_commands]
+    generator_opts = [max_commands: ctx.max_commands]
 
     generator_opts =
-      if branching, do: Keyword.put(generator_opts, :branching, branching), else: generator_opts
+      if ctx.branching,
+        do: Keyword.put(generator_opts, :branching, ctx.branching),
+        else: generator_opts
 
-    generator = Generator.generate_sequence(model, generator_opts)
+    ctx = Map.put(ctx, :generator, Generator.generate_sequence(ctx.model, generator_opts))
 
     # Seed-library replay phase (DR-023): replay previously-failing seeds before
     # random exploration, reusing the per-sequence machinery below. On a
     # still-failing replay the run halts here; otherwise exploration proceeds.
-    replay_ctx = %{
-      generator: generator,
-      model: model,
-      target: target,
-      shrink: shrink,
-      shrinker_config: shrinker_config,
-      on_failure: on_failure,
-      reporter: reporter,
-      stutter_config: stutter_config,
-      run_nonce: run_nonce
-    }
-
-    case replay_phase(seed_library, replay_ctx) do
+    case replay_phase(ctx.seed_library, ctx) do
       {:halt, failure} ->
         {:error, failure}
 
@@ -523,93 +552,64 @@ defmodule PropertyDamage do
         # per-check firings across every generated sequence (always-on);
         # `tracker` accumulates the heavier command/transition/state dimensions
         # only when `coverage: true` was requested.
-        coverage_acc = %{
+        acc = %{
           fires: %{},
-          tracker: if(coverage, do: Coverage.new(model), else: nil)
+          tracker: if(ctx.coverage, do: Coverage.new(ctx.model), else: nil),
+          total_commands: 0,
+          samples: []
         }
 
-        run_loop(
-          generator,
-          model,
-          target,
-          max_runs,
-          seed,
-          run_nonce,
-          shrink,
-          shrinker_config,
-          on_failure,
-          reporter,
-          stutter_config,
-          0,
-          0,
-          coverage_acc
-        )
+        run_loop(ctx, 0, acc)
     end
   end
 
-  defp run_loop(
-         _generator,
-         model,
-         _target,
-         max_runs,
-         seed,
-         _run_nonce,
-         _shrink,
-         _shrinker_config,
-         _on_failure,
-         reporter,
-         _stutter_config,
-         run_number,
-         total_commands,
-         coverage_acc
-       )
-       when run_number >= max_runs do
+  defp run_loop(ctx, run_number, acc) when run_number >= ctx.max_runs do
     stats =
-      %{runs: max_runs, total_commands: total_commands, seed: seed}
-      |> put_coverage_stats(coverage_acc)
+      %{
+        runs: ctx.max_runs,
+        total_commands: acc.total_commands,
+        seed: ctx.seed,
+        targets: Enum.map(ctx.targets, &%{index: &1.index, name: &1.name})
+      }
+      |> put_coverage_stats(acc)
+      |> put_metrics(ctx, acc.samples)
 
-    Reporter.emit(reporter, fn ->
+    Reporter.emit(ctx.reporter, fn ->
       %RunResult{
         outcome: :ok,
-        runs_completed: max_runs,
-        total_commands: total_commands,
-        seed: seed,
-        invariants: invariant_summary(coverage_acc.fires, model)
+        runs_completed: ctx.max_runs,
+        total_commands: acc.total_commands,
+        seed: ctx.seed,
+        invariants: invariant_summary(acc.fires, ctx.model)
       }
     end)
 
     {:ok, stats}
   end
 
-  defp run_loop(
-         generator,
-         model,
-         target,
-         max_runs,
-         seed,
-         run_nonce,
-         shrink,
-         shrinker_config,
-         on_failure,
-         reporter,
-         stutter_config,
-         run_number,
-         total_commands,
-         coverage_acc
-       ) do
+  defp run_loop(ctx, run_number, acc) do
+    case run_once(ctx, run_number, acc) do
+      {:pass, acc} -> run_loop(ctx, run_number + 1, acc)
+      {:error, _failure} = error -> error
+    end
+  end
+
+  # One run: generate its sequence, then setup_each, execute, teardown_each.
+  # Returns `{:pass, acc}` or the run's `{:error, failure}`.
+  defp run_once(ctx, run_number, acc) do
     # Generate a command sequence, deterministically derived from the seed.
     # Run 0 uses the base seed itself so a reported seed reproduces exactly
     # with max_runs: 1.
-    run_seed = Generator.run_seed(seed, run_number)
-    sequence = generate_one(generator, run_seed)
+    run_seed = Generator.run_seed(ctx.seed, run_number)
+    sequence = generate_one(ctx.generator, run_seed)
     command_count = Sequence.command_count(sequence)
 
     # Per-run heartbeat (DR-022). run_number is reported 1-based for consumers.
-    Reporter.emit(reporter, fn ->
+    Reporter.emit(ctx.reporter, fn ->
       %RunUpdate{
         phase: :run,
         run_number: run_number + 1,
-        total_runs: max_runs,
+        total_runs: ctx.max_runs,
         command_count: command_count,
         branch_count: Sequence.branch_count(sequence)
       }
@@ -624,129 +624,264 @@ defmodule PropertyDamage do
       branching: Sequence.branching?(sequence)
     })
 
-    # Setup each (if model implements it)
-    setup_each_result =
-      if function_exported?(model, :setup_each, 1) do
-        model.setup_each(%{adapter_config: target.config, run_number: run_number})
-      else
-        :ok
-      end
+    run = %{sequence: sequence, run_seed: run_seed, run_number: run_number, start: seq_start_time}
 
-    case setup_each_result do
+    case call_setup_each(ctx, run_number) do
       :ok ->
-        # Start event queue for injectors. Its stop is guaranteed by the outer
-        # `after` below so that a raise in injector/mock setup cannot leak it
-        # (A6); injector/mock setup therefore lives inside the outer try.
-        {:ok, event_queue} = EventQueue.start_link()
-
         try do
-          # Setup injector adapters
-          setup_injectors(target.injectors, event_queue)
-
-          # Setup declared mock services (WP-C5): a per-run registry, one per run
-          # like the event queue, reused across this run's shrink attempts and the
-          # reproduction re-execution (mock_registry is nil when none declared).
-          {mock_registry, mock_contexts} = setup_mocks(target.mocks, event_queue)
-
-          try do
-            # Execute the sequence
-            run_result =
-              Executor.run(sequence, model, target.adapter,
-                config: target.config,
-                event_queue: event_queue,
-                mock_registry: mock_registry,
-                stutter_config: stutter_config,
-                # Explicit stutter RNG base (DR-029): per-run seed so stutter
-                # decisions are decoupled from run count and seed-library replay
-                # drift, yet reproduce on the same campaign seed.
-                rng_seed: run_seed,
-                # Client-minted run-scoped values (DR-034): the exploration run is
-                # epoch 0; the nonce is constant across the campaign's runs.
-                run_nonce: run_nonce,
-                mint_epoch: 0
-              )
-
-            case run_result do
-              {:ok, result} ->
-                # Emit telemetry for sequence stop
-                Telemetry.sequence_stop(seq_start_time, %{
-                  run_number: run_number,
-                  success: result.success,
-                  commands_executed: command_count
-                })
-
-                # Accumulate this sequence's per-check firings into the whole-run
-                # total (DR-026), and (only under coverage: true) fold its
-                # command/transition/state dimensions into the tracker.
-                coverage_acc = accumulate_coverage(coverage_acc, result, sequence)
-
-                if result.success do
-                  # Success - continue to next run
-                  run_loop(
-                    generator,
-                    model,
-                    target,
-                    max_runs,
-                    seed,
-                    run_nonce,
-                    shrink,
-                    shrinker_config,
-                    on_failure,
-                    reporter,
-                    stutter_config,
-                    run_number + 1,
-                    total_commands + command_count,
-                    coverage_acc
-                  )
-                else
-                  # Failure - shrink and report. Pass the run's EFFECTIVE seed so
-                  # the report's "reproduce with this seed" is exact (run 0 of a
-                  # reproduction derives the identical sequence from it).
-                  handle_failure(
-                    sequence,
-                    result,
-                    model,
-                    target,
-                    event_queue,
-                    mock_registry,
-                    shrink,
-                    shrinker_config,
-                    on_failure,
-                    reporter,
-                    run_seed,
-                    run_number,
-                    run_nonce,
-                    stutter_config,
-                    coverage_acc.fires
-                  )
-                end
-
-              # Executor.run returns {:error, reason} when the adapter's setup/1
-              # fails. Surface it as a run-level error (mirroring setup_each_failed)
-              # instead of crashing on a hard {:ok, _} match (A4).
-              {:error, reason} ->
-                {:error, %{adapter_setup_failed: reason, run_number: run_number}}
-            end
-          after
-            # Teardown declared mock services, then injectors. The event queue
-            # is stopped by the outer `after` so it is released even if injector
-            # or mock setup raised before this inner try was entered (A6).
-            teardown_mocks(mock_registry, mock_contexts)
-            teardown_injectors(target.injectors)
-
-            # Teardown each
-            if function_exported?(model, :teardown_each, 1) do
-              model.teardown_each(%{adapter_config: target.config, run_number: run_number})
-            end
-          end
+          if ctx.branching,
+            do: run_branching(ctx, run, acc),
+            else: run_lockstep(ctx, run, acc)
         after
-          EventQueue.stop(event_queue)
+          call_teardown_each(ctx, run_number)
         end
 
       {:error, reason} ->
         {:error, %{setup_each_failed: reason, run_number: run_number}}
     end
   end
+
+  # Setup each and teardown each (if the model implements them) receive the
+  # reference target's config.
+  defp call_setup_each(ctx, run_number) do
+    if function_exported?(ctx.model, :setup_each, 1) do
+      ctx.model.setup_each(%{adapter_config: ctx.target.config, run_number: run_number})
+    else
+      :ok
+    end
+  end
+
+  defp call_teardown_each(ctx, run_number) do
+    if function_exported?(ctx.model, :teardown_each, 1) do
+      ctx.model.teardown_each(%{adapter_config: ctx.target.config, run_number: run_number})
+    end
+  end
+
+  # A linear sequence runs on every target through the lockstep scheduler,
+  # which owns each target's event queue, injectors, mocks, setup and teardown.
+  defp run_lockstep(ctx, run, acc) do
+    {:ok, outcome} =
+      Scheduler.run(
+        model: ctx.model,
+        targets: ctx.targets,
+        commands: Sequence.to_list(run.sequence),
+        seed: ctx.seed,
+        run_number: run.run_number,
+        run_nonce: ctx.run_nonce,
+        # The exploration run is epoch 0 (DR-034); shrink attempts and the
+        # reproduction re-execution draw later epochs.
+        mint_epoch: 0,
+        concurrency: ctx.concurrency,
+        compare: ctx.compare,
+        equivalence: ctx.equivalence,
+        measure_latency: ctx.measure_latency,
+        stutter_config: ctx.stutter_config,
+        check_mode: ctx.check_mode
+      )
+
+    Telemetry.sequence_stop(run.start, %{
+      run_number: run.run_number,
+      success: is_nil(outcome.failure),
+      commands_executed: Sequence.command_count(run.sequence)
+    })
+
+    # Coverage and check firings come from the reference target's run (DR-026).
+    acc =
+      case outcome.results do
+        [%{} = reference | _] -> accumulate_coverage(acc, reference, run.sequence)
+        _ -> acc
+      end
+
+    acc = record_sample(acc, ctx, run.run_number, outcome)
+
+    case outcome.failure do
+      nil ->
+        {:pass,
+         %{acc | total_commands: acc.total_commands + Sequence.command_count(run.sequence)}}
+
+      failure ->
+        lockstep_failure(ctx, run, outcome, failure, acc.fires)
+    end
+  end
+
+  # A one-target failure (other than a setup failure) is shrunk and reproduced
+  # through the linear engine. A failure in a run with two or more targets is
+  # reported as found, without shrinking.
+  defp lockstep_failure(%{targets: [_one]} = ctx, run, outcome, %{kind: kind} = failure, fires)
+       when kind != :setup_failed do
+    case outcome.results do
+      [%{failure_reason: %Failure{}} = result] ->
+        with_run_services(ctx.target, fn event_queue, mock_registry ->
+          handle_failure(
+            ctx,
+            run.sequence,
+            result,
+            event_queue,
+            mock_registry,
+            run.run_seed,
+            run.run_number,
+            fires
+          )
+        end)
+
+      _ ->
+        report_failure(ctx, lockstep_report(ctx, run, outcome, failure, fires))
+    end
+  end
+
+  defp lockstep_failure(ctx, run, outcome, failure, fires) do
+    report_failure(ctx, lockstep_report(ctx, run, outcome, failure, fires))
+  end
+
+  # The report of a lockstep failure as the run found it: the failing target's
+  # state and event log, the original sequence, no shrinking.
+  defp lockstep_report(ctx, run, outcome, failure, fires) do
+    result = Enum.at(outcome.results, failure.variant.index) || %{}
+
+    FailureReport.new(
+      seed: run.run_seed,
+      run_number: run.run_number,
+      original_sequence: run.sequence,
+      shrunk_sequence: run.sequence,
+      plan_source: :generated,
+      source_revision: RunTrace.source_revision(),
+      run_nonce: ctx.run_nonce,
+      mint_epoch: 0,
+      executed: Map.get(result, :executed, %{}),
+      failed_at_index: failure.root,
+      failure_reason: failure.reason,
+      event_log: Map.get(result, :event_log, []),
+      projections: Map.get(result, :projections, %{}),
+      projections_before: Map.get(result, :projections_before),
+      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+      linearization: Map.get(result, :linearization),
+      stacktrace: Map.get(result, :stacktrace),
+      model: ctx.model,
+      targets: ctx.target_entries,
+      variant: failure.variant,
+      concurrency: ctx.concurrency,
+      check_fires: fires
+    )
+  end
+
+  # A branching sequence runs on the one target through the linear engine.
+  defp run_branching(ctx, run, acc) do
+    with_run_services(ctx.target, fn event_queue, mock_registry ->
+      run_result =
+        Executor.run(run.sequence, ctx.model, ctx.target.adapter,
+          config: ctx.target.config,
+          event_queue: event_queue,
+          mock_registry: mock_registry,
+          stutter_config: ctx.stutter_config,
+          # Explicit stutter RNG base (DR-029): per-run seed so stutter
+          # decisions are decoupled from run count and seed-library replay
+          # drift, yet reproduce on the same campaign seed.
+          rng_seed: run.run_seed,
+          # Client-minted run-scoped values (DR-034): the exploration run is
+          # epoch 0; the nonce is constant across the campaign's runs.
+          run_nonce: ctx.run_nonce,
+          mint_epoch: 0
+        )
+
+      case run_result do
+        {:ok, result} ->
+          Telemetry.sequence_stop(run.start, %{
+            run_number: run.run_number,
+            success: result.success,
+            commands_executed: Sequence.command_count(run.sequence)
+          })
+
+          acc = accumulate_coverage(acc, result, run.sequence)
+
+          if result.success do
+            command_count = Sequence.command_count(run.sequence)
+            {:pass, %{acc | total_commands: acc.total_commands + command_count}}
+          else
+            # Shrink and report. Pass the run's EFFECTIVE seed so the report's
+            # "reproduce with this seed" is exact (run 0 of a reproduction
+            # derives the identical sequence from it).
+            handle_failure(
+              ctx,
+              run.sequence,
+              result,
+              event_queue,
+              mock_registry,
+              run.run_seed,
+              run.run_number,
+              acc.fires
+            )
+          end
+
+        # Executor.run returns {:error, reason} when the adapter's setup/1
+        # fails: a setup failure of the one target, never shrunk.
+        {:error, reason} ->
+          report_failure(
+            ctx,
+            setup_report(ctx, run.sequence, run.run_seed, run.run_number, reason, acc.fires)
+          )
+      end
+    end)
+  end
+
+  # The report of a target's adapter setup failure: nothing ran, so it holds
+  # the generated sequence, no state, and no command index.
+  defp setup_report(ctx, sequence, seed, run_number, reason, fires) do
+    FailureReport.new(
+      seed: seed,
+      run_number: run_number,
+      original_sequence: sequence,
+      shrunk_sequence: sequence,
+      plan_source: :generated,
+      source_revision: RunTrace.source_revision(),
+      run_nonce: ctx.run_nonce,
+      mint_epoch: 0,
+      failed_at_index: nil,
+      failure_reason: Failure.setup_failed(reason),
+      model: ctx.model,
+      targets: ctx.target_entries,
+      variant: %{index: ctx.target.index, name: ctx.target.name},
+      concurrency: ctx.concurrency,
+      check_fires: fires
+    )
+  end
+
+  # Starts an event queue with the target's injectors and mocks for the linear
+  # engine, runs `fun` with the queue and the mock registry, and releases all
+  # of them again. The queue's stop is guaranteed by the outer `after`, so a
+  # raise in injector or mock setup cannot leak it (A6).
+  defp with_run_services(target, fun) do
+    {:ok, event_queue} = EventQueue.start_link()
+
+    try do
+      setup_injectors(target.injectors, event_queue)
+      {mock_registry, mock_contexts} = setup_mocks(target.mocks, event_queue)
+
+      try do
+        fun.(event_queue, mock_registry)
+      after
+        teardown_mocks(mock_registry, mock_contexts)
+        teardown_injectors(target.injectors)
+      end
+    after
+      EventQueue.stop(event_queue)
+    end
+  end
+
+  # Under `compare: :performance | :both`, each run at or after `warmup_runs`
+  # contributes its per-target latencies and observations to the metrics.
+  defp record_sample(%{samples: samples} = acc, ctx, run_number, outcome) do
+    if ctx.measure_latency and run_number >= ctx.warmup_runs do
+      sample = LatencyMetrics.sample(ctx.targets, outcome.latencies, outcome.observations)
+      %{acc | samples: [sample | samples]}
+    else
+      acc
+    end
+  end
+
+  defp put_metrics(stats, %{measure_latency: false}, _samples), do: stats
+
+  defp put_metrics(stats, ctx, samples),
+    do: Map.put(stats, :metrics, LatencyMetrics.calculate(ctx.targets, samples))
 
   defp generate_one(generator, run_seed) do
     Generator.generate_value(generator, run_seed)
@@ -849,8 +984,10 @@ defmodule PropertyDamage do
 
   # Replay previously-failing seeds before random exploration. Returns
   # `:proceed` to run exploration, or `{:halt, failure}` to stop with that
-  # failure (a shrunk `FailureReport` for a still-failing seed, or a setup-error
-  # map mirroring `run_loop`'s contract).
+  # failure (a shrunk `FailureReport` for a still-failing seed, a `:setup_failed`
+  # report, or a `setup_each_failed` map mirroring `run_loop`'s contract).
+  #
+  # A replayed seed runs against the reference target only.
   defp replay_phase(nil, _ctx), do: :proceed
 
   defp replay_phase(%{path: path, prune_after: k, verbose: verbose}, ctx) do
@@ -875,8 +1012,8 @@ defmodule PropertyDamage do
     {:halt, %{setup_each_failed: reason, phase: :seed_library_replay}}
   end
 
-  defp finish_replay({:adapter_setup_failed, reason}, _path, _k, _reporter) do
-    {:halt, %{adapter_setup_failed: reason, phase: :seed_library_replay}}
+  defp finish_replay({:setup_failed, report}, _path, _k, _reporter) do
+    {:halt, report}
   end
 
   defp finish_replay({:ok, library, results, rep_report}, path, k, reporter) do
@@ -921,7 +1058,7 @@ defmodule PropertyDamage do
 
     case outcome do
       {:setup_each_failed, _reason} = err -> err
-      {:adapter_setup_failed, _reason} = err -> err
+      {:setup_failed, _report} = err -> err
       {lib, results, rep} -> {:ok, lib, Enum.reverse(results), rep}
     end
   end
@@ -938,7 +1075,7 @@ defmodule PropertyDamage do
       {:setup_each_failed, _reason} = err ->
         {:halt, err}
 
-      {:adapter_setup_failed, _reason} = err ->
+      {:setup_failed, _report} = err ->
         {:halt, err}
 
       {:pass} ->
@@ -983,20 +1120,13 @@ defmodule PropertyDamage do
       if build_rep? do
         {:error, report} =
           handle_failure(
+            ctx,
             sequence,
             exec_result,
-            ctx.model,
-            ctx.target,
             event_queue,
             mock_registry,
-            ctx.shrink,
-            ctx.shrinker_config,
-            ctx.on_failure,
-            ctx.reporter,
             seed,
             0,
-            ctx.run_nonce,
-            ctx.stutter_config,
             # Replay is a pre-exploration phase; whole-run anti-vacuity coverage
             # is an exploration concern, so no firings are accumulated here.
             %{}
@@ -1013,31 +1143,17 @@ defmodule PropertyDamage do
     if entry && entry.consecutive_passes >= k, do: :prune, else: :pass
   end
 
-  # Drive one sequence through the standard per-sequence lifecycle (setup_each →
-  # event queue + injectors → Executor.run → teardown), invoking `fun` with the
-  # live event queue. Mirrors `run_loop`'s body for a single run-0 derivation.
+  # Drive one sequence through the per-sequence lifecycle (setup_each → event
+  # queue + injectors → Executor.run → teardown) against the reference target,
+  # invoking `fun` with the live event queue. Mirrors a branching run of
+  # `run_loop` for a single run-0 derivation.
   defp with_sequence_execution(seed, ctx, fun) do
     sequence = generate_one(ctx.generator, seed)
 
-    setup_each_result =
-      if function_exported?(ctx.model, :setup_each, 1) do
-        ctx.model.setup_each(%{adapter_config: ctx.target.config, run_number: 0})
-      else
-        :ok
-      end
-
-    case setup_each_result do
+    case call_setup_each(ctx, 0) do
       :ok ->
-        # Start event queue for injectors. Its stop is guaranteed by the outer
-        # `after` below so that a raise in injector/mock setup cannot leak it
-        # (A6); injector/mock setup therefore lives inside the outer try.
-        {:ok, event_queue} = EventQueue.start_link()
-
         try do
-          setup_injectors(ctx.target.injectors, event_queue)
-          {mock_registry, mock_contexts} = setup_mocks(ctx.target.mocks, event_queue)
-
-          try do
+          with_run_services(ctx.target, fn event_queue, mock_registry ->
             run_result =
               Executor.run(sequence, ctx.model, ctx.target.adapter,
                 config: ctx.target.config,
@@ -1057,24 +1173,13 @@ defmodule PropertyDamage do
                 fun.(sequence, result, event_queue, mock_registry)
 
               # Executor.run returns {:error, reason} when the adapter's setup/1
-              # fails. Surface it up the replay chain (mirroring setup_each_failed)
-              # instead of crashing on a hard {:ok, _} match (A4).
+              # fails: the replay halts with a setup failure report.
               {:error, reason} ->
-                {:adapter_setup_failed, reason}
+                {:setup_failed, setup_report(ctx, sequence, seed, 0, reason, %{})}
             end
-          after
-            # The event queue is stopped by the outer `after` so it is released
-            # even if injector or mock setup raised before this inner try was
-            # entered (A6).
-            teardown_mocks(mock_registry, mock_contexts)
-            teardown_injectors(ctx.target.injectors)
-
-            if function_exported?(ctx.model, :teardown_each, 1) do
-              ctx.model.teardown_each(%{adapter_config: ctx.target.config, run_number: 0})
-            end
-          end
+          end)
         after
-          EventQueue.stop(event_queue)
+          call_teardown_each(ctx, 0)
         end
 
       {:error, reason} ->
@@ -1203,23 +1308,27 @@ defmodule PropertyDamage do
     :ok
   end
 
+  # Shrinks a one-target failure and reproduces it through the linear engine,
+  # using the event queue and mock registry the caller set up for the target.
   defp handle_failure(
+         ctx,
          sequence,
          result,
-         model,
-         target,
          event_queue,
          mock_registry,
-         shrink,
-         shrinker_config,
-         on_failure,
-         reporter,
          seed,
          run_number,
-         run_nonce,
-         stutter_config,
          check_fires
        ) do
+    %{
+      model: model,
+      target: target,
+      shrink: shrink,
+      shrinker_config: shrinker_config,
+      run_nonce: run_nonce,
+      stutter_config: stutter_config
+    } = ctx
+
     # Stutter failures are now shrinkable (DR-029): the shrinker reproduces them
     # with stutter forced on (probability 1.0), so they minimize to the offending
     # command rather than being skipped. `seed` is the run's effective seed,
@@ -1329,17 +1438,31 @@ defmodule PropertyDamage do
         projections_before: report_result.projections_before,
         command_fold_ordinals: Map.get(report_result, :command_fold_ordinals, %{}),
         model: model,
-        adapter: target.adapter,
+        targets: ctx.target_entries,
+        variant: %{index: target.index, name: target.name},
+        concurrency: ctx.concurrency,
         linearization: report_result.linearization,
         stacktrace: Map.get(report_result, :stacktrace),
         check_fires: check_fires
       )
 
+    report_failure(ctx, failure_report)
+  end
+
+  # Announces a failure report and returns it as the run's result.
+  defp report_failure(ctx, failure_report) do
     # Terminal failure notification (DR-022): the verbose consumer renders this
     # as the failure summary. The authoritative result is the returned report.
-    Reporter.emit(reporter, fn ->
-      %RunResult{outcome: :error, failure: failure_report}
+    Reporter.emit(ctx.reporter, fn ->
+      %RunResult{
+        outcome: :error,
+        failure: failure_report,
+        kind: failure_report.kind,
+        variant: failure_report.variant
+      }
     end)
+
+    on_failure = ctx.on_failure
 
     # A raising on_failure handler must not destroy the failure we just found:
     # catch it, warn, and still return the report.
@@ -1437,13 +1560,15 @@ defmodule PropertyDamage do
   - `:max_time_ms` - Maximum time for shrinking in ms (default: from `:strategy`)
   - `:shrink_arguments` - Whether to shrink argument values (default: true)
   - `:targets` - Single-entry target list overriding the system to re-execute
-    against (default: the report's adapter with an empty `config:`); see
-    `PropertyDamage.Target`
+    against (default: the report's reference target: its adapter, name and
+    `config:`); see `PropertyDamage.Target`
 
   ## Returns
 
   - `{:ok, new_failure_report}` - Shrinking succeeded, possibly smaller sequence
-  - `{:error, reason}` - Shrinking failed (e.g., missing model/adapter)
+  - `{:error, reason}` - Shrinking failed: `:missing_model_or_adapter` when the
+    report records no model or no target, or the setup `%PropertyDamage.Failure{}`
+    when the target's adapter `setup/1` fails on the re-execution
 
   ## Example
 
@@ -1461,12 +1586,12 @@ defmodule PropertyDamage do
           {:ok, FailureReport.t()} | {:error, term()}
   def shrink_further(%FailureReport{} = report, opts \\ []) do
     model = report.model
-    adapter = report.adapter
+    reference = FailureReport.reference_target(report)
 
-    if is_nil(model) or is_nil(adapter) do
+    if is_nil(model) or is_nil(reference) do
       {:error, :missing_model_or_adapter}
     else
-      target = Options.override_target!(opts, adapter, "PropertyDamage.shrink_further/2")
+      target = Options.override_target!(opts, reference, "PropertyDamage.shrink_further/2")
 
       # Build shrinker config from options
       strategy = Keyword.get(opts, :strategy, :thorough)
@@ -1514,10 +1639,10 @@ defmodule PropertyDamage do
                mint_epoch: fresh_epoch
              ) do
           # A re-execution whose adapter setup fails cannot confirm a further
-          # shrink; surface it as a run error instead of crashing on a hard
-          # {:ok, _} match (A4), mirroring run_loop's adapter_setup_failed.
+          # shrink; surface the setup failure instead of crashing on a hard
+          # {:ok, _} match (A4).
           {:error, reason} ->
-            {:error, %{adapter_setup_failed: reason, run_number: report.run_number}}
+            {:error, Failure.setup_failed(reason)}
 
           {:ok, fresh_result} ->
             end_time = System.monotonic_time(:millisecond)
@@ -1553,7 +1678,9 @@ defmodule PropertyDamage do
                   projections_before: fresh_result.projections_before,
                   command_fold_ordinals: Map.get(fresh_result, :command_fold_ordinals, %{}),
                   model: model,
-                  adapter: target.adapter,
+                  # The re-shrink re-executed against this one target.
+                  targets: [PropertyDamage.Target.to_entry(target)],
+                  variant: %{index: 0, name: target.name},
                   linearization: fresh_result.linearization,
                   stacktrace: Map.get(fresh_result, :stacktrace)
                 )
@@ -1684,7 +1811,7 @@ defmodule PropertyDamage do
   ## Options
 
   - `:targets` - Single-entry target list overriding the system to replay
-    against (default: the report's adapter with an empty `config:`)
+    against (default: the report's reference target)
   - `:stop_on_failure` - Stop at first failure (default: true)
 
   ## Example
@@ -2018,7 +2145,7 @@ defmodule PropertyDamage do
           # Cleanup injectors on setup failure; the event queue is stopped by
           # the outer `after`.
           teardown_injectors(injectors)
-          {:error, {:adapter_setup_failed, reason}}
+          {:error, Failure.setup_failed(reason)}
       end
     after
       EventQueue.stop(event_queue)

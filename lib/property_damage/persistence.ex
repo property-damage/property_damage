@@ -54,20 +54,21 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
-  @version 8
+  @version 9
   @extension ".pd"
   @trace_extension ".pdtrace"
 
   # Fields whose presence on a loaded report is expected (not struct drift) even
-  # though the current struct lacks them. Pre-v8 files are refused outright
-  # (DR-041, following the DR-039/DR-040 precedent), so there are no legacy shapes
-  # to whitelist: a v8 file carrying an unknown key IS drift and should be surfaced.
+  # though the current struct lacks them. Files older than the current version
+  # are refused outright (DR-041, following the DR-039/DR-040 precedent), so there
+  # are no legacy shapes to whitelist: a current-version file carrying an unknown
+  # key IS drift and should be surfaced.
   @removed_fields []
 
   # Fields whose absence on a loaded report is expected format evolution (not
-  # struct drift). Empty for the same reason as @removed_fields: only v8 files
-  # load, and a v8 file legitimately lacking a current field is a genuine shape
-  # change worth a warning.
+  # struct drift). Empty for the same reason as @removed_fields: only
+  # current-version files load, and such a file legitimately lacking a current
+  # field is a genuine shape change worth a warning.
   @added_fields []
 
   # Upper bound on the term size we are willing to reconstruct from a file.
@@ -348,7 +349,9 @@ defmodule PropertyDamage.Persistence do
       shrink_time_ms: report.shrink_time_ms,
       timestamp: DateTime.to_iso8601(report.timestamp),
       model: report.model && inspect(report.model),
-      adapter: report.adapter && inspect(report.adapter),
+      kind: report.kind,
+      variant: report.variant,
+      targets: Enum.map(report.targets, &export_target/1),
       shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
       original_command_count: length(Sequence.to_list(report.original_sequence)),
       reproduction_command: FailureReport.reproduction_command(report)
@@ -359,6 +362,18 @@ defmodule PropertyDamage.Persistence do
   # ============================================================================
   # Private Helpers
   # ============================================================================
+
+  # A `targets:` entry as JSON: the adapter and name as strings, the config,
+  # injectors and mocks inspected (they may hold terms JSON cannot encode).
+  defp export_target({adapter, entry}) do
+    %{
+      adapter: inspect(adapter),
+      name: Keyword.get(entry, :name),
+      config: inspect(Keyword.get(entry, :config, %{})),
+      injectors: Enum.map(Keyword.get(entry, :injectors, []), &inspect/1),
+      mocks: inspect(Keyword.get(entry, :mocks, []))
+    }
+  end
 
   defp do_save(report, path) do
     binary = encode(report)
@@ -410,16 +425,18 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
-  # V8 format (DR-041): a report's `failure_reason` is a `%PropertyDamage.Failure{}`
-  # (nested class struct), and the six denormalized failure fields
-  # (`failure_type` / `check_name` / `failure_message` / `invariant_name` /
-  # `idempotency_violation` / `poll_timeout_info`) are gone, replaced by accessors.
-  # V6's fold-order record (DR-040) is unchanged. Positions remain
+  # V9 format: a report records the run's `targets` (the reference first), its
+  # report `kind`, the failing `variant` and the run's `concurrency` in place of
+  # one `adapter`. As in v8 (DR-041), a report's `failure_reason` is a
+  # `%PropertyDamage.Failure{}` (nested class struct) and the six denormalized
+  # failure fields (`failure_type` / `check_name` / `failure_message` /
+  # `invariant_name` / `idempotency_violation` / `poll_timeout_info`) are
+  # accessors. V6's fold-order record (DR-040) is unchanged. Positions remain
   # `%Sequence.Position{}` structs (DR-039). The payload carries an explicit
   # `kind`; the loader dispatches on it rather than the file extension. A report
   # already embeds its trace, so it is returned as stored, with no legacy-field
   # folding or trace synthesis. A standalone trace payload returns the trace.
-  defp decode(<<"PD", 8::8, stored_checksum::32, term_binary::binary>>) do
+  defp decode(<<"PD", @version::8, stored_checksum::32, term_binary::binary>>) do
     with_decoded_payload(stored_checksum, term_binary, fn payload ->
       metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
 
@@ -433,11 +450,13 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v8 files (format versions 1-7) are refused (DR-041, following DR-039/DR-040).
-  # A v7 file stores `%Failure{type: %Failure.Assertion{}}` and `assertion_fires`;
-  # v8 renamed both to the check vocabulary. Older files predate the `%Failure{}`
-  # shape entirely. There is no honest in-place upgrade: re-capture the failure
-  # under the current version.
+  # Pre-v9 files (format versions 1-8) are refused (DR-041, following DR-039/DR-040).
+  # A v8 report records one `adapter` where v9 records the run's `targets`, its
+  # `kind` and the failing `variant`; a v7 file stores
+  # `%Failure{type: %Failure.Assertion{}}` and `assertion_fires`, which v8
+  # renamed to the check vocabulary. Older files predate the `%Failure{}` shape
+  # entirely. There is no honest in-place upgrade: re-capture the failure under
+  # the current version.
   defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
        when version < @version do
     {:error, {:unsupported_format_version, version, @version}}

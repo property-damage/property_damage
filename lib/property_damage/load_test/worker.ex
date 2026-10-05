@@ -125,7 +125,7 @@ defmodule PropertyDamage.LoadTest.Worker do
         {:ok, state}
 
       {:error, reason} ->
-        {:stop, {:adapter_setup_failed, reason}}
+        {:stop, PropertyDamage.Failure.setup_failed(reason)}
     end
   end
 

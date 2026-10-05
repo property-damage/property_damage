@@ -130,7 +130,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
         projections: result.projections,
         projections_before: result.projections_before,
         model: model,
-        adapter: adapter
+        targets: for(adapter <- List.wrap(adapter), do: {adapter, []})
       )
 
     {:ok, path} = Persistence.save(failure, dir)
@@ -219,7 +219,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
           failed_at_index: 1,
           failure_reason: Failure.check_failed(:count_bounded, %RuntimeError{message: "x"}),
           model: FailingModel,
-          adapter: FailingAdapter
+          targets: [{FailingAdapter, []}]
         )
 
       {:ok, path} = Persistence.save(failure, dir)
@@ -242,7 +242,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
           failed_at_index: 2,
           failure_reason: Failure.check_failed(:count_bounded, %RuntimeError{message: "x"}),
           model: nil,
-          adapter: FailingAdapter
+          targets: [{FailingAdapter, []}]
         )
 
       {:ok, path} = Persistence.save(failure, dir)

@@ -103,7 +103,11 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
         projections: result.projections,
         projections_before: result.projections_before,
         model: Keyword.get(opts, :model, FailingModel),
-        adapter: Keyword.get(opts, :adapter, FailingAdapter)
+        targets:
+          for(
+            adapter <- List.wrap(Keyword.get(opts, :adapter, FailingAdapter)),
+            do: {adapter, []}
+          )
       )
 
     {:ok, path} = Persistence.save(failure, dir)
@@ -225,7 +229,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
           projections: result.projections,
           projections_before: result.projections_before,
           model: FailingModel,
-          adapter: FailingAdapter
+          targets: [{FailingAdapter, []}]
         )
 
       {:ok, path} = Persistence.save(failure, dir)

@@ -259,7 +259,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
 
   defp print_summary(failure, strategy, command_count) do
     IO.puts("Model:    #{inspect(failure.model)}")
-    IO.puts("Adapter:  #{inspect(failure.adapter)}")
+    IO.puts("Targets:  #{PropertyDamage.FailureReport.targets_source(failure)}")
     IO.puts("Seed:     #{inspect(failure.seed)}")
 
     IO.puts(
