@@ -205,7 +205,9 @@ defmodule PropertyDamage.Executor do
   # Adapter teardown is best-effort (DR-027): a raising teardown logs a warning
   # but never fails the run, so a cleanup hiccup cannot mask the actual result
   # (or, during shrinking, perturb the failure being minimized).
-  defp safe_teardown(adapter, user_context) do
+  # Shared with PropertyDamage.Variant.
+  @doc false
+  def safe_teardown(adapter, user_context) do
     require Logger
 
     try do
@@ -404,22 +406,11 @@ defmodule PropertyDamage.Executor do
         mint
       )
 
-    # DR-024: @check at: :startup checks run on the initial init/0 state,
-    # after setup/1 and before command 1. A :halt failure aborts before any
-    # command runs.
-    case run_phase_checks(initial_state, :startup) do
-      {:halt, name, reason, _counters} ->
-        Finalization.finalize_result(
-          {:failed, nil, Failure.check_failed(name, reason), initial_state}
-        )
+    case run_startup_checks(initial_state) do
+      {:failed, nil, _failure, _state} = failed ->
+        Finalization.finalize_result(failed)
 
-      {:ok, startup_recorded, startup_counters} ->
-        initial_state = %{
-          initial_state
-          | check_failures: startup_recorded ++ initial_state.check_failures,
-            check_counters: startup_counters
-        }
-
+      {:ok, initial_state} ->
         result =
           commands
           |> Enum.with_index()
@@ -458,6 +449,27 @@ defmodule PropertyDamage.Executor do
         result
         |> restore_remaining_faults(adapter_context, event_queue)
         |> Finalization.finalize_result()
+    end
+  end
+
+  # DR-024: @check at: :startup checks run on the initial init/0 state, after
+  # setup/1 and before command 1. Returns {:ok, state} with any recorded
+  # failures and the fire counters folded in, or, when a check halts, the failed
+  # tuple {:failed, nil, failure, state} that finalize_result/1 reports with no
+  # command index. Used by the linear loop and PropertyDamage.Variant.
+  @doc false
+  def run_startup_checks(state) do
+    case run_phase_checks(state, :startup) do
+      {:halt, name, reason, _counters} ->
+        {:failed, nil, Failure.check_failed(name, reason), state}
+
+      {:ok, startup_recorded, startup_counters} ->
+        {:ok,
+         %{
+           state
+           | check_failures: startup_recorded ++ state.check_failures,
+             check_counters: startup_counters
+         }}
     end
   end
 
@@ -558,46 +570,81 @@ defmodule PropertyDamage.Executor do
     }
   end
 
-  # The per-command stepping seam (init_state / step / stop_pollers) lives in
-  # PropertyDamage.Executor.Stepping, the documented public interface. It builds
-  # on the engine primitives below (build_initial_state / execute_command), which
-  # are also shared with Executor.Branching (DR-029).
+  # The per-command stepping seam (init_state / step / drain / finalize /
+  # stop_pollers) lives in PropertyDamage.Executor.Stepping, the documented
+  # public interface. It builds on the engine primitives below
+  # (build_initial_state / execute_command_with_outcome); Executor.Branching
+  # shares them through execute_command (DR-029).
 
   # Execute a single command
   # Shared with PropertyDamage.Executor.Branching (prefix/branch/suffix). DR-029.
   @doc false
   def execute_command(command, index, state, model, adapter, adapter_context, event_queue) do
-    mock_registry = state.mock_registry
+    case execute_command_with_outcome(
+           command,
+           index,
+           state,
+           model,
+           adapter,
+           adapter_context,
+           event_queue
+         ) do
+      {:ok, new_state, _outcome} -> {:ok, new_state}
+      {:error, reason, failed_state, _outcome} -> {:error, reason, failed_state}
+    end
+  end
 
-    try do
-      # Check if this is a nemesis command
-      if Nemesis.nemesis_command?(command) do
-        PropertyDamage.Executor.Nemesis.execute_nemesis_command(
-          command,
-          index,
-          state,
-          model,
-          adapter_context,
-          event_queue
-        )
-      else
-        execute_regular_command(
-          command,
-          index,
-          state,
-          model,
-          adapter,
-          adapter_context,
-          event_queue,
-          mock_registry
-        )
-      end
-    rescue
-      e in PropertyDamage.ProjectionError ->
-        # A projection signalled a transition invariant violation by raising.
-        # Report it as a failure (with the pre-command state) rather than
-        # letting it crash the run.
-        {:error, Failure.projection_violation(e.projection, e.original), state}
+  # Execute a single command and also return the raw adapter outcome, so a
+  # caller that compares what the adapter answered does not rebuild it from the
+  # state. The outcome is one of:
+  #
+  #   {:ok, events}      the events the adapter returned (settled events for
+  #                      :probe/:async; the events inject/2 returned for a
+  #                      nemesis command)
+  #   {:error, reason}   the adapter's (or nemesis inject/2's) own error term;
+  #                      a settle timeout is {:error, {:timeout, last_reason}}
+  #                      and a return outside the adapter protocol is
+  #                      {:error, return_value}
+  #   {:raised, e}       execute/3 raised `e`
+  #   :not_called        a placeholder could not be resolved, so the adapter
+  #                      was never called
+  #
+  # Returns {:ok, state, outcome} | {:error, failure, failed_state, outcome}.
+  # The state and failure halves are exactly what execute_command/7 reports.
+  # Used by PropertyDamage.Executor.Stepping.
+  @doc false
+  def execute_command_with_outcome(
+        command,
+        index,
+        state,
+        model,
+        adapter,
+        adapter_context,
+        event_queue
+      ) do
+    # Only a command that reaches the adapter's execute/3 records a time.
+    state = %{state | last_execute_us: nil}
+
+    if Nemesis.nemesis_command?(command) do
+      PropertyDamage.Executor.Nemesis.execute_nemesis_command(
+        command,
+        index,
+        state,
+        model,
+        adapter_context,
+        event_queue
+      )
+    else
+      execute_regular_command(
+        command,
+        index,
+        state,
+        model,
+        adapter,
+        adapter_context,
+        event_queue,
+        state.mock_registry
+      )
     end
   end
 
@@ -628,7 +675,7 @@ defmodule PropertyDamage.Executor do
       {:ok, resolved_command} ->
         # 2. Per-command injection/poller sink (DR-027), opened via the shared
         # Runtime.InjectionWindow so the sink lifecycle lives in one place (the
-        # same window the differential and load-test paths use). The engine seeds
+        # same window the load-test path uses). The engine seeds
         # a rich context its inject folds projections into, and starts real
         # resource pollers; those closures below are the engine's contribution to
         # the shared window.
@@ -649,6 +696,7 @@ defmodule PropertyDamage.Executor do
         # poller must route its result to this stable mailbox, not the
         # short-lived Task's.
         poller_owner = self()
+        poller_started = state.on_resource_poller_start
 
         build_runtime = fn sink ->
           start_poller_fn = fn opts ->
@@ -663,6 +711,7 @@ defmodule PropertyDamage.Executor do
               )
 
             Runtime.Sink.add_poller(sink, poller)
+            if poller_started, do: poller_started.(poller.pid)
             poller
           end
 
@@ -687,28 +736,36 @@ defmodule PropertyDamage.Executor do
             Map.get(state.command_specs, command.__struct__)
           end
 
+        # The adapter's wall-clock, every settle attempt and the waits between
+        # them included, is timed here and nothing after it answered.
         execute_fn = fn runtime ->
-          try do
-            Settle.execute_with_settle(
-              resolved_command,
-              adapter,
-              adapter_context,
-              runtime,
-              command_spec
-            )
-          rescue
-            e ->
-              # Capture stacktrace for adapter exceptions
-              stacktrace = __STACKTRACE__
-              {:error, {e, stacktrace}}
-          end
+          started = System.monotonic_time(:microsecond)
+
+          result =
+            try do
+              Settle.execute_with_settle(
+                resolved_command,
+                adapter,
+                adapter_context,
+                runtime,
+                command_spec
+              )
+            rescue
+              # A raise outside the adapter's Task (for example in its timeout/1)
+              # is tagged like one inside it.
+              e -> {:raised, e, __STACKTRACE__}
+            end
+
+          {result, System.monotonic_time(:microsecond) - started}
         end
 
         # The window drains the accumulated injection context and any resource
         # pollers started during execution, then stops the sink (even if the
         # adapter raises).
-        {result, final_injection_ctx, started_resource_pollers} =
+        {{result, execute_us}, final_injection_ctx, started_resource_pollers} =
           Runtime.InjectionWindow.run(initial_ctx, build_runtime, execute_fn)
+
+        state = %{state | last_execute_us: execute_us}
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections
@@ -767,16 +824,23 @@ defmodule PropertyDamage.Executor do
           # implementation (handle_command_events/2 below). The non-success arms
           # stay here so a {:retry, _} from a sync command is still rejected.
           {:ok, events} when is_list(events) ->
-            handle_command_events(events, event_ctx)
+            fold_command_events(events, event_ctx)
 
           {:settled, events} ->
-            handle_command_events(events, event_ctx)
+            fold_command_events(events, event_ctx)
 
           {:timeout, last_reason} ->
-            {:error, Failure.settle_timeout(last_reason), state_with_pollers}
+            {:error, Failure.settle_timeout(last_reason), state_with_pollers, {:error, result}}
 
           {:error, reason} ->
-            {:error, Failure.adapter_error(reason), state_with_pollers}
+            {:error, Failure.adapter_error(reason), state_with_pollers, result}
+
+          # The report keeps the shape a raise has always had,
+          # {exception, stacktrace}; only the outcome tells it apart from an
+          # adapter that returned {:error, {exception, stacktrace}}.
+          {:raised, exception, stacktrace} ->
+            {:error, Failure.adapter_error({exception, stacktrace}), state_with_pollers,
+             {:raised, exception}}
 
           {:retry, reason} ->
             # {:retry, _} is the probe/async settle protocol: only :probe/:async
@@ -786,19 +850,34 @@ defmodule PropertyDamage.Executor do
             command_module = if is_struct(resolved_command), do: resolved_command.__struct__
 
             {:error, Failure.retry_from_sync_command(%{command: command_module, reason: reason}),
-             state_with_pollers}
+             state_with_pollers, {:error, result}}
 
           # Adapter returned something other than {:ok, list} / {:error, _} /
           # {:timeout, _} / {:retry, _}: report a graceful failure instead of
           # crashing the run with a CaseClauseError (this clause sits outside
           # the execute rescue).
           other ->
-            {:error, Failure.malformed_adapter_return(other), state_with_pollers}
+            {:error, Failure.malformed_adapter_return(other), state_with_pollers, {:error, other}}
         end
 
       {:error, reason} ->
-        {:error, Failure.placeholder_resolution(reason), state}
+        {:error, Failure.placeholder_resolution(reason), state, :not_called}
     end
+  end
+
+  # Run the post-events pipeline for a command whose adapter answered with
+  # `events`, and attach that answer as the outcome. A projection that signals a
+  # transition-invariant violation by raising is reported as a failure carrying
+  # the pre-command state, rather than crashing the run.
+  defp fold_command_events(events, event_ctx) do
+    case handle_command_events(events, event_ctx) do
+      {:ok, new_state} -> {:ok, new_state, {:ok, events}}
+      {:error, reason, failed_state} -> {:error, reason, failed_state, {:ok, events}}
+    end
+  rescue
+    e in PropertyDamage.ProjectionError ->
+      {:error, Failure.projection_violation(e.projection, e.original), event_ctx.state,
+       {:ok, events}}
   end
 
   # Shared post-events pipeline for both command success arms: {:ok, events} from

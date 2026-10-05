@@ -2,19 +2,48 @@ defmodule PropertyDamage.Differential.Result do
   @moduledoc """
   Result from differential testing.
 
-  Contains comparison results, divergences, and performance metrics.
+  Contains the run's status, every divergence found (oldest first), the failure
+  that ended the campaign (if any), and performance metrics.
+
+  `status` is `:equivalent` when no run diverged, `:divergent` when at least one
+  run diverged, and `:failed` when a failure ended the campaign (`failure` is
+  set; divergences of earlier runs stay listed).
   """
 
+  alias PropertyDamage.Failure
+
+  @typedoc "A compared target: its zero-based position in `targets:` and its name."
+  @type variant :: %{index: non_neg_integer(), name: String.t()}
+
+  @typedoc """
+  The first command at which a non-reference target answered differently from
+  the reference. `run` is the 0-based run and `root` the command's 0-based
+  index; `results` holds every target's observation of that command, keyed by
+  target name.
+  """
   @type divergence :: %{
-          required(:seed) => integer(),
-          required(:command) => struct(),
-          required(:step) => non_neg_integer(),
-          required(:reference_result) => term(),
-          required(:results) => map(),
-          optional(:divergent_target) => String.t(),
-          optional(:divergent_result) => term(),
-          optional(:run_index) => non_neg_integer(),
-          optional(:reference_name) => String.t()
+          seed: integer(),
+          run: non_neg_integer(),
+          root: non_neg_integer(),
+          command: struct(),
+          variant: variant(),
+          reference_result: term(),
+          divergent_result: term(),
+          results: %{String.t() => term()}
+        }
+
+  @typedoc """
+  What ended the campaign, naming the target it happened in. `root` is `nil`
+  when the failure belongs to no command (setup, a `:startup` check). `reason`
+  is the `%PropertyDamage.Failure{}`, the exception an adapter raised, or the
+  term a setup returned.
+  """
+  @type failure :: %{
+          kind: :check_failed | :setup_failed | :execution_failed,
+          variant: variant(),
+          run: non_neg_integer(),
+          root: non_neg_integer() | nil,
+          reason: term()
         }
 
   @type metrics :: %{
@@ -31,29 +60,28 @@ defmodule PropertyDamage.Differential.Result do
           optional(:reason) => term()
         }
 
-  @typedoc "A compared target: its zero-based position in `targets:` and its name."
-  @type variant :: %{index: non_neg_integer(), name: String.t()}
-
   @type t :: %__MODULE__{
           mode: :correctness | :performance | :both,
-          execution: :interleaved | :sequential,
+          concurrency: :serial | :parallel,
           runs: non_neg_integer(),
           seed: integer(),
           reference: variant(),
-          status: :equivalent | :divergent | :complete,
+          status: :equivalent | :divergent | :failed,
           divergences: [divergence()],
+          failure: failure() | nil,
           metrics: %{String.t() => metrics()},
           targets: [variant()]
         }
 
   defstruct [
     :mode,
-    :execution,
+    :concurrency,
     :runs,
     :seed,
     :reference,
     :status,
     :divergences,
+    :failure,
     :metrics,
     :targets
   ]
@@ -108,7 +136,7 @@ defmodule PropertyDamage.Differential.Result do
     Differential Testing Result
     ===========================
     Mode: #{result.mode}
-    Execution: #{result.execution}
+    Concurrency: #{result.concurrency}
     Runs: #{result.runs}
     Seed: #{result.seed}
     Status: #{format_status(result.status)}
@@ -125,7 +153,9 @@ defmodule PropertyDamage.Differential.Result do
     divergences =
       if result.divergences != [], do: "\n" <> format_divergences(result), else: ""
 
-    summary <> metrics <> divergences
+    failure = if result.failure, do: "\n" <> format_failure(result.failure), else: ""
+
+    summary <> metrics <> divergences <> failure
   end
 
   defp format_metrics(result) do
@@ -195,15 +225,35 @@ defmodule PropertyDamage.Differential.Result do
 
   defp format_divergence(div) do
     """
-    Step #{div.step}: #{inspect(div.command.__struct__)}
+    Run #{div.run}, root #{div.root}: #{inspect(div.command.__struct__)}
       Reference: #{inspect(div.reference_result)}
-      #{div.divergent_target}: #{inspect(div.divergent_result)}
+      #{div.variant.name}: #{inspect(div.divergent_result)}
     """
   end
+
+  defp format_failure(failure) do
+    """
+    Failure
+    -------
+    #{failure.kind} in #{failure.variant.name} (run #{failure.run}, root #{format_root(failure.root)})
+      #{format_reason(failure.reason)}
+    """
+  end
+
+  defp format_root(nil), do: "none"
+  defp format_root(root), do: root
+
+  defp format_reason(%Failure{} = failure) do
+    label = Enum.join(Enum.reject([Failure.kind(failure), Failure.name(failure)], &is_nil/1), " ")
+    "#{label}: #{inspect(Failure.detail(failure))}"
+  end
+
+  defp format_reason(%{__exception__: true} = exception), do: Exception.message(exception)
+  defp format_reason(reason), do: inspect(reason)
 
   defp format_variant(%{index: index, name: name}), do: "[#{index}] #{name}"
 
   defp format_status(:equivalent), do: "EQUIVALENT ✓"
   defp format_status(:divergent), do: "DIVERGENT ✗"
-  defp format_status(:complete), do: "COMPLETE"
+  defp format_status(:failed), do: "FAILED ✗"
 end

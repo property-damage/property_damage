@@ -7,19 +7,19 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
   window: start a `PropertyDamage.Runtime.Sink`, seed it, build the `%Runtime{}`
   the adapter receives (its `inject`/`start_poller` closures accumulate into the
   sink), run the execution, then drain the accumulated context and pollers and
-  stop the sink. Before this module that boilerplate was copied three times (the
-  executor's `execute_regular_command`, `Differential`, and `LoadTest.Worker`),
-  so a change to the sink mechanism had to be made in three places and drifted.
+  stop the sink. Before this module that boilerplate was copied into every path
+  (the executor's `execute_regular_command` and `LoadTest.Worker` among them),
+  so a change to the sink mechanism had to be made in several places and drifted.
 
   What stays *caller-specific* is deliberately not captured here, because it
   legitimately differs between paths:
 
     * the sink's initial context and how `inject` folds into it. The engine seeds
       a rich context (`:projections`, `:event_log`, ...) and folds projections in
-      real time; the differential and load-test paths seed `%{events: []}` and
-      just accumulate the raw injected events.
+      real time; the load-test path seeds `%{events: []}` and just accumulates
+      the raw injected events.
     * the `start_poller` policy. The engine starts real resource pollers; the
-      differential and load-test paths raise, having no poller support.
+      load-test path raises, having no poller support.
     * how the adapter is actually invoked (directly, via settle, or wrapped in a
       timeout task).
 
@@ -69,7 +69,7 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
 
   @doc """
   Open a window for a path that only *accumulates* injected events and has no
-  resource-poller support (the differential and load-test paths).
+  resource-poller support (the load-test path).
 
   Seeds the sink with `%{events: []}`, hands the adapter a runtime whose `inject`
   appends raw events and whose `start_poller` raises `ArgumentError` with

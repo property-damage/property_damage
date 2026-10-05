@@ -305,7 +305,7 @@ defmodule PropertyDamage.Replay do
     }
 
     case Stepping.step(command, next_index, before_state, step_context) do
-      {:ok, new_exec_state} ->
+      {:ok, new_exec_state, _outcome} ->
         emit_step(
           session,
           new_exec_state,
@@ -317,7 +317,7 @@ defmodule PropertyDamage.Replay do
           :in_progress
         )
 
-      {:error, reason, failed_state} ->
+      {:error, reason, failed_state, _outcome} ->
         emit_step(
           session,
           failed_state,

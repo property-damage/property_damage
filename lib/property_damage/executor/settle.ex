@@ -18,20 +18,36 @@ defmodule PropertyDamage.Executor.Settle do
 
   # Execute command with settle logic for probes/async, sourced from the spec.
   # Each adapter.execute/3 attempt is bounded by adapter.timeout/1 (DR-032).
+  #
+  # A raising execute/3 comes back as `{:raised, exception, stacktrace}`, tagged
+  # where the raise was caught (Timeout.execute_tagged/4). The settle loop only
+  # speaks the adapter protocol, so on the probe/async path the tag is thrown
+  # past it and caught here; a raise ends the settle loop, as an `{:error, _}`
+  # attempt does.
   def execute_with_settle(command, adapter, user_context, runtime, spec) do
     execution = settle_execution(command, spec)
 
     if execution in [:probe, :async] do
       config = settle_config(command, spec)
 
-      Settle.settle(
-        fn -> Timeout.execute(adapter, command, user_context, runtime) end,
-        timeout_ms: config.timeout_ms,
-        interval_ms: config.interval_ms,
-        backoff: config.backoff
-      )
+      attempt = fn ->
+        case Timeout.execute_tagged(adapter, command, user_context, runtime) do
+          {:raised, _exception, _stacktrace} = raised -> throw({__MODULE__, raised})
+          result -> result
+        end
+      end
+
+      try do
+        Settle.settle(attempt,
+          timeout_ms: config.timeout_ms,
+          interval_ms: config.interval_ms,
+          backoff: config.backoff
+        )
+      catch
+        :throw, {__MODULE__, raised} -> raised
+      end
     else
-      Timeout.execute(adapter, command, user_context, runtime)
+      Timeout.execute_tagged(adapter, command, user_context, runtime)
     end
   end
 

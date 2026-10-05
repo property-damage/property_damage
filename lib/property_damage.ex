@@ -138,7 +138,6 @@ defmodule PropertyDamage do
     Failure,
     FailureReport,
     Generator,
-    MockServiceRegistry,
     Options,
     Progress.Printer,
     Progress.ReplayUpdate,
@@ -154,6 +153,7 @@ defmodule PropertyDamage do
     Validation
   }
 
+  alias PropertyDamage.Runtime.RunServices
   alias PropertyDamage.Shrinker.Config, as: ShrinkerConfig
 
   @typedoc """
@@ -819,71 +819,15 @@ defmodule PropertyDamage do
     _ -> nil
   end
 
-  defp setup_injectors(injectors, event_queue) do
-    for adapter <- injectors do
-      if function_exported?(adapter, :setup, 1) do
-        adapter.setup(%{event_queue: event_queue})
-      end
-    end
-  end
+  # Per-run injector and mock wiring, shared with PropertyDamage.Variant.
+  defp setup_injectors(injectors, event_queue),
+    do: RunServices.setup_injectors(injectors, event_queue)
 
-  defp teardown_injectors(injectors) do
-    for adapter <- injectors do
-      if function_exported?(adapter, :teardown, 1) do
-        adapter.teardown(%{})
-      end
-    end
-  end
+  defp teardown_injectors(injectors), do: RunServices.teardown_injectors(injectors)
 
-  # ============================================================================
-  # Mock Service Lifecycle (WP-C5)
-  # ============================================================================
+  defp setup_mocks(mocks, event_queue), do: RunServices.setup_mocks(mocks, event_queue)
 
-  # Start a per-run MockServiceRegistry and bring up each declared mock: register
-  # it (init_state/0) and call its setup/1 with the entry's config merged with
-  # the framework channels (:registry and :event_queue). Returns the registry pid
-  # (or nil when no mocks are declared) plus the per-mock setup contexts, which
-  # teardown_mocks/2 later hands back to each mock's teardown/1. Mirrors the event
-  # queue's per-run lifecycle; the pid is reused across this run's shrink attempts.
-  defp setup_mocks([], _event_queue), do: {nil, []}
-
-  defp setup_mocks(mocks, event_queue) do
-    {:ok, registry} = MockServiceRegistry.start_link([])
-
-    contexts =
-      for {module, config} <- mocks do
-        :ok = MockServiceRegistry.register(registry, module)
-
-        context =
-          if function_exported?(module, :setup, 1) do
-            case module.setup(Map.merge(config, %{registry: registry, event_queue: event_queue})) do
-              {:ok, ctx} -> ctx
-              :ok -> %{}
-            end
-          else
-            %{}
-          end
-
-        {module, context}
-      end
-
-    {registry, contexts}
-  end
-
-  # Tear each mock down (best-effort, in reverse setup order) then stop the
-  # registry. A nil registry means no mocks were declared, so this is a no-op.
-  defp teardown_mocks(nil, _contexts), do: :ok
-
-  defp teardown_mocks(registry, contexts) do
-    for {module, context} <- Enum.reverse(contexts) do
-      if function_exported?(module, :teardown, 1) do
-        module.teardown(context)
-      end
-    end
-
-    MockServiceRegistry.stop(registry)
-    :ok
-  end
+  defp teardown_mocks(registry, contexts), do: RunServices.teardown_mocks(registry, contexts)
 
   # ============================================================================
   # Seed Library Replay Phase (DR-023)

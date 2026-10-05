@@ -4,7 +4,6 @@ defmodule PropertyDamage.TargetsEntryPointsTest do
   alias Mix.Tasks.Pd.Scaffold
 
   alias PropertyDamage.{
-    Differential,
     Export,
     FailureReport,
     Integration,
@@ -91,22 +90,6 @@ defmodule PropertyDamage.TargetsEntryPointsTest do
   end
 
   describe "entry keys an entry point cannot honor" do
-    test "Differential.run/1 rejects injectors:" do
-      error =
-        assert_raise NimbleOptions.ValidationError, fn ->
-          Differential.run(
-            model: ExecutorModel,
-            targets: [SimpleAdapter, {TestAdapter, injectors: [SimpleAdapter]}],
-            compare: :correctness
-          )
-        end
-
-      assert error.key == :targets
-
-      assert Exception.message(error) =~
-               "`injectors:` is not supported by PropertyDamage.Differential.run/1"
-    end
-
     test "LoadTest.run/1 rejects injectors:" do
       error =
         assert_raise NimbleOptions.ValidationError, fn ->

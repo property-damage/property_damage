@@ -221,7 +221,7 @@ defmodule PropertyDamage.TargetsEngineTest do
 
       assert result.status == :divergent
       assert [divergence | _] = result.divergences
-      assert divergence.divergent_target == "ShiftedAdapter"
+      assert divergence.variant == %{index: 1, name: "ShiftedAdapter"}
     end
 
     test "reversing the order moves the reference with the position" do
@@ -229,7 +229,7 @@ defmodule PropertyDamage.TargetsEngineTest do
 
       assert result.status == :divergent
       assert [divergence | _] = result.divergences
-      assert divergence.divergent_target == "PlainAdapter"
+      assert divergence.variant == %{index: 1, name: "PlainAdapter"}
     end
   end
 

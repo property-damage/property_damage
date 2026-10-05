@@ -78,7 +78,10 @@ Node on the host.
 - Each adapter's `setup/1` resets its instance (purges non-admin users) so reused
   containers never leak state between runs, and both transports start every run
   from identical empty forges.
-- `Differential.run/1` sets each target up only once, so the differential tests
-  loop with `max_runs: 1`: a fresh setup per call resets both forges, giving a
-  clean comparison per generated sequence.
+- `Differential.run/1` sets each target up at the start of every run, so a
+  campaign resets both forges before every generated sequence. `setup/1` is
+  idempotent, because a crashed run may leave state behind. The bench tests still
+  call it once per seed (`max_runs: 1`) so each seed reports its own result.
+- A failure (`result.status == :failed`) names the variant, for example the
+  `"ui"` target; a divergence names it in `divergence.variant`.
 - Browser automation is slow; command/run counts are kept modest.

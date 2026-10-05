@@ -189,7 +189,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
     end
   end
 
-  # Client-minted run-scoped value (DR-034), for the Differential/LoadTest
+  # Client-minted run-scoped value (DR-034), for the LoadTest
   # resolution engine: a pure function of the caller's (nonce, epoch) and the
   # marker's baked coordinates.
   defp do_deep_resolve({_reg, run_nonce, mint_epoch}, %Mint{} = marker) do

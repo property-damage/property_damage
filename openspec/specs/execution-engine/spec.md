@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded.
 
 ## Requirements
 
@@ -36,6 +36,11 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 - **WHEN** a command execution fails mid-sequence
 - **THEN** the framework SHALL still call `teardown/1` for cleanup
 - **AND** the framework SHALL log a warning if teardown itself raises an error
+
+#### Scenario: Differential runs set up per run per target (DR-044)
+- **WHEN** `PropertyDamage.Differential.run/1` runs a campaign of N runs
+- **THEN** the framework SHALL call each target's `setup/1` N times, once at the start of every run, and its `teardown/1` N times
+- **AND** `setup/1` SHALL be idempotent
 
 #### Scenario: Shrink attempts repeat the full lifecycle
 - **WHEN** the shrinker re-executes a candidate sequence
@@ -336,6 +341,93 @@ Two targets that run against one system isolate their slices of state through `c
 #### Scenario: Same adapter and distinct config
 - **WHEN** the two targets carry different `config:` maps (for example distinct tenants)
 - **THEN** the task SHALL print no isolation warning
+
+### Requirement: Stepping Outcome, Drain and Finalize (DR-044)
+
+`PropertyDamage.Executor.Stepping.step/4` SHALL execute exactly one command and return `{:ok, state, outcome}` or `{:error, %PropertyDamage.Failure{}, failed_state, outcome}`. `outcome` SHALL be the raw answer to the command: `{:ok, events}` (for a `:probe` or `:async` command, the settled events), `{:error, reason}` (the adapter's own error term), `{:raised, exception}` (`execute/3` raised) or `:not_called` (a placeholder in the command could not be resolved). `Stepping.drain/2` SHALL fold the events waiting in the context's event queue into the state and return `{:ok, state}` or `{:error, %PropertyDamage.Failure{}, failed_state}`. `Stepping.finalize/2` SHALL take the last state, or `{:failed, index, %PropertyDamage.Failure{}, failed_state}`, restore the faults still active, finalize the run as `PropertyDamage.Executor.run/4` does, and return the result map `Executor.run/4` reports.
+
+#### Scenario: Outcome of a returned error
+
+- **WHEN** an adapter returns `{:error, reason}` for a command
+- **THEN** `step/4` SHALL return `{:error, failure, failed_state, {:error, reason}}`
+
+#### Scenario: Outcome of an adapter raise
+
+- **WHEN** an adapter raises an exception in `execute/3`
+- **THEN** `step/4` SHALL return a failure whose detail is `{exception, stacktrace}` and the outcome `{:raised, exception}`
+- **AND** only the outcome SHALL tell this case apart from an adapter that returns `{:error, {exception, stacktrace}}`
+
+#### Scenario: Outcome of an unresolved placeholder
+
+- **WHEN** a command holds a placeholder whose producer never captured a value
+- **THEN** `step/4` SHALL NOT call the adapter
+- **AND** the outcome SHALL be `:not_called`
+
+#### Scenario: Drain folds delivered events
+
+- **WHEN** an injector or a resource poller delivers events into the queue between two steps and `drain/2` is called
+- **THEN** the state SHALL contain those events in its projections and event log
+- **AND** each drained event SHALL be checked by `@check every:` checks as it folds
+
+#### Scenario: Finalize reports the full-run result
+
+- **WHEN** `finalize/2` is called on the state of a clean stepped run
+- **THEN** it SHALL await the `@eventually` pollers, settle the queue, evaluate `@check at: :teardown` checks and stop every poller
+- **AND** SHALL return the result map that `Executor.run/4` returns for the same sequence
+
+### Requirement: Variant Process (DR-044)
+
+`PropertyDamage.Variant` SHALL run one target over one concrete command sequence in its own process, through `Executor.Stepping`. The variant process SHALL own the executor state (projections, event log, its copy of the placeholder registry), the event queue, the target's injectors and mocks, and every `@eventually` state poller and resource poller its commands start; the variant SHALL run every step itself, because pollers report to the process that runs the step. `Variant.setup/1` SHALL start the event queue, set up the injectors and mocks, call the adapter's `setup/1` with the target's `config:`, and run the `@check at: :startup` checks. `Variant.advance_to/2` SHALL step every command from the next unexecuted index up to and including the given index, then drain the event queue, and SHALL return `{:ok, [{index, observation}]}` or `{:failed, %{kind, root, reason}}`. After a failure every later `advance_to/2` SHALL return the same `{:failed, failure}`. When the variant process exits for any reason, including `Process.exit(pid, :kill)`, every poller, the event queue and the mock registry it started SHALL stop.
+
+#### Scenario: Resume at the next index
+
+- **WHEN** `advance_to(pid, 0)` returns and `advance_to(pid, 3)` is called
+- **THEN** the variant SHALL execute commands 1, 2 and 3 from the state that command 0 left
+
+#### Scenario: Setup error
+
+- **WHEN** the adapter's `setup/1` returns `{:error, reason}`
+- **THEN** `Variant.setup/1` SHALL return `{:error, reason}`
+- **AND** the event queue, injectors and mocks SHALL be released again
+- **AND** the adapter's `teardown/1` SHALL NOT be called
+
+#### Scenario: Startup check failure
+
+- **WHEN** an `@check at: :startup` check fails
+- **THEN** `Variant.setup/1` SHALL still return `:ok`
+- **AND** the first `advance_to/2` SHALL return `{:failed, %{kind: :check_failed, root: nil, reason: failure}}`
+
+#### Scenario: Boundary drain
+
+- **WHEN** an injector delivers an event after a command returned and `advance_to/2` reaches its boundary
+- **THEN** the variant SHALL fold the event before `advance_to/2` returns
+- **AND** the event SHALL NOT be part of any command's observation
+
+#### Scenario: Poller dies with a killed variant
+
+- **WHEN** a variant that started an `@eventually` poller is killed with `Process.exit(pid, :kill)`
+- **THEN** the poller process SHALL no longer be alive
+
+#### Scenario: RNG seeding
+
+- **WHEN** a variant starts
+- **THEN** it SHALL seed its process RNG with `:rand.seed(:exsss, :erlang.phash2({Generator.run_seed(seed, run_number), target.index}, 4_294_967_296))` before `setup/1` can call the adapter
+- **AND** stutter decisions SHALL use their own generator derived from the run seed
+
+### Requirement: Lockstep Scheduler (DR-044)
+
+`PropertyDamage.Scheduler.run/1` SHALL run one command sequence against every target as variants in lockstep and return `{:ok, run}` where `run` is a map with the keys `divergence`, `failure`, `results`, `observations` and `latencies`. Variants SHALL be set up one after another in target order. The scheduler SHALL advance the variants to each boundary under `concurrency: :serial` (one at a time in target order) or `concurrency: :parallel` (all at once), run the comparison, and only then advance to the next boundary. At the end of the run, whether it ended in a pass, a divergence or a failure, every variant that was set up SHALL be finalized and stopped.
+
+#### Scenario: Setup failure ends the run before command 0
+
+- **WHEN** the setup of a target fails
+- **THEN** `run.failure` SHALL have the kind `:setup_failed` and name that target
+- **AND** `run.results`, `run.observations` and `run.latencies` SHALL be empty
+
+#### Scenario: Finalize-time failure becomes the run's failure
+
+- **WHEN** a run passes every boundary and a variant's finalization fails (an `@eventually` timeout or an `@check at: :teardown` check)
+- **THEN** `run.failure` SHALL have the kind `:check_failed` and name that variant
 
 ### Requirement: Seed Library Replay Phase
 

@@ -51,7 +51,11 @@ PropertyDamage.Differential.run(
 ```
 
 The first target in the `targets:` list is the oracle: divergences are reported
-as "the UI did something the API didn't."
+as "the UI did something the API didn't." Each divergence names the variant that
+differed (`%{index: 1, name: "ui"}` here), the run and the command index (`root`).
+Each target runs as its own variant (its own process), and the targets advance in
+lockstep: both execute command `r`, the results are compared, and only then does
+either start command `r + 1`.
 
 ## The model is the intent
 
@@ -159,34 +163,37 @@ def setup(config) do
 end
 ```
 
-One subtlety specific to differential testing: **`Differential.run/1` sets each
-target up once and does not reset between its internal runs.** For a stateful SUT,
-drive the run-loop yourself with `max_runs: 1`, so each call re-runs `setup/1` and
-resets both instances:
+`Differential.run/1` calls each target's `setup/1` at the start of **every** run
+and tears it down at the end, so a `max_runs: N` campaign resets both forges N
+times. Because `setup/1` can find state a crashed run left behind, it must be
+idempotent, which a purge-and-recreate reset is:
 
 ```elixir
-for seed <- 1..20 do
-  {:ok, result} =
-    PropertyDamage.Differential.run(
-      model: GiteaBench.Model,
-      targets: [
-        {ApiAdapter, name: "api", config: Map.new(api_opts)},
-        {UiAdapter, name: "ui", config: Map.new(ui_opts)}
-      ],
-      compare: :correctness,
-      equivalence: :structural,
-      max_commands: 12,
-      max_runs: 1,
-      seed: seed
-    )
+{:ok, result} =
+  PropertyDamage.Differential.run(
+    model: GiteaBench.Model,
+    targets: [
+      {ApiAdapter, name: "api", config: Map.new(api_opts)},
+      {UiAdapter, name: "ui", config: Map.new(ui_opts)}
+    ],
+    compare: :correctness,
+    equivalence: :structural,
+    max_commands: 12,
+    max_runs: 20,
+    seed: 1
+  )
 
-  assert result.status == :equivalent, inspect(result.divergences, pretty: true)
-end
+assert result.status == :equivalent, inspect(result.divergences, pretty: true)
 ```
 
-`PropertyDamage.run/1` (a single adapter) *does* call `setup/1` per run, so it is
-fine with `max_runs: N` directly. The looping pattern is only needed for the
-differential path.
+The two forges are separate instances, so the default `concurrency: :serial` is
+the right choice. If both targets shared one forge, `concurrency: :parallel`
+would need a distinct user namespace per target through `config:`.
+
+If setup or a command fails, the result has `status: :failed` and
+`result.failure` names the variant (`kind`, `variant`, `run`, `root`, `reason`),
+for example `%{kind: :setup_failed, variant: %{index: 1, name: "ui"}, ...}` when
+the UI forge is down.
 
 ## Prove the oracle isn't vacuous
 
@@ -205,6 +212,7 @@ assert divergent.status == :divergent
 
 [divergence | _] = divergent.divergences
 assert %CreateLabel{} = divergence.command
+assert divergence.variant == %{index: 1, name: "ui"}
 {:ok, [ref]}  = divergence.reference_result
 {:ok, [ui]}   = divergence.divergent_result
 assert ref.name == ui.name
@@ -244,7 +252,7 @@ test the transports separately.
 ## Next steps
 
 - [Differential Testing](differential_testing.md) — the full `Differential.run/1`
-  API, equivalence strategies, and execution modes
+  API, equivalence strategies, and `concurrency:`
 - [Writing Commands](writing_commands.md) — `when:`/`overrides:` wiring and `external()`
 - [Integration Testing](integration_testing.md) — driving live services
 - `benches/gitea_bench/` — the complete, runnable example this guide is drawn from

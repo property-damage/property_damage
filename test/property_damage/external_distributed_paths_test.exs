@@ -108,7 +108,7 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
   # ---------------------------------------------------------------------------
 
   describe "Differential.run/1 captures external() values" do
-    test "interleaved: a consumer receives the concrete value its producer yielded" do
+    test "a consumer receives the concrete value its producer yielded" do
       # Single target => no reference => no divergence halts the sequence, so the
       # whole Create -> Use sequence runs and we can observe resolution.
       used =
@@ -123,7 +123,6 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
                  name: "solo", config: %{test_pid: self(), prefix: "solo", name: "solo"}}
               ],
               compare: :correctness,
-              execution: :interleaved,
               max_runs: 1,
               max_commands: 12,
               seed: seed
@@ -135,7 +134,7 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
           end
         end)
 
-      assert used, "no seed routed a placeholder into a Use command (interleaved)"
+      assert used, "no seed routed a placeholder into a Use command"
 
       Enum.each(used, fn {_name, target} ->
         refute match?(%Placeholder{}, target)
@@ -144,11 +143,11 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
       end)
     end
 
-    test "sequential: each target resolves the consumer to its OWN captured value" do
+    test "parallel: each target resolves the consumer to its OWN captured value" do
       # Distinct id prefixes per target prove the registries are per-target: the
       # same consumer placeholder resolves to "a_id" under target a and "b_id"
-      # under target b. Sequential mode runs each full sequence before comparing,
-      # so divergence never truncates a sequence.
+      # under target b. Structural equivalence ignores the differing ids, so no
+      # divergence truncates the sequence before its consumers run.
       used =
         Enum.find_value(1..300, fn seed ->
           drain_used([])
@@ -161,7 +160,8 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
                 {ProbingAdapter, name: "b", config: %{test_pid: self(), prefix: "b", name: "b"}}
               ],
               compare: :correctness,
-              execution: :sequential,
+              equivalence: :structural,
+              concurrency: :parallel,
               max_runs: 1,
               max_commands: 12,
               seed: seed
@@ -175,7 +175,7 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
           end
         end)
 
-      assert used, "no seed routed a Use onto both targets (sequential)"
+      assert used, "no seed routed a Use onto both targets (parallel)"
 
       for {name, target} <- used do
         refute match?(%Placeholder{}, target)

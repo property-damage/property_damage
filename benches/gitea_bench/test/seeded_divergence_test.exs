@@ -58,6 +58,8 @@ defmodule SeededDivergenceTest do
 
     divergence = hd(divergent.divergences)
     assert %CreateLabel{} = divergence.command
+    assert divergence.variant == %{index: 1, name: "ui"}
+    assert is_integer(divergence.root)
 
     {:ok, [ref_label]} = divergence.reference_result
     {:ok, [ui_label]} = divergence.divergent_result

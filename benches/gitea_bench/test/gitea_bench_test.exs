@@ -11,9 +11,9 @@ defmodule GiteaBenchTest do
        state.
 
   Browser automation is slow, so command/run counts are modest. Each differential
-  call uses `max_runs: 1` and loops here, because `Differential.run/1` sets each
-  target up only once; a fresh setup per call resets both forges, giving a clean
-  comparison per generated sequence (see README).
+  call uses `max_runs: 1` and loops here over seeds, so a failing seed is named by
+  its own call; `Differential.run/1` sets every target up per run, so each
+  generated sequence starts from freshly reset forges (see README).
   """
 
   use ExUnit.Case, async: false
