@@ -23,9 +23,29 @@ defmodule PropertyDamage.Executor.Timeout do
   Run `adapter.execute(command, user_context, runtime)` under the adapter's
   per-command timeout. Returns the adapter's result unchanged, or
   `{:error, %CommandTimeoutError{}}` if the timeout elapses.
+
+  A raising `execute/3` comes back as `{:error, {exception, stacktrace}}`,
+  the channel stutter retries and load-test workers report through. Callers
+  that must tell a raise apart from an adapter that returned such a tuple use
+  `execute_tagged/4`.
   """
   @spec execute(module(), struct() | map(), term(), struct()) :: term()
   def execute(adapter, command, user_context, runtime) do
+    case execute_tagged(adapter, command, user_context, runtime) do
+      {:raised, exception, stacktrace} -> {:error, {exception, stacktrace}}
+      result -> result
+    end
+  end
+
+  @doc """
+  Like `execute/4`, but a raising `execute/3` comes back as
+  `{:raised, exception, stacktrace}`.
+
+  The raise is tagged inside the Task that caught it, so the tag cannot be
+  confused with any value the adapter returns.
+  """
+  @spec execute_tagged(module(), struct() | map(), term(), struct()) :: term()
+  def execute_tagged(adapter, command, user_context, runtime) do
     timeout_ms = command_timeout_ms(adapter, command)
 
     task =
@@ -49,10 +69,8 @@ defmodule PropertyDamage.Executor.Timeout do
       {:ok, {:returned, result}} ->
         result
 
-      # Preserve the pre-DR-032 exception channel: a raising `execute/3` used to
-      # be rescued in execute_regular_command into `{:error, {e, stacktrace}}`.
       {:ok, {:raised, exception, stacktrace}} ->
-        {:error, {exception, stacktrace}}
+        {:raised, exception, stacktrace}
 
       # An exit/throw from `execute/3` is surfaced as an ordinary adapter error
       # (tagged with how it escaped), exactly as if the adapter had returned

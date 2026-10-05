@@ -19,7 +19,10 @@ defmodule PropertyDamage.Executor.Nemesis do
   alias PropertyDamage.Nemesis
   alias PropertyDamage.PlaceholderRegistry
 
-  # Execute a nemesis (fault injection) command
+  # Execute a nemesis (fault injection) command. Returns
+  # {:ok, state, outcome} | {:error, failure, failed_state, outcome}, where the
+  # outcome is what inject/2 answered: {:ok, events} or {:error, reason}, or
+  # :not_called when a placeholder in the command could not be resolved.
   def execute_nemesis_command(command, index, state, model, adapter_context, event_queue) do
     # Resolve placeholders so a nemesis parameterized by a prior
     # command's output injects against the real value, not a sentinel
@@ -40,7 +43,7 @@ defmodule PropertyDamage.Executor.Nemesis do
         )
 
       {:error, reason} ->
-        {:error, Failure.placeholder_resolution(reason), state}
+        {:error, Failure.placeholder_resolution(reason), state, :not_called}
     end
   end
 
@@ -62,144 +65,166 @@ defmodule PropertyDamage.Executor.Nemesis do
       active_faults: Map.get(state, :active_faults, %{})
     }
 
+    case nemesis_module.inject(resolved_command, nemesis_context) do
+      {:ok, events} = outcome ->
+        case fold_injected_fault(
+               events,
+               command,
+               resolved_command,
+               index,
+               state,
+               model,
+               event_queue
+             ) do
+          {:ok, new_state} -> {:ok, new_state, outcome}
+          {:error, failure, failed_state} -> {:error, failure, failed_state, outcome}
+        end
+
+      {:error, reason} = outcome ->
+        {:error, Failure.nemesis_error(reason), state, outcome}
+    end
+  end
+
+  # Fold the events inject/2 returned, track the fault for auto-restore, and run
+  # the checks. A projection that raises a transition-invariant violation is
+  # reported with the pre-command state rather than crashing the run.
+  defp fold_injected_fault(events, command, resolved_command, index, state, model, event_queue) do
+    nemesis_module = command.__struct__
     check_mode = Map.get(state, :check_mode, :halt)
     check_failures = Map.get(state, :check_failures, [])
 
-    case nemesis_module.inject(resolved_command, nemesis_context) do
-      {:ok, events} ->
-        # Record the nemesis command's own fold ordinal (P8 / DR-040), then fold
-        # it. A nemesis command has no injection window, so the counter starts at
-        # the run counter carried on the state.
-        command_fold_ordinal = state.fold_counter
-        fold_counter = command_fold_ordinal + 1
+    # Record the nemesis command's own fold ordinal (P8 / DR-040), then fold
+    # it. A nemesis command has no injection window, so the counter starts at
+    # the run counter carried on the state.
+    command_fold_ordinal = state.fold_counter
+    fold_counter = command_fold_ordinal + 1
 
-        command_fold_ordinals =
-          Map.put(state.command_fold_ordinals, state.current_position, command_fold_ordinal)
+    command_fold_ordinals =
+      Map.put(state.command_fold_ordinals, state.current_position, command_fold_ordinal)
 
-        # Update projections with nemesis command
-        projections = Executor.Events.update_projections(state.projections, resolved_command)
+    # Update projections with nemesis command
+    projections = Executor.Events.update_projections(state.projections, resolved_command)
 
-        # DR-025: capture pre-drain state so check_async can locate an async
-        # violation at the observing event's command_index.
-        projs_before_async = projections
-        log_before_async = state.event_log
+    # DR-025: capture pre-drain state so check_async can locate an async
+    # violation at the observing event's command_index.
+    projs_before_async = projections
+    log_before_async = state.event_log
 
-        # Process nemesis events with source: :nemesis
-        {projections, event_log, fold_counter} =
-          process_nemesis_events(
-            events,
-            nemesis_module,
-            index,
-            state.event_log,
-            projections,
-            state.branch_id,
-            fold_counter
-          )
+    # Process nemesis events with source: :nemesis
+    {projections, event_log, fold_counter} =
+      process_nemesis_events(
+        events,
+        nemesis_module,
+        index,
+        state.event_log,
+        projections,
+        state.branch_id,
+        fold_counter
+      )
 
-        # Drain and process injector events
-        {projections, event_log, fold_counter} =
-          Executor.Events.process_injector_events(
-            event_queue,
-            event_log,
-            projections,
-            state.branch_id,
-            fold_counter,
-            Map.get(state, :await_matchers, [])
-          )
+    # Drain and process injector events
+    {projections, event_log, fold_counter} =
+      Executor.Events.process_injector_events(
+        event_queue,
+        event_log,
+        projections,
+        state.branch_id,
+        fold_counter,
+        Map.get(state, :await_matchers, [])
+      )
 
-        # Track active fault if auto-restoring
-        active_faults = Map.get(state, :active_faults, %{})
+    # Track active fault if auto-restoring
+    active_faults = Map.get(state, :active_faults, %{})
 
-        active_faults =
-          if Nemesis.auto_restores?(command) do
-            Map.put(active_faults, {nemesis_module, index}, %{
-              command: command,
-              started_at: System.monotonic_time(:millisecond),
-              duration_ms: Nemesis.get_duration_ms(command)
-            })
-          else
-            active_faults
-          end
+    active_faults =
+      if Nemesis.auto_restores?(command) do
+        Map.put(active_faults, {nemesis_module, index}, %{
+          command: command,
+          started_at: System.monotonic_time(:millisecond),
+          duration_ms: Nemesis.get_duration_ms(command)
+        })
+      else
+        active_faults
+      end
 
-        # DR-025: assert @check every: on the nemesis + injector events folded
-        # above, incrementally, before the command's own checks.
-        case Executor.check_async(
+    # DR-025: assert @check every: on the nemesis + injector events folded
+    # above, incrementally, before the command's own checks.
+    case Executor.check_async(
+           model,
+           projs_before_async,
+           log_before_async,
+           event_log,
+           state.check_counters,
+           check_mode,
+           check_failures
+         ) do
+      {:halt, async_name, async_reason, _idx, async_counters} ->
+        failed_state =
+          Executor.put_state(state, %{
+            event_log: event_log,
+            projections: projections,
+            step_count: state.step_count + 1,
+            check_counters: async_counters,
+            active_faults: active_faults,
+            fold_counter: fold_counter,
+            command_fold_ordinals: command_fold_ordinals
+          })
+
+        {:error, Failure.check_failed(async_name, async_reason), failed_state}
+
+      {:ok, async_counters, async_failures} ->
+        # Run checks
+        check_ctx = %{
+          command: resolved_command,
+          events: events,
+          command_index: index,
+          step_count: state.step_count + 1,
+          projections: projections,
+          branch_id: state.branch_id,
+          active_faults: active_faults
+        }
+
+        case Executor.run_checks(
                model,
-               projs_before_async,
-               log_before_async,
-               event_log,
-               state.check_counters,
+               projections,
+               check_ctx,
+               async_counters,
                check_mode,
-               check_failures
+               async_failures
              ) do
-          {:halt, async_name, async_reason, _idx, async_counters} ->
-            failed_state =
+          {:ok, check_counters, updated_failures} ->
+            new_state =
               Executor.put_state(state, %{
                 event_log: event_log,
                 projections: projections,
                 step_count: state.step_count + 1,
-                check_counters: async_counters,
+                check_counters: check_counters,
+                check_failures: updated_failures,
                 active_faults: active_faults,
                 fold_counter: fold_counter,
                 command_fold_ordinals: command_fold_ordinals
               })
 
-            {:error, Failure.check_failed(async_name, async_reason), failed_state}
+            {:ok, new_state}
 
-          {:ok, async_counters, async_failures} ->
-            # Run checks
-            check_ctx = %{
-              command: resolved_command,
-              events: events,
-              command_index: index,
-              step_count: state.step_count + 1,
-              projections: projections,
-              branch_id: state.branch_id,
-              active_faults: active_faults
-            }
+          {:error, check_name, reason, check_counters} ->
+            failed_state =
+              Executor.put_state(state, %{
+                event_log: event_log,
+                projections: projections,
+                step_count: state.step_count + 1,
+                check_counters: check_counters,
+                active_faults: active_faults,
+                fold_counter: fold_counter,
+                command_fold_ordinals: command_fold_ordinals
+              })
 
-            case Executor.run_checks(
-                   model,
-                   projections,
-                   check_ctx,
-                   async_counters,
-                   check_mode,
-                   async_failures
-                 ) do
-              {:ok, check_counters, updated_failures} ->
-                new_state =
-                  Executor.put_state(state, %{
-                    event_log: event_log,
-                    projections: projections,
-                    step_count: state.step_count + 1,
-                    check_counters: check_counters,
-                    check_failures: updated_failures,
-                    active_faults: active_faults,
-                    fold_counter: fold_counter,
-                    command_fold_ordinals: command_fold_ordinals
-                  })
-
-                {:ok, new_state}
-
-              {:error, check_name, reason, check_counters} ->
-                failed_state =
-                  Executor.put_state(state, %{
-                    event_log: event_log,
-                    projections: projections,
-                    step_count: state.step_count + 1,
-                    check_counters: check_counters,
-                    active_faults: active_faults,
-                    fold_counter: fold_counter,
-                    command_fold_ordinals: command_fold_ordinals
-                  })
-
-                {:error, Failure.check_failed(check_name, reason), failed_state}
-            end
+            {:error, Failure.check_failed(check_name, reason), failed_state}
         end
-
-      {:error, reason} ->
-        {:error, Failure.nemesis_error(reason), state}
     end
+  rescue
+    e in PropertyDamage.ProjectionError ->
+      {:error, Failure.projection_violation(e.projection, e.original), state}
   end
 
   # ============================================================================
