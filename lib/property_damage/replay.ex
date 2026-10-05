@@ -214,10 +214,20 @@ defmodule PropertyDamage.Replay do
   # `opts` is already validated, so `:targets` holds zero or one target.
   defp replay_target(opts, default_adapter) do
     case opts[:targets] do
-      [target] -> target
-      nil -> %PropertyDamage.Target{adapter: default_adapter, name: "adapter", index: 0}
+      [target] ->
+        target
+
+      nil ->
+        %PropertyDamage.Target{
+          adapter: default_adapter,
+          name: default_name(default_adapter),
+          index: 0
+        }
     end
   end
+
+  defp default_name(nil), do: nil
+  defp default_name(adapter), do: adapter |> Module.split() |> List.last()
 
   defp do_start(failure, model, %{adapter: adapter, config: config}, opts) do
     sequence = FailureReport.shrunk_sequence(failure)
