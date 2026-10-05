@@ -39,6 +39,9 @@ defmodule PropertyDamage.Variant do
   included, none of those processes survive. A kill cannot be intercepted by the
   dying process, so a separate guardian process monitors the variant and kills
   every poller, the queue and the mock registry the variant registered with it.
+  A resource poller is registered the moment an adapter starts it, before
+  `execute/3` continues, so a kill in the middle of a command (for example
+  while a `:probe` command waits between settle attempts) reaps it too.
 
   ## The boundary drain
 
@@ -58,16 +61,21 @@ defmodule PropertyDamage.Variant do
 
   ## Randomness
 
-  A new process draws its own entropy for `:rand`, so an adapter that draws
-  random values in `setup/1` or `execute/3` would see different values every
-  time the same seed is replayed. Before anything runs, the variant seeds its
-  process RNG from the run's seed and its own position among the targets:
+  A new process draws its own entropy for `:rand`. Before anything runs, the
+  variant seeds its own process RNG from the run's seed and its position among
+  the targets:
 
       :rand.seed(:exsss, :erlang.phash2({Generator.run_seed(seed, run_number), target.index}, 4_294_967_296))
 
-  Two runs of one seed draw the same values; two variants of one run draw
-  different ones. Stutter decisions use their own generator derived from the
-  run seed (DR-029), passed as the executor's `rng_seed`.
+  The seed covers what runs in the variant process itself: the adapter's
+  `setup/1`, `timeout/1` and `teardown/1`, injector and mock setup,
+  projections, and checks. Two runs of one seed draw the same values there; two
+  variants of one run draw different ones. It does not cover the adapter's
+  `execute/3`, which the engine runs in a new Task per command attempt: that
+  Task draws its own entropy, so a value drawn there is not reproduced by the
+  seed. Stutter
+  decisions use their own generator derived from the run seed (DR-029), passed
+  as the executor's `rng_seed`.
 
   ## Observations and failures
 
@@ -92,7 +100,9 @@ defmodule PropertyDamage.Variant do
       or answered `{:error, _}` under `on_adapter_error: :halt`, or the command
       could not be executed (`reason` is the `%PropertyDamage.Failure{}`)
     * `kind: :check_failed` - a check failed (`reason` is the
-      `%PropertyDamage.Failure{}`); `root` is `nil` for a `:startup` check
+      `%PropertyDamage.Failure{}`); `root` is `nil` for a `:startup` check, and
+      for a check that failed on a drained event it is the command that event
+      belongs to, as `finish/1` reports it in `failed_at_index`
 
   After a failure the variant steps nothing more: every later `advance_to/2`
   returns the same `{:failed, failure}`, and `finish/1` reports the failed run
@@ -403,7 +413,8 @@ defmodule PropertyDamage.Variant do
         placeholder_registry: state.placeholder_registry,
         rng_seed: state.run_seed,
         run_nonce: state.run_nonce,
-        mint_epoch: 0
+        mint_epoch: 0,
+        on_resource_poller_start: guard_now_fun(state.guardian)
       )
 
     ctx = %Stepping.Context{
@@ -523,9 +534,16 @@ defmodule PropertyDamage.Variant do
       | phase: :halted,
         exec: failed_state,
         halted: failed,
-        failure: failure
+        failure: %{failure | root: attributed_root(failed_state, failure.root)}
     })
   end
+
+  # A check that fails on a drained event belongs to the command whose event it
+  # was (DR-025), which may be earlier than the command being stepped. The
+  # engine records that command on the failed state, and the finished result
+  # reports it as `failed_at_index`; the failure's root says the same.
+  defp attributed_root(%{async_failed_index: :unset}, root), do: root
+  defp attributed_root(%{async_failed_index: attributed}, _root), do: attributed
 
   # The event values of one command's :injected entries, then its :command
   # entries, in fold order. Only entries the step added are examined.
@@ -619,12 +637,34 @@ defmodule PropertyDamage.Variant do
       {:guard, new_pids} ->
         guardian_loop(ref, Enum.into(new_pids, pids))
 
+      {:guard_now, pid, from, reply_ref} ->
+        send(from, {reply_ref, :guarded})
+        guardian_loop(ref, MapSet.put(pids, pid))
+
       {:DOWN, ^ref, :process, _pid, _reason} ->
         Enum.each(pids, &Process.exit(&1, :kill))
     end
   end
 
   defp guard(state, pids), do: send(state.guardian, {:guard, pids})
+
+  # A resource poller is linked to the per-command Task that started it, not to
+  # the variant, and the Task may finish while the step is still running (a
+  # settle retry sleeps in the variant). The engine calls this function from
+  # that Task as soon as the poller started, and the Task waits until the
+  # guardian holds the pid, so a kill at any later moment reaps the poller.
+  defp guard_now_fun(guardian) do
+    fn pid ->
+      reply_ref = make_ref()
+      send(guardian, {:guard_now, pid, self(), reply_ref})
+
+      receive do
+        {^reply_ref, :guarded} -> :ok
+      after
+        5_000 -> :ok
+      end
+    end
+  end
 
   defp guard_pollers(%{exec: exec} = state) do
     pids =

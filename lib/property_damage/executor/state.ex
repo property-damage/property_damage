@@ -78,6 +78,12 @@ defmodule PropertyDamage.Executor.State do
       (a nemesis command, an unresolved placeholder). Written on every command:
       two monotonic clock reads, so a run that ignores it pays nothing
       measurable. `PropertyDamage.Variant` reads it for latency comparison.
+    * `:on_resource_poller_start` - `nil` or a 1-arity function the engine
+      calls with each resource poller's pid as soon as `runtime.start_poller`
+      started it, before control returns to the adapter. A resource poller is
+      linked to the process that started it (a per-command Task), so an owner
+      that must reap every poller even when it is killed mid-command
+      (`PropertyDamage.Variant`) learns of it here. `nil` everywhere else.
   """
 
   @enforce_keys [
@@ -119,7 +125,8 @@ defmodule PropertyDamage.Executor.State do
     await_matchers: [],
     fold_counter: 0,
     command_fold_ordinals: %{},
-    last_execute_us: nil
+    last_execute_us: nil,
+    on_resource_poller_start: nil
   ]
 
   @type t :: %__MODULE__{
@@ -151,6 +158,7 @@ defmodule PropertyDamage.Executor.State do
           await_matchers: [map()],
           fold_counter: non_neg_integer(),
           command_fold_ordinals: %{term() => non_neg_integer()},
-          last_execute_us: non_neg_integer() | nil
+          last_execute_us: non_neg_integer() | nil,
+          on_resource_poller_start: (pid() -> term()) | nil
         }
 end

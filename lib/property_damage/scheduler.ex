@@ -69,7 +69,7 @@ defmodule PropertyDamage.Scheduler do
   """
 
   alias PropertyDamage.Differential.Equivalence
-  alias PropertyDamage.{PlaceholderRegistry, Target, Variant}
+  alias PropertyDamage.{Failure, PlaceholderRegistry, Target, Variant}
 
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
@@ -391,11 +391,31 @@ defmodule PropertyDamage.Scheduler do
     end
   end
 
+  # Under `check_mode: :record` a failing check does not end the run: the
+  # result carries no failure_reason, only the recorded check failures
+  # (chronological). The first of them is the run's failure.
+  defp finalize_failure(
+         config,
+         target,
+         %{success: false, failure_reason: nil, check_failures: [first | _]}
+       ) do
+    reason = Failure.check_failed(first.check_name, without_stacktrace(first.reason))
+    failure(config, target, :check_failed, first.command_index, reason)
+  end
+
   defp finalize_failure(config, target, %{success: false} = result) do
     failure(config, target, :check_failed, result.failed_at_index, result.failure_reason)
   end
 
   defp finalize_failure(_config, _target, _result), do: nil
+
+  # A recorded check that raised keeps `{exception, stacktrace}`; a halting run
+  # reports the exception alone, and so does this.
+  defp without_stacktrace({exception, stacktrace})
+       when is_exception(exception) and is_list(stacktrace),
+       do: exception
+
+  defp without_stacktrace(reason), do: reason
 
   defp latencies(%{measure_latency: false}, _variant), do: []
 

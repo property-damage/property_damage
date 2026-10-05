@@ -696,6 +696,7 @@ defmodule PropertyDamage.Executor do
         # poller must route its result to this stable mailbox, not the
         # short-lived Task's.
         poller_owner = self()
+        poller_started = state.on_resource_poller_start
 
         build_runtime = fn sink ->
           start_poller_fn = fn opts ->
@@ -710,6 +711,7 @@ defmodule PropertyDamage.Executor do
               )
 
             Runtime.Sink.add_poller(sink, poller)
+            if poller_started, do: poller_started.(poller.pid)
             poller
           end
 

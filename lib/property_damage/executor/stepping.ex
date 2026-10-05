@@ -103,20 +103,26 @@ defmodule PropertyDamage.Executor.Stepping do
     * `:rng_seed` - explicit stutter RNG base (DR-029)
     * `:run_nonce` - run nonce seeding `mint_per_run` resolution (DR-034)
     * `:mint_epoch` - SUT-execution epoch for minted values (DR-034, default 0)
+    * `:on_resource_poller_start` - called with each resource poller's pid as
+      soon as an adapter starts it, from the process running `execute/3`
+      (default `nil`; see `PropertyDamage.Executor.State`)
   """
   @spec init_state(module(), keyword()) :: map()
   def init_state(model, opts \\ []) do
-    Executor.build_initial_state(
-      model,
-      Keyword.get(opts, :event_queue),
-      Keyword.get(opts, :stutter_config),
-      Keyword.get(opts, :mock_registry),
-      Keyword.get(opts, :check_mode, :halt),
-      Keyword.get(opts, :external_markers, []),
-      Keyword.get(opts, :placeholder_registry),
-      Keyword.get(opts, :rng_seed),
-      {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
-    )
+    state =
+      Executor.build_initial_state(
+        model,
+        Keyword.get(opts, :event_queue),
+        Keyword.get(opts, :stutter_config),
+        Keyword.get(opts, :mock_registry),
+        Keyword.get(opts, :check_mode, :halt),
+        Keyword.get(opts, :external_markers, []),
+        Keyword.get(opts, :placeholder_registry),
+        Keyword.get(opts, :rng_seed),
+        {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
+      )
+
+    %{state | on_resource_poller_start: Keyword.get(opts, :on_resource_poller_start)}
   end
 
   @typedoc """
