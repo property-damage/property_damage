@@ -46,7 +46,7 @@ defmodule PropertyDamage.CoverageTest do
     def command_sequence_projection, do: TestProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   def mock_result(commands) do

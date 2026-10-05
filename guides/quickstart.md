@@ -109,7 +109,7 @@ defmodule AccountModel do
   def command_sequence_projection, do: AccountState
 
   @impl true
-  def assertion_projections, do: [AccountState]
+  def check_projections, do: [AccountState]
 
   @impl true
   def simulator, do: AccountSimulator

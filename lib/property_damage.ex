@@ -1971,7 +1971,7 @@ defmodule PropertyDamage do
   """
   @spec fail!(String.t(), keyword()) :: no_return()
   def fail!(message, data \\ []) do
-    raise %PropertyDamage.AssertionFailed{message: message, data: Map.new(data)}
+    raise %PropertyDamage.CheckFailed{message: message, data: Map.new(data)}
   end
 
   # ============================================================================

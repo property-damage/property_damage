@@ -79,7 +79,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
     end
 
     test "an intentional fail!/2 assertion is a SUT error" do
-      reason = %PropertyDamage.AssertionFailed{message: "balance negative"}
+      reason = %PropertyDamage.CheckFailed{message: "balance negative"}
       assert ErrorOrigin.classify(Failure.assertion_failed(:balance, reason)).origin == :sut_error
     end
 

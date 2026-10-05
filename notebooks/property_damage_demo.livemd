@@ -237,7 +237,7 @@ end
 
 The model wires everything together: the weighted command list (with `when:`
 preconditions and `with:` state-derived overrides), the projection used for
-sequence state, the assertion projections, and the simulator.
+sequence state, the check projections, and the simulator.
 
 ```elixir
 defmodule Demo.Model do
@@ -264,7 +264,7 @@ defmodule Demo.Model do
   def command_sequence_projection, do: Demo.Bank
 
   @impl true
-  def assertion_projections, do: [Demo.Bank]
+  def check_projections, do: [Demo.Bank]
 
   @impl true
   def simulator, do: Demo.Simulator
@@ -596,7 +596,7 @@ defmodule Demo.ChaosModel do
   def command_sequence_projection, do: Demo.ChaosBank
 
   @impl true
-  def assertion_projections, do: [Demo.ChaosBank]
+  def check_projections, do: [Demo.ChaosBank]
 
   @impl true
   def simulator, do: Demo.Simulator

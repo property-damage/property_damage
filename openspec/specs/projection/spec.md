@@ -262,7 +262,7 @@ Projections MAY omit `init/0` and `apply/2` to serve purely as assertion contain
 
 ### Requirement: Dual Projection Roles
 
-Projections SHALL serve two distinct roles in models. The command sequence projection (returned by `command_sequence_projection/0`) drives command generation by maintaining state for precondition evaluation and generator parameterization. Assertion projections (returned by `assertion_projections/0`) verify invariants during execution.
+Projections SHALL serve two distinct roles in models. The command sequence projection (returned by `command_sequence_projection/0`) drives command generation by maintaining state for precondition evaluation and generator parameterization. Check projections (returned by `check_projections/0`) verify invariants during execution.
 
 #### Scenario: Command sequence projection drives generation
 - **WHEN** a projection is designated as the command sequence projection
@@ -270,13 +270,13 @@ Projections SHALL serve two distinct roles in models. The command sequence proje
 - **AND** its state is passed to `with:` functions for generator overrides
 - **AND** its state is passed to the simulator for event prediction
 
-#### Scenario: Assertion projections verify invariants
-- **WHEN** projections are listed in `assertion_projections/0`
+#### Scenario: Check projections verify invariants
+- **WHEN** projections are listed in `check_projections/0`
 - **THEN** they receive commands and events during execution
 - **AND** their assertions fire according to their trigger configurations
 
 #### Scenario: Same behaviour for both roles
-- **WHEN** a projection module is used as either a command sequence projection or an assertion projection
+- **WHEN** a projection module is used as either a command sequence projection or a check projection
 - **THEN** it uses the same `PropertyDamage.Model.Projection` behaviour for both roles
 
 ### Requirement: Use Macro Infrastructure

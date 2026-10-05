@@ -176,7 +176,7 @@ defmodule Warehouse.Model do
   def command_sequence_projection, do: State
 
   @impl true
-  def assertion_projections, do: [State]
+  def check_projections, do: [State]
 
   # The simulator predicts events during sequence generation, so AwaitWidget
   # (which needs a shipped sku to exist) becomes eligible to be generated.

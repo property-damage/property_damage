@@ -173,7 +173,7 @@ defmodule PropertyDamage.MockServiceRunTest do
     @impl true
     def command_sequence_projection, do: ChargeState
     @impl true
-    def assertion_projections, do: [ChargeState]
+    def check_projections, do: [ChargeState]
     @impl true
     def simulator, do: __MODULE__
     @impl PropertyDamage.Model.Simulator
@@ -188,7 +188,7 @@ defmodule PropertyDamage.MockServiceRunTest do
     @impl true
     def command_sequence_projection, do: ChargeState
     @impl true
-    def assertion_projections, do: [ChargeState]
+    def check_projections, do: [ChargeState]
     @impl true
     def simulator, do: __MODULE__
     @impl PropertyDamage.Model.Simulator

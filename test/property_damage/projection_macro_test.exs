@@ -1,6 +1,6 @@
 defmodule PropertyDamage.ProjectionMacroTest do
   @moduledoc """
-  Compile-time hazards in the assertion-projection DSL (`use
+  Compile-time hazards in the check-projection DSL (`use
   PropertyDamage.Model.Projection`): dangling/misplaced `@trigger`, multi-clause
   assertions, and mistyped trigger values that would silently never fire.
   """

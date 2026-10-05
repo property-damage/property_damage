@@ -172,7 +172,7 @@ defmodule PropertyDamage.ExecutorTest do
       } =
         result.failure_reason
 
-      assert %PropertyDamage.AssertionFailed{} = exception
+      assert %PropertyDamage.CheckFailed{} = exception
       assert exception.message =~ "exceeds limit"
     end
   end

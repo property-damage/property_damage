@@ -75,7 +75,7 @@ defmodule ObanBench.Retry.Model do
   def command_sequence_projection, do: ObanBench.Retry.Projection
 
   @impl true
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   @impl true
   def simulator, do: ObanBench.Simulator

@@ -11,7 +11,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   def analyze(model, opts \\ []) do
     # Get model components
     commands = get_commands(model)
-    assertion_projections = get_assertion_projections(model)
+    check_projections = get_check_projections(model)
 
     # Extract events from commands
     events = extract_events_from_commands(commands)
@@ -20,7 +20,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     patterns = Patterns.detect_patterns_multi(events)
 
     # Get existing checks
-    existing_checks = extract_existing_checks(assertion_projections)
+    existing_checks = extract_existing_checks(check_projections)
 
     # Find cross-event fields (consistency check candidates)
     cross_event_fields = Patterns.find_cross_event_fields(events)
@@ -62,9 +62,9 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     end
   end
 
-  defp get_assertion_projections(model) do
-    if Code.ensure_loaded?(model) and function_exported?(model, :assertion_projections, 0) do
-      model.assertion_projections()
+  defp get_check_projections(model) do
+    if Code.ensure_loaded?(model) and function_exported?(model, :check_projections, 0) do
+      model.check_projections()
     else
       []
     end
@@ -158,8 +158,8 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   # Check Extraction
   # ============================================================================
 
-  defp extract_existing_checks(assertion_projections) do
-    assertion_projections
+  defp extract_existing_checks(check_projections) do
+    check_projections
     |> Enum.flat_map(fn projection ->
       Code.ensure_loaded?(projection)
 

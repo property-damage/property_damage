@@ -76,7 +76,7 @@ defmodule PropertyDamage.IExTest do
       assert output =~ "TestAssertions"
     end
 
-    test "reports (none) for a model without assertion projections" do
+    test "reports (none) for a model without check projections" do
       output = capture_io(fn -> assert IEx.explain(SimpleModel) == :ok end)
 
       assert output =~ "PROJECTIONS"

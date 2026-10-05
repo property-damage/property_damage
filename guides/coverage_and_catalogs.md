@@ -97,7 +97,7 @@ defmodule Bank.Model do
   @impl true
   def command_sequence_projection, do: Bank.Ledger
   @impl true
-  def assertion_projections, do: [Bank.Ledger]
+  def check_projections, do: [Bank.Ledger]
   @impl true
   def simulator, do: __MODULE__
 

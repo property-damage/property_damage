@@ -123,7 +123,7 @@ defmodule PropertyDamageTest do
     @behaviour PropertyDamage.Model
     def commands, do: [AlwaysFailCmd]
     def command_sequence_projection, do: AlwaysFailState
-    def assertion_projections, do: [AlwaysFailAssertion]
+    def check_projections, do: [AlwaysFailAssertion]
   end
 
   # Setup succeeds on the exploration run and fails on the second call, which is
@@ -221,7 +221,7 @@ defmodule PropertyDamageTest do
       def command_sequence_projection, do: ModelState
 
       @impl true
-      def assertion_projections, do: []
+      def check_projections, do: []
 
       # Every callback echoes the exact map it received back to the test pid,
       # which lives in adapter_config (guaranteed present on every path).

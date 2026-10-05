@@ -239,7 +239,7 @@ guide for the safety/liveness pairing and the accumulator contract.
 
 ## Tracking State for Invariants
 
-Assertion projections can track their own state:
+Check projections can track their own state:
 
 ```elixir
 defmodule MyApp.Projections.AuditInvariants do

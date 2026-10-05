@@ -69,7 +69,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     @impl true
     def command_sequence_projection, do: PaymentProjection
     @impl true
-    def assertion_projections, do: [PaymentProjection]
+    def check_projections, do: [PaymentProjection]
     @impl true
     def simulator, do: PaymentSimulator
   end
@@ -177,7 +177,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     @impl true
     def command_sequence_projection, do: ProbeProjection
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule RetryThenSucceedAdapter do

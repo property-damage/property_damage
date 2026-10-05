@@ -84,7 +84,7 @@ The framework SHALL generate command sequences through an iterative loop: check 
 - **AND** generates command data using the command's generator with `with:` overrides
 - **AND** calls the simulator to predict resulting events
 - **AND** applies predicted events to the projection to update state
-- **AND** repeats until the configured maximum commands or `terminate?/3` returns true
+- **AND** repeats until the configured maximum commands or `terminate_early?/3` returns true
 
 #### Scenario: No valid commands available
 - **WHEN** all commands' `when:` predicates return false for the current state
@@ -150,36 +150,36 @@ Models SHALL support a four-phase lifecycle: `setup_once` runs once at the start
 
 ### Requirement: Terminal States
 
-Models MAY implement `terminate?/3` to control when command generation stops. The callback receives the current state, the command that just executed, and the events it produced. When `terminate?/3` returns `true`, the generation loop SHALL stop appending commands to the sequence.
+Models MAY implement `terminate_early?/3` to control when command generation stops. The callback receives the current state, the command that just executed, and the events it produced. When `terminate_early?/3` returns `true`, the generation loop SHALL stop appending commands to the sequence.
 
 #### Scenario: Terminate on specific command
-- **WHEN** `terminate?/3` pattern-matches a specific command type and returns `true`
+- **WHEN** `terminate_early?/3` pattern-matches a specific command type and returns `true`
 - **THEN** the framework stops generating further commands after that command
 
 #### Scenario: Terminate on state condition
-- **WHEN** `terminate?/3` inspects the state and returns `true` based on a state predicate
+- **WHEN** `terminate_early?/3` inspects the state and returns `true` based on a state predicate
 - **THEN** the framework stops generating further commands
 
 #### Scenario: Terminate on event
-- **WHEN** `terminate?/3` inspects the events list and finds a terminal event
+- **WHEN** `terminate_early?/3` inspects the events list and finds a terminal event
 - **THEN** the framework stops generating further commands
 
 #### Scenario: No terminate callback
-- **WHEN** a model does not implement `terminate?/3`
+- **WHEN** a model does not implement `terminate_early?/3`
 - **THEN** the framework generates commands until the configured `max_commands` limit
 
 ### Requirement: Optional Projection and Event Callbacks
 
-Models MAY implement `assertion_projections/0` returning a list of invariant-checking projections, and `injectable_events/0` returning a list of event modules that can arrive from outside command execution. When provided, `assertion_projections/0` projections SHALL be evaluated alongside the command-sequence projection, and `injectable_events/0` modules SHALL be recognized as valid externally-arriving events.
+Models MAY implement `check_projections/0` returning a list of invariant-checking projections, and `injectable_events/0` returning a list of event modules that can arrive from outside command execution. When provided, `check_projections/0` projections SHALL be evaluated alongside the command-sequence projection, and `injectable_events/0` modules SHALL be recognized as valid externally-arriving events.
 
-#### Scenario: Assertion projections declared
-- **WHEN** a model implements `assertion_projections/0`
+#### Scenario: Check projections declared
+- **WHEN** a model implements `check_projections/0`
 - **THEN** the returned projection modules verify invariants during execution
 - **AND** their assertions fire according to their trigger configurations
 
-#### Scenario: No assertion projections
-- **WHEN** a model does not implement `assertion_projections/0`
-- **THEN** the framework defaults to an empty list and no assertion projections run
+#### Scenario: No check projections
+- **WHEN** a model does not implement `check_projections/0`
+- **THEN** the framework defaults to an empty list and no check projections run
 
 #### Scenario: Injectable events declared
 - **WHEN** a model implements `injectable_events/0`
@@ -188,12 +188,12 @@ Models MAY implement `assertion_projections/0` returning a list of invariant-che
 
 ### Requirement: Invariant Catalog Enumeration (DR-026)
 
-The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.assertion_catalog(model)` SHALL walk the model's projections — the command-sequence projection plus any assertion projections, deduplicated — union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
+The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.assertion_catalog(model)` SHALL walk the model's projections — the command-sequence projection plus any check projections, deduplicated — union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
 
 #### Scenario: Catalog unions across projections
 - **WHEN** `assertion_catalog/1` is called on a model whose projections declare invariants
 - **THEN** the result SHALL include every invariant from every projection
-- **AND** a projection listed both as the command-sequence projection and as an assertion projection SHALL be visited once (deduplicated)
+- **AND** a projection listed both as the command-sequence projection and as a check projection SHALL be visited once (deduplicated)
 
 #### Scenario: Same id in two projections stays distinct
 - **WHEN** two different projections each declare an invariant with the same `id`

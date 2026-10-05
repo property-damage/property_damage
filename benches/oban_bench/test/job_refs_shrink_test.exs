@@ -68,7 +68,7 @@ defmodule ObanBench.JobRefsShrinkTest do
              type: %PropertyDamage.Failure.Assertion{
                kind: :assertion_failed,
                name: name,
-               detail: %PropertyDamage.AssertionFailed{} = failure
+               detail: %PropertyDamage.CheckFailed{} = failure
              }
            } = report.failure_reason
 

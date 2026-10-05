@@ -92,7 +92,7 @@ defmodule OpenapiBench.LoadModel do
   def command_sequence_projection, do: OpenapiBench.LoadConsistency
 
   @impl true
-  def assertion_projections, do: [OpenapiBench.LoadConsistency]
+  def check_projections, do: [OpenapiBench.LoadConsistency]
 
   @impl true
   def simulator, do: OpenapiBench.LoadSimulator

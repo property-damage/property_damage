@@ -106,7 +106,7 @@ defmodule PropertyDamage.MutationTest do
     def command_sequence_projection, do: ModelState
 
     @impl true
-    def assertion_projections, do: [AlwaysFailAssertion]
+    def check_projections, do: [AlwaysFailAssertion]
 
     @impl true
     def simulator, do: __MODULE__
@@ -765,7 +765,7 @@ defmodule PropertyDamage.MutationTest do
     def command_sequence_projection, do: ModelState
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
 
     @impl true
     def simulator, do: __MODULE__

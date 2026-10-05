@@ -13,13 +13,13 @@ defmodule PropertyDamage.Model do
 
   ## Optional Callbacks
 
-  - `assertion_projections/0` - Projections that verify invariants
+  - `check_projections/0` - Projections that verify invariants
   - `injectable_events/0` - Events that can arrive from Adapter.Injector modules
   - `setup_once/1` - Setup that runs once at the start (not during shrinking)
   - `setup_each/1` - Setup that runs before each execution (including shrink attempts)
   - `teardown_each/1` - Cleanup after each execution
   - `teardown_once/1` - Final cleanup after all shrinking complete
-  - `terminate?/3` - Control when command generation should stop
+  - `terminate_early?/3` - Control when command generation should stop
 
   ## Command Sequence Generation
 
@@ -45,7 +45,7 @@ defmodule PropertyDamage.Model do
     → synthetic events
     → command_sequence_projection.apply(events)
     → updated state
-    → repeat until max_commands or terminate?/3 returns true
+    → repeat until max_commands or terminate_early?/3 returns true
   ```
 
   ## Example
@@ -64,12 +64,12 @@ defmodule PropertyDamage.Model do
 
         # Optional: projections that verify invariants
         @impl true
-        def assertion_projections, do: [OrderBalances]
+        def check_projections, do: [OrderBalances]
 
         # Terminate when order is deleted
         @impl true
-        def terminate?(_state, %DeleteOrder{}, _events), do: true
-        def terminate?(_state, _command, _events), do: false
+        def terminate_early?(_state, %DeleteOrder{}, _events), do: true
+        def terminate_early?(_state, _command, _events), do: false
       end
 
   ## Command Specification
@@ -178,7 +178,8 @@ defmodule PropertyDamage.Model do
 
   ## Terminal States
 
-  The `terminate?/3` callback controls when command generation should stop.
+  The `terminate_early?/3` callback runs during generation on simulator events
+  and returns `true` to end the sequence before `max_commands`.
   This is more flexible than command-level attributes because the same
   command may or may not be terminal depending on the test scenario.
 
@@ -188,9 +189,9 @@ defmodule PropertyDamage.Model do
   - `events` - The events produced by that command
 
   Examples:
-  - Terminate on specific command: `def terminate?(_state, %Shutdown{}, _events), do: true`
-  - Terminate on state: `def terminate?(state, _, _), do: map_size(state.pending) == 0`
-  - Terminate on event: `def terminate?(_, _, events), do: Enum.any?(events, &is_complete?/1)`
+  - Terminate on specific command: `def terminate_early?(_state, %Shutdown{}, _events), do: true`
+  - Terminate on state: `def terminate_early?(state, _, _), do: map_size(state.pending) == 0`
+  - Terminate on event: `def terminate_early?(_, _, events), do: Enum.any?(events, &is_complete?/1)`
 
   If not implemented, the framework runs until `max_commands` is reached.
   """
@@ -273,7 +274,7 @@ defmodule PropertyDamage.Model do
   @callback simulator() :: module()
 
   @doc """
-  Returns list of assertion projection modules.
+  Returns list of check projection modules.
 
   These projections verify invariants via `use PropertyDamage.Model.Projection`.
   Their state is updated with each command and event, and assertions are run
@@ -281,7 +282,7 @@ defmodule PropertyDamage.Model do
 
   Optional - defaults to `[]` if not implemented.
   """
-  @callback assertion_projections() :: [module()]
+  @callback check_projections() :: [module()]
 
   @doc """
   Returns list of event modules that can be injected from outside.
@@ -383,10 +384,11 @@ defmodule PropertyDamage.Model do
   @callback teardown_once(config :: lifecycle_config()) :: :ok
 
   @doc """
-  Determines if the test should terminate after the given command/events.
+  Decides whether to end the sequence being generated before `max_commands`.
 
-  Called after each command execution with the updated state.
-  Return `true` to stop generating further commands.
+  Runs during generation, after each command, on the events the simulator
+  produced for it. Return `true` to stop generating further commands for this
+  sequence.
 
   ## Arguments
 
@@ -397,29 +399,30 @@ defmodule PropertyDamage.Model do
   ## Examples
 
       # Terminate on specific command type
-      def terminate?(_state, %Shutdown{}, _events), do: true
-      def terminate?(_state, _command, _events), do: false
+      def terminate_early?(_state, %Shutdown{}, _events), do: true
+      def terminate_early?(_state, _command, _events), do: false
 
       # Terminate based on state
-      def terminate?(state, _command, _events) do
+      def terminate_early?(state, _command, _events) do
         map_size(state.pending_payments) == 0
       end
 
       # Terminate based on events
-      def terminate?(_state, _command, events) do
+      def terminate_early?(_state, _command, events) do
         Enum.any?(events, &match?(%PaymentCompleted{}, &1))
       end
   """
-  @callback terminate?(state :: map(), command :: struct(), events :: [struct()]) :: boolean()
+  @callback terminate_early?(state :: map(), command :: struct(), events :: [struct()]) ::
+              boolean()
 
   @optional_callbacks [
-    assertion_projections: 0,
+    check_projections: 0,
     injectable_events: 0,
     setup_once: 1,
     setup_each: 1,
     teardown_each: 1,
     teardown_once: 1,
-    terminate?: 3,
+    terminate_early?: 3,
     simulator: 0
   ]
 
@@ -572,19 +575,19 @@ defmodule PropertyDamage.Model do
   @doc """
   The full projection list a model exposes.
 
-  The command-sequence projection plus any `assertion_projections/0`,
+  The command-sequence projection plus any `check_projections/0`,
   deduplicated (a projection listed in both appears once).
   """
   @spec projection_modules(module()) :: [module()]
   def projection_modules(model) do
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    [model.command_sequence_projection() | assertion_projections]
+    [model.command_sequence_projection() | check_projections]
     |> Enum.uniq()
   end
 

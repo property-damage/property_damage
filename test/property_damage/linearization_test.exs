@@ -23,7 +23,7 @@ defmodule PropertyDamage.LinearizationTest do
 
     def commands, do: []
     def command_sequence_projection, do: TestProjection
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   describe "generate_linearizations/1" do
@@ -150,7 +150,7 @@ defmodule PropertyDamage.LinearizationTest do
     def command_sequence_projection, do: CounterProjection
 
     @impl PropertyDamage.Model
-    def assertion_projections, do: []
+    def check_projections, do: []
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -315,7 +315,7 @@ defmodule PropertyDamage.LinearizationTest do
         @impl PropertyDamage.Model
         def command_sequence_projection, do: CounterProjection
         @impl PropertyDamage.Model
-        def assertion_projections, do: []
+        def check_projections, do: []
         @impl PropertyDamage.Model
         def simulator, do: __MODULE__
 

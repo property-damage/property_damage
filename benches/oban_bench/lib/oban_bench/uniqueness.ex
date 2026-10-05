@@ -116,7 +116,7 @@ defmodule ObanBench.Uniqueness.Model do
   # safety check and receives every command/event, so it need not be listed
   # again here (doing so would evaluate the check twice).
   @impl true
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   @impl true
   def simulator, do: ObanBench.Uniqueness.Simulator

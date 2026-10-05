@@ -54,8 +54,8 @@ mix pd.integration                 # Run integration tests against live services
 All user-facing contracts are defined as behaviours:
 
 - **Command** (`lib/property_damage/command.ex`) — Pure generator interface. Defines `generator/1` returning `StreamData.t(map())`. Commands are stateless semantic definitions; state-dependent logic (preconditions, overrides) belongs in the Model.
-- **Model** (`lib/property_damage/model.ex`) — Orchestrates which commands run and when. Required: `commands/0` (list of command specs with optional `weight:`, `when:`, `with:` options) and `command_sequence_projection/0`. Optional: `assertion_projections/0`, `simulator/0`, lifecycle hooks.
-- **Projection** (`lib/property_damage/model/projection.ex`) — State reducers. Required: `init/0`, `apply/2`. Assertion projections use `@trigger` attributes (`every: N`, `every: CommandModule`) for sync checks and `@poll_state` for eventual consistency checks.
+- **Model** (`lib/property_damage/model.ex`) — Orchestrates which commands run and when. Required: `commands/0` (list of command specs with optional `weight:`, `when:`, `with:` options) and `command_sequence_projection/0`. Optional: `check_projections/0`, `simulator/0`, lifecycle hooks.
+- **Projection** (`lib/property_damage/model/projection.ex`) — State reducers. Required: `init/0`, `apply/2`. Check projections use `@trigger` attributes (`every: N`, `every: CommandModule`) for sync checks and `@poll_state` for eventual consistency checks.
 - **Adapter** (`lib/property_damage/adapter.ex`) — Bridge to the SUT. Lifecycle: `setup/1` → `execute/2` × N → `teardown/1`. Execute returns `{:ok, [events]}` or `{:error, reason}`. Supports sub-adapters via `delegate_execution/1` macro.
 - **Nemesis** (`lib/property_damage/nemesis.ex`) — Fault injection. Callbacks: `inject/2`, `restore/2`, `precondition/1`. 10 built-in implementations under `PropertyDamage.Nemesis.*`.
 

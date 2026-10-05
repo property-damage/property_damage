@@ -161,9 +161,9 @@ defmodule FullPaymentModel do
 end
 ```
 
-## Reusable Assertion Projections
+## Reusable Check Projections
 
-The same pattern works for assertion projections that need to access state
+The same pattern works for check projections that need to access state
 from different structures:
 
 <!-- pd-doc-verify: runnable -->
@@ -203,7 +203,7 @@ defmodule BalanceInvariant do
 end
 ```
 
-This assertion projection tracks its own state and works regardless of
+This check projection tracks its own state and works regardless of
 the main state projection's structure.
 
 ## When to Use Protocols

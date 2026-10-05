@@ -78,7 +78,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
     @impl true
     def command_sequence_projection, do: SeqProj
     @impl true
-    def assertion_projections, do: [Sum]
+    def check_projections, do: [Sum]
   end
 
   defmodule ImpureModel do
@@ -89,7 +89,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
     @impl true
     def command_sequence_projection, do: SeqProj
     @impl true
-    def assertion_projections, do: [Sum, Impure]
+    def check_projections, do: [Sum, Impure]
   end
 
   # ---- Adapter --------------------------------------------------------------
@@ -241,7 +241,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
       @impl true
       def command_sequence_projection, do: ModelState
       @impl true
-      def assertion_projections, do: []
+      def check_projections, do: []
       @impl true
       def simulator, do: __MODULE__
       @impl PropertyDamage.Model.Simulator
@@ -258,7 +258,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
       @impl true
       def command_sequence_projection, do: ModelState
       @impl true
-      def assertion_projections, do: [ImpureEventProj]
+      def check_projections, do: [ImpureEventProj]
       @impl true
       def simulator, do: __MODULE__
       @impl PropertyDamage.Model.Simulator

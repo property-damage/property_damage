@@ -108,7 +108,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
     end
 
     def command_sequence_projection, do: MyAppTest.Projections.State
-    def assertion_projections, do: [MyAppTest.Projections.UniqueUsers]
+    def check_projections, do: [MyAppTest.Projections.UniqueUsers]
   end
   ```
 
@@ -1384,7 +1384,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       end
 
       @impl true
-      def assertion_projections do
+      def check_projections do
         # TODO: Add extra projections (with @trigger/@poll_state assertions)
         # Example: [Projections.ResourceExists, Projections.ValidState]
         []

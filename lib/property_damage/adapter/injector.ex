@@ -34,7 +34,7 @@ defmodule PropertyDamage.Adapter.Injector do
 
   The framework uses this for:
   - Validating that Model.injectable_events/0 covers all possible injected events
-  - Detecting orphan events that no assertion projection handles
+  - Detecting orphan events that no check projection handles
 
   ## Example
 

@@ -202,7 +202,7 @@ defmodule PropertyDamage.Test.ShrinkQuality.Model do
   def command_sequence_projection, do: PropertyDamage.Test.ShrinkQuality.Projection
 
   @impl true
-  def assertion_projections, do: [PropertyDamage.Test.ShrinkQuality.Projection]
+  def check_projections, do: [PropertyDamage.Test.ShrinkQuality.Projection]
 
   @impl true
   def simulator, do: PropertyDamage.Test.ShrinkQuality.Simulator

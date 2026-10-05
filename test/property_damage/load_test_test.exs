@@ -130,7 +130,7 @@ defmodule PropertyDamage.LoadTestTest do
       {:ok, metrics} = Metrics.start_link()
 
       # Record some assertion failures (by exception module)
-      Metrics.record_assertion_failure(metrics, PropertyDamage.AssertionFailed, CreateAccount, %{
+      Metrics.record_assertion_failure(metrics, PropertyDamage.CheckFailed, CreateAccount, %{
         reason: "balance -50",
         command_index: 5,
         step_type: :command,
@@ -138,7 +138,7 @@ defmodule PropertyDamage.LoadTestTest do
         timestamp: System.monotonic_time(:millisecond)
       })
 
-      Metrics.record_assertion_failure(metrics, PropertyDamage.AssertionFailed, CreateAccount, %{
+      Metrics.record_assertion_failure(metrics, PropertyDamage.CheckFailed, CreateAccount, %{
         reason: "balance -100",
         command_index: 10,
         step_type: :event,
@@ -164,13 +164,13 @@ defmodule PropertyDamage.LoadTestTest do
 
       assert snapshot.assertion_failures == 3
       assert snapshot.assertion_failure_rate == 3.0
-      assert snapshot.failures_by_exception[PropertyDamage.AssertionFailed] == 2
+      assert snapshot.failures_by_exception[PropertyDamage.CheckFailed] == 2
       assert snapshot.failures_by_exception[ArgumentError] == 1
       assert length(snapshot.recent_assertion_failures) == 3
 
       # Verify failure details
       [first | _] = snapshot.recent_assertion_failures
-      assert first.exception_module in [PropertyDamage.AssertionFailed, ArgumentError]
+      assert first.exception_module in [PropertyDamage.CheckFailed, ArgumentError]
       assert Map.has_key?(first, :reason)
       assert Map.has_key?(first, :command_index)
 
@@ -182,7 +182,7 @@ defmodule PropertyDamage.LoadTestTest do
 
       # Record more failures than the max (100)
       for i <- 1..150 do
-        Metrics.record_assertion_failure(metrics, PropertyDamage.AssertionFailed, TestCommand, %{
+        Metrics.record_assertion_failure(metrics, PropertyDamage.CheckFailed, TestCommand, %{
           reason: "failure #{i}",
           command_index: i,
           step_type: :command,
@@ -476,7 +476,7 @@ defmodule PropertyDamage.LoadTestTest do
     def simulate(_cmd, _state), do: [%{type: :created}]
 
     @impl PropertyDamage.Model
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule WorkerTestAdapter do
@@ -579,7 +579,7 @@ defmodule PropertyDamage.LoadTestTest do
     def command_sequence_projection, do: PropertyDamage.LoadTestTest.OrderingProjection
 
     @impl PropertyDamage.Model
-    def assertion_projections, do: [PropertyDamage.LoadTestTest.OrderingProjection]
+    def check_projections, do: [PropertyDamage.LoadTestTest.OrderingProjection]
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -936,7 +936,7 @@ defmodule PropertyDamage.LoadTestTest do
       def command_sequence_projection, do: MockProjection
 
       @impl PropertyDamage.Model
-      def assertion_projections, do: []
+      def check_projections, do: []
 
       @impl PropertyDamage.Model
       def simulator, do: __MODULE__
@@ -1218,8 +1218,8 @@ defmodule PropertyDamage.LoadTestTest do
       end)
     end
 
-    # Model with assertion projections for testing assertion_mode option
-    defmodule FailingAssertionProjection do
+    # Model with check projections for testing assertion_mode option
+    defmodule FailingCheckProjection do
       use PropertyDamage.Model.Projection
 
       @impl true
@@ -1247,7 +1247,7 @@ defmodule PropertyDamage.LoadTestTest do
       def command_sequence_projection, do: MockProjection
 
       @impl true
-      def assertion_projections, do: [FailingAssertionProjection]
+      def check_projections, do: [FailingCheckProjection]
     end
 
     @tag :integration
@@ -1288,7 +1288,7 @@ defmodule PropertyDamage.LoadTestTest do
         assert report.metrics.assertion_failure_rate > 0
 
         # Should have tracked failures by exception module
-        assert Map.has_key?(report.metrics.failures_by_exception, PropertyDamage.AssertionFailed)
+        assert Map.has_key?(report.metrics.failures_by_exception, PropertyDamage.CheckFailed)
       end)
     end
 

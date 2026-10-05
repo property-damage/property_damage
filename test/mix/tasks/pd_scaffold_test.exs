@@ -697,7 +697,7 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       # DELETE has weight 1
       assert code =~ "{Commands.DeletePet, weight: 1}"
       assert code =~ "def command_sequence_projection do"
-      assert code =~ "def assertion_projections do"
+      assert code =~ "def check_projections do"
     end
   end
 

@@ -72,7 +72,7 @@ defmodule PropertyDamage.SuggestionsTest do
     def command_sequence_projection, do: EmptyProjection
 
     @impl true
-    def assertion_projections, do: [TestProjection]
+    def check_projections, do: [TestProjection]
   end
 
   # Model with no projections
@@ -86,7 +86,7 @@ defmodule PropertyDamage.SuggestionsTest do
     def command_sequence_projection, do: EmptyProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   # ============================================================================
@@ -625,7 +625,7 @@ defmodule PropertyDamage.SuggestionsTest do
       assert is_binary(summary)
     end
 
-    test "handles model with no assertion projections" do
+    test "handles model with no check projections" do
       analysis = Suggestions.analyze(MinimalModel)
 
       assert analysis.model == MinimalModel

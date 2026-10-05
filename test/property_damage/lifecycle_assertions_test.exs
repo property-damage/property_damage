@@ -238,7 +238,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def command_sequence_projection, do: LivenessAndSafetyProjection
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule SilentAdapter do
@@ -512,7 +512,7 @@ defmodule PropertyDamage.LifecycleAssertionsTest do
     @impl true
     def command_sequence_projection, do: MaxCountProjection
     @impl true
-    def assertion_projections, do: [MaxCountProjection]
+    def check_projections, do: [MaxCountProjection]
   end
 
   test "a projection listed twice evaluates its teardown check only once" do

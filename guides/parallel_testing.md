@@ -184,7 +184,7 @@ defmodule AccountModel do
 
   def command_sequence_projection, do: AccountState
 
-  def assertion_projections, do: [BalanceInvariant]
+  def check_projections, do: [BalanceInvariant]
 
   defp has_accounts?(state), do: map_size(state.accounts) > 0
   defp has_two_accounts?(state), do: map_size(state.accounts) >= 2

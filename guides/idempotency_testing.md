@@ -222,7 +222,7 @@ The `runtime.stutter` map contains:
 
 ## Writing Idempotency Invariants
 
-Use an assertion projection to enforce idempotency rules alongside stutter
+Use a check projection to enforce idempotency rules alongside stutter
 testing:
 
 ```elixir

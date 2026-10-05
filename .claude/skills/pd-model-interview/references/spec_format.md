@@ -83,7 +83,7 @@ Every event here must be produced by at least one command's `events:` list.
 ### 4. Projections
 
 The command-sequence projection (what state it tracks and which commands'
-guards or generators need it), then assertion projections. State exists only
+guards or generators need it), then check projections. State exists only
 because something gates on it or an invariant inspects it.
 
 ### 5. Invariants

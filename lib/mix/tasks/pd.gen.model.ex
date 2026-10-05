@@ -10,7 +10,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
 
       --commands COMMANDS               Comma-separated list of command module names
       --projection NAME                 State projection module name
-      --assertion-projections NAMES     Comma-separated list of assertion projection names
+      --check-projections NAMES     Comma-separated list of check projection names
 
   ## Examples
 
@@ -24,7 +24,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
       mix pd.gen.model MyApp.TestModel \\
         --commands CreateUser,UpdateUser,DeleteUser \\
         --projection MyApp.Projections.ModelState \\
-        --assertion-projections BalanceChecker,AuditLog
+        --check-projections BalanceChecker,AuditLog
 
   ## Projections
 
@@ -34,7 +34,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
   - Define temporal assertions via `@poll_state`
 
   The `command_sequence_projection` is the primary projection used for command generation.
-  The `assertion_projections` are additional projections for invariants and side tracking.
+  The `check_projections` are additional projections for invariants and side tracking.
   """
 
   use Mix.Task
@@ -45,7 +45,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
   def run(args) do
     {opts, argv, _} =
       OptionParser.parse(args,
-        strict: [commands: :string, projection: :string, assertion_projections: :string]
+        strict: [commands: :string, projection: :string, check_projections: :string]
       )
 
     case argv do
@@ -64,14 +64,14 @@ defmodule Mix.Tasks.Pd.Gen.Model do
   defp generate_model(module_name, opts) do
     commands = parse_list(Keyword.get(opts, :commands, ""))
     projection = Keyword.get(opts, :projection)
-    assertion_projections = parse_list(Keyword.get(opts, :assertion_projections, ""))
+    check_projections = parse_list(Keyword.get(opts, :check_projections, ""))
 
     path = module_to_path(module_name)
     dir = Path.dirname(path)
 
     File.mkdir_p!(dir)
 
-    content = generate_content(module_name, commands, projection, assertion_projections)
+    content = generate_content(module_name, commands, projection, check_projections)
 
     File.write!(path, content)
 
@@ -96,7 +96,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
     "lib/#{path}.ex"
   end
 
-  defp generate_content(module_name, commands, projection, assertion_projections) do
+  defp generate_content(module_name, commands, projection, check_projections) do
     # Infer namespace from module name
     parts = String.split(module_name, ".")
     namespace = Enum.slice(parts, 0..-2//1) |> Enum.join(".")
@@ -104,8 +104,8 @@ defmodule Mix.Tasks.Pd.Gen.Model do
     commands_section = generate_commands_section(commands, namespace)
     projection_section = generate_projection_section(projection, namespace)
 
-    assertion_projections_section =
-      generate_assertion_projections_section(assertion_projections, namespace)
+    check_projections_section =
+      generate_check_projections_section(check_projections, namespace)
 
     """
     defmodule #{module_name} do
@@ -142,9 +142,9 @@ defmodule Mix.Tasks.Pd.Gen.Model do
       end
 
       @impl true
-      def assertion_projections do
+      def check_projections do
         [
-          #{assertion_projections_section}
+          #{check_projections_section}
         ]
       end
 
@@ -168,7 +168,7 @@ defmodule Mix.Tasks.Pd.Gen.Model do
       #   :ok
       # end
       #
-      # def terminate?(state, command, events) do
+      # def terminate_early?(state, command, events) do
       #   # Return true to stop command generation
       #   false
       # end
@@ -223,11 +223,11 @@ defmodule Mix.Tasks.Pd.Gen.Model do
     projection
   end
 
-  defp generate_assertion_projections_section([], namespace) do
+  defp generate_check_projections_section([], namespace) do
     "# #{namespace}.Projections.SomeExtraProjection"
   end
 
-  defp generate_assertion_projections_section(assertion_projections, _namespace) do
-    Enum.join(assertion_projections, ",\n      ")
+  defp generate_check_projections_section(check_projections, _namespace) do
+    Enum.join(check_projections, ",\n      ")
   end
 end

@@ -23,7 +23,7 @@ defmodule OpenapiBench.Generated.Model do
   def command_sequence_projection, do: OpenapiBench.Consistency
 
   @impl true
-  def assertion_projections, do: [OpenapiBench.Consistency]
+  def check_projections, do: [OpenapiBench.Consistency]
 
   @impl true
   def simulator, do: OpenapiBench.Simulator

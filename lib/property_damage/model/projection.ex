@@ -209,7 +209,7 @@ defmodule PropertyDamage.Model.Projection do
   In your Model, specify projections:
 
       def command_sequence_projection, do: MyStateProjection    # required
-      def assertion_projections, do: [Validator, Audit]  # optional
+      def check_projections, do: [Validator, Audit]  # optional
 
   All projections (state + extra) use the same `Projection` behaviour.
   """

@@ -102,8 +102,8 @@ defmodule PropertyDamage.IEx do
     state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
@@ -132,7 +132,7 @@ defmodule PropertyDamage.IEx do
       {:setup_each, 1, "Setup before each execution"},
       {:teardown_each, 1, "Cleanup after each execution"},
       {:teardown_once, 1, "Final cleanup after all runs"},
-      {:terminate?, 3, "Custom termination condition"},
+      {:terminate_early?, 3, "Custom termination condition"},
       {:injectable_events, 0, "Events from injector adapters"}
     ]
 
@@ -171,7 +171,7 @@ defmodule PropertyDamage.IEx do
   defp collect_hints(model) do
     hints = []
 
-    # Check for missing terminate?
+    # Check for missing terminate_early?
     commands = model.commands() |> Model.normalize_commands()
 
     has_destructive =
@@ -181,8 +181,8 @@ defmodule PropertyDamage.IEx do
       end)
 
     hints =
-      if has_destructive and not function_exported?(model, :terminate?, 3) do
-        ["Consider implementing terminate?/3 for destructive commands" | hints]
+      if has_destructive and not function_exported?(model, :terminate_early?, 3) do
+        ["Consider implementing terminate_early?/3 for destructive commands" | hints]
       else
         hints
       end

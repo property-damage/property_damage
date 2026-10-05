@@ -47,7 +47,7 @@ end
 
 defmodule PropertyDamage.Test.Flake.Health do
   @moduledoc false
-  # Assertion projection: any Bad event flips the run to failing.
+  # Check projection: any Bad event flips the run to failing.
   use PropertyDamage.Model.Projection
 
   alias PropertyDamage.Test.Flake.Events.Bad
@@ -87,7 +87,7 @@ defmodule PropertyDamage.Test.Flake.Model do
   def command_sequence_projection, do: State
 
   @impl true
-  def assertion_projections, do: [Health]
+  def check_projections, do: [Health]
 
   @impl true
   def simulator, do: __MODULE__
@@ -98,7 +98,7 @@ defmodule PropertyDamage.Test.Flake.Model do
   end
 
   @impl true
-  def terminate?(_state, %Op{}, _events), do: true
+  def terminate_early?(_state, %Op{}, _events), do: true
 end
 
 defmodule PropertyDamage.Test.Flake.Adapter do

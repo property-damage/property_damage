@@ -267,7 +267,7 @@ defmodule PropertyDamage.Generator do
             new_acc = [command | acc]
             new_acc_ph = acc_ph ++ minted
 
-            if should_terminate?(model, new_state, command, events) do
+            if terminate_early?(model, new_state, command, events) do
               StreamData.constant({Enum.reverse(new_acc), new_acc_ph})
             else
               generate_linear_recursive(
@@ -395,8 +395,8 @@ defmodule PropertyDamage.Generator do
               new_acc = [command | acc]
               new_acc_ph = acc_ph ++ minted
 
-              if should_terminate?(model, new_state, command, events) do
-                # DR-013: terminate? stops the WHOLE sequence, not just the
+              if terminate_early?(model, new_state, command, events) do
+                # DR-013: terminate_early? stops the WHOLE sequence, not just the
                 # prefix. Signal it so no branches or suffix get appended.
                 remaining = max_total - length(new_acc)
 
@@ -595,7 +595,7 @@ defmodule PropertyDamage.Generator do
                 new_acc = [command | acc]
                 new_acc_ph = acc_ph ++ minted
 
-                if should_terminate?(model, new_state, command, events) do
+                if terminate_early?(model, new_state, command, events) do
                   StreamData.constant({Enum.reverse(new_acc), new_acc_ph})
                 else
                   generate_branch(
@@ -766,9 +766,9 @@ defmodule PropertyDamage.Generator do
     end)
   end
 
-  defp should_terminate?(model, state, command, events) do
-    if Code.ensure_loaded?(model) and function_exported?(model, :terminate?, 3) do
-      model.terminate?(state, command, events)
+  defp terminate_early?(model, state, command, events) do
+    if Code.ensure_loaded?(model) and function_exported?(model, :terminate_early?, 3) do
+      model.terminate_early?(state, command, events)
     else
       false
     end

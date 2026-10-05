@@ -108,7 +108,7 @@ defmodule PropertyDamage.Forensics do
   - `:model` - The model module (required)
   - `:event_mapping` - Module to translate production events (optional)
   - `:stop_on_first_failure` - Stop at first invariant violation (default: true)
-  - `:projections` - Override which assertion projections to use (default: model's)
+  - `:projections` - Override which check projections to use (default: model's)
 
   ## Returns
 
@@ -154,16 +154,16 @@ defmodule PropertyDamage.Forensics do
     # Initialize projections
     command_sequence_projection = model.command_sequence_projection()
 
-    assertion_projections =
+    check_projections =
       Keyword.get_lazy(opts, :projections, fn ->
-        if function_exported?(model, :assertion_projections, 0) do
-          model.assertion_projections()
+        if function_exported?(model, :check_projections, 0) do
+          model.check_projections()
         else
           []
         end
       end)
 
-    all_projections = [command_sequence_projection | assertion_projections]
+    all_projections = [command_sequence_projection | check_projections]
 
     initial_projections =
       for projection <- all_projections, into: %{} do
@@ -198,7 +198,7 @@ defmodule PropertyDamage.Forensics do
               history,
               violations,
               model,
-              assertion_projections,
+              check_projections,
               stop_early
             )
           end
@@ -215,7 +215,7 @@ defmodule PropertyDamage.Forensics do
          history,
          violations,
          model,
-         assertion_projections,
+         check_projections,
          stop_early
        ) do
     # Apply event to all projections
@@ -239,7 +239,7 @@ defmodule PropertyDamage.Forensics do
       branch_id: nil
     }
 
-    case run_checks(model, assertion_projections, new_projections, check_ctx) do
+    case run_checks(model, check_projections, new_projections, check_ctx) do
       :ok ->
         {:cont, {:ok, new_state, [event | history], violations}}
 
@@ -300,12 +300,12 @@ defmodule PropertyDamage.Forensics do
     end)
   end
 
-  defp run_assertions(model, assertion_projections, projections, assertion_ctx) do
+  defp run_assertions(model, check_projections, projections, assertion_ctx) do
     alias PropertyDamage.Model.Projection
 
     # Run assertions on all projections (state + extra)
     command_sequence_projection = model.command_sequence_projection()
-    all_projections = [command_sequence_projection | assertion_projections]
+    all_projections = [command_sequence_projection | check_projections]
 
     Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       projection_state = Map.get(projections, projection)
@@ -349,7 +349,7 @@ defmodule PropertyDamage.Forensics do
   end
 
   # Legacy wrapper for backward compatibility
-  defp run_checks(model, assertion_projections, projections, check_ctx) do
+  defp run_checks(model, check_projections, projections, check_ctx) do
     # Convert old check_ctx to new assertion_ctx format
     {event_module, event} =
       case check_ctx.events do
@@ -364,7 +364,7 @@ defmodule PropertyDamage.Forensics do
       command_or_event: event
     }
 
-    run_assertions(model, assertion_projections, projections, assertion_ctx)
+    run_assertions(model, check_projections, projections, assertion_ctx)
   end
 
   defp get_module(%{__struct__: mod}), do: mod

@@ -494,14 +494,14 @@ defmodule PropertyDamage.Executor do
   defp init_projections(model) do
     cmd_seq_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    all_projections = [cmd_seq_projection | assertion_projections]
+    all_projections = [cmd_seq_projection | check_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
@@ -1147,14 +1147,14 @@ defmodule PropertyDamage.Executor do
     # Get all projections that may have assertions
     cmd_seq_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    all_projections = [cmd_seq_projection | assertion_projections]
+    all_projections = [cmd_seq_projection | check_projections]
 
     result =
       Enum.reduce_while(
@@ -1397,16 +1397,16 @@ defmodule PropertyDamage.Executor do
   end
 
   # The full projection list a model exposes: the command-sequence projection
-  # plus any assertion projections.
+  # plus any check projections.
   defp projection_modules(model) do
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    [model.command_sequence_projection() | assertion_projections]
+    [model.command_sequence_projection() | check_projections]
     |> Enum.uniq()
   end
 
@@ -1658,14 +1658,14 @@ defmodule PropertyDamage.Executor do
       # Get all projections
       cmd_seq_projection = model.command_sequence_projection()
 
-      assertion_projections =
-        if function_exported?(model, :assertion_projections, 0) do
-          model.assertion_projections()
+      check_projections =
+        if function_exported?(model, :check_projections, 0) do
+          model.check_projections()
         else
           []
         end
 
-      all_projections = [cmd_seq_projection | assertion_projections]
+      all_projections = [cmd_seq_projection | check_projections]
 
       # For each event, check if any @poll_state assertions should be spawned.
       # Each spawned poller is paired with its (projection, assertion name) so

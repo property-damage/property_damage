@@ -46,7 +46,7 @@ defmodule PropertyDamage.ForensicsTest do
     def apply(state, _), do: state
   end
 
-  # Test assertion projection with assertions
+  # Test check projection with assertions
   defmodule OrderInvariants do
     use PropertyDamage.Model.Projection
 
@@ -76,10 +76,10 @@ defmodule PropertyDamage.ForensicsTest do
 
     def commands, do: []
     def command_sequence_projection, do: OrderState
-    def assertion_projections, do: [OrderInvariants]
+    def check_projections, do: [OrderInvariants]
   end
 
-  # Assertion projection that only checks the most-recent event's amount, so each
+  # Check projection that only checks the most-recent event's amount, so each
   # violating event produces exactly one violation tied to that event (unlike
   # OrderInvariants, whose accumulated state keeps failing once any amount is negative).
   defmodule LastAmountInvariant do
@@ -105,7 +105,7 @@ defmodule PropertyDamage.ForensicsTest do
 
     def commands, do: []
     def command_sequence_projection, do: OrderState
-    def assertion_projections, do: [LastAmountInvariant]
+    def check_projections, do: [LastAmountInvariant]
   end
 
   # Test event mapping

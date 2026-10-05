@@ -81,7 +81,7 @@ defmodule ObanBench.UniquenessTest do
                type: %PropertyDamage.Failure.Assertion{
                  kind: :assertion_failed,
                  name: :exactly_once,
-                 detail: %PropertyDamage.AssertionFailed{data: %{observed: 2, expected: 1}}
+                 detail: %PropertyDamage.CheckFailed{data: %{observed: 2, expected: 1}}
                }
              } = report.failure_reason
 

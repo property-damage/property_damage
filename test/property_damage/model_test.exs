@@ -13,13 +13,13 @@ defmodule PropertyDamage.ModelTest do
 
       assert function_exported?(FullModel, :commands, 0)
       assert function_exported?(FullModel, :command_sequence_projection, 0)
-      assert function_exported?(FullModel, :assertion_projections, 0)
+      assert function_exported?(FullModel, :check_projections, 0)
       assert function_exported?(FullModel, :injectable_events, 0)
       assert function_exported?(FullModel, :setup_once, 1)
       assert function_exported?(FullModel, :setup_each, 1)
       assert function_exported?(FullModel, :teardown_each, 1)
       assert function_exported?(FullModel, :teardown_once, 1)
-      assert function_exported?(FullModel, :terminate?, 3)
+      assert function_exported?(FullModel, :terminate_early?, 3)
       assert function_exported?(FullModel, :simulate, 2)
     end
 
@@ -28,7 +28,7 @@ defmodule PropertyDamage.ModelTest do
 
       assert function_exported?(MinimalModel, :commands, 0)
       assert function_exported?(MinimalModel, :command_sequence_projection, 0)
-      assert function_exported?(MinimalModel, :assertion_projections, 0)
+      assert function_exported?(MinimalModel, :check_projections, 0)
       assert function_exported?(MinimalModel, :simulate, 2)
 
       # Optional callbacks not exported
@@ -37,7 +37,7 @@ defmodule PropertyDamage.ModelTest do
       refute function_exported?(MinimalModel, :setup_each, 1)
       refute function_exported?(MinimalModel, :teardown_each, 1)
       refute function_exported?(MinimalModel, :teardown_once, 1)
-      refute function_exported?(MinimalModel, :terminate?, 3)
+      refute function_exported?(MinimalModel, :terminate_early?, 3)
     end
   end
 
@@ -55,8 +55,8 @@ defmodule PropertyDamage.ModelTest do
       assert projection == ModelState
     end
 
-    test "assertion_projections/0 returns projection list" do
-      projections = FullModel.assertion_projections()
+    test "check_projections/0 returns projection list" do
+      projections = FullModel.check_projections()
 
       assert projections == [TestAssertions]
     end
@@ -169,14 +169,14 @@ defmodule PropertyDamage.ModelTest do
     end
   end
 
-  describe "terminate?/3" do
+  describe "terminate_early?/3" do
     test "receives state, command, and events" do
       state = %{items: %{}}
       command = %CreateItem{name: "Test", quantity: 1}
       events = [%ItemCreated{item_ref: nil, name: "Test", quantity: 1}]
 
       # Should not raise - callback receives all arguments
-      result = FullModel.terminate?(state, command, events)
+      result = FullModel.terminate_early?(state, command, events)
 
       assert is_boolean(result)
     end
@@ -186,7 +186,7 @@ defmodule PropertyDamage.ModelTest do
       command = %MinimalCommand{}
       events = []
 
-      assert FullModel.terminate?(state, command, events) == true
+      assert FullModel.terminate_early?(state, command, events) == true
     end
 
     test "returns false for non-terminal command" do
@@ -194,7 +194,7 @@ defmodule PropertyDamage.ModelTest do
       command = %CreateItem{name: "Test", quantity: 1}
       events = []
 
-      assert FullModel.terminate?(state, command, events) == false
+      assert FullModel.terminate_early?(state, command, events) == false
     end
   end
 
@@ -286,8 +286,8 @@ defmodule PropertyDamage.ModelTest do
 
       assert {:commands, 0} in callbacks
       assert {:command_sequence_projection, 0} in callbacks
-      # assertion_projections is now optional
-      assert {:assertion_projections, 0} in callbacks
+      # check_projections is now optional
+      assert {:check_projections, 0} in callbacks
       # simulator is a callback (optional) - returns module implementing Simulator behaviour
       assert {:simulator, 0} in callbacks
     end
@@ -295,13 +295,13 @@ defmodule PropertyDamage.ModelTest do
     test "optional callbacks are declared" do
       optional = Model.behaviour_info(:optional_callbacks)
 
-      assert {:assertion_projections, 0} in optional
+      assert {:check_projections, 0} in optional
       assert {:injectable_events, 0} in optional
       assert {:setup_once, 1} in optional
       assert {:setup_each, 1} in optional
       assert {:teardown_each, 1} in optional
       assert {:teardown_once, 1} in optional
-      assert {:terminate?, 3} in optional
+      assert {:terminate_early?, 3} in optional
       assert {:simulator, 0} in optional
     end
   end

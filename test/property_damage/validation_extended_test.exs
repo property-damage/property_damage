@@ -43,7 +43,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl PropertyDamage.Model
-    def assertion_projections, do: []
+    def check_projections, do: []
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -62,7 +62,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule InvalidWeightModel do
@@ -77,7 +77,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule ValidAdapter do
@@ -311,7 +311,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule UnbalancedWeightModel do
@@ -329,7 +329,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   describe "model warnings" do

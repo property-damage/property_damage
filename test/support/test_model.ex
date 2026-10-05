@@ -3,7 +3,7 @@ defmodule PropertyDamage.Test.FullModel do
   Complete test model implementing all callbacks.
 
   Demonstrates full Model behaviour implementation including
-  lifecycle hooks, terminate?/3, and the new Model-level wiring pattern.
+  lifecycle hooks, terminate_early?/3, and the new Model-level wiring pattern.
   """
   @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
@@ -31,7 +31,7 @@ defmodule PropertyDamage.Test.FullModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestAssertions]
 
   @impl true
   def injectable_events, do: [ItemCreated, ItemViewed]
@@ -67,13 +67,13 @@ defmodule PropertyDamage.Test.FullModel do
 
   # Terminate after MinimalCommand
   @impl true
-  def terminate?(_state, %MinimalCommand{}, _events), do: true
-  def terminate?(_state, _command, _events), do: false
+  def terminate_early?(_state, %MinimalCommand{}, _events), do: true
+  def terminate_early?(_state, _command, _events), do: false
 end
 
 defmodule PropertyDamage.Test.TerminateImmediatelyModel do
   @moduledoc """
-  Test model whose terminate?/3 fires after the first command. Used to prove
+  Test model whose terminate_early?/3 fires after the first command. Used to prove
   that a model-requested termination stops the whole sequence in branching mode
   (no branches, no suffix appended after the prefix) per DR-013.
   """
@@ -99,7 +99,7 @@ defmodule PropertyDamage.Test.TerminateImmediatelyModel do
   end
 
   @impl true
-  def terminate?(_state, _command, _events), do: true
+  def terminate_early?(_state, _command, _events), do: true
 end
 
 defmodule PropertyDamage.Test.MinimalModel do
@@ -133,7 +133,7 @@ defmodule PropertyDamage.Test.MinimalModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestAssertions]
 
   @impl true
   def simulator, do: __MODULE__
@@ -177,7 +177,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestAssertions]
 
   @impl true
   def simulator, do: __MODULE__
@@ -222,7 +222,7 @@ defmodule PropertyDamage.Test.WeightedModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestAssertions]
 
   @impl true
   def simulator, do: __MODULE__

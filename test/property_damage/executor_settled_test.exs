@@ -89,7 +89,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
     def command_sequence_projection, do: ModelState
 
     @impl true
-    def assertion_projections, do: [FailingAssertion]
+    def check_projections, do: [FailingAssertion]
 
     @impl true
     def simulator, do: __MODULE__
@@ -138,7 +138,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
                }
              } = sync_result.failure_reason
 
-      assert %PropertyDamage.AssertionFailed{} = sync_exception
+      assert %PropertyDamage.CheckFailed{} = sync_exception
 
       # Settled path: the probe command's settled event drives the same
       # @trigger every: 1 assertion and must produce the same failure_reason shape.
@@ -160,7 +160,7 @@ defmodule PropertyDamage.ExecutorSettledTest do
                }
              } = settled_result.failure_reason
 
-      assert %PropertyDamage.AssertionFailed{} = settled_exception
+      assert %PropertyDamage.CheckFailed{} = settled_exception
     end
   end
 

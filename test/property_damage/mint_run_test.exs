@@ -40,7 +40,7 @@ defmodule PropertyDamage.MintRunTest do
     @impl true
     def command_sequence_projection, do: Proj
     @impl true
-    def assertion_projections, do: [Proj]
+    def check_projections, do: [Proj]
     @impl true
     def simulator, do: __MODULE__
     @impl PropertyDamage.Model.Simulator

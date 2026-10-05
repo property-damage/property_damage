@@ -31,7 +31,7 @@ defmodule PropertyDamage.OnFailureGuardTest do
     @behaviour PropertyDamage.Model
     def commands, do: [Cmd]
     def command_sequence_projection, do: State
-    def assertion_projections, do: [AlwaysFail]
+    def check_projections, do: [AlwaysFail]
   end
 
   defmodule Adapter do

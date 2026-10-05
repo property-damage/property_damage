@@ -185,7 +185,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
                type: %Failure.Assertion{
                  kind: :assertion_failed,
                  name: :quantity_limit,
-                 detail: {%PropertyDamage.AssertionFailed{}, _st}
+                 detail: {%PropertyDamage.CheckFailed{}, _st}
                }
              } = refutation.reason
     end

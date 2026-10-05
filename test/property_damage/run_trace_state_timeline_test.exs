@@ -34,7 +34,7 @@ defmodule PropertyDamage.RunTraceStateTimelineTest do
     @impl true
     def command_sequence_projection, do: Log
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   describe "faithful timeline (linear)" do

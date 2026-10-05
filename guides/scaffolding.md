@@ -311,7 +311,7 @@ generated files' "next steps" footer lists exactly what is left:
    Catalogs*.
 
 3. **Wire the projection into the model** — replace the `raise` in
-   `command_sequence_projection/0`, and list assertion projections.
+   `command_sequence_projection/0`, and list check projections.
 
 4. **Add a simulator** (`simulate/2`) if you want state-dependent command
    selection (`when:`/`with:`) during the symbolic phase.
@@ -366,7 +366,7 @@ produces:
   type: %PropertyDamage.Failure.Assertion{
     kind: :assertion_failed,
     name: :read_consistent,
-    detail: %PropertyDamage.AssertionFailed{
+    detail: %PropertyDamage.CheckFailed{
       message: "GET key=3 returned :unset, model expects 71",
       data: %{key: 3, actual: :unset, expected: 71}
     }

@@ -375,7 +375,7 @@ defmodule OrderModel do
   def command_sequence_projection, do: OrderState
 
   @impl true
-  def assertion_projections, do: [OrderInvariants]
+  def check_projections, do: [OrderInvariants]
 end
 ```
 

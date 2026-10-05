@@ -1,6 +1,6 @@
 defmodule KratosBench.State do
   @moduledoc """
-  The model's expectation of Kratos, doubling as the assertion projection.
+  The model's expectation of Kratos, doubling as the check projection.
 
   During generation it is fed the simulator's predicted events so `when:`/`with:`
   can pick coherent targets (an existing identity to log in as or delete); during

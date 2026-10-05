@@ -354,14 +354,14 @@ Faster commands mean workers become available sooner:
 ### 4. Check Sequence Length
 
 If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
-~1 command. Check your model's `terminate?/3` implementation:
+~1 command. Check your model's `terminate_early?/3` implementation:
 
 ```elixir
 # This terminates immediately - only 1 command per sequence
-def terminate?(_state, _history, _step), do: true
+def terminate_early?(_state, _history, _step), do: true
 
 # This runs 5-10 commands per sequence
-def terminate?(_state, _history, step), do: step >= 8
+def terminate_early?(_state, _history, step), do: step >= 8
 ```
 
 Longer sequences mean more commands per arrival, potentially improving
@@ -412,7 +412,7 @@ status = Runner.status(runner)
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
 | Completed << Spawned | Workers failing to start (`adapter.setup`) or SUT refusing connections | Check adapter setup and SUT connection limits; lower arrival rate |
-| Commands ≈ Arrivals | Early termination | Check `terminate?/3` returns `false` initially |
+| Commands ≈ Arrivals | Early termination | Check `terminate_early?/3` returns `false` initially |
 | Peak util 100%, avg util low | Bursty traffic | Add ramp-up to smooth the arrival curve |
 | Peak and avg util both high | Sustained overload | Lower arrival rate or scale the SUT |
 | Low arrivals/sec vs target | Ramp-up or failed arrivals | Check ramp config and the Spawned/Completed gap |

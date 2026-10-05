@@ -45,32 +45,10 @@ defmodule PropertyDamage.Differential do
         compare: :correctness
       )
 
-  ## Time-Separated Execution
-
-  Run against one system now, save results, compare later:
-
-      # Save baseline
-      PropertyDamage.Differential.run(
-        model: MyModel,
-        targets: [{ProdAdapter, name: "v2.3"}],
-        compare: :performance,
-        export_to: "baselines/v2.3.json"
-      )
-
-      # Later, compare against baseline
-      PropertyDamage.Differential.run(
-        model: MyModel,
-        targets: [{ProdAdapter, name: "v2.4"}],
-        compare: :performance,
-        baseline: "baselines/v2.3.json"
-      )
-
   ## Execution Modes
 
   - `:interleaved` - Execute commands round-robin across targets (default for correctness)
   - `:sequential` - Execute full sequence on each target (default for performance)
-
-  When using `baseline:`, execution is implicitly sequential.
 
   ## Equivalence Strategies
 
@@ -81,7 +59,7 @@ defmodule PropertyDamage.Differential do
   - Custom function - `fn ref_result, target_result -> boolean`
   """
 
-  alias PropertyDamage.Differential.{Baseline, Equivalence, Result, Target}
+  alias PropertyDamage.Differential.{Equivalence, Result, Target}
   alias PropertyDamage.{Generator, Options, PlaceholderRegistry, Runtime, Sequence, Telemetry}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate, Reporter}
@@ -125,8 +103,6 @@ defmodule PropertyDamage.Differential do
   - `:seed` - Random seed for reproducibility
   - `:execution` - `:interleaved` or `:sequential`
   - `:equivalence` - Equivalence strategy (default: `:exact`)
-  - `:baseline` - Path to baseline file for comparison
-  - `:export_to` - Path to export results for future baseline
   - `:metrics` - Performance metrics to collect (default: `[:latency, :throughput]`)
   - `:percentiles` - Latency percentiles (default: `[50, 95, 99]`)
   - `:warmup_runs` - Runs to discard before measuring (default: 0)
@@ -145,34 +121,30 @@ defmodule PropertyDamage.Differential do
     opts = Options.validate_differential!(opts)
 
     with {:ok, config} <- build_config(opts),
-         {:ok, targets} <- parse_targets(config.targets),
-         {:ok, baseline} <- maybe_load_baseline(config.baseline) do
+         {:ok, targets} <- parse_targets(config.targets) do
       # Determine execution mode (record it on config so the result reports the
-      # mode actually used, including baseline-forced sequential runs).
-      execution_mode = determine_execution_mode(config, baseline)
+      # mode actually used).
+      execution_mode = determine_execution_mode(config)
       config = Map.put(config, :execution_mode, execution_mode)
 
       # Run the appropriate execution strategy
       result =
         case execution_mode do
           :interleaved ->
-            run_interleaved(config, targets, baseline)
+            run_interleaved(config, targets)
 
           :sequential ->
-            run_sequential(config, targets, baseline)
+            run_sequential(config, targets)
         end
 
-      # Maybe export results
       case result do
         {:ok, result} ->
-          with :ok <- maybe_export(config, result) do
-            # Terminal notification (DR-022): a copy of the authoritative result
-            # for consumers, emitted once for both execution modes. The returned
-            # `{:ok, result}` remains the source of truth.
-            Reporter.emit(config.reporter, fn -> %DifferentialResult{result: result} end)
+          # Terminal notification (DR-022): a copy of the authoritative result
+          # for consumers, emitted once for both execution modes. The returned
+          # `{:ok, result}` remains the source of truth.
+          Reporter.emit(config.reporter, fn -> %DifferentialResult{result: result} end)
 
-            {:ok, result}
-          end
+          {:ok, result}
 
         error ->
           error
@@ -209,8 +181,6 @@ defmodule PropertyDamage.Differential do
       run_nonce: opts[:run_nonce] || :crypto.strong_rand_bytes(8) |> :binary.decode_unsigned(),
       execution: opts[:execution],
       equivalence: opts[:equivalence],
-      baseline: opts[:baseline],
-      export_to: opts[:export_to],
       metrics: opts[:metrics],
       percentiles: opts[:percentiles],
       warmup_runs: opts[:warmup_runs],
@@ -254,12 +224,8 @@ defmodule PropertyDamage.Differential do
     end
   end
 
-  defp determine_execution_mode(config, baseline) do
+  defp determine_execution_mode(config) do
     cond do
-      # Baseline comparison requires sequential
-      baseline != nil ->
-        :sequential
-
       # Explicit setting
       config.execution != nil ->
         config.execution
@@ -276,23 +242,11 @@ defmodule PropertyDamage.Differential do
     end
   end
 
-  defp maybe_load_baseline(nil), do: {:ok, nil}
-
-  defp maybe_load_baseline(path) do
-    Baseline.load(path)
-  end
-
-  defp maybe_export(%{export_to: nil}, _result), do: :ok
-
-  defp maybe_export(%{export_to: path} = config, result) do
-    Baseline.export(result, config, path)
-  end
-
   # ============================================================================
   # Interleaved Execution
   # ============================================================================
 
-  defp run_interleaved(config, targets, _baseline) do
+  defp run_interleaved(config, targets) do
     # Seed the process RNG (execution-time randomness only; sequence
     # generation is seeded explicitly per run)
     :rand.seed(:exsss, config.seed)
@@ -501,21 +455,13 @@ defmodule PropertyDamage.Differential do
   # Sequential Execution
   # ============================================================================
 
-  defp run_sequential(config, targets, baseline) do
+  defp run_sequential(config, targets) do
     # Seed the process RNG (execution-time randomness only; sequence
     # generation is seeded explicitly per run)
     :rand.seed(:exsss, config.seed)
 
     # Pre-generate all sequences
     sequences = generate_sequences(config)
-
-    # If we have a baseline, use its sequences instead
-    sequences =
-      if baseline do
-        Enum.map(baseline.runs, & &1.commands)
-      else
-        sequences
-      end
 
     # Run each target sequentially
     target_results =
@@ -531,7 +477,7 @@ defmodule PropertyDamage.Differential do
       |> Map.new()
 
     # Compare results
-    compare_sequential_results(config, targets, target_results, baseline, sequences)
+    compare_sequential_results(config, targets, target_results, sequences)
   end
 
   defp generate_sequences(config) do
@@ -642,7 +588,7 @@ defmodule PropertyDamage.Differential do
     }
   end
 
-  defp compare_sequential_results(config, targets, target_results, baseline, sequences) do
+  defp compare_sequential_results(config, targets, target_results, sequences) do
     # Calculate metrics for each target
     metrics =
       for target <- targets, into: %{} do
@@ -651,18 +597,10 @@ defmodule PropertyDamage.Differential do
         {target.name, target_metrics}
       end
 
-    # If we have a baseline, add its metrics
-    metrics =
-      if baseline do
-        Map.put(metrics, baseline.target_name, baseline.aggregate_metrics)
-      else
-        metrics
-      end
-
     # Check for divergences in correctness mode
     divergences =
       if config.compare in [:correctness, :both] do
-        find_sequential_divergences(config, targets, target_results, baseline, sequences)
+        find_sequential_divergences(config, targets, target_results, sequences)
       else
         []
       end
@@ -670,22 +608,14 @@ defmodule PropertyDamage.Differential do
     {:ok, build_result(config, targets, divergences, metrics)}
   end
 
-  defp find_sequential_divergences(config, targets, target_results, baseline, sequences) do
+  defp find_sequential_divergences(config, targets, target_results, sequences) do
     # Find reference
     reference = Enum.find(targets, &(&1.role == :reference))
 
     ref_data =
-      cond do
-        baseline != nil ->
-          # Compare against baseline
-          %{runs: baseline.runs, name: baseline.target_name}
-
-        reference != nil ->
-          # Compare against reference target
-          %{runs: Map.get(target_results, reference.name).runs, name: reference.name}
-
-        true ->
-          nil
+      if reference != nil do
+        # Compare against reference target
+        %{runs: Map.get(target_results, reference.name).runs, name: reference.name}
       end
 
     if ref_data do
@@ -876,14 +806,14 @@ defmodule PropertyDamage.Differential do
   defp init_projections(model) do
     command_sequence_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    all_projections = [command_sequence_projection | assertion_projections]
+    all_projections = [command_sequence_projection | check_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}

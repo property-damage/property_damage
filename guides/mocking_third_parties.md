@@ -189,7 +189,7 @@ defmodule PaymentTestModel do
   def command_sequence_projection, do: PaymentState
 
   @impl true
-  def assertion_projections, do: [PaymentInvariant]
+  def check_projections, do: [PaymentInvariant]
 end
 ```
 
@@ -342,7 +342,7 @@ def handle_request(%{path: path, body: body} = req, state) do
   # ... handle normally
 end
 
-# Assertion projection can check recorded requests
+# Check projection can check recorded requests
 @trigger every: 10
 def assert_no_duplicate_charges(state, _) do
   charges = Enum.filter(state.mock_requests, &(&1.path == "/charge"))

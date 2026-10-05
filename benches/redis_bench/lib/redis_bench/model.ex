@@ -73,7 +73,7 @@ defmodule RedisBench.Model do
   def command_sequence_projection, do: RedisBench.Projection
 
   @impl true
-  def assertion_projections, do: [RedisBench.Projection]
+  def check_projections, do: [RedisBench.Projection]
 
   @impl true
   def simulator, do: RedisBench.Simulator
@@ -108,7 +108,7 @@ defmodule RedisBench.RmwModel do
   def command_sequence_projection, do: RedisBench.Projection
 
   @impl true
-  def assertion_projections, do: [RedisBench.Projection]
+  def check_projections, do: [RedisBench.Projection]
 
   @impl true
   def simulator, do: RedisBench.Simulator

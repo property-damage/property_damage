@@ -87,7 +87,7 @@ defmodule PropertyDamage.ValidationTest do
       def command_sequence_projection, do: NoGeneratorProjection
 
       @impl true
-      def assertion_projections, do: []
+      def check_projections, do: []
     end
 
     test "raises when a command is missing generator/1" do
@@ -146,7 +146,7 @@ defmodule PropertyDamage.ValidationTest do
       def command_sequence_projection, do: NemesisProjection
 
       @impl true
-      def assertion_projections, do: []
+      def check_projections, do: []
     end
 
     test "validates a nemesis command via new!/2 instead of generator/1" do
@@ -235,7 +235,7 @@ defmodule PropertyDamage.ValidationTest do
   # carry :poll_state instead. Surfaced by the Oban (6b) bench, whose model
   # validates a projection with a @poll_state assertion. The event a poll
   # triggers on must also count as handled (not reported as an orphan).
-  describe "validate!/3 with a @poll_state assertion projection" do
+  describe "validate!/3 with a @poll_state check projection" do
     defmodule PollEvents do
       defmodule Started, do: defstruct([])
       defmodule Finished, do: defstruct([])
@@ -273,7 +273,7 @@ defmodule PropertyDamage.ValidationTest do
       @impl true
       def command_sequence_projection, do: PollProjection
       @impl true
-      def assertion_projections, do: [PollProjection]
+      def check_projections, do: [PollProjection]
     end
 
     defmodule PollAdapter do

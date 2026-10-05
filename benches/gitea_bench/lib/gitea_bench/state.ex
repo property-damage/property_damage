@@ -1,6 +1,6 @@
 defmodule GiteaBench.State do
   @moduledoc """
-  The model's view of the forge, doubling as the assertion projection.
+  The model's view of the forge, doubling as the check projection.
 
   During generation it is fed the simulator's predicted events so `when:`/`with:`
   can pick coherent targets; during execution it is fed the adapters' real events

@@ -26,7 +26,7 @@ end
 
 defmodule PropertyDamage.Test.Projections.TestAssertions do
   @moduledoc """
-  Test assertion projection demonstrating all assertion features.
+  Test check projection demonstrating all assertion features.
 
   Includes:
   - @trigger every: 1 (every step)

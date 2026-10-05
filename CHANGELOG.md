@@ -174,6 +174,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING**: Renamed the model callback `assertion_projections/0` to
+  `check_projections/0`, the exception `PropertyDamage.AssertionFailed` to
+  `PropertyDamage.CheckFailed` (still raised by `PropertyDamage.fail!/2`), and the
+  model callback `terminate?/3` to `terminate_early?/3`. The old names are not
+  recognized. `mix pd.gen.model` now takes `--check-projections`.
+
 - **`failure_reason` is a `%PropertyDamage.Failure{}` everywhere it flowed as a
   raw tuple (BREAKING, DR-041).** Every producer (the executor, branching,
   nemesis, finalization, linearization) now constructs a `%Failure{}`, and every
@@ -348,6 +354,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeouts report `failed_at_index: nil` must update.
 
 ### Removed
+
+- **BREAKING**: Removed Differential baseline files: the `baseline:` and
+  `export_to:` options, `PropertyDamage.Differential.Baseline`, and the `:baseline`
+  field of `PropertyDamage.Differential.Result`. Passing either option now raises
+  the unknown-option validation error.
 
 - **BREAKING:** removed `PropertyDamage.Flakiness` and its facade delegates
   `check_determinism/4` and `discover_flaky_seeds/3`.

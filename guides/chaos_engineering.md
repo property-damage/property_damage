@@ -209,7 +209,7 @@ defmodule Cache.ChaosModel do
   def command_sequence_projection, do: State
 
   @impl true
-  def assertion_projections, do: [State]
+  def check_projections, do: [State]
 
   # The simulator predicts events during sequence generation so state-dependent
   # commands (GetKey needs a key to exist) become eligible. The catch-all covers
@@ -527,7 +527,7 @@ defmodule TravelBooking.ChaosModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections do
+  def check_projections do
     [
       BookingInvariants,
       NemesisInvariants

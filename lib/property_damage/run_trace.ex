@@ -698,12 +698,12 @@ defmodule PropertyDamage.RunTrace do
          function_exported?(model, :command_sequence_projection, 0) do
       command_projection = model.command_sequence_projection()
 
-      assertion_projections =
-        if function_exported?(model, :assertion_projections, 0),
-          do: model.assertion_projections(),
+      check_projections =
+        if function_exported?(model, :check_projections, 0),
+          do: model.check_projections(),
           else: []
 
-      Map.new([command_projection | assertion_projections], &{&1, &1.init()})
+      Map.new([command_projection | check_projections], &{&1, &1.init()})
     else
       %{}
     end

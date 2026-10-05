@@ -15,7 +15,7 @@ defmodule Mix.Tasks.Pd.ValidateTest do
   #
   # The valid test-support modules used here:
   #   * PropertyDamage.Test.ExecutorModel  - valid model with commands,
-  #     command_sequence_projection, and assertion_projections.
+  #     command_sequence_projection, and check_projections.
   #   * PropertyDamage.Test.SimpleAdapter  - valid adapter.
   #
   # validate!/2 on this pair returns {:ok, warnings} with two "produced but not

@@ -335,9 +335,20 @@ defmodule PropertyDamage.GeneratorTest do
       end
     end
 
-    test "terminate?/3 firing in the prefix stops the whole sequence (DR-013)" do
+    test "terminate_early?/3 returning true after the first command yields one-command sequences" do
+      generator =
+        Generator.generate_sequence(PropertyDamage.Test.TerminateImmediatelyModel,
+          max_commands: 20
+        )
+
+      for seq <- Enum.take(generator, 20) do
+        assert length(Sequence.to_list(seq)) == 1
+      end
+    end
+
+    test "terminate_early?/3 firing in the prefix stops the whole sequence (DR-013)" do
       # A model that terminates after the first command must not have branches
-      # or a suffix appended in branching mode: terminate? means "stop the
+      # or a suffix appended in branching mode: terminate_early? means "stop the
       # sequence", not "end the prefix and keep building".
       generator =
         Generator.generate_sequence(PropertyDamage.Test.TerminateImmediatelyModel,
@@ -352,10 +363,10 @@ defmodule PropertyDamage.GeneratorTest do
 
       for seq <- Enum.take(generator, 20) do
         refute Sequence.branching?(seq),
-               "terminate? fired in the prefix, so the sequence must not branch"
+               "terminate_early? fired in the prefix, so the sequence must not branch"
 
         assert length(Sequence.to_list(seq)) == 1,
-               "terminate? after the first command must stop at one command"
+               "terminate_early? after the first command must stop at one command"
       end
     end
 

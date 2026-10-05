@@ -6,7 +6,7 @@ end
 
 defmodule PropertyDamage.Test.Projections.FailingAssertion do
   @moduledoc """
-  Assertion projection that fails when total_quantity exceeds threshold.
+  Check projection that fails when total_quantity exceeds threshold.
   """
   use PropertyDamage.Model.Projection
 
@@ -58,7 +58,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestAssertions]
 
   @impl true
   def simulator, do: __MODULE__
@@ -75,7 +75,7 @@ end
 
 defmodule PropertyDamage.Test.FailingModel do
   @moduledoc """
-  Model with failing assertion projection for testing check failures.
+  Model with failing check projection for testing check failures.
   """
   @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
@@ -91,7 +91,7 @@ defmodule PropertyDamage.Test.FailingModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [FailingAssertion]
+  def check_projections, do: [FailingAssertion]
 
   @impl true
   def simulator, do: __MODULE__
@@ -176,7 +176,7 @@ defmodule PropertyDamage.Test.SimpleModel do
   @impl true
   def command_sequence_projection, do: ModelState
 
-  # No assertion_projections - optional callback
+  # No check_projections - optional callback
 end
 
 # ============================================================================
@@ -185,7 +185,7 @@ end
 
 defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
   @moduledoc """
-  Assertion projection with two different checks at different thresholds.
+  Check projection with two different checks at different thresholds.
 
   Used to test that the shrinker preserves failure type:
   - `high_limit` fails when quantity > 200
@@ -245,7 +245,7 @@ defmodule PropertyDamage.Test.MultiCheckModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [MultiCheckAssertion]
+  def check_projections, do: [MultiCheckAssertion]
 end
 
 # ============================================================================
@@ -273,7 +273,7 @@ defmodule PropertyDamage.Test.ProbeModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [FailingAssertion]
+  def check_projections, do: [FailingAssertion]
 
   @impl true
   def simulator, do: __MODULE__
@@ -411,7 +411,7 @@ defmodule PropertyDamage.Test.LinkModel do
   def command_sequence_projection, do: LinkState
 
   @impl true
-  def assertion_projections, do: [LinkWeightAssertion]
+  def check_projections, do: [LinkWeightAssertion]
 
   @impl true
   def simulator, do: __MODULE__

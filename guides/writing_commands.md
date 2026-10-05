@@ -228,7 +228,7 @@ defmodule MyTest.OrderModel do
 
   def commands, do: [CreateOrder, CancelOrder]
   def command_sequence_projection, do: MyTest.OrderProjection
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   # Return self as the simulator module
   def simulator, do: __MODULE__
@@ -277,7 +277,7 @@ defmodule MyTest.OrderModel do
   end
 
   def command_sequence_projection, do: MyTest.OrderProjection
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   # Return self as the simulator (delegates to Simulation module)
   def simulator, do: __MODULE__

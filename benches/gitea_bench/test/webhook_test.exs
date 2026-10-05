@@ -29,7 +29,7 @@ defmodule GiteaBench.WebhookTest do
     test "safety bites: a duplicate delivery fails @trigger at: :teardown" do
       duplicate = %{webhooks: %{{"u0/r0", 1} => 2}}
 
-      assert_raise PropertyDamage.AssertionFailed, fn ->
+      assert_raise PropertyDamage.CheckFailed, fn ->
         WebhookAssertions.assert_at_most_one_webhook(duplicate, :teardown)
       end
     end

@@ -242,7 +242,7 @@ for managing memory:
 
 - **Limit `max_commands`** -- 200 commands with complex events can consume
   significant memory. Start with 50 and increase only if needed.
-- **Use `:disabled` assertion mode for exploration** -- Assertion projections
+- **Use `:disabled` assertion mode for exploration** -- Check projections
   maintain their own state. Disabling them during initial exploration reduces
   memory overhead.
 - **Keep projection state lean** -- Store only what assertions need. Avoid

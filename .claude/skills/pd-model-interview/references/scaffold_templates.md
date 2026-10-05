@@ -239,7 +239,7 @@ defmodule MyStore.PD.Wallets.Model do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [BalanceInvariants]
+  def check_projections, do: [BalanceInvariants]
 
   @impl true
   def injectable_events, do: []

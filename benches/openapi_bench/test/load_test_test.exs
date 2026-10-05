@@ -101,7 +101,7 @@ defmodule OpenapiBench.LoadTestTest do
     assert m.total_requests > 0
     assert m.assertion_failures > 0
     assert map_size(m.failures_by_exception) > 0
-    assert Map.has_key?(m.failures_by_exception, PropertyDamage.AssertionFailed)
+    assert Map.has_key?(m.failures_by_exception, PropertyDamage.CheckFailed)
 
     # Leave the shared SUT clean for subsequent tests.
     Server.reset(false)

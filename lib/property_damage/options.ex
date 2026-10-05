@@ -627,14 +627,6 @@ defmodule PropertyDamage.Options do
       default: :exact,
       doc: "Equivalence strategy: `:exact`, `:structural`, or custom function."
     ],
-    baseline: [
-      type: :string,
-      doc: "Path to baseline file for comparison."
-    ],
-    export_to: [
-      type: :string,
-      doc: "Path to export results for future baseline."
-    ],
     metrics: [
       type: {:list, {:in, [:latency, :throughput]}},
       default: [:latency, :throughput],

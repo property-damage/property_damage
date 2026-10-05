@@ -63,7 +63,7 @@ defmodule ObanBench.Model do
   def command_sequence_projection, do: ObanBench.Projection
 
   @impl true
-  def assertion_projections, do: [ObanBench.Projection]
+  def check_projections, do: [ObanBench.Projection]
 
   @impl true
   def simulator, do: ObanBench.Simulator

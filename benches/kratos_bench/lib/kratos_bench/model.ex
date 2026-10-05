@@ -38,7 +38,7 @@ defmodule KratosBench.Model do
   def command_sequence_projection, do: KratosBench.State
 
   @impl true
-  def assertion_projections, do: [KratosBench.State]
+  def check_projections, do: [KratosBench.State]
 
   @impl true
   def simulator, do: KratosBench.Simulator

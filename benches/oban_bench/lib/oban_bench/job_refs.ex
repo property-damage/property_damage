@@ -199,7 +199,7 @@ defmodule ObanBench.JobRefs.Model do
   def command_sequence_projection, do: ObanBench.JobRefs.Projection
 
   @impl true
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   @impl true
   def simulator, do: ObanBench.JobRefs.Simulator

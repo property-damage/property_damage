@@ -99,7 +99,7 @@ Nemesis commands SHALL participate in the normal command sequence as defined by 
 
 #### Scenario: Adjusting assertions during active faults
 
-- **WHEN** an assertion projection fires while a Nemesis fault is active
+- **WHEN** a check projection fires while a Nemesis fault is active
 - **THEN** the projection SHOULD be able to inspect the active faults in the model state
 - **AND** MAY relax or skip invariant checks that are expected to fail during the fault
 

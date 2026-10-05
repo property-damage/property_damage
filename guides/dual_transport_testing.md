@@ -231,8 +231,7 @@ Use dual-transport testing when:
 - A system exposes the same operations through more than one interface (API + UI,
   CLI + API, SDK + raw protocol) and they must stay in lockstep.
 - You are migrating between two implementations and want to prove equivalence
-  before cutting over (pair it with the baseline export in
-  [Differential Testing](differential_testing.md)).
+  before cutting over (see [Differential Testing](differential_testing.md)).
 - You have a trusted reference implementation and a new one to validate.
 
 It is the wrong tool when the transports are *meant* to differ (e.g. a UI
@@ -242,7 +241,7 @@ test the transports separately.
 ## Next steps
 
 - [Differential Testing](differential_testing.md) — the full `Differential.run/1`
-  API, equivalence strategies, execution modes, and baselines
+  API, equivalence strategies, and execution modes
 - [Writing Commands](writing_commands.md) — `when:`/`with:` wiring and `external()`
 - [Integration Testing](integration_testing.md) — driving live services
 - `benches/gitea_bench/` — the complete, runnable example this guide is drawn from

@@ -110,7 +110,7 @@ defmodule PropertyDamage.ErrorOrigin do
     if assertion_code_crash?(reason) do
       # The assertion function itself raised an unexpected exception (e.g. a
       # KeyError on a missing field) rather than calling fail!/raising
-      # AssertionFailed. That is a bug in the assertion code, not the SUT.
+      # CheckFailed. That is a bug in the assertion code, not the SUT.
       %{
         origin: :test_code_error,
         details: %{
@@ -516,10 +516,10 @@ defmodule PropertyDamage.ErrorOrigin do
   defp format_reason(e) when is_exception(e), do: Exception.message(e)
   defp format_reason(other), do: inspect(other, limit: 5)
 
-  # An intentional failure raises PropertyDamage.AssertionFailed (via fail!/2);
+  # An intentional failure raises PropertyDamage.CheckFailed (via fail!/2);
   # anything else exception-shaped means the assertion code itself crashed.
-  defp assertion_code_crash?(%PropertyDamage.AssertionFailed{}), do: false
-  defp assertion_code_crash?({%PropertyDamage.AssertionFailed{}, _stacktrace}), do: false
+  defp assertion_code_crash?(%PropertyDamage.CheckFailed{}), do: false
+  defp assertion_code_crash?({%PropertyDamage.CheckFailed{}, _stacktrace}), do: false
   defp assertion_code_crash?(exception) when is_exception(exception), do: true
   defp assertion_code_crash?({exception, _stacktrace}) when is_exception(exception), do: true
   defp assertion_code_crash?(_), do: false

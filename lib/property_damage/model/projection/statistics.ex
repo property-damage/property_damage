@@ -21,7 +21,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   ## Usage
 
       defmodule MyModel do
-        def assertion_projections do
+        def check_projections do
           [
             {PropertyDamage.Model.Projection.Statistics, [
               window_size: 100,
@@ -269,7 +269,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   end
 
   # ============================================================================
-  # Check Registration (for use as assertion projection)
+  # Check Registration (for use as check projection)
   # ============================================================================
 
   @doc false

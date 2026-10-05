@@ -27,7 +27,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 - **Fault Injection (Nemesis)**: Built-in operations for network, resource, time, and process faults
-- **Differential Testing**: Compare implementations against oracles, baselines, or each other
+- **Differential Testing**: Compare implementations against oracles or each other
 
 ## Installation
 
@@ -177,7 +177,7 @@ defmodule MyApp.TestModel do
   def command_sequence_projection, do: MyApp.Projections.Users
 
   @impl true
-  def assertion_projections, do: [MyApp.Projections.Users]
+  def check_projections, do: [MyApp.Projections.Users]
 
   @impl true
   def simulator, do: MyApp.Simulator
@@ -541,7 +541,7 @@ defmodule MyModel do
   # Required
   def commands, do: [{CommandModule, weight: N}, ...]
   def command_sequence_projection, do: MyStateProjection
-  def assertion_projections, do: [MyExtraProjection, ...]  # Optional
+  def check_projections, do: [MyExtraProjection, ...]  # Optional
 
   # Optional
   def injectable_events, do: []  # For Adapter.Injector
@@ -550,7 +550,7 @@ defmodule MyModel do
   def setup_each(config), do: :ok  # Called before each run/shrink attempt
   def teardown_each(config), do: :ok
   def teardown_once(config), do: :ok
-  def terminate?(state, command, events), do: false  # Custom termination
+  def terminate_early?(state, command, events), do: false  # Custom termination
 end
 ```
 
@@ -838,7 +838,7 @@ Detect deadlocks, livelocks, and starvation with the Liveness projection.
 
 ```elixir
 defmodule MyModel do
-  def assertion_projections do
+  def check_projections do
     [
       {PropertyDamage.Model.Projection.Liveness, [
         max_pending_duration_ms: 10_000,
@@ -1320,29 +1320,6 @@ PropertyDamage.Differential.run(
 )
 ```
 
-### Time-Separated Comparison
-
-Save results now, compare later:
-
-```elixir
-# Export baseline before deployment
-PropertyDamage.Differential.run(
-  model: MyModel,
-  targets: [{ProdAdapter, name: "v2.3"}],
-  compare: :performance,
-  export_to: "baselines/v2.3.json",
-  seed: 12345
-)
-
-# Compare against baseline after deployment
-PropertyDamage.Differential.run(
-  model: MyModel,
-  targets: [{ProdAdapter, name: "v2.4"}],
-  compare: :performance,
-  baseline: "baselines/v2.3.json"
-)
-```
-
 ### Equivalence Strategies
 
 ```elixir
@@ -1495,8 +1472,7 @@ PropertyDamage
 │
 ├── Differential
 │   ├── Differential - Main API (run, compare modes)
-│   ├── Equivalence  - Comparison strategies (exact, structural, custom)
-│   └── Baseline     - Export/import for time-separated testing
+│   └── Equivalence  - Comparison strategies (exact, structural, custom)
 │
 └── Utilities
     ├── Persistence  - Save/load failures

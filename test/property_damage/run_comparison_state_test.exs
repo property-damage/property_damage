@@ -31,7 +31,7 @@ defmodule PropertyDamage.RunComparisonStateTest do
     @impl true
     def command_sequence_projection, do: SumP
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defp trace(v, outcome) do

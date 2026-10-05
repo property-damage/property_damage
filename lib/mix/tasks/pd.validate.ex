@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Pd.Validate do
 
   ### Warnings (validation passes with warnings)
   - Commands that declare no `:observables` in their `command_spec/1`
-  - Events produced but not handled by assertion projections
+  - Events produced but not handled by check projections
   - Missing optional callbacks that may be useful
 
   ## Options
@@ -216,8 +216,8 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
@@ -311,8 +311,8 @@ defmodule Mix.Tasks.Pd.Validate do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
@@ -336,8 +336,8 @@ defmodule Mix.Tasks.Pd.Validate do
     state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end

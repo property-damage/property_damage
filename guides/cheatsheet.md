@@ -70,7 +70,7 @@ defmodule MyApp.TestModel do
   # --- All below are optional ---
 
   # @impl true
-  # def assertion_projections, do: [BalanceInvariant, AuditLog]
+  # def check_projections, do: [BalanceInvariant, AuditLog]
 
   # @impl true
   # def simulator, do: __MODULE__  # or a separate module
@@ -90,8 +90,8 @@ defmodule MyApp.TestModel do
 
   # Stop generation when condition is met
   # @impl true
-  # def terminate?(_state, %Shutdown{}, _events), do: true
-  # def terminate?(_state, _cmd, _events), do: false
+  # def terminate_early?(_state, %Shutdown{}, _events), do: true
+  # def terminate_early?(_state, _cmd, _events), do: false
 end
 ```
 

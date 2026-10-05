@@ -100,7 +100,7 @@ defmodule CachexBench.Model do
   def command_sequence_projection, do: CachexBench.Projection
 
   @impl true
-  def assertion_projections, do: [CachexBench.Projection]
+  def check_projections, do: [CachexBench.Projection]
 
   @impl true
   def simulator, do: CachexBench.Simulator

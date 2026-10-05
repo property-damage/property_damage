@@ -233,7 +233,7 @@ defmodule PropertyDamage.Linearization do
   def verify_candidate(linearization, observed, initial_projections, model, counters) do
     sim = simulator(model)
     sequence_projection = model.command_sequence_projection()
-    all_projections = [sequence_projection | model_assertion_projections(model)]
+    all_projections = [sequence_projection | model_check_projections(model)]
 
     linearization
     |> Enum.reduce_while({initial_projections, counters, 0}, fn {branch_id, position, command},
@@ -279,9 +279,9 @@ defmodule PropertyDamage.Linearization do
     end
   end
 
-  defp model_assertion_projections(model) do
-    if Code.ensure_loaded?(model) and function_exported?(model, :assertion_projections, 0) do
-      model.assertion_projections()
+  defp model_check_projections(model) do
+    if Code.ensure_loaded?(model) and function_exported?(model, :check_projections, 0) do
+      model.check_projections()
     else
       []
     end

@@ -125,7 +125,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def command_sequence_projection, do: GateProjection
     @impl true
-    def assertion_projections, do: [InlineProjection]
+    def check_projections, do: [InlineProjection]
   end
 
   test "catalog enumerates default, inline, and validates-linked invariants" do
@@ -166,7 +166,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   # ReuseProjectionA is listed BOTH as the command-sequence projection and as an
-  # assertion projection (a doubly-listed projection); the catalog must dedup it.
+  # check projection (a doubly-listed projection); the catalog must dedup it.
   defmodule ReuseModel do
     @behaviour PropertyDamage.Model
     @impl true
@@ -174,7 +174,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
     @impl true
     def command_sequence_projection, do: ReuseProjectionA
     @impl true
-    def assertion_projections, do: [ReuseProjectionA, ReuseProjectionB]
+    def check_projections, do: [ReuseProjectionA, ReuseProjectionB]
   end
 
   test "two projections may reuse an id; the catalog keys by {projection, id} and dedups" do

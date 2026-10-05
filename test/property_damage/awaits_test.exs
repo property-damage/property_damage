@@ -125,7 +125,7 @@ defmodule PropertyDamage.AwaitsTest do
     @impl true
     def command_sequence_projection, do: IssueProjection
     @impl true
-    def assertion_projections, do: [IssueProjection]
+    def check_projections, do: [IssueProjection]
   end
 
   # --- Adapters ---------------------------------------------------------------
@@ -253,7 +253,7 @@ defmodule PropertyDamage.AwaitsTest do
     @impl true
     def command_sequence_projection, do: SafetyOnlyProjection
     @impl true
-    def assertion_projections, do: [SafetyOnlyProjection]
+    def check_projections, do: [SafetyOnlyProjection]
   end
 
   # A later, unrelated command whose adapter delivers the duplicate webhooks for
@@ -317,7 +317,7 @@ defmodule PropertyDamage.AwaitsTest do
     end
   end
 
-  # No-assertion projection so the overlap scenario exercises pure attribution
+  # No-check projection so the overlap scenario exercises pure attribution
   # (no pollers / triggers to interfere).
   defmodule PlainProjection do
     use PropertyDamage.Model.Projection
@@ -334,7 +334,7 @@ defmodule PropertyDamage.AwaitsTest do
     @impl true
     def command_sequence_projection, do: PlainProjection
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   # The second command delivers the webhook for issue "i1" once BOTH commands'

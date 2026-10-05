@@ -135,7 +135,7 @@ defmodule PropertyDamage.Test.EtsRegister.Model do
   def command_sequence_projection, do: PropertyDamage.Test.EtsRegister.Projection
 
   @impl true
-  def assertion_projections, do: [PropertyDamage.Test.EtsRegister.Projection]
+  def check_projections, do: [PropertyDamage.Test.EtsRegister.Projection]
 
   @impl true
   def simulator, do: PropertyDamage.Test.EtsRegister.Simulator

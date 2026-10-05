@@ -106,7 +106,7 @@ defmodule PropertyDamage.Wave1IntegrationTest do
     @impl true
     def command_sequence_projection, do: Projection
     @impl true
-    def assertion_projections, do: [Projection]
+    def check_projections, do: [Projection]
     @impl true
     def simulator, do: Simulator
   end
