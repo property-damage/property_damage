@@ -16,10 +16,30 @@ defmodule PropertyDamage.Shrinker do
   The accepted candidate's failure must match the original on three dimensions,
   compared through its failure *signature* (`failure_signature/2`):
   - Same failure kind (`:check_failed`, `:idempotency_violation`, `:diverged`, etc.)
-  - Same check name (for invariant violations)
+  - Same name (`PropertyDamage.Failure.name/1`): the check name for an invariant
+    violation, and for a divergence the root command's module
   - Same target: the index of the target the failure happened in (`0` with one
     target). A candidate that fails in another target, or with another kind, is
     a different failure and is rejected.
+
+  For a divergence the name matters as much as the target. If one target
+  answers a `CreateLabel` differently, a candidate that drops the command the
+  `CreateLabel` depends on may diverge earlier, at a `CreateRepo`, for an
+  unrelated reason. That candidate diverges in the same target, but at a command
+  of another type, so it is another failure and the shrinker rejects it.
+
+  ## Invalid Candidates
+
+  Before a candidate runs, the shrinker validates it against the model: it folds
+  the candidate through the model's command-sequence projection and simulator
+  and checks each command's `when:` predicate. A candidate whose validation
+  returns false, or raises, is invalid and is never run, so it can never be a
+  counterexample. Shrinking makes up sequences the generator never would, such
+  as a command whose argument was halved to 0, or a command that references an
+  entity whose creating command was removed. Model code may raise on such a
+  sequence. The raise says the model cannot simulate the candidate, not that
+  the system under test is wrong, so treating it as a failure would report a
+  bug the system does not have.
 
   A further property also holds: the failure occurs at the **same or an earlier
   command index** (the failing root) than in the original. This one is guaranteed *structurally*
@@ -144,8 +164,9 @@ defmodule PropertyDamage.Shrinker do
   The three properties that must match for a shrunk sequence to be considered
   as reproducing the "same" failure. `kind` is the failure's globally-unique
   kind (`PropertyDamage.Failure.kind/1`, `:diverged` for a divergence), so two
-  failures of different *classes* can never collide; `name` is the
-  check/projection name where one is meaningful (`nil` otherwise); and
+  failures of different *classes* can never collide; `name` is
+  `PropertyDamage.Failure.name/1`: the check/projection name for a check, the
+  root command's module for a divergence, `nil` where no name is meaningful; and
   `variant_index` is the index of the target the failure happened in (`0` for a
   run with one target).
 
@@ -155,7 +176,9 @@ defmodule PropertyDamage.Shrinker do
   signature (`{:check, :x}` for both) would let the shrinker swap one bug's
   identity for the other's. Keying on the target is load-bearing for the same
   reason: a check that fails in the reference target is a different failure
-  from a divergence found in another target.
+  from a divergence found in another target. Keying a divergence on its root
+  command's module keeps a divergence at one command type from standing in for
+  a divergence at another.
   """
   @type failure_signature :: {Failure.kind(), atom() | nil, non_neg_integer()}
 
@@ -1192,7 +1215,8 @@ defmodule PropertyDamage.Shrinker do
 
   # Reconstruct a minimal %Failure{} from a signature for passing to nested
   # shrink calls, which only consult its signature (kind + name) for equivalence;
-  # the target travels separately as the variant index.
+  # the target travels separately as the variant index. The rebuilt failure
+  # yields the signature it was built from, a divergence's name included.
   defp reconstruct_failure_reason(nil), do: nil
 
   defp reconstruct_failure_reason({:check_failed, name, _variant_index}) do

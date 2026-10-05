@@ -343,7 +343,7 @@ defmodule PropertyDamage.Persistence do
       run_number: report.run_number,
       failed_at_index: report.failed_at_index,
       failure_type: FailureReport.failure_type(report),
-      check_name: FailureReport.check_name(report),
+      check_name: name_string(FailureReport.check_name(report)),
       failure_message: FailureReport.failure_message(report),
       shrink_iterations: report.shrink_iterations,
       shrink_time_ms: report.shrink_time_ms,
@@ -352,6 +352,9 @@ defmodule PropertyDamage.Persistence do
       kind: report.kind,
       variant: report.variant,
       targets: Enum.map(report.targets, &export_target/1),
+      equivalence: export_equivalence(report.equivalence),
+      stutter: report.stutter && inspect(report.stutter),
+      max_commands: report.max_commands,
       shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
       original_command_count: length(Sequence.to_list(report.original_sequence)),
       reproduction_command: FailureReport.reproduction_command(report)
@@ -362,6 +365,21 @@ defmodule PropertyDamage.Persistence do
   # ============================================================================
   # Private Helpers
   # ============================================================================
+
+  # A failure's name as JSON: a module (a divergence's root command) by its
+  # Elixir name, any other atom as its string.
+  defp name_string(nil), do: nil
+
+  defp name_string(name) when is_atom(name) do
+    case Atom.to_string(name) do
+      "Elixir." <> module -> module
+      string -> string
+    end
+  end
+
+  # A function cannot be written as JSON, so a custom equivalence is `custom`.
+  defp export_equivalence(equivalence) when is_function(equivalence), do: :custom
+  defp export_equivalence(equivalence), do: equivalence
 
   # A `targets:` entry as JSON: the adapter and name as strings, the config,
   # injectors and mocks inspected (they may hold terms JSON cannot encode).
@@ -678,7 +696,7 @@ defmodule PropertyDamage.Persistence do
       |> String.slice(0, 15)
 
     type = FailureReport.failure_type(report) || "unknown"
-    check = FailureReport.check_name(report) || "none"
+    check = name_string(FailureReport.check_name(report)) || "none"
     seed = report.seed
 
     "#{timestamp}-#{type}-#{check}-seed#{seed}#{@extension}"
@@ -738,9 +756,10 @@ defmodule PropertyDamage.Persistence do
   end
 
   defp parse_filename(filename) do
-    # Pattern: {timestamp}-{type}-{check}-seed{seed}.pd
+    # Pattern: {timestamp}-{type}-{check}-seed{seed}.pd; a divergence's check
+    # is its root command's module, so it may hold dots.
     case Regex.run(
-           ~r/^(\d{8}T\d{6})-(\w+)-(\w+)-seed(\d+)\.pd$/,
+           ~r/^(\d{8}T\d{6})-(\w+)-([\w.]+)-seed(\d+)\.pd$/,
            filename
          ) do
       [_, timestamp_str, type, check, seed_str] ->
@@ -751,7 +770,7 @@ defmodule PropertyDamage.Persistence do
            # to_existing_atom (not to_atom): a directory of crafted filenames must
            # not be able to exhaust the atom table. An unknown check-name raises
            # ArgumentError below and drops to the accurate full-load fallback.
-           check_name: String.to_existing_atom(check),
+           check_name: check_name_atom(check),
            seed: String.to_integer(seed_str)
          }}
 
@@ -760,6 +779,13 @@ defmodule PropertyDamage.Persistence do
     end
   rescue
     ArgumentError -> :error
+  end
+
+  # A check part with a dot names a module (see `name_string/1`).
+  defp check_name_atom(check) do
+    if String.contains?(check, "."),
+      do: String.to_existing_atom("Elixir." <> check),
+      else: String.to_existing_atom(check)
   end
 
   defp parse_timestamp(str) do

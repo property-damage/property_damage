@@ -427,6 +427,7 @@ defmodule PropertyDamage do
       on_failure: build_on_failure_callback(opts),
       reporter: reporter,
       branching: opts[:branching],
+      stutter: opts[:stutter],
       stutter_config: Stutter.parse_config(opts[:stutter]),
       check_mode: opts[:check_mode],
       seed_library: seed_library,
@@ -1423,6 +1424,9 @@ defmodule PropertyDamage do
       model: ctx.model,
       targets: ctx.target_entries,
       concurrency: ctx.concurrency,
+      equivalence: ctx.equivalence,
+      stutter: ctx.stutter,
+      max_commands: ctx.max_commands,
       check_fires: found.fires
     )
   end
@@ -1547,7 +1551,10 @@ defmodule PropertyDamage do
   - `:concurrency` - `:serial` or `:parallel`, as on `PropertyDamage.run/1`
     (default: the report's `concurrency`)
   - `:equivalence` - `:exact`, `:structural` or a 2-arity function, as on
-    `PropertyDamage.run/1` (default: `:exact`)
+    `PropertyDamage.run/1` (default: the report's `equivalence`)
+
+  The re-shrink also uses the report's `stutter` configuration: a stutter
+  failure re-runs with stutter forced on, as the run's own shrink does.
 
   ## Returns
 
@@ -1597,8 +1604,9 @@ defmodule PropertyDamage do
       run_nonce: report.trace && report.trace.run_nonce,
       concurrency: Keyword.get(opts, :concurrency, report.concurrency),
       compare: :correctness,
-      equivalence: Keyword.get(opts, :equivalence, :exact),
-      stutter_config: nil,
+      equivalence: Keyword.get(opts, :equivalence, report.equivalence || :exact),
+      stutter: report.stutter,
+      stutter_config: Stutter.parse_config(report.stutter),
       check_mode: :halt
     }
 
@@ -1629,6 +1637,9 @@ defmodule PropertyDamage do
         concurrency: ctx.concurrency,
         compare: ctx.compare,
         equivalence: ctx.equivalence,
+        # A stutter failure re-shrinks with stutter forced on (DR-029), as in
+        # the run's own failure path.
+        stutter_config: ctx.stutter_config,
         config:
           ShrinkerConfig.new(
             max_iterations: strategy_iterations(strategy, opts),
@@ -1677,6 +1688,9 @@ defmodule PropertyDamage do
            model: report.model,
            targets: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
            concurrency: ctx.concurrency,
+           equivalence: ctx.equivalence,
+           stutter: ctx.stutter,
+           max_commands: report.max_commands,
            linearization: Map.get(result, :linearization),
            stacktrace: Map.get(result, :stacktrace)
          )}

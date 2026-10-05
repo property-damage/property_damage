@@ -63,6 +63,16 @@ defmodule PropertyDamage.FailureReport do
   - `:latency_exceeded` - a target exceeded a latency budget. No run produces
     this kind yet.
 
+  ## Reproduction inputs
+
+  Besides `seed`, `targets` and `concurrency`, a report records the run
+  options that decide whether the failure reproduces: `equivalence` (the run's
+  `equivalence:`, an atom or the function as given), `stutter` (the run's
+  normalized `stutter:` option, or `nil` when stutter was off) and
+  `max_commands` (the run's `max_commands:`, which decides the sequence the
+  seed generates). `reproduction_command/1` prints each one that differs from
+  its default, and `PropertyDamage.shrink_further/2` re-shrinks under them.
+
   `variant` names the target the failure happened in (`%{index:, name:}`, its
   position in `targets:` and its name; index 0 in a one-target run), and
   `targets` holds the run's `targets:` entries in order, the first being the
@@ -74,6 +84,10 @@ defmodule PropertyDamage.FailureReport do
 
   alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Failure, RunTrace, Sequence}
   alias PropertyDamage.Failure.Check
+
+  # The `max_commands:` default of `PropertyDamage.run/1`; a reproduction
+  # command prints the option only when the run used another value.
+  @default_max_commands 50
   alias PropertyDamage.RunTrace.Step
 
   @typedoc "The failure's kind (`PropertyDamage.Failure.kind/1`)."
@@ -105,6 +119,11 @@ defmodule PropertyDamage.FailureReport do
           variant: variant() | nil,
           targets: [target_entry()],
           concurrency: :serial | :parallel,
+
+          # The run options a reproduction needs (see "Reproduction inputs").
+          equivalence: PropertyDamage.Comparison.strategy() | nil,
+          stutter: keyword() | nil,
+          max_commands: pos_integer() | nil,
 
           # The execution record of the run this report describes (DR-033). The
           # deep structures (plan, event_log, executed) live here once;
@@ -164,6 +183,9 @@ defmodule PropertyDamage.FailureReport do
             variant: nil,
             targets: [],
             concurrency: :serial,
+            equivalence: :exact,
+            stutter: nil,
+            max_commands: nil,
             trace: nil,
             original_sequence: nil,
             failure_reason: nil,
@@ -210,6 +232,10 @@ defmodule PropertyDamage.FailureReport do
   - `:kind` - The report kind (default: derived from `:failure_reason` by
     `kind_of/1`)
   - `:concurrency` - The run's `concurrency:` (default `:serial`)
+  - `:equivalence` - The run's `equivalence:` (default `:exact`)
+  - `:stutter` - The run's normalized `stutter:` option (default `nil`, stutter
+    off)
+  - `:max_commands` - The run's `max_commands:` (default `nil`, not recorded)
   - `:linearization` - Selected linearization (parallel)
   """
   @spec new(keyword()) :: t()
@@ -284,6 +310,9 @@ defmodule PropertyDamage.FailureReport do
       variant: Keyword.get_lazy(opts, :variant, fn -> reference_variant(targets) end),
       targets: targets,
       concurrency: Keyword.get(opts, :concurrency, :serial),
+      equivalence: Keyword.get(opts, :equivalence, :exact),
+      stutter: Keyword.get(opts, :stutter),
+      max_commands: Keyword.get(opts, :max_commands),
       trace: trace,
       original_sequence: original_sequence,
       failure_reason: failure_reason,
@@ -708,20 +737,46 @@ defmodule PropertyDamage.FailureReport do
   Get the reproduction command as a string.
 
   It names the run's exact `targets:` list (see `targets_source/1`) and, for
-  several targets, a `concurrency:` other than the default `:serial`.
+  several targets, a `concurrency:` other than the default `:serial`. It also
+  prints `max_commands:` when it differs from the default, `stutter:` when the
+  run used stutter, and `equivalence:` when it is not `:exact`: an atom as is,
+  a named function as its capture (`&Mod.fun/2`). Any other function cannot be
+  printed, so the command shows `equivalence: <custom function>`, which the
+  reader replaces with the function the run used.
   """
   @spec reproduction_command(t()) :: String.t()
   def reproduction_command(%__MODULE__{seed: seed, model: model, targets: targets} = report) do
-    model_str = if model, do: "model: #{inspect(model)}, ", else: ""
-    targets_str = if targets != [], do: "targets: #{targets_source(report)}, ", else: ""
+    options =
+      [
+        model && "model: #{inspect(model)}",
+        targets != [] && "targets: #{targets_source(report)}",
+        (length(targets) > 1 and report.concurrency != :serial) &&
+          "concurrency: #{inspect(report.concurrency)}",
+        report.equivalence not in [nil, :exact] &&
+          "equivalence: #{equivalence_source(report.equivalence)}",
+        report.stutter && "stutter: #{inspect(report.stutter)}",
+        report.max_commands not in [nil, @default_max_commands] &&
+          "max_commands: #{report.max_commands}",
+        "seed: #{seed}",
+        "max_runs: 1"
+      ]
+      |> Enum.filter(&is_binary/1)
 
-    concurrency_str =
-      if length(targets) > 1 and report.concurrency != :serial,
-        do: "concurrency: #{inspect(report.concurrency)}, ",
-        else: ""
-
-    "PropertyDamage.run(#{model_str}#{targets_str}#{concurrency_str}seed: #{seed}, max_runs: 1)"
+    "PropertyDamage.run(#{Enum.join(options, ", ")})"
   end
+
+  # An equivalence as Elixir source: an atom as is, a named function as its
+  # capture, any other function as a placeholder that does not compile.
+  defp equivalence_source(equivalence) when is_atom(equivalence), do: inspect(equivalence)
+
+  defp equivalence_source(equivalence) when is_function(equivalence) do
+    case Function.info(equivalence, :type) do
+      {:type, :external} -> inspect(equivalence)
+      _ -> "<custom function>"
+    end
+  end
+
+  defp equivalence_source(_equivalence), do: "<custom function>"
 
   @doc """
   The failed run as a timeline of `Step` structs, in flattened (reading) order.
@@ -914,7 +969,8 @@ defmodule PropertyDamage.FailureReport do
        do: inspect(reason)
 
   defp message_for(%Failure{type: %Failure.Divergence{} = d}) do
-    "Command #{d.root} diverged: the reference answered #{inspect(d.reference_result)}, " <>
+    "Command #{d.root}#{divergence_name(d.name)} diverged: " <>
+      "the reference answered #{inspect(d.reference_result)}, " <>
       "the target answered #{inspect(d.divergent_result)}"
   end
 
@@ -922,6 +978,9 @@ defmodule PropertyDamage.FailureReport do
     do: "Adapter setup failed: " <> extract_message(detail)
 
   defp message_for(%Failure{type: type}), do: inspect(type.detail)
+
+  defp divergence_name(nil), do: ""
+  defp divergence_name(name), do: " (#{inspect(name)})"
 
   # Extract a human message from a check/exception reason. The
   # is_exception clause MUST precede %{message: msg}: exceptions like

@@ -178,9 +178,12 @@ defmodule PropertyDamage.LockstepRunTest do
       divergence = Failure.detail(report.failure_reason)
 
       assert divergence |> Map.keys() |> Enum.sort() ==
-               [:divergent_result, :reference_result, :results, :root]
+               [:command, :divergent_result, :reference_result, :results, :root]
 
       assert %Step{value: value} =
+               Enum.at(Sequence.to_list(report.original_sequence), divergence.root)
+
+      assert divergence.command ==
                Enum.at(Sequence.to_list(report.original_sequence), divergence.root)
 
       assert report.seed == @seed

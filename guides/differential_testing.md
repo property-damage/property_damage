@@ -265,20 +265,23 @@ A divergence is a report with `kind: :diverged`. It carries:
 |-------|---------|
 | `variant` | `%{index, name}` of the first target that answered differently from the reference |
 | `failed_at_index` | 0-based index of the root where it diverged |
-| `failure_reason` | a `%PropertyDamage.Failure{}` of type `Failure.Divergence`, holding `root`, `reference_result`, `divergent_result` and `results` (every target's answer, keyed by target name) |
+| `failure_reason` | a `%PropertyDamage.Failure{}` of type `Failure.Divergence`, holding `root`, `command` (the root command), `reference_result`, `divergent_result` and `results` (every target's answer, keyed by target name); `Failure.name/1` is the root command's module |
 | `targets` | the run's `targets:` entries, so the reproduction names the same targets |
 | `concurrency` | `:serial` or `:parallel` |
 | `seed` | the campaign seed |
 
 The framework shrinks a divergence before it reports it. Every shrink attempt
 runs the candidate sequence on every target, each set up and torn down for that
-attempt. A candidate counts only if the same target still diverges, with the
-same failure kind, at the same or an earlier root. The reference's sequence is
+attempt. A candidate counts only if the same target still diverges, at a command
+of the same type, at the same or an earlier root. A candidate that diverges at a
+command of another type is a different failure. The reference's sequence is
 what shrinks, because all targets run the same commands.
 `PropertyDamage.FailureReport.shrunk_sequence/1` returns the shrunk sequence, and
 `PropertyDamage.FailureReport.reproduction_command/1` returns a command that
 reruns the failure with the exact `targets:` entries (non-default `name:` and
-`config:`) and a non-default `concurrency:`.
+`config:`) and a non-default `concurrency:`, `equivalence:`, `stutter:` or
+`max_commands:`. An `equivalence:` function that is not a named capture such as
+`&MyApp.Compare.same?/2` prints as `<custom function>`, for you to replace.
 
 Under `check_mode: :record`, a check failure recorded at or before the
 divergence root is reported instead of the divergence.
@@ -326,9 +329,9 @@ Branching sequences run against one target: `branching:` with two or more
 targets is an option error. `PropertyDamage.replay/2`,
 `PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
 the report's reference target (with its name and config).
-`PropertyDamage.shrink_further/2` re-shrinks with `report.targets` by default;
-pass `targets:` (one or more entries), `concurrency:` or `equivalence:` to
-override.
+`PropertyDamage.shrink_further/2` re-shrinks with the report's `targets`,
+`concurrency`, `equivalence` and `stutter` by default; pass `targets:` (one or
+more entries), `concurrency:` or `equivalence:` to override.
 
 ## Options Reference
 

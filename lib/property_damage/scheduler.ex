@@ -58,7 +58,8 @@ defmodule PropertyDamage.Scheduler do
   always a `%PropertyDamage.Failure{}`:
 
     * `:diverged` - a target answered a root differently from the reference
-      (`PropertyDamage.Failure.diverged/4`).
+      (`PropertyDamage.Failure.diverged/5`). Its name is the root command's
+      module, so a divergence at a command of another type is another failure.
     * `:setup_failed` - a target's `setup/1` returned an error or raised
       (`PropertyDamage.Failure.setup_failed/1`, holding the error term or the
       exception). Targets already set up are torn down; the failing one is not.
@@ -66,16 +67,21 @@ defmodule PropertyDamage.Scheduler do
       `:startup` phase, or while the run finalized (an `@eventually` timeout,
       a `:teardown` check).
     * `:execution_failed` - a target's adapter raised, a command could not be
-      executed (the failure the target's engine reported for it), or the
-      target's process crashed (`PropertyDamage.Failure.unknown/1` holding the
-      exit reason).
+      executed (the failure the target's engine reported for it), the
+      machinery failed while the run finalized (a resource poller error, a
+      poll predicate that raised), or the target's process crashed
+      (`PropertyDamage.Failure.unknown/1` holding the exit reason).
+
+  A failure's kind is derived from its `reason` by
+  `PropertyDamage.FailureReport.kind_of/1`, so a report's `kind` always agrees
+  with its `failure_reason`.
 
   Under `:serial` no other target executes the failing root after the failure;
   under `:parallel` the commands already running finish. In both, no target
   starts the next root.
   """
 
-  alias PropertyDamage.{Comparison, Failure, PlaceholderRegistry, Target, Variant}
+  alias PropertyDamage.{Comparison, Failure, FailureReport, PlaceholderRegistry, Target, Variant}
 
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
@@ -192,7 +198,7 @@ defmodule PropertyDamage.Scheduler do
         {:error, reason} ->
           Enum.each(ready, &stop_variant/1)
           reason = Failure.setup_failed(reason)
-          {:halt, {:error, failure(config, target, :setup_failed, nil, reason)}}
+          {:halt, {:error, failure(config, target, nil, reason)}}
       end
     end)
     |> case do
@@ -255,10 +261,10 @@ defmodule PropertyDamage.Scheduler do
   defp step_roots(config, variants) do
     config.commands
     |> Enum.with_index()
-    |> Enum.reduce_while({variants, nil}, fn {_command, root}, {variants, nil} ->
+    |> Enum.reduce_while({variants, nil}, fn {command, root}, {variants, nil} ->
       case advance_all(config, variants, root) do
         {:ok, variants} ->
-          case compare_boundary(config, variants, root) do
+          case compare_boundary(config, variants, root, command) do
             nil -> {:cont, {variants, nil}}
             divergence -> {:halt, {variants, divergence}}
           end
@@ -308,16 +314,16 @@ defmodule PropertyDamage.Scheduler do
       {:ok, {:ok, observed}} ->
         {:ok, %{variant | observations: Enum.reverse(observed, variant.observations)}}
 
-      {:ok, {:failed, %{kind: kind, root: failed_root, reason: reason}}} ->
-        {:failed, variant, failure(config, variant.target, kind, failed_root, reason)}
+      {:ok, {:failed, %{root: failed_root, reason: reason}}} ->
+        {:failed, variant, failure(config, variant.target, failed_root, reason)}
 
       {:ok, {:error, reason}} ->
-        {:failed, variant, failure(config, variant.target, :execution_failed, root, reason)}
+        {:failed, variant, failure(config, variant.target, root, reason)}
 
       {:crashed, reason} ->
         variant = %{variant | pid: nil}
         reason = Failure.unknown(reason)
-        {:failed, variant, failure(config, variant.target, :execution_failed, root(root), reason)}
+        {:failed, variant, failure(config, variant.target, root(root), reason)}
     end
   end
 
@@ -329,11 +335,11 @@ defmodule PropertyDamage.Scheduler do
   # ==========================================================================
 
   # The one place a boundary is compared: each non-reference variant's
-  # observation of `root` against the reference's. Returns the `:diverged`
-  # failure of the first non-equivalent variant, or nil.
-  defp compare_boundary(%{compare?: false}, _variants, _root), do: nil
+  # observation of `root` (the index of `command`) against the reference's.
+  # Returns the `:diverged` failure of the first non-equivalent variant, or nil.
+  defp compare_boundary(%{compare?: false}, _variants, _root, _command), do: nil
 
-  defp compare_boundary(config, variants, root) do
+  defp compare_boundary(config, variants, root, command) do
     observed = Enum.map(variants, &{&1.target, observation_at(&1, root)})
     [{_reference, reference_result} | others] = observed
 
@@ -345,8 +351,8 @@ defmodule PropertyDamage.Scheduler do
 
       {target, divergent_result} ->
         results = Map.new(observed, fn {target, result} -> {target.name, result} end)
-        reason = Failure.diverged(root, reference_result, divergent_result, results)
-        failure(config, target, :diverged, root, reason)
+        reason = Failure.diverged(root, command, reference_result, divergent_result, results)
+        failure(config, target, root, reason)
     end
   end
 
@@ -387,7 +393,7 @@ defmodule PropertyDamage.Scheduler do
         {result, latency, run_failure(config, variant.target, result, failure)}
 
       {:crashed, reason} ->
-        crash = failure(config, variant.target, :execution_failed, nil, Failure.unknown(reason))
+        crash = failure(config, variant.target, nil, Failure.unknown(reason))
         {nil, latency, failure || crash}
     end
   end
@@ -401,11 +407,11 @@ defmodule PropertyDamage.Scheduler do
          %{success: false, failure_reason: nil, check_failures: [first | _]}
        ) do
     reason = Failure.check_failed(first.check_name, without_stacktrace(first.reason))
-    failure(config, target, :check_failed, first.command_index, reason)
+    failure(config, target, first.command_index, reason)
   end
 
   defp finalize_failure(config, target, %{success: false} = result) do
-    failure(config, target, :check_failed, result.failed_at_index, result.failure_reason)
+    failure(config, target, result.failed_at_index, result.failure_reason)
   end
 
   defp finalize_failure(_config, _target, _result), do: nil
@@ -442,10 +448,13 @@ defmodule PropertyDamage.Scheduler do
   defp with_failure_reason(nil, _results), do: nil
 
   defp with_failure_reason(failure, results) do
-    case Enum.at(results, failure.variant.index) do
-      %{failure_reason: %Failure{} = reason} -> %{failure | reason: reason}
-      _ -> %{failure | reason: Failure.adapter_error(failure.reason)}
-    end
+    reason =
+      case Enum.at(results, failure.variant.index) do
+        %{failure_reason: %Failure{} = reason} -> reason
+        _ -> Failure.adapter_error(failure.reason)
+      end
+
+    %{failure | kind: FailureReport.kind_of(reason), reason: reason}
   end
 
   # A recorded check that raised keeps `{exception, stacktrace}`; a halting run
@@ -488,8 +497,18 @@ defmodule PropertyDamage.Scheduler do
   defp exit_reason({reason, {GenServer, :call, _args}}), do: {:exit, reason}
   defp exit_reason(reason), do: {:exit, reason}
 
-  defp failure(config, %Target{} = target, kind, root, reason) do
-    %{kind: kind, variant: variant_of(target), run: config.run_number, root: root, reason: reason}
+  # Every failure's kind comes from its reason by the one mapping a report
+  # uses (`FailureReport.kind_of/1`), so the two always agree. A variant
+  # reports an adapter raise by the bare exception; `with_failure_reason/2`
+  # swaps in the engine's `%Failure{}` for it and derives the kind again.
+  defp failure(config, %Target{} = target, root, reason) do
+    %{
+      kind: FailureReport.kind_of(reason) || :execution_failed,
+      variant: variant_of(target),
+      run: config.run_number,
+      root: root,
+      reason: reason
+    }
   end
 
   defp variant_of(%Target{index: index, name: name}), do: %{index: index, name: name}

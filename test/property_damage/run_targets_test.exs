@@ -67,7 +67,7 @@ defmodule PropertyDamage.RunTargetsTest do
 
         assert %Failure{} = reason = report.failure_reason
         assert Failure.kind(reason) == :diverged
-        assert Failure.name(reason) == nil
+        assert Failure.name(reason) == Step
 
         detail = Failure.detail(reason)
         assert detail.root == 0

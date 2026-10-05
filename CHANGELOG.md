@@ -14,17 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `concurrency:`, `compare:`, `equivalence:`, `metrics:`, `percentiles:` and
   `warmup_runs:`. `{:ok, stats}` carries `targets` and, under
   `compare: :performance | :both`, `metrics` keyed by target name.
-- **`FailureReport` fields `kind`, `variant`, `targets` and `concurrency` (DR-045).**
+- **`FailureReport` fields `kind`, `variant`, `targets`, `concurrency`,
+  `equivalence`, `stutter` and `max_commands` (DR-045).**
   `kind` is `:check_failed`, `:diverged`, `:setup_failed` or `:execution_failed`
-  (`:did_not_converge` and `:latency_exceeded` are named for later features).
+  (`:did_not_converge` and `:latency_exceeded` are named for later features),
+  and always equals `kind_of(failure_reason)`.
   `variant` is `%{index, name}`. `targets` holds the run's entries, so
-  `reproduction_command/1` prints the exact target list. New helpers:
+  `reproduction_command/1` prints the exact target list. It also prints
+  `equivalence:`, `stutter:` and `max_commands:` when the run used a
+  non-default value (a function equivalence that is not a named capture prints
+  as `<custom function>`), and `shrink_further/2` re-shrinks under the report's
+  `equivalence` and `stutter`. New helpers:
   `FailureReport.kind_of/1`, `reference_target/1` and `targets_source/1`; new
   failure types `Failure.Divergence` and `Failure.Setup`.
 - **A divergence is shrunk and reproduced (DR-045).** It ends the run and `run/1`
   returns `{:error, report}` with `kind: :diverged`. The shrinker accepts a
   candidate only with the same `{kind, name, variant_index}` at the same or an
-  earlier root, and runs every attempt on every target.
+  earlier root, and runs every attempt on every target. A divergence is
+  identified by its root command: `Failure.Divergence` carries the `command`,
+  `Failure.diverged/5` takes it, and `Failure.name/1` of a divergence is the
+  root command's module, so a candidate that diverges at a command of another
+  type is rejected.
 - **Command and check telemetry from the engine (DR-045).**
   `[:property_damage, :command, :start | :stop]` and
   `[:property_damage, :check, :start | :stop]` carry `variant` and `run_number`;

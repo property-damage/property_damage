@@ -187,15 +187,19 @@ The system SHALL support re-running the shrinker over an already-shrunk failure 
 
 ### Requirement: Failure Signature
 
-The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned by `Shrinker.failure_signature/2`, where kind identifies the category of failure, name identifies the specific check (or nil for non-check failures) and variant_index is the index of the target that failed. `Shrinker.equivalent_failures?/2` SHALL compare `{reason, variant_index}` pairs.
+The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned by `Shrinker.failure_signature/2`, where kind identifies the category of failure, name is `Failure.name/1` (the specific check for a check failure, the root command's module for a divergence, nil for other failures) and variant_index is the index of the target that failed. A signature rebuilt into a failure (`Failure.from_signature/2`) SHALL yield the same signature. `Shrinker.equivalent_failures?/2` SHALL compare `{reason, variant_index}` pairs.
 
 #### Scenario: Check failure signature
 - **WHEN** a failure is caused by a check violation
 - **THEN** the signature SHALL contain the failure kind, the check name and the variant index
 
 #### Scenario: Non-check failure signature
-- **WHEN** a failure is caused by a non-check condition (e.g., adapter error, linearization failure)
+- **WHEN** a failure is caused by a non-check condition other than a divergence (e.g., adapter error, linearization failure)
 - **THEN** the signature SHALL contain the failure kind, nil for the check name and the variant index
+
+#### Scenario: Divergence signature names the root command
+- **WHEN** a failure is a divergence
+- **THEN** the signature SHALL contain `:diverged`, the root command's module and the variant index (DR-045)
 
 #### Scenario: Check failure signature includes the check name
 - **WHEN** a failure is a named check failure (`@check` / `@check at:` check)
@@ -211,8 +215,13 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 
 #### Scenario: Divergence is shrunk
 - **WHEN** a run fails with kind `:diverged`
-- **THEN** the shrinker SHALL remove commands while the same variant still diverges from the reference at the same or an earlier root
+- **THEN** the shrinker SHALL remove commands while the same variant still diverges from the reference, at a root command of the same module, at the same or an earlier root
 - **AND** every candidate SHALL run in every target
+
+#### Scenario: A divergence at another command type is rejected
+- **GIVEN** a divergence at a command of type X in variant 1
+- **WHEN** a candidate diverges in variant 1 at a command of type Y
+- **THEN** the shrinker SHALL reject the candidate
 
 #### Scenario: Setup failures are not shrunk
 - **WHEN** a run fails with kind `:setup_failed`
@@ -226,4 +235,15 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 - **WHEN** `shrink_further/2` is called
 - **THEN** it SHALL use `report.targets` by default
 - **AND** SHALL accept a `targets:` override with one or more entries and the options `concurrency:` and `equivalence:`
+- **AND** SHALL default `equivalence:` to the report's `equivalence` and re-shrink a stutter failure with the report's `stutter` configuration
 - **AND** export file names SHALL hash the signature triple
+
+### Requirement: Invalid Candidates Are Not Counterexamples (DR-045)
+
+Before running a shrink candidate, the shrinker SHALL validate it against the model: fold it through the model's command-sequence projection and simulator and check each command's `when:` predicate. A candidate whose validation returns false or raises SHALL be invalid and SHALL NOT be run or accepted. Shrinking builds sequences the generator never would (an argument halved to 0, a command whose referenced entity's creating command was removed); model code that raises on such a sequence says the model cannot simulate it, not that the system under test is wrong.
+
+#### Scenario: A candidate the model cannot simulate is not a counterexample
+- **GIVEN** a model whose projection raises when it folds an event that references an entity the state does not hold
+- **WHEN** a shrink candidate keeps a command that references an entity whose creating command was removed
+- **THEN** the candidate's validation SHALL raise
+- **AND** the shrinker SHALL treat the candidate as invalid and SHALL NOT accept it as a reproduction

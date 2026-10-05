@@ -43,9 +43,18 @@ defmodule PropertyDamage.LockstepShrinkTest do
     def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
+  defmodule Ping do
+    use PropertyDamage.Command
+    defstruct []
+
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+  end
+
   defmodule Noised, do: defstruct([:n])
   defmodule Armed, do: defstruct([])
   defmodule Flipped, do: defstruct([:value])
+  defmodule Pinged, do: defstruct([:value])
 
   defmodule Tally do
     use PropertyDamage.Model.Projection
@@ -113,6 +122,18 @@ defmodule PropertyDamage.LockstepShrinkTest do
     def check_projections, do: [ArmGuard]
   end
 
+  # Under the `:split` skew, an armed Flip diverges and an unarmed Ping
+  # diverges: removing the Arm moves the divergence to another command.
+  defmodule SplitModel do
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: [{Noise, weight: 2}, Arm, Ping, Flip]
+
+    @impl true
+    def command_sequence_projection, do: Tally
+  end
+
   # Divides by each Noise's n, which argument shrinking halves toward 0.
   defmodule DivideTally do
     use PropertyDamage.Model.Projection
@@ -138,7 +159,9 @@ defmodule PropertyDamage.LockstepShrinkTest do
   # Config keys:
   #
   #   :skew       :after_two_noise | :always - answer Flip with value 1 instead
-  #               of 0 (after two Noise commands in this run, or always)
+  #               of 0 (after two Noise commands in this run, or always);
+  #               :split - answer an armed Flip and an unarmed Ping with 1, and
+  #               report every unarmed Ping to the registered test process
   #   :counts     :counters ref; index 1 counts setups, index 2 teardowns
   defmodule FlipAdapter do
     use PropertyDamage.Adapter
@@ -146,7 +169,11 @@ defmodule PropertyDamage.LockstepShrinkTest do
     @impl true
     def setup(config) do
       if counts = config[:counts], do: :counters.add(counts, 1, 1)
-      {:ok, Map.put(config, :noise, :atomics.new(1, []))}
+
+      {:ok,
+       config
+       |> Map.put(:noise, :atomics.new(1, []))
+       |> Map.put(:armed, :atomics.new(1, []))}
     end
 
     @impl true
@@ -161,18 +188,34 @@ defmodule PropertyDamage.LockstepShrinkTest do
       {:ok, [%Noised{n: n}]}
     end
 
-    def execute(%Arm{}, _ctx, _runtime), do: {:ok, [%Armed{}]}
+    def execute(%Arm{}, ctx, _runtime) do
+      :atomics.put(ctx.armed, 1, 1)
+      {:ok, [%Armed{}]}
+    end
 
     def execute(%Flip{}, ctx, _runtime) do
       skewed? =
         case ctx[:skew] do
           :always -> true
           :after_two_noise -> :atomics.get(ctx.noise, 1) >= 2
+          :split -> armed?(ctx)
           _ -> false
         end
 
       {:ok, [%Flipped{value: if(skewed?, do: 1, else: 0)}]}
     end
+
+    def execute(%Ping{}, ctx, _runtime) do
+      skewed? = ctx[:skew] == :split and not armed?(ctx)
+
+      if skewed? do
+        if pid = Process.whereis(:pd_lockstep_shrink_probe), do: send(pid, :unarmed_ping)
+      end
+
+      {:ok, [%Pinged{value: if(skewed?, do: 1, else: 0)}]}
+    end
+
+    defp armed?(ctx), do: :atomics.get(ctx.armed, 1) == 1
   end
 
   # ==========================================================================
@@ -242,12 +285,37 @@ defmodule PropertyDamage.LockstepShrinkTest do
   defp signature(%FailureReport{} = report),
     do: Shrinker.failure_signature(report.failure_reason, report.variant.index)
 
-  defp drain_probe(count \\ 0) do
+  defp drain_probe(message \\ :unarmed_flip, count \\ 0) do
     receive do
-      :unarmed_flip -> drain_probe(count + 1)
+      ^message -> drain_probe(message, count + 1)
     after
       0 -> count
     end
+  end
+
+  # A report's kind always agrees with its failure reason.
+  defp assert_kind_agrees(%FailureReport{} = report) do
+    assert report.kind == FailureReport.kind_of(report.failure_reason)
+  end
+
+  # A sequence whose first divergence under `:split` is a Flip after the only
+  # Arm before it, with a Ping between them and no Ping before the Arm. Without
+  # the Arm, that Ping diverges first.
+  defp split_seed do
+    find_seed(SplitModel, fn commands ->
+      arm = Enum.find_index(commands, &match?(%Arm{}, &1))
+
+      with true <- is_integer(arm),
+           false <- commands |> Enum.take(arm) |> Enum.any?(&match?(%Ping{}, &1)),
+           after_arm = Enum.drop(commands, arm + 1),
+           flip when is_integer(flip) <- Enum.find_index(after_arm, &match?(%Flip{}, &1)),
+           between = Enum.take(after_arm, flip),
+           false <- Enum.any?(between, &match?(%Arm{}, &1)) do
+        Enum.any?(between, &match?(%Ping{}, &1))
+      else
+        _ -> false
+      end
+    end)
   end
 
   # ==========================================================================
@@ -388,7 +456,70 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
       assert %{reason: reason, variant: %{index: index}} = rerun.failure
       assert Shrinker.failure_signature(reason, index) == signature(report)
-      assert signature(report) == {:diverged, nil, 1}
+      assert signature(report) == {:diverged, Flip, 1}
+    end
+  end
+
+  # ==========================================================================
+  # Divergence identity: the root command
+  # ==========================================================================
+
+  describe "a divergence's identity" do
+    test "is its root command's module" do
+      seed = planted_seed()
+
+      assert {:error, report} = run(DivergeModel, targets(), seed: seed)
+
+      assert_kind_agrees(report)
+      assert Failure.name(report.failure_reason) == Flip
+
+      root_command =
+        report |> FailureReport.shrunk_sequence() |> Sequence.to_list() |> List.last()
+
+      assert Failure.detail(report.failure_reason).command == root_command
+      assert FailureReport.classify_reason(report.failure_reason) == {:diverged, Flip}
+    end
+
+    test "rejects a candidate that diverges at another command in the same target" do
+      seed = split_seed()
+      original = commands(SplitModel, seed)
+      Process.register(self(), @probe)
+
+      try do
+        assert {:error, report} =
+                 run(SplitModel, targets(%{}, %{skew: :split}), seed: seed)
+
+        rejected = drain_probe(:unarmed_ping)
+
+        assert_kind_agrees(report)
+        assert report.kind == :diverged
+        assert report.variant.index == 1
+
+        shrunk = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
+        assert Enum.map(shrunk, & &1.__struct__) == [Arm, Flip]
+        assert Failure.name(report.failure_reason) == Flip
+        assert signature(report) == {:diverged, Flip, 1}
+        assert length(shrunk) < length(original)
+        assert %Flip{} = Failure.detail(report.failure_reason).command
+
+        assert rejected >= 1,
+               "expected at least one candidate to diverge at an unarmed Ping"
+      after
+        Process.unregister(@probe)
+      end
+    end
+
+    @tag :tmp_dir
+    test "survives a persistence round trip", %{tmp_dir: dir} do
+      seed = planted_seed()
+      assert {:error, report} = run(DivergeModel, targets(), seed: seed)
+
+      assert {:ok, path} = PropertyDamage.Persistence.save(report, dir)
+      assert {:ok, loaded} = PropertyDamage.Persistence.load(path)
+
+      assert %Flip{} = Failure.detail(loaded.failure_reason).command
+      assert Failure.name(loaded.failure_reason) == Flip
+      assert loaded.failure_reason == report.failure_reason
     end
   end
 

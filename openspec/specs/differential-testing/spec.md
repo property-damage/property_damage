@@ -177,13 +177,14 @@ The framework SHALL treat the first root at which a non-reference variant's obse
 - **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :diverged`
 - **AND** `report.variant` SHALL be `%{index, name}` of the first non-equivalent variant in target order
 - **AND** `report.failed_at_index` SHALL be the 0-based index of the diverging root
-- **AND** the failure reason SHALL be a `%PropertyDamage.Failure{}` of type `Failure.Divergence` carrying `root`, `reference_result`, `divergent_result` and `results` (every variant's observation, keyed by target name)
+- **AND** the failure reason SHALL be a `%PropertyDamage.Failure{}` of type `Failure.Divergence` carrying `root`, `command` (the root command), `reference_result`, `divergent_result` and `results` (every variant's observation, keyed by target name)
+- **AND** `Failure.name/1` of the failure reason SHALL be the root command's module
 
 #### Scenario: A divergence is shrunk and reproduced
 
 - **WHEN** a divergence is found in a run
 - **THEN** the framework SHALL shrink the sequence with the reference's sequence as the shrink target, running every attempt through every target
-- **AND** SHALL accept a candidate only if it diverges in the same variant at the same or an earlier root
+- **AND** SHALL accept a candidate only if it diverges in the same variant, at a root command of the same module, at the same or an earlier root
 - **AND** `FailureReport.shrunk_sequence/1` SHALL return the shrunk sequence
 - **AND** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries
 
@@ -221,7 +222,7 @@ The framework SHALL treat the first root at which a non-reference variant's obse
 
 ### Requirement: Failures Name the Variant (DR-044, DR-045)
 
-A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
+A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. The `kind` SHALL be derived from the failure reason by `FailureReport.kind_of/1`, so a failure found while the run finalizes is `:execution_failed` when its reason is of the execution class. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
 
 #### Scenario: Check failure
 
@@ -244,7 +245,7 @@ A failure SHALL name the variant `%{index, name}` that failed and the root where
 
 ### Requirement: Failure Report Is the Result (DR-045)
 
-`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `coverage` when requested, and `metrics` keyed by target name under `compare: :performance | :both`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them) and `concurrency`, and SHALL NOT carry `adapter`. A `setup_once/1` or `setup_each/1` failure SHALL keep returning `{:error, %{setup_once_failed: _}}` or `{:error, %{setup_each_failed: _, run_number: _}}`. There SHALL be no `Differential.Result`.
+`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `coverage` when requested, and `metrics` keyed by target name under `compare: :performance | :both`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `equivalence`, `stutter` and `max_commands`, and SHALL NOT carry `adapter`. A `setup_once/1` or `setup_each/1` failure SHALL keep returning `{:error, %{setup_once_failed: _}}` or `{:error, %{setup_each_failed: _, run_number: _}}`. There SHALL be no `Differential.Result`.
 
 #### Scenario: Passing multi-target run
 
@@ -256,6 +257,11 @@ A failure SHALL name the variant `%{index, name}` that failed and the root where
 
 - **WHEN** a failure report comes from a run with non-default target names, configs or `concurrency:`
 - **THEN** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries (non-default `name:` and `config:`) and the non-default `concurrency:`
+
+#### Scenario: Reproduction names the run options that decide the outcome
+- **WHEN** a failure report comes from a run with a non-default `equivalence:`, `max_commands:` or with `stutter:`
+- **THEN** the report SHALL record `equivalence`, `stutter` and `max_commands`
+- **AND** `FailureReport.reproduction_command/1` SHALL print `equivalence:` (an atom as is, a named function as its capture, any other function as the placeholder `<custom function>`), `stutter:` and `max_commands:`
 
 ### Requirement: Per-Target Injectors, Mocks and Pollers in Multi-Target Runs (DR-044)
 

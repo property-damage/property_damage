@@ -68,12 +68,29 @@ a note that two targets disagreed.
    run's entries as `Target.to_entry/1` gives them, so
    `reproduction_command/1` prints the exact target list, including
    non-default `name:` and `config:`) and `concurrency` (a non-default value
-   is printed too). `adapter` is removed. `kind_of/1`, `reference_target/1`
-   and `targets_source/1` are new.
+   is printed too). It also records the run's `equivalence` (an atom, or the
+   function as given), `stutter` (the normalized option, or nil) and
+   `max_commands`. `reproduction_command/1` prints `equivalence:` when it is
+   not `:exact` (a named function as its capture; any other function as the
+   placeholder `<custom function>`, which does not compile until the reader
+   replaces it), `stutter:` when it was set and `max_commands:` when it is not
+   the default, so the printed command regenerates and judges the same run.
+   `shrink_further/2` re-shrinks under the report's `equivalence` and
+   `stutter`. `adapter` is removed. `kind_of/1`, `reference_target/1` and
+   `targets_source/1` are new. A report's `kind` is always
+   `kind_of(failure_reason)`: the scheduler derives every failure's kind from
+   its reason with that one mapping, so a resource poller error found while
+   the run finalizes is `:execution_failed`, not `:check_failed`.
 8. **Shrinking is variant-aware.** The failure identity is
    `{kind, name, variant_index}`, from `Shrinker.failure_signature/2`. A
    candidate that fails in another variant or with another kind is
-   rejected. A candidate is accepted only at the same or an earlier root,
+   rejected. A divergence's name is its root command's module (item 13), so
+   a candidate that diverges in the same variant at a command of another type
+   is rejected too: without that, dropping the command a diverging
+   `CreateLabel` depends on can yield a candidate that diverges at a
+   `CreateRepo` for an unrelated reason, and the shrinker would accept it. A
+   candidate whose validation raises (the model's projection, simulator or
+   `when:` predicate) is invalid and never a counterexample. A candidate is accepted only at the same or an earlier root,
    by truncation at the failing root. Every attempt runs `setup_each/1`,
    then the candidate through the scheduler with every target, each set up
    and torn down for that attempt, with the run's effective seed,
@@ -87,7 +104,8 @@ a note that two targets disagreed.
 9. **Persistence version 9.** Failure reports (`.pd`) and traces
    (`.pdtrace`) are version 9. Loaders refuse version 8 and older.
    `export_json/1` writes `kind`, `variant` and `targets` instead of
-   `adapter`.
+   `adapter`, and `equivalence` (`custom` for a function), `stutter` and
+   `max_commands`.
 10. **Telemetry and progress name the variant.** The engine emits
     `[:property_damage, :command, :start | :stop]` and
     `[:property_damage, :check, :start | :stop]` with `variant` and
@@ -113,9 +131,14 @@ a note that two targets disagreed.
     through `on_failure`, the regression handler and the seed-library
     append. `setup_once/1`, `setup_each/1` and their teardowns receive the
     reference target's config.
-13. **Two failure types.** `Failure.Divergence` holds `root`,
-    `reference_result`, `divergent_result` and `results` keyed by target
-    name; its kind is `:diverged` and its name is nil. `Failure.Setup` holds
+13. **Two failure types.** `Failure.Divergence` holds `root`, `command`
+    (the root command), `name`, `reference_result`, `divergent_result` and
+    `results` keyed by target name; its kind is `:diverged`.
+    `Failure.diverged/5` takes the root command, and `Failure.name/1` of a
+    divergence is the root command's module: the key of the default root
+    observation, what the target answered to that command type. A later
+    comparison feature that names its own observations will supply that name
+    instead. `Failure.Setup` holds
     the error term or exception; its kind is `:setup_failed`.
 14. **Engine behavior now shared.** `check_mode:` reaches the engine (before,
     `run/1` accepted it without effect). `teardown_each/1` runs at the end of

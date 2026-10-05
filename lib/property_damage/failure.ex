@@ -66,23 +66,33 @@ defmodule PropertyDamage.Failure.Divergence do
   A target answered a command differently from the reference target. See
   `PropertyDamage.Failure` for the kind table.
 
-  `root` is the index of the command whose answers differ. Each observation is
-  `{:ok, events}` (the events the command injected, then the events it
-  returned) or `{:error, reason}` (the adapter's error answer).
-  `reference_result` is the reference target's observation, `divergent_result`
-  the diverging target's, and `results` every target's, keyed by target name.
+  `root` is the index of the command whose answers differ, and `command` that
+  command. Each observation is `{:ok, events}` (the events the command
+  injected, then the events it returned) or `{:error, reason}` (the adapter's
+  error answer). `reference_result` is the reference target's observation,
+  `divergent_result` the diverging target's, and `results` every target's,
+  keyed by target name.
+
+  `name` identifies what was observed, and so which divergence this is. The
+  default observation of a root is what the target answered to that command, so
+  `name` is the root command's module: two divergences at commands of different
+  types are different failures, and the shrinker keeps them apart. A later
+  comparison feature that names its own observations will supply that name
+  instead.
   """
 
   @type observation :: {:ok, [struct()]} | {:error, term()}
 
   @type t :: %__MODULE__{
           root: non_neg_integer() | nil,
+          command: struct() | nil,
+          name: atom() | nil,
           reference_result: observation() | nil,
           divergent_result: observation() | nil,
           results: %{String.t() => observation()} | nil
         }
 
-  defstruct [:root, :reference_result, :divergent_result, :results]
+  defstruct [:root, :command, :name, :reference_result, :divergent_result, :results]
 end
 
 defmodule PropertyDamage.Failure.Setup do
@@ -169,7 +179,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:diverged` | `nil` | `%{root:, reference_result:, divergent_result:, results:}` |
+  | `:diverged` | the root command's module | `%{root:, command:, reference_result:, divergent_result:, results:}` |
 
   ### `Failure.Setup` - a target could not be brought up
 
@@ -236,19 +246,29 @@ defmodule PropertyDamage.Failure do
   def kind(%__MODULE__{type: %Setup{}}), do: :setup_failed
   def kind(%__MODULE__{type: type}), do: type.kind
 
-  @doc "The check/projection name, or `nil` when a name is not meaningful."
+  @doc """
+  The failure's name, or `nil` when a name is not meaningful.
+
+  For a check failure it is the check or projection name. For a divergence it
+  names the observation that differed: by default the root command's module,
+  since the default observation of a root is what the target answered to that
+  command. A later comparison feature that names its own observations will
+  supply that name instead.
+  """
   @spec name(t()) :: atom() | nil
   def name(%__MODULE__{type: %Check{name: name}}), do: name
+  def name(%__MODULE__{type: %Divergence{name: name}}), do: name
   def name(%__MODULE__{type: _}), do: nil
 
   @doc """
   The class-specific payload for the failure. For a divergence it is the map
-  `%{root:, reference_result:, divergent_result:, results:}`.
+  `%{root:, command:, reference_result:, divergent_result:, results:}`.
   """
   @spec detail(t()) :: term()
   def detail(%__MODULE__{type: %Divergence{} = divergence}) do
     Map.take(Map.from_struct(divergence), [
       :root,
+      :command,
       :reference_result,
       :divergent_result,
       :results
@@ -376,16 +396,20 @@ defmodule PropertyDamage.Failure do
   # ==========================================================================
 
   @doc """
-  A target answered command `root` differently from the reference target.
+  A target answered `command`, the command at index `root`, differently from
+  the reference target.
 
   `reference_result` and `divergent_result` are the two observations; `results`
-  holds every target's observation of that command, keyed by target name.
+  holds every target's observation of that command, keyed by target name. The
+  failure's name is the command's module (see `name/1`).
   """
-  @spec diverged(non_neg_integer(), term(), term(), %{String.t() => term()}) :: t()
-  def diverged(root, reference_result, divergent_result, results) do
+  @spec diverged(non_neg_integer(), struct(), term(), term(), %{String.t() => term()}) :: t()
+  def diverged(root, %command_module{} = command, reference_result, divergent_result, results) do
     %__MODULE__{
       type: %Divergence{
         root: root,
+        command: command,
+        name: command_module,
         reference_result: reference_result,
         divergent_result: divergent_result,
         results: results
@@ -441,8 +465,9 @@ defmodule PropertyDamage.Failure do
   Build a minimal `%Failure{}` carrying only a kind and a name.
 
   Used by the shrinker to reconstruct a comparable failure from the kind and
-  name of a failure signature; the `detail` is left `nil`. Names are only
-  retained for `Check` kinds.
+  name of a failure signature; the `detail` is left `nil`. Names are retained
+  for `Check` kinds and for `:diverged`, so the rebuilt failure has the
+  signature it was built from.
   """
   @spec from_signature(kind(), atom() | nil) :: t()
   def from_signature(kind, name) when kind in @check_kinds do
@@ -453,7 +478,7 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: %Execution{kind: kind}}
   end
 
-  def from_signature(:diverged, _name), do: %__MODULE__{type: %Divergence{}}
+  def from_signature(:diverged, name), do: %__MODULE__{type: %Divergence{name: name}}
 
   def from_signature(:setup_failed, _name), do: %__MODULE__{type: %Setup{}}
 
