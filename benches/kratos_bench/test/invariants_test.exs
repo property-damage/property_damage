@@ -27,8 +27,7 @@ defmodule KratosBench.InvariantsTest do
   defp run(seed, overrides) do
     PropertyDamage.run(
       model: KratosBench.Model,
-      adapter: KratosBench.Adapter,
-      adapter_config: KratosBench.adapter_config(overrides),
+      targets: [{KratosBench.Adapter, config: KratosBench.target_config(overrides)}],
       max_commands: 16,
       max_runs: 12,
       seed: seed,

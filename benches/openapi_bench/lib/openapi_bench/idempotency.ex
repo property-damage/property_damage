@@ -131,7 +131,7 @@ end
 defmodule OpenapiBench.Idempotency.Model do
   @moduledoc """
   Idempotency bench model: sequences of `CreateValue` against `POST /values`.
-  `setup_each/1` seeds the `idempotency_bug` flag from `adapter_config` so the
+  `setup_each/1` seeds the `idempotency_bug` flag from the target's `config:` so the
   same model exercises both the retry-safe and the double-creating SUT.
   """
   @behaviour PropertyDamage.Model

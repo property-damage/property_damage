@@ -54,7 +54,7 @@ defmodule ObanBench.RetryTest do
         assert {:ok, _stats} =
                  PropertyDamage.run(
                    model: Model,
-                   adapter: Adapter,
+                   targets: [Adapter],
                    seed: unquote(seed),
                    max_commands: 8,
                    max_runs: 6,
@@ -71,7 +71,7 @@ defmodule ObanBench.RetryTest do
       assert {:error, report} =
                PropertyDamage.run(
                  model: Model,
-                 adapter: DoubleApplyAdapter,
+                 targets: [DoubleApplyAdapter],
                  seed: @seed,
                  max_commands: 8,
                  max_runs: 6,

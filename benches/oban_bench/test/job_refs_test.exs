@@ -25,7 +25,7 @@ defmodule ObanBench.JobRefsTest do
         assert {:ok, _stats} =
                  PropertyDamage.run(
                    model: Model,
-                   adapter: Adapter,
+                   targets: [Adapter],
                    seed: unquote(seed),
                    max_commands: 12,
                    max_runs: 12,
@@ -39,7 +39,7 @@ defmodule ObanBench.JobRefsTest do
     assert {:ok, stats} =
              PropertyDamage.run(
                model: Model,
-               adapter: Adapter,
+               targets: [Adapter],
                seed: 1,
                max_commands: 12,
                max_runs: 25,

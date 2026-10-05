@@ -56,7 +56,7 @@ defmodule RedisBench.FaultInjectionTest do
       assert {:ok, _stats} =
                PropertyDamage.run(
                  model: RedisBench.Model,
-                 adapter: RedisBench.ProxyAdapter,
+                 targets: [RedisBench.ProxyAdapter],
                  max_commands: 12,
                  max_runs: 10,
                  verbose: false
@@ -69,7 +69,7 @@ defmodule RedisBench.FaultInjectionTest do
       assert {:error, report} =
                PropertyDamage.run(
                  model: RedisBench.Model,
-                 adapter: RedisBench.ProxyAdapter,
+                 targets: [RedisBench.ProxyAdapter],
                  max_commands: 12,
                  max_runs: 5,
                  seed: 1,

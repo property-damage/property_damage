@@ -49,7 +49,7 @@ defmodule RedisBench.SeededBugTest do
     assert {:error, report} =
              PropertyDamage.run(
                model: RedisBench.Model,
-               adapter: StaleReadAdapter,
+               targets: [StaleReadAdapter],
                max_commands: 30,
                max_runs: 50,
                seed: 1,

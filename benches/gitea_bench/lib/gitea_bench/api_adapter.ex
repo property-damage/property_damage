@@ -6,7 +6,7 @@ defmodule GiteaBench.ApiAdapter do
   and then builds its event from a neutral observation read (`GiteaBench.Gitea`),
   so the events are directly comparable to the UI adapter's.
 
-  Config (`opts`/`adapter_config`): `:base_url` (required), `:admin_user`,
+  Config (`config:` in the `targets:` entry): `:base_url` (required), `:admin_user`,
   `:admin_password`.
   """
 

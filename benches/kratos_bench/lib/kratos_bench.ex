@@ -18,9 +18,9 @@ defmodule KratosBench do
   @spec email_for(non_neg_integer()) :: String.t()
   def email_for(n), do: "user-#{n}@kratos.pd.local"
 
-  @doc "Adapter config from application env, plus any overrides (e.g. seeded bugs)."
-  @spec adapter_config(keyword() | map()) :: map()
-  def adapter_config(overrides \\ %{}) do
+  @doc "Target config from application env, plus any overrides (e.g. seeded bugs)."
+  @spec target_config(keyword() | map()) :: map()
+  def target_config(overrides \\ %{}) do
     %{
       public_url: Application.fetch_env!(:kratos_bench, :public_url),
       admin_url: Application.fetch_env!(:kratos_bench, :admin_url),

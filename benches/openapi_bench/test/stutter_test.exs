@@ -38,8 +38,9 @@ defmodule OpenapiBench.StutterTest do
     assert {:error, report} =
              PropertyDamage.run(
                model: Model,
-               adapter: Adapter,
-               adapter_config: %{base_url: Server.base_url(), idempotency_bug: true},
+               targets: [
+                 {Adapter, config: %{base_url: Server.base_url(), idempotency_bug: true}}
+               ],
                stutter: @stutter,
                max_commands: 10,
                max_runs: 20,
@@ -58,8 +59,9 @@ defmodule OpenapiBench.StutterTest do
     assert {:ok, stats} =
              PropertyDamage.run(
                model: Model,
-               adapter: Adapter,
-               adapter_config: %{base_url: Server.base_url(), idempotency_bug: false},
+               targets: [
+                 {Adapter, config: %{base_url: Server.base_url(), idempotency_bug: false}}
+               ],
                stutter: Keyword.put(@stutter, :max_repeats, 2),
                coverage: true,
                max_commands: 10,

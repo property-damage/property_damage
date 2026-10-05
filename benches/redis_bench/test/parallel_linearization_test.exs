@@ -124,7 +124,7 @@ defmodule RedisBench.ParallelLinearizationTest do
         assert {:ok, _stats} =
                  PropertyDamage.run(
                    model: RedisBench.Model,
-                   adapter: RedisBench.Adapter,
+                   targets: [RedisBench.Adapter],
                    seed: unquote(seed),
                    max_commands: 12,
                    max_runs: 40,
@@ -141,7 +141,7 @@ defmodule RedisBench.ParallelLinearizationTest do
         assert {:ok, _stats} =
                  PropertyDamage.run(
                    model: RedisBench.RmwModel,
-                   adapter: RedisBench.Adapter,
+                   targets: [RedisBench.Adapter],
                    seed: unquote(seed),
                    max_commands: 12,
                    max_runs: 40,
@@ -189,7 +189,7 @@ defmodule RedisBench.ParallelLinearizationTest do
           FailureReport.shrunk_sequence(failure),
           RedisBench.RmwModel,
           LostUpdateAdapter,
-          adapter_config: %{}
+          config: %{}
         )
 
       refute replay.success
@@ -246,7 +246,7 @@ defmodule RedisBench.ParallelLinearizationTest do
   defp run_lost_update(seed) do
     PropertyDamage.run(
       model: RedisBench.RmwModel,
-      adapter: LostUpdateAdapter,
+      targets: [LostUpdateAdapter],
       seed: seed,
       max_commands: 12,
       max_runs: 40,

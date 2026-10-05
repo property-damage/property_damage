@@ -33,8 +33,7 @@ defmodule GiteaBenchTest do
     assert {:ok, _stats} =
              PropertyDamage.run(
                model: GiteaBench.Model,
-               adapter: GiteaBench.ApiAdapter,
-               adapter_config: Map.new(api_opts()),
+               targets: [{GiteaBench.ApiAdapter, config: Map.new(api_opts())}],
                max_commands: 16,
                max_runs: 5
              )
@@ -45,8 +44,7 @@ defmodule GiteaBenchTest do
     assert {:ok, _stats} =
              PropertyDamage.run(
                model: GiteaBench.Model,
-               adapter: GiteaBench.UiAdapter,
-               adapter_config: Map.new(ui_opts()),
+               targets: [{GiteaBench.UiAdapter, config: Map.new(ui_opts())}],
                max_commands: 10,
                max_runs: 2
              )
@@ -104,8 +102,8 @@ defmodule GiteaBenchTest do
                PropertyDamage.Differential.run(
                  model: GiteaBench.Model,
                  targets: [
-                   {GiteaBench.ApiAdapter, role: :reference, opts: api_opts()},
-                   {GiteaBench.UiAdapter, name: "ui", opts: ui_opts()}
+                   {GiteaBench.ApiAdapter, name: "api", config: Map.new(api_opts())},
+                   {GiteaBench.UiAdapter, name: "ui", config: Map.new(ui_opts())}
                  ],
                  compare: :correctness,
                  equivalence: :structural,

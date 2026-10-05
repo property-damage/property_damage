@@ -40,16 +40,15 @@ defmodule OpenapiBench.FailureWorkflowTest do
     assert {:error, _report} =
              PropertyDamage.run(
                model: Model,
-               adapter: Adapter,
-               adapter_config: %{base_url: Server.base_url(), bug: true},
-               # The run-level :regression schema accepts :adapter, so the
-               # generated ExUnit test's HTTP-spec mapping is pinned explicitly
-               # to the generated adapter rather than falling back to
-               # report.adapter.
+               targets: [{Adapter, config: %{base_url: Server.base_url(), bug: true}}],
+               # The :regression schema accepts its own :targets, so the
+               # generated ExUnit test's target is pinned explicitly to the
+               # generated adapter rather than falling back to the run's
+               # target.
                regression: [
                  save_failures: failures_dir,
                  generate_tests: tests_dir,
-                 adapter: Adapter
+                 targets: [Adapter]
                ],
                max_commands: 25,
                max_runs: 50,
@@ -77,7 +76,7 @@ defmodule OpenapiBench.FailureWorkflowTest do
     # failure (drives the same engine path as the original run).
     assert {:ok, steps} =
              PropertyDamage.replay(loaded,
-               adapter_config: %{base_url: Server.base_url(), bug: true}
+               targets: [{Adapter, config: %{base_url: Server.base_url(), bug: true}}]
              )
 
     assert Enum.any?(steps, &match?({:check_failed, _, _}, &1.result)),

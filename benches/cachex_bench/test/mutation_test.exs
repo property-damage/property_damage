@@ -77,7 +77,7 @@ defmodule CachexBench.MutationTest do
 
   test "the read-consistency invariant kills mutants and the report shape is honest" do
     assert {:ok, report} =
-             Mutation.run([model: CachexBench.Model, adapter: CachexBench.Adapter] ++ @opts)
+             Mutation.run([model: CachexBench.Model, targets: [CachexBench.Adapter]] ++ @opts)
 
     assert %Report{} = report
 
@@ -117,7 +117,7 @@ defmodule CachexBench.MutationTest do
 
   test "without the invariant the same mutations all survive (control)" do
     assert {:ok, report} =
-             Mutation.run([model: UncheckedModel, adapter: CachexBench.Adapter] ++ @opts)
+             Mutation.run([model: UncheckedModel, targets: [CachexBench.Adapter]] ++ @opts)
 
     # Nothing checks the perturbed events, so no mutant can be killed. This is
     # the RED control proving the kills above are the invariant's doing, not an

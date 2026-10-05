@@ -17,8 +17,7 @@ defmodule OpenapiBench.ScaffoldRunTest do
       assert {:ok, _stats} =
                PropertyDamage.run(
                  model: Model,
-                 adapter: Adapter,
-                 adapter_config: %{base_url: Server.base_url(), bug: false},
+                 targets: [{Adapter, config: %{base_url: Server.base_url(), bug: false}}],
                  max_commands: 25,
                  max_runs: 50,
                  seed: unquote(seed),
