@@ -396,7 +396,7 @@ defmodule PropertyDamage.DifferentialTest do
       assert result.divergences != []
 
       [div | _] = result.divergences
-      assert div.divergent_target == "divergent"
+      assert div.variant == %{index: 1, name: "divergent"}
     end
 
     test "uses structural equivalence when specified" do
@@ -514,21 +514,23 @@ defmodule PropertyDamage.DifferentialTest do
     end
 
     test "format/1 produces readable output" do
-      result = %Result{
-        mode: :correctness,
-        execution: :interleaved,
-        runs: 100,
-        seed: 12_345,
-        reference: %{index: 0, name: "oracle"},
-        status: :equivalent,
-        divergences: [],
-        metrics: %{},
-        targets: [%{index: 0, name: "oracle"}, %{index: 1, name: "sut"}]
-      }
+      result =
+        struct(Result,
+          mode: :correctness,
+          concurrency: :serial,
+          runs: 100,
+          seed: 12_345,
+          reference: %{index: 0, name: "oracle"},
+          status: :equivalent,
+          divergences: [],
+          metrics: %{},
+          targets: [%{index: 0, name: "oracle"}, %{index: 1, name: "sut"}]
+        )
 
       output = Result.format(result)
       assert output =~ "Differential Testing Result"
       assert output =~ "correctness"
+      assert output =~ "Concurrency: serial"
       assert output =~ "EQUIVALENT"
     end
   end
@@ -563,11 +565,11 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   # ============================================================================
-  # Execution Mode Tests
+  # Concurrency
   # ============================================================================
 
-  describe "execution modes" do
-    test "interleaved is default for correctness" do
+  describe "concurrency" do
+    test "serial is the default" do
       {:ok, result} =
         Differential.run(
           model: TestModel,
@@ -581,42 +583,7 @@ defmodule PropertyDamage.DifferentialTest do
           seed: 12_345
         )
 
-      assert result.execution == :interleaved
-    end
-
-    test "sequential is default for performance" do
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            ReferenceAdapter,
-            IdenticalAdapter
-          ],
-          compare: :performance,
-          max_runs: 2,
-          max_commands: 2,
-          seed: 12_345
-        )
-
-      assert result.execution == :sequential
-    end
-
-    test "can override execution mode" do
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            ReferenceAdapter,
-            IdenticalAdapter
-          ],
-          compare: :correctness,
-          execution: :sequential,
-          max_runs: 2,
-          max_commands: 2,
-          seed: 12_345
-        )
-
-      assert result.execution == :sequential
+      assert Map.get(result, :concurrency) == :serial
     end
   end
 
@@ -646,7 +613,7 @@ defmodule PropertyDamage.DifferentialTest do
   # ============================================================================
 
   describe "run/1 progress (DR-022)" do
-    test "interleaved on_progress receives :run updates then a terminal result" do
+    test "on_progress receives :run updates then a terminal result" do
       test_pid = self()
 
       {:ok, result} =
@@ -657,7 +624,6 @@ defmodule PropertyDamage.DifferentialTest do
             {IdenticalAdapter, name: "identical"}
           ],
           compare: :correctness,
-          execution: :interleaved,
           max_runs: 3,
           max_commands: 2,
           seed: 12_345,
@@ -673,35 +639,6 @@ defmodule PropertyDamage.DifferentialTest do
 
       assert %Progress{data: %DifferentialUpdate{phase: :run, run_number: 1, total_runs: 3}} =
                hd(run_updates)
-
-      assert %Progress{data: %DifferentialResult{result: ^result}} = List.last(progresses)
-    end
-
-    test "sequential on_progress receives :target updates then a terminal result" do
-      test_pid = self()
-
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            ReferenceAdapter,
-            {IdenticalAdapter, name: "identical"}
-          ],
-          compare: :performance,
-          max_runs: 2,
-          max_commands: 2,
-          seed: 12_345,
-          on_progress: fn progress -> send(test_pid, {:progress, progress}) end
-        )
-
-      progresses = drain_progress([])
-
-      target_names =
-        for %Progress{data: %DifferentialUpdate{phase: :target, target_name: name}} <- progresses,
-            do: name
-
-      assert "ReferenceAdapter" in target_names
-      assert "identical" in target_names
 
       assert %Progress{data: %DifferentialResult{result: ^result}} = List.last(progresses)
     end
@@ -743,60 +680,54 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   # ============================================================================
-  # Characterization: per-target injected-event capture (F2 sink-window refactor)
+  # Characterization: per-target injected-event capture
   #
-  # These lock the observable contract of execute_target_command's injection sink
-  # BEFORE it is refactored onto the shared injection-sink window helper: an
-  # adapter that injects mid-execution has the injected event folded into its
-  # result AHEAD of its returned events (injected ++ returned), and this holds in
-  # both interleaved and sequential modes. If the refactor drops, reorders, or
-  # double-counts injected events, the positive tests flip to divergent; the
-  # negative control proves the tests actually observe the injected event.
+  # An adapter that injects mid-execution has the injected event folded into its
+  # root observation AHEAD of its returned events (injected ++ returned). If that
+  # folding drops, reorders, or double-counts injected events, the positive test
+  # flips to divergent; the negative control proves the tests actually observe
+  # the injected event.
   # ============================================================================
   describe "injected-event folding (characterization)" do
-    for mode <- [:interleaved, :sequential] do
-      test "#{mode}: an injected event is folded ahead of returned events" do
-        {:ok, result} =
-          Differential.run(
-            model: TestModel,
-            targets: [
-              PreCombinedAdapter,
-              {InjectingCandidateAdapter, name: "injecting"}
-            ],
-            compare: :correctness,
-            execution: unquote(mode),
-            max_runs: 3,
-            max_commands: 3,
-            seed: 12_345
-          )
+    test "an injected event is folded ahead of returned events" do
+      {:ok, result} =
+        Differential.run(
+          model: TestModel,
+          targets: [
+            PreCombinedAdapter,
+            {InjectingCandidateAdapter, name: "injecting"}
+          ],
+          compare: :correctness,
+          max_runs: 3,
+          max_commands: 3,
+          seed: 12_345
+        )
 
-        # The injecting target's result equals [injected, returned], matching the
-        # reference that returns that stream directly: no divergence.
-        assert result.status == :equivalent
-        assert result.divergences == []
-      end
+      # The injecting target's result equals [injected, returned], matching the
+      # reference that returns that stream directly: no divergence.
+      assert result.status == :equivalent
+      assert result.divergences == []
+    end
 
-      test "#{mode}: the injected event is actually observed (negative control)" do
-        {:ok, result} =
-          Differential.run(
-            model: TestModel,
-            targets: [
-              ReturnedOnlyAdapter,
-              {InjectingCandidateAdapter, name: "injecting"}
-            ],
-            compare: :correctness,
-            execution: unquote(mode),
-            max_runs: 3,
-            max_commands: 3,
-            seed: 12_345
-          )
+    test "the injected event is actually observed (negative control)" do
+      {:ok, result} =
+        Differential.run(
+          model: TestModel,
+          targets: [
+            ReturnedOnlyAdapter,
+            {InjectingCandidateAdapter, name: "injecting"}
+          ],
+          compare: :correctness,
+          max_runs: 3,
+          max_commands: 3,
+          seed: 12_345
+        )
 
-        # Reference emits only the returned event; the injecting target additionally
-        # carries the injected event, so the streams diverge. This proves the
-        # positive test above is not passing by silently dropping injected events.
-        assert result.status == :divergent
-        assert result.divergences != []
-      end
+      # Reference emits only the returned event; the injecting target additionally
+      # carries the injected event, so the streams diverge. This proves the
+      # positive test above is not passing by silently dropping injected events.
+      assert result.status == :divergent
+      assert result.divergences != []
     end
   end
 
