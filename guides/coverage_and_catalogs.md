@@ -136,7 +136,7 @@ end
 {:ok, stats} =
   PropertyDamage.run(
     model: Bank.Model,
-    adapter: Bank.Adapter,
+    targets: [Bank.Adapter],
     max_commands: 20,
     max_runs: 50,
     seed: 7,
@@ -211,7 +211,7 @@ result carries the merged tracker:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
-result = PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter, coverage: true)
+result = PropertyDamage.run(model: Bank.Model, targets: [Bank.Adapter], coverage: true)
 tracker = PropertyDamage.coverage(result, Bank.Model)
 ```
 
@@ -330,7 +330,7 @@ PropertyDamage.Coverage.meets_threshold?(stats.coverage, check_coverage: 100)
 invariant fired. Wire it into a test or a CI script:
 
 ```elixir
-{:ok, stats} = PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter, coverage: true)
+{:ok, stats} = PropertyDamage.run(model: Bank.Model, targets: [Bank.Adapter], coverage: true)
 
 unless PropertyDamage.Coverage.meets_threshold?(stats.coverage,
          command: 100, transition: 80, check_coverage: 100) do
@@ -354,10 +354,10 @@ between edits. Enable it with a run option:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 # Default file; a new failure's seed is appended, and stored seeds replay first.
-PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter, seed_library: true)
+PropertyDamage.run(model: Bank.Model, targets: [Bank.Adapter], seed_library: true)
 
 # Or an explicit path
-PropertyDamage.run(model: Bank.Model, adapter: Bank.Adapter, seed_library: "seeds.json")
+PropertyDamage.run(model: Bank.Model, targets: [Bank.Adapter], seed_library: "seeds.json")
 ```
 
 You rarely touch `PropertyDamage.SeedLibrary` directly. Each entry tracks a
@@ -380,7 +380,7 @@ library, generate ExUnit tests, deduplicate similar failures — use the
 ```elixir
 PropertyDamage.run(
   model: Bank.Model,
-  adapter: Bank.Adapter,
+  targets: [Bank.Adapter],
   regression: [
     save_failures: "failures/",
     seed_library: "seeds.json",

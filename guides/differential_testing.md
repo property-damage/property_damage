@@ -34,7 +34,7 @@ Compare your system under test against a reference implementation:
 PropertyDamage.Differential.run(
   model: MyModel,
   targets: [
-    {ReferenceAdapter, role: :reference},
+    ReferenceAdapter,
     {SUTAdapter, name: "new-impl"}
   ],
   compare: :correctness,
@@ -42,8 +42,8 @@ PropertyDamage.Differential.run(
 )
 ```
 
-The reference target's results are treated as "correct" - divergences indicate
-bugs in other targets.
+The first target in the `targets:` list is the reference oracle - its results are
+treated as "correct" and divergences indicate bugs in other targets.
 
 ### 2. Performance Comparison
 
@@ -53,8 +53,8 @@ Compare implementations for latency and throughput:
 {:ok, result} = PropertyDamage.Differential.run(
   model: MyModel,
   targets: [
-    {RedisAdapter, name: "redis-backend"},
-    {PostgresAdapter, name: "postgres-backend"}
+    {RedisAdapter, name: "redis", config: %{host: "localhost"}},
+    {PostgresAdapter, name: "postgres", config: %{url: "postgres://localhost/db"}}
   ],
   compare: :performance,
   max_runs: 100,
@@ -73,8 +73,8 @@ A powerful pattern is comparing the same adapter with different configurations:
 PropertyDamage.Differential.run(
   model: MyModel,
   targets: [
-    {HTTPAdapter, role: :reference, opts: [base_url: "https://prod.example.com"]},
-    {HTTPAdapter, name: "staging", opts: [base_url: "https://staging.example.com"]}
+    {HTTPAdapter, name: "prod", config: %{base_url: "https://prod.example.com"}},
+    {HTTPAdapter, name: "staging", config: %{base_url: "https://staging.example.com"}}
   ],
   compare: :correctness
 )
@@ -83,8 +83,8 @@ PropertyDamage.Differential.run(
 PropertyDamage.Differential.run(
   model: MyModel,
   targets: [
-    {DBAdapter, name: "with-cache", opts: [cache: true]},
-    {DBAdapter, name: "no-cache", opts: [cache: false]}
+    {DBAdapter, name: "with-cache", config: %{cache: true}},
+    {DBAdapter, name: "no-cache", config: %{cache: false}}
   ],
   compare: :both  # Check both correctness and performance
 )
@@ -206,6 +206,10 @@ end
 result.status
 # => :equivalent | :divergent | :complete
 
+# The reference and every target are %{index: i, name: n}
+result.reference
+# => %{index: 0, name: "ReferenceAdapter"}
+
 # Check for divergences
 if PropertyDamage.Differential.Result.divergent?(result) do
   IO.puts("Found #{length(result.divergences)} divergences")
@@ -218,9 +222,9 @@ if PropertyDamage.Differential.Result.divergent?(result) do
 end
 
 # Get metrics per target
-for target <- result.targets do
-  metrics = PropertyDamage.Differential.Result.metrics_for(result, target)
-  IO.puts("#{target}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
+for %{name: name} <- result.targets do
+  metrics = PropertyDamage.Differential.Result.metrics_for(result, name)
+  IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
 end
 ```
 
@@ -253,14 +257,41 @@ IO.puts(PropertyDamage.Differential.Result.format(result, format: :divergences))
 ### Target Specification
 
 ```elixir
-{AdapterModule}
-{AdapterModule, opts}
-
-# opts can include:
-#   name:  Display name (default: derived from module)
-#   role:  :reference for oracle testing
-#   opts:  Options passed to adapter's setup/1
+AdapterModule                           # Bare module name
+{AdapterModule, name: "display-name"}   # Explicit display name
+{AdapterModule, config: %{key: value}}  # Configuration for setup/1
+{AdapterModule, name: "name", config: %{key: value}}  # Both
 ```
+
+The **first entry in the `targets:` list is the reference oracle** (no special marker needed).
+The `config:` option is a map of key-value pairs passed to the adapter's `setup/1` callback.
+Each target may have the same adapter module with different configs for isolation
+(e.g., distinct tenants).
+
+A bare module takes its last module segment as its name (`MyApp.ReferenceAdapter`
+is `"ReferenceAdapter"`). Two entries must not share a name, so give entries on the
+same adapter distinct `name:` values. Differential runs do not support `injectors:`
+or `mocks:` in an entry.
+
+### Isolating Targets on the Same System
+
+When comparing two targets that run on the same system (for example, the same
+database server), isolation is critical to avoid state leakage. The `config:` field
+is your isolation boundary: pass a distinct tenant, schema, database name, or port
+to each target so they do not collide. For example, when testing two database
+configurations against the same PostgreSQL server, pass a different database name
+to each:
+
+```elixir
+targets: [
+  {DBAdapter, name: "replica-1", config: %{db: "test_db_1"}},
+  {DBAdapter, name: "replica-2", config: %{db: "test_db_2"}}
+]
+```
+
+The `mix pd.validate --targets "<list>"` command warns when two targets share the
+same adapter module *and* an identical `config:`, since that usually signals a
+configuration mistake. Fix it by giving each target its own config.
 
 ### Optional Options
 
@@ -289,7 +320,7 @@ alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate}
 
 PropertyDamage.Differential.run(
   model: MyModel,
-  targets: [{OracleAdapter, role: :reference}, {SUTAdapter, name: "new-impl"}],
+  targets: [OracleAdapter, {SUTAdapter, name: "new-impl"}],
   compare: :correctness,
   on_progress: fn
     %Progress{data: %DifferentialUpdate{phase: :run, run_number: n, total_runs: total}} ->
@@ -320,10 +351,10 @@ defmodule MigrationTest do
     {:ok, result} = PropertyDamage.Differential.run(
       model: OrderModel,
       targets: [
-        {SQLAdapter, role: :reference, name: "postgres",
-         opts: [url: "postgres://localhost/orders"]},
+        {SQLAdapter, name: "postgres",
+         config: %{url: "postgres://localhost/orders"}},
         {SQLAdapter, name: "cockroach",
-         opts: [url: "postgres://localhost:26257/orders"]}
+         config: %{url: "postgres://localhost:26257/orders"}}
       ],
       compare: :both,
       max_runs: 500,
@@ -353,10 +384,10 @@ Comparing v1 and v2 of an API:
 PropertyDamage.Differential.run(
   model: UserModel,
   targets: [
-    {HTTPAdapter, role: :reference, name: "v1",
-     opts: [base_url: "https://api.example.com/v1"]},
+    {HTTPAdapter, name: "v1",
+     config: %{base_url: "https://api.example.com/v1"}},
     {HTTPAdapter, name: "v2",
-     opts: [base_url: "https://api.example.com/v2"]}
+     config: %{base_url: "https://api.example.com/v2"}}
   ],
   compare: :correctness,
   equivalence: fn v1_result, v2_result ->

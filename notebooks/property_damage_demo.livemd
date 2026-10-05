@@ -336,7 +336,7 @@ Against the correct adapter this returns `{:ok, stats}`.
 result =
   PropertyDamage.run(
     model: Demo.Model,
-    adapter: Demo.BankAdapter,
+    targets: [Demo.BankAdapter],
     max_commands: 25,
     max_runs: 100,
     seed: 42,
@@ -426,7 +426,7 @@ it, and returns `{:error, failure}`.
 {:error, failure} =
   PropertyDamage.run(
     model: Demo.Model,
-    adapter: Demo.BuggyBankAdapter,
+    targets: [Demo.BuggyBankAdapter],
     max_commands: 25,
     max_runs: 100,
     seed: 42
@@ -604,7 +604,7 @@ end
 
 PropertyDamage.run(
   model: Demo.ChaosModel,
-  adapter: Demo.BankAdapter,
+  targets: [Demo.BankAdapter],
   max_commands: 20,
   max_runs: 30,
   seed: 7

@@ -55,8 +55,7 @@ OpenapiBench.Server.ensure_started()
 {:ok, result} =
   PropertyDamage.Integration.run(
     model: OpenapiBench.Generated.Model,
-    adapter: OpenapiBench.Generated.Adapter,
-    adapter_config: %{base_url: OpenapiBench.Server.base_url()},
+    targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: OpenapiBench.Server.base_url()}}],
     max_runs: 20,
     max_commands: 25
   )
@@ -88,7 +87,7 @@ failures: [], duration_ms: ..., model: ..., adapter: ...}`.
 
 ### Seeing it catch a real bug
 
-The bench's SUT has a seedable defect: pass `bug: true` in `adapter_config` and
+The bench's SUT has a seedable defect: pass `bug: true` in the target's `config:` and
 `PUT` answers `200` but silently drops the write, so a later `GET` on the same
 key comes back `404`. The generated client's read-consistency invariant catches
 it, and `run/1` returns `{:error, result}`:
@@ -97,8 +96,7 @@ it, and `run/1` returns `{:error, result}`:
 {:error, result} =
   PropertyDamage.Integration.run(
     model: OpenapiBench.Generated.Model,
-    adapter: OpenapiBench.Generated.Adapter,
-    adapter_config: %{base_url: OpenapiBench.Server.base_url(), bug: true},
+    targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: OpenapiBench.Server.base_url(), bug: true}}],
     max_runs: 5,
     max_commands: 25
   )
@@ -243,8 +241,7 @@ set:
 {:ok, result} =
   PropertyDamage.Integration.run(
     model: OpenapiBench.Generated.Model,
-    adapter: OpenapiBench.Generated.Adapter,
-    adapter_config: %{base_url: "http://localhost:4010"},
+    targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}],
     max_runs: 100,
     max_commands: 50,
     # Optional: wait for the service to become healthy before the first run.
@@ -275,8 +272,7 @@ failures (deduplicated by fingerprint), rather than a fixed number of runs:
 {:ok, bugs} =
   PropertyDamage.Integration.hunt_bugs(
     model: OpenapiBench.Generated.Model,
-    adapter: OpenapiBench.Generated.Adapter,
-    adapter_config: %{base_url: "http://localhost:4010", bug: true},
+    targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010", bug: true}}],
     stop_after: 3,
     max_runs: :unlimited,
     save_to: "discovered_bugs/"
@@ -398,7 +394,7 @@ programmatically:
 
 ```elixir
 {:ok, failure} = PropertyDamage.load_failure("bugs/read_consistent-seed352687743.pd")
-PropertyDamage.replay(failure, adapter_config: %{base_url: "http://localhost:4010"})
+PropertyDamage.replay(failure, targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}])
 ```
 
 ## CI/CD Integration

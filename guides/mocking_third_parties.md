@@ -225,14 +225,15 @@ end
 
 ## Wiring the Mock into a Run
 
-Declare the mock with the `:mock_services` option of `PropertyDamage.run/1`.
-Each entry is a mock module or a `{module, config}` tuple:
+Declare the mock in the `mocks:` entry of `targets:` in `PropertyDamage.run/1`.
+Each mock entry is a mock module or a `{module, config}` tuple:
 
 ```elixir
 PropertyDamage.run(
   model: PaymentTestModel,
-  adapter: PaymentAdapter,
-  mock_services: [{MyTest.PaymentGatewayMock, %{port: 4445}}]
+  targets: [{PaymentAdapter,
+    mocks: [{MyTest.PaymentGatewayMock, %{port: 4445}}]
+  }]
 )
 ```
 
@@ -283,7 +284,7 @@ end
 
 Returning events from `handle_request/2` is not enough on its own -- the
 transport must `push_events/3` them into the registry for the framework to see
-them. `runtime.mock_registry` is `nil` when the run declared no `:mock_services`.
+them. `runtime.mock_registry` is `nil` when the run's target declared no `mocks:`.
 
 ## Mock Patterns
 

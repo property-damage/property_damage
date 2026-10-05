@@ -106,9 +106,10 @@ defmodule MyApp.RegressionTest do
       ]
 
       {:ok, events} = PropertyDamage.execute(commands,
-        adapter: TestAdapter,
-        injector_adapters: [WebhookInjectorAdapter],
-        adapter_config: %{base_url: "http://localhost:4000"}
+        targets: [{TestAdapter,
+          config: %{base_url: "http://localhost:4000"},
+          injectors: [WebhookInjectorAdapter]
+        }]
       )
 
       # Assert on command events
@@ -148,7 +149,7 @@ Here's how to extract it for a regression test:
 # Run property test
 {:error, failure} = PropertyDamage.run(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   on_failure: fn report ->
     # Log the shrunk sequence for later use
     IO.puts("Shrunk sequence:")
@@ -165,7 +166,7 @@ commands = PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_s
 PropertyDamage can generate regression test code from failures:
 
 ```elixir
-{:error, failure} = PropertyDamage.run(model: M, adapter: A)
+{:error, failure} = PropertyDamage.run(model: M, targets: [A])
 
 # Generate ExUnit test code
 test_code = PropertyDamage.generate_test(failure, format: :exunit)
@@ -217,9 +218,9 @@ Execute a fixed command sequence without a model.
 
 **Options:**
 
-- `:adapter` - Adapter module (required)
-- `:injector_adapters` - List of injector adapter modules (default: `[]`)
-- `:adapter_config` - Config passed to `adapter.setup/1` (default: `%{}`)
+- `:targets` - A list with exactly one entry (required): the adapter module, or
+  `{Module, config: map, injectors: [...], mocks: [...]}`. `config:` is passed to
+  `adapter.setup/1` (default: `%{}`)
 - `:refs` - Initial ref resolution map (default: `%{}`)
 
 **Returns:**
@@ -232,9 +233,10 @@ Execute a fixed command sequence without a model.
 
 ```elixir
 {:ok, events} = PropertyDamage.execute(commands,
-  adapter: MyAdapter,
-  injector_adapters: [WebhookAdapter],
-  adapter_config: %{base_url: "http://localhost:4000"}
+  targets: [{MyAdapter,
+    config: %{base_url: "http://localhost:4000"},
+    injectors: [WebhookAdapter]
+  }]
 )
 ```
 

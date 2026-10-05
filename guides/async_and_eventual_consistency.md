@@ -191,7 +191,7 @@ end
 result =
   PropertyDamage.run(
     model: Warehouse.Model,
-    adapter: Warehouse.Adapter,
+    targets: [Warehouse.Adapter],
     max_commands: 6,
     max_runs: 20,
     seed: 1
@@ -724,9 +724,10 @@ Register injector adapters when running tests:
 ```elixir
 PropertyDamage.run(
   model: MyTest.Model,
-  adapter: MyTest.HTTPAdapter,
-  adapter_config: %{base_url: "http://localhost:4000"},
-  injector_adapters: [MyTest.PaymentWebhookAdapter],
+  targets: [{MyTest.HTTPAdapter,
+    config: %{base_url: "http://localhost:4000"},
+    injectors: [MyTest.PaymentWebhookAdapter]
+  }],
   max_runs: 100
 )
 ```

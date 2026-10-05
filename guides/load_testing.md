@@ -38,8 +38,7 @@ alias PropertyDamage.LoadTest.{Runner, Report}
 # Start a load test
 {:ok, runner} = Runner.start_link(
   model: MyApp.Model,
-  adapter: MyApp.HTTPAdapter,
-  adapter_config: %{base_url: "http://localhost:4000"},
+  targets: [{MyApp.HTTPAdapter, config: %{base_url: "http://localhost:4000"}}],
   arrival_rate: 50,           # 50 new sequences per second
   duration: {2, :minutes}
 )
@@ -64,8 +63,7 @@ run finishes, and returns the final report:
 ```elixir
 {:ok, report} = PropertyDamage.LoadTest.run(
   model: MyApp.Model,
-  adapter: MyApp.HTTPAdapter,
-  adapter_config: %{base_url: "http://localhost:4000"},
+  targets: [{MyApp.HTTPAdapter, config: %{base_url: "http://localhost:4000"}}],
   arrival_rate: 50,
   duration: {2, :minutes}
 )
@@ -90,7 +88,7 @@ to `PropertyDamage.LoadTest.Report`.
 
 `run/1` validates its options against a NimbleOptions schema
 (`PropertyDamage.Options.load_test_schema/0`, the authority for what is
-accepted). The required options are `model`, `adapter`, `arrival_rate`, and
+accepted). The required options are `model`, `targets`, `arrival_rate`, and
 `duration`; everything in [Configuration Options](#configuration-options) below
 is optional.
 
@@ -138,7 +136,7 @@ write.
 | Option | Description | Example |
 |--------|-------------|---------|
 | `model` | Your PropertyDamage model module | `MyApp.Model` |
-| `adapter` | Your adapter module | `MyApp.HTTPAdapter` |
+| `targets` | One entry: your adapter module, or `{Module, config: map}` | `[MyApp.HTTPAdapter]` |
 | `arrival_rate` | Target sequences per second | `50` or `{100, {1, :seconds}}` |
 | `duration` | Test length | `{5, :minutes}` |
 
@@ -146,7 +144,6 @@ write.
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `adapter_config` | Adapter configuration | `%{}` |
 | `ramp_up` | How to ramp up to target rate | `:immediate` |
 | `ramp_down` | How to ramp down at end | `:immediate` |
 | `think_time` | `{min_ms, max_ms}` between commands | `{0, 0}` |
@@ -191,7 +188,7 @@ Example with ramp-up and ramp-down:
 ```elixir
 Runner.start_link(
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [MyAdapter],
   arrival_rate: 100,
   duration: {5, :minutes},
   ramp_up: {:linear, {30, :seconds}},    # 30s to reach full rate
@@ -453,8 +450,7 @@ alias PropertyDamage.LoadTest.{Runner, Report}
 # Configuration
 config = [
   model: MyApp.Model,
-  adapter: MyApp.HTTPAdapter,
-  adapter_config: %{base_url: "http://localhost:4000"},
+  targets: [{MyApp.HTTPAdapter, config: %{base_url: "http://localhost:4000"}}],
   arrival_rate: 50,
   duration: {5, :minutes},
   ramp_up: {:linear, {30, :seconds}},

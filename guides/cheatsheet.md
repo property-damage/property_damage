@@ -98,7 +98,7 @@ end
 ### Lifecycle callback arguments
 
 Every lifecycle callback receives a single map, and `:adapter_config` (the
-`adapter_config` you passed to the run, defaulting to `%{}`) is always present.
+`config:` of the run's `targets:` entry, defaulting to `%{}`) is always present.
 The remaining keys are path tags:
 
 - `setup_each/1` and `teardown_each/1` get `run_number: n` on the normal run
@@ -109,7 +109,7 @@ The remaining keys are path tags:
 - `setup_once/1` and `teardown_once/1` run on the normal run path only (replay
   never calls the `_once` callbacks) and both get `%{adapter_config: config}`.
 
-Because `adapter_config` is the only key guaranteed everywhere, destructure just
+Because `:adapter_config` is the only key guaranteed everywhere, destructure just
 that and treat `run_number`/`replay` as informational:
 
 ```elixir
@@ -274,17 +274,19 @@ end
 PropertyDamage.run(
   # Required
   model: MyModel,
-  adapter: MyAdapter,
+  targets: [{MyApp.Adapter,
+    config: %{api_url: "http://localhost:4000"},
+    injectors: [MyApp.WebhookInjector],
+    mocks: []
+  }],
 
   # Core options
-  adapter_config: %{api_url: "http://localhost:4000"},
   max_commands: 50,          # default: 50
   max_runs: 100,             # default: 100
   seed: 12345,               # default: random
   verbose: true,             # default: false
   validate: true,            # default: true
   shrink: true,              # default: true
-  injector_adapters: [],     # default: []
 
   # Branching (parallel execution)
   branching: [
@@ -302,10 +304,6 @@ PropertyDamage.run(
     commands: :all,            # :all or [Module1, Module2]
     comparison: :strict        # :strict | {:structural, fields} | {:custom, fun}
   },
-
-  # Event injection (InjectorAdapter modules). Nemesis fault injection is wired
-  # differently: add nemesis modules to the model's commands/0 list.
-  injector_adapters: [MyApp.WebhookInjector],
 
   # Callbacks
   on_failure: fn report -> IO.inspect(report) end,
