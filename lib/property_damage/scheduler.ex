@@ -33,7 +33,7 @@ defmodule PropertyDamage.Scheduler do
   the run, pass or fail, every variant that was set up finalizes its run and
   tears its adapter down, again in its own process.
 
-  So `PropertyDamage.Adapter.setup/1` runs once per run per target, and may
+  So `c:PropertyDamage.Adapter.setup/1` runs once per run per target, and may
   find state a previous run (or a crashed one) left behind: it must be
   idempotent.
 
@@ -43,8 +43,8 @@ defmodule PropertyDamage.Scheduler do
   injected, then the events it returned; for a `:probe` or `:async` command,
   the settled events) or `{:error, reason}` (the adapter's error answer). The
   first target is the reference. At each boundary, each other target's
-  observation is compared with the reference's through
-  `PropertyDamage.Differential.Equivalence`; the first target (in target order)
+  observation is compared with the reference's under the run's equivalence
+  strategy (`:exact`, `:structural` or a 2-arity function); the first target (in target order)
   that is not equivalent is the run's divergence, and the run stops at that
   boundary. One function holds this comparison, so the observation compared at
   a boundary can be changed in one place. With one target there is no

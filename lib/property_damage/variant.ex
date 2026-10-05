@@ -137,7 +137,7 @@ defmodule PropertyDamage.Variant do
     * `:model` (required) - the model module
     * `:commands` (required) - the concrete command list
     * `:placeholder_registry` (required) - this variant's copy of the registry
-      built from `:commands` (`PropertyDamage.PlaceholderRegistry.build/1`)
+      built once per run from `:commands`
     * `:seed`, `:run_number` (required) - the campaign seed and the 0-based run
     * `:run_nonce` - the run nonce for client-minted values (DR-034)
     * `:stutter_config` - stutter configuration (default `nil`)
