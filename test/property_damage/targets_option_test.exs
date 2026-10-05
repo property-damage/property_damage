@@ -57,6 +57,15 @@ defmodule PropertyDamage.TargetsOptionTest do
         end
       end
 
+      test "#{schema}: rejects a validated target struct as an entry" do
+        target = struct(PropertyDamage.Target, adapter: SimpleAdapter, name: "x", index: 0)
+
+        assert_targets_error(
+          fn -> validate(unquote(schema), [target]) end,
+          "targets entry 0 is malformed"
+        )
+      end
+
       test "#{schema}: accepts a bare module and a module with a keyword" do
         for entry <- [SimpleAdapter, {SimpleAdapter, name: "named"}] do
           assert [t] = validate(unquote(schema), [entry])[:targets]
