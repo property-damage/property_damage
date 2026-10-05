@@ -22,14 +22,14 @@ A shrunk sequence SHALL only be accepted if it reproduces the same failure as th
 - **THEN** the candidate SHALL be rejected
 - **AND** the shrinker SHALL continue trying other candidates
 
-#### Scenario: Different assertion rejected
-- **WHEN** the original failure is a named assertion failure
-- **AND** a candidate shrunk sequence fails via a *different* assertion
-- **THEN** the candidate SHALL be rejected (assertion failures are distinguished by name, not conflated) (DR-025)
+#### Scenario: Different check rejected
+- **WHEN** the original failure is a named check failure
+- **AND** a candidate shrunk sequence fails via a *different* check
+- **THEN** the candidate SHALL be rejected (check failures are distinguished by name, not conflated) (DR-025)
 
-#### Scenario: Same assertion observed synchronously or asynchronously is equivalent
-- **WHEN** the original failure and a candidate failure are the same named assertion
-- **THEN** they SHALL be equivalent regardless of whether the assertion fired on a command's own event, an asynchronously-observed event, or the `at: :teardown` settled checkpoint
+#### Scenario: Same check observed synchronously or asynchronously is equivalent
+- **WHEN** the original failure and a candidate failure are the same named check
+- **THEN** they SHALL be equivalent regardless of whether the check fired on a command's own event, an asynchronously-observed event, or the `at: :teardown` settled checkpoint
 
 #### Scenario: Failure at same or earlier index
 - **WHEN** a candidate shrunk sequence produces the equivalent failure
@@ -193,10 +193,10 @@ The failure signature SHALL be a tuple of `{type, check_name}` where type identi
 - **WHEN** a failure is caused by a non-check condition (e.g., adapter error, linearization failure)
 - **THEN** the signature SHALL contain the failure type and nil for the check name
 
-#### Scenario: Assertion failure signature includes the assertion name
-- **WHEN** a failure is a named assertion failure (`@trigger` / `@trigger at:` assertion)
-- **THEN** the signature SHALL record the assertion name as the check name, so failures of distinct assertions are not treated as equivalent (DR-025)
+#### Scenario: Check failure signature includes the check name
+- **WHEN** a failure is a named check failure (`@check` / `@check at:` check)
+- **THEN** the signature SHALL record the check name as the check name, so failures of distinct checks are not treated as equivalent (DR-025)
 
-#### Scenario: Asynchronously-observed assertion failure carries a location
-- **WHEN** an `@trigger every:` assertion fails on an asynchronously-observed event
+#### Scenario: Asynchronously-observed check failure carries a location
+- **WHEN** an `@check every:` check fails on an asynchronously-observed event
 - **THEN** the failure SHALL carry the observing event's `command_index` as `failed_at_index`, so the shrinker's truncation can target it (the truncation is still verified to reproduce the failure before being accepted)

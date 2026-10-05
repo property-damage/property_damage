@@ -6,7 +6,7 @@ and simulators that work across different models with different state structures
 ## The Problem
 
 When building reusable command configurations, preconditions (`when:`) and
-generators (`with:`) need to access state. But different models may structure
+generators (`overrides:`) need to access state. But different models may structure
 their state differently:
 
 ```elixir
@@ -108,13 +108,13 @@ defmodule MyDomain.CommandConfigs do
       when: fn state ->
         PaymentAccess.approved_auth_ids(state) != []
       end,
-      with: fn state ->
+      overrides: fn state ->
         # Pick inside the seeded stream with StreamData.member_of, NOT
         # Enum.random: Enum.random draws from the process RNG, which is not the
         # generation seed, so the same reported seed would not reproduce the
         # same choice. (To couple `amount` to the chosen auth's limit you would
         # select and bound it inside the command's own generator/1 via
-        # StreamData.bind, since `with:` overrides are per-field.)
+        # StreamData.bind, since `overrides:` values are per-field.)
         %{
           auth_id: StreamData.member_of(PaymentAccess.approved_auth_ids(state)),
           amount: StreamData.positive_integer()
@@ -161,9 +161,9 @@ defmodule FullPaymentModel do
 end
 ```
 
-## Reusable Assertion Projections
+## Reusable Check Projections
 
-The same pattern works for assertion projections that need to access state
+The same pattern works for check projections that need to access state
 from different structures:
 
 <!-- pd-doc-verify: runnable -->
@@ -192,7 +192,7 @@ defmodule BalanceInvariant do
 
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_captured_within_authorized(state, _context) do
     if state.total_captured > state.total_authorized do
       PropertyDamage.fail!("captured exceeds authorized",
@@ -203,7 +203,7 @@ defmodule BalanceInvariant do
 end
 ```
 
-This assertion projection tracks its own state and works regardless of
+This check projection tracks its own state and works regardless of
 the main state projection's structure.
 
 ## When to Use Protocols
@@ -211,7 +211,7 @@ the main state projection's structure.
 Protocols add complexity. Use them when:
 
 - You have multiple models with genuinely different state structures
-- The same command/assertion logic needs to work across them
+- The same command/check logic needs to work across them
 - The benefit of reuse outweighs the protocol overhead
 
 For simpler cases, direct state access is fine:
@@ -220,7 +220,7 @@ For simpler cases, direct state access is fine:
 # Simple: just access state directly
 {CancelOrder,
   when: fn state -> map_size(state.orders) > 0 end,
-  with: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
+  overrides: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
 ```
 
 ## Alternative: Helper Modules
@@ -246,7 +246,7 @@ Then use in command specs (selecting inside the seeded stream):
 ```elixir
 {CapturePayment,
   when: &PaymentHelpers.has_approved_auths?/1,
-  with: fn state ->
+  overrides: fn state ->
     %{auth_id: StreamData.member_of(PaymentHelpers.approved_auth_ids(state))}
   end}
 ```

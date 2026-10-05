@@ -1,11 +1,11 @@
-defmodule PropertyDamage.Failure.Assertion do
+defmodule PropertyDamage.Failure.Check do
   @moduledoc """
   A property or invariant did not hold. See `PropertyDamage.Failure` for the kind
   table.
   """
 
   @type kind ::
-          :assertion_failed
+          :check_failed
           | :idempotency_violation
           | :linearization
           | :poll_timeout
@@ -77,7 +77,7 @@ defmodule PropertyDamage.Failure do
   represented:
 
       %PropertyDamage.Failure{
-        type: %Failure.Assertion{} | %Failure.Execution{} | %Failure.Framework{},
+        type: %Failure.Check{} | %Failure.Execution{} | %Failure.Framework{},
         branch_id: non_neg_integer() | nil
       }
 
@@ -95,14 +95,14 @@ defmodule PropertyDamage.Failure do
   identifies a failure without also naming the class (this is what keeps the
   shrinker's equivalence relation exact; see `PropertyDamage.Shrinker`).
 
-  ### `Failure.Assertion` — a property or invariant did not hold
+  ### `Failure.Check` — a property or invariant did not hold
 
   | kind | name | detail |
   |------|------|--------|
-  | `:assertion_failed` | the assertion / check name | the exception, message, or reason |
+  | `:check_failed` | the check name | the exception, message, or reason |
   | `:idempotency_violation` | `nil` | the `%Stutter.Violation{}` |
   | `:linearization` | `nil` | a human message |
-  | `:poll_timeout` | the temporal assertion name | the poll-timeout info map |
+  | `:poll_timeout` | the eventually check name | the poll-timeout info map |
   | `:settle_timeout` | `nil` | the last settle error |
   | `:projection_violation` | the projection module | the raised exception |
 
@@ -133,12 +133,12 @@ defmodule PropertyDamage.Failure do
   more time (a tuning question), not necessarily a bug.
   """
 
-  alias PropertyDamage.Failure.{Assertion, Execution, Framework}
+  alias PropertyDamage.Failure.{Check, Execution, Framework}
 
-  @type class :: :assertion | :execution | :framework
+  @type class :: :check | :execution | :framework
 
   @type kind ::
-          :assertion_failed
+          :check_failed
           | :idempotency_violation
           | :linearization
           | :poll_timeout
@@ -155,7 +155,7 @@ defmodule PropertyDamage.Failure do
           | :unknown
 
   @type t :: %__MODULE__{
-          type: Assertion.t() | Execution.t() | Framework.t(),
+          type: Check.t() | Execution.t() | Framework.t(),
           branch_id: non_neg_integer() | nil
         }
 
@@ -165,9 +165,9 @@ defmodule PropertyDamage.Failure do
   # Accessors
   # ==========================================================================
 
-  @doc "The failure's class: `:assertion`, `:execution`, or `:framework`."
+  @doc "The failure's class: `:check`, `:execution`, or `:framework`."
   @spec class(t()) :: class()
-  def class(%__MODULE__{type: %Assertion{}}), do: :assertion
+  def class(%__MODULE__{type: %Check{}}), do: :check
   def class(%__MODULE__{type: %Execution{}}), do: :execution
   def class(%__MODULE__{type: %Framework{}}), do: :framework
 
@@ -175,9 +175,9 @@ defmodule PropertyDamage.Failure do
   @spec kind(t()) :: kind()
   def kind(%__MODULE__{type: type}), do: type.kind
 
-  @doc "The assertion/check/projection name, or `nil` when a name is not meaningful."
+  @doc "The check/projection name, or `nil` when a name is not meaningful."
   @spec name(t()) :: atom() | nil
-  def name(%__MODULE__{type: %Assertion{name: name}}), do: name
+  def name(%__MODULE__{type: %Check{name: name}}), do: name
   def name(%__MODULE__{type: _}), do: nil
 
   @doc "The class-specific payload for the failure."
@@ -203,45 +203,45 @@ defmodule PropertyDamage.Failure do
   def in_branch(%__MODULE__{} = failure, branch_id), do: %{failure | branch_id: branch_id}
 
   # ==========================================================================
-  # Assertion constructors
+  # Check constructors
   # ==========================================================================
 
-  @doc "An assertion / invariant check failed (`name` identifies which)."
-  @spec assertion_failed(atom() | nil, term()) :: t()
-  def assertion_failed(name, detail) do
-    %__MODULE__{type: %Assertion{kind: :assertion_failed, name: name, detail: detail}}
+  @doc "A check or invariant failed (`name` identifies which)."
+  @spec check_failed(atom() | nil, term()) :: t()
+  def check_failed(name, detail) do
+    %__MODULE__{type: %Check{kind: :check_failed, name: name, detail: detail}}
   end
 
   @doc "A command was not idempotent under stutter (`detail` is the violation)."
   @spec idempotency_violation(term()) :: t()
   def idempotency_violation(violation) do
-    %__MODULE__{type: %Assertion{kind: :idempotency_violation, detail: violation}}
+    %__MODULE__{type: %Check{kind: :idempotency_violation, detail: violation}}
   end
 
   @doc "No sequential ordering explained the observed parallel results."
   @spec linearization(term()) :: t()
   def linearization(message) do
-    %__MODULE__{type: %Assertion{kind: :linearization, detail: message}}
+    %__MODULE__{type: %Check{kind: :linearization, detail: message}}
   end
 
-  @doc "A temporal (`@poll_state`) assertion timed out; `info` carries the details."
+  @doc "A `@eventually` check timed out; `info` carries the details."
   @spec poll_timeout(map()) :: t()
   def poll_timeout(info) do
-    name = get_in(info, [:triggered_by, :assertion_name])
-    %__MODULE__{type: %Assertion{kind: :poll_timeout, name: name, detail: info}}
+    name = get_in(info, [:triggered_by, :check_name])
+    %__MODULE__{type: %Check{kind: :poll_timeout, name: name, detail: info}}
   end
 
   @doc "A probe/bridge command never settled; `detail` is the last error."
   @spec settle_timeout(term()) :: t()
   def settle_timeout(last_reason) do
-    %__MODULE__{type: %Assertion{kind: :settle_timeout, detail: last_reason}}
+    %__MODULE__{type: %Check{kind: :settle_timeout, detail: last_reason}}
   end
 
   @doc "A projection's `apply/2` rejected a transition (`name` is the projection)."
   @spec projection_violation(module() | atom(), term()) :: t()
   def projection_violation(projection, exception) do
     %__MODULE__{
-      type: %Assertion{kind: :projection_violation, name: projection, detail: exception}
+      type: %Check{kind: :projection_violation, name: projection, detail: exception}
     }
   end
 
@@ -280,7 +280,7 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: %Execution{kind: :resource_poller_error, detail: reason}}
   end
 
-  @doc "A `@poll_state` predicate raised while polling."
+  @doc "A `@eventually` predicate raised while polling."
   @spec poll_error(term()) :: t()
   def poll_error(reason) do
     %__MODULE__{type: %Execution{kind: :poll_error, detail: reason}}
@@ -314,8 +314,8 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: %Framework{kind: :unknown, detail: term}}
   end
 
-  @assertion_kinds [
-    :assertion_failed,
+  @check_kinds [
+    :check_failed,
     :idempotency_violation,
     :linearization,
     :poll_timeout,
@@ -337,11 +337,11 @@ defmodule PropertyDamage.Failure do
   Build a minimal `%Failure{}` carrying only a `{kind, name}` signature.
 
   Used by the shrinker to reconstruct a comparable failure from a signature; the
-  `detail` is left `nil`. Names are only retained for `Assertion` kinds.
+  `detail` is left `nil`. Names are only retained for `Check` kinds.
   """
   @spec from_signature(kind(), atom() | nil) :: t()
-  def from_signature(kind, name) when kind in @assertion_kinds do
-    %__MODULE__{type: %Assertion{kind: kind, name: name}}
+  def from_signature(kind, name) when kind in @check_kinds do
+    %__MODULE__{type: %Check{kind: kind, name: name}}
   end
 
   def from_signature(kind, _name) when kind in @execution_kinds do

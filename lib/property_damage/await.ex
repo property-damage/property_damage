@@ -15,16 +15,16 @@ defmodule PropertyDamage.Await do
   **not** block, time out, or assert anything on its own.
 
   All *judgment* over a command's correlated set lives in projections, reusing
-  the existing assertion machinery rather than a second bespoke await path:
+  the existing check machinery rather than a second bespoke await path:
 
-    * **liveness** ("the event must eventually arrive") is a `@poll_state`
-      assertion over the correlated set;
-    * **safety / cardinality** ("at most one", "exactly N") is a `@trigger`/
-      `@invariant` assertion over the correlated set.
+    * **liveness** ("the event must eventually arrive") is a `@eventually`
+      check over the correlated set;
+    * **safety / cardinality** ("at most one", "exactly N") is a `@check`/
+      `@invariant` check over the correlated set.
 
   This keeps one surface for correlation (`awaits/2`) and one surface for
   judgment (projections). The internal `EventQueue` is already awaited by the
-  `@poll_state` finalize drain, so liveness needs no separate await loop.
+  `@eventually` finalize drain, so liveness needs no separate await loop.
 
   ## Multiplicity
 

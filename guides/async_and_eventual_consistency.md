@@ -140,7 +140,7 @@ defmodule Warehouse.State do
 
   # Safety: a widget can only arrive once the probe has settled, and it can only
   # arrive if it was shipped. This fires once per settled AwaitWidget probe.
-  @trigger every: Warehouse.Events.WidgetArrived
+  @check every: Warehouse.Events.WidgetArrived
   def assert_arrivals_were_shipped(state, %WidgetArrived{sku: sku}) do
     unless MapSet.member?(state.shipped, sku) do
       PropertyDamage.fail!("widget arrived without being shipped",
@@ -166,7 +166,7 @@ defmodule Warehouse.Model do
       {AwaitWidget,
        weight: 3,
        when: fn state -> MapSet.size(state.shipped) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          %{sku: StreamData.member_of(MapSet.to_list(state.shipped))}
        end}
     ]
@@ -176,7 +176,7 @@ defmodule Warehouse.Model do
   def command_sequence_projection, do: State
 
   @impl true
-  def assertion_projections, do: [State]
+  def check_projections, do: [State]
 
   # The simulator predicts events during sequence generation, so AwaitWidget
   # (which needs a shipped sku to exist) becomes eligible to be generated.
@@ -200,7 +200,7 @@ result =
 IO.inspect(result, label: "run result")
 ```
 
-Running it prints a passing result whose `assertion_fires` count is the number of
+Running it prints a passing result whose `check_fires` count is the number of
 `AwaitWidget` probes that actually settled (your exact count varies with the seed
 and command mix):
 
@@ -208,7 +208,7 @@ and command mix):
 run result: {:ok,
  %{
    seed: 1,
-   assertion_fires: %{{Warehouse.State, :arrivals_were_shipped} => 116},
+   check_fires: %{{Warehouse.State, :arrivals_were_shipped} => 116},
    runs: 20,
    total_commands: 120
  }}
@@ -265,7 +265,7 @@ defmodule MyTest.Commands.GetOrder do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # Default to nil - Model provides actual order_id via with:
+    # Default to nil - Model provides actual order_id via overrides:
     %{order_id: nil}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
@@ -280,7 +280,7 @@ def commands do
   [
     {GetOrder,
       when: fn state -> map_size(state.orders) > 0 end,
-      with: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
+      overrides: fn state -> %{order_id: StreamData.member_of(Map.keys(state.orders))} end}
   ]
 end
 ```
@@ -365,7 +365,7 @@ defmodule MyTest.Commands.CreateAuthorization do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # account_id provided via Model's with: option
+    # account_id provided via Model's overrides: option
     %{
       account_id: nil,
       amount: StreamData.integer(100..10000),
@@ -392,7 +392,7 @@ def commands do
   [
     {CreateAuthorization,
       when: fn state -> map_size(state.accounts) > 0 end,
-      with: fn state -> %{account_id: StreamData.member_of(Map.keys(state.accounts))} end}
+      overrides: fn state -> %{account_id: StreamData.member_of(Map.keys(state.accounts))} end}
   ]
 end
 ```
@@ -559,7 +559,7 @@ end
 
 **When to use `runtime.inject`:**
 
-- Model assertions depend on intermediate states
+- Model checks depend on intermediate states
 - Projections need to track resources before they settle
 - Event timeline accuracy matters for debugging/visualization
 - You want to emit `Created` event immediately, then `Settled` event after polling
@@ -767,12 +767,12 @@ overlap diagnostic is logged.
 
 `awaits/2` is **pure correlation** — it never blocks and asserts nothing.
 Express judgment over a command's correlated set with ordinary projection
-assertions:
+checks:
 
-- **liveness** ("the webhook must arrive") — a `@poll_state` over the correlated
+- **liveness** ("the webhook must arrive") — a `@eventually` over the correlated
   set (e.g. `fn s -> s.webhooks[id] >= 1 end`). A timeout is reported at the
   awaiting command's index.
-- **safety / cardinality** ("exactly one webhook per close") — a `@trigger` or
+- **safety / cardinality** ("exactly one webhook per close") — a `@check` or
   `@invariant` over the correlated set.
 
 When you also run in simulator mode, have `Model.simulate/2` predict the awaited
@@ -903,26 +903,26 @@ defmodule MyTest.AuthorizationPoller do
 end
 ```
 
-## Safety vs Liveness: `@trigger at: :teardown`
+## Safety vs Liveness: `@check at: :teardown`
 
 Verifying an eventually-consistent effect has two halves, and they need
 different tools:
 
-- **Liveness** ("the effect *eventually* happens") is what `@poll_state`
+- **Liveness** ("the effect *eventually* happens") is what `@eventually`
   expresses: its poller resolves the instant its predicate is first true, then
   stops. This is a reachability check.
 - **Safety** ("the effect *never* happens too much": at most once, never
-  exceeds N) is the dual. A `@poll_state` predicate *cannot* express it: a value
+  exceeds N) is the dual. A `@eventually` predicate *cannot* express it: a value
   can pass *through* the correct number on its way to overshooting, and the
   poller resolves on that transient pass and stops watching. Its natural
   evaluation point is the moment the system has **settled**, on the final state.
 
-That settled checkpoint is `@trigger at: :teardown`. It runs once, on the merged
-final projection state, after both the state pollers (`@poll_state`) and the
+That settled checkpoint is `@check at: :teardown`. It runs once, on the merged
+final projection state, after both the state pollers (`@eventually`) and the
 resource pollers have finalized, and before `Adapter.teardown/1`. A persistent
 over-application (a counter left above its expected value, a job applied twice)
-is still visible there and reports as a clear, named assertion failure rather
-than as a generic poll timeout. A genuine `@poll_state` liveness timeout
+is still visible there and reports as a clear, named check failure rather
+than as a generic poll timeout. A genuine `@eventually` liveness timeout
 preempts the checkpoint (a timeout is itself a not-settled outcome).
 
 ```elixir
@@ -940,11 +940,11 @@ defmodule JobProjection do
   def apply(s, _), do: s
 
   # Liveness: the effect eventually reaches the expected count.
-  @poll_state after: Enqueue, timeout: {5, :seconds}, interval: {50, :milliseconds}
+  @eventually after: Enqueue, timeout: {5, :seconds}, interval: {50, :milliseconds}
   def eventually_applied(_s, %Enqueue{}), do: fn s -> s.applied >= s.expected end
 
   # Safety: it never over-applies. Evaluated on the settled state.
-  @trigger at: :teardown
+  @check at: :teardown
   def assert_effectively_once(state, _phase) do
     if state.max_applied > state.expected do
       PropertyDamage.fail!("over-applied",

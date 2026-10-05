@@ -30,7 +30,7 @@ defmodule ObanBench.Projection do
   # counter must eventually reach the number of increments enqueued for it.
   # The confirming values arrive via a resource poller AFTER the command
   # returns, so this is a genuine async/settle check, not a synchronous one.
-  @poll_state after: Enqueued,
+  @eventually after: Enqueued,
               timeout: {1500, :milliseconds},
               interval: {20, :milliseconds}
   def counter_eventually_consistent(_state, %Enqueued{counter: counter}) do
@@ -63,7 +63,7 @@ defmodule ObanBench.Model do
   def command_sequence_projection, do: ObanBench.Projection
 
   @impl true
-  def assertion_projections, do: [ObanBench.Projection]
+  def check_projections, do: [ObanBench.Projection]
 
   @impl true
   def simulator, do: ObanBench.Simulator

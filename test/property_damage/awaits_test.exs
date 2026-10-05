@@ -6,10 +6,10 @@ defmodule PropertyDamage.AwaitsTest do
   the ambient `nil`), persistently for the rest of the run. Judgment over the
   correlated set lives in projections:
 
-    * **liveness** via a `@poll_state` over the correlated set;
-    * **safety / cardinality** via a `@trigger`/`@invariant` over it.
+    * **liveness** via a `@eventually` over the correlated set;
+    * **safety / cardinality** via a `@check`/`@invariant` over it.
 
-  There is no bespoke await loop: `@poll_state`'s finalize drain already awaits
+  There is no bespoke await loop: `@eventually`'s finalize drain already awaits
   the internal `EventQueue`. A liveness poll-timeout reports at the *triggering*
   command's index so the shrinker keeps locality.
   """
@@ -100,7 +100,7 @@ defmodule PropertyDamage.AwaitsTest do
     def apply(state, _), do: state
 
     # Liveness: the closing webhook for the issue eventually correlates.
-    @poll_state after: IssueCloseRequested,
+    @eventually after: IssueCloseRequested,
                 timeout: {200, :milliseconds},
                 interval: {10, :milliseconds}
     def webhook_eventually_arrives(_state, %IssueCloseRequested{issue_id: id}) do
@@ -108,7 +108,7 @@ defmodule PropertyDamage.AwaitsTest do
     end
 
     # Safety: at most one closing webhook per issue.
-    @trigger every: IssueClosedWebhook
+    @check every: IssueClosedWebhook
     def assert_at_most_one_webhook(state, _event) do
       unless Enum.all?(state.webhooks, fn {_id, n} -> n <= 1 end) do
         PropertyDamage.fail!("more than one closing webhook for an issue",
@@ -125,7 +125,7 @@ defmodule PropertyDamage.AwaitsTest do
     @impl true
     def command_sequence_projection, do: IssueProjection
     @impl true
-    def assertion_projections, do: [IssueProjection]
+    def check_projections, do: [IssueProjection]
   end
 
   # --- Adapters ---------------------------------------------------------------
@@ -195,8 +195,8 @@ defmodule PropertyDamage.AwaitsTest do
     end
   end
 
-  describe "safety via @trigger on the correlated set" do
-    test "a duplicate correlated webhook trips the cardinality assertion" do
+  describe "safety via @check on the correlated set" do
+    test "a duplicate correlated webhook trips the cardinality check" do
       result =
         run([%CloseIssue{issue_id: "i1"}], fn queue ->
           EventQueue.push(queue, WebhookInjector, %IssueClosedWebhook{issue_id: "i1"})
@@ -207,7 +207,7 @@ defmodule PropertyDamage.AwaitsTest do
       refute result.success
 
       assert %Failure{
-               type: %Failure.Assertion{kind: :assertion_failed, name: :at_most_one_webhook}
+               type: %Failure.Check{kind: :check_failed, name: :at_most_one_webhook}
              } =
                result.failure_reason
 
@@ -222,7 +222,7 @@ defmodule PropertyDamage.AwaitsTest do
     end
   end
 
-  # Safety-only projection (no @poll_state) so the inline DR-025 async check is
+  # Safety-only projection (no @eventually) so the inline DR-025 async check is
   # the only thing that can halt the run — no poller timing to interfere.
   defmodule SafetyOnlyProjection do
     use PropertyDamage.Model.Projection
@@ -236,7 +236,7 @@ defmodule PropertyDamage.AwaitsTest do
 
     def apply(state, _), do: state
 
-    @trigger every: IssueClosedWebhook
+    @check every: IssueClosedWebhook
     def assert_at_most_one_webhook(state, _event) do
       unless Enum.all?(state.webhooks, fn {_id, n} -> n <= 1 end) do
         PropertyDamage.fail!("more than one closing webhook for an issue",
@@ -253,11 +253,11 @@ defmodule PropertyDamage.AwaitsTest do
     @impl true
     def command_sequence_projection, do: SafetyOnlyProjection
     @impl true
-    def assertion_projections, do: [SafetyOnlyProjection]
+    def check_projections, do: [SafetyOnlyProjection]
   end
 
   # A later, unrelated command whose adapter delivers the duplicate webhooks for
-  # issue "i1", so they are drained (and the assertion trips) during THIS
+  # issue "i1", so they are drained (and the check trips) during THIS
   # command's pipeline, not the awaiting command's.
   defmodule DeliverWebhooks do
     use PropertyDamage.Command
@@ -286,7 +286,7 @@ defmodule PropertyDamage.AwaitsTest do
   end
 
   describe "attribution of an async every: failure to an earlier command (DR-025)" do
-    test "a later command's drain trips the assertion but the failure names the awaiting command" do
+    test "a later command's drain trips the check but the failure names the awaiting command" do
       {:ok, queue} = EventQueue.start_link()
       seq = Sequence.linear([%CloseIssue{issue_id: "i1"}, %DeliverWebhooks{}])
 
@@ -301,11 +301,11 @@ defmodule PropertyDamage.AwaitsTest do
       refute result.success
 
       assert %Failure{
-               type: %Failure.Assertion{kind: :assertion_failed, name: :at_most_one_webhook}
+               type: %Failure.Check{kind: :check_failed, name: :at_most_one_webhook}
              } = result.failure_reason
 
       # The offending webhooks are correlated to CloseIssue (index 0); the
-      # assertion tripped while DeliverWebhooks (index 1) was draining them.
+      # check tripped while DeliverWebhooks (index 1) was draining them.
       # DR-025 command attribution must name the owning command, not the current.
       indices =
         result.event_log
@@ -317,7 +317,7 @@ defmodule PropertyDamage.AwaitsTest do
     end
   end
 
-  # No-assertion projection so the overlap scenario exercises pure attribution
+  # No-check projection so the overlap scenario exercises pure attribution
   # (no pollers / triggers to interfere).
   defmodule PlainProjection do
     use PropertyDamage.Model.Projection
@@ -334,7 +334,7 @@ defmodule PropertyDamage.AwaitsTest do
     @impl true
     def command_sequence_projection, do: PlainProjection
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   # The second command delivers the webhook for issue "i1" once BOTH commands'
@@ -387,16 +387,16 @@ defmodule PropertyDamage.AwaitsTest do
     end
   end
 
-  describe "liveness via @poll_state on the correlated set" do
+  describe "liveness via @eventually on the correlated set" do
     test "a never-arriving awaited event times out at the awaiting command's index" do
       result = run([%CloseIssue{issue_id: "i1"}], fn _queue -> [] end)
 
       refute result.success
 
-      assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+      assert %Failure{type: %Failure.Check{kind: :poll_timeout, detail: info}} =
                result.failure_reason
 
-      assert info.triggered_by.assertion_name == :webhook_eventually_arrives
+      assert info.triggered_by.check_name == :webhook_eventually_arrives
 
       # RED before P5: poll timeouts report failed_at_index: nil, losing the
       # link to the command whose liveness window opened.

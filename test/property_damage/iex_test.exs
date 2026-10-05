@@ -73,10 +73,10 @@ defmodule PropertyDamage.IExTest do
       # Projections section lists the command-sequence projection and extras.
       assert output =~ "PROJECTIONS"
       assert output =~ "ModelState"
-      assert output =~ "TestAssertions"
+      assert output =~ "TestChecks"
     end
 
-    test "reports (none) for a model without assertion projections" do
+    test "reports (none) for a model without check projections" do
       output = capture_io(fn -> assert IEx.explain(SimpleModel) == :ok end)
 
       assert output =~ "PROJECTIONS"

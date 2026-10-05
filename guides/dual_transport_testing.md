@@ -57,7 +57,7 @@ something the API didn't."
 
 Write commands at the altitude of *what the user means*, not *how a transport does
 it*. The Gitea chain is `CreateUser → CreateRepo → CreateIssue → CreateLabel →
-AddLabelToIssue → CloseIssue`, wired together with `when:`/`with:` so each command
+AddLabelToIssue → CloseIssue`, wired together with `when:`/`overrides:` so each command
 depends on state an earlier one produced (see
 [Writing Commands](writing_commands.md)). None of it knows about HTTP verbs or CSS
 selectors:
@@ -65,9 +65,9 @@ selectors:
 ```elixir
 def commands do
   [
-    {CreateUser, weight: 3, with: &user_overrides/1},
-    {CreateRepo, weight: 3, when: &has_users?/1, with: &repo_overrides/1},
-    {CreateIssue, weight: 3, when: &has_repos?/1, with: &issue_overrides/1},
+    {CreateUser, weight: 3, overrides: &user_overrides/1},
+    {CreateRepo, weight: 3, when: &has_users?/1, overrides: &repo_overrides/1},
+    {CreateIssue, weight: 3, when: &has_repos?/1, overrides: &issue_overrides/1},
     # ...
   ]
 end
@@ -189,7 +189,7 @@ differential path.
 
 An oracle that can never fail tells you nothing. The strongest demonstration is a
 bug in a property the model *deliberately doesn't specify*, so it can only be caught
-by comparing transports — not by any single-transport assertion.
+by comparing transports — not by any single-transport check.
 
 In the bench, a flag makes the UI adapter create labels with the **wrong color**.
 The model never asserts anything about color, so a single-transport run stays green;
@@ -210,7 +210,7 @@ refute ref.color == ui.color           # caught only by the oracle
 
 Without the flag, the same seeds are all `:equivalent` — so the divergence is the
 bug, not flakiness. This is the canonical argument for what an oracle buys you over
-single-transport assertions.
+single-transport checks.
 
 ## Running it
 
@@ -231,8 +231,7 @@ Use dual-transport testing when:
 - A system exposes the same operations through more than one interface (API + UI,
   CLI + API, SDK + raw protocol) and they must stay in lockstep.
 - You are migrating between two implementations and want to prove equivalence
-  before cutting over (pair it with the baseline export in
-  [Differential Testing](differential_testing.md)).
+  before cutting over (see [Differential Testing](differential_testing.md)).
 - You have a trusted reference implementation and a new one to validate.
 
 It is the wrong tool when the transports are *meant* to differ (e.g. a UI
@@ -242,7 +241,7 @@ test the transports separately.
 ## Next steps
 
 - [Differential Testing](differential_testing.md) — the full `Differential.run/1`
-  API, equivalence strategies, execution modes, and baselines
-- [Writing Commands](writing_commands.md) — `when:`/`with:` wiring and `external()`
+  API, equivalence strategies, and execution modes
+- [Writing Commands](writing_commands.md) — `when:`/`overrides:` wiring and `external()`
 - [Integration Testing](integration_testing.md) — driving live services
 - `benches/gitea_bench/` — the complete, runnable example this guide is drawn from

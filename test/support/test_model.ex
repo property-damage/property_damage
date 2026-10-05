@@ -3,14 +3,14 @@ defmodule PropertyDamage.Test.FullModel do
   Complete test model implementing all callbacks.
 
   Demonstrates full Model behaviour implementation including
-  lifecycle hooks, terminate?/3, and the new Model-level wiring pattern.
+  lifecycle hooks, terminate_early?/3, and the new Model-level wiring pattern.
   """
   @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   @impl true
   def commands do
@@ -19,7 +19,7 @@ defmodule PropertyDamage.Test.FullModel do
       {ViewItem,
        weight: 2,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end},
@@ -31,7 +31,7 @@ defmodule PropertyDamage.Test.FullModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def injectable_events, do: [ItemCreated, ItemViewed]
@@ -67,13 +67,13 @@ defmodule PropertyDamage.Test.FullModel do
 
   # Terminate after MinimalCommand
   @impl true
-  def terminate?(_state, %MinimalCommand{}, _events), do: true
-  def terminate?(_state, _command, _events), do: false
+  def terminate_early?(_state, %MinimalCommand{}, _events), do: true
+  def terminate_early?(_state, _command, _events), do: false
 end
 
 defmodule PropertyDamage.Test.TerminateImmediatelyModel do
   @moduledoc """
-  Test model whose terminate?/3 fires after the first command. Used to prove
+  Test model whose terminate_early?/3 fires after the first command. Used to prove
   that a model-requested termination stops the whole sequence in branching mode
   (no branches, no suffix appended after the prefix) per DR-013.
   """
@@ -99,7 +99,7 @@ defmodule PropertyDamage.Test.TerminateImmediatelyModel do
   end
 
   @impl true
-  def terminate?(_state, _command, _events), do: true
+  def terminate_early?(_state, _command, _events), do: true
 end
 
 defmodule PropertyDamage.Test.MinimalModel do
@@ -114,7 +114,7 @@ defmodule PropertyDamage.Test.MinimalModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   @impl true
   def commands do
@@ -122,7 +122,7 @@ defmodule PropertyDamage.Test.MinimalModel do
       CreateItem,
       {ViewItem,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end}
@@ -133,7 +133,7 @@ defmodule PropertyDamage.Test.MinimalModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def simulator, do: __MODULE__
@@ -157,7 +157,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   # Simple list - commands use default weight of 1
   @impl true
@@ -166,7 +166,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
       CreateItem,
       {ViewItem,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end}
@@ -177,7 +177,7 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def simulator, do: __MODULE__
@@ -201,7 +201,7 @@ defmodule PropertyDamage.Test.WeightedModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   # Weighted list - CreateItem 3x more likely than ViewItem
   @impl true
@@ -211,7 +211,7 @@ defmodule PropertyDamage.Test.WeightedModel do
       {ViewItem,
        weight: 1,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end}
@@ -222,7 +222,7 @@ defmodule PropertyDamage.Test.WeightedModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def simulator, do: __MODULE__

@@ -1,6 +1,6 @@
 # DR-005: Projection Naming
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed). Amended by DR-042: `assertion_projections` is now `check_projections`.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
 
 ## Decision

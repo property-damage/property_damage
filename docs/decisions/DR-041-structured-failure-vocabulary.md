@@ -1,6 +1,6 @@
 # DR-041: Structured Failure Vocabulary (`%Failure{}`)
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-042: `Failure.Assertion` is now `Failure.Check` and kind `:assertion_failed` is now `:check_failed`.
 **Date:** 2026-07-04
 
 > Follows the DR-039 / DR-040 persistence-refusal precedent for the format bump.

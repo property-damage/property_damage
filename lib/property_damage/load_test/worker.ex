@@ -17,7 +17,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     :adapter_context,
     :metrics,
     :think_time_range,
-    :assertion_mode,
+    :check_mode,
     # Run nonce for client-minted run-scoped values (DR-034); nil until the
     # load-test harness threads one through. Each worker uses its worker_id as
     # the mint_epoch, so workers send distinct minted values regardless.
@@ -26,7 +26,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     :sequences_executed,
     :commands_executed,
     :errors,
-    :assertion_failures
+    :check_failures
   ]
 
   @type t :: %__MODULE__{}
@@ -34,7 +34,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   @type sequence_result :: %{
           commands_run: non_neg_integer(),
           errors: non_neg_integer(),
-          assertion_failures: non_neg_integer()
+          check_failures: non_neg_integer()
         }
 
   # ============================================================================
@@ -52,7 +52,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   - `:adapter_config` - Adapter configuration (default: %{})
   - `:metrics` - Metrics collector pid (required)
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
-  - `:assertion_mode` - How to handle assertions (default: :disabled)
+  - `:check_mode` - How to handle checks (default: :disabled)
 
   Returns `{:ok, pid}` or `{:error, reason}` if adapter setup fails.
   """
@@ -104,7 +104,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     metrics = Keyword.fetch!(opts, :metrics)
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
-    assertion_mode = Keyword.get(opts, :assertion_mode, :disabled)
+    check_mode = Keyword.get(opts, :check_mode, :disabled)
     run_nonce = Keyword.get(opts, :run_nonce)
 
     # Setup adapter ONCE - this context will be reused for all sequences
@@ -118,12 +118,12 @@ defmodule PropertyDamage.LoadTest.Worker do
           adapter_context: adapter_context,
           metrics: metrics,
           think_time_range: think_time_range,
-          assertion_mode: assertion_mode,
+          check_mode: check_mode,
           run_nonce: run_nonce,
           sequences_executed: 0,
           commands_executed: 0,
           errors: 0,
-          assertion_failures: 0
+          check_failures: 0
         }
 
         {:ok, state}
@@ -151,7 +151,7 @@ defmodule PropertyDamage.LoadTest.Worker do
       sequences_executed: state.sequences_executed,
       commands_executed: state.commands_executed,
       errors: state.errors,
-      assertion_failures: state.assertion_failures
+      check_failures: state.check_failures
     }
 
     {:reply, stats, state}
@@ -183,11 +183,11 @@ defmodule PropertyDamage.LoadTest.Worker do
 
     # Execute sequence using persistent adapter context
     case execute_sequence_commands(sequence, state) do
-      {:ok, commands_run, errors, assertion_failure_count} ->
+      {:ok, commands_run, errors, check_failure_count} ->
         result = %{
           commands_run: commands_run,
           errors: errors,
-          assertion_failures: assertion_failure_count
+          check_failures: check_failure_count
         }
 
         new_state = %{
@@ -195,7 +195,7 @@ defmodule PropertyDamage.LoadTest.Worker do
           | commands_executed: state.commands_executed + commands_run,
             sequences_executed: state.sequences_executed + 1,
             errors: state.errors + errors,
-            assertion_failures: state.assertion_failures + assertion_failure_count
+            check_failures: state.check_failures + check_failure_count
         }
 
         {:ok, result, new_state}
@@ -214,14 +214,14 @@ defmodule PropertyDamage.LoadTest.Worker do
 
     # Initialize projections for this sequence
     initial_projections =
-      if state.assertion_mode != :disabled do
+      if state.check_mode != :disabled do
         init_projections(state.model)
       else
         nil
       end
 
     initial_counters =
-      if state.assertion_mode != :disabled do
+      if state.check_mode != :disabled do
         %{step: 0, command: 0, event: 0}
       else
         nil
@@ -247,9 +247,9 @@ defmodule PropertyDamage.LoadTest.Worker do
          _registry,
          commands_run,
          errors,
-         assertion_failures
+         check_failures
        ) do
-    {:ok, commands_run, errors, assertion_failures}
+    {:ok, commands_run, errors, check_failures}
   end
 
   defp execute_commands(
@@ -260,7 +260,7 @@ defmodule PropertyDamage.LoadTest.Worker do
          registry,
          commands_run,
          errors,
-         assertion_failures
+         check_failures
        ) do
     # Apply think time between commands
     maybe_think(state.think_time_range)
@@ -286,10 +286,10 @@ defmodule PropertyDamage.LoadTest.Worker do
     # Report metrics
     Metrics.record_request(state.metrics, command_module, latency_ms, result)
 
-    # Run assertions if enabled and command succeeded
-    {new_projections, new_counters, assertion_failure_delta} =
-      if state.assertion_mode != :disabled and result == :ok do
-        run_assertions_for_command(
+    # Run checks if enabled and command succeeded
+    {new_projections, new_counters, check_failure_delta} =
+      if state.check_mode != :disabled and result == :ok do
+        run_checks_for_command(
           command,
           events,
           projections,
@@ -310,7 +310,7 @@ defmodule PropertyDamage.LoadTest.Worker do
       registry,
       commands_run + 1,
       errors + error_delta,
-      assertion_failures + assertion_failure_delta
+      check_failures + check_failure_delta
     )
   end
 
@@ -406,7 +406,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp categorize_error(_), do: :unknown_error
 
   # ============================================================================
-  # Assertion Support
+  # Check Support
   # ============================================================================
 
   defp get_module(%{__struct__: module}), do: module
@@ -416,36 +416,36 @@ defmodule PropertyDamage.LoadTest.Worker do
   defp init_projections(model) do
     command_sequence_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    all_projections = [command_sequence_projection | assertion_projections]
+    all_projections = [command_sequence_projection | check_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
     end
   end
 
-  defp run_assertions_for_command(command, events, projections, counters, command_index, state) do
+  defp run_checks_for_command(command, events, projections, counters, command_index, state) do
     model = state.model
     command_module = command.__struct__
 
     # Fold the command AND all of its events into the projections BEFORE running
-    # any assertion, mirroring the main Executor (which asserts against the
+    # any check, mirroring the main Executor (which asserts against the
     # post-events state; see Executor.run_checks, invoked with projections that
     # already have both the command and its events applied). A command-level
-    # `@trigger every: Cmd` therefore observes this command's own events — e.g. a
+    # `@check every: Cmd` therefore observes this command's own events — e.g. a
     # read-consistency check sees the value just retrieved. Folding events one at
     # a time and asserting in between (the prior behavior) made such checks read
     # stale state and misfire.
     projections = update_projections(projections, command)
     projections = Enum.reduce(events, projections, &update_projections(&2, &1))
 
-    # Command counters + command assertions
+    # Command counters + command checks
     counters =
       counters
       |> Map.update(:step, 1, &(&1 + 1))
@@ -453,7 +453,7 @@ defmodule PropertyDamage.LoadTest.Worker do
       |> Map.update(command_module, 1, &(&1 + 1))
 
     {counters, command_failures} =
-      run_assertions(
+      run_step_checks(
         model,
         projections,
         :command,
@@ -464,8 +464,8 @@ defmodule PropertyDamage.LoadTest.Worker do
         state
       )
 
-    # Per-event counters + event assertions, all against the fully-folded
-    # projections (again matching the Executor's event-assertion pass).
+    # Per-event counters + event checks, all against the fully-folded
+    # projections (again matching the Executor's event-check pass).
     {counters, event_failures} =
       Enum.reduce(events, {counters, 0}, fn event, {ctrs, failures} ->
         event_module = get_module(event)
@@ -477,7 +477,7 @@ defmodule PropertyDamage.LoadTest.Worker do
           |> Map.update(event_module, 1, &(&1 + 1))
 
         {ctrs, event_failure_count} =
-          run_assertions(
+          run_step_checks(
             model,
             projections,
             :event,
@@ -500,7 +500,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     end
   end
 
-  defp run_assertions(
+  defp run_step_checks(
          model,
          projections,
          step_type,
@@ -512,31 +512,31 @@ defmodule PropertyDamage.LoadTest.Worker do
        ) do
     command_sequence_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    all_projections = [command_sequence_projection | assertion_projections]
+    all_projections = [command_sequence_projection | check_projections]
 
     failure_count =
       Enum.reduce(all_projections, 0, fn projection, failures ->
         projection_state = Map.get(projections, projection)
 
-        assertions =
-          if function_exported?(projection, :__assertions__, 0) do
-            projection.__assertions__()
+        checks =
+          if function_exported?(projection, :__checks__, 0) do
+            projection.__checks__()
           else
             []
           end
 
-        Enum.reduce(assertions, failures, fn assertion, acc_failures ->
-          if Projection.should_run?(assertion.trigger, step_type, module, counters) do
+        Enum.reduce(checks, failures, fn check, acc_failures ->
+          if Projection.should_run?(check.trigger, step_type, module, counters) do
             try do
-              assertion_fn = assertion.function_name
-              apply(projection, assertion_fn, [projection_state, command_or_event])
+              check_fn = check.function_name
+              apply(projection, check_fn, [projection_state, command_or_event])
               acc_failures
             rescue
               e ->
@@ -548,7 +548,7 @@ defmodule PropertyDamage.LoadTest.Worker do
                   timestamp: System.monotonic_time(:millisecond)
                 }
 
-                Metrics.record_assertion_failure(
+                Metrics.record_check_failure(
                   state.metrics,
                   e.__struct__,
                   module,

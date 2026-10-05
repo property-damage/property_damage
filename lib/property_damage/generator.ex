@@ -135,7 +135,7 @@ defmodule PropertyDamage.Generator do
   All framework code MUST realize generated values through this function.
 
   Generation being a pure function of the seed also depends on user code
-  (generators, `when:`/`with:`, the projection/simulator) being pure; enforce
+  (generators, `when:`/`overrides:`, the projection/simulator) being pure; enforce
   that with `PropertyDamage.audit/2` (`mix pd.audit`). See the
   [deterministic generation guide](deterministic_generation.md).
   """
@@ -267,7 +267,7 @@ defmodule PropertyDamage.Generator do
             new_acc = [command | acc]
             new_acc_ph = acc_ph ++ minted
 
-            if should_terminate?(model, new_state, command, events) do
+            if terminate_early?(model, new_state, command, events) do
               StreamData.constant({Enum.reverse(new_acc), new_acc_ph})
             else
               generate_linear_recursive(
@@ -395,8 +395,8 @@ defmodule PropertyDamage.Generator do
               new_acc = [command | acc]
               new_acc_ph = acc_ph ++ minted
 
-              if should_terminate?(model, new_state, command, events) do
-                # DR-013: terminate? stops the WHOLE sequence, not just the
+              if terminate_early?(model, new_state, command, events) do
+                # DR-013: terminate_early? stops the WHOLE sequence, not just the
                 # prefix. Signal it so no branches or suffix get appended.
                 remaining = max_total - length(new_acc)
 
@@ -595,7 +595,7 @@ defmodule PropertyDamage.Generator do
                 new_acc = [command | acc]
                 new_acc_ph = acc_ph ++ minted
 
-                if should_terminate?(model, new_state, command, events) do
+                if terminate_early?(model, new_state, command, events) do
                   StreamData.constant({Enum.reverse(new_acc), new_acc_ph})
                 else
                   generate_branch(
@@ -686,9 +686,9 @@ defmodule PropertyDamage.Generator do
   end
 
   defp get_command_generator(cmd_module, spec, state) do
-    # spec is now a map with :with key
+    # spec is now a map with :overrides key
     overrides =
-      case Map.get(spec, :with) do
+      case Map.get(spec, :overrides) do
         nil -> %{}
         fun when is_function(fun, 1) -> fun.(state)
         map when is_map(map) -> map
@@ -720,7 +720,7 @@ defmodule PropertyDamage.Generator do
     end
   end
 
-  # A `with:` override only takes effect for fields the command defines (the
+  # An `overrides:` option only takes effect for fields the command defines (the
   # generated map is built into the command struct, which rejects unknown keys).
   # An override targeting any other key is a silent no-op; surface it with a clear
   # error naming the command and offending field(s) rather than the opaque
@@ -732,7 +732,7 @@ defmodule PropertyDamage.Generator do
 
       if unknown != [] do
         raise ArgumentError,
-              "Invalid `with:` override for command #{inspect(cmd_module)}: " <>
+              "Invalid `overrides:` for command #{inspect(cmd_module)}: " <>
                 "field(s) #{inspect(unknown)} are not defined by the command " <>
                 "(its fields are #{inspect(fields)}). An override for an undefined " <>
                 "field has no effect; check for a typo or a renamed field."
@@ -766,9 +766,9 @@ defmodule PropertyDamage.Generator do
     end)
   end
 
-  defp should_terminate?(model, state, command, events) do
-    if Code.ensure_loaded?(model) and function_exported?(model, :terminate?, 3) do
-      model.terminate?(state, command, events)
+  defp terminate_early?(model, state, command, events) do
+    if Code.ensure_loaded?(model) and function_exported?(model, :terminate_early?, 3) do
+      model.terminate_early?(state, command, events)
     else
       false
     end
@@ -873,7 +873,7 @@ defmodule PropertyDamage.Generator do
 
   During generation, `external()` markers in simulated events become
   `%PropertyDamage.Placeholder{}` structs embedded in projection state. This
-  surfaces them so a model's `with:` function can route one into a command that
+  surfaces them so a model's `overrides:` function can route one into a command that
   consumes a server-generated value.
 
   ## Options
@@ -884,7 +884,7 @@ defmodule PropertyDamage.Generator do
   ## Example
 
       # In the model's command list:
-      {ViewOrder, with: fn state ->
+      {ViewOrder, overrides: fn state ->
         %{order_id: PropertyDamage.Generator.external_from(state, path: [:id])}
       end}
   """
@@ -900,7 +900,7 @@ defmodule PropertyDamage.Generator do
   A seeded generator that picks one external placeholder from `state`.
 
   Returns `StreamData.constant(nil)` when no matching external is available, so
-  a `with:` function can guard on `nil`. Accepts the same options as
+  an `overrides:` function can guard on `nil`. Accepts the same options as
   `available_externals/2`.
   """
   @spec external_from(map(), keyword()) :: StreamData.t(struct() | nil)

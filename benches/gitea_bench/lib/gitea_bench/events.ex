@@ -55,7 +55,7 @@ defmodule GiteaBench.Events do
 
     Keyed by the same client-chosen `{full_name, number}` link the rest of the
     bench uses, so `CloseIssue.awaits/2` can correlate the delivery back to the
-    command that caused it, and `GiteaBench.WebhookAssertions` can judge the
+    command that caused it, and `GiteaBench.WebhookChecks` can judge the
     correlated set (liveness: at least one; safety: at most one).
     """
     defstruct [:full_name, :number]

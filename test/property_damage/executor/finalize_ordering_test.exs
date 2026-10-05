@@ -4,16 +4,16 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
   The finalize chain runs, in order:
 
-      finalize_pollers (@poll_state drain + async checks)
+      finalize_pollers (@eventually drain + async checks)
         -> finalize_resource_pollers
         -> settle_event_queue (drain injector/poller events + async checks)
         -> finalize_after_settle
-        -> run_phase_assertions(:teardown)
+        -> run_phase_checks(:teardown)
 
   When more than one failure is live at finalize time, a strict precedence
   decides which one is reported (DR-024/025/026):
 
-      async-halt (drain)  >  poll-timeout  >  settle-halt  >  resource-error  >  teardown-assertion
+      async-halt (drain)  >  poll-timeout  >  settle-halt  >  resource-error  >  teardown-check
 
   These tests pin that precedence (and the `command_index` carried by the two
   async cases) by constructing scenarios where two competing failures fire at
@@ -50,8 +50,8 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   end
 
   # ===========================================================================
-  # Guard 1 - async-halt (a poller event folded during the @poll_state await
-  # drain trips an `every:` assertion) preempts the poll timeout, and is
+  # Guard 1 - async-halt (a poller event folded during the @eventually await
+  # drain trips an `every:` check) preempts the poll timeout, and is
   # reported at the injecting command's index.
   #
   # The chain checks `state.async_halt` (set inside finalize_pollers' drain)
@@ -67,11 +67,11 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
     def apply(s, _), do: s
 
     # Liveness that never resolves: a poll-timeout candidate.
-    @poll_state after: Started, timeout: {1000, :milliseconds}, interval: {10, :milliseconds}
+    @eventually after: Started, timeout: {1000, :milliseconds}, interval: {10, :milliseconds}
     def confirm_eventually(_state, %Started{}), do: fn s -> s.confirmed end
 
     # Async safety: trips on the poller's second Bumped, observed during the drain.
-    @trigger every: Bumped
+    @check every: Bumped
     def assert_count_at_most_one(state, _event) do
       if state.max > 1, do: PropertyDamage.fail!("count exceeded 1", max: state.max)
     end
@@ -98,7 +98,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
       # SECOND poll (the first returns :continue). The first poll fires at ~0ms,
       # the second one interval_ms later, by which time the synchronous per-command
       # injector drain has already passed. So the events are NOT folded at command
-      # level; they land during the @poll_state await drain at finalize instead
+      # level; they land during the @eventually await drain at finalize instead
       # (the Started event below starts that never-confirming poller), where the
       # incremental async check trips and sets async_halt.
       counter = :counters.new(1, [:atomics])
@@ -122,12 +122,12 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
 
     assert result.failed_at_index == 0
 
-    refute match?(%Failure{type: %Failure.Assertion{kind: :poll_timeout}}, result.failure_reason),
+    refute match?(%Failure{type: %Failure.Check{kind: :poll_timeout}}, result.failure_reason),
            "async-halt must win over the poll timeout"
   end
 
@@ -143,7 +143,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
     @impl true
     def apply(s, _), do: s
 
-    @poll_state after: Started, timeout: {200, :milliseconds}, interval: {10, :milliseconds}
+    @eventually after: Started, timeout: {200, :milliseconds}, interval: {10, :milliseconds}
     def confirm_eventually(_state, %Started{}), do: fn s -> s.confirmed end
   end
 
@@ -182,10 +182,10 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+    assert %Failure{type: %Failure.Check{kind: :poll_timeout, detail: info}} =
              result.failure_reason
 
-    assert info.triggered_by.assertion_name == :confirm_eventually
+    assert info.triggered_by.check_name == :confirm_eventually
 
     refute match?(
              %Failure{type: %Failure.Execution{kind: :resource_poller_error}},
@@ -195,11 +195,11 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   end
 
   # ===========================================================================
-  # Guard 3 - a settle-halt (an `every:` assertion tripping on a poller event
+  # Guard 3 - a settle-halt (an `every:` check tripping on a poller event
   # folded during settle_event_queue) preempts a resource-poller error, and is
   # reported at the injecting command's index.
   #
-  # No @poll_state poller here, so finalize_pollers is a no-op; both resource
+  # No @eventually poller here, so finalize_pollers is a no-op; both resource
   # pollers are finalized, then the settle drain folds poller-1's events. The
   # chain checks the settle-halt BEFORE the captured resource_halt.
   # ===========================================================================
@@ -211,7 +211,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
     def apply(%{count: c, max: m} = s, %Bumped{}), do: %{s | count: c + 1, max: max(m, c + 1)}
     def apply(s, _), do: s
 
-    @trigger every: Bumped
+    @check every: Bumped
     def assert_count_at_most_one(state, _event) do
       if state.max > 1, do: PropertyDamage.fail!("count exceeded 1", max: state.max)
     end
@@ -269,7 +269,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
 
     assert result.failed_at_index == 0
@@ -282,9 +282,9 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   end
 
   # ===========================================================================
-  # Guard 4 - a resource-poller error preempts a teardown (@trigger at:) safety
+  # Guard 4 - a resource-poller error preempts a teardown (@check at:) safety
   # check. finalize_after_settle inspects resource_halt BEFORE running the
-  # teardown checkpoint; reorder them and the named assertion wins instead.
+  # teardown checkpoint; reorder them and the named check wins instead.
   # ===========================================================================
   defmodule ResourceVsTeardownProjection do
     use PropertyDamage.Model.Projection
@@ -294,7 +294,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
     def apply(%{count: c, max: m} = s, %Bumped{}), do: %{s | count: c + 1, max: max(m, c + 1)}
     def apply(s, _), do: s
 
-    @trigger at: :teardown
+    @check at: :teardown
     def assert_count_at_most_one(state, _phase) do
       if state.max > 1, do: PropertyDamage.fail!("count exceeded 1 at settle", max: state.max)
     end
@@ -343,9 +343,9 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
              result.failure_reason
 
     refute match?(
-             %Failure{type: %Failure.Assertion{kind: :assertion_failed}},
+             %Failure{type: %Failure.Check{kind: :check_failed}},
              result.failure_reason
            ),
-           "the resource-poller error must preempt the teardown assertion"
+           "the resource-poller error must preempt the teardown check"
   end
 end

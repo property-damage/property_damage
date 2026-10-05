@@ -78,7 +78,7 @@ Each command builds a map of `StreamData` generators, pipes it through
 state-derived values), and finishes with `StreamData.fixed_map/1`.
 
 `Credit` and `Debit` default `account_ref` to `nil`; the Model fills it from
-state via `with:`.
+state via `overrides:`.
 
 ```elixir
 defmodule Demo.Commands.OpenAccount do
@@ -106,7 +106,7 @@ defmodule Demo.Commands.Credit do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # account_ref is supplied by the Model's `with:` from live state.
+    # account_ref is supplied by the Model's `overrides:` from live state.
     %{account_ref: nil, amount: StreamData.integer(1..500)}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
@@ -135,12 +135,12 @@ end
 ### Projection and invariant
 
 A projection reduces events into state with `apply/2`. Functions tagged
-`@trigger` are **invariants**: PropertyDamage runs them at the configured points
+`@check` are **invariants**: PropertyDamage runs them at the configured points
 and treats a raised exception (via `PropertyDamage.fail!/2`) as a violation. A
 returned value is ignored — an invariant signals failure only by raising.
 
 Our invariant is the classic bounds property: **no account balance is ever
-negative**. We name it with `@invariant` and link the assertion with
+negative**. We name it with `@invariant` and link the check with
 `validates:`, which lets the coverage report tell us the invariant actually
 fired.
 
@@ -179,7 +179,7 @@ defmodule Demo.Bank do
   @invariant id: :balance_non_negative,
              description: "No account balance is ever negative (no overdrafts)"
 
-  @trigger every: 1, validates: :balance_non_negative
+  @check every: 1, validates: :balance_non_negative
   def assert_balance_non_negative(state, _step) do
     negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
 
@@ -236,8 +236,8 @@ end
 ### Model
 
 The model wires everything together: the weighted command list (with `when:`
-preconditions and `with:` state-derived overrides), the projection used for
-sequence state, the assertion projections, and the simulator.
+preconditions and `overrides:` state-derived overrides), the projection used for
+sequence state, the check projections, and the simulator.
 
 ```elixir
 defmodule Demo.Model do
@@ -252,11 +252,11 @@ defmodule Demo.Model do
       {Credit,
        weight: 3,
        when: fn s -> map_size(s.accounts) > 0 end,
-       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
       {Debit,
        weight: 3,
        when: fn s -> map_size(s.accounts) > 0 end,
-       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end}
+       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end}
     ]
   end
 
@@ -264,7 +264,7 @@ defmodule Demo.Model do
   def command_sequence_projection, do: Demo.Bank
 
   @impl true
-  def assertion_projections, do: [Demo.Bank]
+  def check_projections, do: [Demo.Bank]
 
   @impl true
   def simulator, do: Demo.Simulator
@@ -357,13 +357,13 @@ coverage = PropertyDamage.coverage(result, Demo.Model)
 Kino.Markdown.new("```\n" <> PropertyDamage.Coverage.format(coverage, :summary) <> "\n```")
 ```
 
-`PropertyDamage.assertion_coverage/2` joins the run's assertion firings against
+`PropertyDamage.check_coverage/2` joins the run's check firings against
 the invariant catalog — an invariant that never fired is a *vacuous* guarantee.
 Here `balance_non_negative` should show `covered?: true` with a large fire count.
 
 ```elixir
 rows =
-  for inv <- PropertyDamage.assertion_coverage(result, Demo.Model) do
+  for inv <- PropertyDamage.check_coverage(result, Demo.Model) do
     %{invariant: inv.id, covered?: inv.covered?, fire_count: inv.fire_count}
   end
 
@@ -559,7 +559,7 @@ defmodule Demo.ChaosBank do
   def apply(state, %NetworkLatencyRestored{}), do: state
   def apply(state, _event), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_balance_non_negative(state, _step) do
     negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
 
@@ -582,11 +582,11 @@ defmodule Demo.ChaosModel do
       {Credit,
        weight: 3,
        when: fn s -> map_size(s.accounts) > 0 end,
-       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
       {Debit,
        weight: 3,
        when: fn s -> map_size(s.accounts) > 0 end,
-       with: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
+       overrides: fn s -> %{account_ref: StreamData.member_of(Map.keys(s.accounts))} end},
       # Low weight = occasional faults.
       {NetworkLatency, weight: 1}
     ]
@@ -596,7 +596,7 @@ defmodule Demo.ChaosModel do
   def command_sequence_projection, do: Demo.ChaosBank
 
   @impl true
-  def assertion_projections, do: [Demo.ChaosBank]
+  def check_projections, do: [Demo.ChaosBank]
 
   @impl true
   def simulator, do: Demo.Simulator

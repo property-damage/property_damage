@@ -1,10 +1,10 @@
 defmodule GiteaBench.State do
   @moduledoc """
-  The model's view of the forge, doubling as the assertion projection.
+  The model's view of the forge, doubling as the check projection.
 
-  During generation it is fed the simulator's predicted events so `when:`/`with:`
+  During generation it is fed the simulator's predicted events so `when:`/`overrides:`
   can pick coherent targets; during execution it is fed the adapters' real events
-  and the `@trigger` assertions check fidelity. Because every field it keys on
+  and the `@check` functions check fidelity. Because every field it keys on
   (login, `owner/name`, per-repo issue number, label names) is client-chosen and
   identical across transports, the same projection logic serves both phases and
   both adapters.
@@ -21,7 +21,7 @@ defmodule GiteaBench.State do
     UserCreated
   }
 
-  # DR-026 invariant catalog: the properties the assertions below uphold.
+  # DR-026 invariant catalog: the properties the checks below uphold.
   @invariant id: :user_login_faithful,
              description: "The SUT creates the user under the requested login"
   @invariant id: :repo_name_faithful,
@@ -76,9 +76,9 @@ defmodule GiteaBench.State do
 
   def apply(state, _event), do: state
 
-  # --- SUT-fidelity assertions (non-vacuous even on a single transport) -------
+  # --- SUT-fidelity checks (non-vacuous even on a single transport) -------
 
-  @trigger every: UserCreated, validates: :user_login_faithful
+  @check every: UserCreated, validates: :user_login_faithful
   def assert_user_login(_state, %UserCreated{login: login, requested_login: requested}) do
     if login != requested do
       PropertyDamage.fail!("user created under wrong login",
@@ -88,7 +88,7 @@ defmodule GiteaBench.State do
     end
   end
 
-  @trigger every: RepoCreated, validates: :repo_name_faithful
+  @check every: RepoCreated, validates: :repo_name_faithful
   def assert_repo_name(_state, %RepoCreated{name: name, requested_name: requested}) do
     if name != requested do
       PropertyDamage.fail!("repo created under wrong name",
@@ -98,7 +98,7 @@ defmodule GiteaBench.State do
     end
   end
 
-  @trigger every: IssueCreated, validates: :issue_title_faithful
+  @check every: IssueCreated, validates: :issue_title_faithful
   def assert_issue_title(_state, %IssueCreated{title: title, requested_title: requested}) do
     if title != requested do
       PropertyDamage.fail!("issue stored under wrong title",
@@ -108,7 +108,7 @@ defmodule GiteaBench.State do
     end
   end
 
-  @trigger every: LabelCreated, validates: :label_name_faithful
+  @check every: LabelCreated, validates: :label_name_faithful
   def assert_label_name(_state, %LabelCreated{name: name, requested_name: requested}) do
     if name != requested do
       PropertyDamage.fail!("label created under wrong name",
@@ -118,7 +118,7 @@ defmodule GiteaBench.State do
     end
   end
 
-  @trigger every: LabelAssigned, validates: :assigned_label_defined
+  @check every: LabelAssigned, validates: :assigned_label_defined
   def assert_assigned_label_defined(state, %LabelAssigned{
         full_name: full_name,
         requested_label: label
@@ -134,7 +134,7 @@ defmodule GiteaBench.State do
     end
   end
 
-  @trigger every: LabelAssigned, validates: :assigned_label_observed
+  @check every: LabelAssigned, validates: :assigned_label_observed
   def assert_assigned_label_observed(_state, %LabelAssigned{
         requested_label: label,
         labels: observed
@@ -147,7 +147,7 @@ defmodule GiteaBench.State do
     end
   end
 
-  @trigger every: IssueClosed, validates: :issue_closed_observed
+  @check every: IssueClosed, validates: :issue_closed_observed
   def assert_issue_closed_observed(_state, %IssueClosed{state: state}) do
     unless state == "closed" do
       PropertyDamage.fail!("issue not reported closed by the SUT", observed_state: state)
@@ -156,7 +156,7 @@ defmodule GiteaBench.State do
 
   # --- Whole-run structural consistency --------------------------------------
 
-  @trigger at: :teardown, validates: :assigned_labels_subset
+  @check at: :teardown, validates: :assigned_labels_subset
   def assert_labels_subset(state, _phase) do
     Enum.each(state.repos, fn {full_name, repo} ->
       Enum.each(repo.issues, fn {number, issue} ->

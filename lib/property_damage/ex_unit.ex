@@ -43,7 +43,7 @@ defmodule PropertyDamage.ExUnit do
   - `:shrink` - Whether to shrink failures (default: true)
   - `:validate` - Whether to validate config (default: true)
   - `:adapter_config` - Config passed to adapter.setup/1 (default: %{})
-  - `:verbose`, `:assertion_mode`, `:branching`, `:stutter`,
+  - `:verbose`, `:check_mode`, `:branching`, `:stutter`,
     `:external_markers`, `:on_failure`, and the rest of the `run/1` surface
 
   Defaults are applied by `run/1` itself; a `nil` `:seed` is dropped so the
@@ -71,7 +71,7 @@ defmodule PropertyDamage.ExUnit do
            [%CreateItem{quantity: 101}]
 
          Failed at command #0:
-           #PropertyDamage.Failure<assertion_failed :quantity_limit "Quantity 101 exceeds limit">
+           #PropertyDamage.Failure<check_failed :quantity_limit "Quantity 101 exceeds limit">
 
          Reproduce with: seed: 12345
   """
@@ -152,7 +152,7 @@ defmodule PropertyDamage.ExUnit do
 
   `:model` and `:adapter` are required (a missing one raises `KeyError` with a
   clear message); every other option is forwarded verbatim, so the full
-  `run/1` surface (`verbose:`, `assertion_mode:`, `branching:`, `stutter:`,
+  `run/1` surface (`verbose:`, `check_mode:`, `branching:`, `stutter:`,
   `external_markers:`, `on_failure:`, ...) is reachable from the ExUnit macro.
   `run/1` validates the result and applies its own defaults for any omitted
   option, so this function deliberately does not re-specify them. A `nil`
@@ -225,7 +225,7 @@ defmodule PropertyDamage.ExUnit do
 
   defp format_failure_reason(%PropertyDamage.Failure{} = failure) do
     case PropertyDamage.Failure.kind(failure) do
-      kind when kind in [:assertion_failed, :projection_violation] ->
+      kind when kind in [:check_failed, :projection_violation] ->
         "Check #{inspect(PropertyDamage.Failure.name(failure))} failed: " <>
           "#{inspect(PropertyDamage.Failure.detail(failure))}"
 

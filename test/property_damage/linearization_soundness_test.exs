@@ -5,7 +5,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
   Two failure modes are guarded here, in both directions:
 
   1. **Over-reporting (the bug this suite was born for).** The executor used to
-     run each branch's synchronous `@trigger` assertions against that branch's
+     run each branch's synchronous `@check` checks against that branch's
      *forked* projection state. A fork omits the concurrently-executing sibling
      branches' effects, so a read that legally observed a sibling's write was
      flagged as a consistency violation: `Put k v ∥ Get k` reported as a race
@@ -16,8 +16,8 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
      cross-branch invariant violation must still be caught. Two branches that
      are each individually fine but jointly break an invariant (each adds 60 to
      a counter capped at 100) are non-linearizable: no ordering satisfies the
-     invariant. The OLD code MISSED this (per-branch assertions saw only 60,
-     and the merge never re-ran assertions), so the assertion-aware checker is
+     invariant. The OLD code MISSED this (per-branch checks saw only 60,
+     and the merge never re-ran checks), so the check-aware checker is
      also a soundness *improvement*, not just a false-positive fix.
 
   The checker's verdict is additionally cross-validated against an INDEPENDENT
@@ -60,7 +60,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
 
   describe "a correct SUT is never reported as failing under branching" do
     # This is the headline property. Pre-fix it failed on every seed (the
-    # forked-state assertions invented races); post-fix every seed is green.
+    # forked-state checks invented races); post-fix every seed is green.
     for seed <- 1..40 do
       test "seed #{seed}: CorrectAdapter under branching is linearizable" do
         result =
@@ -85,7 +85,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
     test "a read that observed the concurrent write is consistent" do
       # branch0 = Put k 7, branch1 = Get k; the Get observed 7 (Put serialized
       # first). [Put, Get] explains both the events AND the read-consistency
-      # assertion, so the checker must accept it.
+      # check, so the checker must accept it.
       branch_commands = [[%PutKey{key: :k0, value: 7}], [%GetKey{key: :k0}]]
 
       branch_events = %{
@@ -156,11 +156,11 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
   # ==========================================================================
 
   describe "genuine cross-branch invariant violation is caught" do
-    test "checker refutes with the specific assertion when every ordering breaks the invariant" do
+    test "checker refutes with the specific check when every ordering breaks the invariant" do
       # Each branch adds 60 to a counter capped at 100. Every interleaving ends
       # at 120, so NO ordering satisfies the invariant. Events are predictable
       # (so they are compatible in every ordering): the refutation must be
-      # assertion-driven and name the failing check.
+      # check-driven and name the failing check.
       branch_commands = [
         [%CreateItem{name: "A", quantity: 60}],
         [%CreateItem{name: "B", quantity: 60}]
@@ -182,10 +182,10 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
       assert refutation.check_name == :quantity_limit
 
       assert %Failure{
-               type: %Failure.Assertion{
-                 kind: :assertion_failed,
+               type: %Failure.Check{
+                 kind: :check_failed,
                  name: :quantity_limit,
-                 detail: {%PropertyDamage.AssertionFailed{}, _st}
+                 detail: {%PropertyDamage.CheckFailed{}, _st}
                }
              } = refutation.reason
     end
@@ -206,7 +206,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
       refute result.success
 
       assert %Failure{
-               type: %Failure.Assertion{kind: :assertion_failed, name: :quantity_limit},
+               type: %Failure.Check{kind: :check_failed, name: :quantity_limit},
                branch_id: _bid
              } = result.failure_reason
     end
@@ -214,7 +214,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
     test "a read no ordering can explain is refuted on event incompatibility (refutation is nil)" do
       # branch1 reads 5, but only value 1 was ever written: no serialization
       # explains the observed event. The refutation is event-based, so its
-      # detail is nil (no assertion was the cause).
+      # detail is nil (no check was the cause).
       branch_commands = [[%PutKey{key: :k0, value: 1}], [%GetKey{key: :k0}]]
 
       branch_events = %{
@@ -289,8 +289,8 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
   defp projections, do: %{ShrinkQuality.Projection => ShrinkQuality.Projection.init()}
 
   defp failing_projections do
-    alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
-    %{ModelState => ModelState.init(), FailingAssertion => FailingAssertion.init()}
+    alias PropertyDamage.Test.Projections.{FailingCheck, ModelState}
+    %{ModelState => ModelState.init(), FailingCheck => FailingCheck.init()}
   end
 
   defp entry(event, command_index), do: Entry.from_command(event, command_index, timestamp: 1)
@@ -305,7 +305,7 @@ defmodule PropertyDamage.LinearizationSoundnessTest do
 
   # Independent oracle: a branching execution is linearizable iff SOME serial
   # order of the flattened commands passes when run through the plain LINEAR
-  # executor (which applies the normal, sound per-command assertions). This
+  # executor (which applies the normal, sound per-command checks). This
   # shares no code with Linearization.check beyond the executor's single-command
   # path, so it is a genuine cross-check of the verdict.
   defp some_serial_order_passes?(branches, model, adapter) do

@@ -1,11 +1,11 @@
 defmodule PropertyDamage.Invariants.Invariant do
   @moduledoc """
-  A first-class invariant: the named property a set of assertions verifies (DR-026).
+  A first-class invariant: the named property a set of checks verifies (DR-026).
 
-  An assertion does not stand alone; it *checks* an invariant. The invariant is
+  A check does not stand alone; it *checks* an invariant. The invariant is
   the stable, named thing a model promises to uphold, and one invariant may be
-  checked by more than one assertion (for example a synchronous `@trigger` and a
-  temporal `@poll_state`). Giving invariants identity lets the framework build a
+  checked by more than one check (for example a synchronous `@check` and a
+  temporal `@eventually`). Giving invariants identity lets the framework build a
   single authoritative catalog and report which invariants a run actually
   exercised (anti-vacuity coverage).
 
@@ -29,14 +29,14 @@ defmodule PropertyDamage.Invariants.Invariant do
 
       @invariant id: :balance_nonneg, description: "Balance never drops below zero"
 
-  or inline on the assertion that checks them:
+  or inline on the check that checks them:
 
-      @trigger every: 1, id: :balance_nonneg, description: "..."
+      @check every: 1, id: :balance_nonneg, description: "..."
       def assert_balance(state, _), do: ...
 
-  Other assertions link to a declared invariant with `validates: :id`. An
-  assertion with neither `id:` nor `validates:` validates an invariant whose `id`
-  is the assertion's own (`assert_`-stripped) name, so every existing assertion
+  Other checks link to a declared invariant with `validates: :id`. An
+  check with neither `id:` nor `validates:` validates an invariant whose `id`
+  is the check's own (`assert_`-stripped) name, so every existing check
   owns a same-named invariant by default.
   """
 
@@ -57,7 +57,7 @@ defmodule PropertyDamage.Invariants.Invariant do
   - `:description` (optional) must be a binary or `nil`.
 
   Raises `ArgumentError` on malformed input. This is the single validating code
-  path: both the centralized (`@invariant`) and inline (`@trigger ... id:`)
+  path: both the centralized (`@invariant`) and inline (`@check ... id:`)
   declaration sites build through it.
   """
   @spec new!(keyword()) :: t()
@@ -98,7 +98,7 @@ defmodule PropertyDamage.Invariants.Invariant do
   the **description** (and only the description) at report time, best-effort with
   fallback to the local description; that config plumbing is deferred (DR-026
   §9). Resolution is lazy (report/catalog time only): never compile-time, never
-  on the run hot path, and it never feeds generation, shrinking, or assertion
+  on the run hot path, and it never feeds generation, shrinking, or check
   logic.
   """
   @spec fetch!(atom(), map()) :: t()

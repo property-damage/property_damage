@@ -42,7 +42,7 @@ defmodule PropertyDamage.Execute3RuntimeTest do
     @impl PropertyDamage.Model.Simulator
     def simulate(_cmd, _state), do: [%{type: :created}]
     @impl PropertyDamage.Model
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   describe "user_context is exactly the setup/1 return (no framework keys)" do
@@ -113,7 +113,7 @@ defmodule PropertyDamage.Execute3RuntimeTest do
           adapter_config: %{},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       assert {:ok, _stats} = Worker.execute_sequence(worker)

@@ -19,7 +19,7 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
       seed: 512_902_757,
       run_number: 3,
       failed_at_index: 0,
-      failure_reason: Failure.assertion_failed(:NonNegativeBalance, "Balance cannot be negative"),
+      failure_reason: Failure.check_failed(:NonNegativeBalance, "Balance cannot be negative"),
       original_sequence: seq,
       shrunk_sequence: seq
     )
@@ -44,7 +44,7 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
       out = Formatter.format(sut_failure(), :json)
       assert {:ok, decoded} = Jason.decode(out)
       assert decoded["location"]["seed"] == 512_902_757
-      assert decoded["failure"]["type"] == "assertion_failed"
+      assert decoded["failure"]["type"] == "check_failed"
     end
 
     test ":compact renders a single concise line/string" do

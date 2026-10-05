@@ -173,7 +173,7 @@ defmodule PropertyDamage.MixProject do
         Exceptions: [
           PropertyDamage.Error,
           PropertyDamage.ErrorOrigin,
-          PropertyDamage.AssertionFailed,
+          PropertyDamage.CheckFailed,
           PropertyDamage.CommandTimeoutError,
           PropertyDamage.ProjectionError
         ],

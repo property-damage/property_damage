@@ -14,7 +14,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     :adapter_config,
     :metrics,
     :think_time_range,
-    :assertion_mode,
+    :check_mode,
     :run_nonce,
     # Owning process (runner); we stop with it so workers never orphan
     :owner,
@@ -46,7 +46,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
   - `:adapter_config` - Adapter configuration (default: %{})
   - `:metrics` - Metrics collector pid (required)
   - `:think_time_range` - {min, max} ms between commands (default: {0, 0})
-  - `:assertion_mode` - How to handle assertions (default: :disabled)
+  - `:check_mode` - How to handle checks (default: :disabled)
 
   Returns `{:ok, pid}` or `{:error, reason}`.
   """
@@ -110,7 +110,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
     adapter_config = Keyword.get(opts, :adapter_config, %{})
     metrics = Keyword.fetch!(opts, :metrics)
     think_time_range = Keyword.get(opts, :think_time_range, {0, 0})
-    assertion_mode = Keyword.get(opts, :assertion_mode, :disabled)
+    check_mode = Keyword.get(opts, :check_mode, :disabled)
 
     state = %__MODULE__{
       model: model,
@@ -118,7 +118,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
       adapter_config: adapter_config,
       metrics: metrics,
       think_time_range: think_time_range,
-      assertion_mode: assertion_mode,
+      check_mode: check_mode,
       run_nonce: Keyword.get(opts, :run_nonce),
       owner: Keyword.get(opts, :owner),
       available: :queue.new(),
@@ -302,7 +302,7 @@ defmodule PropertyDamage.LoadTest.WorkerPool do
            adapter_config: state.adapter_config,
            metrics: state.metrics,
            think_time_range: state.think_time_range,
-           assertion_mode: state.assertion_mode,
+           check_mode: state.check_mode,
            run_nonce: state.run_nonce
          ) do
       {:ok, worker} ->

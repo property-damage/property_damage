@@ -72,7 +72,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
         }
       end)
 
-    kind = Keyword.get(opts, :failure_type, :assertion_failed)
+    kind = Keyword.get(opts, :failure_type, :check_failed)
     check_name = Keyword.get(opts, :check_name, :balance_non_negative)
     message = Keyword.get(opts, :message, "Balance -100 is negative")
 
@@ -89,7 +89,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
   end
 
   # Build a %Failure{} for the FI tests from a (real) kind + name + message.
-  defp fi_failure_reason(:assertion_failed, name, msg), do: Failure.assertion_failed(name, msg)
+  defp fi_failure_reason(:check_failed, name, msg), do: Failure.check_failed(name, msg)
 
   defp fi_failure_reason(:projection_violation, name, msg),
     do: Failure.projection_violation(name || :Projection, msg)
@@ -203,7 +203,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     end
 
     test "categorizes error correctly" do
-      check_failure = create_failure_report(failure_type: :assertion_failed)
+      check_failure = create_failure_report(failure_type: :check_failed)
       fp = Fingerprint.from_failure_report(check_failure)
       assert fp.error_category == :check_violation
 
@@ -271,7 +271,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     test "very different fingerprints have low score" do
       report1 =
         create_failure_report(
-          failure_type: :assertion_failed,
+          failure_type: :check_failed,
           check_name: :balance_non_negative,
           command: %TestCommand.DebitAccount{account_ref: "acc_1", amount: 100, currency: "USD"}
         )
@@ -352,7 +352,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     end
 
     test "returns false for dissimilar fingerprints" do
-      report1 = create_failure_report(failure_type: :assertion_failed, check_name: :check_a)
+      report1 = create_failure_report(failure_type: :check_failed, check_name: :check_a)
       report2 = create_failure_report(failure_type: :nemesis_error, check_name: nil, events: [])
 
       fp1 = Fingerprint.from_failure_report(report1)
@@ -522,15 +522,15 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       refute cluster.pattern.description =~ ~r/^Failure\b/
     end
 
-    test "an assertion_failed cluster reads as a check failure, not generic Failure" do
+    test "a check_failed cluster reads as a check failure, not generic Failure" do
       failures = [
-        create_failure_report(seed: 111, failure_type: :assertion_failed),
-        create_failure_report(seed: 222, failure_type: :assertion_failed)
+        create_failure_report(seed: 111, failure_type: :check_failed),
+        create_failure_report(seed: 222, failure_type: :check_failed)
       ]
 
       [cluster | _] = Patterns.cluster_failures(failures)
 
-      assert cluster.pattern.failure_type == :assertion_failed
+      assert cluster.pattern.failure_type == :check_failed
       assert cluster.pattern.description =~ "Check failure"
       refute cluster.pattern.description =~ ~r/^Failure\b/
     end
@@ -581,7 +581,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
     end
 
     test "detects dissimilar failures" do
-      report1 = create_failure_report(failure_type: :assertion_failed, check_name: :check_a)
+      report1 = create_failure_report(failure_type: :check_failed, check_name: :check_a)
       report2 = create_failure_report(failure_type: :nemesis_error, check_name: nil, events: [])
 
       refute FailureIntelligence.similar?(report1, report2)
@@ -814,7 +814,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       # A fresh cluster-A failure should map onto the cluster-A group with a
       # perfect score.
       assert {cluster, score} = Patterns.find_best_match(cluster_a_failure(99), clusters)
-      assert cluster.pattern.failure_type == :assertion_failed
+      assert cluster.pattern.failure_type == :check_failed
       assert_in_delta score, 1.0, 0.0001
     end
 
@@ -854,7 +854,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       # The big cluster is the check-failure group; the mid cluster is the
       # exception group.
       [big, mid, _lone] = clusters
-      assert big.pattern.failure_type == :assertion_failed
+      assert big.pattern.failure_type == :check_failed
       assert big.pattern.command_types == [TestCommand.DebitAccount]
       assert mid.pattern.failure_type == :nemesis_error
     end
@@ -868,7 +868,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       assert analysis.total_failures == 6
 
       # Most common pattern is the largest cluster (the 3 check failures).
-      assert analysis.most_common_pattern.failure_type == :assertion_failed
+      assert analysis.most_common_pattern.failure_type == :check_failed
       assert analysis.most_common_pattern.command_types == [TestCommand.DebitAccount]
 
       # Membership: the two significant clusters cover 5 of the 6 failures.
@@ -895,7 +895,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       cluster = FailureIntelligence.match_pattern(cluster_a_failure(99), clusters)
 
       refute is_nil(cluster)
-      assert cluster.pattern.failure_type == :assertion_failed
+      assert cluster.pattern.failure_type == :check_failed
     end
 
     test "returns nil for a novel failure that matches no cluster", %{clusters: clusters} do
@@ -926,8 +926,7 @@ defmodule PropertyDamage.FailureIntelligenceTest do
       %FailureReport{
         seed: seed,
         run_number: 0,
-        failure_reason:
-          Failure.assertion_failed(:balance_non_negative, "Balance -100 is negative")
+        failure_reason: Failure.check_failed(:balance_non_negative, "Balance -100 is negative")
       }
     end
 

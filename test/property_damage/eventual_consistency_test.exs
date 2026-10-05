@@ -1,10 +1,10 @@
 defmodule PropertyDamage.EventualConsistencyTest do
   @moduledoc """
-  End-to-end tests for the @poll_state eventual-consistency pipeline through
+  End-to-end tests for the @eventually eventual-consistency pipeline through
   Executor.run. These exercise the R4 fixes:
 
-    1. @poll_state assertions no longer crash the run on the first command
-       (the run_projection_assertions type filter)
+    1. @eventually checks no longer crash the run on the first command
+       (the run_projection_checks type filter)
     2. a poll predicate can observe events that arrive AFTER the last command
        (the drain-and-refresh finalization loop)
     3. a poll timeout produces a FailureReport instead of crashing
@@ -43,8 +43,8 @@ defmodule PropertyDamage.EventualConsistencyTest do
 
     # Eventual consistency: the payment must become confirmed within the
     # window. The confirming event arrives via a resource poller AFTER the
-    # command returns. @poll_state triggers on the PaymentInitiated EVENT.
-    @poll_state after: PaymentInitiated,
+    # command returns. @eventually triggers on the PaymentInitiated EVENT.
+    @eventually after: PaymentInitiated,
                 timeout: {300, :milliseconds},
                 interval: {10, :milliseconds}
     def payment_eventually_confirmed(_state, %PaymentInitiated{id: id}) do
@@ -69,7 +69,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     @impl true
     def command_sequence_projection, do: PaymentProjection
     @impl true
-    def assertion_projections, do: [PaymentProjection]
+    def check_projections, do: [PaymentProjection]
     @impl true
     def simulator, do: PaymentSimulator
   end
@@ -125,7 +125,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     end
   end
 
-  test "a @poll_state predicate observes a confirmation that arrives after the command" do
+  test "a @eventually predicate observes a confirmation that arrives after the command" do
     {:ok, result} = run_executor(ConfirmingAdapter)
 
     assert result.success,
@@ -139,10 +139,10 @@ defmodule PropertyDamage.EventualConsistencyTest do
 
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout, detail: info}} =
+    assert %Failure{type: %Failure.Check{kind: :poll_timeout, detail: info}} =
              result.failure_reason
 
-    assert info.triggered_by.assertion_name == :payment_eventually_confirmed
+    assert info.triggered_by.check_name == :payment_eventually_confirmed
     # The crash these fixes prevent was a missing :projections_before key
     assert Map.has_key?(result, :projections_before)
   end
@@ -177,7 +177,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
     @impl true
     def command_sequence_projection, do: ProbeProjection
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule RetryThenSucceedAdapter do
@@ -234,9 +234,9 @@ defmodule PropertyDamage.EventualConsistencyTest do
       )
 
     assert {:error, %PropertyDamage.FailureReport{} = report} = result
-    assert %Failure{type: %Failure.Assertion{kind: :poll_timeout}} = report.failure_reason
+    assert %Failure{type: %Failure.Check{kind: :poll_timeout}} = report.failure_reason
 
-    # DR-030: a @poll_state liveness timeout is now attributed to the command
+    # DR-030: a @eventually liveness timeout is now attributed to the command
     # whose event opened the poll window (InitiatePayment at index 0), so the
     # shrinker keeps locality. (Previously reported as nil.)
     assert report.failed_at_index == 0

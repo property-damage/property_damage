@@ -2,7 +2,7 @@ defmodule ObanBenchTest do
   @moduledoc """
   The core eventual-consistency loop end to end against real Oban + Postgres:
   commands enqueue async jobs, resource pollers observe the database between
-  commands, and the `@poll_state` invariant asserts the observed counter value
+  commands, and the `@eventually` invariant asserts the observed counter value
   eventually matches what was enqueued.
   """
   use ExUnit.Case, async: false

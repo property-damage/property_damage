@@ -153,7 +153,7 @@ write.
 | `arrival_jitter` | `{min_ms, max_ms}` jitter per arrival | `{0, 0}` |
 | `metrics_interval` | How often to sample metrics (snapshot cadence) | `{1, :seconds}` |
 | `on_progress` | Progress consumer: `LoadUpdate` snapshots + a terminal `LoadResult` | `nil` |
-| `assertion_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
+| `check_mode` | `:disabled`, `:record`, `:log`, or `:halt` | `:disabled` |
 | `run_nonce` | `non_neg_integer` seeding client-minted run-scoped values (DR-034); set it only for reproducible minted values | strong random entropy |
 
 ### Arrival Rate Formats
@@ -221,8 +221,8 @@ or custom reporting.
 | `by_command` | `%{command_module => %{count, latency_p50, latency_p95, latency_mean, error_count}}` |
 | `duration_ms` | Wall-clock length of the run |
 | `active_sessions` / `completed_sessions` | Session gauges at snapshot time |
-| `assertion_failures` / `assertion_failure_rate` / `failures_by_exception` | Populated when `assertion_mode` is not `:disabled` (`failures_by_exception` is `%{exception_module => count}`) |
-| `recent_assertion_failures` | Bounded list of recent assertion-failure detail maps |
+| `check_failures` / `check_failure_rate` / `failures_by_exception` | Populated when `check_mode` is not `:disabled` (`failures_by_exception` is `%{exception_module => count}`) |
+| `recent_check_failures` | Bounded list of recent check-failure detail maps |
 | `history` | Time series: a list of `%{timestamp, rps, latency_p95, active_sessions, error_rate}` points |
 
 `report.pool_stats` describes the dynamic worker pool:
@@ -354,14 +354,14 @@ Faster commands mean workers become available sooner:
 ### 4. Check Sequence Length
 
 If `Total Commands ≈ Arrivals Spawned`, your sequences terminate after
-~1 command. Check your model's `terminate?/3` implementation:
+~1 command. Check your model's `terminate_early?/3` implementation:
 
 ```elixir
 # This terminates immediately - only 1 command per sequence
-def terminate?(_state, _history, _step), do: true
+def terminate_early?(_state, _history, _step), do: true
 
 # This runs 5-10 commands per sequence
-def terminate?(_state, _history, step), do: step >= 8
+def terminate_early?(_state, _history, step), do: step >= 8
 ```
 
 Longer sequences mean more commands per arrival, potentially improving
@@ -412,7 +412,7 @@ status = Runner.status(runner)
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
 | Completed << Spawned | Workers failing to start (`adapter.setup`) or SUT refusing connections | Check adapter setup and SUT connection limits; lower arrival rate |
-| Commands ≈ Arrivals | Early termination | Check `terminate?/3` returns `false` initially |
+| Commands ≈ Arrivals | Early termination | Check `terminate_early?/3` returns `false` initially |
 | Peak util 100%, avg util low | Bursty traffic | Add ramp-up to smooth the arrival curve |
 | Peak and avg util both high | Sustained overload | Lower arrival rate or scale the SUT |
 | Low arrivals/sec vs target | Ramp-up or failed arrivals | Check ramp config and the Spawned/Completed gap |

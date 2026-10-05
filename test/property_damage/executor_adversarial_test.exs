@@ -199,7 +199,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
 
     assert match?(
              %Failure{
-               type: %Failure.Assertion{kind: :projection_violation, name: RaisingProjection}
+               type: %Failure.Check{kind: :projection_violation, name: RaisingProjection}
              },
              result.failure_reason
            )
@@ -211,7 +211,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
 
     assert match?(
              %Failure{
-               type: %Failure.Assertion{kind: :projection_violation, name: ExitingProjection}
+               type: %Failure.Check{kind: :projection_violation, name: ExitingProjection}
              },
              result.failure_reason
            )
@@ -223,7 +223,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
 
     assert match?(
              %Failure{
-               type: %Failure.Assertion{kind: :projection_violation, name: ThrowingProjection}
+               type: %Failure.Check{kind: :projection_violation, name: ThrowingProjection}
              },
              result.failure_reason
            )

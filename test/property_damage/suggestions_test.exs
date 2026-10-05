@@ -43,9 +43,9 @@ defmodule PropertyDamage.SuggestionsTest do
     @impl true
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_balance_non_negative(_state, _cmd_or_event) do
-      # No-op assertion that always passes
+      # No-op check that always passes
       :ok
     end
   end
@@ -72,7 +72,7 @@ defmodule PropertyDamage.SuggestionsTest do
     def command_sequence_projection, do: EmptyProjection
 
     @impl true
-    def assertion_projections, do: [TestProjection]
+    def check_projections, do: [TestProjection]
   end
 
   # Model with no projections
@@ -86,7 +86,7 @@ defmodule PropertyDamage.SuggestionsTest do
     def command_sequence_projection, do: EmptyProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   # ============================================================================
@@ -566,7 +566,7 @@ defmodule PropertyDamage.SuggestionsTest do
       suggestion = %{type: :non_negative_check, field: :balance}
       code = Formatter.generate_example_code(suggestion)
 
-      assert code =~ "@trigger every: 1"
+      assert code =~ "@check every: 1"
       assert code =~ "def assert_balance_non_negative"
       assert code =~ "PropertyDamage.fail!"
     end
@@ -625,7 +625,7 @@ defmodule PropertyDamage.SuggestionsTest do
       assert is_binary(summary)
     end
 
-    test "handles model with no assertion projections" do
+    test "handles model with no check projections" do
       analysis = Suggestions.analyze(MinimalModel)
 
       assert analysis.model == MinimalModel

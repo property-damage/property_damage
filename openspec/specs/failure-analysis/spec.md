@@ -10,7 +10,7 @@ Failure analysis provides intelligent post-mortem tooling for PropertyDamage tes
 
 A run's `failure_reason` SHALL be a single structured type,
 `%PropertyDamage.Failure{}` (DR-041), not a loose family of `{:tag, ...}` tuples.
-It SHALL nest one class struct under `type` — `Failure.Assertion`,
+It SHALL nest one class struct under `type` — `Failure.Check`,
 `Failure.Execution`, or `Failure.Framework` — so that illegal class/kind
 combinations are unrepresentable, and SHALL record the producing branch (if any)
 as `branch_id` on the envelope (absorbing the former `{:branch_failure, id,
@@ -22,7 +22,7 @@ and `partial_events/1` accessors.
 #### Scenario: Kinds partition into three classes
 
 - **WHEN** a run fails
-- **THEN** `Failure.class/1` SHALL return `:assertion` for a property/invariant violation (`:assertion_failed`, `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`, `:projection_violation`)
+- **THEN** `Failure.class/1` SHALL return `:check` for a property/invariant violation (`:check_failed`, `:idempotency_violation`, `:linearization`, `:poll_timeout`, `:settle_timeout`, `:projection_violation`)
 - **AND** `:execution` for a command-execution failure (`:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`, `:resource_poller_error`, `:poll_error`, `:retry_from_sync_command`, `:malformed_adapter_return`)
 - **AND** `:framework` for a framework-level failure (`:placeholder_resolution`, `:unknown`)
 
@@ -37,8 +37,8 @@ The system SHALL extract comparable features from each failure report, producing
 
 #### Scenario: Fingerprint from a check failure
 
-- **WHEN** a failure report's `failure_reason` is a `%PropertyDamage.Failure{}` of kind `:assertion_failed` naming `:NonNegativeBalance` (so `FailureReport.failure_type/1` is `:assertion_failed` and `check_name/1` is `:NonNegativeBalance`)
-- **THEN** the fingerprint SHALL contain `failure_type: :assertion_failed` and `check_name: :NonNegativeBalance`
+- **WHEN** a failure report's `failure_reason` is a `%PropertyDamage.Failure{}` of kind `:check_failed` naming `:NonNegativeBalance` (so `FailureReport.failure_type/1` is `:check_failed` and `check_name/1` is `:NonNegativeBalance`)
+- **THEN** the fingerprint SHALL contain `failure_type: :check_failed` and `check_name: :NonNegativeBalance`
 - **AND** the fingerprint SHALL include the command type that triggered the failure
 - **AND** the fingerprint SHALL include the event types produced before failure
 
@@ -145,7 +145,7 @@ The system SHALL classify each failure as originating from the SUT, the test cod
 
 #### Scenario: SUT error with high confidence
 
-- **WHEN** the failure reason is a `%PropertyDamage.Failure{}` of kind `:assertion_failed`, `:poll_timeout`, `:idempotency_violation`, or `:linearization`
+- **WHEN** the failure reason is a `%PropertyDamage.Failure{}` of kind `:check_failed`, `:poll_timeout`, `:idempotency_violation`, or `:linearization`
 - **THEN** the origin SHALL be classified as `:sut_error` with confidence `:high`
 
 #### Scenario: Test code error with high confidence
@@ -155,7 +155,7 @@ The system SHALL classify each failure as originating from the SUT, the test cod
 
 #### Scenario: Ambiguous classification
 
-- **WHEN** the failure is a generic exception during assertion execution or an adapter error
+- **WHEN** the failure is a generic exception during check execution or an adapter error
 - **THEN** the origin SHALL be classified as `:unknown` with confidence `:low`
 - **AND** the classification SHALL include evidence explaining the ambiguity
 
@@ -229,9 +229,9 @@ The system SHALL produce structured failure reports containing location (run num
 
 #### Scenario: Report names the violated invariant (DR-026)
 
-- **WHEN** an assertion failure is reported and the assertion validates an invariant with a description
-- **THEN** the report SHALL headline the invariant's `name` and `description`, with the specific failing assertion shown as secondary detail
-- **AND** when the invariant has no description, the report SHALL fall back to the assertion name as today
+- **WHEN** a check failure is reported and the check validates an invariant with a description
+- **THEN** the report SHALL headline the invariant's `name` and `description`, with the specific failing check shown as secondary detail
+- **AND** when the invariant has no description, the report SHALL fall back to the check name as today
 
 #### Scenario: Report renders per-command labels (DR-028 amendment, P7)
 

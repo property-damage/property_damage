@@ -1,7 +1,7 @@
 defmodule KratosBench.Simulator do
   @moduledoc """
   Predicts one event per command during generation, before Kratos is touched, so
-  `KratosBench.State` advances and `when:`/`with:` can pick coherent targets.
+  `KratosBench.State` advances and `when:`/`overrides:` can pick coherent targets.
 
   Without this the `when:`-gated `Login`/`DeleteIdentity` commands would never be
   generated (the projection would stay empty during the symbolic phase). The

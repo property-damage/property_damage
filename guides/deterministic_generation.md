@@ -14,7 +14,7 @@ Concretely, the following code runs during the **symbolic phase** and MUST be
 free of side effects and ambient reads:
 
 - command generators (`generator/1`),
-- `when:` and `with:` predicates in the model's command list,
+- `when:` and `overrides:` predicates in the model's command list,
 - the `command_sequence_projection`, and
 - the `simulator`.
 

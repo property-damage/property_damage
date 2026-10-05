@@ -1,7 +1,7 @@
 defmodule PropertyDamage.Wave1IntegrationTest do
   @moduledoc """
   Integration coverage for the "wave-1" executor surface: nemesis fault
-  injection, stutter (idempotency retries), resource pollers (@poll_state
+  injection, stutter (idempotency retries), resource pollers (@eventually
   eventual consistency), and mid-execution event injection ("mocks") all in a
   SINGLE Executor.run sequence sharing one event log, projection set, and run
   loop. Each mechanism is tested in isolation elsewhere; this asserts they
@@ -72,7 +72,7 @@ defmodule PropertyDamage.Wave1IntegrationTest do
 
     # Synchronous invariant fired after every step (including after the nemesis
     # command): every tracked payment is in a known status.
-    @trigger every: 1
+    @check every: 1
     def assert_status_valid(state, _cmd_or_event) do
       bad = Enum.reject(Map.values(state.status), &(&1 in [:initiated, :confirmed]))
 
@@ -83,7 +83,7 @@ defmodule PropertyDamage.Wave1IntegrationTest do
 
     # Eventual consistency: the confirmation arrives via a resource poller after
     # InitiatePayment returns.
-    @poll_state after: Initiated,
+    @eventually after: Initiated,
                 timeout: {300, :milliseconds},
                 interval: {10, :milliseconds}
     def payment_eventually_confirmed(_state, %Initiated{id: id}) do
@@ -106,7 +106,7 @@ defmodule PropertyDamage.Wave1IntegrationTest do
     @impl true
     def command_sequence_projection, do: Projection
     @impl true
-    def assertion_projections, do: [Projection]
+    def check_projections, do: [Projection]
     @impl true
     def simulator, do: Simulator
   end

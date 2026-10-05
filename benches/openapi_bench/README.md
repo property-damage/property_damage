@@ -44,7 +44,7 @@ suite must catch and shrink.
 
 The invariant pieces the scaffold cannot infer are hand-written under
 `lib/openapi_bench/`: `consistency.ex` (the read-consistency projection +
-assertion) and `simulator.ex`. Regenerating with `mix pd.scaffold` reproduces
+check) and `simulator.ex`. Regenerating with `mix pd.scaffold` reproduces
 the `lib/generated/` base; the diff is exactly the next-step fill-ins above.
 
 The point: the same generated client that passes `scaffold_run_test` (faithful

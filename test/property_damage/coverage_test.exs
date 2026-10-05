@@ -46,7 +46,7 @@ defmodule PropertyDamage.CoverageTest do
     def command_sequence_projection, do: TestProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   def mock_result(commands) do
@@ -147,7 +147,7 @@ defmodule PropertyDamage.CoverageTest do
         Coverage.new(TestModel)
         |> Coverage.record(mock_result([%TestCommand.Create{id: "1"}]))
 
-      stats = %{runs: 100, coverage: tracker, assertion_fires: %{}}
+      stats = %{runs: 100, coverage: tracker, check_fires: %{}}
 
       assert Coverage.from_result({:ok, stats}, TestModel) == tracker
     end
@@ -156,7 +156,7 @@ defmodule PropertyDamage.CoverageTest do
       # Aggregate stats without :sequence and without :coverage (coverage: true
       # was not requested). The error must point at the right accessor rather
       # than surfacing a raw KeyError on :sequence.
-      stats = %{runs: 100, assertion_fires: %{}}
+      stats = %{runs: 100, check_fires: %{}}
 
       assert_raise ArgumentError, ~r/coverage/, fn ->
         Coverage.from_result({:ok, stats}, TestModel)

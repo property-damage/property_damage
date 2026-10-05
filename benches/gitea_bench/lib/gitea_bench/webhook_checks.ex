@@ -1,4 +1,4 @@
-defmodule GiteaBench.WebhookAssertions do
+defmodule GiteaBench.WebhookChecks do
   @moduledoc """
   The DR-030 judgment over the webhook-correlated set: exactly one delivered
   `issues` (closed) webhook per closed issue, split into its liveness and safety
@@ -9,11 +9,11 @@ defmodule GiteaBench.WebhookAssertions do
   this projection's own state — a per-issue delivery count folded from the webhook
   events, keyed by the client-chosen `{full_name, number}`:
 
-    * **liveness** (`@poll_state`): after an issue is closed, its webhook must
+    * **liveness** (`@eventually`): after an issue is closed, its webhook must
       *eventually* arrive. The poller drains the `EventQueue` until the count for
       that issue reaches one, or fails as a poll-timeout localized (via the P5
       correlation) to the `CloseIssue` that dropped its delivery.
-    * **safety** (`@trigger at: :teardown`): no issue may receive *more than one*
+    * **safety** (`@check at: :teardown`): no issue may receive *more than one*
       delivery. Checked once on the settled final state, after all pollers
       finalize, so every arrived webhook is already counted.
 
@@ -38,13 +38,13 @@ defmodule GiteaBench.WebhookAssertions do
   def apply(state, _event), do: state
 
   # Liveness: the delivery for this specific closed issue must arrive.
-  @poll_state after: IssueClosed, timeout: 10, interval: {200, :milliseconds}
+  @eventually after: IssueClosed, timeout: 10, interval: {200, :milliseconds}
   def webhook_delivered(_state, %IssueClosed{full_name: full_name, number: number}) do
     fn s -> Map.get(s.webhooks, {full_name, number}, 0) >= 1 end
   end
 
   # Safety: no issue may receive a duplicate delivery.
-  @trigger at: :teardown
+  @check at: :teardown
   def assert_at_most_one_webhook(state, _phase) do
     for {{full_name, number}, count} <- state.webhooks, count > 1 do
       PropertyDamage.fail!("issue received more than one close webhook",

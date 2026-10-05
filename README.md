@@ -27,7 +27,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 - **Fault Injection (Nemesis)**: Built-in operations for network, resource, time, and process faults
-- **Differential Testing**: Compare implementations against oracles, baselines, or each other
+- **Differential Testing**: Compare implementations against oracles or each other
 
 ## Installation
 
@@ -94,7 +94,7 @@ end
 
 ### 3. Define Projections and Invariants
 
-Projections reduce events into state. Functions tagged with `@trigger`
+Projections reduce events into state. Functions tagged with `@check`
 are invariants, checked at the configured points:
 
 <!-- pd-doc-verify: runnable -->
@@ -117,7 +117,7 @@ defmodule MyApp.Projections.Users do
   # Checked after every command. Assert a property your SUT must never violate.
   # (Don't assert uniqueness of a client-supplied field like emails -- the
   # generator can legitimately repeat them; assert on what the SUT guarantees.)
-  @trigger every: 1
+  @check every: 1
   def assert_emails_present(state, _cmd_or_event) do
     if Enum.any?(state.users, fn {_id, u} -> u.email in [nil, ""] end) do
       PropertyDamage.fail!("user with missing email", users: state.users)
@@ -126,7 +126,7 @@ defmodule MyApp.Projections.Users do
 end
 ```
 
-(`@trigger every: MyApp.Commands.CreateUser` runs a check only after that
+(`@check every: MyApp.Commands.CreateUser` runs a check only after that
 command; see the [invariants guide](guides/writing_invariants.md) for more.)
 
 ### 4. Define a Simulator
@@ -155,7 +155,7 @@ end
 ### 5. Define a Model
 
 The model ties everything together and owns the state-dependent logic:
-selection weights, `when:` preconditions, and `with:` generator overrides:
+selection weights, `when:` preconditions, and `overrides:` generator overrides:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -169,7 +169,7 @@ defmodule MyApp.TestModel do
       # {MyApp.Commands.DeleteUser,
       #  weight: 1,
       #  when: fn state -> map_size(state.users) > 0 end,
-      #  with: fn state -> %{id: StreamData.member_of(Map.keys(state.users))} end}
+      #  overrides: fn state -> %{id: StreamData.member_of(Map.keys(state.users))} end}
     ]
   end
 
@@ -177,7 +177,7 @@ defmodule MyApp.TestModel do
   def command_sequence_projection, do: MyApp.Projections.Users
 
   @impl true
-  def assertion_projections, do: [MyApp.Projections.Users]
+  def check_projections, do: [MyApp.Projections.Users]
 
   @impl true
   def simulator, do: MyApp.Simulator
@@ -541,7 +541,7 @@ defmodule MyModel do
   # Required
   def commands, do: [{CommandModule, weight: N}, ...]
   def command_sequence_projection, do: MyStateProjection
-  def assertion_projections, do: [MyExtraProjection, ...]  # Optional
+  def check_projections, do: [MyExtraProjection, ...]  # Optional
 
   # Optional
   def injectable_events, do: []  # For Adapter.Injector
@@ -550,7 +550,7 @@ defmodule MyModel do
   def setup_each(config), do: :ok  # Called before each run/shrink attempt
   def teardown_each(config), do: :ok
   def teardown_once(config), do: :ok
-  def terminate?(state, command, events), do: false  # Custom termination
+  def terminate_early?(state, command, events), do: false  # Custom termination
 end
 ```
 
@@ -819,7 +819,7 @@ context = %{
 ### Adjusting Invariants During Faults
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_latency_sla(state, _cmd_or_event) do
   # Skip SLA check during partition
   unless Map.get(state.active_faults, :network_partition) do
@@ -838,7 +838,7 @@ Detect deadlocks, livelocks, and starvation with the Liveness projection.
 
 ```elixir
 defmodule MyModel do
-  def assertion_projections do
+  def check_projections do
     [
       {PropertyDamage.Model.Projection.Liveness, [
         max_pending_duration_ms: 10_000,
@@ -1320,29 +1320,6 @@ PropertyDamage.Differential.run(
 )
 ```
 
-### Time-Separated Comparison
-
-Save results now, compare later:
-
-```elixir
-# Export baseline before deployment
-PropertyDamage.Differential.run(
-  model: MyModel,
-  targets: [{ProdAdapter, name: "v2.3"}],
-  compare: :performance,
-  export_to: "baselines/v2.3.json",
-  seed: 12345
-)
-
-# Compare against baseline after deployment
-PropertyDamage.Differential.run(
-  model: MyModel,
-  targets: [{ProdAdapter, name: "v2.4"}],
-  compare: :performance,
-  baseline: "baselines/v2.3.json"
-)
-```
-
 ### Equivalence Strategies
 
 ```elixir
@@ -1391,7 +1368,7 @@ benches/openapi_bench/
 ### oban_bench
 
 [Oban](https://hex.pm/packages/oban) on real Postgres: the eventual-consistency
-rung (`@poll_state`, pollers, `external()` job ids). Provisions Postgres via
+rung (`@eventually`, pollers, `external()` job ids). Provisions Postgres via
 Docker.
 
 ```
@@ -1495,8 +1472,7 @@ PropertyDamage
 │
 ├── Differential
 │   ├── Differential - Main API (run, compare modes)
-│   ├── Equivalence  - Comparison strategies (exact, structural, custom)
-│   └── Baseline     - Export/import for time-separated testing
+│   └── Equivalence  - Comparison strategies (exact, structural, custom)
 │
 └── Utilities
     ├── Persistence  - Save/load failures

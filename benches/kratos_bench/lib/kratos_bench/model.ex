@@ -25,12 +25,12 @@ defmodule KratosBench.Model do
   @impl true
   def commands do
     [
-      {RegisterAccept, weight: 4, with: &register_overrides/1},
-      {RegisterModify, weight: 2, with: &register_overrides/1},
-      {RegisterReject, weight: 2, with: &register_overrides/1},
+      {RegisterAccept, weight: 4, overrides: &register_overrides/1},
+      {RegisterModify, weight: 2, overrides: &register_overrides/1},
+      {RegisterReject, weight: 2, overrides: &register_overrides/1},
       {ListIdentities, weight: 3},
-      {Login, weight: 2, when: &has_identity?/1, with: &login_overrides/1},
-      {DeleteIdentity, weight: 1, when: &has_identity?/1, with: &delete_overrides/1}
+      {Login, weight: 2, when: &has_identity?/1, overrides: &login_overrides/1},
+      {DeleteIdentity, weight: 1, when: &has_identity?/1, overrides: &delete_overrides/1}
     ]
   end
 
@@ -38,7 +38,7 @@ defmodule KratosBench.Model do
   def command_sequence_projection, do: KratosBench.State
 
   @impl true
-  def assertion_projections, do: [KratosBench.State]
+  def check_projections, do: [KratosBench.State]
 
   @impl true
   def simulator, do: KratosBench.Simulator

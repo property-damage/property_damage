@@ -151,7 +151,7 @@ Generating model...
 Next steps:
   1. Review and customize generators in command generator/1 callbacks
   2. Define events/3 (command, status, response) to map responses to events
-  3. Add when:/with: options in Model's commands() for preconditions
+  3. Add when:/overrides: options in Model's commands() for preconditions
   4. Implement simulate/2 in Model for expected events
   5. Configure authentication in adapter
 ```
@@ -272,7 +272,7 @@ If the spec declares `securitySchemes`, the adapter also gets a
 ### Model — command weights, projection slots
 
 The model lists the commands with inferred weights (reads > creates > updates >
-deletes) and leaves you two `TODO`s: the state projection and any assertion
+deletes) and leaves you two `TODO`s: the state projection and any check
 projections.
 
 ```elixir
@@ -307,14 +307,14 @@ generated files' "next steps" footer lists exactly what is left:
 
 2. **Write a state projection with invariants** — this is the part that catches
    bugs. It reduces events into model state and asserts properties with
-   `@trigger`. See *Writing Effective Invariants* and *Coverage and Invariant
+   `@check`. See *Writing Effective Invariants* and *Coverage and Invariant
    Catalogs*.
 
 3. **Wire the projection into the model** — replace the `raise` in
-   `command_sequence_projection/0`, and list assertion projections.
+   `command_sequence_projection/0`, and list check projections.
 
 4. **Add a simulator** (`simulate/2`) if you want state-dependent command
-   selection (`when:`/`with:`) during the symbolic phase.
+   selection (`when:`/`overrides:`) during the symbolic phase.
 
 5. **Point the adapter at your API** via `adapter_config: %{base_url: ...}` and
    any auth keys.
@@ -363,10 +363,10 @@ produces:
 
 # report.failure_reason:
 %PropertyDamage.Failure{
-  type: %PropertyDamage.Failure.Assertion{
-    kind: :assertion_failed,
+  type: %PropertyDamage.Failure.Check{
+    kind: :check_failed,
     name: :read_consistent,
-    detail: %PropertyDamage.AssertionFailed{
+    detail: %PropertyDamage.CheckFailed{
       message: "GET key=3 returned :unset, model expects 71",
       data: %{key: 3, actual: :unset, expected: 71}
     }
@@ -388,7 +388,7 @@ projection and simulator are hand-written alongside it.
 
 ## Where to go next
 
-- **Writing Effective Invariants** — the projection assertions that catch bugs.
+- **Writing Effective Invariants** — the projection checks that catch bugs.
 - **Coverage and Invariant Catalogs** — prove your invariants are actually
   exercised (anti-vacuity).
 - **Writing Commands** — how `external()` values flow from one command to the

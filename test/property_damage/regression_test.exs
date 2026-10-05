@@ -43,13 +43,13 @@ defmodule PropertyDamage.RegressionTest do
     def command_sequence_projection, do: PropertyDamage.RegressionTest.TestProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   def make_failure(seed, opts \\ []) do
     failure_reason =
       Keyword.get_lazy(opts, :failure_reason, fn ->
-        Failure.assertion_failed(
+        Failure.check_failed(
           Keyword.get(opts, :check_name, :test_check),
           Keyword.get(opts, :message, "Test failure")
         )

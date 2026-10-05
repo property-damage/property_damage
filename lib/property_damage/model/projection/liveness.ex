@@ -10,7 +10,7 @@ defmodule PropertyDamage.Model.Projection.Liveness do
 
   | Property Type | Example | Detection |
   |---------------|---------|-----------|
-  | Safety | "Balance never goes negative" | State assertion |
+  | Safety | "Balance never goes negative" | State check |
   | Liveness | "Every request eventually completes" | Timeout on pending |
 
   ## What This Projection Detects
@@ -30,7 +30,7 @@ defmodule PropertyDamage.Model.Projection.Liveness do
   ## Configuration
 
       defmodule MyModel do
-        def assertion_projections do
+        def check_projections do
           [
             {PropertyDamage.Model.Projection.Liveness, [
               max_pending_duration_ms: 10_000,
@@ -205,7 +205,7 @@ defmodule PropertyDamage.Model.Projection.Liveness do
   end
 
   # ============================================================================
-  # Check Registration (for use as assertion projection)
+  # Check Registration (for use as check projection)
   # ============================================================================
 
   @doc false

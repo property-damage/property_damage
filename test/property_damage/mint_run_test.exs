@@ -26,7 +26,7 @@ defmodule PropertyDamage.MintRunTest do
     def apply(state, _), do: state
 
     # Always fails once a command has run, so the run fails and shrinks.
-    @trigger every: 1
+    @check every: 1
     def always_fails(state, _cmd_or_event) do
       if state.count >= 1, do: PropertyDamage.fail!("boom", count: state.count)
     end
@@ -40,7 +40,7 @@ defmodule PropertyDamage.MintRunTest do
     @impl true
     def command_sequence_projection, do: Proj
     @impl true
-    def assertion_projections, do: [Proj]
+    def check_projections, do: [Proj]
     @impl true
     def simulator, do: __MODULE__
     @impl PropertyDamage.Model.Simulator

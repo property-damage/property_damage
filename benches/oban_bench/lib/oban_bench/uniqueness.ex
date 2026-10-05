@@ -5,7 +5,7 @@ defmodule ObanBench.Uniqueness do
   value equals the number of DISTINCT keys, not the number of enqueues.
 
   The model dedupes keys to predict the expected value (liveness, via
-  `@poll_state`); the adapter enforces the exactly-once safety bound in the
+  `@eventually`); the adapter enforces the exactly-once safety bound in the
   resource poller (`ObanBench.ExactlyOnce`). The faithful `UniqueWorker` carries
   an Oban `unique` constraint; the seeded bug (in the test) drops it so
   duplicates run and the counter overshoots.
@@ -46,7 +46,7 @@ defmodule ObanBench.Uniqueness.Projection do
 
   The exactly-once oracle itself lives in the resource poller
   (`ObanBench.ExactlyOnce`): liveness via its timeout, safety via its overshoot
-  check. This projection carries no assertion, so it is purely descriptive.
+  check. This projection carries no check, so it is purely descriptive.
   """
   use PropertyDamage.Model.Projection
 
@@ -69,7 +69,7 @@ defmodule ObanBench.Uniqueness.Projection do
   # Safety: each DISTINCT {counter, key} must increment the counter at most once,
   # so the observed maximum must never exceed the number of distinct keys
   # enqueued for that counter. Evaluated on the settled state (DR-024).
-  @trigger at: :teardown
+  @check at: :teardown
   def assert_exactly_once(state, _phase) do
     for {counter, observed} <- state.observed do
       expected = state.keys |> Map.get(counter, MapSet.new()) |> MapSet.size()
@@ -112,11 +112,11 @@ defmodule ObanBench.Uniqueness.Model do
   @impl true
   def command_sequence_projection, do: ObanBench.Uniqueness.Projection
 
-  # The command-sequence projection already carries the @trigger at: :teardown
+  # The command-sequence projection already carries the @check at: :teardown
   # safety check and receives every command/event, so it need not be listed
   # again here (doing so would evaluate the check twice).
   @impl true
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   @impl true
   def simulator, do: ObanBench.Uniqueness.Simulator

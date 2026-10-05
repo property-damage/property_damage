@@ -63,8 +63,8 @@ defmodule PropertyDamage.Options do
       Accumulate the heavier whole-run coverage dimensions
       (command/transition/state) across all generated sequences, attached to the
       success stats as `:coverage` (a `PropertyDamage.Coverage` tracker).
-      Per-assertion/invariant coverage (anti-vacuity) is always collected
-      regardless of this flag; see `PropertyDamage.assertion_coverage/2`.
+      Per-check/invariant coverage (anti-vacuity) is always collected
+      regardless of this flag; see `PropertyDamage.check_coverage/2`.
       """
     ],
     seed_library: [
@@ -155,13 +155,13 @@ defmodule PropertyDamage.Options do
       `RunResult`. See `PropertyDamage.Progress` (DR-022).
       """
     ],
-    assertion_mode: [
+    check_mode: [
       type: {:in, [:disabled, :halt, :record, :log]},
       default: :halt,
       doc: """
-      How to handle assertion failures:
+      How to handle check failures:
       - `:halt` - Stop on first failure (default)
-      - `:disabled` - Skip all assertions
+      - `:disabled` - Skip all checks
       - `:record` - Record failures but continue
       - `:log` - Log failures as warnings and continue
       """
@@ -281,6 +281,28 @@ defmodule PropertyDamage.Options do
 
   @run_schema NimbleOptions.new!(@run_schema_definition)
 
+  # Option keys that were renamed. The old key is never translated: passing it
+  # raises a validation error that names the replacement.
+  @retired_run_keys %{assertion_mode: :check_mode}
+  @retired_load_test_keys %{assertion_mode: :check_mode}
+
+  @doc false
+  # Raises `NimbleOptions.ValidationError` for the first retired key present in
+  # `opts`. `retired` maps each retired key to its replacement.
+  @spec reject_retired_keys!(keyword(), %{atom() => atom()}) :: :ok
+  def reject_retired_keys!(opts, retired) do
+    case Enum.find(opts, fn {key, _value} -> Map.has_key?(retired, key) end) do
+      nil ->
+        :ok
+
+      {key, value} ->
+        raise NimbleOptions.ValidationError,
+          key: key,
+          value: value,
+          message: "`#{key}:` was renamed `#{Map.fetch!(retired, key)}:`"
+    end
+  end
+
   @doc """
   Returns the compiled NimbleOptions schema for `PropertyDamage.run/1`.
   """
@@ -303,6 +325,8 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_run!(keyword()) :: keyword()
   def validate_run!(opts) do
+    reject_retired_keys!(opts, @retired_run_keys)
+
     opts
     |> NimbleOptions.validate!(@run_schema)
     |> validate_branching_bounds!()
@@ -412,14 +436,14 @@ defmodule PropertyDamage.Options do
       report) at completion. See `PropertyDamage.Progress` (DR-022).
       """
     ],
-    assertion_mode: [
+    check_mode: [
       type: {:in, [:disabled, :halt, :record, :log]},
       default: :disabled,
       doc: """
-      How to handle assertions during load testing:
-      - `:disabled` - Skip all assertions (maximum throughput, default)
-      - `:record` - Run assertions and record failures in metrics
-      - `:log` - Run assertions and log failures as warnings
+      How to handle checks during load testing:
+      - `:disabled` - Skip all checks (maximum throughput, default)
+      - `:record` - Run checks and record failures in metrics
+      - `:log` - Run checks and log failures as warnings
       - `:halt` - Stop on first failure
       """
     ]
@@ -449,6 +473,7 @@ defmodule PropertyDamage.Options do
   """
   @spec validate_load_test!(keyword()) :: keyword()
   def validate_load_test!(opts) do
+    reject_retired_keys!(opts, @retired_load_test_keys)
     NimbleOptions.validate!(opts, @load_test_schema)
   end
 
@@ -626,14 +651,6 @@ defmodule PropertyDamage.Options do
       type: :any,
       default: :exact,
       doc: "Equivalence strategy: `:exact`, `:structural`, or custom function."
-    ],
-    baseline: [
-      type: :string,
-      doc: "Path to baseline file for comparison."
-    ],
-    export_to: [
-      type: :string,
-      doc: "Path to export results for future baseline."
     ],
     metrics: [
       type: {:list, {:in, [:latency, :throughput]}},

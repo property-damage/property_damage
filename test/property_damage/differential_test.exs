@@ -8,7 +8,7 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   alias PropertyDamage.Differential
-  alias PropertyDamage.Differential.{Baseline, Equivalence, Result, Target}
+  alias PropertyDamage.Differential.{Equivalence, Result, Target}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate}
 
@@ -211,7 +211,7 @@ defmodule PropertyDamage.DifferentialTest do
     def apply(state, _), do: state
   end
 
-  defmodule TestAssertions do
+  defmodule TestChecks do
     use PropertyDamage.Model.Projection
 
     @impl true
@@ -220,7 +220,7 @@ defmodule PropertyDamage.DifferentialTest do
     @impl true
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_always_pass(_state, _cmd_or_event), do: :ok
   end
 
@@ -235,7 +235,7 @@ defmodule PropertyDamage.DifferentialTest do
     def command_sequence_projection, do: TestProjection
 
     @impl PropertyDamage.Model
-    def assertion_projections, do: [TestAssertions]
+    def check_projections, do: [TestChecks]
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -593,51 +593,6 @@ defmodule PropertyDamage.DifferentialTest do
   end
 
   # ============================================================================
-  # Baseline Tests
-  # ============================================================================
-
-  describe "Baseline" do
-    @tag :tmp_dir
-    test "exports and loads baseline", %{tmp_dir: tmp_dir} do
-      path = Path.join(tmp_dir, "test_baseline.json")
-
-      # Create mock run data
-      run_data = %{
-        runs: [
-          %{
-            commands: [%TestCommand{value: 1}],
-            results: [{:ok, [%TestEvent{value: 1, item_ref: "a"}]}],
-            timings: [100, 200],
-            event_log: [%TestEvent{value: 1}],
-            is_warmup: false
-          }
-        ],
-        setup_success: true
-      }
-
-      config = %{
-        model: TestModel,
-        targets: [{ReferenceAdapter, name: "test"}],
-        seed: 12_345
-      }
-
-      # Export
-      :ok = Baseline.export_run_data(run_data, config, path)
-      assert File.exists?(path)
-
-      # Load
-      {:ok, baseline} = Baseline.load(path)
-
-      assert baseline.seed == 12_345
-      assert length(baseline.runs) == 1
-    end
-
-    test "load returns error for missing file" do
-      assert {:error, {:file_not_found, _}} = Baseline.load("/nonexistent/path.json")
-    end
-  end
-
-  # ============================================================================
   # Same Adapter Different Config Tests
   # ============================================================================
 
@@ -725,63 +680,24 @@ defmodule PropertyDamage.DifferentialTest do
     end
   end
 
-  describe "baseline and export (I4)" do
-    @tag :tmp_dir
-    test "reports the actual (sequential) execution mode when a baseline is used (I4a)",
-         %{tmp_dir: tmp_dir} do
-      path = Path.join(tmp_dir, "i4a_baseline.json")
+  describe "retired options" do
+    for key <- [:baseline, :export_to] do
+      test "#{key}: is rejected as an unknown option" do
+        error =
+          assert_raise NimbleOptions.ValidationError, fn ->
+            Differential.run([
+              {unquote(key), "x.json"},
+              model: TestModel,
+              targets: [{ReferenceAdapter, role: :reference}, {IdenticalAdapter}],
+              compare: :correctness,
+              max_runs: 1,
+              max_commands: 2,
+              seed: 12_345
+            ])
+          end
 
-      run_data = %{
-        runs: [
-          %{
-            commands: [%TestCommand{value: 1}],
-            results: [{:ok, [%TestEvent{value: 1, item_ref: "a"}]}],
-            timings: [100],
-            event_log: [],
-            is_warmup: false
-          }
-        ],
-        setup_success: true
-      }
-
-      config = %{model: TestModel, targets: [{ReferenceAdapter, name: "test"}], seed: 12_345}
-      :ok = Baseline.export_run_data(run_data, config, path)
-
-      {:ok, result} =
-        Differential.run(
-          model: TestModel,
-          targets: [{ReferenceAdapter, name: "current"}],
-          compare: :correctness,
-          baseline: path,
-          max_runs: 1,
-          max_commands: 2,
-          seed: 12_345
-        )
-
-      # A baseline forces sequential execution; the reported mode must match.
-      assert result.execution == :sequential
-    end
-
-    @tag :tmp_dir
-    test "returns an error instead of crashing when baseline export fails (I4b)",
-         %{tmp_dir: tmp_dir} do
-      bad_path = Path.join([tmp_dir, "missing_dir", "export.json"])
-
-      result =
-        Differential.run(
-          model: TestModel,
-          targets: [
-            {ReferenceAdapter, role: :reference},
-            {IdenticalAdapter}
-          ],
-          compare: :correctness,
-          export_to: bad_path,
-          max_runs: 1,
-          max_commands: 2,
-          seed: 12_345
-        )
-
-      assert {:error, {:write_failed, _}} = result
+        assert error.message =~ inspect(unquote(key))
+      end
     end
   end
 

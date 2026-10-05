@@ -1,12 +1,12 @@
 defmodule PropertyDamage.Model.Projection do
   @moduledoc """
-  Behaviour for projections that track state and optionally define assertions.
+  Behaviour for projections that track state and optionally define checks.
 
   Projections are the core building block for stateful property-based testing.
   They serve two purposes:
 
   1. **State tracking**: Reduce commands and events into state via `apply/2`
-  2. **Invariant checking**: Define assertions via `@trigger` and `@poll_state`
+  2. **Invariant checking**: Define checks via `@check` and `@eventually`
 
   ## Basic Usage
 
@@ -24,13 +24,13 @@ defmodule PropertyDamage.Model.Projection do
 
         def apply(state, _), do: state
 
-        # Synchronous assertion - runs immediately when event occurs
-        @trigger every: 1
+        # Synchronous check - runs immediately when event occurs
+        @check every: 1
         def assert_total_non_negative(state, _cmd_or_event) do
           if state.total < 0, do: PropertyDamage.fail!("total is negative", total: state.total)
         end
 
-        @trigger every: CreateOrder
+        @check every: CreateOrder
         def assert_order_tracked(state, %CreateOrder{id: id}) do
           unless Map.has_key?(state.orders, id) do
             PropertyDamage.fail!("order not tracked", order_id: id)
@@ -38,53 +38,53 @@ defmodule PropertyDamage.Model.Projection do
         end
       end
 
-  ## Assertion Types
+  ## Check Types
 
-  There are two types of assertions:
+  There are two types of checks:
 
-  ### Synchronous Assertions (`@trigger`)
+  ### Synchronous Checks (`@check`)
 
-  Run immediately when the trigger condition is met. Use for invariants that
+  Run immediately when the check condition is met. Use for invariants that
   should hold right after a command/event is processed.
 
-      @trigger every: 1
+      @check every: 1
       def assert_balance_positive(state, _cmd_or_event) do
         if state.balance < 0 do
           PropertyDamage.fail!("balance is negative", balance: state.balance)
         end
       end
 
-  `@trigger` also supports an `at:` timing for one-shot checks at a lifecycle
+  `@check` also supports an `at:` timing for one-shot checks at a lifecycle
   boundary (`at: :startup` / `at: :teardown`); see "Lifecycle-Boundary
-  Assertions" below. Use `at: :teardown` for safety properties on the settled
+  Checks" below. Use `at: :teardown` for safety properties on the settled
   final state.
 
-  ### Temporal Assertions (`@poll_state`)
+  ### Eventually Checks (`@eventually`)
 
-  Spawn a background poller when a trigger event occurs. The poller periodically
+  Spawn a background poller when an event arrives. The poller periodically
   checks if a predicate becomes true within a timeout. Use for eventual
-  consistency assertions.
+  consistency checks.
 
-      @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+      @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
       def payment_confirmed(_state, %PaymentInitiated{id: id}) do
         fn s -> s.payments[id] == :confirmed end
       end
 
-  ## Defining Assertions
+  ## Defining Checks
 
-  Assertions are functions that take two arguments:
+  Checks are functions that take two arguments:
 
   1. `state` - The current projection state
-  2. `command_or_event` - The command or event that triggered the assertion
+  2. `command_or_event` - The command or event that triggered the check
 
-  Each assertion **must** be preceded by either a `@trigger` or `@poll_state`
-  attribute. Both `@trigger` and `@poll_state` functions can have any name.
+  Each check **must** be preceded by either a `@check` or `@eventually`
+  attribute. Both `@check` and `@eventually` functions can have any name.
   The `assert_` prefix is optional and conventional but not required.
 
-  If a synchronous assertion fails, raise an exception (or use `PropertyDamage.fail!/2`).
-  If it returns without raising, the assertion passed.
+  If a synchronous check fails, raise an exception (or use `PropertyDamage.fail!/2`).
+  If it returns without raising, the check passed.
 
-  For `@poll_state` assertions, the function must return a predicate function
+  For `@eventually` checks, the function must return a predicate function
   `(state -> boolean)` that will be polled.
 
   ## Raising in apply/2
@@ -99,43 +99,43 @@ defmodule PropertyDamage.Model.Projection do
         %{state | balance: new_balance}
       end
 
-  ## @trigger Syntax
+  ## @check Syntax
 
-  Use `@trigger` with `every:` to specify when a synchronous assertion runs:
+  Use `@check` with `every:` to specify when a synchronous check runs:
 
   | Syntax | Runs when... |
   |--------|--------------|
-  | `@trigger every: 1` | After every step |
-  | `@trigger every: :command` | After any command |
-  | `@trigger every: :event` | After any event |
-  | `@trigger every: CreateOrder` | After CreateOrder command/event |
-  | `@trigger every: [Cmd1, Cmd2]` | After any listed command/event |
-  | `@trigger every: 10` | Every 10th step (sampling) |
-  | `@trigger every: {5, :command}` | Every 5th command |
-  | `@trigger every: {3, CreateOrder}` | Every 3rd CreateOrder |
+  | `@check every: 1` | After every step |
+  | `@check every: :command` | After any command |
+  | `@check every: :event` | After any event |
+  | `@check every: CreateOrder` | After CreateOrder command/event |
+  | `@check every: [Cmd1, Cmd2]` | After any listed command/event |
+  | `@check every: 10` | Every 10th step (sampling) |
+  | `@check every: {5, :command}` | Every 5th command |
+  | `@check every: {3, CreateOrder}` | Every 3rd CreateOrder |
 
   A **step** is each unit processed in the execution stream: every command AND
   every event increments the step counter. So `every: 1` runs after each command
   and after each of its events, while `every: {5, :command}` counts commands only.
   The count in `{N, target}` must be a positive integer.
 
-  ## Lifecycle-Boundary Assertions (`@trigger at:`)
+  ## Lifecycle-Boundary Checks (`@check at:`)
 
-  `@trigger` has a second, orthogonal timing axis: `at:`. Where `every:` *samples*
-  an assertion during the command loop, `at:` fires it exactly **once** at a
-  lifecycle phase boundary. An assertion carries exactly one timing: `every:` xor
+  `@check` has a second, orthogonal timing axis: `at:`. Where `every:` *samples*
+  a check during the command loop, `at:` fires it exactly **once** at a
+  lifecycle phase boundary. A check carries exactly one timing: `every:` xor
   `at:` (declaring both is a compile error).
 
   | Syntax | Runs... |
   |--------|---------|
-  | `@trigger at: :startup` | once on the initial `init/0` state, after `setup/1`, before command 1 |
-  | `@trigger at: :teardown` | once on the fully-**settled** final state, after all pollers finalize, before `teardown/1` |
+  | `@check at: :startup` | once on the initial `init/0` state, after `setup/1`, before command 1 |
+  | `@check at: :teardown` | once on the fully-**settled** final state, after all pollers finalize, before `teardown/1` |
 
-  Because no command or event triggers a lifecycle-boundary assertion, the
+  Because no command or event triggers a lifecycle-boundary check, the
   second argument is the phase atom (`:startup` or `:teardown`); a state-only
   check ignores it:
 
-      @trigger at: :teardown
+      @check at: :teardown
       def assert_balance_reconciles(state, _phase) do
         if state.debits != state.credits do
           PropertyDamage.fail!("ledger did not reconcile", state: state)
@@ -143,11 +143,11 @@ defmodule PropertyDamage.Model.Projection do
       end
 
   `at: :teardown` is the natural home for a **safety** property ("this never
-  happens too much"), the temporal dual of `@poll_state`'s **liveness** ("this
+  happens too much"), the temporal dual of `@eventually`'s **liveness** ("this
   eventually happens"). "Settled" means after both the state pollers
-  (`@poll_state`) and the resource pollers have finalized: the one point in a run
+  (`@eventually`) and the resource pollers have finalized: the one point in a run
   where no poller is live and every observed event has been folded into
-  projection state. A `@poll_state` liveness timeout preempts the `:teardown`
+  projection state. An `@eventually` liveness timeout preempts the `:teardown`
   checkpoint (a timeout is itself a not-settled outcome). A failing `:startup`
   check halts the run before the first command.
 
@@ -163,7 +163,7 @@ defmodule PropertyDamage.Model.Projection do
       # GOOD — accumulates: the overshoot leaves a permanent trace.
       def apply(%{count: c, max: m} = s, %Applied{}), do: %{s | count: c + 1, max: max(m, c + 1)}
 
-      @trigger at: :teardown
+      @check at: :teardown
       def assert_at_most_once(state, _phase) do
         if state.max > 1, do: PropertyDamage.fail!("applied more than once", max: state.max)
       end
@@ -172,9 +172,9 @@ defmodule PropertyDamage.Model.Projection do
       def apply(%{count: c} = s, %Applied{}), do: %{s | count: c + 1}
       def apply(%{count: c} = s, %Reverted{}), do: %{s | count: c - 1}
 
-  ## @poll_state Syntax
+  ## @eventually Syntax
 
-  Use `@poll_state` with the following options:
+  Use `@eventually` with the following options:
 
   | Option | Type | Description |
   |--------|------|-------------|
@@ -186,19 +186,19 @@ defmodule PropertyDamage.Model.Projection do
 
   Example:
 
-      @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+      @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
       def payment_confirmed(_state, %PaymentInitiated{id: id}) do
         fn s -> s.payments[id] == :confirmed end
       end
 
   ## Simplified Usage (No State)
 
-  For assertions that only inspect commands/events, skip `init/0` and `apply/2`:
+  For checks that only inspect commands/events, skip `init/0` and `apply/2`:
 
       defmodule CommandValidator do
         use PropertyDamage.Model.Projection
 
-        @trigger every: CreateOrder
+        @check every: CreateOrder
         def assert_order_has_items(_state, %CreateOrder{items: items}) do
           if Enum.empty?(items), do: PropertyDamage.fail!("order must have items")
         end
@@ -209,7 +209,7 @@ defmodule PropertyDamage.Model.Projection do
   In your Model, specify projections:
 
       def command_sequence_projection, do: MyStateProjection    # required
-      def assertion_projections, do: [Validator, Audit]  # optional
+      def check_projections, do: [Validator, Audit]  # optional
 
   All projections (state + extra) use the same `Projection` behaviour.
   """
@@ -231,20 +231,20 @@ defmodule PropertyDamage.Model.Projection do
   @callback apply(state :: any(), command_or_event :: struct()) :: any()
 
   @doc """
-  Execute an assertion.
+  Execute a check.
 
-  Assertions are functions decorated with `@trigger` or `@poll_state`.
-  Called when the assertion's trigger condition is met. The `assert_` prefix is
-  conventional but not required; when present it is stripped from the assertion's
+  Checks are functions decorated with `@check` or `@eventually`.
+  Called when the check's trigger condition is met. The `assert_` prefix is
+  conventional but not required; when present it is stripped from the check's
   reported `:name` (so `def assert_total_ok` is reported as `:total_ok`) while the
-  full function name is kept internally for dispatch. Exactly one `@trigger` or
-  `@poll_state` may decorate an assertion, never both and never more than one.
-  Should raise an exception if the assertion fails.
-  If the function returns without raising, the assertion passed.
+  full function name is kept internally for dispatch. Exactly one `@check` or
+  `@eventually` may decorate a check, never both and never more than one.
+  Should raise an exception if the check fails.
+  If the function returns without raising, the check passed.
 
   ## Example
 
-      @trigger every: 1
+      @check every: 1
       def assert_total_non_negative(state, _cmd_or_event) do
         if state.total < 0, do: PropertyDamage.fail!("total is negative")
       end
@@ -252,10 +252,10 @@ defmodule PropertyDamage.Model.Projection do
   ## Parameters
 
   - `state` - Current projection state
-  - `command_or_event` - The command or event that triggered this assertion
+  - `command_or_event` - The command or event that triggered this check
   """
 
-  # Note: No callback defined - assertions are detected via @trigger/@poll_state attributes
+  # Note: No callback defined - checks are detected via @check/@eventually attributes
 
   @optional_callbacks init: 0, apply: 2
 
@@ -263,22 +263,22 @@ defmodule PropertyDamage.Model.Projection do
     quote do
       @behaviour PropertyDamage.Model.Projection
 
-      # Accumulating attribute for assertion metadata
-      Module.register_attribute(__MODULE__, :assertions, accumulate: true)
-      # @trigger / @poll_state accumulate so that stacking more than one on a
-      # single assertion is detectable (and rejected) rather than silently
-      # overwriting; exactly one is expected per assertion.
-      Module.register_attribute(__MODULE__, :trigger, accumulate: true)
-      Module.register_attribute(__MODULE__, :poll_state, accumulate: true)
-      # Names of functions already registered as assertions, so subsequent
-      # clauses of a multi-clause assertion aren't re-flagged as missing @trigger.
-      Module.register_attribute(__MODULE__, :__pd_assertion_fns__, accumulate: true)
+      # Accumulating attribute for check metadata
+      Module.register_attribute(__MODULE__, :checks, accumulate: true)
+      # @check / @eventually accumulate so that stacking more than one on a
+      # single check is detectable (and rejected) rather than silently
+      # overwriting; exactly one is expected per check.
+      Module.register_attribute(__MODULE__, :check, accumulate: true)
+      Module.register_attribute(__MODULE__, :eventually, accumulate: true)
+      # Names of functions already registered as checks, so subsequent
+      # clauses of a multi-clause check aren't re-flagged as missing @check.
+      Module.register_attribute(__MODULE__, :__pd_check_fns__, accumulate: true)
       # Centralized invariant declarations (DR-026). Each value is the
       # keyword-list argument to PropertyDamage.Invariants.Invariant.new!/1, e.g.
       # `@invariant id: :balance_nonneg, description: "..."`.
       Module.register_attribute(__MODULE__, :invariant, accumulate: true)
 
-      # Register on_definition callback to capture assertion definitions
+      # Register on_definition callback to capture check definitions
       @on_definition PropertyDamage.Model.Projection
 
       @before_compile PropertyDamage.Model.Projection
@@ -286,20 +286,20 @@ defmodule PropertyDamage.Model.Projection do
   end
 
   defmacro __before_compile__(env) do
-    if Module.get_attribute(env.module, :trigger) not in [nil, []] or
-         Module.get_attribute(env.module, :poll_state) not in [nil, []] do
+    if Module.get_attribute(env.module, :check) not in [nil, []] or
+         Module.get_attribute(env.module, :eventually) not in [nil, []] do
       raise CompileError,
         file: env.file,
         line: env.line,
-        description: "dangling @trigger/@poll_state with no following 2-arity assertion function."
+        description: "dangling @check/@eventually with no following 2-arity check function."
     end
 
-    assertions = Module.get_attribute(env.module, :assertions) |> Enum.reverse()
+    checks = Module.get_attribute(env.module, :checks) |> Enum.reverse()
 
     # Build the invariant registry (DR-026): %{id => %Invariant{}}, enforcing
     # id-uniqueness and validates: resolution, warning on declared-but-unchecked.
     invariant_attrs = Module.get_attribute(env.module, :invariant) |> Enum.reverse()
-    invariants = build_invariants(env, assertions, invariant_attrs)
+    invariants = build_invariants(env, checks, invariant_attrs)
 
     # Check if init/0 is defined
     has_init = Module.defines?(env.module, {:init, 0})
@@ -328,20 +328,20 @@ defmodule PropertyDamage.Model.Projection do
       unquote(default_apply)
 
       @doc """
-      Returns metadata for all assertions defined in this module.
+      Returns metadata for all checks defined in this module.
 
-      Each assertion entry contains:
-      - `:name` - Atom identifying the assertion
+      Each check entry contains:
+      - `:name` - Atom identifying the check
       - `:trigger` - Normalized trigger specification
       """
-      def __assertions__, do: unquote(Macro.escape(assertions))
+      def __checks__, do: unquote(Macro.escape(checks))
 
       @doc """
       Returns the invariant registry for this projection (DR-026).
 
       A map of `%{id => %PropertyDamage.Invariants.Invariant{}}` covering every
       invariant declared in this projection: centrally via `@invariant`, inline
-      via `@trigger ... id:`, and the same-named invariant each bare assertion
+      via `@check ... id:`, and the same-named invariant each bare check
       owns by default.
       """
       def __invariants__, do: unquote(Macro.escape(invariants))
@@ -352,10 +352,10 @@ defmodule PropertyDamage.Model.Projection do
   # compile-time structural validations (DR-026), all at @before_compile so the
   # checks are order-independent: accumulate every declaration and reference,
   # then resolve.
-  defp build_invariants(env, assertions, invariant_attrs) do
+  defp build_invariants(env, checks, invariant_attrs) do
     alias PropertyDamage.Invariants.Invariant
 
-    # Explicit declarations: @invariant attributes plus inline id: on assertions.
+    # Explicit declarations: @invariant attributes plus inline id: on checks.
     explicit_from_attrs =
       Enum.map(invariant_attrs, fn opts ->
         inv = Invariant.new!(opts)
@@ -363,7 +363,7 @@ defmodule PropertyDamage.Model.Projection do
       end)
 
     explicit_from_inline =
-      for a <- assertions, a.invariant_inline? do
+      for a <- checks, a.invariant_inline? do
         {a.invariant_id, Invariant.new!(id: a.invariant_id, description: a.invariant_description)}
       end
 
@@ -383,10 +383,10 @@ defmodule PropertyDamage.Model.Projection do
     explicit_map = Map.new(explicit)
     explicit_id_set = MapSet.new(explicit_ids)
 
-    # Implicit declarations: a bare assertion's default-named invariant, unless
+    # Implicit declarations: a bare check's default-named invariant, unless
     # that id is already explicitly declared (then the default links to it).
     default_ids =
-      for a <- assertions, not a.invariant_inline?, not a.invariant_validates?, do: a.invariant_id
+      for a <- checks, not a.invariant_inline?, not a.invariant_validates?, do: a.invariant_id
 
     implicit_map =
       for id <- Enum.uniq(default_ids), not MapSet.member?(explicit_id_set, id), into: %{} do
@@ -399,27 +399,27 @@ defmodule PropertyDamage.Model.Projection do
     # local set-membership; never calls fetch!/2.
     declared_ids = MapSet.union(explicit_id_set, MapSet.new(default_ids))
 
-    for a <- assertions,
+    for a <- checks,
         a.invariant_validates?,
         not MapSet.member?(declared_ids, a.invariant_id) do
       raise CompileError,
         file: env.file,
         line: a.invariant_def_line,
         description:
-          "assertion #{a.name}/2 has validates: #{inspect(a.invariant_id)}, but no invariant " <>
+          "check #{a.name}/2 has validates: #{inspect(a.invariant_id)}, but no invariant " <>
             "with that id is declared in #{inspect(env.module)}."
     end
 
     # Static vacuity: an @invariant-declared id with zero checks (inline and
     # default declarations always carry their own check, so only @invariant
     # attributes can be statically vacuous).
-    checked_ids = MapSet.new(assertions, & &1.invariant_id)
+    checked_ids = MapSet.new(checks, & &1.invariant_id)
     attr_ids = Enum.map(explicit_from_attrs, fn {id, _} -> id end)
 
     for id <- Enum.uniq(attr_ids), not MapSet.member?(checked_ids, id) do
       IO.warn(
         "invariant #{inspect(id)} declared in #{inspect(env.module)} has no checks; it is " <>
-          "statically vacuous (no assertion validates it).",
+          "statically vacuous (no check validates it).",
         Macro.Env.stacktrace(env)
       )
     end
@@ -429,144 +429,142 @@ defmodule PropertyDamage.Model.Projection do
 
   @doc false
   # Called by @on_definition when any function is defined in the module
-  # Detects assertion functions (either @trigger or @poll_state decorated)
+  # Detects check functions (either @check or @eventually decorated)
   def __on_definition__(env, :def, name, [_state, _cmd_or_event] = _args, _guards, body) do
     # accumulate: true means these come back as lists (newest first), or [].
-    trigger_opts = Module.get_attribute(env.module, :trigger) || []
-    poll_state_opts = Module.get_attribute(env.module, :poll_state) || []
-    has_trigger? = trigger_opts != []
-    has_poll? = poll_state_opts != []
-    decorated? = has_trigger? or has_poll?
-    already_registered? = name in (Module.get_attribute(env.module, :__pd_assertion_fns__) || [])
+    check_opts = Module.get_attribute(env.module, :check) || []
+    eventually_opts = Module.get_attribute(env.module, :eventually) || []
+    has_check? = check_opts != []
+    has_eventually? = eventually_opts != []
+    decorated? = has_check? or has_eventually?
+    already_registered? = name in (Module.get_attribute(env.module, :__pd_check_fns__) || [])
 
     cond do
-      # A @trigger/@poll_state landing on the projection's own init/apply is a
-      # misplaced (dangling) attribute, not an assertion.
+      # A @check/@eventually landing on the projection's own init/apply is a
+      # misplaced (dangling) attribute, not a check.
       decorated? and name in [:init, :apply] ->
         raise CompileError,
           file: env.file,
           line: env.line,
           description:
-            "@trigger/@poll_state must immediately precede a 2-arity assertion function, " <>
+            "@check/@eventually must immediately precede a 2-arity check function, " <>
               "not #{name}/2. Move the attribute directly above your assert_ function."
 
-      # An assertion is synchronous (@trigger) or temporal (@poll_state), never
+      # A check is synchronous (@check) or temporal (@eventually), never
       # both -- the two have incompatible semantics.
-      has_trigger? and has_poll? ->
+      has_check? and has_eventually? ->
         raise CompileError,
           file: env.file,
           line: env.line,
           description:
-            "cannot combine both @trigger and @poll_state on the same assertion (#{name}/2); " <>
+            "cannot combine both @check and @eventually on the same check (#{name}/2); " <>
               "use one or the other."
 
-      length(trigger_opts) > 1 ->
+      length(check_opts) > 1 ->
         raise CompileError,
           file: env.file,
           line: env.line,
-          description:
-            "multiple @trigger attributes on #{name}/2; an assertion may have only one."
+          description: "multiple @check attributes on #{name}/2; a check may have only one."
 
-      length(poll_state_opts) > 1 ->
+      length(eventually_opts) > 1 ->
         raise CompileError,
           file: env.file,
           line: env.line,
-          description:
-            "multiple @poll_state attributes on #{name}/2; an assertion may have only one."
+          description: "multiple @eventually attributes on #{name}/2; a check may have only one."
 
-      # An assertion carries exactly one timing: a during-run sample (every:) or
+      # A check carries exactly one timing: a during-run sample (every:) or
       # a lifecycle boundary (at:), never both (DR-024).
-      has_trigger? and trigger_timing_conflict?(hd(trigger_opts)) ->
+      has_check? and trigger_timing_conflict?(hd(check_opts)) ->
         raise CompileError,
           file: env.file,
           line: env.line,
           description:
-            "@trigger on #{name}/2 declares both every: and at:; an assertion may carry only " <>
-              "one timing. Split it into two assertions."
+            "@check on #{name}/2 declares both every: and at:; a check may carry only " <>
+              "one timing. Split it into two checks."
 
-      # @poll_state decorated function - temporal assertion
-      has_poll? ->
-        assertion_name = extract_assertion_name_from_function(name) || name
+      # @eventually decorated function - eventually check
+      has_eventually? ->
+        check_name = extract_check_name_from_function(name) || name
         predicate_source = capture_predicate_source(body)
-        {inv, opts} = extract_invariant_meta(hd(poll_state_opts), assertion_name, env)
+        {inv, opts} = extract_invariant_meta(hd(eventually_opts), check_name, env)
 
-        assertion_def =
+        check_def =
           Map.merge(inv, %{
-            name: assertion_name,
+            name: check_name,
             type: :polling,
             function_name: name,
-            poll_state: normalize_poll_state(opts),
+            eventually: normalize_eventually(opts),
             predicate_source: predicate_source
           })
 
-        Module.put_attribute(env.module, :assertions, assertion_def)
-        Module.put_attribute(env.module, :__pd_assertion_fns__, name)
-        Module.delete_attribute(env.module, :poll_state)
+        Module.put_attribute(env.module, :checks, check_def)
+        Module.put_attribute(env.module, :__pd_check_fns__, name)
+        Module.delete_attribute(env.module, :eventually)
 
-      # @trigger decorated function - synchronous assertion
-      has_trigger? ->
-        assertion_name = extract_assertion_name_from_function(name) || name
-        {inv, opts} = extract_invariant_meta(hd(trigger_opts), assertion_name, env)
+      # @check decorated function - synchronous check
+      has_check? ->
+        check_name = extract_check_name_from_function(name) || name
+        {inv, opts} = extract_invariant_meta(hd(check_opts), check_name, env)
 
-        assertion_def =
+        check_def =
           Map.merge(inv, %{
-            name: assertion_name,
+            name: check_name,
             type: :synchronous,
             function_name: name,
             trigger: normalize_trigger(opts)
           })
 
-        Module.put_attribute(env.module, :assertions, assertion_def)
-        Module.put_attribute(env.module, :__pd_assertion_fns__, name)
-        Module.delete_attribute(env.module, :trigger)
+        Module.put_attribute(env.module, :checks, check_def)
+        Module.put_attribute(env.module, :__pd_check_fns__, name)
+        Module.delete_attribute(env.module, :check)
 
-      # A later clause of an already-registered (multi-clause) assertion: the
-      # @trigger sat on the first clause and was consumed; this is fine.
+      # A later clause of an already-registered (multi-clause) check: the
+      # @check sat on the first clause and was consumed; this is fine.
       already_registered? ->
         :ok
 
       # assert_* function without attribute - error
-      extract_assertion_name_from_function(name) != nil ->
-        assertion_name = extract_assertion_name_from_function(name)
+      extract_check_name_from_function(name) != nil ->
+        check_name = extract_check_name_from_function(name)
 
         raise CompileError,
           file: env.file,
           line: env.line,
-          description: "assert_#{assertion_name}/2 missing @trigger attribute"
+          description: "assert_#{check_name}/2 missing @check attribute"
 
       true ->
         :ok
     end
   end
 
-  # Any other definition while a @trigger/@poll_state is pending means the
-  # attribute did not land on a 2-arity assertion (e.g. it sat above init/0 or
+  # Any other definition while a @check/@eventually is pending means the
+  # attribute did not land on a 2-arity check (e.g. it sat above init/0 or
   # a helper). Raise rather than silently attaching it to the wrong function.
   def __on_definition__(env, kind, name, _args, _guards, _body) do
-    if Module.get_attribute(env.module, :trigger) not in [nil, []] or
-         Module.get_attribute(env.module, :poll_state) not in [nil, []] do
+    if Module.get_attribute(env.module, :check) not in [nil, []] or
+         Module.get_attribute(env.module, :eventually) not in [nil, []] do
       raise CompileError,
         file: env.file,
         line: env.line,
         description:
-          "dangling @trigger/@poll_state: it must immediately precede a 2-arity assertion " <>
+          "dangling @check/@eventually: it must immediately precede a 2-arity check " <>
             "function, but the next definition is #{kind} #{name}."
     end
 
     :ok
   end
 
-  # Split the invariant-linking keys (DR-026) out of a @trigger/@poll_state
-  # keyword list, returning the assertion's invariant metadata plus the remaining
+  # Split the invariant-linking keys (DR-026) out of a @check/@eventually
+  # keyword list, returning the check's invariant metadata plus the remaining
   # opts (the timing keys the existing trigger/poll normalizers consume).
   #
   # - `id:`        declares an invariant inline (optionally with `description:`)
-  #                and registers this assertion as a check of it.
-  # - `validates:` links this assertion to an invariant declared elsewhere.
-  # - neither      defaults the invariant id to the assertion's (stripped) name,
+  #                and registers this check as a check of it.
+  # - `validates:` links this check to an invariant declared elsewhere.
+  # - neither      defaults the invariant id to the check's (stripped) name,
   #                implicitly declaring a same-named invariant (full backward
   #                compatibility).
-  defp extract_invariant_meta(opts, assertion_name, env) do
+  defp extract_invariant_meta(opts, check_name, env) do
     {id, opts} = Keyword.pop(opts, :id)
     {validates, opts} = Keyword.pop(opts, :validates)
     {description, opts} = Keyword.pop(opts, :description)
@@ -576,7 +574,7 @@ defmodule PropertyDamage.Model.Projection do
         file: env.file,
         line: env.line,
         description:
-          "assertion #{assertion_name}/2 declares both id: and validates:; use id: to " <>
+          "check #{check_name}/2 declares both id: and validates:; use id: to " <>
             "declare an invariant inline or validates: to link to one declared elsewhere, " <>
             "not both."
     end
@@ -585,7 +583,7 @@ defmodule PropertyDamage.Model.Projection do
       cond do
         id != nil -> {id, true, false}
         validates != nil -> {validates, false, true}
-        true -> {assertion_name, false, false}
+        true -> {check_name, false, false}
       end
 
     meta = %{
@@ -599,8 +597,8 @@ defmodule PropertyDamage.Model.Projection do
     {meta, opts}
   end
 
-  # Check if function name starts with "assert_" and extract the assertion name
-  defp extract_assertion_name_from_function(name) when is_atom(name) do
+  # Check if function name starts with "assert_" and extract the check name
+  defp extract_check_name_from_function(name) when is_atom(name) do
     name_str = Atom.to_string(name)
 
     if String.starts_with?(name_str, "assert_") do
@@ -612,7 +610,7 @@ defmodule PropertyDamage.Model.Projection do
     end
   end
 
-  # A @trigger carries exactly one timing axis. `at:` (lifecycle boundary) and
+  # A @check carries exactly one timing axis. `at:` (lifecycle boundary) and
   # `every:` (during-run sampling) are mutually exclusive; declaring both is a
   # compile error (DR-024).
   defp trigger_timing_conflict?(opts) when is_list(opts) do
@@ -723,18 +721,18 @@ defmodule PropertyDamage.Model.Projection do
   end
 
   @doc """
-  Check if an assertion should run given the current step context.
+  Check if a check should run given the current step context.
 
   ## Parameters
 
-  - `trigger` - Normalized trigger from assertion metadata
+  - `trigger` - Normalized trigger from check metadata
   - `step_type` - `:command` or `:event`
   - `module` - The command or event module
   - `counters` - Map with `:step`, `:command`, `:event`, and per-module counts
 
   ## Returns
 
-  `true` if the assertion should run, `false` otherwise.
+  `true` if the check should run, `false` otherwise.
   """
   @spec should_run?(map(), :command | :event, module(), map()) :: boolean()
   def should_run?(trigger, step_type, module, counters) do
@@ -773,12 +771,12 @@ defmodule PropertyDamage.Model.Projection do
   @doc """
   Check if an event matches a polling trigger.
 
-  Used by the executor to determine if a `@poll_state` assertion should spawn
+  Used by the executor to determine if an `@eventually` check should spawn
   a poller when an event is processed.
 
   ## Parameters
 
-  - `poll_state` - Normalized poll_state spec from assertion metadata
+  - `eventually` - Normalized eventually spec from check metadata
   - `event_module` - The module of the event being processed
 
   ## Returns
@@ -786,16 +784,16 @@ defmodule PropertyDamage.Model.Projection do
   `true` if the poller should be spawned, `false` otherwise.
   """
   @spec event_matches_poll_trigger?(map(), module()) :: boolean()
-  def event_matches_poll_trigger?(poll_state, event_module) do
-    event_module in poll_state.after
+  def event_matches_poll_trigger?(eventually, event_module) do
+    event_module in eventually.after
   end
 
   # ============================================================================
-  # @poll_state Helpers
+  # @eventually Helpers
   # ============================================================================
 
-  # Normalize @poll_state options to a consistent internal representation
-  defp normalize_poll_state(opts) when is_list(opts) do
+  # Normalize @eventually options to a consistent internal representation
+  defp normalize_eventually(opts) when is_list(opts) do
     after_events = normalize_module_list(Keyword.fetch!(opts, :after))
     timeout_ms = normalize_time(Keyword.fetch!(opts, :timeout))
     interval_ms = normalize_time(Keyword.fetch!(opts, :interval))

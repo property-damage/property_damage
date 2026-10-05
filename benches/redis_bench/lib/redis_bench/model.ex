@@ -20,7 +20,7 @@ defmodule RedisBench.Projection do
   def apply(state, %ValueRead{value: value}), do: %{state | last_read: value}
   def apply(state, _event), do: state
 
-  @trigger every: ReadValue
+  @check every: ReadValue
   def assert_value_consistent(state, _command) do
     if state.last_read != state.count do
       PropertyDamage.fail!(
@@ -73,7 +73,7 @@ defmodule RedisBench.Model do
   def command_sequence_projection, do: RedisBench.Projection
 
   @impl true
-  def assertion_projections, do: [RedisBench.Projection]
+  def check_projections, do: [RedisBench.Projection]
 
   @impl true
   def simulator, do: RedisBench.Simulator
@@ -108,7 +108,7 @@ defmodule RedisBench.RmwModel do
   def command_sequence_projection, do: RedisBench.Projection
 
   @impl true
-  def assertion_projections, do: [RedisBench.Projection]
+  def check_projections, do: [RedisBench.Projection]
 
   @impl true
   def simulator, do: RedisBench.Simulator

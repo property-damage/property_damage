@@ -47,7 +47,7 @@ end
 
 defmodule PropertyDamage.Test.FI.Balance do
   @moduledoc false
-  # Assertion projection: balance must never go negative. A normal Op deposits a
+  # Check projection: balance must never go negative. A normal Op deposits a
   # positive amount (safe); a buggy Op overdraws, driving the balance negative
   # and firing the invariant.
   use PropertyDamage.Model.Projection
@@ -68,7 +68,7 @@ defmodule PropertyDamage.Test.FI.Balance do
 
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_balance_non_negative(state, _cmd_or_event) do
     unless state.balance >= 0 do
       PropertyDamage.fail!("Balance is negative", balance: state.balance)
@@ -96,7 +96,7 @@ defmodule PropertyDamage.Test.FI.Model do
   def command_sequence_projection, do: State
 
   @impl true
-  def assertion_projections, do: [Balance]
+  def check_projections, do: [Balance]
 
   @impl true
   def simulator, do: __MODULE__
@@ -107,7 +107,7 @@ defmodule PropertyDamage.Test.FI.Model do
   end
 
   @impl true
-  def terminate?(_state, %Op{}, _events), do: true
+  def terminate_early?(_state, %Op{}, _events), do: true
 end
 
 defmodule PropertyDamage.Test.FI.Adapter do

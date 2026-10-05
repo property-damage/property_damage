@@ -84,7 +84,7 @@ end
 defmodule GiteaBench.Model do
   @moduledoc """
   The single, transport-agnostic model. `commands/0` defines the dependency chain
-  via `when:` preconditions and `with:` parameterization against `GiteaBench.State`;
+  via `when:` preconditions and `overrides:` parameterization against `GiteaBench.State`;
   it never mentions API or UI. Creation names are derived from state counters so
   every create within a sequence is unique (no self-collision), while operations on
   existing entities draw from state so sequences interact (the same issue gets
@@ -105,12 +105,12 @@ defmodule GiteaBench.Model do
   @impl true
   def commands do
     [
-      {CreateUser, weight: 3, with: &user_overrides/1},
-      {CreateRepo, weight: 3, when: &has_users?/1, with: &repo_overrides/1},
-      {CreateIssue, weight: 3, when: &has_repos?/1, with: &issue_overrides/1},
-      {CreateLabel, weight: 2, when: &has_repos?/1, with: &label_overrides/1},
-      {AddLabelToIssue, weight: 2, when: &can_assign?/1, with: &assign_overrides/1},
-      {CloseIssue, weight: 1, when: &has_open_issue?/1, with: &close_overrides/1}
+      {CreateUser, weight: 3, overrides: &user_overrides/1},
+      {CreateRepo, weight: 3, when: &has_users?/1, overrides: &repo_overrides/1},
+      {CreateIssue, weight: 3, when: &has_repos?/1, overrides: &issue_overrides/1},
+      {CreateLabel, weight: 2, when: &has_repos?/1, overrides: &label_overrides/1},
+      {AddLabelToIssue, weight: 2, when: &can_assign?/1, overrides: &assign_overrides/1},
+      {CloseIssue, weight: 1, when: &has_open_issue?/1, overrides: &close_overrides/1}
     ]
   end
 
@@ -118,7 +118,7 @@ defmodule GiteaBench.Model do
   def command_sequence_projection, do: GiteaBench.State
 
   @impl true
-  def assertion_projections, do: [GiteaBench.State]
+  def check_projections, do: [GiteaBench.State]
 
   @impl true
   def simulator, do: GiteaBench.Simulator

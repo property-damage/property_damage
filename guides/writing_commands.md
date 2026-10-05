@@ -23,7 +23,7 @@ Commands define:
 
 Commands do NOT define:
 - When the command is valid (preconditions) - defined in Model via `when:`
-- How to parameterize based on state - defined in Model via `with:`
+- How to parameterize based on state - defined in Model via `overrides:`
 - Expected events from execution - defined in Model via `simulate/2`
 
 ### Basic Command Example
@@ -88,7 +88,7 @@ defmodule MyTest.Commands.ViewOrder do
 
   @impl true
   def generator(overrides \\ %{}) do
-    # Default to nil - Model provides actual refs via with:
+    # Default to nil - Model provides actual refs via overrides:
     %{order_ref: nil}
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()
@@ -112,7 +112,7 @@ defmodule MyTest.OrderModel do
       CreateOrder,
       {ViewOrder,
         when: fn s -> map_size(s.orders) > 0 end,
-        with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+        overrides: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
     ]
   end
 
@@ -198,7 +198,7 @@ def commands do
     {ViewOrder,
       weight: 2,
       when: fn state -> map_size(state.orders) > 0 end,
-      with: fn state -> %{order_ref: StreamData.member_of(Map.keys(state.orders))} end}
+      overrides: fn state -> %{order_ref: StreamData.member_of(Map.keys(state.orders))} end}
   ]
 end
 ```
@@ -207,15 +207,15 @@ end
 |--------|------|-------------|
 | `weight:` | `pos_integer()` | Relative selection frequency (default: 1) |
 | `when:` | `(state -> boolean)` | Precondition function |
-| `with:` | `(state -> map)` | Override function for generation |
+| `overrides:` | `(state -> map)` | Override function for generation |
 
 ### Simulate Callback
 
 > **State-dependent commands require a simulator.** During *generation* there is no
 > SUT, so projection state is built only from the events a simulator predicts. A
-> command whose `when:`/`with:` reads that state (e.g. "select an existing account")
+> command whose `when:`/`overrides:` reads that state (e.g. "select an existing account")
 > will see the empty initial state and **never be selected** unless a `simulator/0`
-> populates the state first. If your `when:`/`with:` commands mysteriously never fire,
+> populates the state first. If your `when:`/`overrides:` commands mysteriously never fire,
 > a missing simulator is the usual cause.
 
 Models that need symbolic execution implement the `PropertyDamage.Model.Simulator` behaviour
@@ -228,7 +228,7 @@ defmodule MyTest.OrderModel do
 
   def commands, do: [CreateOrder, CancelOrder]
   def command_sequence_projection, do: MyTest.OrderProjection
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   # Return self as the simulator module
   def simulator, do: __MODULE__
@@ -277,7 +277,7 @@ defmodule MyTest.OrderModel do
   end
 
   def command_sequence_projection, do: MyTest.OrderProjection
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   # Return self as the simulator (delegates to Simulation module)
   def simulator, do: __MODULE__
@@ -293,7 +293,7 @@ defmodule MyTest.CommandWiring do
     [
       weight: 2,
       when: fn s -> map_size(s.orders) > 0 end,
-      with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end
+      overrides: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end
     ]
   end
 
@@ -301,7 +301,7 @@ defmodule MyTest.CommandWiring do
     [
       weight: 1,
       when: fn s -> Enum.any?(s.orders, fn {_, o} -> o.status == :active end) end,
-      with: fn s ->
+      overrides: fn s ->
         active = Enum.filter(s.orders, fn {_, o} -> o.status == :active end)
         %{order_ref: StreamData.member_of(Keyword.keys(active))}
       end
@@ -341,7 +341,7 @@ defmodule SharedWiring.Orders do
   def view_order_wiring(orders_key \\ :orders) do
     [
       when: fn s -> map_size(Map.get(s, orders_key, %{})) > 0 end,
-      with: fn s ->
+      overrides: fn s ->
         orders = Map.get(s, orders_key, %{})
         %{order_ref: StreamData.member_of(Map.keys(orders))}
       end
@@ -354,7 +354,7 @@ defmodule SharedWiring.Orders do
         orders = Map.get(s, orders_key, %{})
         Enum.any?(orders, fn {_, o} -> Map.get(o, status_field) == :active end)
       end,
-      with: fn s ->
+      overrides: fn s ->
         orders = Map.get(s, orders_key, %{})
         active_refs =
           orders
@@ -404,9 +404,9 @@ defmodule ViewOrder do
 
   ## Generator Requirements
 
-  Requires `order_ref` override - typically provided via Model's `with:`:
+  Requires `order_ref` override - typically provided via Model's `overrides:`:
 
-      {ViewOrder, with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+      {ViewOrder, overrides: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
 
   ## Expected Events
 
@@ -526,6 +526,6 @@ interval doubles after each retry (capped at the timeout).
 | Field generation | Command (`generator/1`) |
 | Static metadata | Command (`command_spec/1` / `use` options) |
 | When to enable | Model (`when:` option) |
-| State-dependent params | Model (`with:` option) |
+| State-dependent params | Model (`overrides:` option) |
 | Expected events | Simulator (`simulate/2` via `simulator/0`) |
 | State shape | Model's projection |

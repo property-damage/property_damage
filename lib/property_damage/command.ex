@@ -30,7 +30,7 @@ defmodule PropertyDamage.Command do
         },
         shrink: :prefer_remove | :neutral | :prefer_keep,  # Shrinking priority
         when: (state -> boolean),             # Precondition
-        with: (state -> map) | map,           # Generator overrides
+        overrides: (state -> map) | map,      # Generator overrides
         weight: pos_integer(),                # Generation weight
         observables: [module()],              # Events this command can produce
         idempotent: boolean(),                # Eligible for stutter testing
@@ -113,7 +113,7 @@ defmodule PropertyDamage.Command do
             CreateOrder,  # Always enabled, weight 1
             {ViewOrder,
               when: fn s -> map_size(s.orders) > 0 end,
-              with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+              overrides: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
           ]
         end
 
@@ -161,7 +161,7 @@ defmodule PropertyDamage.Command do
   | `:observables`             | Event modules this command can produce             |
   | `:idempotent`              | Eligibility for stutter testing                    |
   | `:acceptable_retry_events` | Acceptable alternative stutter-retry responses     |
-  | `:when` / `:with` / `:weight` | Model-level wiring (precondition/overrides/weight) |
+  | `:when` / `:overrides` / `:weight` | Model-level wiring (precondition/overrides/weight) |
 
   ## Design Principles
 
@@ -269,7 +269,7 @@ defmodule PropertyDamage.Command do
   - `:settle` - Settle configuration for probe/async commands
   - `:shrink` - Shrinking priority (`:prefer_remove`, `:neutral`, or `:prefer_keep`)
   - `:when` - Precondition function `(state -> boolean)`
-  - `:with` - Generator overrides `(state -> map)` or map
+  - `:overrides` - Generator overrides `(state -> map)` or map
   - `:weight` - Generation weight (positive integer)
   - `:observables` - Event modules this command can produce (default `[]`)
   - `:idempotent` - Whether the command is eligible for stutter testing (default `true`)
@@ -294,8 +294,8 @@ defmodule PropertyDamage.Command do
   run, instead of folding it as ambient (`command_index: nil`).
 
   This is **pure correlation**: it never blocks and asserts nothing. Judgment
-  over the correlated set lives in projections (a `@poll_state` assertion for
-  liveness, a `@trigger`/`@invariant` for safety/cardinality). See
+  over the correlated set lives in projections (a `@eventually` check for
+  liveness, a `@check`/`@invariant` for safety/cardinality). See
   `PropertyDamage.Await` for the multiplicity rules (first-registered wins).
 
   Evaluated per command instance, after execution and placeholder capture, so
@@ -359,7 +359,7 @@ defmodule PropertyDamage.Command do
       #   shrink: :prefer_remove,
       #   settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear},
       #   when: fn _ -> true end,
-      #   with: %{},
+      #   overrides: %{},
       #   weight: 1
       # }
   """
@@ -394,7 +394,7 @@ defmodule PropertyDamage.Command do
       settle: %{timeout_ms: 2_000, interval_ms: 300, backoff: :linear},
       shrink: :neutral,
       when: fn _ -> true end,
-      with: %{},
+      overrides: %{},
       weight: 1,
       observables: [],
       idempotent: true,

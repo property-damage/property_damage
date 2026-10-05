@@ -31,7 +31,7 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 
 #### Scenario: Check execution events
 
-- **WHEN** a check (assertion) is evaluated
+- **WHEN** a check is evaluated
 - **THEN** the system SHALL emit `[:property_damage, :check, :start]` with check_name and projection module
 - **AND** when the check completes, it SHALL emit `[:property_damage, :check, :stop]` with duration, passed flag, and optional message
 
@@ -57,7 +57,7 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 
 ### Requirement: Coverage Tracking
 
-The system SHALL track and report coverage metrics for property-based test execution, including command coverage, transition coverage, state coverage, and assertion (invariant) coverage (DR-026). Coverage metrics SHALL be accumulated across all sequences generated within a run, not a single representative sequence.
+The system SHALL track and report coverage metrics for property-based test execution, including command coverage, transition coverage, state coverage, and check (invariant) coverage (DR-026). Coverage metrics SHALL be accumulated across all sequences generated within a run, not a single representative sequence.
 
 #### Scenario: Command coverage
 
@@ -77,11 +77,11 @@ The system SHALL track and report coverage metrics for property-based test execu
 - **THEN** the system SHALL classify each projection state into a state class
 - **AND** track state class counts and state class transitions
 
-#### Scenario: Assertion (invariant) coverage (DR-026)
+#### Scenario: Check (invariant) coverage (DR-026)
 
-- **WHEN** assertions are evaluated during test runs
-- **THEN** the system SHALL record how many times each assertion actually fired, keyed by its owning projection and name, counting firing at every evaluation site (synchronous `every:` on commands and observed events including the asynchronous paths of DR-025, lifecycle `at:` boundaries of DR-024, and `@poll_state` poller spawn)
-- **AND** firing counts SHALL be attached to every result as `result.assertion_fires` and accumulated across all sequences of the run
+- **WHEN** checks are evaluated during test runs
+- **THEN** the system SHALL record how many times each check actually fired, keyed by its owning projection and name, counting firing at every evaluation site (synchronous `every:` on commands and observed events including the asynchronous paths of DR-025, lifecycle `at:` boundaries of DR-024, and `@eventually` poller spawn)
+- **AND** firing counts SHALL be attached to every result as `result.check_fires` and accumulated across all sequences of the run
 - **AND** this recording SHALL be always-on (it does not require the `coverage: true` option)
 
 #### Scenario: Whole-run coverage accumulation via coverage: true (DR-026)
@@ -100,7 +100,7 @@ The system SHALL track and report coverage metrics for property-based test execu
 
 - **WHEN** `Coverage.meets_threshold?(coverage, command: 80, transition: 50)` is called
 - **THEN** the system SHALL return `true` only if command coverage is at least 80% and transition coverage is at least 50%
-- **AND** an `assertion_coverage:` threshold (DR-026) SHALL return `true` only if at least that percentage of catalog invariants were covered, enabling a strict "fail on any uncovered invariant" gate at `assertion_coverage: 100`
+- **AND** an `check_coverage:` threshold (DR-026) SHALL return `true` only if at least that percentage of catalog invariants were covered, enabling a strict "fail on any uncovered invariant" gate at `check_coverage: 100`
 
 #### Scenario: Cumulative coverage across runs
 
@@ -109,13 +109,13 @@ The system SHALL track and report coverage metrics for property-based test execu
 
 ### Requirement: Invariant Catalog and Coverage Reporting (DR-026)
 
-The system SHALL expose the catalog of invariants a model verifies and report which were exercised. `PropertyDamage.assertion_coverage(result, model)` SHALL return the per-invariant coverage breakdown from a single result without re-executing the run. By default a run SHALL emit a terse one-line invariant-coverage footer through the existing reporter (DR-022), not unconditional stdout; the rich breakdown is available on demand and the heavier dimensions behind `coverage: true`.
+The system SHALL expose the catalog of invariants a model verifies and report which were exercised. `PropertyDamage.check_coverage(result, model)` SHALL return the per-invariant coverage breakdown from a single result without re-executing the run. By default a run SHALL emit a terse one-line invariant-coverage footer through the existing reporter (DR-022), not unconditional stdout; the rich breakdown is available on demand and the heavier dimensions behind `coverage: true`.
 
 #### Scenario: Coverage detail without re-execution
 
-- **WHEN** `PropertyDamage.assertion_coverage(result, model)` is called on a passing result
+- **WHEN** `PropertyDamage.check_coverage(result, model)` is called on a passing result
 - **THEN** the system SHALL return, per invariant, its `id`, `name`, `description`, check kind(s), fire count, and covered status
-- **AND** it SHALL compute this by joining `result.assertion_fires` against the model's catalog, with no re-execution
+- **AND** it SHALL compute this by joining `result.check_fires` against the model's catalog, with no re-execution
 - **AND** an invariant is covered when any of its checks fired
 
 #### Scenario: Terse footer by default
@@ -127,7 +127,7 @@ The system SHALL expose the catalog of invariants a model verifies and report wh
 
 #### Scenario: Catalog enumeration
 
-- **WHEN** `PropertyDamage.assertion_catalog(model)` is called
+- **WHEN** `PropertyDamage.check_catalog(model)` is called
 - **THEN** the system SHALL return every invariant the model verifies, unioned across its projections and keyed by `{projection, id}` so two projections MAY reuse an `id` for distinct invariants
 
 ### Requirement: Progress Reporting

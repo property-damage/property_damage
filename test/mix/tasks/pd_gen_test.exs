@@ -195,12 +195,12 @@ defmodule Mix.Tasks.PdGenTest do
       assert content =~ "@behaviour PropertyDamage.Model"
       assert content =~ "def commands"
       assert content =~ "def command_sequence_projection"
-      assert content =~ "def assertion_projections"
+      assert content =~ "def check_projections"
 
       assert_compiles(content)
     end
 
-    test "generates a model with commands, projection, and assertion projections" do
+    test "generates a model with commands, projection, and check projections" do
       capture_io(fn ->
         GenModel.run([
           "GenModelFull.TestModel",
@@ -208,7 +208,7 @@ defmodule Mix.Tasks.PdGenTest do
           "CreateUser,UpdateUser,DeleteUser",
           "--projection",
           "GenModelFull.Projections.ModelState",
-          "--assertion-projections",
+          "--check-projections",
           "BalanceChecker,AuditLog"
         ])
       end)

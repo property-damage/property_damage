@@ -43,7 +43,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl PropertyDamage.Model
-    def assertion_projections, do: []
+    def check_projections, do: []
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -62,7 +62,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule InvalidWeightModel do
@@ -77,7 +77,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule ValidAdapter do
@@ -90,6 +90,22 @@ defmodule PropertyDamage.ValidationExtendedTest do
   # Options.validate_run! Tests (NimbleOptions-based validation)
   # ============================================================================
 
+  describe "Options.validate_load_test!/1" do
+    test "accepts check_mode and rejects the retired assertion_mode key" do
+      base = [model: ValidModel, adapter: ValidAdapter, arrival_rate: 1, duration: {1, :seconds}]
+
+      error =
+        assert_raise NimbleOptions.ValidationError, fn ->
+          Options.validate_load_test!(base ++ [assertion_mode: :record])
+        end
+
+      assert error.key == :assertion_mode
+      assert Exception.message(error) == "`assertion_mode:` was renamed `check_mode:`"
+
+      assert Options.validate_load_test!(base ++ [check_mode: :record])[:check_mode] == :record
+    end
+  end
+
   describe "Options.validate_run!/1" do
     test "passes with valid options and returns keyword list with defaults" do
       opts = [model: ValidModel, adapter: ValidAdapter]
@@ -99,6 +115,21 @@ defmodule PropertyDamage.ValidationExtendedTest do
       assert validated[:adapter] == ValidAdapter
       assert validated[:max_commands] == 50
       assert validated[:max_runs] == 100
+    end
+
+    test "accepts check_mode and rejects the retired assertion_mode key" do
+      error =
+        assert_raise NimbleOptions.ValidationError, fn ->
+          Options.validate_run!(model: ValidModel, adapter: ValidAdapter, assertion_mode: :record)
+        end
+
+      assert error.key == :assertion_mode
+      assert Exception.message(error) == "`assertion_mode:` was renamed `check_mode:`"
+
+      validated =
+        Options.validate_run!(model: ValidModel, adapter: ValidAdapter, check_mode: :record)
+
+      assert validated[:check_mode] == :record
     end
 
     test "raises on missing model" do
@@ -311,7 +342,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule UnbalancedWeightModel do
@@ -329,7 +360,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
     def command_sequence_projection, do: PropertyDamage.ValidationExtendedTest.ValidProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   describe "model warnings" do

@@ -15,7 +15,7 @@ defmodule PropertyDamage.CommandLabelTest do
     * A `nil` label (or a command without `label/2`) contributes nothing.
 
   These are failing-first behaviour tests: on HEAD before P7 nothing renders a
-  label, so each assertion that the label text appears is RED.
+  label, so each check that the label text appears is RED.
   """
   use ExUnit.Case, async: false
 
@@ -95,7 +95,7 @@ defmodule PropertyDamage.CommandLabelTest do
         original_sequence: sequence,
         shrunk_sequence: sequence,
         failed_at_index: Keyword.get(opts, :failed_at_index, 0),
-        failure_reason: Failure.assertion_failed(:SomeInvariant, "boom"),
+        failure_reason: Failure.check_failed(:SomeInvariant, "boom"),
         model: LabelModel
       ] ++ Keyword.delete(opts, :failed_at_index)
     )

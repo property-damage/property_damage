@@ -71,7 +71,7 @@ defmodule PropertyDamage.Validation do
     warnings = []
     warnings = warnings ++ warn_missing_downstream_observables(model)
     warnings = warnings ++ warn_orphan_events(model)
-    warnings = warnings ++ warn_no_assertion_projections(model)
+    warnings = warnings ++ warn_no_check_projections(model)
     warnings = warnings ++ warn_unbalanced_weights(model)
     warnings = warnings ++ warn_single_command(model)
 
@@ -195,8 +195,8 @@ defmodule PropertyDamage.Validation do
     state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
@@ -205,14 +205,14 @@ defmodule PropertyDamage.Validation do
     IO.puts(io, "Extra Projections (#{length(extra_projs)}):")
 
     for proj <- extra_projs do
-      assertions =
-        if function_exported?(proj, :__assertions__, 0) do
-          proj.__assertions__()
+      checks =
+        if function_exported?(proj, :__checks__, 0) do
+          proj.__checks__()
         else
           []
         end
 
-      IO.puts(io, "  - #{inspect(proj)} (#{length(assertions)} assertions)")
+      IO.puts(io, "  - #{inspect(proj)} (#{length(checks)} checks)")
     end
 
     IO.puts(io, "")
@@ -312,7 +312,7 @@ defmodule PropertyDamage.Validation do
   end
 
   defp validate_model_callbacks(model) do
-    # assertion_projections is optional
+    # check_projections is optional
     required_callbacks = [:commands, :command_sequence_projection]
 
     for callback <- required_callbacks, not function_exported?(model, callback, 0), reduce: [] do
@@ -394,8 +394,8 @@ defmodule PropertyDamage.Validation do
       end
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
@@ -465,17 +465,17 @@ defmodule PropertyDamage.Validation do
 
     # Collect all events handled by extra projections
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
     handled_events =
       for proj <- extra_projs,
-          function_exported?(proj, :__assertions__, 0),
-          assertion <- proj.__assertions__(),
-          mod <- assertion_handled_modules(assertion) do
+          function_exported?(proj, :__checks__, 0),
+          check <- proj.__checks__(),
+          mod <- check_handled_modules(check) do
         mod
       end
       |> Enum.uniq()
@@ -498,27 +498,27 @@ defmodule PropertyDamage.Validation do
     for event <- orphans, reduce: [] do
       acc ->
         [
-          "Event #{inspect(event)} produced but not handled by any assertion projection check"
+          "Event #{inspect(event)} produced but not handled by any check projection"
           | acc
         ]
     end
   end
 
-  # Events an assertion observes. Synchronous (@trigger) assertions list them
-  # under trigger.modules; polling (@poll_state) assertions are spawned by the
-  # events in poll_state.after (and thus observe them). Polling assertions have
-  # no :trigger key, so reaching for assertion.trigger blindly would crash.
-  defp assertion_handled_modules(%{trigger: %{modules: modules}}), do: List.wrap(modules)
+  # Events a check observes. Synchronous (@check) checks list them
+  # under trigger.modules; polling (@eventually) checks are spawned by the
+  # events in eventually.after (and thus observe them). Polling checks have
+  # no :trigger key, so reaching for check.trigger blindly would crash.
+  defp check_handled_modules(%{trigger: %{modules: modules}}), do: List.wrap(modules)
 
-  defp assertion_handled_modules(%{poll_state: %{after: after_events}}),
+  defp check_handled_modules(%{eventually: %{after: after_events}}),
     do: List.wrap(after_events)
 
-  defp assertion_handled_modules(_assertion), do: []
+  defp check_handled_modules(_check), do: []
 
-  defp warn_no_assertion_projections(model) do
+  defp warn_no_check_projections(model) do
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
@@ -526,8 +526,8 @@ defmodule PropertyDamage.Validation do
     if Enum.empty?(extra_projs) do
       [
         "Model has no extra projections - " <>
-          "invariants should be defined in command_sequence_projection or assertion_projections. " <>
-          "Consider adding projections with assertions to verify system behavior."
+          "invariants should be defined in command_sequence_projection or check_projections. " <>
+          "Consider adding check projections to verify system behavior."
       ]
     else
       []

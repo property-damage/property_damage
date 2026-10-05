@@ -36,7 +36,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     def init, do: %{}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_mode(_state, _cmd_or_event) do
       case :persistent_term.get({__MODULE__, :mode}, :fail) do
         :fail -> PropertyDamage.fail!("switched to fail")
@@ -49,7 +49,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     @behaviour PropertyDamage.Model
     def commands, do: [Cmd]
     def command_sequence_projection, do: State
-    def assertion_projections, do: [Switchable]
+    def check_projections, do: [Switchable]
   end
 
   # Same model, but records the exact map its lifecycle callbacks receive. Used
@@ -59,7 +59,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     @behaviour PropertyDamage.Model
     def commands, do: [Cmd]
     def command_sequence_projection, do: State
-    def assertion_projections, do: [Switchable]
+    def check_projections, do: [Switchable]
 
     def setup_each(config) do
       send(config.adapter_config.test_pid, {:lifecycle, :setup_each, config})

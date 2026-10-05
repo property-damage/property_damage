@@ -31,7 +31,7 @@ defmodule PropertyDamage.RunComparisonStateTest do
     @impl true
     def command_sequence_projection, do: SumP
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defp trace(v, outcome) do
@@ -48,7 +48,7 @@ defmodule PropertyDamage.RunComparisonStateTest do
 
   test "a state-only divergence produces a ranked, classified :state finding" do
     passing = trace(1, :pass)
-    failing = trace(2, {:fail, Failure.assertion_failed(:Inv, "boom")})
+    failing = trace(2, {:fail, Failure.check_failed(:Inv, "boom")})
 
     comparison = RunComparison.compare([passing, failing])
     assert comparison.comparable?

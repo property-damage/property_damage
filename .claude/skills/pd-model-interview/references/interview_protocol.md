@@ -81,8 +81,8 @@ never happen. Start from the Phase 1 fear answer. For each invariant:
 - Attach it to state and events by name ("a cancelled order never ships" →
   needs cancelled-set and ship events in the projection).
 - Derive the classification: "if this went wrong, would you see it
-  immediately or only after the dust settles?" Immediately → `@trigger`;
-  eventually → `@poll_state` (elicit a tolerable settling time).
+  immediately or only after the dust settles?" Immediately → `@check`;
+  eventually → `@eventually` (elicit a tolerable settling time).
 - Elicit severity: is a violation a bug or a catastrophe? (Goes in prose;
   informs how hard the model should hunt it.)
 

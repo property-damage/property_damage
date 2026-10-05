@@ -6,13 +6,13 @@ defmodule ObanBench.ExactlyOnce do
   Exactly-once is two properties, and they now live in different places:
 
     * **safety** ("the counter never EXCEEDS its expected final value") is a
-      declarative `@trigger at: :teardown` assertion on each bench's projection,
+      declarative `@check at: :teardown` check on each bench's projection,
       evaluated on the fully-**settled** state (DR-024). The projection
       accumulates the expected value (counting `Enqueued`, with the uniqueness
       dedup rule applied in `apply/2`) and the maximum value ever observed (from
       `Incremented`), then fails if the observed maximum exceeded the expected.
       Because the check runs on the settled state and the projection retains the
-      maximum, it catches an overshoot that a `@poll_state` liveness predicate
+      maximum, it catches an overshoot that a `@eventually` liveness predicate
       would miss: the value passes transiently through the expected number on
       its way to overshooting, and a liveness poller resolves on that transient
       pass and stops watching.
@@ -43,7 +43,7 @@ defmodule ObanBench.ExactlyOnce do
   Enqueue `worker_mod` for `base` carrying `key`, and start a poller that
   streams the database value back as `Incremented` events until the job reaches
   a terminal state. The exactly-once oracle is the projection's
-  `@trigger at: :teardown` safety check, not this adapter.
+  `@check at: :teardown` safety check, not this adapter.
   """
   def enqueue(base, key, worker_mod, ctx, runtime) do
     name = "#{ctx.run_id}:#{base}"

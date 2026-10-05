@@ -37,7 +37,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
       }
 
       rep =
-        report(failure_reason: Failure.assertion_failed(:bal, "bad"), projections: projections)
+        report(failure_reason: Failure.check_failed(:bal, "bad"), projections: projections)
 
       json = Formatter.format(rep, :json)
       assert is_binary(json)
@@ -47,7 +47,7 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
 
     test "preserves nil and booleans as native JSON values" do
       projections = %{SomeEvent => %{active: true, deleted: false, note: nil, n: 3}}
-      rep = report(failure_reason: Failure.assertion_failed(:x, "m"), projections: projections)
+      rep = report(failure_reason: Failure.check_failed(:x, "m"), projections: projections)
 
       assert {:ok, decoded} = Jason.decode(Formatter.format(rep, :json))
       # Round-tripped types survive (somewhere in the structure)
@@ -78,16 +78,16 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
       assert is_binary(Formatter.format(rep, :terminal, color: false))
     end
 
-    test "an intentional fail!/2 assertion is a SUT error" do
-      reason = %PropertyDamage.AssertionFailed{message: "balance negative"}
-      assert ErrorOrigin.classify(Failure.assertion_failed(:balance, reason)).origin == :sut_error
+    test "an intentional fail!/2 check is a SUT error" do
+      reason = %PropertyDamage.CheckFailed{message: "balance negative"}
+      assert ErrorOrigin.classify(Failure.check_failed(:balance, reason)).origin == :sut_error
     end
 
-    test "an assertion whose code crashes is a TEST CODE error, not a SUT bug" do
-      # The assertion function itself raised (e.g. KeyError on a missing field)
+    test "a check whose code crashes is a TEST CODE error, not a SUT bug" do
+      # The check function itself raised (e.g. KeyError on a missing field)
       # rather than calling fail!/2 -- that is a broken test, not a SUT bug.
       for reason <- [%KeyError{key: :foo}, {%KeyError{key: :foo}, []}] do
-        classification = ErrorOrigin.classify(Failure.assertion_failed(:x, reason))
+        classification = ErrorOrigin.classify(Failure.check_failed(:x, reason))
         assert classification.origin == :test_code_error
       end
     end
@@ -165,12 +165,12 @@ defmodule PropertyDamage.FailureReportRobustnessTest do
   end
 
   describe "exception message extraction" do
-    test "a KeyError assertion failure renders a non-empty message" do
+    test "a KeyError check failure renders a non-empty message" do
       # KeyError computes its message lazily (message: nil in the struct), so
       # matching %{message: msg} first produced an empty failure_message
       key_error = %KeyError{key: :missing, term: %{}}
 
-      rep = report(failure_reason: Failure.assertion_failed(:my_check, key_error))
+      rep = report(failure_reason: Failure.check_failed(:my_check, key_error))
 
       assert FailureReport.failure_message(rep) != ""
 

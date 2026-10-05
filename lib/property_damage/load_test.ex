@@ -98,7 +98,7 @@ defmodule PropertyDamage.LoadTest do
   - **Throughput**: Total requests, requests/second
   - **Latency**: p50, p95, p99, min, max, mean
   - **Errors**: Total count, error rate, by type
-  - **Assertions**: Failures count, rate, by assertion name (when enabled)
+  - **Checks**: Failures count, rate, by check name (when enabled)
   - **Per-Command**: Breakdown by command type
   - **Worker Pool**: Workers created, peak workers, utilization
   - **History**: Time series for trend analysis
@@ -157,11 +157,11 @@ defmodule PropertyDamage.LoadTest do
   - `:on_progress` - Callback receiving `%PropertyDamage.Progress{}` values: a
     `LoadUpdate` (metrics snapshot) each interval and a terminal `LoadResult`
     (final report). See `PropertyDamage.Progress` (DR-022).
-  - `:assertion_mode` - How to handle assertions (default: `:disabled`):
-    - `:disabled` - Skip all assertions (maximum throughput)
-    - `:record` - Run assertions and record failures in metrics
-    - `:log` - Run assertions and log failures as warnings
-    - `:halt` - Run assertions and halt on the first failure
+  - `:check_mode` - How to handle checks (default: `:disabled`):
+    - `:disabled` - Skip all checks (maximum throughput)
+    - `:record` - Run checks and record failures in metrics
+    - `:log` - Run checks and log failures as warnings
+    - `:halt` - Run checks and halt on the first failure
 
   ## Returns
 

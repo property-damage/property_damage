@@ -4,6 +4,8 @@
 
 Define the load testing subsystem that leverages PropertyDamage's stateful property-based testing infrastructure to generate realistic, model-driven load against a system under test, with dynamic worker scaling, arrival rate control, ramp strategies, and comprehensive metrics collection.
 
+Reference Decision Records: DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs)
+
 ## Requirements
 
 ### Requirement: Arrival Rate Configuration
@@ -147,20 +149,28 @@ The metrics system SHALL use reservoir sampling to bound memory usage for percen
 - **THEN** the metrics system SHALL maintain a fixed-size reservoir (default 1000 samples)
 - **AND** SHALL compute accurate percentile approximations from the reservoir
 
-### Requirement: Assertion Mode
+### Requirement: Check Mode
 
-The load test assertion mode SHALL default to `:record`, continuing execution after assertion failures rather than halting.
+The load test check mode SHALL default to `:record`, continuing execution after check failures rather than halting.
 
-#### Scenario: Default assertion mode
+#### Scenario: Default check mode
 
-- **WHEN** a load test is started without specifying assertion mode
+- **WHEN** a load test is started without specifying check mode
 - **THEN** the framework SHALL use `:record` mode
-- **AND** assertion failures SHALL be counted in metrics but SHALL NOT halt the test
+- **AND** check failures SHALL be counted in metrics but SHALL NOT halt the test
 
-#### Scenario: Disabled assertions
+#### Scenario: Disabled checks
 
-- **WHEN** assertion mode is set to `:disabled`
-- **THEN** the framework SHALL skip assertion evaluation entirely during the load test
+- **WHEN** check mode is set to `:disabled`
+- **THEN** the framework SHALL skip check evaluation entirely during the load test
+
+### Requirement: Retired Check Mode Key Is Rejected (DR-042)
+
+The load test SHALL reject the retired option `assertion_mode:` with a validation error that names its replacement `check_mode:`.
+
+#### Scenario: Load test started with `assertion_mode:`
+- **WHEN** a load test is started with `assertion_mode:` in its options
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` with the message "`assertion_mode:` was renamed `check_mode:`"
 
 ### Requirement: Command Timeouts
 
@@ -206,7 +216,7 @@ The framework SHALL generate a summary report containing metrics, failures, and 
 #### Scenario: Report generation
 
 - **WHEN** a load test completes
-- **THEN** the framework SHALL return a report containing throughput metrics, latency percentiles, error summaries, assertion failure summaries, worker pool statistics, and timing information
+- **THEN** the framework SHALL return a report containing throughput metrics, latency percentiles, error summaries, check failure summaries, worker pool statistics, and timing information
 
 #### Scenario: Report formatting
 

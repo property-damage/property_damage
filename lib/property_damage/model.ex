@@ -3,7 +3,7 @@ defmodule PropertyDamage.Model do
   Behaviour for models in stateful property-based testing.
 
   A model ties together all the components needed for testing: which commands
-  can be generated, which projections track state and assertions, and the
+  can be generated, which projections track state and checks, and the
   test lifecycle hooks.
 
   ## Required Callbacks
@@ -13,13 +13,13 @@ defmodule PropertyDamage.Model do
 
   ## Optional Callbacks
 
-  - `assertion_projections/0` - Projections that verify invariants
+  - `check_projections/0` - Projections that verify invariants
   - `injectable_events/0` - Events that can arrive from Adapter.Injector modules
   - `setup_once/1` - Setup that runs once at the start (not during shrinking)
   - `setup_each/1` - Setup that runs before each execution (including shrink attempts)
   - `teardown_each/1` - Cleanup after each execution
   - `teardown_once/1` - Final cleanup after all shrinking complete
-  - `terminate?/3` - Control when command generation should stop
+  - `terminate_early?/3` - Control when command generation should stop
 
   ## Command Sequence Generation
 
@@ -28,24 +28,24 @@ defmodule PropertyDamage.Model do
   1. **State Check**: Get current state from `command_sequence_projection/0`
   2. **Filter Commands**: Evaluate each command's `when:` precondition against state
   3. **Select Command**: Choose from valid commands based on `weight:`
-  4. **Generate Instance**: Call the selected command's `with:` generator with state
+  4. **Generate Instance**: Call the selected command's `overrides:` generator with state
   5. **Simulate Execution**: Call `simulate/2` to predict resulting events
   6. **Update State**: Apply predicted events to the projection
   7. **Repeat**: Go to step 2 until sequence length reached
 
-  During execution, real events replace simulated predictions, and assertion
+  During execution, real events replace simulated predictions, and check
   projections verify invariants.
 
   ```
   command_sequence_projection.init()
     → filter commands by `when:` predicate
     → select command (weighted random)
-    → generate command data (module generator + `with:` overrides)
+    → generate command data (module generator + `overrides:` values)
     → simulator.simulate(command, state)
     → synthetic events
     → command_sequence_projection.apply(events)
     → updated state
-    → repeat until max_commands or terminate?/3 returns true
+    → repeat until max_commands or terminate_early?/3 returns true
   ```
 
   ## Example
@@ -64,12 +64,12 @@ defmodule PropertyDamage.Model do
 
         # Optional: projections that verify invariants
         @impl true
-        def assertion_projections, do: [OrderBalances]
+        def check_projections, do: [OrderBalances]
 
         # Terminate when order is deleted
         @impl true
-        def terminate?(_state, %DeleteOrder{}, _events), do: true
-        def terminate?(_state, _command, _events), do: false
+        def terminate_early?(_state, %DeleteOrder{}, _events), do: true
+        def terminate_early?(_state, _command, _events), do: false
       end
 
   ## Command Specification
@@ -88,7 +88,7 @@ defmodule PropertyDamage.Model do
           {CancelOrder,
             weight: 1,
             when: fn state -> map_size(state.orders) > 0 end,
-            with: fn state -> %{order_ref: StreamData.member_of(Map.keys(state.orders))} end}
+            overrides: fn state -> %{order_ref: StreamData.member_of(Map.keys(state.orders))} end}
         ]
       end
 
@@ -96,7 +96,7 @@ defmodule PropertyDamage.Model do
 
   - `:weight` - Relative selection frequency (default: 1)
   - `:when` - Precondition function `(state -> boolean)` (default: always true)
-  - `:with` - Override function `(state -> map)` for command generation (default: %{})
+  - `:overrides` - Override function `(state -> map)` for command generation (default: %{})
 
   Weights express *relative* frequency among valid commands. If CreateOrder
   has weight 3 and CancelOrder has weight 1, and both pass their `when:` predicates,
@@ -178,7 +178,8 @@ defmodule PropertyDamage.Model do
 
   ## Terminal States
 
-  The `terminate?/3` callback controls when command generation should stop.
+  The `terminate_early?/3` callback runs during generation on simulator events
+  and returns `true` to end the sequence before `max_commands`.
   This is more flexible than command-level attributes because the same
   command may or may not be terminal depending on the test scenario.
 
@@ -188,9 +189,9 @@ defmodule PropertyDamage.Model do
   - `events` - The events produced by that command
 
   Examples:
-  - Terminate on specific command: `def terminate?(_state, %Shutdown{}, _events), do: true`
-  - Terminate on state: `def terminate?(state, _, _), do: map_size(state.pending) == 0`
-  - Terminate on event: `def terminate?(_, _, events), do: Enum.any?(events, &is_complete?/1)`
+  - Terminate on specific command: `def terminate_early?(_state, %Shutdown{}, _events), do: true`
+  - Terminate on state: `def terminate_early?(state, _, _), do: map_size(state.pending) == 0`
+  - Terminate on event: `def terminate_early?(_, _, events), do: Enum.any?(events, &is_complete?/1)`
 
   If not implemented, the framework runs until `max_commands` is reached.
   """
@@ -200,12 +201,12 @@ defmodule PropertyDamage.Model do
 
   - `:weight` - Relative selection frequency (default: 1)
   - `:when` - Precondition function `(state -> boolean)` (default: always true)
-  - `:with` - Override function `(state -> map)` for command generation (default: %{})
+  - `:overrides` - Override function `(state -> map)` for command generation (default: %{})
   """
   @type command_opts :: [
           weight: pos_integer(),
           when: (map() -> boolean()),
-          with: (map() -> map())
+          overrides: (map() -> map())
         ]
 
   @typedoc """
@@ -219,7 +220,7 @@ defmodule PropertyDamage.Model do
   Each command can be specified as:
   - `Module` - Simple module, weight 1, always enabled
   - `{Module, weight}` - Module with custom weight
-  - `{Module, opts}` - Module with full options (weight, when, with)
+  - `{Module, opts}` - Module with full options (weight, when, overrides)
 
   ## Examples
 
@@ -230,7 +231,7 @@ defmodule PropertyDamage.Model do
           {CancelOrder,
             weight: 1,
             when: fn s -> map_size(s.orders) > 0 end,
-            with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+            overrides: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
         ]
       end
   """
@@ -241,7 +242,7 @@ defmodule PropertyDamage.Model do
 
   This projection's state is passed to:
   - `when:` predicates in command specs (preconditions)
-  - `with:` override functions in command specs (generators)
+  - `overrides:` functions in command specs (generators)
   - `simulate/2` for predicting expected events
 
   During sequence generation, the simulator predicts events and this projection
@@ -273,15 +274,15 @@ defmodule PropertyDamage.Model do
   @callback simulator() :: module()
 
   @doc """
-  Returns list of assertion projection modules.
+  Returns list of check projection modules.
 
   These projections verify invariants via `use PropertyDamage.Model.Projection`.
-  Their state is updated with each command and event, and assertions are run
-  according to their `@trigger` conditions.
+  Their state is updated with each command and event, and checks are run
+  according to their `@check` conditions.
 
   Optional - defaults to `[]` if not implemented.
   """
-  @callback assertion_projections() :: [module()]
+  @callback check_projections() :: [module()]
 
   @doc """
   Returns list of event modules that can be injected from outside.
@@ -383,10 +384,11 @@ defmodule PropertyDamage.Model do
   @callback teardown_once(config :: lifecycle_config()) :: :ok
 
   @doc """
-  Determines if the test should terminate after the given command/events.
+  Decides whether to end the sequence being generated before `max_commands`.
 
-  Called after each command execution with the updated state.
-  Return `true` to stop generating further commands.
+  Runs during generation, after each command, on the events the simulator
+  produced for it. Return `true` to stop generating further commands for this
+  sequence.
 
   ## Arguments
 
@@ -397,29 +399,30 @@ defmodule PropertyDamage.Model do
   ## Examples
 
       # Terminate on specific command type
-      def terminate?(_state, %Shutdown{}, _events), do: true
-      def terminate?(_state, _command, _events), do: false
+      def terminate_early?(_state, %Shutdown{}, _events), do: true
+      def terminate_early?(_state, _command, _events), do: false
 
       # Terminate based on state
-      def terminate?(state, _command, _events) do
+      def terminate_early?(state, _command, _events) do
         map_size(state.pending_payments) == 0
       end
 
       # Terminate based on events
-      def terminate?(_state, _command, events) do
+      def terminate_early?(_state, _command, events) do
         Enum.any?(events, &match?(%PaymentCompleted{}, &1))
       end
   """
-  @callback terminate?(state :: map(), command :: struct(), events :: [struct()]) :: boolean()
+  @callback terminate_early?(state :: map(), command :: struct(), events :: [struct()]) ::
+              boolean()
 
   @optional_callbacks [
-    assertion_projections: 0,
+    check_projections: 0,
     injectable_events: 0,
     setup_once: 1,
     setup_each: 1,
     teardown_each: 1,
     teardown_once: 1,
-    terminate?: 3,
+    terminate_early?: 3,
     simulator: 0
   ]
 
@@ -482,11 +485,16 @@ defmodule PropertyDamage.Model do
   end
 
   # Validate the resolved spec's selection/generation callbacks and return the
-  # `{weight, module, spec}` tuple. Bad `when:`/`with:` arities used to fail
+  # `{weight, module, spec}` tuple. Bad `when:`/`overrides:` arities used to fail
   # with an opaque CaseClauseError deep in generation; surface them here.
   defp finalize_spec(resolved, module) do
+    if Map.has_key?(resolved, :with) do
+      raise ArgumentError,
+            "Invalid `with:` for command #{inspect(module)}: `with:` was renamed `overrides:`."
+    end
+
     validate_when!(Map.get(resolved, :when), module)
-    validate_with!(Map.get(resolved, :with), module)
+    validate_overrides!(Map.get(resolved, :overrides), module)
     {validate_weight!(resolved.weight, module), module, resolved}
   end
 
@@ -520,22 +528,22 @@ defmodule PropertyDamage.Model do
             "expected a 1-arity function `fn state -> boolean end`, got #{inspect(other)}."
   end
 
-  # A `with:` override is either a map or invoked as `fun.(state)` to produce a
+  # An `overrides:` option is either a map or invoked as `fun.(state)` to produce a
   # map during generation; reject other shapes before they hit generation.
-  defp validate_with!(nil, _module), do: :ok
-  defp validate_with!(map, _module) when is_map(map), do: :ok
-  defp validate_with!(fun, _module) when is_function(fun, 1), do: :ok
+  defp validate_overrides!(nil, _module), do: :ok
+  defp validate_overrides!(map, _module) when is_map(map), do: :ok
+  defp validate_overrides!(fun, _module) when is_function(fun, 1), do: :ok
 
-  defp validate_with!(fun, module) when is_function(fun) do
+  defp validate_overrides!(fun, module) when is_function(fun) do
     raise ArgumentError,
-          "Invalid `with:` for command #{inspect(module)}: " <>
+          "Invalid `overrides:` for command #{inspect(module)}: " <>
             "expected a 1-arity function `fn state -> map end` or a map, " <>
             "got a function of arity #{fun_arity(fun)}."
   end
 
-  defp validate_with!(other, module) do
+  defp validate_overrides!(other, module) do
     raise ArgumentError,
-          "Invalid `with:` for command #{inspect(module)}: " <>
+          "Invalid `overrides:` for command #{inspect(module)}: " <>
             "expected a 1-arity function `fn state -> map end` or a map, got #{inspect(other)}."
   end
 
@@ -572,19 +580,19 @@ defmodule PropertyDamage.Model do
   @doc """
   The full projection list a model exposes.
 
-  The command-sequence projection plus any `assertion_projections/0`,
+  The command-sequence projection plus any `check_projections/0`,
   deduplicated (a projection listed in both appears once).
   """
   @spec projection_modules(module()) :: [module()]
   def projection_modules(model) do
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    [model.command_sequence_projection() | assertion_projections]
+    [model.command_sequence_projection() | check_projections]
     |> Enum.uniq()
   end
 
@@ -594,28 +602,28 @@ defmodule PropertyDamage.Model do
   The union of every projection's invariant registry (`__invariants__/0`), keyed
   by `{projection, id}` so two projections may reuse an `id` for distinct
   invariants. Each entry carries the `%PropertyDamage.Invariants.Invariant{}` and
-  the assertions that check it, with a per-check kind:
+  the checks that check it, with a per-check kind:
 
-  - `:synchronous` - a during-run `@trigger every:` check
-  - `:lifecycle` - a `@trigger at:` lifecycle-boundary check
-  - `:polling` - a temporal `@poll_state` check
+  - `:synchronous` - a during-run `@check every:` check
+  - `:lifecycle` - a `@check at:` lifecycle-boundary check
+  - `:eventual` - an `@eventually` check
 
   Returns a list deterministically ordered by `{inspect(projection), id}`.
   """
-  @spec assertion_catalog(module()) :: [
+  @spec check_catalog(module()) :: [
           %{
             projection: module(),
             id: atom(),
             invariant: PropertyDamage.Invariants.Invariant.t(),
-            checks: [%{name: atom(), kind: :synchronous | :lifecycle | :polling}]
+            checks: [%{name: atom(), kind: :synchronous | :lifecycle | :eventual}]
           }
         ]
-  def assertion_catalog(model) do
+  def check_catalog(model) do
     for projection <- projection_modules(model),
         function_exported?(projection, :__invariants__, 0),
         {id, invariant} <- projection.__invariants__() do
       checks =
-        projection.__assertions__()
+        projection.__checks__()
         |> Enum.filter(&(&1.invariant_id == id))
         |> Enum.map(fn a -> %{name: a.name, kind: check_kind(a)} end)
 
@@ -624,7 +632,7 @@ defmodule PropertyDamage.Model do
     |> Enum.sort_by(fn entry -> {inspect(entry.projection), entry.id} end)
   end
 
-  defp check_kind(%{type: :polling}), do: :polling
+  defp check_kind(%{type: :polling}), do: :eventual
   defp check_kind(%{type: :synchronous, trigger: %{type: :at}}), do: :lifecycle
   defp check_kind(%{type: :synchronous}), do: :synchronous
 end

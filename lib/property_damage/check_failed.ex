@@ -1,13 +1,12 @@
-# `AssertionFailed` is an intentional public name: it is raised by the
-# documented `fail!/2` and matched on by users since v0.1. The "*Error"
+# `CheckFailed` is an intentional public name: it is the exception raised by
+# the documented `fail!/2`, so users match on it directly. The "*Error"
 # naming convention is enforced for every other exception in the codebase.
 # credo:disable-for-next-line Credo.Check.Consistency.ExceptionNames
-defmodule PropertyDamage.AssertionFailed do
+defmodule PropertyDamage.CheckFailed do
   @moduledoc """
-  Simple exception for assertion failures.
+  Exception raised by `PropertyDamage.fail!/2` when a check fails.
 
-  This exception is raised by `PropertyDamage.fail!/2` and provides a
-  convenient way to fail assertions with a message and optional data.
+  It carries a message and optional data, so a check can fail with context.
 
   ## Usage
 

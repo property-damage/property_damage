@@ -71,7 +71,7 @@ defmodule PropertyDamage.Error do
   # ============================================================================
 
   defp format_failure(kind, failure, context)
-       when kind in [:assertion_failed, :projection_violation] do
+       when kind in [:check_failed, :projection_violation] do
     check_name = PropertyDamage.Failure.name(failure)
     cmd_info = format_command_info(context)
 

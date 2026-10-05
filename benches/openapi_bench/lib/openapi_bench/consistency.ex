@@ -1,7 +1,7 @@
 defmodule OpenapiBench.Consistency do
   @moduledoc """
   Read-consistency invariant over the generated KV client (scaffold next-steps
-  4 & 6: the projection + assertion the scaffold leaves to the user).
+  4 & 6: the projection + check the scaffold leaves to the user).
 
   The model tallies what each key should hold from the `PutValueCompleted`
   events the generated adapter returns, and every `GetValue` must observe that
@@ -31,7 +31,7 @@ defmodule OpenapiBench.Consistency do
   @invariant id: :read_consistency,
              description: "Every read observes the model's latest write to that key (or :unset)"
 
-  @trigger every: GetValue, validates: :read_consistency
+  @check every: GetValue, validates: :read_consistency
   def assert_read_consistent(state, _command) do
     case state.last_read do
       {key, observed} ->

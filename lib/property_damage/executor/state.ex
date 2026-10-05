@@ -21,7 +21,7 @@ defmodule PropertyDamage.Executor.State do
 
     * `:model` - the model module
     * `:event_queue` - `EventQueue` pid for injector/poller events (or `nil`)
-    * `:assertion_mode` - `:halt | :record | :log | :disabled`
+    * `:check_mode` - `:halt | :record | :log | :disabled`
     * `:stutter_config` - stutter configuration (or `nil`)
     * `:mock_registry` - mock service registry pid (or `nil`)
     * `:external_markers` - declared `external()` marker atoms
@@ -45,15 +45,15 @@ defmodule PropertyDamage.Executor.State do
     * `:mint_epoch` - which SUT execution within a logical run this is (DR-034);
       `0` for the recorded run, incremented per shrink attempt / replay.
     * `:step_count` - number of commands executed
-    * `:assertion_counters` - `%{step:, command:, event:, ...}` firing counts
-    * `:assertion_failures` - accumulated `:record`-mode failures (newest-first)
+    * `:check_counters` - `%{step:, command:, event:, ...}` firing counts
+    * `:check_failures` - accumulated `:record`-mode failures (newest-first)
     * `:branch_id` - current branch id during branching (`nil` on the linear path)
-    * `:active_pollers` - running `@poll_state` pollers
+    * `:active_pollers` - running `@eventually` pollers
     * `:active_resource_pollers` - running resource pollers
     * `:active_faults` - `%{{nemesis_module, index} => fault}` (ghost field)
     * `:async_halt` - `{name, reason, command_index}` set when a DR-025 async
-      `every:` assertion trips during a `@poll_state` await drain (ghost field)
-    * `:async_failed_index` - the command index a DR-025 async `every:` assertion
+      `every:` check trips during a `@eventually` await drain (ghost field)
+    * `:async_failed_index` - the command index a DR-025 async `every:` check
       failure is attributed to (the offending event's `command_index`, which may
       be an earlier command than the one currently executing, or `nil` for an
       ambient injector event). `:unset` on every non-failing state; consulted by
@@ -77,7 +77,7 @@ defmodule PropertyDamage.Executor.State do
   @enforce_keys [
     :model,
     :event_queue,
-    :assertion_mode,
+    :check_mode,
     :stutter_config,
     :mock_registry,
     :external_markers,
@@ -87,7 +87,7 @@ defmodule PropertyDamage.Executor.State do
   defstruct [
     :model,
     :event_queue,
-    :assertion_mode,
+    :check_mode,
     :stutter_config,
     :mock_registry,
     :external_markers,
@@ -102,8 +102,8 @@ defmodule PropertyDamage.Executor.State do
     run_nonce: nil,
     mint_epoch: 0,
     step_count: 0,
-    assertion_counters: %{step: 0, command: 0, event: 0},
-    assertion_failures: [],
+    check_counters: %{step: 0, command: 0, event: 0},
+    check_failures: [],
     branch_id: nil,
     active_pollers: [],
     active_resource_pollers: [],
@@ -118,7 +118,7 @@ defmodule PropertyDamage.Executor.State do
   @type t :: %__MODULE__{
           model: module(),
           event_queue: pid() | nil,
-          assertion_mode: atom(),
+          check_mode: atom(),
           stutter_config: term(),
           mock_registry: pid() | nil,
           external_markers: list(),
@@ -133,8 +133,8 @@ defmodule PropertyDamage.Executor.State do
           run_nonce: non_neg_integer() | nil,
           mint_epoch: non_neg_integer(),
           step_count: non_neg_integer(),
-          assertion_counters: map(),
-          assertion_failures: list(),
+          check_counters: map(),
+          check_failures: list(),
           branch_id: term(),
           active_pollers: list(),
           active_resource_pollers: list(),

@@ -80,8 +80,8 @@ defmodule PropertyDamage.MockServiceRunTest do
 
     # An over-limit charge (> 50) must be declined by the fraud service. A buggy
     # mock that approves it trips this. Fires on the mock-injected event, so the
-    # assertion is only reachable BECAUSE handle_request/2 injected it.
-    @trigger every: FraudChecked
+    # check is only reachable BECAUSE handle_request/2 injected it.
+    @check every: FraudChecked
     def assert_high_declined(_state, %FraudChecked{amount: a, approved: ap}) do
       if a > 50 and ap do
         PropertyDamage.fail!("over-limit charge approved by fraud service", amount: a)
@@ -173,7 +173,7 @@ defmodule PropertyDamage.MockServiceRunTest do
     @impl true
     def command_sequence_projection, do: ChargeState
     @impl true
-    def assertion_projections, do: [ChargeState]
+    def check_projections, do: [ChargeState]
     @impl true
     def simulator, do: __MODULE__
     @impl PropertyDamage.Model.Simulator
@@ -184,11 +184,11 @@ defmodule PropertyDamage.MockServiceRunTest do
     @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
     @impl true
-    def commands, do: [{Charge, with: fn _ -> %{amount: StreamData.constant(80)} end}]
+    def commands, do: [{Charge, overrides: fn _ -> %{amount: StreamData.constant(80)} end}]
     @impl true
     def command_sequence_projection, do: ChargeState
     @impl true
-    def assertion_projections, do: [ChargeState]
+    def check_projections, do: [ChargeState]
     @impl true
     def simulator, do: __MODULE__
     @impl PropertyDamage.Model.Simulator

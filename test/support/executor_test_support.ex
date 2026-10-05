@@ -4,9 +4,9 @@ defmodule PropertyDamage.Test.ExecutorTestSupport do
   """
 end
 
-defmodule PropertyDamage.Test.Projections.FailingAssertion do
+defmodule PropertyDamage.Test.Projections.FailingCheck do
   @moduledoc """
-  Assertion projection that fails when total_quantity exceeds threshold.
+  Check projection that fails when total_quantity exceeds threshold.
   """
   use PropertyDamage.Model.Projection
 
@@ -22,7 +22,7 @@ defmodule PropertyDamage.Test.Projections.FailingAssertion do
 
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_quantity_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 100 do
       PropertyDamage.fail!("Quantity exceeds limit", quantity: state.total_quantity, limit: 100)
@@ -39,7 +39,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{ModelState, TestAssertions}
+  alias PropertyDamage.Test.Projections.{ModelState, TestChecks}
 
   @impl true
   def commands do
@@ -47,7 +47,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
       CreateItem,
       {ViewItem,
        when: fn state -> map_size(Map.get(state, :items, %{})) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          items = Map.get(state, :items, %{})
          %{item_ref: StreamData.member_of(Map.keys(items))}
        end}
@@ -58,7 +58,7 @@ defmodule PropertyDamage.Test.ExecutorModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [TestAssertions]
+  def check_projections, do: [TestChecks]
 
   @impl true
   def simulator, do: __MODULE__
@@ -75,14 +75,14 @@ end
 
 defmodule PropertyDamage.Test.FailingModel do
   @moduledoc """
-  Model with failing assertion projection for testing check failures.
+  Model with failing check projection for testing check failures.
   """
   @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.ItemCreated
-  alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
+  alias PropertyDamage.Test.Projections.{FailingCheck, ModelState}
 
   @impl true
   def commands, do: [CreateItem]
@@ -91,7 +91,7 @@ defmodule PropertyDamage.Test.FailingModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [FailingAssertion]
+  def check_projections, do: [FailingCheck]
 
   @impl true
   def simulator, do: __MODULE__
@@ -176,16 +176,16 @@ defmodule PropertyDamage.Test.SimpleModel do
   @impl true
   def command_sequence_projection, do: ModelState
 
-  # No assertion_projections - optional callback
+  # No check_projections - optional callback
 end
 
 # ============================================================================
 # Multi-Check Test Support (for failure equivalence testing)
 # ============================================================================
 
-defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
+defmodule PropertyDamage.Test.Projections.MultiCheckProjection do
   @moduledoc """
-  Assertion projection with two different checks at different thresholds.
+  Check projection with two different checks at different thresholds.
 
   Used to test that the shrinker preserves failure type:
   - `high_limit` fails when quantity > 200
@@ -208,7 +208,7 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
 
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_low_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 100 do
       PropertyDamage.fail!("Quantity exceeds low limit",
@@ -218,7 +218,7 @@ defmodule PropertyDamage.Test.Projections.MultiCheckAssertion do
     end
   end
 
-  @trigger every: 1
+  @check every: 1
   def assert_high_limit(state, _cmd_or_event) do
     unless state.total_quantity <= 200 do
       PropertyDamage.fail!("Quantity exceeds high limit",
@@ -231,12 +231,12 @@ end
 
 defmodule PropertyDamage.Test.MultiCheckModel do
   @moduledoc """
-  Model with multiple assertion checks for testing failure equivalence.
+  Model with multiple checks for testing failure equivalence.
   """
   @behaviour PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.CreateItem
-  alias PropertyDamage.Test.Projections.{ModelState, MultiCheckAssertion}
+  alias PropertyDamage.Test.Projections.{ModelState, MultiCheckProjection}
 
   @impl true
   def commands, do: [CreateItem]
@@ -245,7 +245,7 @@ defmodule PropertyDamage.Test.MultiCheckModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [MultiCheckAssertion]
+  def check_projections, do: [MultiCheckProjection]
 end
 
 # ============================================================================
@@ -264,7 +264,7 @@ defmodule PropertyDamage.Test.ProbeModel do
 
   alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
-  alias PropertyDamage.Test.Projections.{FailingAssertion, ModelState}
+  alias PropertyDamage.Test.Projections.{FailingCheck, ModelState}
 
   @impl true
   def commands, do: [CreateItem, ProbeItem]
@@ -273,7 +273,7 @@ defmodule PropertyDamage.Test.ProbeModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [FailingAssertion]
+  def check_projections, do: [FailingCheck]
 
   @impl true
   def simulator, do: __MODULE__
@@ -341,7 +341,7 @@ defmodule PropertyDamage.Test.Commands.Link do
   A command that optionally consumes a prior Link's external id (`:parent`), so
   chains of Links form a multi-level dependency graph. Each Link produces an
   external id via its `LinkAdded` event (DR-021); the `:weight` field feeds a
-  cumulative-sum assertion.
+  cumulative-sum check.
   """
   @behaviour PropertyDamage.Command
 
@@ -362,7 +362,7 @@ defmodule PropertyDamage.Test.Projections.LinkState do
   def apply(state, _), do: state
 end
 
-defmodule PropertyDamage.Test.Projections.LinkWeightAssertion do
+defmodule PropertyDamage.Test.Projections.LinkWeightCheck do
   @moduledoc """
   Fails once the cumulative weight of executed Links exceeds 100.
   """
@@ -380,7 +380,7 @@ defmodule PropertyDamage.Test.Projections.LinkWeightAssertion do
 
   def apply(state, _), do: state
 
-  @trigger every: 1
+  @check every: 1
   def assert_weight_limit(state, _cmd_or_event) do
     unless state.total_weight <= 100 do
       PropertyDamage.fail!("Cumulative weight exceeds limit",
@@ -393,7 +393,7 @@ end
 
 defmodule PropertyDamage.Test.LinkModel do
   @moduledoc """
-  Model wiring Link commands to the cumulative-weight assertion, with a
+  Model wiring Link commands to the cumulative-weight check, with a
   simulator so the shrinker's validity check (`Sequence.Validator.valid_sequence?/2`)
   has something to simulate.
   """
@@ -402,7 +402,7 @@ defmodule PropertyDamage.Test.LinkModel do
 
   alias PropertyDamage.Test.Commands.Link
   alias PropertyDamage.Test.Events.LinkAdded
-  alias PropertyDamage.Test.Projections.{LinkState, LinkWeightAssertion}
+  alias PropertyDamage.Test.Projections.{LinkState, LinkWeightCheck}
 
   @impl true
   def commands, do: [Link]
@@ -411,7 +411,7 @@ defmodule PropertyDamage.Test.LinkModel do
   def command_sequence_projection, do: LinkState
 
   @impl true
-  def assertion_projections, do: [LinkWeightAssertion]
+  def check_projections, do: [LinkWeightCheck]
 
   @impl true
   def simulator, do: __MODULE__
@@ -425,7 +425,7 @@ end
 defmodule PropertyDamage.Test.LinkAdapter do
   @moduledoc """
   Adapter for Link commands. Binds each Link's produced ref to a deterministic
-  per-run id (the ref value is irrelevant to the assertion; only `:weight` is).
+  per-run id (the ref value is irrelevant to the check; only `:weight` is).
   """
   use PropertyDamage.Adapter
 

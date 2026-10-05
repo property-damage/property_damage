@@ -106,7 +106,7 @@ defmodule PropertyDamage.Shrinker do
   shrunk = Shrinker.shrink(
     sequence,
     failed_at_index: 5,
-    failure_reason: PropertyDamage.Failure.assertion_failed(:balance_invariant, "..."),
+    failure_reason: PropertyDamage.Failure.check_failed(:balance_invariant, "..."),
     model: MyModel,
     adapter: MyAdapter,
     config: config
@@ -135,12 +135,12 @@ defmodule PropertyDamage.Shrinker do
   The two properties that must match for a shrunk sequence to be considered as
   reproducing the "same" failure. `kind` is the failure's globally-unique kind
   (so two failures of different *classes* can never collide), and `name` is the
-  assertion/check/projection name where one is meaningful (`nil` otherwise).
+  check/projection name where one is meaningful (`nil` otherwise).
 
   Keying on `kind` rather than the coarser class is load-bearing: a
-  `:poll_timeout` of assertion `:x` and an `:assertion_failed` of `:x` share a
+  `:poll_timeout` of check `:x` and an `:check_failed` of `:x` share a
   name but are different bugs, so their signatures must differ. A class-based
-  signature (`{:assertion, :x}` for both) would let the shrinker swap one bug's
+  signature (`{:check, :x}` for both) would let the shrinker swap one bug's
   identity for the other's.
   """
   @type failure_signature :: {Failure.kind(), atom() | nil}
@@ -164,8 +164,8 @@ defmodule PropertyDamage.Shrinker do
   # kinds, its name; the envelope's `branch_id` is deliberately NOT part of the
   # signature, so a branch failure is equivalent to the same failure on the
   # linear path (matching the old branch-unwrapping behaviour). The `name` keeps
-  # distinct assertions from being conflated, and keeps an async-observed
-  # assertion failure equivalent to a teardown failure of the same assertion.
+  # distinct checks from being conflated, and keeps an async-observed
+  # check failure equivalent to a teardown failure of the same check.
   @spec failure_signature(Failure.t() | term()) :: failure_signature()
   def failure_signature(%Failure{} = failure) do
     {Failure.kind(failure), Failure.name(failure)}
@@ -1197,8 +1197,8 @@ defmodule PropertyDamage.Shrinker do
   # shrink calls, which only consult its signature (kind + name) for equivalence.
   defp reconstruct_failure_reason(nil), do: nil
 
-  defp reconstruct_failure_reason({:assertion_failed, name}) do
-    Failure.assertion_failed(name, "")
+  defp reconstruct_failure_reason({:check_failed, name}) do
+    Failure.check_failed(name, "")
   end
 
   defp reconstruct_failure_reason({kind, name}) do

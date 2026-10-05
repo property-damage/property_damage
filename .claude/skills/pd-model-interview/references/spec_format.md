@@ -83,7 +83,7 @@ Every event here must be produced by at least one command's `events:` list.
 ### 4. Projections
 
 The command-sequence projection (what state it tracks and which commands'
-guards or generators need it), then assertion projections. State exists only
+guards or generators need it), then check projections. State exists only
 because something gates on it or an invariant inspects it.
 
 ### 5. Invariants
@@ -92,12 +92,12 @@ One `###`-heading per invariant:
 
 ```yaml
 name: no_negative_balance
-kind: trigger              # trigger (immediate) | poll_state (eventual)
+kind: trigger              # trigger (immediate) | eventually (eventual)
 projection: BalanceInvariants
-after: every_step          # or an event name; poll_state: settling time too
+after: every_step          # or an event name; eventually: settling time too
 ```
 
-Prose: the assertion in domain language, and the severity of a violation.
+Prose: the check in domain language, and the severity of a violation.
 Suggested-but-unadopted invariants do not go here - they go in section 7 as
 deferred.
 

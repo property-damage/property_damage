@@ -1,6 +1,6 @@
 # DR-007: Model-Level Command Wiring
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed). Amended by DR-042: the `with:` option is now `overrides:`.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
 
 ## Decision

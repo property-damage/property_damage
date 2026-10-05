@@ -87,7 +87,7 @@ defmodule PropertyDamage.ValidationTest do
       def command_sequence_projection, do: NoGeneratorProjection
 
       @impl true
-      def assertion_projections, do: []
+      def check_projections, do: []
     end
 
     test "raises when a command is missing generator/1" do
@@ -146,7 +146,7 @@ defmodule PropertyDamage.ValidationTest do
       def command_sequence_projection, do: NemesisProjection
 
       @impl true
-      def assertion_projections, do: []
+      def check_projections, do: []
     end
 
     test "validates a nemesis command via new!/2 instead of generator/1" do
@@ -230,12 +230,12 @@ defmodule PropertyDamage.ValidationTest do
     end
   end
 
-  # Regression: warn_orphan_events/1 used to read assertion.trigger blindly,
-  # which crashed (KeyError :trigger) on @poll_state assertions, since those
-  # carry :poll_state instead. Surfaced by the Oban (6b) bench, whose model
-  # validates a projection with a @poll_state assertion. The event a poll
+  # Regression: warn_orphan_events/1 used to read check.trigger blindly,
+  # which crashed (KeyError :trigger) on @eventually checks, since those
+  # carry :eventually instead. Surfaced by the Oban (6b) bench, whose model
+  # validates a projection with a @eventually check. The event a poll
   # triggers on must also count as handled (not reported as an orphan).
-  describe "validate!/3 with a @poll_state assertion projection" do
+  describe "validate!/3 with a @eventually check projection" do
     defmodule PollEvents do
       defmodule Started, do: defstruct([])
       defmodule Finished, do: defstruct([])
@@ -261,7 +261,7 @@ defmodule PropertyDamage.ValidationTest do
       def apply(state, %Finished{}), do: %{state | done: true}
       def apply(state, _), do: state
 
-      @poll_state after: Started, timeout: {100, :milliseconds}, interval: {10, :milliseconds}
+      @eventually after: Started, timeout: {100, :milliseconds}, interval: {10, :milliseconds}
       def eventually_finished(_state, %Started{}), do: fn s -> s.done end
     end
 
@@ -273,7 +273,7 @@ defmodule PropertyDamage.ValidationTest do
       @impl true
       def command_sequence_projection, do: PollProjection
       @impl true
-      def assertion_projections, do: [PollProjection]
+      def check_projections, do: [PollProjection]
     end
 
     defmodule PollAdapter do
@@ -287,7 +287,7 @@ defmodule PropertyDamage.ValidationTest do
       def execute(%PollCommand{}, _ctx, _runtime), do: {:ok, [%PollEvents.Started{}]}
     end
 
-    test "validation does not crash on a @poll_state assertion" do
+    test "validation does not crash on a @eventually check" do
       assert {:ok, warnings} = Validation.validate!(PollModel, PollAdapter)
       assert is_list(warnings)
     end

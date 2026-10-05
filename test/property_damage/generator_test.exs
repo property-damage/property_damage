@@ -4,7 +4,7 @@ defmodule PropertyDamage.GeneratorTest do
 
   alias PropertyDamage.Generator
 
-  # Fixtures for `with:` override no-op detection. CreateItem's fields are
+  # Fixtures for `overrides:` option no-op detection. CreateItem's fields are
   # [:name, :quantity]; an override targeting any other key is ineffective.
   defmodule UnknownKeyMapModel do
     @behaviour PropertyDamage.Model
@@ -12,7 +12,7 @@ defmodule PropertyDamage.GeneratorTest do
     alias PropertyDamage.Test.Projections.ModelState
 
     @impl true
-    def commands, do: [{CreateItem, with: %{bogus_field: StreamData.constant(1)}}]
+    def commands, do: [{CreateItem, overrides: %{bogus_field: StreamData.constant(1)}}]
 
     @impl true
     def command_sequence_projection, do: ModelState
@@ -25,7 +25,7 @@ defmodule PropertyDamage.GeneratorTest do
 
     @impl true
     def commands,
-      do: [{CreateItem, with: fn _state -> %{bogus_field: StreamData.constant(1)} end}]
+      do: [{CreateItem, overrides: fn _state -> %{bogus_field: StreamData.constant(1)} end}]
 
     @impl true
     def command_sequence_projection, do: ModelState
@@ -37,7 +37,7 @@ defmodule PropertyDamage.GeneratorTest do
     alias PropertyDamage.Test.Projections.ModelState
 
     @impl true
-    def commands, do: [{CreateItem, with: %{name: StreamData.constant("fixed")}}]
+    def commands, do: [{CreateItem, overrides: %{name: StreamData.constant("fixed")}}]
 
     @impl true
     def command_sequence_projection, do: ModelState
@@ -335,9 +335,20 @@ defmodule PropertyDamage.GeneratorTest do
       end
     end
 
-    test "terminate?/3 firing in the prefix stops the whole sequence (DR-013)" do
+    test "terminate_early?/3 returning true after the first command yields one-command sequences" do
+      generator =
+        Generator.generate_sequence(PropertyDamage.Test.TerminateImmediatelyModel,
+          max_commands: 20
+        )
+
+      for seq <- Enum.take(generator, 20) do
+        assert length(Sequence.to_list(seq)) == 1
+      end
+    end
+
+    test "terminate_early?/3 firing in the prefix stops the whole sequence (DR-013)" do
       # A model that terminates after the first command must not have branches
-      # or a suffix appended in branching mode: terminate? means "stop the
+      # or a suffix appended in branching mode: terminate_early? means "stop the
       # sequence", not "end the prefix and keep building".
       generator =
         Generator.generate_sequence(PropertyDamage.Test.TerminateImmediatelyModel,
@@ -352,10 +363,10 @@ defmodule PropertyDamage.GeneratorTest do
 
       for seq <- Enum.take(generator, 20) do
         refute Sequence.branching?(seq),
-               "terminate? fired in the prefix, so the sequence must not branch"
+               "terminate_early? fired in the prefix, so the sequence must not branch"
 
         assert length(Sequence.to_list(seq)) == 1,
-               "terminate? after the first command must stop at one command"
+               "terminate_early? after the first command must stop at one command"
       end
     end
 
@@ -378,27 +389,27 @@ defmodule PropertyDamage.GeneratorTest do
     end
   end
 
-  describe "with: override no-op detection" do
+  describe "overrides: override no-op detection" do
     alias PropertyDamage.Sequence
     alias PropertyDamage.Test.Commands.CreateItem
 
-    test "raises a clear error when a static with: map targets an unknown field" do
+    test "raises a clear error when a static overrides: map targets an unknown field" do
       generator = Generator.generate_sequence(UnknownKeyMapModel, max_commands: 5)
 
-      assert_raise ArgumentError, ~r/with:.*CreateItem.*bogus_field/s, fn ->
+      assert_raise ArgumentError, ~r/overrides:.*CreateItem.*bogus_field/s, fn ->
         Enum.take(generator, 1)
       end
     end
 
-    test "raises a clear error when a with: function targets an unknown field" do
+    test "raises a clear error when a overrides: function targets an unknown field" do
       generator = Generator.generate_sequence(UnknownKeyFunModel, max_commands: 5)
 
-      assert_raise ArgumentError, ~r/with:.*CreateItem.*bogus_field/s, fn ->
+      assert_raise ArgumentError, ~r/overrides:.*CreateItem.*bogus_field/s, fn ->
         Enum.take(generator, 1)
       end
     end
 
-    test "accepts a with: override that targets a real command field" do
+    test "accepts a overrides: override that targets a real command field" do
       generator = Generator.generate_sequence(ValidOverrideModel, max_commands: 5)
       seq = generator |> Enum.take(1) |> hd()
 

@@ -222,7 +222,7 @@ The `runtime.stutter` map contains:
 
 ## Writing Idempotency Invariants
 
-Use an assertion projection to enforce idempotency rules alongside stutter
+Use a check projection to enforce idempotency rules alongside stutter
 testing:
 
 ```elixir
@@ -240,7 +240,7 @@ defmodule IdempotencyProjection do
 
   def apply(state, _event), do: state
 
-  @trigger every: :command
+  @check every: :command
   def assert_no_duplicate_creation(state, _event) do
     duplicates = Enum.filter(state.creation_counts, fn {_k, v} -> v > 1 end)
 

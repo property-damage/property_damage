@@ -40,8 +40,7 @@ defmodule PropertyDamage.Differential.Result do
           status: :equivalent | :divergent | :complete,
           divergences: [divergence()],
           metrics: %{String.t() => metrics()},
-          targets: [String.t()],
-          baseline: String.t() | nil
+          targets: [String.t()]
         }
 
   defstruct [
@@ -53,8 +52,7 @@ defmodule PropertyDamage.Differential.Result do
     :status,
     :divergences,
     :metrics,
-    :targets,
-    :baseline
+    :targets
   ]
 
   @doc """

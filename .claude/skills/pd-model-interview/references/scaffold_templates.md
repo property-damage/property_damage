@@ -94,7 +94,7 @@ end
 
 Generator notes from the spec become StreamData generators. A field that
 references an existing entity (`wallet_id`) defaults to `nil` here; the
-model's `with:` option supplies it from projection state.
+model's `overrides:` option supplies it from projection state.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -121,7 +121,7 @@ defmodule MyStore.PD.Wallets.Commands.Deposit do
   @impl true
   def generator(overrides \\ %{}) do
     %{
-      # spec: "an existing wallet" -> supplied by the model's with: option
+      # spec: "an existing wallet" -> supplied by the model's overrides: option
       wallet_id: nil,
       # spec: "positive cents"
       amount: StreamData.positive_integer()
@@ -188,7 +188,7 @@ defmodule MyStore.PD.Wallets.Projections.BalanceInvariants do
 
   # spec invariant: no_negative_balance (trigger, every step).
   # Severity: money leaves the books - catastrophic.
-  @trigger every: 1
+  @check every: 1
   def assert_no_negative_balance(state, _cmd_or_event) do
     case Enum.find(state.balances, fn {_id, balance} -> balance < 0 end) do
       nil -> :ok
@@ -198,10 +198,10 @@ defmodule MyStore.PD.Wallets.Projections.BalanceInvariants do
 end
 ```
 
-A `poll_state` invariant (eventual consistency) has this shape instead - the
+An `@eventually` invariant (eventual consistency) has this shape instead - the
 function returns a predicate polled until true or timeout:
 
-    @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+    @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
     def payment_confirmed(_state, %PaymentInitiated{id: id}) do
       fn state -> state.payments[id] == :confirmed end
     end
@@ -209,7 +209,7 @@ function returns a predicate polled until true or timeout:
 ## Model
 
 Spec `when:` prose becomes the `when:` guard; entity-reference fields get
-their `with:` override; spec weights carry over.
+their `overrides:` option; spec weights carry over.
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -229,7 +229,7 @@ defmodule MyStore.PD.Wallets.Model do
        weight: 3,
        # spec: "at least one wallet exists"
        when: fn state -> map_size(state.wallets) > 0 end,
-       with: fn state ->
+       overrides: fn state ->
          %{wallet_id: StreamData.member_of(Map.keys(state.wallets))}
        end}
     ]
@@ -239,7 +239,7 @@ defmodule MyStore.PD.Wallets.Model do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [BalanceInvariants]
+  def check_projections, do: [BalanceInvariants]
 
   @impl true
   def injectable_events, do: []

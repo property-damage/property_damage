@@ -11,7 +11,7 @@ defmodule PropertyDamage.StatePoller do
   - `:projection` - The projection module whose state is checked
   - `:interval_ms` - Polling interval in milliseconds
   - `:timeout_ms` - Maximum time to poll before timing out
-  - `:triggered_by` - Map with `:event` and `:assertion_name`
+  - `:triggered_by` - Map with `:event` and `:check_name`
 
   Optional:
   - `:predicate_source` - String representation of the predicate for debugging
@@ -23,7 +23,7 @@ defmodule PropertyDamage.StatePoller do
           projection: module(),
           interval_ms: pos_integer(),
           timeout_ms: pos_integer(),
-          triggered_by: %{event: struct(), assertion_name: atom()},
+          triggered_by: %{event: struct(), check_name: atom()},
           get_state_fn: (module() -> any()) | nil
         ]
 
@@ -98,7 +98,7 @@ defmodule PropertyDamage.StatePoller do
         projection: PaymentProjection,
         interval_ms: 100,
         timeout_ms: 5000,
-        triggered_by: %{event: event, assertion_name: :payment_confirmed}
+        triggered_by: %{event: event, check_name: :payment_confirmed}
       )
   """
   @spec start(start_opts()) :: t()
@@ -336,7 +336,7 @@ defmodule PropertyDamage.StatePoller do
           require Logger
 
           Logger.warning(
-            "StatePoller predicate raised: #{inspect(e)} in #{state.triggered_by.assertion_name}"
+            "StatePoller predicate raised: #{inspect(e)} in #{state.triggered_by.check_name}"
           )
 
           Process.send_after(self(), :poll, state.interval_ms)
@@ -352,7 +352,7 @@ defmodule PropertyDamage.StatePoller do
 
           Logger.warning(
             "StatePoller predicate escaped via #{kind}: #{inspect(reason)} " <>
-              "in #{state.triggered_by.assertion_name}"
+              "in #{state.triggered_by.check_name}"
           )
 
           Process.send_after(self(), :poll, state.interval_ms)

@@ -2,7 +2,7 @@ defmodule PropertyDamage.TelemetryTest do
   # async: false is required: this test attaches GLOBAL :telemetry handlers for
   # event names (e.g. [:property_damage, :sequence, :start]) that other tests
   # also emit via PropertyDamage.run. Under async, a concurrent run's event can
-  # satisfy a name-only assert_receive here, so assertions on its metadata
+  # satisfy a name-only assert_receive here, so checks on its metadata
   # (e.g. run_number) flake. Running sync removes the cross-test interference.
   use ExUnit.Case, async: false
 

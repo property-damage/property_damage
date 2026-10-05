@@ -104,14 +104,14 @@ defmodule PropertyDamage.Executor do
   alias PropertyDamage.Sequence.Position
 
   @typedoc """
-  Assertion mode controls whether and how assertion failures are handled.
+  Check mode controls whether and how check failures are handled.
 
-  - `:disabled` - Skip all assertions (useful for load testing focused on throughput)
+  - `:disabled` - Skip all checks (useful for load testing focused on throughput)
   - `:halt` (default) - Stop execution at first failure, return failure
   - `:record` - Record failures and continue, return all failures at end
   - `:log` - Log failures as warnings and continue
   """
-  @type assertion_mode :: :disabled | :halt | :record | :log
+  @type check_mode :: :disabled | :halt | :record | :log
 
   @typedoc """
   Result of executing a command sequence.
@@ -126,8 +126,8 @@ defmodule PropertyDamage.Executor do
           failure_reason: term() | nil,
           stacktrace: Exception.stacktrace() | nil,
           linearization: [struct()] | nil,
-          assertion_failures: [map()] | nil,
-          assertion_counters: map(),
+          check_failures: [map()] | nil,
+          check_counters: map(),
           command_fold_ordinals: %{term() => non_neg_integer()}
         }
 
@@ -151,7 +151,7 @@ defmodule PropertyDamage.Executor do
   - `:injector_adapters` - List of injector adapter modules (optional)
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
   - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
-  - `:assertion_mode` - How to handle assertions (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
+  - `:check_mode` - How to handle checks (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
 
   ## Returns
 
@@ -167,7 +167,7 @@ defmodule PropertyDamage.Executor do
     event_queue = Keyword.get(opts, :event_queue)
     stutter_config = Keyword.get(opts, :stutter_config)
     mock_registry = Keyword.get(opts, :mock_registry)
-    assertion_mode = Keyword.get(opts, :assertion_mode, :halt)
+    check_mode = Keyword.get(opts, :check_mode, :halt)
     external_markers = Keyword.get(opts, :external_markers, [])
     rng_seed = Keyword.get(opts, :rng_seed)
     # Client-minted run-scoped value inputs (DR-034): the run nonce and the
@@ -185,7 +185,7 @@ defmodule PropertyDamage.Executor do
             event_queue,
             stutter_config,
             mock_registry,
-            assertion_mode,
+            check_mode,
             external_markers,
             rng_seed,
             mint
@@ -248,7 +248,7 @@ defmodule PropertyDamage.Executor do
   - `event_queue` - EventQueue pid (optional)
   - `stutter_config` - Stutter.Config for idempotency testing (optional)
   - `mock_registry` - MockServiceRegistry pid (optional)
-  - `assertion_mode` - How to handle assertion failures (optional, default: `:halt`)
+  - `check_mode` - How to handle check failures (optional, default: `:halt`)
 
   ## Returns
 
@@ -262,7 +262,7 @@ defmodule PropertyDamage.Executor do
           pid() | nil,
           Stutter.Config.t() | nil,
           pid() | nil,
-          assertion_mode(),
+          check_mode(),
           [atom()],
           integer() | nil,
           {non_neg_integer() | nil, non_neg_integer()}
@@ -276,7 +276,7 @@ defmodule PropertyDamage.Executor do
         event_queue \\ nil,
         stutter_config \\ nil,
         mock_registry \\ nil,
-        assertion_mode \\ :halt,
+        check_mode \\ :halt,
         external_markers \\ [],
         rng_seed \\ nil,
         mint \\ {nil, 0}
@@ -290,7 +290,7 @@ defmodule PropertyDamage.Executor do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode,
+        check_mode,
         external_markers,
         rng_seed,
         mint
@@ -306,7 +306,7 @@ defmodule PropertyDamage.Executor do
       event_queue,
       stutter_config,
       mock_registry,
-      assertion_mode,
+      check_mode,
       external_markers,
       sequence.registry,
       rng_seed,
@@ -322,7 +322,7 @@ defmodule PropertyDamage.Executor do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode,
+        check_mode,
         external_markers,
         rng_seed,
         mint
@@ -336,7 +336,7 @@ defmodule PropertyDamage.Executor do
       event_queue,
       stutter_config,
       mock_registry,
-      assertion_mode,
+      check_mode,
       external_markers,
       rng_seed,
       mint
@@ -352,7 +352,7 @@ defmodule PropertyDamage.Executor do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode,
+        check_mode,
         external_markers,
         rng_seed,
         mint
@@ -366,7 +366,7 @@ defmodule PropertyDamage.Executor do
       event_queue,
       stutter_config,
       mock_registry,
-      assertion_mode,
+      check_mode,
       external_markers,
       nil,
       rng_seed,
@@ -386,7 +386,7 @@ defmodule PropertyDamage.Executor do
          event_queue,
          stutter_config,
          mock_registry,
-         assertion_mode,
+         check_mode,
          external_markers,
          registry,
          rng_seed,
@@ -398,27 +398,27 @@ defmodule PropertyDamage.Executor do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode,
+        check_mode,
         external_markers,
         registry,
         rng_seed,
         mint
       )
 
-    # DR-024: @trigger at: :startup checks run on the initial init/0 state,
+    # DR-024: @check at: :startup checks run on the initial init/0 state,
     # after setup/1 and before command 1. A :halt failure aborts before any
     # command runs.
-    case run_phase_assertions(initial_state, :startup) do
+    case run_phase_checks(initial_state, :startup) do
       {:halt, name, reason, _counters} ->
         Finalization.finalize_result(
-          {:failed, nil, Failure.assertion_failed(name, reason), initial_state}
+          {:failed, nil, Failure.check_failed(name, reason), initial_state}
         )
 
       {:ok, startup_recorded, startup_counters} ->
         initial_state = %{
           initial_state
-          | assertion_failures: startup_recorded ++ initial_state.assertion_failures,
-            assertion_counters: startup_counters
+          | check_failures: startup_recorded ++ initial_state.check_failures,
+            check_counters: startup_counters
         }
 
         result =
@@ -494,14 +494,14 @@ defmodule PropertyDamage.Executor do
   defp init_projections(model) do
     cmd_seq_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    all_projections = [cmd_seq_projection | assertion_projections]
+    all_projections = [cmd_seq_projection | check_projections]
 
     for projection <- all_projections, into: %{} do
       {projection, projection.init()}
@@ -518,7 +518,7 @@ defmodule PropertyDamage.Executor do
         event_queue,
         stutter_config,
         mock_registry,
-        assertion_mode,
+        check_mode,
         external_markers,
         registry,
         rng_seed \\ nil,
@@ -544,9 +544,9 @@ defmodule PropertyDamage.Executor do
       # the dispatch loops so external capture keys on position, not a flat index.
       current_position: nil,
       step_count: 0,
-      assertion_counters: %{step: 0, command: 0, event: 0},
-      assertion_failures: [],
-      assertion_mode: assertion_mode,
+      check_counters: %{step: 0, command: 0, event: 0},
+      check_failures: [],
+      check_mode: check_mode,
       branch_id: nil,
       stutter_config: stutter_config,
       mock_registry: mock_registry,
@@ -716,8 +716,8 @@ defmodule PropertyDamage.Executor do
         base_event_log = final_injection_ctx.event_log
         injected_events = final_injection_ctx.injected_events
 
-        assertion_mode = state.assertion_mode
-        assertion_failures = state.assertion_failures
+        check_mode = state.check_mode
+        check_failures = state.check_failures
 
         # Pollers started during this command's execution must be tracked even on
         # the failure branches below, so finalize_result/2 can stop them at run
@@ -753,8 +753,8 @@ defmodule PropertyDamage.Executor do
           injected_events: injected_events,
           base_projections: base_projections,
           base_event_log: base_event_log,
-          assertion_mode: assertion_mode,
-          assertion_failures: assertion_failures,
+          check_mode: check_mode,
+          check_failures: check_failures,
           started_resource_pollers: started_resource_pollers,
           # P8 / DR-040: the fold counter after any injected events folded during
           # adapter execution; the command fold continues from here.
@@ -823,8 +823,8 @@ defmodule PropertyDamage.Executor do
       injected_events: injected_events,
       base_projections: base_projections,
       base_event_log: base_event_log,
-      assertion_mode: assertion_mode,
-      assertion_failures: assertion_failures,
+      check_mode: check_mode,
+      check_failures: check_failures,
       started_resource_pollers: started_resource_pollers,
       base_fold_counter: base_fold_counter
     } = ctx
@@ -905,8 +905,8 @@ defmodule PropertyDamage.Executor do
 
     # Pack the post-events State. Every outcome path below writes the same
     # State fields; only the event_log (final_event_log on the success path),
-    # the assertion counters, and whether assertion_failures is set differ.
-    # put_state/2 is struct!/2, so omitting :assertion_failures preserves the
+    # the check counters, and whether check_failures is set differ.
+    # put_state/2 is struct!/2, so omitting :check_failures preserves the
     # prior value (the async-halt and check-fail paths deliberately do not
     # overwrite it). This closure is the single pack site the two former arms
     # mirrored across ten put_state calls.
@@ -938,16 +938,16 @@ defmodule PropertyDamage.Executor do
       )
     end
 
-    # 7.7. DR-025: evaluate @trigger every: assertions on the async
+    # 7.7. DR-025: evaluate @check every: checks on the async
     #      events just folded (injector + mock), incrementally.
     case check_async(
            model,
            projs_before_async,
            log_before_async,
            event_log,
-           state.assertion_counters,
-           assertion_mode,
-           assertion_failures
+           state.check_counters,
+           check_mode,
+           check_failures
          ) do
       {:halt, async_name, async_reason, async_index, async_counters} ->
         # DR-025: attribute the failure to the offending event's command_index
@@ -955,9 +955,9 @@ defmodule PropertyDamage.Executor do
         # executing (or nil for an ambient injector event) — never blindly to the
         # current command. Finalization reads this to set `failed_at_index`.
         failed_state =
-          pack.(%{assertion_counters: async_counters, async_failed_index: async_index})
+          pack.(%{check_counters: async_counters, async_failed_index: async_index})
 
-        {:error, Failure.assertion_failed(async_name, async_reason), failed_state}
+        {:error, Failure.check_failed(async_name, async_reason), failed_state}
 
       {:ok, async_counters, async_failures} ->
         # 8. Run checks
@@ -975,10 +975,10 @@ defmodule PropertyDamage.Executor do
                projections,
                check_ctx,
                async_counters,
-               assertion_mode,
+               check_mode,
                async_failures
              ) do
-          {:ok, assertion_counters, updated_failures} ->
+          {:ok, check_counters, updated_failures} ->
             # 9. Execute stutter retries if configured
             case PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
                    command,
@@ -994,11 +994,11 @@ defmodule PropertyDamage.Executor do
                 new_state =
                   pack.(%{
                     event_log: final_event_log,
-                    assertion_counters: assertion_counters,
-                    assertion_failures: updated_failures
+                    check_counters: check_counters,
+                    check_failures: updated_failures
                   })
 
-                # Spawn pollers for any @poll_state assertions triggered by these events
+                # Spawn pollers for any @eventually checks triggered by these events
                 new_state = maybe_spawn_pollers(new_state, events, model, index)
                 new_state = update_poller_state_getters(new_state)
 
@@ -1007,8 +1007,8 @@ defmodule PropertyDamage.Executor do
               {:error, :idempotency_violation, violation} ->
                 failed_state =
                   pack.(%{
-                    assertion_counters: assertion_counters,
-                    assertion_failures: updated_failures
+                    check_counters: check_counters,
+                    check_failures: updated_failures
                   })
 
                 {:error, Failure.idempotency_violation(violation), failed_state}
@@ -1016,16 +1016,16 @@ defmodule PropertyDamage.Executor do
               {:error, :stutter_execution_failed, details} ->
                 failed_state =
                   pack.(%{
-                    assertion_counters: assertion_counters,
-                    assertion_failures: updated_failures
+                    check_counters: check_counters,
+                    check_failures: updated_failures
                   })
 
                 {:error, Failure.stutter_execution_failed(details), failed_state}
             end
 
-          {:error, assertion_name, reason, assertion_counters} ->
-            failed_state = pack.(%{assertion_counters: assertion_counters})
-            {:error, Failure.assertion_failed(assertion_name, reason), failed_state}
+          {:error, check_name, reason, check_counters} ->
+            failed_state = pack.(%{check_counters: check_counters})
+            {:error, Failure.check_failed(check_name, reason), failed_state}
         end
     end
   end
@@ -1054,7 +1054,7 @@ defmodule PropertyDamage.Executor do
     Suggestions:
       - Ensure #{inspect(model)}.commands/0 returns a list of command modules, \
     {module, weight} tuples, or %{command: module, ...} maps.
-      - Give each command a positive integer weight, and check any `when:`/`with:` \
+      - Give each command a positive integer weight, and check any `when:`/`overrides:` \
     overrides have the expected shape.
       - Verify every listed command module is defined and uses `PropertyDamage.Command`.
     """
@@ -1130,72 +1130,72 @@ defmodule PropertyDamage.Executor do
   @doc false
   def put_state(%State{} = state, updates), do: struct!(state, updates)
 
-  # Run all triggered assertions
-  # assertion_ctx contains: step_type (:command | :event), module, step_count
-  # assertion_mode controls behavior: :halt, :record, or :log
-  defp run_assertions(
+  # Run all triggered checks
+  # step_ctx contains: step_type (:command | :event), module, step_count
+  # check_mode controls behavior: :halt, :record, or :log
+  defp run_step_checks(
          model,
          projections,
-         assertion_ctx,
-         assertion_counters,
-         assertion_mode,
-         assertion_failures,
+         step_ctx,
+         check_counters,
+         check_mode,
+         check_failures,
          check_ctx
        ) do
     require Logger
 
-    # Get all projections that may have assertions
+    # Get all projections that may have checks
     cmd_seq_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    all_projections = [cmd_seq_projection | assertion_projections]
+    all_projections = [cmd_seq_projection | check_projections]
 
     result =
       Enum.reduce_while(
         all_projections,
-        {:ok, assertion_counters, assertion_failures},
+        {:ok, check_counters, check_failures},
         fn projection, {:ok, counters, failures} ->
           projection_state = Map.get(projections, projection)
 
-          # Only projections that use PropertyDamage.Model.Projection have __assertions__/0
-          assertions =
-            if function_exported?(projection, :__assertions__, 0) do
-              projection.__assertions__()
+          # Only projections that use PropertyDamage.Model.Projection have __checks__/0
+          checks =
+            if function_exported?(projection, :__checks__, 0) do
+              projection.__checks__()
             else
               []
             end
 
-          case run_projection_assertions(
+          case run_projection_checks(
                  projection,
                  projection_state,
-                 assertions,
-                 assertion_ctx,
+                 checks,
+                 step_ctx,
                  counters
                ) do
             {:ok, new_counters} ->
               {:cont, {:ok, new_counters, failures}}
 
-            {:error, assertion_name, reason, new_counters} ->
-              # Handle based on assertion_mode
-              case assertion_mode do
+            {:error, check_name, reason, new_counters} ->
+              # Handle based on check_mode
+              case check_mode do
                 :halt ->
-                  {:halt, {:error, assertion_name, reason, new_counters}}
+                  {:halt, {:error, check_name, reason, new_counters}}
 
                 :record ->
                   # Record failure and continue
                   failure = %{
-                    assertion_name: assertion_name,
+                    check_name: check_name,
                     reason: reason,
                     command: Map.get(check_ctx, :command),
                     command_index: Map.get(check_ctx, :command_index),
-                    step_type: assertion_ctx.step_type,
-                    module: assertion_ctx.module,
+                    step_type: step_ctx.step_type,
+                    module: step_ctx.module,
                     timestamp: System.monotonic_time(:millisecond)
                   }
 
@@ -1203,7 +1203,7 @@ defmodule PropertyDamage.Executor do
 
                 :log ->
                   # Log warning and continue
-                  Logger.warning("Assertion failed: #{assertion_name} - #{inspect(reason)}")
+                  Logger.warning("Check failed: #{check_name} - #{inspect(reason)}")
                   {:cont, {:ok, new_counters, failures}}
               end
           end
@@ -1217,51 +1217,51 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  defp run_projection_assertions(
+  defp run_projection_checks(
          projection,
          projection_state,
-         assertions,
-         assertion_ctx,
+         checks,
+         step_ctx,
          counters
        ) do
     alias PropertyDamage.Model.Projection
 
-    # Only synchronous (@trigger) assertions run here; polling (@poll_state)
-    # assertions have no :trigger key and are handled by the pollers. Without
-    # this filter, accessing assertion.trigger on a polling assertion raised
+    # Only synchronous (@check) checks run here; polling (@eventually)
+    # checks have no :trigger key and are handled by the pollers. Without
+    # this filter, accessing check.trigger on a polling check raised
     # a KeyError that crashed the run on the first command. Lifecycle-boundary
-    # assertions (@trigger at:, DR-024) are also synchronous but fire only at a
+    # checks (@check at:, DR-024) are also synchronous but fire only at a
     # phase boundary, not during the command loop, so they are excluded here and
-    # dispatched separately by run_phase_assertions/2.
-    sync_assertions =
-      Enum.filter(assertions, fn assertion ->
-        assertion.type == :synchronous and not match?(%{type: :at}, assertion.trigger)
+    # dispatched separately by run_phase_checks/2.
+    sync_checks =
+      Enum.filter(checks, fn check ->
+        check.type == :synchronous and not match?(%{type: :at}, check.trigger)
       end)
 
-    Enum.reduce_while(sync_assertions, {:ok, counters}, fn assertion, {:ok, acc_counters} ->
+    Enum.reduce_while(sync_checks, {:ok, counters}, fn check, {:ok, acc_counters} ->
       if Projection.should_run?(
-           assertion.trigger,
-           assertion_ctx.step_type,
-           assertion_ctx.module,
+           check.trigger,
+           step_ctx.step_type,
+           step_ctx.module,
            acc_counters
          ) do
-        # The assertion runs: record the firing (DR-026) before invoking it, so
-        # a failing assertion still counts as exercised. This single site covers
+        # The check runs: record the firing (DR-026) before invoking it, so
+        # a failing check still counts as exercised. This single site covers
         # both the synchronous command/event path and the asynchronous
-        # observation path (DR-025), which dispatches through run_assertions/7.
-        fired = bump_fired(acc_counters, projection, assertion.name)
+        # observation path (DR-025), which dispatches through run_step_checks/7.
+        fired = bump_fired(acc_counters, projection, check.name)
 
-        # Execute assertion - assertions raise on failure
+        # Execute check - checks raise on failure
         try do
-          assertion_fn = assertion.function_name
-          apply(projection, assertion_fn, [projection_state, assertion_ctx.command_or_event])
+          check_fn = check.function_name
+          apply(projection, check_fn, [projection_state, step_ctx.command_or_event])
           # Success: no exception raised
           {:cont, {:ok, fired}}
         rescue
           e ->
-            # Assertion failed by raising exception - capture stacktrace
+            # Check failed by raising exception - capture stacktrace
             stacktrace = __STACKTRACE__
-            {:halt, {:error, assertion.name, {e, stacktrace}, fired}}
+            {:halt, {:error, check.name, {e, stacktrace}, fired}}
         end
       else
         {:cont, {:ok, acc_counters}}
@@ -1269,9 +1269,9 @@ defmodule PropertyDamage.Executor do
     end)
   end
 
-  # Record one firing of an assertion (DR-026). Per-assertion fire counts are
+  # Record one firing of a check (DR-026). Per-check fire counts are
   # colocated as {:fired, projection, name} keys inside the existing
-  # assertion_counters map: inert to should_run?/4 (which does only point
+  # check_counters map: inert to should_run?/4 (which does only point
   # lookups, never iterates) and carried for free by the additive branch merge
   # in merge_branch_states/5.
   defp bump_fired(counters, projection, name) do
@@ -1279,11 +1279,11 @@ defmodule PropertyDamage.Executor do
   end
 
   # ============================================================================
-  # Lifecycle-Boundary Assertions (@trigger at:, DR-024)
+  # Lifecycle-Boundary Checks (@check at:, DR-024)
   # ============================================================================
 
-  # Run every @trigger at: <phase> assertion once on the given projection state.
-  # Unlike during-run (every:) assertions there is no step counter and no
+  # Run every @check at: <phase> check once on the given projection state.
+  # Unlike during-run (every:) checks there is no step counter and no
   # should_run?/4 sampling: the timing IS the phase boundary. The triggering
   # command/event slot carries the phase atom (:startup | :teardown) so a
   # state-only check ignores it.
@@ -1295,17 +1295,17 @@ defmodule PropertyDamage.Executor do
   #   {:halt, name, {exception, stacktrace}} -- first failure under :halt mode.
   #
   # Returns one of (DR-026 threads the fire counters through so lifecycle
-  # firings are recorded, since these assertions never pass through the
+  # firings are recorded, since these checks never pass through the
   # during-run counter path):
   #   {:ok, recorded_failures, counters}
   #   {:halt, name, {exception, stacktrace}, counters}
   # Shared with PropertyDamage.Executor.Finalization (:teardown checkpoint). DR-029.
   @doc false
-  def run_phase_assertions(state, phase) do
-    assertion_mode = state.assertion_mode
-    counters = state.assertion_counters
+  def run_phase_checks(state, phase) do
+    check_mode = state.check_mode
+    counters = state.check_counters
 
-    if assertion_mode == :disabled do
+    if check_mode == :disabled do
       {:ok, [], counters}
     else
       model = Map.fetch!(state, :model)
@@ -1315,14 +1315,14 @@ defmodule PropertyDamage.Executor do
                                                                            {:ok, recorded,
                                                                             acc_counters} ->
         projection_state = Map.get(projections, projection)
-        assertions = phase_assertions(projection, phase)
+        checks = phase_checks(projection, phase)
 
-        case run_phase_projection_assertions(
+        case run_phase_projection_checks(
                projection,
                projection_state,
-               assertions,
+               checks,
                phase,
-               assertion_mode,
+               check_mode,
                recorded,
                acc_counters
              ) do
@@ -1333,37 +1333,37 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  defp run_phase_projection_assertions(
+  defp run_phase_projection_checks(
          projection,
          projection_state,
-         assertions,
+         checks,
          phase,
-         assertion_mode,
+         check_mode,
          recorded,
          counters
        ) do
     require Logger
 
-    Enum.reduce_while(assertions, {:ok, recorded, counters}, fn assertion,
-                                                                {:ok, acc_recorded, acc_counters} ->
+    Enum.reduce_while(checks, {:ok, recorded, counters}, fn check,
+                                                            {:ok, acc_recorded, acc_counters} ->
       # Record the firing (DR-026) before invoking, so a failing lifecycle check
       # still counts as exercised.
-      fired = bump_fired(acc_counters, projection, assertion.name)
+      fired = bump_fired(acc_counters, projection, check.name)
 
       try do
-        apply(projection, assertion.function_name, [projection_state, phase])
+        apply(projection, check.function_name, [projection_state, phase])
         {:cont, {:ok, acc_recorded, fired}}
       rescue
         e ->
           stacktrace = __STACKTRACE__
 
-          case assertion_mode do
+          case check_mode do
             :halt ->
-              {:halt, {:halt, assertion.name, {e, stacktrace}, fired}}
+              {:halt, {:halt, check.name, {e, stacktrace}, fired}}
 
             :record ->
               failure = %{
-                assertion_name: assertion.name,
+                check_name: check.name,
                 reason: {e, stacktrace},
                 command: nil,
                 command_index: nil,
@@ -1375,7 +1375,7 @@ defmodule PropertyDamage.Executor do
               {:cont, {:ok, [failure | acc_recorded], fired}}
 
             :log ->
-              Logger.warning("Assertion failed at #{phase}: #{assertion.name} - #{inspect(e)}")
+              Logger.warning("Check failed at #{phase}: #{check.name} - #{inspect(e)}")
 
               {:cont, {:ok, acc_recorded, fired}}
           end
@@ -1383,13 +1383,13 @@ defmodule PropertyDamage.Executor do
     end)
   end
 
-  # The @trigger at: <phase> assertions declared on a projection. Lifecycle
-  # assertions stay type: :synchronous; the at: phase lives in the trigger spec.
-  defp phase_assertions(projection, phase) do
-    if function_exported?(projection, :__assertions__, 0) do
-      Enum.filter(projection.__assertions__(), fn assertion ->
-        assertion.type == :synchronous and
-          match?(%{type: :at, phase: ^phase}, Map.get(assertion, :trigger))
+  # The @check at: <phase> checks declared on a projection. Lifecycle
+  # checks stay type: :synchronous; the at: phase lives in the trigger spec.
+  defp phase_checks(projection, phase) do
+    if function_exported?(projection, :__checks__, 0) do
+      Enum.filter(projection.__checks__(), fn check ->
+        check.type == :synchronous and
+          match?(%{type: :at, phase: ^phase}, Map.get(check, :trigger))
       end)
     else
       []
@@ -1397,77 +1397,77 @@ defmodule PropertyDamage.Executor do
   end
 
   # The full projection list a model exposes: the command-sequence projection
-  # plus any assertion projections.
+  # plus any check projections.
   defp projection_modules(model) do
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+    check_projections =
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
 
-    [model.command_sequence_projection() | assertion_projections]
+    [model.command_sequence_projection() | check_projections]
     |> Enum.uniq()
   end
 
   # Legacy wrapper for backward compatibility
-  # Maps old check_ctx format to new assertion_ctx format
-  # Now accepts assertion_mode and assertion_failures from state
+  # Maps old check_ctx format to new step_ctx format
+  # Now accepts check_mode and check_failures from state
   # Shared with PropertyDamage.Executor.Nemesis (nemesis-command checks). DR-029.
   @doc false
   def run_checks(
         _model,
         _projections,
         _check_ctx,
-        assertion_counters,
+        check_counters,
         :disabled,
-        assertion_failures
+        check_failures
       ) do
-    # When disabled, skip all assertions and just return success
-    {:ok, assertion_counters, assertion_failures}
+    # When disabled, skip all checks and just return success
+    {:ok, check_counters, check_failures}
   end
 
   def run_checks(
         model,
         projections,
         check_ctx,
-        assertion_counters,
-        assertion_mode,
-        assertion_failures
+        check_counters,
+        check_mode,
+        check_failures
       ) do
     command_module = check_ctx.command.__struct__
 
     # Update counters
     counters =
-      assertion_counters
+      check_counters
       |> Map.update(:step, 1, &(&1 + 1))
       |> Map.update(:command, 1, &(&1 + 1))
       |> Map.update(command_module, 1, &(&1 + 1))
 
-    # Run assertions for command
-    assertion_ctx = %{
+    # Run checks for command
+    step_ctx = %{
       step_type: :command,
       module: command_module,
       command_or_event: check_ctx.command
     }
 
-    case run_assertions(
+    case run_step_checks(
            model,
            projections,
-           assertion_ctx,
+           step_ctx,
            counters,
-           assertion_mode,
-           assertion_failures,
+           check_mode,
+           check_failures,
            check_ctx
          ) do
       {:ok, counters_after_cmd, updated_failures} ->
-        # Now run assertions for each event
-        run_event_assertions(
+        # Now run checks for each event
+        run_event_checks(
           model,
           projections,
           check_ctx.events,
           counters_after_cmd,
-          assertion_mode,
+          check_mode,
           updated_failures,
           check_ctx
         )
@@ -1477,23 +1477,23 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  defp run_event_assertions(
+  defp run_event_checks(
          _model,
          _projections,
          [],
          counters,
-         _assertion_mode,
+         _check_mode,
          failures,
          _check_ctx
        ),
        do: {:ok, counters, failures}
 
-  defp run_event_assertions(
+  defp run_event_checks(
          model,
          projections,
          [event | rest],
          counters,
-         assertion_mode,
+         check_mode,
          failures,
          check_ctx
        ) do
@@ -1506,28 +1506,28 @@ defmodule PropertyDamage.Executor do
       |> Map.update(:event, 1, &(&1 + 1))
       |> Map.update(event_module, 1, &(&1 + 1))
 
-    assertion_ctx = %{
+    step_ctx = %{
       step_type: :event,
       module: event_module,
       command_or_event: event
     }
 
-    case run_assertions(
+    case run_step_checks(
            model,
            projections,
-           assertion_ctx,
+           step_ctx,
            counters,
-           assertion_mode,
+           check_mode,
            failures,
            check_ctx
          ) do
       {:ok, new_counters, updated_failures} ->
-        run_event_assertions(
+        run_event_checks(
           model,
           projections,
           rest,
           new_counters,
-          assertion_mode,
+          check_mode,
           updated_failures,
           check_ctx
         )
@@ -1543,10 +1543,10 @@ defmodule PropertyDamage.Executor do
   #
   # The asynchronous event paths (resource-poller / injector-adapter events,
   # mock-service events, nemesis events, and the finalize-time drains) fold
-  # events into projection state. DR-025 additionally evaluates `@trigger every:`
-  # assertions on those events, so a violation is reported AT the offending event
+  # events into projection state. DR-025 additionally evaluates `@check every:`
+  # checks on those events, so a violation is reported AT the offending event
   # (with that event's `command_index`) rather than only at the
-  # `@trigger at: :teardown` settled checkpoint, giving the shrinker a tight
+  # `@check at: :teardown` settled checkpoint, giving the shrinker a tight
   # truncation target.
   #
   # Evaluation is INCREMENTAL: each event is asserted on the state produced by
@@ -1560,7 +1560,7 @@ defmodule PropertyDamage.Executor do
   # keep their existing batch-against-final timing (run_checks); only the async
   # paths are incremental (the documented asymmetry, DR-025).
 
-  # Run `@trigger every:` assertions on the events folded since `log_before`
+  # Run `@check every:` checks on the events folded since `log_before`
   # (newest-first prepended to `event_log`), incrementally on each event's
   # post-fold state. Returns `{:ok, counters, failures}`, or under `:halt`
   # `{:halt, name, reason, command_index, counters}` where `command_index`
@@ -1592,11 +1592,11 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # Evaluate the synchronous (`@trigger every:`) dispatch for a single
+  # Evaluate the synchronous (`@check every:`) dispatch for a single
   # asynchronously-observed event, on its post-fold `projections`. Mirrors
-  # `run_event_assertions`' counter bumps (`:step` / `:event` / module) so
+  # `run_event_checks`' counter bumps (`:step` / `:event` / module) so
   # `every: N` sampling counts async observations. `step_type` is `:event`, so
-  # `every: :command` assertions do NOT fire (the opt-out) while `every: :event`
+  # `every: :command` checks do NOT fire (the opt-out) while `every: :event`
   # / `every: 1` / `every: Module` do.
   defp check_async_event(model, projections, event, command_index, counters, mode, failures) do
     module = event.__struct__
@@ -1607,10 +1607,10 @@ defmodule PropertyDamage.Executor do
       |> Map.update(:event, 1, &(&1 + 1))
       |> Map.update(module, 1, &(&1 + 1))
 
-    assertion_ctx = %{step_type: :event, module: module, command_or_event: event}
+    step_ctx = %{step_type: :event, module: module, command_or_event: event}
     check_ctx = %{command: nil, command_index: command_index}
 
-    case run_assertions(model, projections, assertion_ctx, counters, mode, failures, check_ctx) do
+    case run_step_checks(model, projections, step_ctx, counters, mode, failures, check_ctx) do
       {:ok, counters, failures} -> {:ok, counters, failures}
       {:error, name, reason, counters} -> {:halt, name, reason, counters}
     end
@@ -1621,7 +1621,7 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
 
   @doc false
-  # Spawn pollers for any @poll_state assertions triggered by the given events
+  # Spawn pollers for any @eventually checks triggered by the given events
   # DR-030: build and register the awaits matchers a command declares. Pure
   # correlation: each %Await{match} becomes a registry entry carrying the
   # command's index + branch, appended in registration order (so first-registered
@@ -1649,26 +1649,26 @@ defmodule PropertyDamage.Executor do
   end
 
   defp maybe_spawn_pollers(state, events, model, command_index) do
-    assertion_mode = state.assertion_mode
+    check_mode = state.check_mode
 
-    # Skip if assertions are disabled
-    if assertion_mode == :disabled do
+    # Skip if checks are disabled
+    if check_mode == :disabled do
       state
     else
       # Get all projections
       cmd_seq_projection = model.command_sequence_projection()
 
-      assertion_projections =
-        if function_exported?(model, :assertion_projections, 0) do
-          model.assertion_projections()
+      check_projections =
+        if function_exported?(model, :check_projections, 0) do
+          model.check_projections()
         else
           []
         end
 
-      all_projections = [cmd_seq_projection | assertion_projections]
+      all_projections = [cmd_seq_projection | check_projections]
 
-      # For each event, check if any @poll_state assertions should be spawned.
-      # Each spawned poller is paired with its (projection, assertion name) so
+      # For each event, check if any @eventually checks should be spawned.
+      # Each spawned poller is paired with its (projection, check name) so
       # the spawn can be recorded as a firing (DR-026): spawning IS firing for a
       # liveness check (the after: event arrived and verification began), so a
       # timed-out or still-pending poller still counts as exercised.
@@ -1676,17 +1676,17 @@ defmodule PropertyDamage.Executor do
         for event <- events,
             event_module = event.__struct__,
             projection <- all_projections,
-            function_exported?(projection, :__assertions__, 0),
-            assertion <- projection.__assertions__(),
-            assertion.type == :polling,
-            Projection.event_matches_poll_trigger?(assertion.poll_state, event_module) do
+            function_exported?(projection, :__checks__, 0),
+            check <- projection.__checks__(),
+            check.type == :polling,
+            Projection.event_matches_poll_trigger?(check.eventually, event_module) do
           # Get current projection state
           projection_state = Map.get(state.projections, projection)
 
-          # Call the assertion function to get the predicate. Dispatch by
+          # Call the check function to get the predicate. Dispatch by
           # function_name (the actual def), since :name is the logical
-          # (assert_-stripped) name shared with synchronous assertions.
-          predicate = apply(projection, assertion.function_name, [projection_state, event])
+          # (assert_-stripped) name shared with synchronous checks.
+          predicate = apply(projection, check.function_name, [projection_state, event])
 
           # Build state getter for the poller
           get_state_fn = fn proj ->
@@ -1698,19 +1698,19 @@ defmodule PropertyDamage.Executor do
           poller =
             StatePoller.start(
               predicate: predicate,
-              predicate_source: assertion.predicate_source,
+              predicate_source: check.predicate_source,
               projection: projection,
-              interval_ms: assertion.poll_state.interval_ms,
-              timeout_ms: assertion.poll_state.timeout_ms,
+              interval_ms: check.eventually.interval_ms,
+              timeout_ms: check.eventually.timeout_ms,
               triggered_by: %{
                 event: event,
-                assertion_name: assertion.name,
+                check_name: check.name,
                 command_index: command_index
               },
               get_state_fn: get_state_fn
             )
 
-          {projection, assertion.name, poller}
+          {projection, check.name, poller}
         end
 
       if Enum.empty?(spawned) do
@@ -1719,12 +1719,12 @@ defmodule PropertyDamage.Executor do
         new_pollers = Enum.map(spawned, fn {_proj, _name, poller} -> poller end)
 
         counters =
-          Enum.reduce(spawned, state.assertion_counters, fn {proj, name, _poller}, acc ->
+          Enum.reduce(spawned, state.check_counters, fn {proj, name, _poller}, acc ->
             bump_fired(acc, proj, name)
           end)
 
         existing_pollers = state.active_pollers
-        %{state | active_pollers: existing_pollers ++ new_pollers, assertion_counters: counters}
+        %{state | active_pollers: existing_pollers ++ new_pollers, check_counters: counters}
       end
     end
   end
@@ -1749,7 +1749,7 @@ defmodule PropertyDamage.Executor do
   # ============================================================================
 
   @doc """
-  Execute a command sequence without model projections or assertions.
+  Execute a command sequence without model projections or checks.
 
   This is a simplified execution path for static regression tests where you want
   to run a fixed command sequence and assert on the raw event log directly,
@@ -1840,7 +1840,7 @@ defmodule PropertyDamage.Executor do
   # order and concatenate in a single pass.
   defp flatten_event_chunks(chunks), do: chunks |> Enum.reverse() |> Enum.concat()
 
-  # Execute a single command in raw mode (no projections/assertions)
+  # Execute a single command in raw mode (no projections/checks)
   defp execute_raw_command(command, index, adapter, adapter_context, event_queue, registry) do
     # Resolve placeholders in command (only for structs that might carry them)
     resolved_result =

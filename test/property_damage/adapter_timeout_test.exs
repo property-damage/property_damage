@@ -33,7 +33,7 @@ defmodule PropertyDamage.AdapterTimeoutTest do
     @impl true
     def command_sequence_projection, do: Proj
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule SlowAdapter do

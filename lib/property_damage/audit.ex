@@ -8,7 +8,7 @@ defmodule PropertyDamage.Audit do
   yields the same plan. All nondeterminism — the clock, `:rand`,
   `System.unique_integer/1`, server-assigned ids, environment — belongs behind
   an execution-time seam (an adapter reifying a seeded relative offset, or
-  `mint_per_run/1`), never inside a generator / `when:` / `with:` predicate /
+  `mint_per_run/1`), never inside a generator / `when:` / `overrides:` predicate /
   `command_sequence_projection` / simulator.
 
   Nothing enforces that contract for *user* code. A generator that reads
@@ -108,7 +108,7 @@ defmodule PropertyDamage.Audit do
 
   Generation-only companion to `run/2`: for each seed it generates the plan and
   folds it through **every** projection (the `command_sequence_projection` plus
-  the `assertion_projections`) twice, using the model's simulator to predict
+  the `check_projections`) twice, using the model's simulator to predict
   events, then compares the two resulting states. A projection that reads a
   clock, a counter, or the environment inside `apply/2` folds to different state
   on the second pass and is named.
@@ -176,12 +176,12 @@ defmodule PropertyDamage.Audit do
   defp projection_states(model) do
     command_projection = model.command_sequence_projection()
 
-    assertion_projections =
-      if function_exported?(model, :assertion_projections, 0),
-        do: model.assertion_projections(),
+    check_projections =
+      if function_exported?(model, :check_projections, 0),
+        do: model.check_projections(),
         else: []
 
-    Map.new([command_projection | assertion_projections], &{&1, &1.init()})
+    Map.new([command_projection | check_projections], &{&1, &1.init()})
   end
 
   defp normalize_seeds(count) when is_integer(count) and count > 0,
@@ -324,7 +324,7 @@ defmodule PropertyDamage.Audit do
 
   defp module_message(pos, m1, m2) do
     "at #{format_pos(pos)} two identical-seed generations selected different commands " <>
-      "(#{inspect(m1)} vs #{inspect(m2)}) — a `when:`/`with:` predicate or the " <>
+      "(#{inspect(m1)} vs #{inspect(m2)}) — a `when:`/`overrides:` predicate or the " <>
       "command_sequence_projection/simulator is likely reading the clock, `:rand`, or " <>
       "process state, changing command selection. #{guidance()}"
   end
@@ -333,7 +333,7 @@ defmodule PropertyDamage.Audit do
     field_names = fields |> Map.keys() |> Enum.map_join(", ", &inspect/1)
 
     "field(s) #{field_names} of #{inspect(module)} at #{format_pos(pos)} differ across two " <>
-      "identical-seed generations — a generator (or `when:`/`with:`) is likely reading the " <>
+      "identical-seed generations — a generator (or `when:`/`overrides:`) is likely reading the " <>
       "clock, `:rand`, `System.unique_integer/1`, or process state. #{guidance()}"
   end
 

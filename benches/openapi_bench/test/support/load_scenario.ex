@@ -37,7 +37,7 @@ defmodule OpenapiBench.LoadConsistency do
   @invariant id: :read_your_write,
              description: "A read of a key written this sequence returns the written value"
 
-  @trigger every: GetValue, validates: :read_your_write
+  @check every: GetValue, validates: :read_your_write
   def assert_read_your_write(state, _command) do
     with {key, observed} <- state.last_read,
          expected when expected != :unset <- Map.get(state.store, key, :unset) do
@@ -92,7 +92,7 @@ defmodule OpenapiBench.LoadModel do
   def command_sequence_projection, do: OpenapiBench.LoadConsistency
 
   @impl true
-  def assertion_projections, do: [OpenapiBench.LoadConsistency]
+  def check_projections, do: [OpenapiBench.LoadConsistency]
 
   @impl true
   def simulator, do: OpenapiBench.LoadSimulator

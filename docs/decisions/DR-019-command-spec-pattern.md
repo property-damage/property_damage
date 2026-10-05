@@ -1,6 +1,6 @@
 # DR-019: Command Spec Pattern
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed). Amended by DR-042: the `with:` override key is now `overrides:`.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
 
 ## Decision

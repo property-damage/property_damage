@@ -52,7 +52,7 @@ defmodule PropertyDamage.ResourcePoller do
       {:error, %PaymentError{code: :gateway_timeout, details: response}}
 
   When an exception is used, the framework will use `Exception.message/1` for
-  cleaner log output in `:log` assertion mode.
+  cleaner log output in `:log` check mode.
 
   ## Timeout Handling
 
@@ -90,7 +90,7 @@ defmodule PropertyDamage.ResourcePoller do
   2. Poller spawns, begins polling immediately
   3. Handler processes each poll result, may inject events
   4. At sequence end, executor awaits all active pollers
-  5. Errors handled based on `assertion_mode`
+  5. Errors handled based on `check_mode`
 
   ## Error Handling
 
@@ -103,7 +103,7 @@ defmodule PropertyDamage.ResourcePoller do
   - `on_timeout` returns `{:error, reason}` → `{:error, reason}` (no stacktrace)
   - Timeout with `:fail` → `{:error, {:timeout, timeout_info}}`
 
-  In `:log` assertion mode, exceptions are formatted using `Exception.message/1`
+  In `:log` check mode, exceptions are formatted using `Exception.message/1`
   for cleaner output. In `:halt` and `:record` modes, full error details including
   stacktraces (when available) are preserved in the failure report.
   """

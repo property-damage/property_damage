@@ -422,7 +422,7 @@ jobs:
         run: docker compose up -d
 
       - uses: erlef/setup-beam@v1
-        with:
+        overrides:
           elixir-version: '1.17'
           otp-version: '27'
 
@@ -440,7 +440,7 @@ jobs:
       - name: Publish results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
-        with:
+        overrides:
           files: reports/*.xml
 ```
 

@@ -6,15 +6,15 @@ real bugs.
 
 ## How an Invariant Signals Failure
 
-A synchronous assertion (a `@trigger`-annotated function in an assertion
-projection) **fails by raising**. The executor runs your assertion and treats a
+A synchronous check (a `@check`-annotated function in a check
+projection) **fails by raising**. The executor runs your check and treats a
 raised exception as a violation; if the function returns without raising, the
-assertion passed. The return value is ignored.
+check passed. The return value is ignored.
 
 Use `PropertyDamage.fail!/2` to raise a structured failure:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_balance_non_negative(state, _cmd_or_event) do
   if state.balance < 0 do
     PropertyDamage.fail!("balance is negative", balance: state.balance)
@@ -23,7 +23,7 @@ end
 ```
 
 > **Do not** return `{:error, "..."}` to signal a violation. A returned tuple is
-> discarded, so the assertion silently passes and the bug is never caught. Raise
+> discarded, so the check silently passes and the bug is never caught. Raise
 > (via `PropertyDamage.fail!/2` or any exception) instead.
 
 ## What Makes a Good Invariant?
@@ -42,7 +42,7 @@ Good invariants are:
 Track that quantities add up correctly:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_balance_matches_ledger(state, _cmd_or_event) do
   # Account balance should equal sum of all transactions
   expected_balances =
@@ -75,7 +75,7 @@ end
 Verify uniqueness constraints:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_emails_unique(state, _cmd_or_event) do
   emails = Enum.map(state.users, fn {_id, user} -> user.email end)
   unique_emails = Enum.uniq(emails)
@@ -101,7 +101,7 @@ Verify valid state transitions:
   :completed => []
 }
 
-@trigger every: 1
+@check every: 1
 def assert_valid_status_transitions(state, _cmd_or_event) do
   invalid =
     state.transition_history
@@ -121,7 +121,7 @@ end
 Verify foreign key relationships:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_orders_reference_valid_users(state, _cmd_or_event) do
   user_ids = MapSet.new(Map.keys(state.users))
 
@@ -142,7 +142,7 @@ end
 Verify values stay within acceptable ranges:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_balances_non_negative(state, _cmd_or_event) do
   negative =
     state.accounts
@@ -153,7 +153,7 @@ def assert_balances_non_negative(state, _cmd_or_event) do
   end
 end
 
-@trigger every: 1
+@check every: 1
 def assert_inventory_non_negative(state, _cmd_or_event) do
   negative =
     state.inventory
@@ -170,7 +170,7 @@ end
 Verify time-based constraints:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_expiry_after_creation(state, _cmd_or_event) do
   invalid =
     state.authorizations
@@ -184,26 +184,26 @@ def assert_expiry_after_creation(state, _cmd_or_event) do
 end
 ```
 
-## Invariant Triggers
+## Check Triggers
 
-Control when invariants are checked using the `@trigger` attribute. The trigger
+Control when checks are run using the `@check` attribute. The trigger
 takes an `every:` key:
 
 ```elixir
 # Check after every step (every: 1)
-@trigger every: 1
+@check every: 1
 def assert_balance_non_negative(state, _cmd_or_event) do
   # ...
 end
 
 # Sample expensive checks periodically (every Nth step)
-@trigger every: 25
+@check every: 25
 def assert_full_consistency_check(state, _cmd_or_event) do
   # ...
 end
 
 # Check after a specific command/event module
-@trigger every: OrderCreated
+@check every: OrderCreated
 def assert_order_valid(state, _cmd_or_event) do
   # ...
 end
@@ -216,30 +216,30 @@ expensive checks.
 
 ### Lifecycle-boundary checks (`at:`)
 
-`@trigger` has a second timing axis, `at:`, for a one-shot check at a lifecycle
-boundary instead of during the command loop. An assertion uses `every:` or
+`@check` has a second timing axis, `at:`, for a one-shot check at a lifecycle
+boundary instead of during the command loop. A check uses `every:` or
 `at:`, never both.
 
 ```elixir
 # Once on the initial init/0 state, before the first command.
-@trigger at: :startup
+@check at: :startup
 def assert_clean_start(_state, _phase), do: :ok
 
 # Once on the fully-settled final state, after all pollers finalize.
-@trigger at: :teardown
+@check at: :teardown
 def assert_no_overshoot(_state, _phase), do: :ok
 ```
 
 `at: :teardown` is the home for **safety** properties over async effects ("never
-applied more than once"), the dual of `@poll_state`'s liveness. Because it runs
+applied more than once"), the dual of `@eventually`'s liveness. Because it runs
 on the final folded state, the projection must **accumulate** evidence (a
 maximum, a sticky flag) rather than snapshot, or a self-healed transient slips
 past. See the [Async and Eventual Consistency](async_and_eventual_consistency.md)
 guide for the safety/liveness pairing and the accumulator contract.
 
-## Tracking State for Invariants
+## Tracking State for Checks
 
-Assertion projections can track their own state:
+Check projections can track their own state:
 
 ```elixir
 defmodule MyApp.Projections.AuditInvariants do
@@ -264,7 +264,7 @@ defmodule MyApp.Projections.AuditInvariants do
 
   def apply(state, _), do: state
 
-  @trigger every: 25
+  @check every: 25
   def assert_no_suspicious_patterns(state, _cmd_or_event) do
     unless Enum.empty?(state.suspicious_patterns) do
       PropertyDamage.fail!("Suspicious patterns detected", patterns: state.suspicious_patterns)
@@ -278,7 +278,7 @@ end
 When using nemesis (chaos engineering), some invariants may not apply:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_latency_within_sla(state, _cmd_or_event) do
   # Skip SLA check during active network partition
   unless Map.get(state.active_faults, :network_partition) do
@@ -297,7 +297,7 @@ end
 
 ```elixir
 # Don't do this - relies on implementation details
-@trigger every: 1
+@check every: 1
 def assert_cache_hit_ratio(state, _cmd_or_event) do
   if state.cache.hits / state.cache.total <= 0.8 do
     PropertyDamage.fail!("Low cache hits")
@@ -309,7 +309,7 @@ end
 
 ```elixir
 # Check what users can observe
-@trigger every: 1
+@check every: 1
 def assert_orders_match_line_items(state, _cmd_or_event) do
   # Sum of line items should equal order total
   ...
@@ -322,7 +322,7 @@ end
 
 ```elixir
 # Don't do this - can fail due to timing
-@trigger every: 1
+@check every: 1
 def assert_recent_activity(state, _cmd_or_event) do
   if DateTime.diff(DateTime.utc_now(), state.last_activity, :second) >= 60 do
     PropertyDamage.fail!("No recent activity")
@@ -334,7 +334,7 @@ end
 
 ```elixir
 # Use event timestamps, not wall clock
-@trigger every: 1
+@check every: 1
 def assert_activity_ordering(state, _cmd_or_event) do
   sorted = Enum.sort_by(state.activities, & &1.timestamp)
   unless state.activities == sorted, do: PropertyDamage.fail!("Out of order")
@@ -347,7 +347,7 @@ end
 
 ```elixir
 # Too specific - will break with any change
-@trigger every: 1
+@check every: 1
 def assert_exact_balance(state, _cmd_or_event) do
   unless state.accounts["acc_1"].balance == 1000, do: PropertyDamage.fail!("Wrong")
 end
@@ -357,7 +357,7 @@ end
 
 ```elixir
 # Check the relationship, not specific values
-@trigger every: 1
+@check every: 1
 def assert_credits_minus_debits(state, _cmd_or_event) do
   expected = state.total_credits - state.total_debits
   actual = Enum.reduce(state.accounts, 0, fn {_, acc}, sum -> sum + acc.balance end)

@@ -60,7 +60,7 @@ defmodule MyApp.TestModel do
       {CancelOrder,
         weight: 1,
         when: fn s -> map_size(s.orders) > 0 end,
-        with: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
+        overrides: fn s -> %{order_ref: StreamData.member_of(Map.keys(s.orders))} end}
     ]
   end
 
@@ -70,7 +70,7 @@ defmodule MyApp.TestModel do
   # --- All below are optional ---
 
   # @impl true
-  # def assertion_projections, do: [BalanceInvariant, AuditLog]
+  # def check_projections, do: [BalanceInvariant, AuditLog]
 
   # @impl true
   # def simulator, do: __MODULE__  # or a separate module
@@ -90,8 +90,8 @@ defmodule MyApp.TestModel do
 
   # Stop generation when condition is met
   # @impl true
-  # def terminate?(_state, %Shutdown{}, _events), do: true
-  # def terminate?(_state, _cmd, _events), do: false
+  # def terminate_early?(_state, %Shutdown{}, _events), do: true
+  # def terminate_early?(_state, _cmd, _events), do: false
 end
 ```
 
@@ -144,8 +144,8 @@ defmodule MyApp.Projections.BalanceInvariant do
   end
   def apply(state, _), do: state
 
-  # Synchronous assertion
-  @trigger every: 1
+  # Synchronous check
+  @check every: 1
   def assert_total_matches_sum(state, _cmd_or_event) do
     sum = state.balances |> Map.values() |> Enum.sum()
     if sum != state.total do
@@ -153,28 +153,28 @@ defmodule MyApp.Projections.BalanceInvariant do
     end
   end
 
-  # Temporal assertion (eventual consistency)
-  # @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+  # Temporal check (eventual consistency)
+  # @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
   # def payment_confirmed(_state, %PaymentInitiated{id: id}) do
   #   fn s -> s.payments[id] == :confirmed end
   # end
 end
 ```
 
-### @trigger Syntax
+### @check Syntax
 
 | Syntax | Fires when |
 |--------|-----------|
-| `@trigger every: 1` | After every step |
-| `@trigger every: :command` | After any command |
-| `@trigger every: :event` | After any event |
-| `@trigger every: CreateOrder` | After `CreateOrder` command or event |
-| `@trigger every: [Cmd1, Cmd2]` | After any listed module |
-| `@trigger every: 10` | Every 10th step (sampling) |
-| `@trigger every: {5, :command}` | Every 5th command |
-| `@trigger every: {3, CreateOrder}` | Every 3rd `CreateOrder` |
+| `@check every: 1` | After every step |
+| `@check every: :command` | After any command |
+| `@check every: :event` | After any event |
+| `@check every: CreateOrder` | After `CreateOrder` command or event |
+| `@check every: [Cmd1, Cmd2]` | After any listed module |
+| `@check every: 10` | Every 10th step (sampling) |
+| `@check every: {5, :command}` | Every 5th command |
+| `@check every: {3, CreateOrder}` | Every 3rd `CreateOrder` |
 
-### @poll_state Syntax
+### @eventually Syntax
 
 | Option | Type | Description |
 |--------|------|-------------|
@@ -339,14 +339,14 @@ PropertyDamage.run(
 | `:neutral` | Default shrinking behavior |
 | `:prefer_keep` | Resistant to removal (important setup commands) |
 
-### Assertion Modes
+### Check Modes
 
 | Mode | Behavior |
 |------|----------|
-| `:halt` | Stop execution on first assertion failure (default) |
+| `:halt` | Stop execution on first check failure (default) |
 | `:record` | Record failures, continue execution, report all at end |
 | `:log` | Log failures to console, continue execution |
-| `:disabled` | Skip all assertions |
+| `:disabled` | Skip all checks |
 
 ### Return Values from Adapter.execute/3
 
@@ -388,7 +388,7 @@ setup_once/1
 **Conservation invariant** -- total in equals total out:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_conservation(state, _) do
   if state.total_credits != state.total_debits + state.total_balance do
     PropertyDamage.fail!("conservation violated",
@@ -400,7 +400,7 @@ end
 **State machine invariant** -- valid status transitions:
 
 ```elixir
-@trigger every: StatusChanged
+@check every: StatusChanged
 def assert_valid_transition(state, %StatusChanged{id: id, new_status: new}) do
   old = state.statuses[id]
   valid = %{pending: [:approved, :rejected], approved: [:shipped], shipped: [:delivered]}
@@ -413,7 +413,7 @@ end
 **Reference existence check** -- referenced entities exist:
 
 ```elixir
-@trigger every: :command
+@check every: :command
 def assert_refs_valid(state, cmd) do
   for {_field, ref} <- Map.from_struct(cmd), is_binary(ref), String.starts_with?(ref, "acc_") do
     unless Map.has_key?(state.accounts, ref) do
@@ -430,7 +430,7 @@ defmodule AmountValidator do
   use PropertyDamage.Model.Projection
   # No init/0 or apply/2 needed
 
-  @trigger every: Credited
+  @check every: Credited
   def assert_positive_credit(_state, %Credited{amount: amt}) do
     if amt <= 0, do: PropertyDamage.fail!("non-positive credit", amount: amt)
   end

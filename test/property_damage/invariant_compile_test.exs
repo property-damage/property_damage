@@ -18,7 +18,7 @@ defmodule PropertyDamage.InvariantCompileTest do
         @invariant id: :balanced
         @invariant id: :balanced
 
-        @trigger every: 1, validates: :balanced
+        @check every: 1, validates: :balanced
         def assert_x(_state, _), do: :ok
       end
       """)
@@ -31,7 +31,7 @@ defmodule PropertyDamage.InvariantCompileTest do
       defmodule PropertyDamage.InvariantCompileTest.Dangling do
         use PropertyDamage.Model.Projection
 
-        @trigger every: 1, validates: :nope
+        @check every: 1, validates: :nope
         def assert_x(_state, _), do: :ok
       end
       """)
@@ -47,7 +47,7 @@ defmodule PropertyDamage.InvariantCompileTest do
 
           @invariant id: :unverified, description: "Nothing checks this"
 
-          @trigger every: 1
+          @check every: 1
           def assert_other(_state, _), do: :ok
         end
         """)
@@ -57,13 +57,13 @@ defmodule PropertyDamage.InvariantCompileTest do
     assert output =~ "statically vacuous"
   end
 
-  test "declaring both id: and validates: on one assertion is a CompileError" do
+  test "declaring both id: and validates: on one check is a CompileError" do
     assert_raise CompileError, ~r/both id: and validates:/, fn ->
       Code.eval_string("""
       defmodule PropertyDamage.InvariantCompileTest.Both do
         use PropertyDamage.Model.Projection
 
-        @trigger every: 1, id: :x, validates: :y
+        @check every: 1, id: :x, validates: :y
         def assert_x(_state, _), do: :ok
       end
       """)

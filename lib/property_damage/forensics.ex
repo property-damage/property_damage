@@ -12,7 +12,7 @@ defmodule PropertyDamage.Forensics do
   that verify correctness during testing analyze production behavior:
 
   1. **Same invariant checks** - Production events are verified against the same
-     assertions used in property tests
+     checks used in property tests
   2. **State reconstruction** - See exactly what state the system was in at each step
   3. **Failure localization** - Pinpoint the exact event that violated an invariant
   4. **Reusable models** - No need to write separate incident analysis code
@@ -57,7 +57,7 @@ defmodule PropertyDamage.Forensics do
   ## Limitations
 
   - Events must be self-describing (contain enough context to reconstruct state)
-  - Assertions using `every: :command` won't trigger (forensics has no commands)
+  - Checks using `every: :command` won't trigger (forensics has no commands)
   - Event ordering must match production ordering
   """
 
@@ -100,7 +100,7 @@ defmodule PropertyDamage.Forensics do
   @doc """
   Analyze a sequence of production events against a model.
 
-  Replays events through the model's projections, running assertion checks
+  Replays events through the model's projections, running checks
   after each event. Stops at the first invariant violation (by default).
 
   ## Options
@@ -108,7 +108,7 @@ defmodule PropertyDamage.Forensics do
   - `:model` - The model module (required)
   - `:event_mapping` - Module to translate production events (optional)
   - `:stop_on_first_failure` - Stop at first invariant violation (default: true)
-  - `:projections` - Override which assertion projections to use (default: model's)
+  - `:projections` - Override which check projections to use (default: model's)
 
   ## Returns
 
@@ -154,16 +154,16 @@ defmodule PropertyDamage.Forensics do
     # Initialize projections
     command_sequence_projection = model.command_sequence_projection()
 
-    assertion_projections =
+    check_projections =
       Keyword.get_lazy(opts, :projections, fn ->
-        if function_exported?(model, :assertion_projections, 0) do
-          model.assertion_projections()
+        if function_exported?(model, :check_projections, 0) do
+          model.check_projections()
         else
           []
         end
       end)
 
-    all_projections = [command_sequence_projection | assertion_projections]
+    all_projections = [command_sequence_projection | check_projections]
 
     initial_projections =
       for projection <- all_projections, into: %{} do
@@ -198,7 +198,7 @@ defmodule PropertyDamage.Forensics do
               history,
               violations,
               model,
-              assertion_projections,
+              check_projections,
               stop_early
             )
           end
@@ -215,7 +215,7 @@ defmodule PropertyDamage.Forensics do
          history,
          violations,
          model,
-         assertion_projections,
+         check_projections,
          stop_early
        ) do
     # Apply event to all projections
@@ -239,20 +239,20 @@ defmodule PropertyDamage.Forensics do
       branch_id: nil
     }
 
-    case run_checks(model, assertion_projections, new_projections, check_ctx) do
+    case run_checks(model, check_projections, new_projections, check_ctx) do
       :ok ->
         {:cont, {:ok, new_state, [event | history], violations}}
 
-      {:error, assertion_name, reason} when stop_early ->
+      {:error, check_name, reason} when stop_early ->
         failure =
-          build_failure(assertion_name, reason, index, event, state, new_projections, history)
+          build_failure(check_name, reason, index, event, state, new_projections, history)
 
         {:halt, {:error, failure}}
 
-      {:error, assertion_name, reason} ->
+      {:error, check_name, reason} ->
         # Collect the violation and continue when stop_early is false.
         failure =
-          build_failure(assertion_name, reason, index, event, state, new_projections, history)
+          build_failure(check_name, reason, index, event, state, new_projections, history)
 
         {:cont, {:ok, new_state, [event | history], [failure | violations]}}
     end
@@ -260,9 +260,9 @@ defmodule PropertyDamage.Forensics do
 
   # A single violation record, shared by the stop-early failure and the
   # collected-violations path so both carry the same detail shape.
-  defp build_failure(assertion_name, reason, index, event, state, new_projections, history) do
+  defp build_failure(check_name, reason, index, event, state, new_projections, history) do
     %{
-      failure_reason: PropertyDamage.Failure.assertion_failed(assertion_name, reason),
+      failure_reason: PropertyDamage.Failure.check_failed(check_name, reason),
       failure_step: index,
       event_at_failure: event,
       state_before: state.projections,
@@ -274,7 +274,7 @@ defmodule PropertyDamage.Forensics do
   defp finalize_result({:ok, state, _history, violations}) do
     command_sequence_projection_key =
       Enum.find(Map.keys(state.projections), fn mod ->
-        not function_exported?(mod, :__assertions__, 0)
+        not function_exported?(mod, :__checks__, 0)
       end)
 
     {:ok,
@@ -300,71 +300,71 @@ defmodule PropertyDamage.Forensics do
     end)
   end
 
-  defp run_assertions(model, assertion_projections, projections, assertion_ctx) do
+  defp run_step_checks(model, check_projections, projections, step_ctx) do
     alias PropertyDamage.Model.Projection
 
-    # Run assertions on all projections (state + extra)
+    # Run checks on all projections (state + extra)
     command_sequence_projection = model.command_sequence_projection()
-    all_projections = [command_sequence_projection | assertion_projections]
+    all_projections = [command_sequence_projection | check_projections]
 
     Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       projection_state = Map.get(projections, projection)
 
-      # Get assertions for this projection (only if it has __assertions__/0)
-      assertions =
-        if function_exported?(projection, :__assertions__, 0) do
-          projection.__assertions__()
+      # Get checks for this projection (only if it has __checks__/0)
+      checks =
+        if function_exported?(projection, :__checks__, 0) do
+          projection.__checks__()
         else
           []
         end
 
-      case run_projection_assertions(projection, projection_state, assertions, assertion_ctx) do
+      case run_projection_checks(projection, projection_state, checks, step_ctx) do
         :ok -> {:cont, :ok}
-        {:error, assertion_name, reason} -> {:halt, {:error, assertion_name, reason}}
+        {:error, check_name, reason} -> {:halt, {:error, check_name, reason}}
       end
     end)
   end
 
-  defp run_projection_assertions(_projection, _projection_state, [], _ctx), do: :ok
+  defp run_projection_checks(_projection, _projection_state, [], _ctx), do: :ok
 
-  defp run_projection_assertions(projection, projection_state, [assertion | rest], ctx) do
+  defp run_projection_checks(projection, projection_state, [check | rest], ctx) do
     alias PropertyDamage.Model.Projection
 
-    # Check if assertion should run given current context
-    if Projection.should_run?(assertion.trigger, ctx.step_type, ctx.module, ctx.counters) do
-      # Execute assertion - assertions raise on failure
+    # Check if check should run given current context
+    if Projection.should_run?(check.trigger, ctx.step_type, ctx.module, ctx.counters) do
+      # Execute check - checks raise on failure
       try do
-        assertion_fn = assertion.function_name
-        apply(projection, assertion_fn, [projection_state, ctx.command_or_event])
+        check_fn = check.function_name
+        apply(projection, check_fn, [projection_state, ctx.command_or_event])
         # Success - no exception raised
-        run_projection_assertions(projection, projection_state, rest, ctx)
+        run_projection_checks(projection, projection_state, rest, ctx)
       rescue
         e ->
-          # Assertion failed by raising exception
-          {:error, assertion.name, e}
+          # Check failed by raising exception
+          {:error, check.name, e}
       end
     else
-      run_projection_assertions(projection, projection_state, rest, ctx)
+      run_projection_checks(projection, projection_state, rest, ctx)
     end
   end
 
   # Legacy wrapper for backward compatibility
-  defp run_checks(model, assertion_projections, projections, check_ctx) do
-    # Convert old check_ctx to new assertion_ctx format
+  defp run_checks(model, check_projections, projections, check_ctx) do
+    # Convert old check_ctx to new step_ctx format
     {event_module, event} =
       case check_ctx.events do
         [event | _] -> {get_module(event), event}
         _ -> {nil, nil}
       end
 
-    assertion_ctx = %{
+    step_ctx = %{
       step_type: :event,
       module: event_module,
       counters: %{step: check_ctx.step_count, event: check_ctx.step_count},
       command_or_event: event
     }
 
-    run_assertions(model, assertion_projections, projections, assertion_ctx)
+    run_step_checks(model, check_projections, projections, step_ctx)
   end
 
   defp get_module(%{__struct__: mod}), do: mod
@@ -414,13 +414,13 @@ defmodule PropertyDamage.Forensics do
   end
 
   defp format_failure_reason(%PropertyDamage.Failure{
-         type: %PropertyDamage.Failure.Assertion{
-           kind: :assertion_failed,
+         type: %PropertyDamage.Failure.Check{
+           kind: :check_failed,
            name: name,
            detail: reason
          }
        }) do
-    "Assertion '#{name}' failed: #{inspect(reason)}"
+    "Check '#{name}' failed: #{inspect(reason)}"
   end
 
   defp format_failure_reason(other), do: inspect(other)
@@ -504,7 +504,7 @@ defmodule PropertyDamage.Forensics do
   defp event_to_code(event), do: inspect(event)
 
   defp format_check_name(%PropertyDamage.Failure{
-         type: %PropertyDamage.Failure.Assertion{kind: :assertion_failed, name: name}
+         type: %PropertyDamage.Failure.Check{kind: :check_failed, name: name}
        }),
        do: "#{name} failure"
 

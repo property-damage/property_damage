@@ -1,6 +1,6 @@
 # DR-026: Invariant Catalog and Anti-Vacuity Coverage (first-class invariant identity + per-assertion firing)
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-042: the assertion identifiers are now check identifiers (`check_coverage/2`, `check_catalog/1`, `check_fires`, `@check`).
 **Date:** 2026-06-24
 
 > Recorded as a design pass, to be implemented next. It gives a model's assertions a

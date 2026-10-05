@@ -90,7 +90,7 @@ defmodule ObanBench.JobRefs.Commands.CancelJob do
 
   @impl true
   def generator(overrides) do
-    # job_ref is supplied by the model's `with:` (an external placeholder routed
+    # job_ref is supplied by the model's `overrides:` (an external placeholder routed
     # from state); the base generator only needs a valid shape.
     %{job_ref: StreamData.constant(nil)}
     |> merge_overrides(overrides)
@@ -132,7 +132,7 @@ defmodule ObanBench.JobRefs.Projection do
   @impl true
   def apply(state, %JobEnqueued{job_id: job_id}) do
     # During generation job_id is a %Placeholder{}; storing it here surfaces it
-    # to `Generator.external_from/2` so a consumer's `with:` can route it.
+    # to `Generator.external_from/2` so a consumer's `overrides:` can route it.
     %{state | jobs: [job_id | state.jobs]}
   end
 
@@ -150,7 +150,7 @@ defmodule ObanBench.JobRefs.Projection do
   # Oban.cancel_job/1 moves a scheduled job to `cancelled`; a cancel that no-ops
   # leaves it `scheduled`, which this catches. The state is read back
   # synchronously right after the cancel, so no settling is needed.
-  @trigger every: CancelJob
+  @check every: CancelJob
   def assert_cancelled_jobs_not_runnable(state, _command) do
     for {ref, st} <- state.cancel_states, st in JobRefs.runnable_states() do
       PropertyDamage.fail!("cancelled job left runnable",
@@ -190,8 +190,8 @@ defmodule ObanBench.JobRefs.Model do
   def commands do
     [
       EnqueueJob,
-      {CancelJob, when: &has_jobs?/1, with: &route_job/1},
-      {ReadJobState, when: &has_jobs?/1, with: &route_job/1}
+      {CancelJob, when: &has_jobs?/1, overrides: &route_job/1},
+      {ReadJobState, when: &has_jobs?/1, overrides: &route_job/1}
     ]
   end
 
@@ -199,7 +199,7 @@ defmodule ObanBench.JobRefs.Model do
   def command_sequence_projection, do: ObanBench.JobRefs.Projection
 
   @impl true
-  def assertion_projections, do: []
+  def check_projections, do: []
 
   @impl true
   def simulator, do: ObanBench.JobRefs.Simulator

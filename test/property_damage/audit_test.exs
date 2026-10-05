@@ -1,7 +1,7 @@
 defmodule PropertyDamage.AuditTest do
   @moduledoc """
   DR-037: generation is a pure function of the seed, and `PropertyDamage.audit/2`
-  proves it. Failing-first fixtures (impure generator / impure `with:`) return
+  proves it. Failing-first fixtures (impure generator / impure `overrides:`) return
   `{:error, ...}`; pure models — including `external()`- and `mint_per_run`-using
   ones — return `:ok`, guarding the DR-036/DR-034 determinism foundation.
   """
@@ -32,7 +32,7 @@ defmodule PropertyDamage.AuditTest do
       assert divergence.message =~ "guides/deterministic_generation.md"
     end
 
-    test "an impure `with:` override (changed selection args) is caught" do
+    test "an impure `overrides:` option (changed selection args) is caught" do
       assert {:error, %{divergence: divergence}} =
                Audit.run(ImpureSelectionModel, seeds: 20, max_commands: 5)
 

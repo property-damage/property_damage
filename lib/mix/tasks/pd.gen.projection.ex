@@ -2,8 +2,8 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
   @moduledoc """
   Generate a PropertyDamage projection module.
 
-  Projections track state and optionally define assertions using `@trigger` or
-  `@poll_state` attributes.
+  Projections track state and optionally define checks using `@check` or
+  `@eventually` attributes.
 
   ## Usage
 
@@ -20,16 +20,16 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
 
   - `init/0` - Initialize projection state
   - `apply/2` - Apply commands/events to state (with example)
-  - `@trigger` assertion example (synchronous)
-  - `@poll_state` assertion example (temporal/eventual consistency)
+  - `@check` check example (synchronous)
+  - `@eventually` check example (temporal/eventual consistency)
 
   ## More Information
 
   See `PropertyDamage.Model.Projection` for full documentation on:
 
   - State tracking with `apply/2`
-  - Synchronous assertions with `@trigger`
-  - Temporal assertions with `@poll_state`
+  - Synchronous checks with `@check`
+  - Eventually checks with `@eventually`
   """
 
   use Mix.Task
@@ -68,7 +68,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
     Mix.shell().info("Next steps:")
     Mix.shell().info("  1. Add event aliases at the top")
     Mix.shell().info("  2. Implement apply/2 for each event to track state")
-    Mix.shell().info("  3. Add assertions with @trigger or @poll_state attributes")
+    Mix.shell().info("  3. Add checks with @check or @eventually attributes")
   end
 
   defp module_to_path(module_name) do
@@ -84,7 +84,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
     """
     defmodule #{module_name} do
       @moduledoc \"\"\"
-      Projection for tracking state and defining assertions.
+      Projection for tracking state and defining checks.
 
       TODO: Add description of what this projection tracks/checks.
       \"\"\"
@@ -116,11 +116,11 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       def apply(state, _event), do: state
 
       # ============================================================================
-      # Synchronous Assertions (@trigger)
+      # Synchronous Checks (@check)
       # ============================================================================
 
       # Example: Check invariant after every step
-      # @trigger every: 1
+      # @check every: 1
       # def assert_total_non_negative(state, _cmd_or_event) do
       #   if state.total < 0 do
       #     PropertyDamage.fail!("total is negative", total: state.total)
@@ -128,7 +128,7 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       # end
 
       # Example: Check invariant after specific event
-      # @trigger every: OrderCreated
+      # @check every: OrderCreated
       # def assert_order_tracked(state, %OrderCreated{id: id}) do
       #   unless Map.has_key?(state.orders, id) do
       #     PropertyDamage.fail!("order not tracked", order_id: id)
@@ -136,13 +136,13 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       # end
 
       # ============================================================================
-      # Temporal Assertions (@poll_state)
+      # Eventually Checks (@eventually)
       # ============================================================================
 
       # Example: Check eventual consistency after an event
       # The function returns a predicate that is polled until true or timeout
       #
-      # @poll_state after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+      # @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
       # def payment_confirmed(_state, %PaymentInitiated{id: id}) do
       #   fn s -> s.payments[id] == :confirmed end
       # end

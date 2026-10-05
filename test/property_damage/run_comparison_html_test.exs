@@ -45,7 +45,7 @@ defmodule PropertyDamage.RunComparisonHtmlTest do
         source_revision: {"abc1234", false},
         plan_source: :generated,
         event_log: [entry(%Result{status: :error})],
-        outcome: {:fail, Failure.assertion_failed(:Inv, "boom")}
+        outcome: {:fail, Failure.check_failed(:Inv, "boom")}
       )
 
     RunComparison.compare([t0, t1])

@@ -97,7 +97,7 @@ defmodule PropertyDamage.ReplayExternalsTest do
       original_sequence: seq,
       shrunk_sequence: seq,
       failed_at_index: 1,
-      failure_reason: Failure.assertion_failed(:Dummy, "for replay"),
+      failure_reason: Failure.check_failed(:Dummy, "for replay"),
       model: Model,
       adapter: Adapter
     )

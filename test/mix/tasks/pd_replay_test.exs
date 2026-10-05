@@ -46,7 +46,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     def apply(state, %Counted{amount: n}), do: %{state | count: state.count + n}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def count_bounded(state, _cmd_or_event) do
       if state.count >= 3 do
         PropertyDamage.fail!("count exceeded bound", count: state.count)
@@ -217,7 +217,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
           original_sequence: branching,
           shrunk_sequence: branching,
           failed_at_index: 1,
-          failure_reason: Failure.assertion_failed(:count_bounded, %RuntimeError{message: "x"}),
+          failure_reason: Failure.check_failed(:count_bounded, %RuntimeError{message: "x"}),
           model: FailingModel,
           adapter: FailingAdapter
         )
@@ -240,7 +240,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
           original_sequence: sequence,
           shrunk_sequence: sequence,
           failed_at_index: 2,
-          failure_reason: Failure.assertion_failed(:count_bounded, %RuntimeError{message: "x"}),
+          failure_reason: Failure.check_failed(:count_bounded, %RuntimeError{message: "x"}),
           model: nil,
           adapter: FailingAdapter
         )

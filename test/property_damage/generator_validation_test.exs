@@ -14,6 +14,13 @@ defmodule PropertyDamage.GeneratorValidationTest do
     def generator(_overrides), do: StreamData.constant(%{})
   end
 
+  defmodule CmdWithWith do
+    use PropertyDamage.Command, with: %{x: 1}
+    defstruct []
+    @impl true
+    def generator(_overrides), do: StreamData.constant(%{})
+  end
+
   describe "command weight validation" do
     test "a zero weight is rejected with a clear error" do
       assert_raise ArgumentError, ~r/weight must be a positive integer/, fn ->
@@ -59,33 +66,53 @@ defmodule PropertyDamage.GeneratorValidationTest do
     end
   end
 
-  describe "command :with arity validation" do
-    test "a zero-arity with: is rejected with a clear error" do
-      assert_raise ArgumentError, ~r/`with:` for command.*1-arity function.*or a map/s, fn ->
-        Model.normalize_command_spec({Cmd, with: fn -> %{} end})
+  describe "command :overrides arity validation" do
+    test "a zero-arity overrides: is rejected with a clear error" do
+      assert_raise ArgumentError, ~r/`overrides:` for command.*1-arity function.*or a map/s, fn ->
+        Model.normalize_command_spec({Cmd, overrides: fn -> %{} end})
       end
     end
 
-    test "a two-arity with: is rejected" do
-      assert_raise ArgumentError, ~r/`with:` for command.*1-arity function.*or a map/s, fn ->
-        Model.normalize_command_spec({Cmd, with: fn _a, _b -> %{} end})
+    test "a two-arity overrides: is rejected" do
+      assert_raise ArgumentError, ~r/`overrides:` for command.*1-arity function.*or a map/s, fn ->
+        Model.normalize_command_spec({Cmd, overrides: fn _a, _b -> %{} end})
       end
     end
 
-    test "a non-map, non-function with: is rejected" do
-      assert_raise ArgumentError, ~r/`with:` for command/s, fn ->
-        Model.normalize_command_spec({Cmd, with: [foo: 1]})
+    test "a non-map, non-function overrides: is rejected" do
+      assert_raise ArgumentError, ~r/`overrides:` for command/s, fn ->
+        Model.normalize_command_spec({Cmd, overrides: [foo: 1]})
       end
     end
 
-    test "a one-arity with: and a map with: both normalize" do
-      assert {1, Cmd, %{with: fun}} =
-               Model.normalize_command_spec({Cmd, with: fn _state -> %{} end})
+    test "a one-arity overrides: and a map overrides: both normalize" do
+      assert {1, Cmd, %{overrides: fun}} =
+               Model.normalize_command_spec({Cmd, overrides: fn _state -> %{} end})
 
       assert is_function(fun, 1)
 
-      assert {1, Cmd, %{with: %{x: 1}}} =
-               Model.normalize_command_spec({Cmd, with: %{x: 1}})
+      assert {1, Cmd, %{overrides: %{x: 1}}} =
+               Model.normalize_command_spec({Cmd, overrides: %{x: 1}})
+    end
+  end
+
+  describe "retired :with key validation" do
+    test "a spec with :with key is rejected with a message naming overrides:" do
+      assert_raise ArgumentError,
+                   ~r/`with:` was renamed `overrides:`/,
+                   fn ->
+                     Model.normalize_command_spec({Cmd, with: %{}})
+                   end
+    end
+
+    test "a use PropertyDamage.Command with: default is rejected" do
+      assert_raise ArgumentError,
+                   ~r/`with:` was renamed `overrides:`/,
+                   fn ->
+                     Model.normalize_command_spec(
+                       PropertyDamage.GeneratorValidationTest.CmdWithWith
+                     )
+                   end
     end
   end
 

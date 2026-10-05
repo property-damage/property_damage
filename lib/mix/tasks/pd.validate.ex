@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Pd.Validate do
 
   ### Warnings (validation passes with warnings)
   - Commands that declare no `:observables` in their `command_spec/1`
-  - Events produced but not handled by assertion projections
+  - Events produced but not handled by check projections
   - Missing optional callbacks that may be useful
 
   ## Options
@@ -216,8 +216,8 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
@@ -261,7 +261,7 @@ defmodule Mix.Tasks.Pd.Validate do
   end
 
   # Declared-but-unchecked invariants (static vacuity, DR-026): a guarantee the
-  # model claims but no assertion verifies.
+  # model claims but no check verifies.
   defp invariant_warnings(model) do
     for %{projection: projection, id: id, checks: []} <- safe_catalog(model) do
       "Invariant #{short_module(projection)}.#{id} declared but never checked (statically vacuous)"
@@ -269,7 +269,7 @@ defmodule Mix.Tasks.Pd.Validate do
   end
 
   defp safe_catalog(model) do
-    PropertyDamage.Model.assertion_catalog(model)
+    PropertyDamage.Model.check_catalog(model)
   rescue
     _ -> []
   end
@@ -311,8 +311,8 @@ defmodule Mix.Tasks.Pd.Validate do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end
@@ -336,8 +336,8 @@ defmodule Mix.Tasks.Pd.Validate do
     state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :assertion_projections, 0) do
-        model.assertion_projections()
+      if function_exported?(model, :check_projections, 0) do
+        model.check_projections()
       else
         []
       end

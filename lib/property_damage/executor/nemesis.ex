@@ -7,7 +7,7 @@ defmodule PropertyDamage.Executor.Nemesis do
   # with :command/:started_at/:duration_ms). The pure fault-injection behaviour
   # (inject/2, restore/2, auto_restores?, ...) lives in PropertyDamage.Nemesis and
   # the individual nemesis modules; this module is the executor-side glue that
-  # drives them, folds their events, and runs assertions.
+  # drives them, folds their events, and runs checks.
   #
   # Shared command-processing helpers are called back: resolve_command_placeholders,
   # run_checks, check_async and put_state from PropertyDamage.Executor; event folds
@@ -62,8 +62,8 @@ defmodule PropertyDamage.Executor.Nemesis do
       active_faults: Map.get(state, :active_faults, %{})
     }
 
-    assertion_mode = Map.get(state, :assertion_mode, :halt)
-    assertion_failures = Map.get(state, :assertion_failures, [])
+    check_mode = Map.get(state, :check_mode, :halt)
+    check_failures = Map.get(state, :check_failures, [])
 
     case nemesis_module.inject(resolved_command, nemesis_context) do
       {:ok, events} ->
@@ -121,16 +121,16 @@ defmodule PropertyDamage.Executor.Nemesis do
             active_faults
           end
 
-        # DR-025: assert @trigger every: on the nemesis + injector events folded
+        # DR-025: assert @check every: on the nemesis + injector events folded
         # above, incrementally, before the command's own checks.
         case Executor.check_async(
                model,
                projs_before_async,
                log_before_async,
                event_log,
-               state.assertion_counters,
-               assertion_mode,
-               assertion_failures
+               state.check_counters,
+               check_mode,
+               check_failures
              ) do
           {:halt, async_name, async_reason, _idx, async_counters} ->
             failed_state =
@@ -138,13 +138,13 @@ defmodule PropertyDamage.Executor.Nemesis do
                 event_log: event_log,
                 projections: projections,
                 step_count: state.step_count + 1,
-                assertion_counters: async_counters,
+                check_counters: async_counters,
                 active_faults: active_faults,
                 fold_counter: fold_counter,
                 command_fold_ordinals: command_fold_ordinals
               })
 
-            {:error, Failure.assertion_failed(async_name, async_reason), failed_state}
+            {:error, Failure.check_failed(async_name, async_reason), failed_state}
 
           {:ok, async_counters, async_failures} ->
             # Run checks
@@ -163,17 +163,17 @@ defmodule PropertyDamage.Executor.Nemesis do
                    projections,
                    check_ctx,
                    async_counters,
-                   assertion_mode,
+                   check_mode,
                    async_failures
                  ) do
-              {:ok, assertion_counters, updated_failures} ->
+              {:ok, check_counters, updated_failures} ->
                 new_state =
                   Executor.put_state(state, %{
                     event_log: event_log,
                     projections: projections,
                     step_count: state.step_count + 1,
-                    assertion_counters: assertion_counters,
-                    assertion_failures: updated_failures,
+                    check_counters: check_counters,
+                    check_failures: updated_failures,
                     active_faults: active_faults,
                     fold_counter: fold_counter,
                     command_fold_ordinals: command_fold_ordinals
@@ -181,19 +181,19 @@ defmodule PropertyDamage.Executor.Nemesis do
 
                 {:ok, new_state}
 
-              {:error, assertion_name, reason, assertion_counters} ->
+              {:error, check_name, reason, check_counters} ->
                 failed_state =
                   Executor.put_state(state, %{
                     event_log: event_log,
                     projections: projections,
                     step_count: state.step_count + 1,
-                    assertion_counters: assertion_counters,
+                    check_counters: check_counters,
                     active_faults: active_faults,
                     fold_counter: fold_counter,
                     command_fold_ordinals: command_fold_ordinals
                   })
 
-                {:error, Failure.assertion_failed(assertion_name, reason), failed_state}
+                {:error, Failure.check_failed(check_name, reason), failed_state}
             end
         end
 
@@ -268,7 +268,7 @@ defmodule PropertyDamage.Executor.Nemesis do
           # DR-025 boundary: auto-restore re-injection is fault CLEARING (the
           # fault lifting on its own), not a SUT effect under test, so these
           # events are folded into projection state but not separately evaluated
-          # against @trigger every: assertions. The nemesis command-injection
+          # against @check every: checks. The nemesis command-injection
           # path (execute_nemesis_command) is where injected-fault events are
           # asserted. This reduce is best-effort cleanup with no failure channel.
           {projections, event_log, fold_counter} =

@@ -54,19 +54,19 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
-  @version 7
+  @version 8
   @extension ".pd"
   @trace_extension ".pdtrace"
 
   # Fields whose presence on a loaded report is expected (not struct drift) even
-  # though the current struct lacks them. Pre-v7 files are refused outright
+  # though the current struct lacks them. Pre-v8 files are refused outright
   # (DR-041, following the DR-039/DR-040 precedent), so there are no legacy shapes
-  # to whitelist: a v7 file carrying an unknown key IS drift and should be surfaced.
+  # to whitelist: a v8 file carrying an unknown key IS drift and should be surfaced.
   @removed_fields []
 
   # Fields whose absence on a loaded report is expected format evolution (not
-  # struct drift). Empty for the same reason as @removed_fields: only v7 files
-  # load, and a v7 file legitimately lacking a current field is a genuine shape
+  # struct drift). Empty for the same reason as @removed_fields: only v8 files
+  # load, and a v8 file legitimately lacking a current field is a genuine shape
   # change worth a warning.
   @added_fields []
 
@@ -410,7 +410,7 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
-  # V7 format (DR-041): a report's `failure_reason` is a `%PropertyDamage.Failure{}`
+  # V8 format (DR-041): a report's `failure_reason` is a `%PropertyDamage.Failure{}`
   # (nested class struct), and the six denormalized failure fields
   # (`failure_type` / `check_name` / `failure_message` / `invariant_name` /
   # `idempotency_violation` / `poll_timeout_info`) are gone, replaced by accessors.
@@ -419,7 +419,7 @@ defmodule PropertyDamage.Persistence do
   # `kind`; the loader dispatches on it rather than the file extension. A report
   # already embeds its trace, so it is returned as stored, with no legacy-field
   # folding or trace synthesis. A standalone trace payload returns the trace.
-  defp decode(<<"PD", 7::8, stored_checksum::32, term_binary::binary>>) do
+  defp decode(<<"PD", 8::8, stored_checksum::32, term_binary::binary>>) do
     with_decoded_payload(stored_checksum, term_binary, fn payload ->
       metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
 
@@ -433,11 +433,11 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v7 files (format versions 1-6) are refused (DR-041, following DR-039/DR-040).
-  # A pre-v7 file stores `failure_reason` as a raw `{:tag, ...}` tuple and carries
-  # the six denormalized failure fields that the current struct no longer has, so
-  # there is no honest in-place upgrade. Re-capture the failure under the current
-  # version.
+  # Pre-v8 files (format versions 1-7) are refused (DR-041, following DR-039/DR-040).
+  # A v7 file stores `%Failure{type: %Failure.Assertion{}}` and `assertion_fires`;
+  # v8 renamed both to the check vocabulary. Older files predate the `%Failure{}`
+  # shape entirely. There is no honest in-place upgrade: re-capture the failure
+  # under the current version.
   defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
        when version < @version do
     {:error, {:unsupported_format_version, version, @version}}

@@ -1,14 +1,14 @@
 defmodule PropertyDamage.AsyncShrinkConvergenceTest do
   @moduledoc """
   End-to-end tests for continuous async-observation checking (DR-025): a
-  `@trigger every:` assertion fires on asynchronously-observed events (here, a
+  `@check every:` check fires on asynchronously-observed events (here, a
   resource poller's injected events), so a violation is reported AT the offending
   event with the injecting command's `command_index`, giving the shrinker a tight
   truncation target.
 
   These are written failing-first against the pre-DR-025 engine: today the
   asynchronous event paths fold events into projection state but never evaluate
-  `@trigger` assertions (the P2 finding), so the overshoot below is undetected and
+  `@check` checks (the P2 finding), so the overshoot below is undetected and
   the run wrongly succeeds.
   """
   use ExUnit.Case, async: false
@@ -34,7 +34,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
   end
 
   # Accumulating safety projection (the DR-024 accumulator contract): tracks the
-  # maximum count ever observed, and bounds it at 1 via an `every:` assertion that
+  # maximum count ever observed, and bounds it at 1 via an `every:` check that
   # must fire on every observed Bumped, async ones included.
   defmodule MaxCountProjection do
     use PropertyDamage.Model.Projection
@@ -49,7 +49,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
 
     def apply(state, _), do: state
 
-    @trigger every: Bumped
+    @check every: Bumped
     def assert_count_at_most_one(state, _event) do
       if state.max > 1 do
         PropertyDamage.fail!("count exceeded 1", max: state.max)
@@ -102,14 +102,14 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     end
   end
 
-  test "an every: assertion fires on an asynchronously-observed (poller) event, at the injecting command's index" do
+  test "an every: check fires on an asynchronously-observed (poller) event, at the injecting command's index" do
     # Bump is at index 0; its poller injects the overshoot.
     {:ok, result} = run_seq(Sequence.linear([%Bump{}]), Model, PollerOvershootAdapter)
 
     refute result.success,
            "expected the poller-injected overshoot to trip every: count_at_most_one"
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
 
     assert result.failed_at_index == 0, "the failure should be located at the injecting command"
@@ -125,7 +125,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
 
     refute result.success, "expected the async overshoot to fail the run"
 
-    assert %Failure{type: %Failure.Assertion{kind: :assertion_failed, name: :count_at_most_one}} =
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
              result.failure_reason
 
     assert result.failed_at_index == 2
@@ -168,11 +168,11 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
 
     def apply(state, _), do: state
 
-    # The opt-out guarantee: an every: :command assertion is triggered only by
+    # The opt-out guarantee: an every: :command check is triggered only by
     # COMMAND steps, never by an event (own or asynchronously-observed). So its
     # second argument is always the command; it must never be a %Bumped{}. This
     # is race-free regardless of when the poller's events fold in.
-    @trigger every: :command
+    @check every: :command
     def assert_triggered_only_by_commands(_state, command_or_event) do
       if match?(%Bumped{}, command_or_event) do
         PropertyDamage.fail!("every: :command was triggered by an event",
@@ -198,7 +198,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
            "every: :command must never be triggered by an event: #{inspect(result.failure_reason)}"
 
     # The async overshoot still folded into projection state; it was simply never
-    # passed to the command-scoped assertion as a trigger.
+    # passed to the command-scoped check as a trigger.
     assert result.projections[CommandScopedProjection].max == 2
   end
 
@@ -206,7 +206,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     {:ok, queue} = EventQueue.start_link()
 
     try do
-      Executor.run(seq, model, adapter, event_queue: queue, assertion_mode: mode)
+      Executor.run(seq, model, adapter, event_queue: queue, check_mode: mode)
     after
       EventQueue.stop(queue)
     end
@@ -219,10 +219,10 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     refute result.success
     assert result.failure_reason == nil
 
-    assert Enum.any?(result.assertion_failures, fn f ->
-             f.assertion_name == :count_at_most_one and f.command_index == 0
+    assert Enum.any?(result.check_failures, fn f ->
+             f.check_name == :count_at_most_one and f.command_index == 0
            end),
-           "expected a recorded async failure at command_index 0: #{inspect(result.assertion_failures)}"
+           "expected a recorded async failure at command_index 0: #{inspect(result.check_failures)}"
   end
 
   test ":disabled mode skips the async check entirely" do

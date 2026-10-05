@@ -37,7 +37,7 @@ defmodule PropertyDamage.Executor.Stepping do
   ## Guarantees
 
   `step/4` runs **the single per-command engine path**: ref/placeholder
-  resolution, settle, nemesis, injector/mock events, projections, assertions,
+  resolution, settle, nemesis, injector/mock events, projections, checks,
   stutter, and pollers all run exactly as they do inside a full run. It is the
   same engine primitive the full-run loop uses, so stepping cannot diverge from
   running.
@@ -82,7 +82,7 @@ defmodule PropertyDamage.Executor.Stepping do
     * `:event_queue` - the async/injected event queue (default `nil`)
     * `:stutter_config` - stutter/idempotency configuration (default `nil`)
     * `:mock_registry` - mock service registry (default `nil`)
-    * `:assertion_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
+    * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
     * `:external_markers` - external value markers (default `[]`)
     * `:placeholder_registry` - registry seeded from the generated sequence (DR-021)
     * `:rng_seed` - explicit stutter RNG base (DR-029)
@@ -96,7 +96,7 @@ defmodule PropertyDamage.Executor.Stepping do
       Keyword.get(opts, :event_queue),
       Keyword.get(opts, :stutter_config),
       Keyword.get(opts, :mock_registry),
-      Keyword.get(opts, :assertion_mode, :halt),
+      Keyword.get(opts, :check_mode, :halt),
       Keyword.get(opts, :external_markers, []),
       Keyword.get(opts, :placeholder_registry),
       Keyword.get(opts, :rng_seed),

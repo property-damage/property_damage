@@ -117,8 +117,8 @@ defmodule PropertyDamage.EtsLinearizationTest do
              "expected the minimal two-increment lost update, got: #{inspect(commands)}"
 
       # The lost update is refuted on the increment events alone (no read
-      # needed), so it surfaces as a linearization failure, not an assertion.
-      assert %Failure{type: %Failure.Assertion{kind: :linearization}} = failure.failure_reason
+      # needed), so it surfaces as a linearization failure, not a check.
+      assert %Failure{type: %Failure.Check{kind: :linearization}} = failure.failure_reason
     end
 
     test "the shrunk reproduction still fails" do

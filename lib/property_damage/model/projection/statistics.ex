@@ -2,8 +2,8 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   @moduledoc """
   Projection that computes statistical properties over event streams.
 
-  Traditional assertions check exact conditions. Statistical projections enable
-  probabilistic assertions like:
+  Traditional checks test exact conditions. Statistical projections enable
+  probabilistic checks like:
 
   - "p99 latency < 100ms"
   - "error rate < 1%"
@@ -11,7 +11,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
 
   ## Why Statistical Projections?
 
-  Nemesis can inject latency, but we need **statistical assertions** to verify
+  Nemesis can inject latency, but we need **statistical checks** to verify
   the system handles it gracefully:
 
   - A single slow request isn't a bug
@@ -21,11 +21,11 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   ## Usage
 
       defmodule MyModel do
-        def assertion_projections do
+        def check_projections do
           [
             {PropertyDamage.Model.Projection.Statistics, [
               window_size: 100,
-              assertions: [
+              checks: [
                 {:p99_latency_ms, :less_than, 500},
                 {:error_rate, :less_than, 0.05},
                 {:success_rate, :greater_than, 0.95}
@@ -67,7 +67,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
     :success_count,
     :error_count,
     :window_size,
-    :assertions,
+    :checks,
     :current_step
   ]
 
@@ -76,7 +76,7 @@ defmodule PropertyDamage.Model.Projection.Statistics do
           success_count: non_neg_integer(),
           error_count: non_neg_integer(),
           window_size: pos_integer(),
-          assertions: [assertion()],
+          checks: [check_spec()],
           current_step: non_neg_integer()
         }
 
@@ -92,19 +92,23 @@ defmodule PropertyDamage.Model.Projection.Statistics do
 
   @type comparator :: :less_than | :greater_than | :equal_to
 
-  @type assertion :: {metric(), comparator(), number()}
+  @type check_spec :: {metric(), comparator(), number()}
 
   @default_window_size 100
 
   @impl PropertyDamage.Model.Projection
   @spec init(keyword()) :: t()
   def init(opts \\ []) do
+    if Keyword.has_key?(opts, :assertions) do
+      raise ArgumentError, "`assertions:` was renamed `checks:`"
+    end
+
     %__MODULE__{
       latency_samples: :queue.new(),
       success_count: 0,
       error_count: 0,
       window_size: Keyword.get(opts, :window_size, @default_window_size),
-      assertions: Keyword.get(opts, :assertions, []),
+      checks: Keyword.get(opts, :checks, []),
       current_step: 0
     }
   end
@@ -233,23 +237,23 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   end
 
   @doc """
-  Check all configured assertions against current metrics.
+  Check all configured checks against current metrics.
   """
-  @spec check_assertions(t()) :: :ok | {:error, String.t()}
-  def check_assertions(state) do
+  @spec evaluate_checks(t()) :: :ok | {:error, String.t()}
+  def evaluate_checks(state) do
     metrics = compute_metrics(state)
 
-    failed_assertions =
-      state.assertions
+    failed_checks =
+      state.checks
       |> Enum.filter(fn {metric, comparator, threshold} ->
         value = Map.get(metrics, metric, 0)
         not apply_comparator(value, comparator, threshold)
       end)
 
-    if Enum.empty?(failed_assertions) do
+    if Enum.empty?(failed_checks) do
       :ok
     else
-      {:error, format_failures(failed_assertions, metrics)}
+      {:error, format_failures(failed_checks, metrics)}
     end
   end
 
@@ -265,18 +269,18 @@ defmodule PropertyDamage.Model.Projection.Statistics do
         "#{metric} = #{Float.round(value * 1.0, 4)} (expected #{comparator} #{threshold})"
       end)
 
-    "Statistical assertion failures: #{details}"
+    "Statistical check failures: #{details}"
   end
 
   # ============================================================================
-  # Check Registration (for use as assertion projection)
+  # Check Registration (for use as check projection)
   # ============================================================================
 
   @doc false
   def __checks__ do
     [
       %{
-        name: :statistical_assertions,
+        name: :statistical_checks,
         trigger: :always,
         sample: 10
       }
@@ -284,13 +288,13 @@ defmodule PropertyDamage.Model.Projection.Statistics do
   end
 
   @doc false
-  @spec check(:statistical_assertions, t(), map()) :: :ok | {:error, String.t()}
-  def check(:statistical_assertions, state, _ctx) do
+  @spec check(:statistical_checks, t(), map()) :: :ok | {:error, String.t()}
+  def check(:statistical_checks, state, _ctx) do
     # Only check if we have enough samples
     metrics = compute_metrics(state)
 
     if metrics.sample_count >= 10 or metrics.total_count >= 10 do
-      check_assertions(state)
+      evaluate_checks(state)
     else
       :ok
     end

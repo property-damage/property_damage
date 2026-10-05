@@ -6,7 +6,7 @@ third-party software, as a self-contained mix project (`{:property_damage, path:
 What it validates:
 
 - **The core loop end to end**: generation → simulation → adapter execution →
-  projection updates → `@trigger` invariants, against a real cache rather than
+  projection updates → `@check` invariants, against a real cache rather than
   the framework's own test mocks.
 - **Non-vacuity**: `test/seeded_bug_test.exs` runs the same model against an
   adapter with a deliberate bug (delete silently no-ops) and asserts that

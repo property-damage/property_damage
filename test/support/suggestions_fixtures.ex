@@ -172,7 +172,7 @@ defmodule PropertyDamage.SuggestionsFixtures do
     @impl true
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def assert_balance_non_negative(_state, _cmd_or_event), do: :ok
   end
 
@@ -181,7 +181,7 @@ defmodule PropertyDamage.SuggestionsFixtures do
   # ==========================================================================
 
   defmodule FullModel do
-    @moduledoc "Commands resolve to events; no existing assertion projections."
+    @moduledoc "Commands resolve to events; no existing check projections."
     @behaviour PropertyDamage.Model
 
     alias PropertyDamage.SuggestionsFixtures.{Commands, Projections}
@@ -200,7 +200,7 @@ defmodule PropertyDamage.SuggestionsFixtures do
     def command_sequence_projection, do: Projections.Empty
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 
   defmodule CheckedModel do
@@ -223,7 +223,7 @@ defmodule PropertyDamage.SuggestionsFixtures do
     def command_sequence_projection, do: Projections.Empty
 
     @impl true
-    def assertion_projections, do: [Projections.BalanceChecked]
+    def check_projections, do: [Projections.BalanceChecked]
   end
 
   defmodule NoEventsModel do
@@ -239,6 +239,6 @@ defmodule PropertyDamage.SuggestionsFixtures do
     def command_sequence_projection, do: Projections.Empty
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
   end
 end

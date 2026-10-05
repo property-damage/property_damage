@@ -142,8 +142,8 @@ end
 
 ## Step 4: Define Invariants
 
-Invariants are checks that should always hold. Define them in assertion
-projections using `@trigger` and `assert_*` functions:
+Invariants are checks that should always hold. Define them in check
+projections using `@check` and `assert_*` functions:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
@@ -162,9 +162,9 @@ defmodule MyApp.Projections.UserInvariants do
 
   def apply(state, _), do: state
 
-  # Assertions use @trigger to specify when to run
+  # Checks use @check to specify when to run
   # and assert_* naming convention
-  @trigger every: 1
+  @check every: 1
   def assert_emails_unique(_state, _cmd_or_event) do
     # In a real system, duplicate emails would be caught at creation time.
     # This is just an example of the pattern (see writing_invariants.md).
@@ -198,7 +198,7 @@ defmodule MyApp.TestModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections, do: [UserInvariants]
+  def check_projections, do: [UserInvariants]
 
   @impl true
   def injectable_events, do: []
@@ -210,16 +210,16 @@ The model above implements four callbacks, but only two are **required**:
 callback is optional (they are listed in `@optional_callbacks`), so a minimal
 model is just those two. The optional ones:
 
-- `assertion_projections/0` — invariant projections to run; defaults to `[]`.
+- `check_projections/0` — invariant projections to run; defaults to `[]`.
 - `injectable_events/0` — events that arrive from outside command execution
   (webhooks, callbacks) rather than from commands; defaults to `[]`.
 - `simulator/0` — a separate simulator module for sequence generation (defaults
   to the model itself).
 - `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1` — lifecycle
   hooks (see the [Cheatsheet](cheatsheet.md) for their argument shapes).
-- `terminate?/3` — a predicate to stop generating a sequence early.
+- `terminate_early?/3` — a predicate to stop generating a sequence early.
 
-This example spells out `assertion_projections/0` and `injectable_events/0`
+This example spells out `check_projections/0` and `injectable_events/0`
 (even though `injectable_events` returns `[]`) to show their shape; you can drop
 either until you need it.
 
@@ -344,7 +344,7 @@ To see what PropertyDamage generates, add `verbose: true`:
 
 This prints a run-configuration summary and a per-run progress line (commands
 executed, pass/fail). For per-command detail (each command, its result, and the
-assertion checks) use step-by-step replay; see the
+checks) use step-by-step replay; see the
 [Debugging Failures](debugging_failures.md) guide.
 
 ## Understanding Results

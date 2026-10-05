@@ -7,7 +7,7 @@ defmodule PropertyDamage.Test.EtsRegister do
   linearizable. This is the canonical linearizability example (each increment
   observes `from -> to = from + 1`), and a richer model than 6a's key/value
   store: the value-carrying `from/to` events let the linearization checker
-  refute lost updates on EVENTS alone, independent of any assertion.
+  refute lost updates on EVENTS alone, independent of any check.
 
   The bench drives this through PD's branching generation. Against the faithful
   `CorrectAdapter` no ordering is ever refuted (locks in the linearization
@@ -86,7 +86,7 @@ defmodule PropertyDamage.Test.EtsRegister.Projection do
   def apply(state, %ValueRead{value: value}), do: %{state | last_read: value}
   def apply(state, _event), do: state
 
-  @trigger every: ReadValue
+  @check every: ReadValue
   def assert_value_consistent(state, _command) do
     if state.last_read != state.count do
       PropertyDamage.fail!(
@@ -135,7 +135,7 @@ defmodule PropertyDamage.Test.EtsRegister.Model do
   def command_sequence_projection, do: PropertyDamage.Test.EtsRegister.Projection
 
   @impl true
-  def assertion_projections, do: [PropertyDamage.Test.EtsRegister.Projection]
+  def check_projections, do: [PropertyDamage.Test.EtsRegister.Projection]
 
   @impl true
   def simulator, do: PropertyDamage.Test.EtsRegister.Simulator

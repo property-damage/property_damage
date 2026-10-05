@@ -97,7 +97,7 @@ defmodule PropertyDamage.Nemesis do
   > environment; if you need to fault an in-process collaborator, do it in your
   > own adapter/command code.
 
-  Assertion projections can adjust invariants during active faults:
+  Check projections can adjust invariants during active faults:
 
       def check(:latency_within_sla, state, ctx) do
         if Map.get(state.active_faults, :network_partition) do

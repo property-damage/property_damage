@@ -90,51 +90,6 @@ PropertyDamage.Differential.run(
 )
 ```
 
-## Time-Separated Execution
-
-Run tests now, compare against results from later (or vice versa).
-
-### Export a Baseline
-
-```elixir
-PropertyDamage.Differential.run(
-  model: MyModel,
-  targets: [{ProdAdapter, name: "v2.3"}],
-  compare: :performance,
-  export_to: "baselines/v2.3.json",
-  seed: 12345  # Use fixed seed for reproducibility
-)
-```
-
-> Create the target directory first (e.g. `File.mkdir_p!("baselines")`) —
-> `export_to:` writes to the path as given and does not create parent directories.
-
-### Compare Against Baseline
-
-Days or weeks later:
-
-```elixir
-{:ok, result} = PropertyDamage.Differential.run(
-  model: MyModel,
-  targets: [{ProdAdapter, name: "v2.4"}],
-  compare: :performance,
-  baseline: "baselines/v2.3.json"
-)
-
-if PropertyDamage.Differential.Result.divergent?(result) do
-  IO.puts("Performance regression detected!")
-  IO.puts(PropertyDamage.Differential.Result.format(result))
-end
-```
-
-The baseline contains:
-- Complete command sequences (as structs, not just seeds)
-- Results per command
-- Timing data
-- Aggregate metrics
-
-This makes baselines portable - they work even if your model changes.
-
 ## Execution Modes
 
 ### Interleaved (Default for Correctness)
@@ -316,8 +271,6 @@ IO.puts(PropertyDamage.Differential.Result.format(result, format: :divergences))
 | `:seed` | random | Random seed for reproducibility |
 | `:execution` | auto | `:interleaved` or `:sequential` |
 | `:equivalence` | `:exact` | Equivalence strategy |
-| `:baseline` | nil | Path to baseline file |
-| `:export_to` | nil | Path to export results |
 | `:warmup_runs` | 0 | Runs to discard before measuring |
 | `:verbose` | false | Print progress |
 | `:on_progress` | nil | Progress consumer (see [Monitoring Progress](#monitoring-progress)) |
@@ -420,18 +373,16 @@ PropertyDamage.Differential.run(
 
 ## Best Practices
 
-1. **Use fixed seeds for baselines** - Makes comparisons reproducible
+1. **Use fixed seeds** - Makes comparisons reproducible
 
 2. **Start with structural equivalence** - Exact matching often fails on
    auto-generated fields
 
 3. **Warmup for performance tests** - Discard initial runs to avoid JIT effects
 
-4. **Export baselines before deployments** - Create a comparison point
+4. **Use interleaved for bug finding** - Detects divergences immediately
 
-5. **Use interleaved for bug finding** - Detects divergences immediately
-
-6. **Use sequential for performance** - Avoids context-switching overhead
+5. **Use sequential for performance** - Avoids context-switching overhead
 
 7. **Compare in CI** - Catch regressions before they reach production
 

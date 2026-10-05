@@ -58,11 +58,6 @@ The framework SHALL support interleaved and sequential execution modes.
 - **WHEN** execution mode is `:sequential` (default for performance comparison)
 - **THEN** the framework SHALL execute the full command sequence on each target independently
 
-#### Scenario: Baseline implies sequential
-
-- **WHEN** a `baseline:` file is provided for comparison
-- **THEN** execution SHALL be implicitly sequential since the baseline was recorded in a prior run
-
 ### Requirement: External Value Capture Per Target
 
 The framework SHALL capture `external()` server-generated values and resolve them into downstream commands during differential execution (DR-021), maintaining a separate placeholder registry per target so that the same consumer placeholder resolves to the value each target actually produced.
@@ -112,22 +107,6 @@ The framework SHALL record which commands produced different results across targ
 
 - **WHEN** divergences are detected in a command sequence
 - **THEN** standard PropertyDamage shrinking SHALL apply to find the minimal command sequence that still produces the divergence
-
-### Requirement: Time-Separated Baselines
-
-The framework SHALL support saving test results to baseline files for later comparison against different implementations or versions.
-
-#### Scenario: Exporting a baseline
-
-- **WHEN** `export_to: "baselines/v2.3.json"` is configured
-- **THEN** the framework SHALL save command sequences, results, timing data, event logs, and aggregate metrics to the specified JSON file
-- **AND** the baseline SHALL include metadata: creation time, model name, model version, target name, and seed
-
-#### Scenario: Comparing against a baseline
-
-- **WHEN** `baseline: "baselines/v2.3.json"` is configured with a live target
-- **THEN** the framework SHALL load the baseline results
-- **AND** SHALL compare the live target's results against the stored baseline results using the configured equivalence strategy
 
 ### Requirement: Target Specification
 

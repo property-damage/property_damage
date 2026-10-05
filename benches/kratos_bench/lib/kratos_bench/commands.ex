@@ -1,7 +1,7 @@
 defmodule KratosBench.Commands do
   @moduledoc """
   Transport-agnostic command intents. Every field is supplied by the model's
-  `with:` overrides (derived from the generation-time projection state), so base
+  `overrides:` values (derived from the generation-time projection state), so base
   generators are `nil` — the standard PropertyDamage pattern.
 
   The three `Register*` variants differ only in the mock behaviour they request:

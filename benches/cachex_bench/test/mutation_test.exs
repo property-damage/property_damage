@@ -37,7 +37,7 @@ defmodule CachexBench.MutationTest do
   @opts [operators: @operators, mutations_per_command: 3, max_runs: 20]
 
   # Same commands, adapter, and projection apply-logic as CachexBench.Projection,
-  # but with NO `@trigger` assertion. This is the control that isolates the
+  # but with NO `@check` check. This is the control that isolates the
   # read-consistency invariant as the thing actually doing the killing.
   defmodule UncheckedProjection do
     use PropertyDamage.Model.Projection
@@ -69,7 +69,7 @@ defmodule CachexBench.MutationTest do
     def command_sequence_projection, do: CachexBench.MutationTest.UncheckedProjection
 
     @impl true
-    def assertion_projections, do: []
+    def check_projections, do: []
 
     @impl true
     def simulator, do: CachexBench.Simulator

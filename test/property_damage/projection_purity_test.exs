@@ -46,7 +46,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
     def apply(state, %Pinged{amount: a}), do: %{state | sum: state.sum + a}
     def apply(state, _), do: state
 
-    @trigger every: 1
+    @check every: 1
     def under_limit(state, _item) do
       unless state.sum <= 100 do
         PropertyDamage.fail!("sum exceeds limit", sum: state.sum)
@@ -78,7 +78,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
     @impl true
     def command_sequence_projection, do: SeqProj
     @impl true
-    def assertion_projections, do: [Sum]
+    def check_projections, do: [Sum]
   end
 
   defmodule ImpureModel do
@@ -89,7 +89,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
     @impl true
     def command_sequence_projection, do: SeqProj
     @impl true
-    def assertion_projections, do: [Sum, Impure]
+    def check_projections, do: [Sum, Impure]
   end
 
   # ---- Adapter --------------------------------------------------------------
@@ -241,7 +241,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
       @impl true
       def command_sequence_projection, do: ModelState
       @impl true
-      def assertion_projections, do: []
+      def check_projections, do: []
       @impl true
       def simulator, do: __MODULE__
       @impl PropertyDamage.Model.Simulator
@@ -258,7 +258,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
       @impl true
       def command_sequence_projection, do: ModelState
       @impl true
-      def assertion_projections, do: [ImpureEventProj]
+      def check_projections, do: [ImpureEventProj]
       @impl true
       def simulator, do: __MODULE__
       @impl PropertyDamage.Model.Simulator
@@ -281,7 +281,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
   describe "faithful derivation equals the runtime snapshot (branching)" do
     test "a branching run failing in the suffix re-derives through the branch merge" do
       # prefix Add 10, two branches each Add 10, suffix Add 85 -> sum 115 at the
-      # suffix command. Branch assertions are disabled; the suffix re-enables them
+      # suffix command. Branch checks are disabled; the suffix re-enables them
       # and Sum fires there, on the merged-then-suffix state.
       seq =
         Sequence.branching(

@@ -22,7 +22,7 @@ defmodule PropertyDamage.FailureReport do
         original_sequence: sequence,
         shrunk_sequence: shrunk,
         failed_at_index: 5,
-        failure_reason: Failure.assertion_failed(:NonNegativeBalance, "...")
+        failure_reason: Failure.check_failed(:NonNegativeBalance, "...")
       )
 
   ## Formatting Reports
@@ -47,7 +47,7 @@ defmodule PropertyDamage.FailureReport do
   """
 
   alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Failure, RunTrace, Sequence}
-  alias PropertyDamage.Failure.Assertion
+  alias PropertyDamage.Failure.Check
   alias PropertyDamage.RunTrace.Step
 
   @typedoc "The failure's kind (`PropertyDamage.Failure.kind/1`)."
@@ -102,7 +102,7 @@ defmodule PropertyDamage.FailureReport do
           # model's catalog and the failing check (invariant_name/1); the
           # description is resolved once at construction.
           invariant_description: String.t() | nil,
-          assertion_fires: %{{module(), atom()} => non_neg_integer()},
+          check_fires: %{{module(), atom()} => non_neg_integer()},
 
           # Human-readable command labels (DR-028 amendment, P7): keyed by the
           # flattened command index (the 0..n-1 index of `Sequence.to_list/1`,
@@ -131,7 +131,7 @@ defmodule PropertyDamage.FailureReport do
             error_origin_details: nil,
             stacktrace: nil,
             invariant_description: nil,
-            assertion_fires: %{},
+            check_fires: %{},
             command_labels: %{}
 
   @doc """
@@ -182,7 +182,7 @@ defmodule PropertyDamage.FailureReport do
     # Classify error origin
     classification = ErrorOrigin.classify(failure_reason, stacktrace)
 
-    # Resolve the invariant the failing assertion checks (DR-026), so the report
+    # Resolve the invariant the failing check validates (DR-026), so the report
     # can headline the named property and the formatter stays pure.
     {_invariant_name, invariant_description} =
       resolve_invariant(Keyword.get(opts, :model), check_name)
@@ -241,7 +241,7 @@ defmodule PropertyDamage.FailureReport do
       error_origin_details: classification.details,
       stacktrace: stacktrace,
       invariant_description: invariant_description,
-      assertion_fires: Keyword.get(opts, :assertion_fires, %{}),
+      check_fires: Keyword.get(opts, :check_fires, %{}),
       command_labels: command_labels
     }
   end
@@ -317,18 +317,18 @@ defmodule PropertyDamage.FailureReport do
     end)
   end
 
-  # Resolve the invariant a failing assertion (by its logical check name) checks,
-  # returning {name, description}. Best-effort: a non-assertion failure (nil
+  # Resolve the invariant a failing check (by its logical check name) checks,
+  # returning {name, description}. Best-effort: a non-check failure (nil
   # check_name), a model without a catalog, or an unmatched name yields
-  # {nil, nil}, so the formatter falls back to the bare assertion name.
+  # {nil, nil}, so the formatter falls back to the bare check name.
   defp resolve_invariant(nil, _check_name), do: {nil, nil}
   defp resolve_invariant(_model, nil), do: {nil, nil}
 
   defp resolve_invariant(model, check_name) when is_atom(model) do
-    if function_exported?(PropertyDamage.Model, :assertion_catalog, 1) do
+    if function_exported?(PropertyDamage.Model, :check_catalog, 1) do
       entry =
         model
-        |> PropertyDamage.Model.assertion_catalog()
+        |> PropertyDamage.Model.check_catalog()
         |> Enum.find(fn %{checks: checks} ->
           Enum.any?(checks, &(&1.name == check_name))
         end)
@@ -439,7 +439,7 @@ defmodule PropertyDamage.FailureReport do
     check_name = check_name(report)
 
     case failure_type(report) do
-      :assertion_failed -> "Invariant Violation: #{check_name}"
+      :check_failed -> "Invariant Violation: #{check_name}"
       :projection_violation -> "Invariant Violation: #{check_name}"
       :idempotency_violation -> "Idempotency Violation"
       :poll_timeout -> "Poll Timeout: #{check_name}"
@@ -469,7 +469,7 @@ defmodule PropertyDamage.FailureReport do
   def failure_type(%__MODULE__{failure_reason: %Failure{} = f}), do: Failure.kind(f)
   def failure_type(%__MODULE__{}), do: :unknown
 
-  @doc "The failing assertion/check/projection name, or `nil`."
+  @doc "The failing check/projection name, or `nil`."
   @spec check_name(t()) :: atom() | nil
   def check_name(%__MODULE__{failure_reason: fr}), do: failure_check_name(fr)
 
@@ -481,16 +481,16 @@ defmodule PropertyDamage.FailureReport do
   @doc "The `%Stutter.Violation{}` for an idempotency failure, or `nil`."
   @spec idempotency_violation(t()) :: map() | nil
   def idempotency_violation(%__MODULE__{
-        failure_reason: %Failure{type: %Assertion{kind: :idempotency_violation, detail: v}}
+        failure_reason: %Failure{type: %Check{kind: :idempotency_violation, detail: v}}
       }),
       do: v
 
   def idempotency_violation(%__MODULE__{}), do: nil
 
-  @doc "The poll-timeout info map for a `@poll_state` timeout, or `nil`."
+  @doc "The poll-timeout info map for a `@eventually` timeout, or `nil`."
   @spec poll_timeout_info(t()) :: map() | nil
   def poll_timeout_info(%__MODULE__{
-        failure_reason: %Failure{type: %Assertion{kind: :poll_timeout, detail: info}}
+        failure_reason: %Failure{type: %Check{kind: :poll_timeout, detail: info}}
       }),
       do: info
 
@@ -724,22 +724,22 @@ defmodule PropertyDamage.FailureReport do
 
   # Human-readable message for each failure kind, mirroring the per-tag wording
   # the old parser produced.
-  defp message_for(%Failure{type: %Assertion{kind: :assertion_failed, detail: detail}}),
+  defp message_for(%Failure{type: %Check{kind: :check_failed, detail: detail}}),
     do: extract_message(detail)
 
-  defp message_for(%Failure{type: %Assertion{kind: :idempotency_violation, detail: violation}}),
+  defp message_for(%Failure{type: %Check{kind: :idempotency_violation, detail: violation}}),
     do: format_idempotency_message(violation)
 
-  defp message_for(%Failure{type: %Assertion{kind: :linearization, detail: message}}),
+  defp message_for(%Failure{type: %Check{kind: :linearization, detail: message}}),
     do: to_string(message)
 
-  defp message_for(%Failure{type: %Assertion{kind: :poll_timeout, detail: info}}),
+  defp message_for(%Failure{type: %Check{kind: :poll_timeout, detail: info}}),
     do: format_poll_timeout_message(info)
 
-  defp message_for(%Failure{type: %Assertion{kind: :settle_timeout, detail: reason}}),
+  defp message_for(%Failure{type: %Check{kind: :settle_timeout, detail: reason}}),
     do: "Command did not settle: #{inspect(reason)}"
 
-  defp message_for(%Failure{type: %Assertion{kind: :projection_violation} = t}) do
+  defp message_for(%Failure{type: %Check{kind: :projection_violation} = t}) do
     "projection #{inspect(t.name)} rejected the transition: " <> extract_message(t.detail)
   end
 
@@ -769,7 +769,7 @@ defmodule PropertyDamage.FailureReport do
 
   defp message_for(%Failure{type: type}), do: inspect(type.detail)
 
-  # Extract a human message from an assertion/exception reason. The
+  # Extract a human message from a check/exception reason. The
   # is_exception clause MUST precede %{message: msg}: exceptions like
   # KeyError/FunctionClauseError carry message: nil and compute it lazily,
   # so matching the map first yielded empty strings.
@@ -780,7 +780,7 @@ defmodule PropertyDamage.FailureReport do
 
   defp format_poll_timeout_message(info) do
     """
-    Temporal assertion #{info.triggered_by.assertion_name} timed out after #{info.elapsed_ms}ms.
+    Eventually check #{info.triggered_by.check_name} timed out after #{info.elapsed_ms}ms.
     Trigger event: #{inspect(info.triggered_by.event)}
     Predicate: #{info.predicate_source || "unknown"}
     Final state: #{inspect(info.final_state, limit: 5)}

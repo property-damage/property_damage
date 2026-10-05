@@ -90,7 +90,7 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
         Create,
         {Use,
          when: fn state -> state.created != [] end,
-         with: fn state -> %{target: Generator.external_from(state, path: [:id])} end}
+         overrides: fn state -> %{target: Generator.external_from(state, path: [:id])} end}
       ]
     end
 
@@ -199,11 +199,11 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
           adapter_config: %{test_pid: self(), prefix: "w", name: "w"},
           metrics: metrics,
           think_time_range: {0, 0},
-          assertion_mode: :disabled
+          check_mode: :disabled
         )
 
       # The worker generates a fresh sequence per call; run until at least one Use
-      # is routed (bounded), so the resolution assertion is non-vacuous. Pre-fix,
+      # is routed (bounded), so the resolution check is non-vacuous. Pre-fix,
       # any routed Use raised an unresolved-placeholder error here.
       used = run_until_routed(worker, 200, [])
 

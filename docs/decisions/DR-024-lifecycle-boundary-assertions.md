@@ -1,6 +1,6 @@
 # DR-024: Lifecycle-Boundary Assertions (`@trigger at:`)
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-042: `@trigger at:` is now `@check at:`.
 **Date:** 2026-06-23
 
 > Recorded as a design pass, to be implemented next. It extends DR-012

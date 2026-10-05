@@ -173,7 +173,7 @@ defmodule Cache.State do
   # Consistency holds whether or not a fault is active: a read returns the last
   # written value. (An in-memory cache is always fast, so there is no SLA to
   # relax here; see "Relaxing Invariants During Faults" below for that pattern.)
-  @trigger every: Cache.Events.KeyRead
+  @check every: Cache.Events.KeyRead
   def assert_reads_are_consistent(state, %KeyRead{key: key, value: value}) do
     expected = Map.get(state.store, key)
 
@@ -199,7 +199,7 @@ defmodule Cache.ChaosModel do
       {GetKey,
        weight: 4,
        when: fn state -> map_size(state.store) > 0 end,
-       with: fn state -> %{key: StreamData.member_of(Map.keys(state.store))} end},
+       overrides: fn state -> %{key: StreamData.member_of(Map.keys(state.store))} end},
       # Low weight = occasional faults.
       {NetworkLatency, weight: 1}
     ]
@@ -209,7 +209,7 @@ defmodule Cache.ChaosModel do
   def command_sequence_projection, do: State
 
   @impl true
-  def assertion_projections, do: [State]
+  def check_projections, do: [State]
 
   # The simulator predicts events during sequence generation so state-dependent
   # commands (GetKey needs a key to exist) become eligible. The catch-all covers
@@ -235,13 +235,13 @@ result =
 IO.inspect(result, label: "run result")
 ```
 
-It prints a passing result (your `assertion_fires` count varies with the seed):
+It prints a passing result (your `check_fires` count varies with the seed):
 
 ```
 run result: {:ok,
  %{
    seed: 7,
-   assertion_fires: %{{Cache.State, :reads_are_consistent} => 212},
+   check_fires: %{{Cache.State, :reads_are_consistent} => 212},
    runs: 20,
    total_commands: 240
  }}
@@ -272,7 +272,7 @@ PropertyDamage.Nemesis.simulated_event?(event)
 
 To make the fault real, point the nemesis at a running Toxiproxy. The repo ships a
 ready-made recipe at `benches/redis_bench/docker-compose.yml` (Redis behind a
-Toxiproxy on control port `8474`); bring it up with:
+Toxiproxy on control port `8474`); bring it up overrides:
 
 ```bash
 cd benches/redis_bench && docker compose up -d
@@ -452,7 +452,7 @@ alias PropertyDamage.Nemesis.PacketLoss
 Some invariants don't apply during faults. Adjust checks accordingly:
 
 ```elixir
-@trigger every: 1
+@check every: 1
 def assert_response_time_sla(state, _cmd_or_event) do
   # Don't check SLA during network partition
   if has_active_fault?(state, :network_partition) do
@@ -527,7 +527,7 @@ defmodule TravelBooking.ChaosModel do
   def command_sequence_projection, do: ModelState
 
   @impl true
-  def assertion_projections do
+  def check_projections do
     [
       BookingInvariants,
       NemesisInvariants

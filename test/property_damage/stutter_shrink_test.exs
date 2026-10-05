@@ -126,7 +126,7 @@ defmodule PropertyDamage.StutterShrinkTest do
     # Charge index.
     refute result.success
 
-    assert %Failure{type: %Failure.Assertion{kind: :idempotency_violation}} =
+    assert %Failure{type: %Failure.Check{kind: :idempotency_violation}} =
              result.failure_reason
 
     assert result.failed_at_index == 3

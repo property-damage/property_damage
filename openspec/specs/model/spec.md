@@ -4,7 +4,7 @@
 
 Models orchestrate stateful property-based tests by defining which commands run, when they are valid, how they are parameterized, and the test lifecycle. A model ties together commands, projections, and optional simulators without knowing transport details or command internals.
 
-Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage)
+Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs)
 
 ## Requirements
 
@@ -46,7 +46,7 @@ Models SHALL accept commands in multiple formats. All formats SHALL be normalize
 
 ### Requirement: Command Wiring Options
 
-Models SHALL support three wiring options for commands: `:weight` for relative selection frequency, `:when` for precondition filtering, and `:with` for generator overrides.
+Models SHALL support three wiring options for commands: `:weight` for relative selection frequency, `:when` for precondition filtering, and `:overrides` for generator overrides.
 
 #### Scenario: Weight controls selection frequency
 - **WHEN** command A has weight 3 and command B has weight 1
@@ -62,29 +62,38 @@ Models SHALL support three wiring options for commands: `:weight` for relative s
 - **WHEN** a command does not specify a `when:` option
 - **THEN** it is always eligible for selection regardless of state
 
-#### Scenario: With function provides generator overrides
-- **WHEN** a command has a `with:` function
+#### Scenario: Overrides function provides generator values
+- **WHEN** a command has an `overrides:` function
 - **THEN** the function receives the current projection state
 - **AND** returns a map of overrides passed to the command's generator
 - **AND** this enables state-dependent parameterization (e.g., selecting existing refs)
 
 #### Scenario: With defaults to empty map
-- **WHEN** a command does not specify a `with:` option
+- **WHEN** a command does not specify an `overrides:` option
 - **THEN** an empty map is passed as overrides to the command's generator
+
+### Requirement: Retired Command Option Keys Are Rejected (DR-042)
+
+The framework SHALL reject the retired command-spec key `with:` with an error that names its replacement `overrides:`. No alias is kept.
+
+#### Scenario: Command listed with the retired `with:` key
+- **WHEN** a model lists a command whose spec carries `with:`
+- **THEN** the framework SHALL raise an `ArgumentError` whose message names the command module and states that `with:` was renamed `overrides:`
+- **AND** the command SHALL NOT be accepted with `with:` treated as `overrides:`
 
 ### Requirement: Command Sequence Generation Loop
 
-The framework SHALL generate command sequences through an iterative loop: check state, filter commands by `when:` predicates, select a command by weight, generate an instance using `with:` overrides, simulate execution to predict events, apply predicted events to the projection, and repeat.
+The framework SHALL generate command sequences through an iterative loop: check state, filter commands by `when:` predicates, select a command by weight, generate an instance using `overrides:` values, simulate execution to predict events, apply predicted events to the projection, and repeat.
 
 #### Scenario: Full generation cycle
 - **WHEN** the framework generates a command sequence
 - **THEN** it initializes the command sequence projection via `init/0`
 - **AND** filters available commands by evaluating each `when:` predicate against the current state
 - **AND** selects one command from valid candidates using weighted random selection
-- **AND** generates command data using the command's generator with `with:` overrides
+- **AND** generates command data using the command's generator with `overrides:` values
 - **AND** calls the simulator to predict resulting events
 - **AND** applies predicted events to the projection to update state
-- **AND** repeats until the configured maximum commands or `terminate?/3` returns true
+- **AND** repeats until the configured maximum commands or `terminate_early?/3` returns true
 
 #### Scenario: No valid commands available
 - **WHEN** all commands' `when:` predicates return false for the current state
@@ -150,36 +159,36 @@ Models SHALL support a four-phase lifecycle: `setup_once` runs once at the start
 
 ### Requirement: Terminal States
 
-Models MAY implement `terminate?/3` to control when command generation stops. The callback receives the current state, the command that just executed, and the events it produced. When `terminate?/3` returns `true`, the generation loop SHALL stop appending commands to the sequence.
+Models MAY implement `terminate_early?/3` to control when command generation stops. The callback receives the current state, the command that just executed, and the events it produced. When `terminate_early?/3` returns `true`, the generation loop SHALL stop appending commands to the sequence.
 
 #### Scenario: Terminate on specific command
-- **WHEN** `terminate?/3` pattern-matches a specific command type and returns `true`
+- **WHEN** `terminate_early?/3` pattern-matches a specific command type and returns `true`
 - **THEN** the framework stops generating further commands after that command
 
 #### Scenario: Terminate on state condition
-- **WHEN** `terminate?/3` inspects the state and returns `true` based on a state predicate
+- **WHEN** `terminate_early?/3` inspects the state and returns `true` based on a state predicate
 - **THEN** the framework stops generating further commands
 
 #### Scenario: Terminate on event
-- **WHEN** `terminate?/3` inspects the events list and finds a terminal event
+- **WHEN** `terminate_early?/3` inspects the events list and finds a terminal event
 - **THEN** the framework stops generating further commands
 
 #### Scenario: No terminate callback
-- **WHEN** a model does not implement `terminate?/3`
+- **WHEN** a model does not implement `terminate_early?/3`
 - **THEN** the framework generates commands until the configured `max_commands` limit
 
 ### Requirement: Optional Projection and Event Callbacks
 
-Models MAY implement `assertion_projections/0` returning a list of invariant-checking projections, and `injectable_events/0` returning a list of event modules that can arrive from outside command execution. When provided, `assertion_projections/0` projections SHALL be evaluated alongside the command-sequence projection, and `injectable_events/0` modules SHALL be recognized as valid externally-arriving events.
+Models MAY implement `check_projections/0` returning a list of invariant-checking projections, and `injectable_events/0` returning a list of event modules that can arrive from outside command execution. When provided, `check_projections/0` projections SHALL be evaluated alongside the command-sequence projection, and `injectable_events/0` modules SHALL be recognized as valid externally-arriving events.
 
-#### Scenario: Assertion projections declared
-- **WHEN** a model implements `assertion_projections/0`
+#### Scenario: Check projections declared
+- **WHEN** a model implements `check_projections/0`
 - **THEN** the returned projection modules verify invariants during execution
-- **AND** their assertions fire according to their trigger configurations
+- **AND** their checks fire according to their trigger configurations
 
-#### Scenario: No assertion projections
-- **WHEN** a model does not implement `assertion_projections/0`
-- **THEN** the framework defaults to an empty list and no assertion projections run
+#### Scenario: No check projections
+- **WHEN** a model does not implement `check_projections/0`
+- **THEN** the framework defaults to an empty list and no check projections run
 
 #### Scenario: Injectable events declared
 - **WHEN** a model implements `injectable_events/0`
@@ -188,12 +197,12 @@ Models MAY implement `assertion_projections/0` returning a list of invariant-che
 
 ### Requirement: Invariant Catalog Enumeration (DR-026)
 
-The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.assertion_catalog(model)` SHALL walk the model's projections — the command-sequence projection plus any assertion projections, deduplicated — union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
+The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.check_catalog(model)` SHALL walk the model's projections — the command-sequence projection plus any check projections, deduplicated — union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
 
 #### Scenario: Catalog unions across projections
-- **WHEN** `assertion_catalog/1` is called on a model whose projections declare invariants
+- **WHEN** `check_catalog/1` is called on a model whose projections declare invariants
 - **THEN** the result SHALL include every invariant from every projection
-- **AND** a projection listed both as the command-sequence projection and as an assertion projection SHALL be visited once (deduplicated)
+- **AND** a projection listed both as the command-sequence projection and as a check projection SHALL be visited once (deduplicated)
 
 #### Scenario: Same id in two projections stays distinct
 - **WHEN** two different projections each declare an invariant with the same `id`
@@ -210,7 +219,7 @@ Models SHALL NOT know transport details (HTTP, database, etc.). Commands SHALL N
 
 #### Scenario: Commands are reusable across models
 - **WHEN** the same command module is used in two different models
-- **AND** each model provides different `when:` and `with:` configurations
+- **AND** each model provides different `when:` and `overrides:` configurations
 - **THEN** the command works correctly in both models without modification
 
 ### Requirement: Command Spec Resolution

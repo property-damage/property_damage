@@ -9,7 +9,7 @@ against [Gitea](https://about.gitea.com), a self-hosted git forge whose every
 operation exists both as a REST API call and as an equivalent web-UI interaction:
 
 - `GiteaBench.Model` defines a chain of intents — CreateUser → CreateRepo →
-  CreateIssue → CreateLabel → AddLabelToIssue → CloseIssue — with `when:`/`with:`
+  CreateIssue → CreateLabel → AddLabelToIssue → CloseIssue — with `when:`/`overrides:`
   wiring the dependencies and `GiteaBench.State` declaring the invariants. It never
   mentions API or UI.
 - `GiteaBench.ApiAdapter` realizes each intent against Gitea's **REST API**.
@@ -51,7 +51,7 @@ different state. Without the flag, the same sequences are equivalent.
 lib/gitea_bench/
   events.ex      shared event structs (both adapters emit the same shapes)
   commands.ex    six transport-agnostic command intents
-  state.ex       model state + DR-026 invariants + @trigger assertions
+  state.ex       model state + DR-026 invariants + @check functions
   model.ex       commands/0 (weight/when/with), simulator
   gitea.ex       readiness, per-run reset, REST mutations + neutral observers
   api_adapter.ex REST transport

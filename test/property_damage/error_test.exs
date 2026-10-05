@@ -10,7 +10,7 @@ defmodule PropertyDamage.ErrorTest do
   describe "Error.format/2 for check_failed" do
     test "formats check failure with context" do
       result =
-        Error.format(Failure.assertion_failed(:balance_valid, "Balance is negative"), %{
+        Error.format(Failure.check_failed(:balance_valid, "Balance is negative"), %{
           command_index: 3,
           seed: 12_345
         })
@@ -23,7 +23,7 @@ defmodule PropertyDamage.ErrorTest do
     end
 
     test "formats check failure without context" do
-      result = Error.format(Failure.assertion_failed(:test_check, "error"), %{})
+      result = Error.format(Failure.check_failed(:test_check, "error"), %{})
 
       assert result =~ "Check Failed: :test_check"
       assert result =~ "error"
