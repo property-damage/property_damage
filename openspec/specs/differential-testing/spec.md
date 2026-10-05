@@ -99,7 +99,7 @@ Each target of a multi-target run SHALL run as a variant: one target over the sh
 
 #### Scenario: Same seed, same adapter randomness
 
-- **WHEN** the same `seed:` is run twice and an adapter draws random values in `setup/1` or `execute/3`
+- **WHEN** the same `seed:` is run twice and an adapter draws random values in `setup/1` (the adapter's `execute/3` runs in a per-attempt Task with its own entropy and is not covered)
 - **THEN** each variant SHALL draw the same values in both runs
 - **AND** two variants of one run SHALL draw different values, because each variant seeds its process with `:rand.seed(:exsss, :erlang.phash2({Generator.run_seed(seed, run_number), target.index}, 4_294_967_296))`
 

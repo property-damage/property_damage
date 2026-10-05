@@ -70,13 +70,17 @@ multi-target run schedules them.
    divergence names its `run`, `root`, `command`, `variant`, the reference
    and divergent observations, and every variant's observation by name.
 10. **Per-variant RNG seeding.** A new process draws fresh entropy for
-    `:rand`, so an adapter that draws random values in `setup/1` or
-    `execute/3` would break same-seed reproduction. Before anything runs, the
-    variant seeds its process with
+    `:rand`, so an adapter that draws random values in `setup/1` would break
+    same-seed reproduction. Before anything runs, the variant seeds its
+    process with
     `:rand.seed(:exsss, :erlang.phash2({Generator.run_seed(seed, run_number), target.index}, 4_294_967_296))`.
-    Two runs of one seed draw the same values; two variants of one run draw
-    different ones. Stutter keeps its own generator, derived from the run
-    seed (DR-029).
+    The seed covers what runs in the variant process: the adapter's
+    `setup/1`, `timeout/1` and `teardown/1`, injector and mock setup,
+    projections and checks. Two runs of one seed draw the same values there;
+    two variants of one run draw different ones. It does not cover
+    `execute/3`, which the engine runs in a new Task per attempt with its own
+    entropy, as `PropertyDamage.run/1` does. Stutter keeps its own generator,
+    derived from the run seed (DR-029).
 11. **`runtime.start_poller` and per-target resources.**
     `runtime.start_poller` is allowed in multi-target runs, and its events
     reach only the variant that started it. The old refusal in
@@ -104,9 +108,9 @@ multi-target run schedules them.
 - Setup per run makes every sequence start from the state `setup/1`
   establishes. Setup once per campaign let one run's leftovers decide the
   next run's result.
-- Seeding each variant makes a same-seed run reproduce adapter-side
-  randomness, and the target index keeps two variants from drawing the same
-  values.
+- Seeding each variant makes a same-seed run reproduce the randomness drawn
+  in the variant process, and the target index keeps two variants from
+  drawing the same values.
 - Naming the variant in every failure lets a report say which target failed
   without a second lookup.
 
