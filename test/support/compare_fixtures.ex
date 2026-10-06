@@ -142,7 +142,7 @@ defmodule PropertyDamage.Test.Compare do
           def commands, do: unquote(support).commands(unquote(Macro.escape(commands)))
 
           @impl true
-          def command_sequence_projection, do: unquote(Module.concat(support, Counter))
+          def command_sequence_projection, do: unquote(Counter)
 
           @impl true
           def check_projections, do: unquote(projections)
