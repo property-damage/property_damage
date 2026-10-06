@@ -116,13 +116,38 @@ end
 
 defmodule PropertyDamage.Failure.Setup do
   @moduledoc """
-  A target could not be brought up: its adapter's `setup/1` returned
-  `{:error, term}` or raised. See `PropertyDamage.Failure` for the kind table.
+  A target could not be brought up, so no root ran in it. See
+  `PropertyDamage.Failure` for the kind table.
+
+  `cause` says what failed:
+
+    * `:adapter_setup` - the adapter's `setup/1` returned `{:error, term}` or
+      raised; `detail` is the term or the exception
+    * `:command` - a setup command's adapter answer was `{:error, term}` or a
+      raise, or the command could not be executed; `detail` is the term, the
+      exception, or the `%PropertyDamage.Failure{}` the engine reported
+    * `:check` - a `@check` or `@eventually` check failed on a setup
+      command's event, wherever it was detected; `detail` is the check's
+      `%PropertyDamage.Failure{}`
+    * `:unresolved_placeholder` - after the last setup command, an
+      `external()` a setup command produces was still unresolved; `field` is
+      its path in the event and `detail` the placeholder
+
+  `command` is the setup command (nil for `:adapter_setup`) and `setup_index`
+  its offset among the setup commands.
   """
 
-  @type t :: %__MODULE__{detail: term()}
+  @type cause :: :adapter_setup | :command | :check | :unresolved_placeholder
 
-  defstruct [:detail]
+  @type t :: %__MODULE__{
+          cause: cause(),
+          command: struct() | nil,
+          setup_index: non_neg_integer() | nil,
+          field: [term()] | nil,
+          detail: term()
+        }
+
+  defstruct cause: :adapter_setup, command: nil, setup_index: nil, field: nil, detail: nil
 end
 
 defmodule PropertyDamage.Failure do
@@ -211,7 +236,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:setup_failed` | `nil` | the term `setup/1` returned in `{:error, term}`, or the exception it raised |
+  | `:setup_failed` | `nil` | depends on `cause` (see `PropertyDamage.Failure.Setup`): the term or exception of `setup/1` or of a setup command, the failed check, or the unresolved placeholder |
 
   ## Triage
 
@@ -453,7 +478,18 @@ defmodule PropertyDamage.Failure do
   """
   @spec setup_failed(term()) :: t()
   def setup_failed(detail) do
-    %__MODULE__{type: %Setup{detail: detail}}
+    %__MODULE__{type: %Setup{cause: :adapter_setup, detail: detail}}
+  end
+
+  @doc """
+  A setup command failed in a target. `cause` is `:command`, `:check` or
+  `:unresolved_placeholder`; `fields` holds `:command`, `:setup_index`,
+  `:detail` and, for an unresolved placeholder, `:field` (see
+  `PropertyDamage.Failure.Setup`).
+  """
+  @spec setup_failed(Setup.cause(), keyword()) :: t()
+  def setup_failed(cause, fields) when cause in [:command, :check, :unresolved_placeholder] do
+    %__MODULE__{type: struct!(Setup, Keyword.put(fields, :cause, cause))}
   end
 
   # ==========================================================================

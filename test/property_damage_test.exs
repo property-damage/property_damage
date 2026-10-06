@@ -212,89 +212,51 @@ defmodule PropertyDamageTest do
     end
   end
 
-  describe "run/1 with lifecycle callbacks" do
-    defmodule LifecycleModel do
-      @behaviour PropertyDamage.Model
+  describe "run/1 with setup commands" do
+    test "each target executes the run's drawn setup commands once per run" do
+      import PropertyDamage.Test.VariantSupport, only: [start_recorder: 0, recorded: 1]
 
-      alias PropertyDamage.Test.Commands.CreateItem
-      alias PropertyDamage.Test.Projections.ModelState
+      alias PropertyDamage.Test.SetupCommands
+      alias PropertyDamage.Test.SetupCommands.{CreateUser, Login}
 
-      @impl true
-      def commands, do: [CreateItem]
+      recorder = start_recorder()
 
-      @impl true
-      def command_sequence_projection, do: ModelState
+      model =
+        SetupCommands.define_model!(PropertyDamageTest.SetupCommandsModel,
+          setup: [CreateUser, {Login, overrides: fn state -> %{user_id: state.user} end}]
+        )
 
-      @impl true
-      def check_projections, do: []
+      assert {:ok, %{runs: 3}} =
+               PropertyDamage.run(
+                 model: model,
+                 targets: [
+                   SetupCommands.target("a", recorder),
+                   SetupCommands.target("b", recorder)
+                 ],
+                 max_runs: 3,
+                 max_commands: 2,
+                 seed: 31,
+                 validate: false
+               )
 
-      # Every callback echoes the exact map it received back to the test pid,
-      # which lives in adapter_config (guaranteed present on every path).
-      @impl true
-      def setup_once(config) do
-        send(config.adapter_config.test_pid, {:lifecycle, :setup_once, config})
-        :ok
-      end
+      entries = recorded(recorder)
 
-      @impl true
-      def setup_each(config) do
-        send(config.adapter_config.test_pid, {:lifecycle, :setup_each, config})
-        :ok
-      end
+      # The names each run drew for its CreateUser, from the run's own seed.
+      drawn =
+        for run <- 0..2 do
+          [%CreateUser{name: name}, _login] =
+            model
+            |> PropertyDamage.Generator.generate_sequence(max_commands: 2)
+            |> PropertyDamage.Generator.generate_value(PropertyDamage.Generator.run_seed(31, run))
+            |> PropertyDamage.Sequence.setup_commands()
 
-      @impl true
-      def teardown_each(config) do
-        send(config.adapter_config.test_pid, {:lifecycle, :teardown_each, config})
-        :ok
-      end
+          name
+        end
 
-      @impl true
-      def teardown_once(config) do
-        send(config.adapter_config.test_pid, {:lifecycle, :teardown_once, config})
-        :ok
-      end
-    end
-
-    test "setup_once and teardown_once receive %{adapter_config: ...} on the run path" do
-      pid = self()
-
-      PropertyDamage.run(
-        model: LifecycleModel,
-        targets: [{SimpleAdapter, config: %{test_pid: pid}}],
-        max_runs: 1,
-        max_commands: 2,
-        validate: false
-      )
-
-      assert_received {:lifecycle, :setup_once, setup_config}
-      assert setup_config == %{adapter_config: %{test_pid: pid}}
-
-      assert_received {:lifecycle, :teardown_once, teardown_config}
-      assert teardown_config == %{adapter_config: %{test_pid: pid}}
-    end
-
-    test "setup_each and teardown_each receive adapter_config + run_number on the run path" do
-      pid = self()
-
-      PropertyDamage.run(
-        model: LifecycleModel,
-        targets: [{SimpleAdapter, config: %{test_pid: pid}}],
-        max_runs: 3,
-        max_commands: 2,
-        validate: false
-      )
-
-      for n <- 0..2 do
-        assert_received {:lifecycle, :setup_each,
-                         %{adapter_config: %{test_pid: ^pid}, run_number: ^n} = setup_config}
-
-        assert map_size(setup_config) == 2
-
-        assert_received {:lifecycle, :teardown_each,
-                         %{adapter_config: %{test_pid: ^pid}, run_number: ^n} = teardown_config}
-
-        assert map_size(teardown_config) == 2
-        refute Map.has_key?(teardown_config, :replay)
+      for target <- ["a", "b"] do
+        executed = SetupCommands.executed(entries, target)
+        assert for(%CreateUser{name: name} <- executed, do: name) == drawn
+        assert Enum.count(executed, &match?(%Login{}, &1)) == 3
       end
     end
   end

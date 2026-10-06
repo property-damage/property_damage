@@ -1,6 +1,6 @@
 # DR-015: Adapter Separation
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed). Amended by DR-048: the model's setup commands run after `Adapter.setup/1` and its teardown commands before `Adapter.teardown/1`; the `setup_each/1` hook this record names is removed.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
 
 ## Decision

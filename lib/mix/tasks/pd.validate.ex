@@ -23,11 +23,16 @@ defmodule Mix.Tasks.Pd.Validate do
   - All command modules exist and implement required callbacks
   - All projection modules exist
   - Injectable events are covered by injector adapters
+  - The model defines no removed lifecycle hook (`setup_each/1`,
+    `teardown_each/1`, `setup_once`, `teardown_once`); setup and teardown
+    entries are valid commands and no nemesis
 
   ### Warnings (validation passes with warnings)
   - Commands that declare no `:observables` in their `command_spec/1`
   - Events produced but not handled by check projections
   - Missing optional callbacks that may be useful
+  - A `when:` or `weight:` on a setup or teardown entry (`setup_each/0`,
+    `teardown_each/0`): every entry of a sequence runs, in order
   - Two targets with the same adapter and an identical `config:`: such targets
     share state, so give each its own `config:` (for example a tenant)
 
@@ -240,7 +245,7 @@ defmodule Mix.Tasks.Pd.Validate do
   end
 
   defp validate_loaded_model_only(model, verbose, strict) do
-    case missing_required_callbacks(model) do
+    case missing_required_callbacks(model) ++ lifecycle_errors(model) do
       [] ->
         report_model_only(model, verbose, strict)
 
@@ -256,6 +261,14 @@ defmodule Mix.Tasks.Pd.Validate do
         not function_exported?(model, callback, 0) do
       "Model missing required callback #{callback}/0"
     end
+  end
+
+  # A removed lifecycle hook, or a nemesis among the setup or teardown commands.
+  defp lifecycle_errors(model) do
+    PropertyDamage.Model.check_lifecycle!(model)
+    []
+  rescue
+    e in ArgumentError -> [e.message]
   end
 
   defp report_model_only(model, verbose, strict) do
@@ -306,7 +319,8 @@ defmodule Mix.Tasks.Pd.Validate do
         "Command #{cmd |> Module.split() |> List.last()} declares no :observables"
       end
 
-    warnings = warnings ++ invariant_warnings(model)
+    warnings =
+      warnings ++ invariant_warnings(model) ++ PropertyDamage.Validation.sequence_warnings(model)
 
     if verbose do
       print_model_summary(model, commands)

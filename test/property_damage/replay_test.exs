@@ -66,13 +66,35 @@ defmodule PropertyDamage.ReplayTest do
     def command_sequence_projection, do: Counter
   end
 
-  # Same counter, but records the exact map each lifecycle callback receives by
-  # echoing it to the pid carried in adapter_config.
+  # A setup command and a teardown command for the counter.
+  defmodule Prepare do
+    @moduledoc false
+    @behaviour PropertyDamage.Command
+    defstruct [:tag]
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{tag: StreamData.constant("default")}
+      |> PropertyDamage.Generator.merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+
+  defmodule Release do
+    @moduledoc false
+    @behaviour PropertyDamage.Command
+    defstruct []
+
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+  end
+
+  # The counter with one setup command and one teardown command.
   defmodule LifecycleCounterModel do
     @moduledoc false
     @behaviour PropertyDamage.Model
 
-    alias PropertyDamage.ReplayTest.{Bump, Counter}
+    alias PropertyDamage.ReplayTest.{Bump, Counter, Prepare, Release}
 
     @impl true
     def commands, do: [Bump]
@@ -81,15 +103,38 @@ defmodule PropertyDamage.ReplayTest do
     def command_sequence_projection, do: Counter
 
     @impl true
-    def setup_each(config) do
-      send(config.adapter_config.test_pid, {:lifecycle, :setup_each, config})
+    def setup_each, do: [{Prepare, overrides: %{tag: "fixture"}}]
+
+    @impl true
+    def teardown_each, do: [Release]
+  end
+
+  # The counter adapter, reporting its setup/1 config, every command it
+  # executes and its teardown/1 to the pid carried in the config.
+  defmodule LifecycleCounterAdapter do
+    @moduledoc false
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(config) do
+      send(config.test_pid, {:lifecycle, :setup, config})
+      {:ok, %{config: config}}
+    end
+
+    @impl true
+    def teardown(context) do
+      send(context.config.test_pid, {:lifecycle, :teardown, context.config})
       :ok
     end
 
     @impl true
-    def teardown_each(config) do
-      send(config.adapter_config.test_pid, {:lifecycle, :teardown_each, config})
-      :ok
+    def execute(command, context, _runtime) do
+      send(context.config.test_pid, {:lifecycle, :execute, command})
+
+      case command do
+        %Bump{} -> {:ok, [%Counted{amount: 1}]}
+        _fixture -> {:ok, []}
+      end
     end
   end
 
@@ -248,37 +293,93 @@ defmodule PropertyDamage.ReplayTest do
     end
   end
 
-  describe "lifecycle callback arguments" do
-    test "replay passes replay: true (and no run_number) to setup_each and teardown_each" do
+  # The counter's failure, recorded with the setup and teardown commands of
+  # LifecycleCounterModel.
+  defp recorded_lifecycle_failure do
+    sequence = %{
+      Sequence.linear([%Bump{}, %Bump{}, %Bump{}])
+      | setup: [%Prepare{tag: "fixture"}],
+        teardown: [%Release{}]
+    }
+
+    {:ok, result} =
+      Executor.run(sequence, LifecycleCounterModel, CounterAdapter,
+        setup_commands: sequence.setup,
+        teardown_commands: sequence.teardown
+      )
+
+    refute result.success
+
+    FailureReport.new(
+      seed: 0,
+      run_number: 1,
+      original_sequence: sequence,
+      shrunk_sequence: sequence,
+      failed_at_index: result.failed_at_index,
+      failure_reason: result.failure_reason,
+      event_log: result.event_log,
+      projections: result.projections,
+      projections_before: result.projections_before,
+      model: LifecycleCounterModel,
+      targets: [{CounterAdapter, []}]
+    )
+  end
+
+  defp lifecycle_messages(acc \\ []) do
+    receive do
+      {:lifecycle, _, _} = message -> lifecycle_messages([message | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  describe "the replay session lifecycle" do
+    test "Replay.run sets the target up with its config, runs the setup commands before step 0 and the teardown commands before teardown/1" do
       pid = self()
-      sequence = Sequence.linear([%Bump{}, %Bump{}, %Bump{}])
+      failure = recorded_lifecycle_failure()
+      assert failure.setup_commands == [%Prepare{tag: "fixture"}]
 
-      {:ok, result} = Executor.run(sequence, LifecycleCounterModel, CounterAdapter, [])
-      refute result.success
+      {:ok, steps} =
+        Replay.run(failure, targets: [{LifecycleCounterAdapter, config: %{test_pid: pid}}])
 
-      failure =
-        FailureReport.new(
-          seed: 0,
-          run_number: 1,
-          original_sequence: sequence,
-          shrunk_sequence: sequence,
-          failed_at_index: result.failed_at_index,
-          failure_reason: result.failure_reason,
-          event_log: result.event_log,
-          projections: result.projections,
-          projections_before: result.projections_before,
-          model: LifecycleCounterModel,
-          targets: [{CounterAdapter, []}]
-        )
+      # Steps index the roots only.
+      assert Enum.map(steps, & &1.index) == [0, 1, 2]
 
-      # Replay.run starts a session (setup_each) and stops it (teardown_each).
-      {:ok, _steps} = Replay.run(failure, targets: [{CounterAdapter, config: %{test_pid: pid}}])
+      assert [
+               {:lifecycle, :setup, %{test_pid: ^pid}},
+               {:lifecycle, :execute, %Prepare{tag: "fixture"}},
+               {:lifecycle, :execute, %Bump{}},
+               {:lifecycle, :execute, %Bump{}},
+               {:lifecycle, :execute, %Bump{}},
+               {:lifecycle, :execute, %Release{}},
+               {:lifecycle, :teardown, %{test_pid: ^pid}}
+             ] = lifecycle_messages()
+    end
 
-      assert_received {:lifecycle, :setup_each, setup_config}
-      assert setup_config == %{adapter_config: %{test_pid: pid}, replay: true}
+    test "a session runs the setup commands in start/2 and the teardown commands in stop/1" do
+      pid = self()
+      failure = recorded_lifecycle_failure()
 
-      assert_received {:lifecycle, :teardown_each, teardown_config}
-      assert teardown_config == %{adapter_config: %{test_pid: pid}, replay: true}
+      {:ok, session} =
+        Replay.start(failure, targets: [{LifecycleCounterAdapter, config: %{test_pid: pid}}])
+
+      assert session.current_index == -1
+
+      assert [
+               {:lifecycle, :setup, %{test_pid: ^pid}},
+               {:lifecycle, :execute, %Prepare{tag: "fixture"}}
+             ] = lifecycle_messages()
+
+      {:ok, session, step} = Replay.step(session)
+      assert step.index == 0
+      assert [{:lifecycle, :execute, %Bump{}}] = lifecycle_messages()
+
+      :ok = Replay.stop(session)
+
+      assert [
+               {:lifecycle, :execute, %Release{}},
+               {:lifecycle, :teardown, %{test_pid: ^pid}}
+             ] = lifecycle_messages()
     end
   end
 end

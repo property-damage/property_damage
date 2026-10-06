@@ -63,11 +63,11 @@ The system SHALL include version metadata in persisted files and warn when loadi
 - **WHEN** a `.pd` file references a dependency not present in the current environment
 - **THEN** the system SHALL return a `{:dependency_missing, dep, saved_version}` warning
 
-#### Scenario: Pre-v10 format versions are refused
+#### Scenario: Pre-v11 format versions are refused
 
-- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1` through `9`) is loaded
-- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 10}}` without attempting to decode the payload
-- **AND** the system SHALL NOT synthesize the missing data: a v9 file stores the report's `equivalence` and a `Failure.Divergence` holding `reference_result` and `divergent_result`, which v10 replaced with `compare`, `compare_counts`, `other_failures` and a divergence holding the `@compare` key, the two values and the mismatch (DR-046); older files predate the `kind`, `variant` and `targets` fields (DR-045), the `%Failure.Check{}` and `check_fires` names (DR-042) and the nested `%Failure{}` shape (DR-041). There is no honest in-place upgrade, so the user re-captures the failure under the current version (the framework is unpublished and such files exist only as regenerable test fixtures)
+- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1` through `10`) is loaded
+- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 11}}` without attempting to decode the payload
+- **AND** the system SHALL NOT synthesize the missing data: a v10 file has no `setup_commands` or `teardown_commands`, which v11 adds so a report reproduces without re-drawing them (DR-048); a v9 file stores the report's `equivalence` and a `Failure.Divergence` holding `reference_result` and `divergent_result`, which v10 replaced with `compare`, `compare_counts`, `other_failures` and a divergence holding the `@compare` key, the two values and the mismatch (DR-046); older files predate the `kind`, `variant` and `targets` fields (DR-045), the `%Failure.Check{}` and `check_fires` names (DR-042) and the nested `%Failure{}` shape (DR-041). There is no honest in-place upgrade, so the user re-captures the failure under the current version (the framework is unpublished and such files exist only as regenerable test fixtures)
 
 #### Scenario: A v10 report carries the comparison record
 

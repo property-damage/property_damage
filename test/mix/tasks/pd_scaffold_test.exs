@@ -698,6 +698,11 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "{Commands.DeletePet, weight: 1}"
       assert code =~ "def command_sequence_projection do"
       assert code =~ "def check_projections do"
+
+      # The commented lifecycle example shows setup and teardown commands.
+      assert code =~ "setup_each/0"
+      assert code =~ "teardown_each/0"
+      refute code =~ "setup_once"
     end
   end
 

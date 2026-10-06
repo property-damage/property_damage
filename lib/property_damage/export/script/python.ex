@@ -87,7 +87,6 @@ Run with: python #{Common.generate_filename(report, :python)}
   end
 
   defp generate_step(%StepPlan.Step{} = step, verbose) do
-    step_num = step.flattened_index + 1
     cmd_name = Common.command_name(step.command)
 
     failure_marker = if step.failed?, do: " (FAILURE POINT)", else: ""
@@ -98,7 +97,7 @@ Run with: python #{Common.generate_filename(report, :python)}
         """
 
         print()
-        print(f"=== Step #{step_num}: #{cmd_name}#{failure_marker} ===")
+        print(f"=== #{step.title}: #{cmd_name}#{failure_marker} ===")
         """
       else
         ""
@@ -125,7 +124,7 @@ Run with: python #{Common.generate_filename(report, :python)}
   end
 
   defp generate_requests_code(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step) do
-    var_name = "resp#{step.flattened_index + 1}"
+    var_name = "resp#{step.key}"
 
     path =
       spec.path

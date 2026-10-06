@@ -96,6 +96,7 @@ defmodule PropertyDamage.Executor do
   alias PropertyDamage.Executor.Branching
   alias PropertyDamage.Executor.Events
   alias PropertyDamage.Executor.Finalization
+  alias PropertyDamage.Executor.Phases
   alias PropertyDamage.Executor.Settle
   alias PropertyDamage.Executor.State
   alias PropertyDamage.Executor.Timeout
@@ -153,6 +154,28 @@ defmodule PropertyDamage.Executor do
   - `:check_mode` - How to handle checks (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
   - `:telemetry` - The context command and check telemetry is emitted with
     (`PropertyDamage.Telemetry`); default `nil`, which emits none
+  - `:setup_commands` - The run's setup commands (`Sequence.setup_commands/1`),
+    stepped after the `@check at: :startup` checks and before the sequence;
+    default `[]`
+  - `:teardown_commands` - The run's teardown commands
+    (`Sequence.teardown_commands/1`), stepped after the run is finalized (its
+    `@check at: :teardown` checks included) and before the adapter's
+    `teardown/1`; default `[]`
+
+  ## Order
+
+  The adapter's `setup/1`, the `@check at: :startup` checks, the setup
+  commands, the sequence (for a branching sequence its prefix, branches and
+  suffix), the finalization (pollers awaited, queue settled, `@check at:
+  :teardown` checks), the teardown commands, and the adapter's `teardown/1`.
+
+  The teardown commands run whenever `setup/1` succeeded, whatever happened
+  after it. A failure in the setup phase (a setup command that could not run,
+  a check that failed on a setup command's event, an `external()` a setup
+  command produces that stayed unresolved) ends the run before the sequence:
+  the result has `success: false`, `failed_at_index: nil` and a
+  `failure_reason` of kind `:setup_failed`. The teardown commands' event-log
+  entries (`phase: :teardown`) are appended to the result's event log.
 
   ## Returns
 
@@ -178,23 +201,23 @@ defmodule PropertyDamage.Executor do
 
     with {:ok, adapter_context} <- adapter.setup(config) do
       try do
-        result =
-          execute_sequence(
-            sequence,
-            model,
-            adapter,
-            adapter_context,
-            event_queue,
-            stutter_config,
-            mock_registry,
-            check_mode,
-            external_markers,
-            rng_seed,
-            mint,
-            telemetry
-          )
+        env = %{
+          model: model,
+          adapter: adapter,
+          adapter_context: adapter_context,
+          event_queue: event_queue,
+          stutter_config: stutter_config,
+          mock_registry: mock_registry,
+          check_mode: check_mode,
+          external_markers: external_markers,
+          rng_seed: rng_seed,
+          mint: mint,
+          telemetry: telemetry,
+          setup_commands: Keyword.get(opts, :setup_commands, []),
+          teardown_commands: Keyword.get(opts, :teardown_commands, [])
+        }
 
-        {:ok, result}
+        {:ok, execute_run(sequence, env)}
       after
         safe_teardown(adapter, adapter_context)
       end
@@ -290,7 +313,7 @@ defmodule PropertyDamage.Executor do
       )
 
   def execute_sequence(
-        %Sequence{branches: nil} = sequence,
+        sequence_or_commands,
         model,
         adapter,
         adapter_context,
@@ -303,87 +326,100 @@ defmodule PropertyDamage.Executor do
         mint,
         telemetry
       ) do
-    # Linear sequence: just execute prefix ++ suffix
-    commands = Sequence.to_list(sequence)
+    sequence =
+      if is_list(sequence_or_commands),
+        do: Sequence.linear(sequence_or_commands),
+        else: sequence_or_commands
 
-    execute_linear(
-      commands,
-      model,
-      adapter,
-      adapter_context,
-      event_queue,
-      stutter_config,
-      mock_registry,
-      check_mode,
-      external_markers,
-      sequence.registry,
-      rng_seed,
-      mint,
-      telemetry
-    )
+    execute_run(sequence, %{
+      model: model,
+      adapter: adapter,
+      adapter_context: adapter_context,
+      event_queue: event_queue,
+      stutter_config: stutter_config,
+      mock_registry: mock_registry,
+      check_mode: check_mode,
+      external_markers: external_markers,
+      rng_seed: rng_seed,
+      mint: mint,
+      telemetry: telemetry,
+      setup_commands: [],
+      teardown_commands: []
+    })
   end
 
-  def execute_sequence(
-        %Sequence{} = sequence,
-        model,
-        adapter,
-        adapter_context,
-        event_queue,
-        stutter_config,
-        mock_registry,
-        check_mode,
-        external_markers,
-        rng_seed,
-        mint,
-        telemetry
-      ) do
-    # Branching sequence: execute prefix, branches, suffix
-    Branching.execute_branching(
-      sequence,
-      model,
-      adapter,
-      adapter_context,
-      event_queue,
-      stutter_config,
-      mock_registry,
-      check_mode,
-      external_markers,
-      rng_seed,
-      mint,
-      telemetry
-    )
-  end
+  # ============================================================================
+  # Run Phases
+  # ============================================================================
 
-  # Backwards compatibility: accept list of commands
-  def execute_sequence(
-        commands,
-        model,
-        adapter,
-        adapter_context,
-        event_queue,
-        stutter_config,
-        mock_registry,
-        check_mode,
-        external_markers,
-        rng_seed,
-        mint,
-        telemetry
+  # One run against an adapter context that is already set up: the startup
+  # checks, the setup commands, the sequence (linear or branching), the
+  # finalization, then the teardown commands. `env` holds the run's inputs.
+  defp execute_run(%Sequence{} = sequence, env) do
+    initial_state =
+      build_initial_state(
+        env.model,
+        env.event_queue,
+        env.stutter_config,
+        env.mock_registry,
+        env.check_mode,
+        env.external_markers,
+        sequence.registry,
+        env.rng_seed,
+        env.mint,
+        env.telemetry
       )
-      when is_list(commands) do
-    execute_linear(
-      commands,
-      model,
-      adapter,
-      adapter_context,
-      event_queue,
-      stutter_config,
-      mock_registry,
-      check_mode,
-      external_markers,
-      nil,
-      rng_seed,
-      mint,
-      telemetry
+
+    ctx = %PropertyDamage.Executor.Stepping.Context{
+      model: env.model,
+      adapter: env.adapter,
+      adapter_context: env.adapter_context,
+      event_queue: env.event_queue,
+      target_name: env.telemetry && env.telemetry.variant.name
+    }
+
+    {ended, linearization} =
+      with {:ok, state} <- run_startup_checks(initial_state),
+           {:ok, state} <- Phases.run_setup(env.setup_commands, state, ctx) do
+        execute_body(sequence, state, env)
+      else
+        {:failed, nil, _failure, _state} = failed -> {failed, nil}
+        {:failed, failure, failed_state} -> {{:failed, nil, failure, failed_state}, nil}
+      end
+
+    result =
+      ended
+      |> Finalization.finalize_result(linearization)
+      |> Phases.attribute(env.setup_commands)
+
+    {_state, entries} = Phases.run_teardown(env.teardown_commands, ended_state(ended), ctx)
+    %{result | event_log: result.event_log ++ entries}
+  end
+
+  defp ended_state({:failed, _index, _reason, state}), do: state
+  defp ended_state(state), do: state
+
+  # The sequence itself, from the state the setup phase left. Returns the
+  # state (or the failed tuple) to finalize and the linearization of a
+  # branching run.
+  defp execute_body(%Sequence{branches: nil} = sequence, state, env) do
+    ended =
+      sequence
+      |> Sequence.to_list()
+      |> execute_linear(state, env.model, env.adapter, env.adapter_context, env.event_queue)
+      |> restore_remaining_faults(env.adapter_context, env.event_queue)
+
+    {ended, nil}
+  end
+
+  defp execute_body(%Sequence{} = sequence, state, env) do
+    Branching.execute_body(
+      sequence,
+      state,
+      env.model,
+      env.adapter,
+      env.adapter_context,
+      env.event_queue
     )
   end
 
@@ -391,79 +427,40 @@ defmodule PropertyDamage.Executor do
   # Linear Execution
   # ============================================================================
 
-  defp execute_linear(
-         commands,
-         model,
-         adapter,
-         adapter_context,
-         event_queue,
-         stutter_config,
-         mock_registry,
-         check_mode,
-         external_markers,
-         registry,
-         rng_seed,
-         mint,
-         telemetry
-       ) do
-    initial_state =
-      build_initial_state(
-        model,
-        event_queue,
-        stutter_config,
-        mock_registry,
-        check_mode,
-        external_markers,
-        registry,
-        rng_seed,
-        mint,
-        telemetry
-      )
+  defp execute_linear(commands, initial_state, model, adapter, adapter_context, event_queue) do
+    commands
+    |> Enum.with_index()
+    |> Enum.reduce_while(initial_state, fn {command, index}, state ->
+      # Capture projections before this command executes
+      state_with_before = %{
+        state
+        | projections_before: state.projections,
+          current_position: Position.prefix(index)
+      }
 
-    case run_startup_checks(initial_state) do
-      {:failed, nil, _failure, _state} = failed ->
-        Finalization.finalize_result(failed)
+      case execute_command(
+             command,
+             index,
+             state_with_before,
+             model,
+             adapter,
+             adapter_context,
+             event_queue
+           ) do
+        {:ok, new_state} ->
+          # Lift any auto-restoring fault whose duration has elapsed, so a
+          # time-bounded fault stops affecting later commands.
+          {:cont,
+           PropertyDamage.Executor.Nemesis.restore_elapsed_faults(
+             new_state,
+             adapter_context,
+             event_queue
+           )}
 
-      {:ok, initial_state} ->
-        result =
-          commands
-          |> Enum.with_index()
-          |> Enum.reduce_while(initial_state, fn {command, index}, state ->
-            # Capture projections before this command executes
-            state_with_before = %{
-              state
-              | projections_before: state.projections,
-                current_position: Position.prefix(index)
-            }
-
-            case execute_command(
-                   command,
-                   index,
-                   state_with_before,
-                   model,
-                   adapter,
-                   adapter_context,
-                   event_queue
-                 ) do
-              {:ok, new_state} ->
-                # Lift any auto-restoring fault whose duration has elapsed, so a
-                # time-bounded fault stops affecting later commands.
-                {:cont,
-                 PropertyDamage.Executor.Nemesis.restore_elapsed_faults(
-                   new_state,
-                   adapter_context,
-                   event_queue
-                 )}
-
-              {:error, reason, failed_state} ->
-                {:halt, {:failed, index, reason, failed_state}}
-            end
-          end)
-
-        result
-        |> restore_remaining_faults(adapter_context, event_queue)
-        |> Finalization.finalize_result()
-    end
+        {:error, reason, failed_state} ->
+          {:halt, {:failed, index, reason, failed_state}}
+      end
+    end)
   end
 
   # DR-024: @check at: :startup checks run on the initial init/0 state, after
@@ -641,10 +638,18 @@ defmodule PropertyDamage.Executor do
     # Only a command that reaches the adapter's execute/3 records a time.
     state = %{state | last_execute_us: nil}
 
+    # The engine attributes a setup command by `{:setup, offset}` (see
+    # PropertyDamage.EventLog.Entry, "Phase"); telemetry reports it as the
+    # offset within the setup phase.
     PropertyDamage.Telemetry.command_span(state.telemetry, command, index, fn ->
       execute_any_command(command, index, state, model, adapter, adapter_context, event_queue)
     end)
   end
+
+  # Whether a step advances the check sampling counters: a root does, a setup
+  # command does not (its `every: N` triggers neither count nor fire).
+  defp sampling?({:setup, _offset}), do: false
+  defp sampling?(_index), do: true
 
   defp execute_any_command(command, index, state, model, adapter, adapter_context, event_queue) do
     if Nemesis.nemesis_command?(command) do
@@ -1069,7 +1074,8 @@ defmodule PropertyDamage.Executor do
           step_count: state.step_count + 1,
           projections: projections,
           branch_id: state.branch_id,
-          telemetry: state.telemetry
+          telemetry: state.telemetry,
+          sampling: sampling?(index)
         }
 
         case run_checks(
@@ -1137,8 +1143,12 @@ defmodule PropertyDamage.Executor do
   # which honors `use PropertyDamage.Command, execution: :probe` and model-level
   # overrides.
   defp build_command_specs(model) do
-    model.commands()
-    |> PropertyDamage.Model.normalize_commands()
+    # A setup or teardown command's module gets its spec from its own entry,
+    # unless commands/0 lists the module too.
+    sequences =
+      PropertyDamage.Model.setup_commands(model) ++ PropertyDamage.Model.teardown_commands(model)
+
+    (sequences ++ PropertyDamage.Model.normalize_commands(model.commands()))
     |> Map.new(fn {_weight, module, spec} -> {module, spec} end)
   rescue
     # Never swallow a misconfigured model into an empty spec map: that silently
@@ -1337,9 +1347,14 @@ defmodule PropertyDamage.Executor do
     # checks (@check at:, DR-024) are also synchronous but fire only at a
     # phase boundary, not during the command loop, so they are excluded here and
     # dispatched separately by run_phase_checks/2.
+    # A step that does not sample (a setup command's) skips the `every: N`
+    # triggers: they read counters it did not advance.
+    sampling = Map.get(step_ctx, :sampling, true)
+
     sync_checks =
       Enum.filter(checks, fn check ->
-        check.type == :synchronous and not match?(%{type: :at}, check.trigger)
+        check.type == :synchronous and not match?(%{type: :at}, check.trigger) and
+          (sampling or not match?(%{type: :every_n}, check.trigger))
       end)
 
     Enum.reduce_while(sync_checks, {:ok, counters}, fn check, {:ok, acc_counters} ->
@@ -1538,19 +1553,18 @@ defmodule PropertyDamage.Executor do
         check_failures
       ) do
     command_module = check_ctx.command.__struct__
+    sampling = Map.get(check_ctx, :sampling, true)
 
     # Update counters
     counters =
-      check_counters
-      |> Map.update(:step, 1, &(&1 + 1))
-      |> Map.update(:command, 1, &(&1 + 1))
-      |> Map.update(command_module, 1, &(&1 + 1))
+      bump_sampling(check_counters, sampling, [:step, :command, command_module])
 
     # Run checks for command
     step_ctx = %{
       step_type: :command,
       module: command_module,
-      command_or_event: check_ctx.command
+      command_or_event: check_ctx.command,
+      sampling: sampling
     }
 
     case run_step_checks(
@@ -1600,18 +1614,16 @@ defmodule PropertyDamage.Executor do
          check_ctx
        ) do
     event_module = event.__struct__
+    sampling = Map.get(check_ctx, :sampling, true)
 
     # Update counters for this event
-    counters =
-      counters
-      |> Map.update(:step, 1, &(&1 + 1))
-      |> Map.update(:event, 1, &(&1 + 1))
-      |> Map.update(event_module, 1, &(&1 + 1))
+    counters = bump_sampling(counters, sampling, [:step, :event, event_module])
 
     step_ctx = %{
       step_type: :event,
       module: event_module,
-      command_or_event: event
+      command_or_event: event,
+      sampling: sampling
     }
 
     case run_step_checks(
@@ -1638,6 +1650,14 @@ defmodule PropertyDamage.Executor do
         error
     end
   end
+
+  # Advance the sampling counters `keys` by one, unless the step does not
+  # sample (a setup command's step, whose `every: N` triggers neither count
+  # nor fire).
+  defp bump_sampling(counters, false, _keys), do: counters
+
+  defp bump_sampling(counters, true, keys),
+    do: Enum.reduce(keys, counters, fn key, acc -> Map.update(acc, key, 1, &(&1 + 1)) end)
 
   # ============================================================================
   # Continuous async-observation checking (DR-025)
@@ -1704,7 +1724,7 @@ defmodule PropertyDamage.Executor do
 
         case check_async_event(model, projs, entry, c, mode, f, telemetry) do
           {:ok, c, f} -> {:cont, {projs, c, f}}
-          {:halt, name, reason, c} -> {:halt, {:halt, name, reason, entry.command_index, c}}
+          {:halt, name, reason, c} -> {:halt, {:halt, name, reason, Entry.attribution(entry), c}}
         end
       end)
 
@@ -1723,15 +1743,18 @@ defmodule PropertyDamage.Executor do
   defp check_async_event(model, projections, entry, counters, mode, failures, telemetry) do
     event = entry.event
     module = event.__struct__
+    # An event of a setup command does not advance the sampling counters.
+    sampling = entry.phase == :root
 
-    counters =
-      counters
-      |> Map.update(:step, 1, &(&1 + 1))
-      |> Map.update(:event, 1, &(&1 + 1))
-      |> Map.update(module, 1, &(&1 + 1))
+    counters = bump_sampling(counters, sampling, [:step, :event, module])
 
-    step_ctx = %{step_type: :event, module: module, command_or_event: event}
-    check_ctx = %{command: nil, command_index: entry.command_index, telemetry: telemetry}
+    step_ctx = %{step_type: :event, module: module, command_or_event: event, sampling: sampling}
+
+    check_ctx = %{
+      command: nil,
+      command_index: Entry.attribution(entry),
+      telemetry: telemetry
+    }
 
     case run_step_checks(model, projections, step_ctx, counters, mode, failures, check_ctx) do
       {:ok, counters, failures} -> {:ok, counters, failures}

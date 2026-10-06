@@ -69,16 +69,19 @@ defmodule PropertyDamage.Executor.Events do
         fold_counter
       ) do
     Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
-      entry = %Entry{
-        timestamp: System.monotonic_time(:millisecond),
-        command_index: command_index,
-        event: event,
-        source: source,
-        injector_adapter: nil,
-        nemesis_module: nil,
-        branch_id: branch_id,
-        fold_index: fc
-      }
+      entry =
+        Entry.attribute(
+          %Entry{
+            timestamp: System.monotonic_time(:millisecond),
+            event: event,
+            source: source,
+            injector_adapter: nil,
+            nemesis_module: nil,
+            branch_id: branch_id,
+            fold_index: fc
+          },
+          command_index
+        )
 
       new_projs = update_projections(projs, event)
       {new_projs, [entry | log], fc + 1}
@@ -125,15 +128,17 @@ defmodule PropertyDamage.Executor.Events do
             # Regular injector adapter entry. DR-030: correlate against the
             # registered awaits matchers, attributing the event to the declaring
             # command's index (ambient `nil` when nothing matches).
-            %Entry{
-              timestamp: queue_entry.timestamp,
-              command_index: correlate(queue_entry.event, matchers),
-              event: queue_entry.event,
-              source: :injector,
-              injector_adapter: queue_entry.adapter_module,
-              nemesis_module: nil,
-              branch_id: branch_id
-            }
+            Entry.attribute(
+              %Entry{
+                timestamp: queue_entry.timestamp,
+                event: queue_entry.event,
+                source: :injector,
+                injector_adapter: queue_entry.adapter_module,
+                nemesis_module: nil,
+                branch_id: branch_id
+              },
+              correlate(queue_entry.event, matchers)
+            )
         end
 
       new_projs = update_projections(projs, queue_entry.event)
@@ -191,16 +196,19 @@ defmodule PropertyDamage.Executor.Events do
     events = MockServiceRegistry.flush_events(mock_registry)
 
     Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
-      entry = %Entry{
-        timestamp: System.monotonic_time(:millisecond),
-        command_index: command_index,
-        event: event,
-        source: :mock,
-        injector_adapter: nil,
-        nemesis_module: nil,
-        branch_id: branch_id,
-        fold_index: fc
-      }
+      entry =
+        Entry.attribute(
+          %Entry{
+            timestamp: System.monotonic_time(:millisecond),
+            event: event,
+            source: :mock,
+            injector_adapter: nil,
+            nemesis_module: nil,
+            branch_id: branch_id,
+            fold_index: fc
+          },
+          command_index
+        )
 
       # Notify mock registry of the event so mocks can react
       MockServiceRegistry.notify_event(mock_registry, event)

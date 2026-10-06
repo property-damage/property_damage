@@ -14,7 +14,7 @@ defmodule SeededDivergenceTest do
 
   use ExUnit.Case, async: false
 
-  alias GiteaBench.Commands.CreateLabel
+  alias GiteaBench.Commands.{CreateLabel, Login}
   alias PropertyDamage.{ComparisonMismatch, Failure, FailureReport, Sequence}
 
   @api_url Application.compile_env(:gitea_bench, :api_url)
@@ -67,6 +67,15 @@ defmodule SeededDivergenceTest do
              Enum.at(Sequence.to_list(FailureReport.shrunk_sequence(divergent)), divergence.root)
 
     assert divergent.variant == %{index: 1, name: "ui"}
+
+    # The Login setup command is never a root of the shrunk sequence; the
+    # report carries it as the run's setup command.
+    refute Enum.any?(
+             Sequence.to_list(FailureReport.shrunk_sequence(divergent)),
+             &match?(%Login{}, &1)
+           )
+
+    assert divergent.setup_commands == [%Login{}]
 
     # The label color observation differs: the same labels exist on both
     # forges, and the label the failing CreateLabel made has another color.

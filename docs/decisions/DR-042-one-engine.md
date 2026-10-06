@@ -1,6 +1,6 @@
 # DR-042: One Engine for Property-Based, Differential and Path-Equivalence Runs
 
-**Status:** Accepted. Amended by DR-044: `Differential.run/1` stays as the multi-target entry point on top of the variant scheduler; `PropertyDamage.run/1` keeps its own loop for now. Amended by DR-045: `Differential.run/1` is deleted and `PropertyDamage.run/1` runs every linear sequence through the scheduler. Amended by DR-046: the wait at a boundary is bounded by `compare: [converge_within: ms]`, not `settle:`, and events are never compared across variants.
+**Status:** Accepted. Amended by DR-044: `Differential.run/1` stays as the multi-target entry point on top of the variant scheduler; `PropertyDamage.run/1` keeps its own loop for now. Amended by DR-045: `Differential.run/1` is deleted and `PropertyDamage.run/1` runs every linear sequence through the scheduler. Amended by DR-046: the wait at a boundary is bounded by `compare: [converge_within: ms]`, not `settle:`, and events are never compared across variants. Amended by DR-048: the setup and teardown commands this record calls prefixes and suffixes are `setup_each/0` and `teardown_each/0` as specified by DR-048.
 **Date:** 2026-10-05
 
 ## Decision

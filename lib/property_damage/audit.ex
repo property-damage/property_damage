@@ -226,10 +226,12 @@ defmodule PropertyDamage.Audit do
 
   # Flatten a sequence into ordered {position, command} pairs using the same
   # structured position scheme the generator mints against (DR-021).
-  defp flatten(%Sequence{prefix: prefix, branches: branches, suffix: suffix}) do
-    with_positions(prefix, &Position.prefix/1) ++
+  defp flatten(%Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence) do
+    with_positions(sequence.setup, &Position.setup/1) ++
+      with_positions(prefix, &Position.prefix/1) ++
       branch_positions(branches) ++
-      with_positions(suffix, &Position.suffix/1)
+      with_positions(suffix, &Position.suffix/1) ++
+      with_positions(sequence.teardown, &Position.teardown/1)
   end
 
   defp branch_positions(nil), do: []

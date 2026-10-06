@@ -4,7 +4,7 @@ defmodule PropertyDamage.Model do
 
   A model ties together all the components needed for testing: which commands
   can be generated, which projections track state and checks, and the
-  test lifecycle hooks.
+  setup and teardown commands every run executes around its roots.
 
   ## Required Callbacks
 
@@ -15,10 +15,8 @@ defmodule PropertyDamage.Model do
 
   - `check_projections/0` - Projections that verify invariants
   - `injectable_events/0` - Events that can arrive from Adapter.Injector modules
-  - `setup_once/1` - Setup that runs once at the start (not during shrinking)
-  - `setup_each/1` - Setup that runs before each execution (including shrink attempts)
-  - `teardown_each/1` - Cleanup after each execution
-  - `teardown_once/1` - Final cleanup after all shrinking complete
+  - `setup_each/0` - The setup commands, run before the roots of every run
+  - `teardown_each/0` - The teardown commands, run after the roots of every run
   - `terminate_early?/3` - Control when command generation should stop
 
   ## Command Sequence Generation
@@ -143,38 +141,43 @@ defmodule PropertyDamage.Model do
 
   This enables symbolic execution during sequence generation.
 
-  ## Lifecycle Diagram
+  ## Setup and teardown commands
 
-      ┌─────────────────────────────────────────────────────────────┐
-      │                     Property Test Run                       │
-      │                                                             │
-      │  setup_once/1 ─────────────────────────────────────────┐    │
-      │                                                        │    │
-      │  ┌─ Run 1 ──────────────────────────────────────┐      │    │
-      │  │ setup_each/1                                 │      │    │
-      │  │ [execute commands against SUT]               │      │    │
-      │  │ teardown_each/1                              │      │    │
-      │  └──────────────────────────────────────────────┘      │    │
-      │                                                        │    │
-      │  ┌─ Run 2 ──────────────────────────────────────┐      │    │
-      │  │ setup_each/1                                 │      │    │
-      │  │ [execute commands against SUT]               │      │    │
-      │  │ teardown_each/1                              │      │    │
-      │  └──────────────────────────────────────────────┘      │    │
-      │                       ...                              │    │
-      │                                                        │    │
-      │  ┌─ If failure, shrinking ─────────────────────┐       │    │
-      │  │ ┌─ Shrink attempt ────────────────────┐     │       │    │
-      │  │ │ setup_each/1                        │     │       │    │
-      │  │ │ [execute shrunk sequence]           │     │       │    │
-      │  │ │ teardown_each/1                     │     │       │    │
-      │  │ └─────────────────────────────────────┘     │       │    │
-      │  │                   ...                       │       │    │
-      │  └─────────────────────────────────────────────┘       │    │
-      │                                                        │    │
-      │  teardown_once/1 ◀─────────────────────────────────────┘    │
-      │                                                             │
-      └─────────────────────────────────────────────────────────────┘
+  A fixture (a user exists, a session is open) is something every target must
+  realize its own way, and only the adapter knows how. So a model declares its
+  fixtures as commands: `setup_each/0` returns the setup commands and
+  `teardown_each/0` the teardown commands. Both take the entries `commands/0`
+  takes, but they form a sequence, not a pick list: every entry runs, in the
+  order written, and `when:` and `weight:` are ignored (`mix pd.validate` warns
+  about them). Infrastructure resets that need no fixture (wiping a database)
+  belong in the adapter's idempotent `setup/1`.
+
+  The generator draws the setup commands from the run seed before the roots and
+  simulates them, so the roots' `when:` and `overrides:` see the fixture state
+  and an `external()` a setup command produces can flow into a root. Adding a
+  setup command therefore changes which roots a seed draws; a seed is stable
+  for a fixed model. The teardown commands are drawn after the roots, against
+  the state the last root left.
+
+  For every run, shrink attempt and target, the order is:
+
+      Adapter.setup/1
+        @check at: :startup checks
+        setup commands            (checks on; stutter and faults off)
+        roots 0..n-1              (compared at each root boundary)
+        final boundary, then finalization and @check at: :teardown checks
+        teardown commands         (no checks; events logged, not folded)
+      Adapter.teardown/1
+
+  Setup commands are not roots: they are never compared, shrunk, counted by
+  `max_commands` or passed to `terminate_early?/3`. A setup command that errors,
+  fails a check, or leaves an `external()` unresolved is a setup failure (kind
+  `:setup_failed`). A teardown command never fails a run: an error or an
+  unresolved placeholder is logged.
+
+  The sequence the setup commands form is unrelated to a branching sequence's
+  prefix (`PropertyDamage.Sequence`): it is the setup prefix of every run,
+  branching or not.
 
   ## Terminal States
 
@@ -296,92 +299,42 @@ defmodule PropertyDamage.Model do
   @callback injectable_events() :: [module()]
 
   @typedoc """
-  Argument map delivered to every lifecycle callback.
-
-  `:adapter_config` is guaranteed on every invocation of every lifecycle
-  callback: it holds the `config:` map of the run's target (defaulting to
-  `%{}`). The remaining keys are path tags, present only on the paths that set
-  them, so a robust callback destructures `adapter_config` and treats the rest
-  as informational:
-
-  - `:run_number` - the exploration run index. Present on the run-loop and
-    trace/single-run paths (the latter passes `0`); absent during replay.
-  - `:replay` - always `true` when present. Set only on the
-    `PropertyDamage.replay/2` path; never combined with `:run_number`.
-  - `:capture` - always `true` when present. Set only on the trace-capture
-    path (`RunTrace`), alongside `:run_number`.
+  A sequence of command entries, written as `commands/0` entries are
+  (`Module`, `{Module, weight}` or `{Module, opts}`). Every entry runs, in
+  order; `when:` and `weight:` are ignored.
   """
-  @type lifecycle_config :: %{
-          required(:adapter_config) => map(),
-          optional(:run_number) => non_neg_integer(),
-          optional(:replay) => true,
-          optional(:capture) => true
-        }
+  @type sequence :: [command_spec()]
 
   @doc """
-  Setup that runs ONCE at the start of the property test.
+  The setup commands: run in every target after the adapter's `setup/1` and
+  before the first root, in every run and every shrink attempt.
 
-  This is NOT re-run during shrinking. Use for expensive one-time setup
-  like starting applications or external services.
+  Each entry's `overrides:` sees the state the earlier setup commands left.
+  A setup command that errors, fails a check or leaves an `external()`
+  unresolved is a setup failure. Optional - defaults to `[]`.
 
-  Runs on the standard run path only (`PropertyDamage.run/3`); replay never
-  invokes the `_once` callbacks. Receives `%{adapter_config: adapter_config}`.
+  ## Example
 
-  ## Returns
-
-  - `:ok` - Setup succeeded
-  - `{:error, reason}` - Setup failed, test aborted
+      def setup_each do
+        [
+          {CreateUser, overrides: %{role: "admin"}},
+          {Login, overrides: fn state -> %{user_id: state.admin_id} end}
+        ]
+      end
   """
-  @callback setup_once(config :: lifecycle_config()) :: :ok | {:error, term()}
+  @callback setup_each() :: sequence()
 
   @doc """
-  Setup that runs BEFORE EACH execution.
+  The teardown commands: run in every target after the last root, the final
+  boundary and the `@check at: :teardown` checks, and before the adapter's
+  `teardown/1`, whatever the run's outcome.
 
-  This runs before every execution including every shrink attempt.
-  Use for resetting state that must be pristine (database, cache, etc.).
-
-  `:adapter_config` is always present. The run-loop and trace/single-run paths
-  additionally pass `:run_number` (the trace path uses `0`); replay instead
-  passes `replay: true`; the trace-capture path also sets `capture: true`.
-  Destructure `%{adapter_config: config}` and treat the rest as informational.
-
-  ## Returns
-
-  - `:ok` - Setup succeeded
-  - `{:error, reason}` - Setup failed, execution skipped
+  Each entry's `overrides:` sees the state after the last root. A teardown
+  command runs no checks and its events are logged without being folded; an
+  error or an unresolved placeholder is logged and never fails the run.
+  Optional - defaults to `[]`.
   """
-  @callback setup_each(config :: lifecycle_config()) :: :ok | {:error, term()}
-
-  @doc """
-  Teardown that runs after each execution.
-
-  This is best-effort cleanup. The framework logs warnings if teardowns
-  raise but does not fail the test.
-
-  Receives the same argument contract as `setup_each/1`: `:adapter_config` is
-  always present; the run-loop and trace/single-run paths add `:run_number`
-  (the trace path uses `0`), and replay adds `replay: true`.
-
-  ## Returns
-
-  Always returns `:ok`. Handle errors internally.
-  """
-  @callback teardown_each(config :: lifecycle_config()) :: :ok
-
-  @doc """
-  Final teardown after all shrinking complete.
-
-  This is best-effort cleanup. The framework logs warnings if teardowns
-  raise but does not fail the test.
-
-  Runs on the standard run path only. Receives
-  `%{adapter_config: adapter_config}`.
-
-  ## Returns
-
-  Always returns `:ok`. Handle errors internally.
-  """
-  @callback teardown_once(config :: lifecycle_config()) :: :ok
+  @callback teardown_each() :: sequence()
 
   @doc """
   Decides whether to end the sequence being generated before `max_commands`.
@@ -418,10 +371,8 @@ defmodule PropertyDamage.Model do
   @optional_callbacks [
     check_projections: 0,
     injectable_events: 0,
-    setup_once: 1,
-    setup_each: 1,
-    teardown_each: 1,
-    teardown_once: 1,
+    setup_each: 0,
+    teardown_each: 0,
     terminate_early?: 3,
     simulator: 0
   ]
@@ -581,6 +532,97 @@ defmodule PropertyDamage.Model do
     else
       PropertyDamage.Command.build_spec(module, [], opts)
     end
+  end
+
+  @doc """
+  The model's setup commands, normalized like `normalize_commands/1`; `[]` when
+  the model does not define `setup_each/0`.
+  """
+  @spec setup_commands(module()) :: [normalized_command()]
+  def setup_commands(model), do: sequence_commands(model, :setup_each)
+
+  @doc """
+  The model's teardown commands, normalized like `normalize_commands/1`; `[]`
+  when the model does not define `teardown_each/0`.
+  """
+  @spec teardown_commands(module()) :: [normalized_command()]
+  def teardown_commands(model), do: sequence_commands(model, :teardown_each)
+
+  defp sequence_commands(model, callback) do
+    if Code.ensure_loaded?(model) and function_exported?(model, callback, 0) do
+      model |> apply(callback, []) |> normalize_commands()
+    else
+      []
+    end
+  end
+
+  # The lifecycle hooks the setup and teardown commands replaced.
+  @removed_hooks [
+    setup_each: 1,
+    teardown_each: 1,
+    setup_once: 1,
+    teardown_once: 1,
+    setup_once: 0,
+    teardown_once: 0
+  ]
+
+  @doc """
+  Raise an `ArgumentError` when `model` defines a removed lifecycle hook
+  (`setup_each/1`, `teardown_each/1`, `setup_once/0,1`, `teardown_once/0,1`)
+  or lists a nemesis module among its setup or teardown commands.
+
+  Runs before any target is set up, so a stale model fails before it touches a
+  system.
+  """
+  @spec check_lifecycle!(module()) :: :ok
+  def check_lifecycle!(model) do
+    Code.ensure_loaded(model)
+
+    case Enum.filter(@removed_hooks, fn {name, arity} ->
+           function_exported?(model, name, arity)
+         end) do
+      [] -> :ok
+      hooks -> raise ArgumentError, removed_hooks_message(model, hooks)
+    end
+
+    for callback <- [:setup_each, :teardown_each],
+        function_exported?(model, callback, 0),
+        module <- Enum.map(apply(model, callback, []), &entry_module/1),
+        is_atom(module) and PropertyDamage.Nemesis.nemesis_module?(module) do
+      raise ArgumentError,
+            "#{inspect(model)}.#{callback}/0 lists the nemesis #{inspect(module)}: " <>
+              "faults are never injected before the first root or during teardown, " <>
+              "so list it in commands/0 instead."
+    end
+
+    :ok
+  end
+
+  @doc """
+  The command module a `commands/0`, `setup_each/0` or `teardown_each/0` entry
+  names, or nil for an entry of another shape.
+  """
+  @spec entry_module(term()) :: module() | nil
+  def entry_module(module) when is_atom(module), do: module
+  def entry_module({module, _weight_or_opts}) when is_atom(module), do: module
+  def entry_module(%{command: module}) when is_atom(module), do: module
+  def entry_module(_entry), do: nil
+
+  defp removed_hooks_message(model, hooks) do
+    names = Enum.map_join(hooks, ", ", fn {name, arity} -> "#{name}/#{arity}" end)
+
+    once =
+      if Enum.any?(hooks, fn {name, _arity} -> name in [:setup_once, :teardown_once] end) do
+        " Once-per-campaign setup has no hook: make the adapter's setup/1 idempotent " <>
+          "(Adapter.setup/1 runs before every run) or wrap PropertyDamage.run/1 yourself."
+      else
+        ""
+      end
+
+    "#{inspect(model)} defines #{names}, which no longer exist. A model declares its " <>
+      "fixtures as commands: setup_each/0 returns the setup commands and " <>
+      "teardown_each/0 the teardown commands, run in every target before and after " <>
+      "the roots. Side effects the adapter can do alone belong in Adapter.setup/1." <> once
   end
 
   @doc """

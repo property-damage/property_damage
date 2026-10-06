@@ -15,16 +15,31 @@ defmodule PropertyDamage.Variant do
                                       placeholder_registry: PlaceholderRegistry.build(commands),
                                       seed: seed, run_number: run, run_nonce: nonce)
       :ok = Variant.setup(pid)
+      :ok = Variant.run_setup(pid)                         # the setup commands
       {:ok, [{0, observation}]} = Variant.advance_to(pid, 0)
       {:ok, observations} = Variant.advance_to(pid, 3)    # resumes at index 1
       state = Variant.snapshot(pid)
       result = Variant.finish(pid)                         # what Executor.run/4 reports
+      {:ok, _entries} = Variant.run_teardown(pid)          # the teardown commands
       :ok = Variant.stop(pid)
 
   `advance_to/2` steps every command from the next unexecuted index up to and
   including the given index, then stops; the next call resumes from the same
   state. Every command of the sequence is one root, so "boundary r" means
   "after command r".
+
+  ## Setup and teardown commands
+
+  `run_setup/1` steps the model's setup commands (`:setup_commands`) through
+  `Stepping.step_setup/4`, drains the queue, and then checks the completion
+  rule: every `external()` a setup command produces must be resolved in this
+  variant's registry. `run_teardown/1` steps the teardown commands
+  (`:teardown_commands`) through `Stepping.step_teardown/4` once. Every other path
+  that executes a run (`PropertyDamage.Executor.run/4`,
+  `PropertyDamage.Replay`) runs both phases the same way. `stop/1`
+  runs them first when nobody did, so they run for every variant whose adapter
+  `setup/1` succeeded, whatever happened after it, and never for one whose
+  `setup/1` failed.
 
   ## What a variant owns
 
@@ -104,6 +119,10 @@ defmodule PropertyDamage.Variant do
       `%PropertyDamage.Failure{}`); `root` is `nil` for a `:startup` check, and
       for a check that failed on a drained event it is the command that event
       belongs to, as `finish/1` reports it in `failed_at_index`
+    * `kind: :setup_failed` - a setup command failed, a check failed on a
+      setup command's event (wherever it was detected, an `@eventually` window
+      opened during setup included), or the completion rule failed; `root` is
+      `nil` and `reason` a `%PropertyDamage.Failure{}` of class `:setup`
 
   After a failure the variant steps nothing more: every later `advance_to/2`
   returns the same `{:failed, failure}`, and `finish/1` reports the failed run
@@ -124,7 +143,7 @@ defmodule PropertyDamage.Variant do
     Telemetry
   }
 
-  alias PropertyDamage.Executor.Stepping
+  alias PropertyDamage.Executor.{Phases, Stepping}
   alias PropertyDamage.Runtime.RunServices
 
   @typedoc "An observation of one command, as `advance_to/2` reports it."
@@ -132,7 +151,7 @@ defmodule PropertyDamage.Variant do
 
   @typedoc "Why a variant stopped stepping."
   @type failure :: %{
-          kind: :check_failed | :execution_failed,
+          kind: :check_failed | :execution_failed | :setup_failed,
           root: non_neg_integer() | nil,
           reason: Failure.t() | Exception.t()
         }
@@ -161,6 +180,8 @@ defmodule PropertyDamage.Variant do
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
     * `:measure_latency` - when `true`, record the wall-clock time of every
       command's `execute/3` (see `latencies/1`); default `false`
+    * `:setup_commands`, `:teardown_commands` - the sequence's setup and
+      teardown commands (see `run_setup/1` and `run_teardown/1`); default `[]`
 
   The process RNG is seeded here, before `setup/1` can call the adapter.
   """
@@ -195,6 +216,29 @@ defmodule PropertyDamage.Variant do
   """
   @spec setup(pid()) :: :ok | {:error, term()}
   def setup(pid), do: GenServer.call(pid, :setup, :infinity)
+
+  @doc """
+  Step the setup commands, in the variant process, after `setup/1`.
+
+  Each one goes through `Stepping.step_setup/4`; then the event queue is
+  drained, and every placeholder a setup command produces must be resolved in
+  this variant's registry. Returns `:ok`, or `{:failed, failure}` with
+  `kind: :setup_failed` (see the module doc); a failed variant steps nothing
+  more.
+  """
+  @spec run_setup(pid()) :: :ok | {:failed, failure()}
+  def run_setup(pid), do: GenServer.call(pid, :run_setup, :infinity)
+
+  @doc """
+  Step the teardown commands, in the variant process, once.
+
+  Returns `{:ok, entries}`, the event-log entries the teardown commands added
+  (`phase: :teardown`), and appends them to the finished result when there is
+  one. A later call, and `stop/1`, run nothing more. A variant whose adapter
+  `setup/1` failed has no teardown commands to run.
+  """
+  @spec run_teardown(pid()) :: {:ok, [PropertyDamage.EventLog.Entry.t()]}
+  def run_teardown(pid), do: GenServer.call(pid, :run_teardown, :infinity)
 
   @doc """
   Step every command from the next unexecuted index up to and including
@@ -286,8 +330,9 @@ defmodule PropertyDamage.Variant do
   @doc """
   Release everything the variant owns, in the variant process, then exit.
 
-  Stops the pollers, tears the mocks and injectors down, stops the event queue,
-  then calls the adapter's `teardown/1` (best-effort: a raising teardown is
+  Runs the teardown commands when `run_teardown/1` did not, then stops the
+  pollers, tears the mocks and injectors down, stops the event queue, and
+  calls the adapter's `teardown/1` (best-effort: a raising teardown is
   logged). Returns `:ok` once all of that is done.
   """
   @spec stop(pid()) :: :ok
@@ -331,6 +376,9 @@ defmodule PropertyDamage.Variant do
       target: target,
       model: Keyword.fetch!(opts, :model),
       commands: opts |> Keyword.fetch!(:commands) |> List.to_tuple(),
+      setup_commands: Keyword.get(opts, :setup_commands, []),
+      teardown_commands: Keyword.get(opts, :teardown_commands, []),
+      teardown_entries: nil,
       placeholder_registry: Keyword.fetch!(opts, :placeholder_registry),
       run_seed: run_seed,
       run_number: run_number,
@@ -368,6 +416,22 @@ defmodule PropertyDamage.Variant do
   end
 
   def handle_call(:setup, _from, state), do: {:reply, {:error, :already_set_up}, state}
+
+  def handle_call(:run_setup, _from, %{phase: :ready} = state) do
+    {reply, state} = run_setup_commands(state)
+    {:reply, reply, state}
+  end
+
+  def handle_call(:run_setup, _from, %{phase: :halted} = state),
+    do: {:reply, {:failed, state.failure}, state}
+
+  def handle_call(:run_setup, _from, state),
+    do: {:reply, {:error, not_steppable(state)}, state}
+
+  def handle_call(:run_teardown, _from, state) do
+    state = run_teardown_commands(state)
+    {:reply, {:ok, state.teardown_entries}, state}
+  end
 
   def handle_call({:advance_to, boundary}, _from, %{phase: :ready} = state) do
     {reply, state} = advance(state, boundary)
@@ -415,7 +479,9 @@ defmodule PropertyDamage.Variant do
     # mailbox; put them back so finalization's receive sees them.
     state.stash |> Enum.reverse() |> Enum.each(&send(self(), &1))
 
-    result = Stepping.finalize(state.halted || state.exec, state.ctx)
+    result =
+      state.halted |> Kernel.||(state.exec) |> Stepping.finalize(state.ctx) |> attribute(state)
+
     {:reply, result, %{state | phase: :finished, result: result, stash: []}}
   end
 
@@ -424,7 +490,7 @@ defmodule PropertyDamage.Variant do
 
   def handle_call(:retire, _from, %{phase: :halted} = state) do
     state.stash |> Enum.reverse() |> Enum.each(&send(self(), &1))
-    result = Stepping.finalize(state.halted, state.ctx)
+    result = state.halted |> Stepping.finalize(state.ctx) |> attribute(state)
     failures = teardown_check_failures(state.exec)
     {:reply, {:ok, result, failures}, %{state | phase: :finished, result: result, stash: []}}
   end
@@ -437,6 +503,7 @@ defmodule PropertyDamage.Variant do
     do: {:reply, Enum.reverse(state.latencies), state}
 
   def handle_call(:stop, _from, state) do
+    state = best_effort_teardown(state)
     release(state)
     {:stop, :normal, :ok, state}
   end
@@ -526,7 +593,8 @@ defmodule PropertyDamage.Variant do
       model: state.model,
       adapter: state.target.adapter,
       adapter_context: adapter_context,
-      event_queue: state.event_queue
+      event_queue: state.event_queue,
+      target_name: state.target.name
     }
 
     state = %{state | ctx: ctx}
@@ -545,6 +613,76 @@ defmodule PropertyDamage.Variant do
         }
     end
   end
+
+  # ==========================================================================
+  # Setup and teardown commands
+  # ==========================================================================
+
+  # Steps every setup command, drains, then applies the completion rule
+  # (`Executor.Phases.run_setup/4`). Any failure halts the variant with a
+  # setup failure.
+  defp run_setup_commands(state) do
+    on_step = fn exec ->
+      guard_pollers(%{state | exec: exec})
+      exec
+    end
+
+    case Phases.run_setup(state.setup_commands, state.exec, state.ctx, on_step) do
+      {:ok, exec} ->
+        {:ok, %{state | exec: exec}}
+
+      {:failed, reason, failed} ->
+        halted = halt_setup(state, failed, reason)
+        {{:failed, halted.failure}, halted}
+    end
+  end
+
+  defp halt_setup(state, failed, reason) do
+    guard_pollers(%{
+      state
+      | phase: :halted,
+        exec: failed,
+        halted: {:failed, nil, reason, failed},
+        failure: %{kind: :setup_failed, root: nil, reason: reason}
+    })
+  end
+
+  # Steps the teardown commands once. A variant whose adapter `setup/1`
+  # failed has no context to run them in.
+  defp run_teardown_commands(%{teardown_entries: entries} = state) when is_list(entries),
+    do: state
+
+  defp run_teardown_commands(%{ctx: nil} = state), do: %{state | teardown_entries: []}
+
+  defp run_teardown_commands(state) do
+    {exec, entries} = Phases.run_teardown(state.teardown_commands, state.exec, state.ctx)
+
+    result =
+      case state.result do
+        nil -> nil
+        result -> %{result | event_log: result.event_log ++ entries}
+      end
+
+    %{state | exec: exec, teardown_entries: entries, result: result}
+  end
+
+  # `stop/1` must reach the adapter's teardown/1 even when a teardown command
+  # escapes the engine (an exit from the adapter's task).
+  defp best_effort_teardown(state) do
+    run_teardown_commands(state)
+  rescue
+    exception ->
+      require Logger
+      Logger.warning("Teardown commands raised: " <> Exception.message(exception))
+      %{state | teardown_entries: []}
+  catch
+    _kind, _reason -> %{state | teardown_entries: []}
+  end
+
+  # A finished result whose failure belongs to a setup command (an
+  # `@eventually` window a setup command opened, a check on its drained
+  # event) reports it as the setup failure it is, with no root index.
+  defp attribute(result, state), do: Phases.attribute(result, state.setup_commands)
 
   # ==========================================================================
   # Stepping
@@ -790,12 +928,25 @@ defmodule PropertyDamage.Variant do
   defp halt(state, failed, failure) do
     {:failed, _index, _reason, failed_state} = failed
 
+    failure =
+      case attributed_root(failed_state, failure.root) do
+        {:setup, offset} ->
+          %{
+            kind: :setup_failed,
+            root: nil,
+            reason: Phases.check_failure(state.setup_commands, offset, failure.reason)
+          }
+
+        root ->
+          %{failure | root: root}
+      end
+
     guard_pollers(%{
       state
       | phase: :halted,
         exec: failed_state,
         halted: failed,
-        failure: %{failure | root: attributed_root(failed_state, failure.root)}
+        failure: failure
     })
   end
 
@@ -813,7 +964,7 @@ defmodule PropertyDamage.Variant do
       event_log
       |> Enum.take(length(event_log) - length(log_before))
       |> Enum.reverse()
-      |> Enum.filter(&(&1.command_index == index))
+      |> Enum.filter(&(&1.phase == :root and &1.command_index == index))
 
     for(%{source: :injected, event: event} <- added, do: event) ++
       for %{source: :command, event: event} <- added, do: event

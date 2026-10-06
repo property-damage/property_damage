@@ -54,7 +54,7 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
 
-  @version 10
+  @version 11
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -359,6 +359,8 @@ defmodule PropertyDamage.Persistence do
       stutter: report.stutter && inspect(report.stutter),
       max_commands: report.max_commands,
       shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
+      setup_commands: Enum.map(report.setup_commands, &inspect/1),
+      teardown_commands: Enum.map(report.teardown_commands, &inspect/1),
       original_command_count: length(Sequence.to_list(report.original_sequence)),
       reproduction_command: FailureReport.reproduction_command(report)
     }
@@ -486,8 +488,10 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v10 files (format versions 1-9) are refused (DR-041, following DR-039/DR-040).
-  # A v9 report records `equivalence` and a divergence of root events where v10
+  # Pre-v11 files (format versions 1-10) are refused (DR-041, following DR-039/DR-040).
+  # A v10 sequence has no setup or teardown commands and a v10 report no
+  # `setup_commands`/`teardown_commands`, where v11 records the commands a
+  # reproduction runs around the roots. A v9 report records `equivalence` and a divergence of root events where v10
   # records `compare`, `compare_counts` and boundary-observation failures.
   # A v8 report records one `adapter` where v9 records the run's `targets`, its
   # `kind` and the failing `variant`; a v7 file stores

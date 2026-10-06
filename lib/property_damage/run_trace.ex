@@ -159,7 +159,9 @@ defmodule PropertyDamage.RunTrace do
   This is the input to `PropertyDamage.RunComparison`. Unlike the exploration
   loop it never shrinks and never stops early on failure: it captures the whole
   execution record of a single run. `plan_source` is always `:generated` (the
-  plan is a pure function of the effective seed).
+  plan is a pure function of the effective seed). The plan carries the setup
+  and teardown commands drawn as `PropertyDamage.run/1` draws them, and the
+  target runs them before and after the roots.
 
   ## Options
 
@@ -199,11 +201,14 @@ defmodule PropertyDamage.RunTrace do
       [max_commands: max_commands] ++ if(branching, do: [branching: branching], else: [])
 
     run_seed = Generator.run_seed(seed, run_number)
-    plan = model |> Generator.generate_sequence(gen_opts) |> Generator.generate_value(run_seed)
 
-    if function_exported?(model, :setup_each, 1) do
-      model.setup_each(%{adapter_config: config, run_number: run_number, capture: true})
-    end
+    # The plan as `PropertyDamage.run/1` draws it: the setup commands and the
+    # roots, then the teardown commands drawn against them.
+    plan =
+      model
+      |> Generator.generate_sequence(gen_opts)
+      |> Generator.generate_value(run_seed)
+      |> then(&Generator.teardown_commands(model, &1, run_seed))
 
     {:ok, event_queue} = EventQueue.start_link()
     setup_injectors(injectors, event_queue)
@@ -215,7 +220,9 @@ defmodule PropertyDamage.RunTrace do
           event_queue: event_queue,
           rng_seed: run_seed,
           run_nonce: run_nonce,
-          mint_epoch: mint_epoch
+          mint_epoch: mint_epoch,
+          setup_commands: plan.setup,
+          teardown_commands: plan.teardown
         )
 
       new(
@@ -238,10 +245,6 @@ defmodule PropertyDamage.RunTrace do
     after
       teardown_injectors(injectors)
       EventQueue.stop(event_queue)
-
-      if function_exported?(model, :teardown_each, 1) do
-        model.teardown_each(%{adapter_config: config, run_number: run_number})
-      end
     end
   end
 
@@ -318,10 +321,12 @@ defmodule PropertyDamage.RunTrace do
     # position, so this is the branch-aware equivalent of grouping by
     # command_index alone. Full entries (not bare events) are kept so each step
     # preserves per-event provenance (source, branch_id) for the event timeline.
+    # A step is a root: setup and teardown entries carry an offset among the
+    # setup or teardown commands, not a root index, and belong to no step.
     entries_by_position =
       event_log
       |> List.wrap()
-      |> Enum.filter(&(&1.command_index != nil))
+      |> Enum.filter(&(&1.command_index != nil and &1.phase == :root))
       |> Enum.group_by(fn entry ->
         Sequence.position_at(sequence, entry.command_index, entry.branch_id)
       end)
@@ -534,6 +539,19 @@ defmodule PropertyDamage.RunTrace do
     section = position.section
 
     cond do
+      # The setup commands fold before every root; a teardown command folds
+      # nothing, so its state is the state the run ended with.
+      section == :setup ->
+        cutoff = boundary_ordinal(items, position, boundary)
+
+        items
+        |> Enum.filter(&section_in?(&1.position, [:setup]))
+        |> keep_below(cutoff, boundary)
+        |> fold_in_order(init)
+
+      section == :teardown ->
+        items |> Enum.sort_by(& &1.ordinal) |> fold_in_order(init)
+
       not branched?(plan) or section == :prefix ->
         cutoff = boundary_ordinal(items, position, boundary)
 
@@ -546,7 +564,7 @@ defmodule PropertyDamage.RunTrace do
         cutoff = boundary_ordinal(items, position, boundary)
 
         items
-        |> Enum.filter(&section_in?(&1.position, [:prefix, section]))
+        |> Enum.filter(&section_in?(&1.position, [:setup, :prefix, section]))
         |> keep_below(cutoff, boundary)
         |> fold_in_order(init)
 
@@ -565,7 +583,7 @@ defmodule PropertyDamage.RunTrace do
   # whole item stream by ordinal; branched-plan prefix positions likewise only
   # ever see prefix items (branch/suffix ordinals are strictly higher).
   defp sections_for(:prefix, plan) do
-    if branched?(plan), do: [:prefix], else: [:prefix, :suffix, nil]
+    if branched?(plan), do: [:setup, :prefix], else: [:setup, :prefix, :suffix, nil]
   end
 
   # Merge branch state exactly as `Executor.Branching.merge_branch_states` does:
@@ -575,7 +593,7 @@ defmodule PropertyDamage.RunTrace do
   defp merged_state(trace, init, items) do
     prefix_state =
       items
-      |> Enum.filter(&(section_of(&1.position) == :prefix))
+      |> Enum.filter(&(section_of(&1.position) in [:setup, :prefix]))
       |> fold_in_order(init)
 
     trace
@@ -610,6 +628,16 @@ defmodule PropertyDamage.RunTrace do
 
   defp linearization_order(_), do: []
 
+  # A setup command's entry carries its offset among the setup commands, not a
+  # root index.
+  defp entry_position(_plan, %{phase: :setup, command_index: offset}),
+    do: Sequence.Position.setup(offset)
+
+  defp entry_position(_plan, %{command_index: nil}), do: nil
+
+  defp entry_position(plan, entry),
+    do: Sequence.position_at(plan, entry.command_index, entry.branch_id)
+
   # All folded items (commands + folded entries) tagged with their fold ordinal
   # and structured position. Non-folded entries (stutter / telemetry, fold_index
   # nil) are excluded: they never advanced projection state.
@@ -624,11 +652,7 @@ defmodule PropertyDamage.RunTrace do
       |> List.wrap()
       |> Enum.filter(&(&1.fold_index != nil))
       |> Enum.map(fn entry ->
-        position =
-          if entry.command_index != nil,
-            do: Sequence.position_at(plan, entry.command_index, entry.branch_id)
-
-        %{ordinal: entry.fold_index, position: position, item: entry.event}
+        %{ordinal: entry.fold_index, position: entry_position(plan, entry), item: entry.event}
       end)
 
     command_items ++ entry_items
@@ -676,7 +700,7 @@ defmodule PropertyDamage.RunTrace do
     |> List.wrap()
     |> Enum.filter(fn entry ->
       entry.fold_index != nil and entry.command_index != nil and
-        Sequence.position_at(plan, entry.command_index, entry.branch_id) == position
+        entry_position(plan, entry) == position
     end)
     |> Enum.sort_by(& &1.fold_index)
   end

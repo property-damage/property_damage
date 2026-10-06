@@ -45,6 +45,16 @@ defmodule PropertyDamage.Sequence do
      c. Merge results and check for linearizability
   3. Execute `suffix` commands sequentially
 
+  ## Setup and teardown commands
+
+  `setup` holds the model's setup commands (`c:PropertyDamage.Model.setup_each/0`)
+  and `teardown` its teardown commands (`c:PropertyDamage.Model.teardown_each/0`),
+  as drawn for this sequence. They run before and after the roots and are not
+  roots themselves: every function here that reads commands (`to_list/1`,
+  `command_count/1`, `indexed/1`, `position_at/3`, `map/2`, `filter/2`, ...)
+  reads the roots only and carries the two lists through unchanged. Read them
+  with `setup_commands/1` and `teardown_commands/1`.
+
   ## Ref Constraints
 
   - Refs created in `prefix` can be used in any branch
@@ -60,11 +70,21 @@ defmodule PropertyDamage.Sequence do
           prefix: [command()],
           branches: [[command()]] | nil,
           suffix: [command()],
+          setup: [command()],
+          teardown: [command()],
           # Internal placeholder registry (DR-021); opaque to users.
           registry: term() | nil
         }
 
-  defstruct prefix: [], branches: nil, suffix: [], registry: nil
+  defstruct prefix: [], branches: nil, suffix: [], setup: [], teardown: [], registry: nil
+
+  @doc "The setup commands that run before the roots, in order."
+  @spec setup_commands(t()) :: [command()]
+  def setup_commands(%__MODULE__{setup: setup}), do: setup
+
+  @doc "The teardown commands that run after the roots, in order."
+  @spec teardown_commands(t()) :: [command()]
+  def teardown_commands(%__MODULE__{teardown: teardown}), do: teardown
 
   @doc """
   Create a linear (non-branching) sequence.
@@ -122,7 +142,9 @@ defmodule PropertyDamage.Sequence do
   Compute a stable fingerprint of a plan (DR-036).
 
   The fingerprint is a hex-encoded SHA-256 digest of the canonical plan: the
-  branch-structured command list (`prefix`, `branches`, `suffix`) with all
+  branch-structured command list (`prefix`, `branches`, `suffix`) and the
+  setup and teardown commands (left out when both are empty, so a plan
+  without them keeps its earlier fingerprint), with all
   symbolic markers carrying their deterministic ids (DR-036), and with the
   derived `registry` field excluded (it is rebuilt per run and is not part of
   the plan's meaning).
@@ -139,8 +161,17 @@ defmodule PropertyDamage.Sequence do
   the term types involved across supported OTP releases.
   """
   @spec fingerprint(t()) :: String.t()
-  def fingerprint(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix}) do
-    canonical = {prefix, branches, suffix}
+  def fingerprint(%__MODULE__{} = sequence) do
+    # A plan without setup and teardown commands keeps the fingerprint it had
+    # before they existed, so earlier traces still compare.
+    canonical =
+      case {sequence.setup, sequence.teardown} do
+        {[], []} ->
+          {sequence.prefix, sequence.branches, sequence.suffix}
+
+        {setup, teardown} ->
+          {sequence.prefix, sequence.branches, sequence.suffix, setup, teardown}
+      end
 
     :crypto.hash(:sha256, :erlang.term_to_binary(canonical, minor_version: 2))
     |> Base.encode16(case: :lower)
@@ -335,20 +366,15 @@ defmodule PropertyDamage.Sequence do
   """
   @spec map(t(), (command() -> command())) :: t()
   def map(%__MODULE__{prefix: prefix, branches: nil, suffix: suffix} = seq, fun) do
-    %__MODULE__{
-      prefix: Enum.map(prefix, fun),
-      branches: nil,
-      suffix: Enum.map(suffix, fun),
-      registry: seq.registry
-    }
+    %{seq | prefix: Enum.map(prefix, fun), branches: nil, suffix: Enum.map(suffix, fun)}
   end
 
   def map(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix} = seq, fun) do
-    %__MODULE__{
-      prefix: Enum.map(prefix, fun),
-      branches: Enum.map(branches, fn branch -> Enum.map(branch, fun) end),
-      suffix: Enum.map(suffix, fun),
-      registry: seq.registry
+    %{
+      seq
+      | prefix: Enum.map(prefix, fun),
+        branches: Enum.map(branches, fn branch -> Enum.map(branch, fun) end),
+        suffix: Enum.map(suffix, fun)
     }
   end
 
@@ -360,12 +386,7 @@ defmodule PropertyDamage.Sequence do
   """
   @spec filter(t(), (command() -> boolean())) :: t()
   def filter(%__MODULE__{prefix: prefix, branches: nil, suffix: suffix} = seq, pred) do
-    %__MODULE__{
-      prefix: Enum.filter(prefix, pred),
-      branches: nil,
-      suffix: Enum.filter(suffix, pred),
-      registry: seq.registry
-    }
+    %{seq | prefix: Enum.filter(prefix, pred), branches: nil, suffix: Enum.filter(suffix, pred)}
   end
 
   def filter(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix} = seq, pred) do
@@ -380,30 +401,20 @@ defmodule PropertyDamage.Sequence do
     case filtered_branches do
       [] ->
         # No branches left, convert to linear
-        %__MODULE__{
-          prefix: filtered_prefix,
-          branches: nil,
-          suffix: filtered_suffix,
-          registry: seq.registry
-        }
+        %{seq | prefix: filtered_prefix, branches: nil, suffix: filtered_suffix}
 
       [only_branch] ->
         # A single remaining branch is not parallel, so inline it linearly
         # (prefix, then the branch's commands, then suffix).
-        %__MODULE__{
-          prefix: filtered_prefix ++ only_branch ++ filtered_suffix,
-          branches: nil,
-          suffix: [],
-          registry: seq.registry
+        %{
+          seq
+          | prefix: filtered_prefix ++ only_branch ++ filtered_suffix,
+            branches: nil,
+            suffix: []
         }
 
       _ ->
-        %__MODULE__{
-          prefix: filtered_prefix,
-          branches: filtered_branches,
-          suffix: filtered_suffix,
-          registry: seq.registry
-        }
+        %{seq | prefix: filtered_prefix, branches: filtered_branches, suffix: filtered_suffix}
     end
   end
 
@@ -437,10 +448,10 @@ defmodule PropertyDamage.Sequence do
   commands as prefix and the new branch.
   """
   @spec add_branch(t(), [command()]) :: t()
-  def add_branch(%__MODULE__{branches: nil, prefix: prefix}, branch_commands) do
+  def add_branch(%__MODULE__{branches: nil} = seq, branch_commands) do
     # Convert linear to branching: existing commands become prefix
     # and we start with one branch
-    %__MODULE__{prefix: prefix, branches: [branch_commands], suffix: []}
+    %{seq | branches: [branch_commands], suffix: [], registry: nil}
   end
 
   def add_branch(%__MODULE__{branches: branches} = seq, branch_commands) do
@@ -466,12 +477,12 @@ defmodule PropertyDamage.Sequence do
   @spec linearizations(t()) :: [t()]
   def linearizations(%__MODULE__{branches: nil} = seq), do: [seq]
 
-  def linearizations(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix}) do
+  def linearizations(%__MODULE__{prefix: prefix, branches: branches, suffix: suffix} = seq) do
     # Generate all interleavings of the branches
     interleavings = interleave_all(branches)
 
     Enum.map(interleavings, fn interleaved ->
-      linear(prefix ++ interleaved ++ suffix)
+      %{linear(prefix ++ interleaved ++ suffix) | setup: seq.setup, teardown: seq.teardown}
     end)
   end
 

@@ -197,6 +197,11 @@ defmodule Mix.Tasks.PdGenTest do
       assert content =~ "def command_sequence_projection"
       assert content =~ "def check_projections"
 
+      # The commented lifecycle example shows setup and teardown commands.
+      assert content =~ "setup_each/0"
+      assert content =~ "teardown_each/0"
+      refute content =~ "setup_once"
+
       assert_compiles(content)
     end
 

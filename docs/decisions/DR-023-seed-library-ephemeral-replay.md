@@ -1,6 +1,6 @@
 # DR-023: Seed Library as an Ephemeral Replay Working Set
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-048: a seed-library replay runs the model's setup commands before each seed's sequence and its teardown commands after it, and there is no `setup_once` or `teardown_once` hook.
 **Date:** 2026-06-18
 
 > Recorded as a design pass, then implemented. It supersedes the seed-library

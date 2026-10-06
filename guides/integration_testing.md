@@ -347,9 +347,11 @@ For programmatic analysis:
 ### 1. Reset state between runs
 
 Each run should start from a clean SUT so failures reproduce independently. The
-bench does this in its model's `setup_each/1`, which resets the register before
-every sequence. For your own service, either expose a reset endpoint or pass a
-`:reset_fn` to `PropertyDamage.Integration.run/1`.
+bench resets its register in its adapter's `setup/1`, which runs before
+every run, shrink attempt and replay, so a reset there must be idempotent: it can
+find what a crashed run left. For your own service, either expose a reset endpoint or pass a `:reset_fn` to
+`PropertyDamage.Integration.run/1`. If the service cannot be reset, see
+[Cleaning Up a Shared Target](#cleaning-up-a-shared-target).
 
 ### 2. Start small, scale up
 
@@ -396,6 +398,148 @@ programmatically:
 {:ok, failure} = PropertyDamage.load_failure("bugs/read_consistent-seed352687743.pd")
 PropertyDamage.replay(failure, targets: [{OpenapiBench.Generated.Adapter, config: %{base_url: "http://localhost:4010"}}])
 ```
+
+## Cleaning Up a Shared Target
+
+Some systems cannot be reset: a shared staging server, a tenant other teams
+use. `Adapter.setup/1` cannot wipe them, and `Adapter.teardown/1` does not
+know which ids the run created. For these, the model's `teardown_each/0`
+returns teardown commands that delete what the run created.
+
+The generator draws teardown commands after the last root, so an `overrides:`
+function sees the state the roots left. In the example, `Remove` receives the
+ids of every note the run created:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule Shared.Events do
+  defmodule NoteCreated do
+    import PropertyDamage, only: [external: 0]
+    defstruct [:text, note_id: external()]
+  end
+
+  defmodule NotesRemoved do
+    defstruct [:note_ids]
+  end
+end
+
+defmodule Shared.Commands do
+  defmodule CreateNote do
+    use PropertyDamage.Command
+    import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+    defstruct [:text]
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{text: StreamData.string(:alphanumeric, min_length: 1)}
+      |> merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+
+  defmodule Remove do
+    use PropertyDamage.Command
+    import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+    defstruct [:note_ids]
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{note_ids: []}
+      |> merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+end
+
+defmodule Shared.Notes do
+  use PropertyDamage.Model.Projection
+
+  alias Shared.Events.NoteCreated
+
+  @impl true
+  def init, do: %{note_ids: []}
+
+  @impl true
+  def apply(state, %NoteCreated{note_id: id}), do: %{state | note_ids: [id | state.note_ids]}
+  def apply(state, _event), do: state
+end
+
+defmodule Shared.Model do
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
+
+  alias Shared.Commands.{CreateNote, Remove}
+  alias Shared.Events.{NoteCreated, NotesRemoved}
+
+  @impl true
+  def commands, do: [CreateNote]
+
+  # Runs after the last root, against the state that root left.
+  @impl true
+  def teardown_each do
+    [{Remove, overrides: fn state -> %{note_ids: state.note_ids} end}]
+  end
+
+  @impl true
+  def command_sequence_projection, do: Shared.Notes
+
+  @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%CreateNote{text: text}, _state), do: [%NoteCreated{text: text}]
+  def simulate(%Remove{note_ids: ids}, _state), do: [%NotesRemoved{note_ids: ids}]
+end
+
+defmodule Shared.Adapter do
+  use PropertyDamage.Adapter
+
+  alias Shared.Commands.{CreateNote, Remove}
+  alias Shared.Events.{NoteCreated, NotesRemoved}
+
+  # The shared server outlives every run; this agent stands in for it.
+  @impl true
+  def setup(%{server: server}), do: {:ok, %{server: server}}
+
+  @impl true
+  def teardown(_ctx), do: :ok
+
+  @impl true
+  def execute(%CreateNote{text: text}, %{server: server}, _runtime) do
+    id = System.unique_integer([:positive])
+    Agent.update(server, &Map.put(&1, id, text))
+    {:ok, [%NoteCreated{text: text, note_id: id}]}
+  end
+
+  def execute(%Remove{note_ids: ids}, %{server: server}, _runtime) do
+    Agent.update(server, &Map.drop(&1, ids))
+    {:ok, [%NotesRemoved{note_ids: ids}]}
+  end
+end
+
+{:ok, server} = Agent.start_link(fn -> %{} end)
+
+{:ok, _stats} =
+  PropertyDamage.run(
+    model: Shared.Model,
+    targets: [{Shared.Adapter, config: %{server: server}}],
+    max_runs: 5,
+    max_commands: 6,
+    seed: 1
+  )
+
+# Every note the runs created is gone, though nothing reset the server.
+0 = Agent.get(server, &map_size/1)
+```
+
+Teardown commands run after every execution, pass or fail, and after every
+shrink attempt, so a failing run leaves the shared target clean as well. They
+are best effort: an error or a raise is logged and never changes the verdict.
+[Writing Commands](writing_commands.md#setup-and-teardown-commands) lists the
+rules, the setup-failure causes, and where infrastructure reset and target
+isolation belong.
 
 ## CI/CD Integration
 
@@ -466,7 +610,7 @@ Health check (...)... ✗ FAILED
 ### Flaky results (passes sometimes, fails others)
 
 - Look for time-dependent behavior or shared state not reset between runs
-- Use a `:reset_fn` (or a per-sequence reset like the bench's `setup_each/1`)
+- Use a `:reset_fn`, or reset the service in an idempotent `Adapter.setup/1`
 - See [Chaos Engineering](chaos_engineering.md) to deliberately surface races
 
 ## Next Steps

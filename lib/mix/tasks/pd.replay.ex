@@ -27,8 +27,9 @@ defmodule Mix.Tasks.Pd.Replay do
   - **1** when the failure reproduces: a command failed its check or errored
     during execution (*bad*).
   - **125** when the replay could not run at all: the project does not compile,
-    the file fails to load, it records no model/adapter, or the sequence is
-    branching. The outcome is *indeterminate*, not a reproduction, so `git bisect`
+    the file fails to load, it records no model/adapter, the sequence is
+    branching, or the target's setup failed (its adapter's `setup/1`, or one of
+    the setup commands the replay runs before the first step). The outcome is *indeterminate*, not a reproduction, so `git bisect`
     treats it as *skip* rather than wrongly blaming the commit (*skip*). 125 is
     still non-zero, so the headline "non-zero means not-confirmed-fixed" contract
     holds.
@@ -216,6 +217,16 @@ defmodule Mix.Tasks.Pd.Replay do
     )
 
     IO.puts("Commands: #{command_count}")
+
+    # The setup commands run before the first step, the teardown commands
+    # after the last.
+    if failure.setup_commands != [] do
+      IO.puts("Setup:    #{Enum.map_join(failure.setup_commands, ", ", &short_name/1)}")
+    end
+
+    if failure.teardown_commands != [] do
+      IO.puts("Teardown: #{Enum.map_join(failure.teardown_commands, ", ", &short_name/1)}")
+    end
   end
 
   defp check_suffix(nil), do: ""
@@ -323,11 +334,24 @@ defmodule Mix.Tasks.Pd.Replay do
   end
 
   defp print_replay_error(
-         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}} = failure
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :adapter_setup}} =
+           failure
        ) do
     print_color(:red, "ERROR: adapter setup failed\n")
     IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
     print_hint("The SUT could not be brought up for replay. Check the adapter's setup/1.")
+  end
+
+  defp print_replay_error(
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}} = failure
+       ) do
+    print_color(:red, "ERROR: the setup commands failed\n")
+    IO.puts("  At:     #{PropertyDamage.FailureReport.setup_location(failure)}")
+    IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
+
+    print_hint(
+      "No step ran: the replay stopped before the first root. Check the setup command against the SUT."
+    )
   end
 
   defp print_replay_error(reason) do

@@ -54,6 +54,20 @@ defmodule PropertyDamage.EventLog.Entry do
         %Entry{timestamp: 20, command_index: 1, event: %OrderCancelled{...}, source: :command}
       ]
 
+  ## Phase
+
+  `phase` tells which part of a run an entry belongs to: `:root` (the
+  default) for the roots, `:setup` for the model's setup commands and
+  `:teardown` for its teardown commands. A setup or teardown entry's
+  `command_index` is the command's offset among the setup or teardown
+  commands, so a reader that takes `command_index` for a root index reads
+  `:root` entries only.
+
+  Inside the engine a command is attributed by its "attribution": the root
+  index for a root, `{:setup, offset}` for a setup command and
+  `{:teardown, offset}` for a teardown command. `attribute/2` writes one into
+  an entry and `attribution/1` reads it back.
+
   ## Timestamp
 
   The timestamp is monotonic time in milliseconds (via `System.monotonic_time/1`),
@@ -82,6 +96,7 @@ defmodule PropertyDamage.EventLog.Entry do
   - `stutter_attempt` - Attempt number for stutter retries (only for `:stutter` source)
   - `stutter_comparison` - Comparison result with original events (only for `:stutter` source)
   - `resource_poller_id` - Reference identifying the poller instance (only for `:resource_poller` source)
+  - `phase` - `:root`, `:setup` or `:teardown` (see "Phase")
   - `fold_index` - Monotonic per-run ordinal stamped when this entry's event was
     folded into the projections (P8 / DR-040). It records the *actual* fold order,
     which the faithful per-step state timeline (`PropertyDamage.RunTrace.state_at/2`)
@@ -111,8 +126,19 @@ defmodule PropertyDamage.EventLog.Entry do
           stutter_attempt: pos_integer() | nil,
           stutter_comparison: :match | {:mismatch, Exception.t()} | nil,
           resource_poller_id: reference() | nil,
+          phase: phase(),
           fold_index: non_neg_integer() | nil
         }
+
+  @typedoc "Which part of a run an entry belongs to; see \"Phase\"."
+  @type phase :: :setup | :root | :teardown
+
+  @typedoc """
+  The command an entry is attributed to: a root index, `{:setup, offset}`,
+  `{:teardown, offset}`, or `nil` for an entry that belongs to no command.
+  """
+  @type attribution ::
+          non_neg_integer() | {:setup, non_neg_integer()} | {:teardown, non_neg_integer()} | nil
 
   defstruct [
     :timestamp,
@@ -128,8 +154,25 @@ defmodule PropertyDamage.EventLog.Entry do
     :stutter_attempt,
     :stutter_comparison,
     :resource_poller_id,
-    :fold_index
+    :fold_index,
+    phase: :root
   ]
+
+  @doc """
+  Attribute `entry` to a command: `{:setup, offset}` and `{:teardown, offset}`
+  set the phase and put the offset in `command_index`; a root index or `nil`
+  is put in `command_index` as it is.
+  """
+  @spec attribute(t(), attribution()) :: t()
+  def attribute(%__MODULE__{} = entry, {phase, offset}) when phase in [:setup, :teardown],
+    do: %{entry | command_index: offset, phase: phase}
+
+  def attribute(%__MODULE__{} = entry, index), do: %{entry | command_index: index}
+
+  @doc "The command `entry` is attributed to; the inverse of `attribute/2`."
+  @spec attribution(t()) :: attribution()
+  def attribution(%__MODULE__{phase: :root, command_index: index}), do: index
+  def attribution(%__MODULE__{phase: phase, command_index: index}), do: {phase, index}
 
   @doc """
   Create a new entry for a command event.
@@ -459,22 +502,24 @@ defmodule PropertyDamage.EventLog.Entry do
       iex> entry.command_index
       3
   """
-  @spec from_injected(struct(), non_neg_integer(), keyword()) :: t()
+  @spec from_injected(struct(), attribution(), keyword()) :: t()
   def from_injected(event, command_index, opts \\ []) do
-    %__MODULE__{
-      timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
-      command_index: command_index,
-      event: event,
-      source: :injected,
-      injector_adapter: nil,
-      nemesis_module: nil,
-      telemetry_receiver: nil,
-      trace_id: nil,
-      span_id: nil,
-      branch_id: Keyword.get(opts, :branch_id),
-      stutter_attempt: nil,
-      stutter_comparison: nil
-    }
+    attribute(
+      %__MODULE__{
+        timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
+        event: event,
+        source: :injected,
+        injector_adapter: nil,
+        nemesis_module: nil,
+        telemetry_receiver: nil,
+        trace_id: nil,
+        span_id: nil,
+        branch_id: Keyword.get(opts, :branch_id),
+        stutter_attempt: nil,
+        stutter_comparison: nil
+      },
+      command_index
+    )
   end
 
   @doc """
@@ -516,11 +561,10 @@ defmodule PropertyDamage.EventLog.Entry do
       iex> entry.command_index
       3
   """
-  @spec from_resource_poller(struct(), non_neg_integer(), reference(), keyword()) :: t()
+  @spec from_resource_poller(struct(), attribution(), reference(), keyword()) :: t()
   def from_resource_poller(event, command_index, poller_id, opts \\ []) do
     %__MODULE__{
       timestamp: Keyword.get(opts, :timestamp, System.monotonic_time(:millisecond)),
-      command_index: command_index,
       event: event,
       source: :resource_poller,
       injector_adapter: nil,
@@ -533,6 +577,7 @@ defmodule PropertyDamage.EventLog.Entry do
       stutter_comparison: nil,
       resource_poller_id: poller_id
     }
+    |> attribute(command_index)
   end
 
   @doc """

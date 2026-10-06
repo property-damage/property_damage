@@ -56,9 +56,14 @@ defmodule PropertyDamage.Validation do
       raise ArgumentError, "Validation failed:\n  - #{error_msg}"
     end
 
+    # A removed lifecycle hook, or a nemesis among the setup or teardown
+    # commands, fails here as it fails PropertyDamage.run/1.
+    PropertyDamage.Model.check_lifecycle!(model)
+
     # Phase 3: Validate commands and projections (requires callbacks)
     errors = []
     errors = errors ++ validate_commands(model)
+    errors = errors ++ validate_sequences(model)
     errors = errors ++ validate_projections(model)
     errors = errors ++ validate_injectable_events(model, injectors)
 
@@ -74,8 +79,88 @@ defmodule PropertyDamage.Validation do
     warnings = warnings ++ warn_no_check_projections(model)
     warnings = warnings ++ warn_unbalanced_weights(model)
     warnings = warnings ++ warn_single_command(model)
+    warnings = warnings ++ sequence_warnings(model)
 
     {:ok, warnings}
+  end
+
+  @doc """
+  Warns about `when:` and `weight:` on a setup or teardown entry.
+
+  Setup and teardown commands form a sequence: every entry runs in order, so
+  `when:` and `weight:` have no effect there.
+  """
+  @spec sequence_warnings(module()) :: [String.t()]
+  def sequence_warnings(model) do
+    for callback <- [:setup_each, :teardown_each],
+        function_exported?(model, callback, 0),
+        {module, opts} when is_atom(module) <- Enum.map(apply(model, callback, []), &entry_opts/1),
+        key <- [:when, :weight],
+        Keyword.has_key?(opts, key) do
+      "#{callback}/0: #{inspect(module)} sets #{key}: ignored in a sequence"
+    end
+  end
+
+  defp entry_opts({module, weight}) when is_atom(module) and is_integer(weight),
+    do: {module, [weight: weight]}
+
+  defp entry_opts({module, opts}) when is_atom(module) and is_list(opts), do: {module, opts}
+
+  defp entry_opts(%{command: module} = map),
+    do: {module, map |> Map.delete(:command) |> Map.to_list()}
+
+  defp entry_opts(module), do: {module, []}
+
+  # Every setup and teardown entry is validated as a commands/0 entry: its
+  # shape, its module, its callbacks and the keys of a map `overrides:`.
+  defp validate_sequences(model) do
+    for callback <- [:setup_each, :teardown_each],
+        function_exported?(model, callback, 0),
+        entry <- apply(model, callback, []),
+        reduce: [] do
+      acc ->
+        validate_command_spec!(entry)
+        module = PropertyDamage.Model.entry_module(entry)
+
+        cond do
+          not Code.ensure_loaded?(module) ->
+            ["#{callback}/0: command module #{inspect(module)} does not exist" | acc]
+
+          missing = missing_command_callback(module) ->
+            {name, arity} = missing
+
+            [
+              "#{callback}/0: command #{inspect(module)} is missing required callback #{name}/#{arity}"
+              | acc
+            ]
+
+          unknown = unknown_override_keys(module, entry) ->
+            [
+              "#{callback}/0: `overrides:` for #{inspect(module)} sets field(s) " <>
+                "#{inspect(unknown)} the command does not define"
+              | acc
+            ]
+
+          true ->
+            acc
+        end
+    end
+    |> Enum.reverse()
+  end
+
+  # The keys of a map `overrides:` the command struct does not define, or nil.
+  # A function `overrides:` is checked when it runs, at generation.
+  defp unknown_override_keys(module, entry) do
+    {_module, opts} = entry_opts(entry)
+
+    with %{} = overrides when map_size(overrides) > 0 <- Keyword.get(opts, :overrides),
+         true <- function_exported?(module, :__struct__, 0),
+         fields = module.__struct__() |> Map.from_struct() |> Map.keys(),
+         [_ | _] = unknown <- Map.keys(overrides) -- fields do
+      unknown
+    else
+      _ -> nil
+    end
   end
 
   @doc """

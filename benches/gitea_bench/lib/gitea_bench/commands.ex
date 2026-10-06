@@ -13,6 +13,26 @@ defmodule GiteaBench.Commands do
 
   import PropertyDamage.Generator, only: [merge_overrides: 2]
 
+  defmodule Login do
+    @moduledoc """
+    Open the admin's session on the forge. The model's only setup command
+    (`GiteaBench.Model.setup_each/0`): every run, in every target, starts with
+    it. Each transport logs in its own way: the API adapter verifies the
+    credentials with one authenticated request, the UI adapter logs the admin
+    in through the browser and keeps the session for the admin's later actions.
+    """
+    use PropertyDamage.Command, observables: [GiteaBench.Events.SessionOpened]
+
+    defstruct []
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{}
+      |> merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+
   defmodule CreateUser do
     @moduledoc "Create a (non-admin) user. login/email injected by the model."
     use PropertyDamage.Command, observables: [GiteaBench.Events.UserCreated]

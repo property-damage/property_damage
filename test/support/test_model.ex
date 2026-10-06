@@ -3,7 +3,8 @@ defmodule PropertyDamage.Test.FullModel do
   Complete test model implementing all callbacks.
 
   Demonstrates full Model behaviour implementation including
-  lifecycle hooks, terminate_early?/3, and the new Model-level wiring pattern.
+  setup and teardown commands, terminate_early?/3, and the new Model-level
+  wiring pattern.
   """
   @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
@@ -37,16 +38,10 @@ defmodule PropertyDamage.Test.FullModel do
   def injectable_events, do: [ItemCreated, ItemViewed]
 
   @impl true
-  def setup_once(_config), do: :ok
+  def setup_each, do: []
 
   @impl true
-  def setup_each(_config), do: :ok
-
-  @impl true
-  def teardown_each(_config), do: :ok
-
-  @impl true
-  def teardown_once(_config), do: :ok
+  def teardown_each, do: []
 
   @impl true
   def simulator, do: __MODULE__
@@ -235,4 +230,26 @@ defmodule PropertyDamage.Test.WeightedModel do
   def simulate(%ViewItem{item_ref: item_ref}, _state) do
     [%ItemViewed{item_ref: item_ref}]
   end
+end
+
+defmodule PropertyDamage.Test.SetupListModel do
+  @moduledoc """
+  Test model with one setup command and one teardown command.
+  """
+  @behaviour PropertyDamage.Model
+
+  alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
+  alias PropertyDamage.Test.Projections.ModelState
+
+  @impl true
+  def commands, do: [CreateItem]
+
+  @impl true
+  def command_sequence_projection, do: ModelState
+
+  @impl true
+  def setup_each, do: [CreateItem]
+
+  @impl true
+  def teardown_each, do: [ViewItem]
 end

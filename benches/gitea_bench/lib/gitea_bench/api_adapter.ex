@@ -7,11 +7,14 @@ defmodule GiteaBench.ApiAdapter do
   so the events are directly comparable to the UI adapter's.
 
   Config (`config:` in the `targets:` entry): `:base_url` (required), `:admin_user`,
-  `:admin_password`.
+  `:admin_password`, and `:login_password`, the password the `Login` setup
+  command authenticates the admin with (default: `:admin_password`; `setup/1`
+  always resets the forge with `:admin_password`).
   """
 
   use PropertyDamage.Adapter
 
+  alias GiteaBench.Events.SessionOpened
   alias GiteaBench.Gitea
 
   alias GiteaBench.Commands.{
@@ -20,7 +23,8 @@ defmodule GiteaBench.ApiAdapter do
     CreateIssue,
     CreateLabel,
     CreateRepo,
-    CreateUser
+    CreateUser,
+    Login
   }
 
   @impl true
@@ -28,13 +32,20 @@ defmodule GiteaBench.ApiAdapter do
     client = Gitea.new(config)
     :ok = Gitea.ensure_ready(client)
     :ok = Gitea.reset!(client)
-    {:ok, %{client: client}}
+    {:ok, %{client: client, login_password: login_password(config, client)}}
   end
 
   @impl true
   def teardown(_ctx), do: :ok
 
   @impl true
+  def execute(%Login{}, %{client: client, login_password: password}, _runtime) do
+    case Gitea.verify_login(client, client.admin_user, password) do
+      :ok -> {:ok, [%SessionOpened{user: client.admin_user}]}
+      {:error, status} -> {:error, {:login_failed, status}}
+    end
+  end
+
   def execute(%CreateUser{login: login, email: email}, %{client: client}, _runtime) do
     with :ok <- Gitea.create_user(client, login, email) do
       {:ok, [Gitea.user_event(client, login)]}
@@ -92,4 +103,7 @@ defmodule GiteaBench.ApiAdapter do
       {:ok, [Gitea.issue_closed_event(client, full_name, number)]}
     end
   end
+
+  defp login_password(config, client),
+    do: Map.get(config, :login_password, client.admin_password)
 end

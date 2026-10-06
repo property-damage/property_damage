@@ -112,6 +112,8 @@ defmodule PropertyDamage.RunComparison.Encode do
 
   defp enc_section(:prefix), do: "prefix"
   defp enc_section(:suffix), do: "suffix"
+  defp enc_section(:setup), do: "setup"
+  defp enc_section(:teardown), do: "teardown"
   defp enc_section({:branch, id}), do: %{"branch" => id}
 
   defp enc_key(k) when is_atom(k), do: to_string(k)

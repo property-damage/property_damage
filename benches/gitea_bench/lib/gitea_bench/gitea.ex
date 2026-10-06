@@ -88,6 +88,19 @@ defmodule GiteaBench.Gitea do
     :ok
   end
 
+  @doc """
+  Verify that `user` can authenticate with `password`: one authenticated
+  `GET /api/v1/user`. Returns `:ok`, or `{:error, status}` when the forge
+  refuses the credentials (`{:error, reason}` when it cannot be reached).
+  """
+  def verify_login(%__MODULE__{} = client, user, password) do
+    case req(:get, client, "/user", auth: {:basic, "#{user}:#{password}"}) do
+      {:ok, 200, _body} -> :ok
+      {:ok, status, _body} -> {:error, status}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   # --- system webhooks (P9 injector) -----------------------------------------
 
   @doc """

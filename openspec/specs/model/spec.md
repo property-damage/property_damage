@@ -4,7 +4,7 @@
 
 Models orchestrate stateful property-based tests by defining which commands run, when they are valid, how they are parameterized, and the test lifecycle. A model ties together commands, projections, and optional simulators without knowing transport details or command internals.
 
-Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs)
+Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-048 (Setup and Teardown Commands)
 
 ## Requirements
 
@@ -117,45 +117,80 @@ Models MAY define a simulator module that predicts expected events for each comm
 - **WHEN** a model does not implement `simulator/0`
 - **THEN** the framework operates without event prediction during generation
 
-### Requirement: Test Lifecycle
+### Requirement: Setup and Teardown Commands
 
-Models SHALL support a four-phase lifecycle: `setup_once` runs once at the start, `setup_each` runs before every execution (including shrink attempts), `teardown_each` runs after every execution, and `teardown_once` runs once after all shrinking is complete.
+Models MAY implement `setup_each/0` and `teardown_each/0`, both defaulting to `[]`. Each SHALL return command specs in the grammar of `commands/0` (`Module` or `{Module, opts}`, with `overrides:`), typed `PropertyDamage.Model.sequence`. The model MUST NOT perform side effects for fixtures: a fixture is a command, so only the adapter realizes it (DR-048).
 
-#### Scenario: Setup once runs before all executions
-- **WHEN** a property test begins
-- **THEN** `setup_once/1` is called exactly once with the test configuration
-- **AND** it runs before any command sequences are executed
+#### Scenario: Setup commands run before the roots of every execution
+- **GIVEN** a model whose `setup_each/0` returns `[{CreateUser, overrides: %{name: "fixture"}}, Login]`
+- **WHEN** a run, a shrink attempt or a replay executes a sequence
+- **THEN** every target runs `CreateUser` and then `Login` after its `Adapter.setup/1` and before the first root
 
-#### Scenario: Setup once is not re-run during shrinking
-- **WHEN** a failure is found and the framework begins shrinking
-- **THEN** `setup_once/1` is NOT called again
-- **AND** only `setup_each/1` and `teardown_each/1` run for each shrink attempt
+#### Scenario: Teardown commands run after the roots of every execution
+- **WHEN** a model's `teardown_each/0` returns `[DeleteUser]` and an execution ends, whether it passes or fails
+- **THEN** every target whose `Adapter.setup/1` succeeded runs `DeleteUser` after the final boundary and the `@check at: :teardown` checks and before its `Adapter.teardown/1`
 
-#### Scenario: Setup each runs before every execution
-- **WHEN** a command sequence is about to be executed (initial run or shrink attempt)
-- **THEN** `setup_each/1` is called before the execution begins
-- **AND** this applies to every shrink attempt as well
+#### Scenario: Both callbacks are optional
+- **WHEN** a model defines neither callback
+- **THEN** no setup or teardown command runs and the generator draws exactly the roots it drew before the callbacks existed
 
-#### Scenario: Teardown each runs after every execution
-- **WHEN** a command sequence execution completes (whether it passes or fails)
-- **THEN** `teardown_each/1` is called for cleanup
+### Requirement: A Setup List Is a Sequence
 
-#### Scenario: Teardown once runs after all shrinking
-- **WHEN** all shrinking is complete (or no shrinking was needed)
-- **THEN** `teardown_once/1` is called exactly once for final cleanup
+Every entry of `setup_each/0` and `teardown_each/0` SHALL run, in the order written. The framework MUST NOT filter entries by `when:` or choose among them by `weight:`. `terminate_early?/3` and `max_commands` SHALL apply to roots only. A `when:` or `weight:` on an entry SHOULD draw a validation warning.
 
-#### Scenario: Lifecycle callbacks are optional
-- **WHEN** a model does not implement any lifecycle callbacks
-- **THEN** the framework proceeds without calling them
-- **AND** no error is raised for missing lifecycle callbacks
+#### Scenario: Entries run in written order
+- **WHEN** `setup_each/0` returns `[A, B, C]`
+- **THEN** each target runs `A`, `B` and `C` in that order, with no omission and no reordering
 
-#### Scenario: Setup failure aborts execution
-- **WHEN** `setup_once/1` returns `{:error, reason}`
-- **THEN** the test is aborted
+#### Scenario: A `when:` or `weight:` on an entry is ignored with a warning
+- **WHEN** an entry of `setup_each/0` or `teardown_each/0` sets `when:` or `weight:`
+- **THEN** the entry still runs
+- **AND** `mix pd.validate` reports a warning that the option is ignored in a sequence
 
-#### Scenario: Setup each failure skips execution
-- **WHEN** `setup_each/1` returns `{:error, reason}`
-- **THEN** that specific execution is skipped
+#### Scenario: Roots alone are bounded by `max_commands`
+- **WHEN** `setup_each/0` returns three entries and `max_commands` is 2
+- **THEN** all three setup commands run
+- **AND** the run draws at most two roots
+
+### Requirement: Setup Commands Shape the Roots
+
+The generator SHALL draw setup commands from the run seed before the roots, and SHALL simulate them before drawing the roots. An `overrides:` function on a setup entry SHALL see the simulated state the earlier setup commands left. The generator SHALL draw teardown commands after the last root, against the simulated state after that root.
+
+#### Scenario: A server-assigned id flows into a root
+- **GIVEN** a setup command whose simulated event carries an `external()` user id
+- **WHEN** a root's `overrides:` reads that id from the state
+- **THEN** the root receives the id the target resolved for that setup command
+
+#### Scenario: A seed is stable for a fixed model
+- **WHEN** a model adds a setup command
+- **THEN** the roots drawn for a given seed MAY differ from the roots drawn before
+- **AND** a model without setup commands draws exactly the roots it drew before
+
+### Requirement: Setup Commands Are Not Roots
+
+A setup or teardown command SHALL NOT be a comparison boundary, SHALL NOT be expanded, and SHALL NOT be dropped, reordered or simplified by the shrinker. A module MAY appear in both `setup_each/0` and `commands/0`, and each instance SHALL follow the rules of its own list.
+
+#### Scenario: A module in both lists
+- **WHEN** `Login` appears in `setup_each/0` and in `commands/0`
+- **THEN** the setup instance is never compared or shrunk
+- **AND** a root instance is drawn, compared and shrunk as any root
+
+### Requirement: Removed Lifecycle Hooks Are Rejected
+
+A model that defines `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1`, `setup_once/0` or `teardown_once/0` SHALL fail at run start with an error that names the replacement. A model that lists a nemesis module in `setup_each/0` or `teardown_each/0` SHALL fail with a validation error, because faults are never injected during setup or teardown commands.
+
+#### Scenario: A removed hook fails at run start
+- **WHEN** a model defines `setup_each/1`
+- **THEN** `PropertyDamage.run/1` raises an `ArgumentError` that names `setup_each/0` and `teardown_each/0` as the replacement
+- **AND** no target's adapter is set up
+
+#### Scenario: A once hook has no replacement hook
+- **WHEN** a model defines `setup_once/0`
+- **THEN** the error says once-per-campaign setup belongs in an idempotent `Adapter.setup/1` or in the caller's wrapper
+
+#### Scenario: A nemesis among the setup commands
+- **WHEN** `setup_each/0` lists a nemesis module
+- **THEN** validation fails with an error that names the callback and the module
 
 ### Requirement: Terminal States
 

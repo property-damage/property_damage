@@ -10,6 +10,13 @@ defmodule PropertyDamage.Sequence.Position do
       %Sequence.Position{section: :prefix, offset: 0}
       %Sequence.Position{section: {:branch, 1}, offset: 2}
       %Sequence.Position{section: :suffix, offset: 0}
+      %Sequence.Position{section: :setup, offset: 1}
+      %Sequence.Position{section: :teardown, offset: 0}
+
+  The `:setup` and `:teardown` sections hold the model's setup commands
+  (`c:PropertyDamage.Model.setup_each/0`) and teardown commands
+  (`c:PropertyDamage.Model.teardown_each/0`). They are not roots: a root's
+  section is `:prefix`, `{:branch, b}` or `:suffix`.
 
   This is *the* position vocabulary (DR-039): the whole framework speaks it, from
   the generator's minting and the executor's `current_position` through the
@@ -26,9 +33,10 @@ defmodule PropertyDamage.Sequence.Position do
 
   @typedoc """
   Which section of a sequence a command lives in: the `:prefix`, the `:suffix`,
-  or a specific parallel branch identified by its `branch_id`.
+  a specific parallel branch identified by its `branch_id`, or the setup or
+  teardown commands.
   """
-  @type section :: :prefix | :suffix | {:branch, non_neg_integer()}
+  @type section :: :prefix | :suffix | {:branch, non_neg_integer()} | :setup | :teardown
 
   @type t :: %__MODULE__{
           section: section(),
@@ -50,14 +58,29 @@ defmodule PropertyDamage.Sequence.Position do
   @spec suffix(non_neg_integer()) :: t()
   def suffix(offset), do: %__MODULE__{section: :suffix, offset: offset}
 
+  @doc "The position of the setup command at `offset`."
+  @spec setup(non_neg_integer()) :: t()
+  def setup(offset), do: %__MODULE__{section: :setup, offset: offset}
+
+  @doc "The position of the teardown command at `offset`."
+  @spec teardown(non_neg_integer()) :: t()
+  def teardown(offset), do: %__MODULE__{section: :teardown, offset: offset}
+
+  @doc "Whether `position` belongs to a root (prefix, branch or suffix)."
+  @spec root?(t()) :: boolean()
+  def root?(%__MODULE__{section: section}), do: section not in [:setup, :teardown]
+
   @doc """
   Human-readable prose for a position (DR-039).
 
   The shared phrasing used by the determinism audit and `mix pd.audit`:
-  `"prefix position 0"`, `"branch 1 position 2"`, `"suffix position 0"`.
+  `"prefix position 0"`, `"branch 1 position 2"`, `"suffix position 0"`,
+  `"setup position 0"`, `"teardown position 0"`.
   """
   @spec describe(t()) :: String.t()
   def describe(%__MODULE__{section: :prefix, offset: i}), do: "prefix position #{i}"
   def describe(%__MODULE__{section: {:branch, b}, offset: i}), do: "branch #{b} position #{i}"
   def describe(%__MODULE__{section: :suffix, offset: i}), do: "suffix position #{i}"
+  def describe(%__MODULE__{section: :setup, offset: i}), do: "setup position #{i}"
+  def describe(%__MODULE__{section: :teardown, offset: i}), do: "teardown position #{i}"
 end

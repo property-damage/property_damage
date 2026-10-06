@@ -39,6 +39,24 @@ defmodule PropertyDamage.Scheduler do
   find state a previous run (or a crashed one) left behind: it must be
   idempotent.
 
+  ## Setup and teardown commands
+
+  Per target and run the order is: `Adapter.setup/1`, the `@check at:
+  :startup` checks, the setup commands (`:setup_commands`), the root-0
+  barrier, the roots, the final boundary, finalization (pollers awaited, queue
+  settled, `@check at: :teardown` checks), the teardown commands
+  (`:teardown_commands`), and `Adapter.teardown/1`.
+
+  Every `Adapter.setup/1` returns before any variant runs a setup command.
+  Then each variant runs its setup commands (`PropertyDamage.Variant.run_setup/1`):
+  one variant after another in target order under `:serial`, all at once
+  under `:parallel`. No variant starts root 0 before every one of them
+  finished. Setup commands are not roots: they are never compared and never
+  scheduled by an observation's `every:`.
+
+  The teardown commands run for every variant whose `Adapter.setup/1`
+  succeeded, whatever happened after it, just before its `Adapter.teardown/1`.
+
   ## Comparison
 
   Variants are compared only through boundary observations: the functions
@@ -67,9 +85,11 @@ defmodule PropertyDamage.Scheduler do
     * `:did_not_converge` - a target's boundary observation was still pending
       at the convergence bound (`PropertyDamage.Failure.did_not_converge/1`),
       named by its key.
-    * `:setup_failed` - a target's `setup/1` returned an error or raised
-      (`PropertyDamage.Failure.setup_failed/1`, holding the error term or the
-      exception). Targets already set up are torn down; the failing one is not.
+    * `:setup_failed` - a target could not be brought up: its `setup/1`
+      returned an error or raised, a setup command failed or a check failed on
+      its event, or an `external()` a setup command produces stayed unresolved
+      (`PropertyDamage.Failure.Setup` names the cause). Its `root` is `nil`, so
+      it sorts before every failure at a root.
     * `:check_failed` - a check failed in a target: at a command, at the
       `:startup` phase, or while the run finalized (an `@eventually` timeout,
       a `:teardown` check).
@@ -88,14 +108,15 @@ defmodule PropertyDamage.Scheduler do
 
   ## Which targets go on after a failure
 
-  Every failure ends the run, with one exception: an `:execution_failed` at a
-  root in a target other than the reference. That target leaves the run (it
-  is retired) and the others go on:
+  Every failure ends the run, with two exceptions in a target other than the
+  reference: an `:execution_failed` at a root, and a `:setup_failed`. That
+  target leaves the run (it is retired) and the others go on:
 
-    * Before the next root starts in any target, the retired target finalizes
-      its run (which stops its pollers), runs its `@check at: :teardown`
-      checks and tears its adapter down; its process, and with it its copy of
-      the placeholder registry, is gone.
+    * Before the next root (or root 0) starts in any target, the retired
+      target finalizes its run (which stops its pollers), runs its `@check at:
+      :teardown` checks, runs its teardown commands and tears its adapter
+      down; its process, and with it its copy of the placeholder registry, is
+      gone. A target whose `setup/1` failed has nothing to tear down.
     * The comparison at that root and at every later one compares the targets
       still running with the reference.
     * When no target other than the reference is left, the run ends.
@@ -168,8 +189,9 @@ defmodule PropertyDamage.Scheduler do
 
   @typedoc """
   The outcome of one run. `results`, `observations` and `latencies` hold one
-  entry per target in target order, for every target that was set up (all of
-  them unless setup failed, then none). Each result is what
+  entry per target in target order (none when the reference's `setup/1`
+  failed; a `nil` result, no observations and no latencies for another target
+  whose `setup/1` failed). Each result is what
   `PropertyDamage.Executor.run/4` reports for that target's run; a retired
   target's is the result it had when it left the run. `failure` is the
   primary failure and `other_failures` the run's other failures, in root
@@ -222,6 +244,9 @@ defmodule PropertyDamage.Scheduler do
     * `:mint_epoch` - the mint epoch every target's run uses for client-minted
       values (DR-034); optional, default `0`, the exploration run's epoch
     * `:stutter_config`, `:check_mode` - passed to every variant (optional)
+    * `:setup_commands`, `:teardown_commands` - the sequence's setup and
+      teardown commands, run by every variant before root 0 and after the
+      final boundary (optional, default `[]`)
     * `:placeholder_registry` - the registry the commands' placeholders resolve
       against (DR-021); optional, default the registry built from `:commands`.
       A shrunk sequence passes its own registry, whose producer positions were
@@ -234,8 +259,8 @@ defmodule PropertyDamage.Scheduler do
     config = build_config(opts)
 
     case set_up(config) do
-      {:ok, variants} ->
-        {:ok, finish_run(config, lockstep(config, variants))}
+      {:ok, run} ->
+        {:ok, finish_run(config, lockstep(config, run))}
 
       {:error, failure} ->
         {:ok, empty_run(config, failure)}
@@ -251,6 +276,8 @@ defmodule PropertyDamage.Scheduler do
       model: model,
       targets: targets,
       commands: commands,
+      setup_commands: Keyword.get(opts, :setup_commands, []),
+      teardown_commands: Keyword.get(opts, :teardown_commands, []),
       seed: Keyword.fetch!(opts, :seed),
       run_number: Keyword.fetch!(opts, :run_number),
       run_nonce: Keyword.get(opts, :run_nonce),
@@ -292,26 +319,31 @@ defmodule PropertyDamage.Scheduler do
   # Setup
   # ==========================================================================
 
-  # Starts and sets up one variant after another. On a failure, the variants
-  # already set up are stopped (their adapters torn down) and the failing one is
-  # stopped without an adapter teardown.
+  # Starts and sets up one variant after another. A failure in the reference
+  # ends the run before any other variant is set up. A failure in another
+  # variant retires it (it has no adapter context, so nothing to tear down)
+  # and the variants after it are still set up. Returns the run so far.
   defp set_up(config) do
+    run = %{active: [], retired: [], failures: [], counts: config.zero_counts}
+
     config.targets
-    |> Enum.reduce_while({:ok, []}, fn target, {:ok, ready} ->
+    |> Enum.reduce_while({:ok, run}, fn target, {:ok, run} ->
       case set_up_variant(config, target) do
         {:ok, variant} ->
-          {:cont, {:ok, [variant | ready]}}
+          {:cont, {:ok, %{run | active: run.active ++ [variant]}}}
+
+        {:error, reason} when target.index == 0 ->
+          {:halt, {:error, failure(config, target, nil, Failure.setup_failed(reason))}}
 
         {:error, reason} ->
-          Enum.each(ready, &stop_variant/1)
-          reason = Failure.setup_failed(reason)
-          {:halt, {:error, failure(config, target, nil, reason)}}
+          failure = failure(config, target, nil, Failure.setup_failed(reason))
+          gone = %{pid: nil, target: target, observations: [], retired: {nil, []}}
+
+          {:cont,
+           {:ok,
+            %{run | retired: run.retired ++ [gone], failures: run.failures ++ [{failure, true}]}}}
       end
     end)
-    |> case do
-      {:ok, ready} -> {:ok, Enum.reverse(ready)}
-      error -> error
-    end
   end
 
   defp set_up_variant(config, target) do
@@ -321,6 +353,8 @@ defmodule PropertyDamage.Scheduler do
         model: config.model,
         commands: config.commands,
         placeholder_registry: config.registry,
+        setup_commands: config.setup_commands,
+        teardown_commands: config.teardown_commands,
         seed: config.seed,
         run_number: config.run_number,
         run_nonce: config.run_nonce,
@@ -358,14 +392,87 @@ defmodule PropertyDamage.Scheduler do
   # an execution failure, `failures`, every failure found (`{failure,
   # primary?}`; a retired variant's `:teardown` check failure cannot be the
   # primary one), and `counts`, the compare counts of the boundaries compared.
-  defp lockstep(config, variants) do
-    run = %{active: variants, retired: [], failures: [], counts: config.zero_counts}
-
+  defp lockstep(config, run) do
     # The barrier: every setup returned and every :startup check passed before
-    # any variant executes command 0. Any failure here ends the run.
-    case advance_all(config, variants, @before_first_root) do
-      {variants, []} -> step_roots(config, %{run | active: variants})
-      {variants, failures} -> %{run | active: variants, failures: primary_candidates(failures)}
+    # any variant executes a setup command. Any failure here ends the run.
+    with true <- goes_on?(config, run),
+         {variants, []} <- advance_all(config, run.active, @before_first_root),
+         {:cont, run} <- run_setup(config, %{run | active: variants}) do
+      step_roots(config, run)
+    else
+      false ->
+        run
+
+      {:halt, run} ->
+        run
+
+      {variants, failures} when is_list(variants) ->
+        %{run | active: variants, failures: run.failures ++ primary_candidates(failures)}
+    end
+  end
+
+  # A run of several targets goes on while a target other than the
+  # reference is still running.
+  defp goes_on?(config, run) do
+    length(config.targets) == 1 or Enum.any?(run.active, &(&1.target.index != 0))
+  end
+
+  # Every variant runs its setup commands. A setup failure in the reference
+  # ends the run; one in another variant retires it before root 0.
+  defp run_setup(config, run) do
+    {active, failures} = setup_all(config, run.active)
+    run = %{run | active: active}
+
+    cond do
+      failures == [] ->
+        {:cont, run}
+
+      Enum.all?(failures, &retires?(&1, @before_first_root)) ->
+        run = Enum.reduce(failures, run, &retire(config, &2, &1))
+        if goes_on?(config, run), do: {:cont, run}, else: {:halt, run}
+
+      true ->
+        {:halt, %{run | failures: run.failures ++ primary_candidates(failures)}}
+    end
+  end
+
+  defp setup_all(%{concurrency: :serial} = config, variants) do
+    {done, failures} =
+      Enum.reduce_while(variants, {[], []}, fn variant, {done, failures} ->
+        case set_up_commands(config, variant) do
+          {:ok, variant} ->
+            {:cont, {[variant | done], failures}}
+
+          {:failed, variant, failure} ->
+            next = {[variant | done], [failure | failures]}
+            if retires?(failure, @before_first_root), do: {:cont, next}, else: {:halt, next}
+        end
+      end)
+
+    rest = Enum.drop(variants, length(done))
+    {Enum.reverse(done, rest), Enum.reverse(failures)}
+  end
+
+  defp setup_all(%{concurrency: :parallel} = config, variants) do
+    done =
+      variants
+      |> Enum.map(fn variant -> Task.async(fn -> set_up_commands(config, variant) end) end)
+      |> Task.await_many(:infinity)
+
+    {Enum.map(done, &elem(&1, 1)), for({:failed, _variant, failure} <- done, do: failure)}
+  end
+
+  defp set_up_commands(config, variant) do
+    case call(variant.pid, &Variant.run_setup/1) do
+      {:ok, :ok} ->
+        {:ok, variant}
+
+      {:ok, {:failed, %{reason: reason}}} ->
+        {:failed, variant, failure(config, variant.target, nil, reason)}
+
+      {:crashed, reason} ->
+        {:failed, %{variant | pid: nil},
+         failure(config, variant.target, nil, Failure.unknown(reason))}
     end
   end
 
@@ -419,11 +526,14 @@ defmodule PropertyDamage.Scheduler do
 
   defp primary_candidates(failures), do: Enum.map(failures, &{&1, true})
 
-  # Only an execution failure at a root, in a variant other than the
-  # reference, lets the run go on without that variant. The reference is what
-  # every other variant is compared with, so its failure ends the run.
+  # Only an execution failure at a root, or a setup failure, in a variant
+  # other than the reference, lets the run go on without that variant. The
+  # reference is what every other variant is compared with, so its failure
+  # ends the run.
   defp retires?(%{kind: :execution_failed, variant: %{index: index}}, root),
     do: root >= 0 and index != 0
+
+  defp retires?(%{kind: :setup_failed, variant: %{index: index}}, _root), do: index != 0
 
   defp retires?(_failure, _root), do: false
 
@@ -438,6 +548,7 @@ defmodule PropertyDamage.Scheduler do
     {result, failure, teardown_failures} =
       case variant.pid && call(variant.pid, &Variant.retire/1) do
         {:ok, {:ok, result, teardown_failures}} ->
+          result = with_teardown_entries(result, variant)
           stop_variant(variant)
           {result, with_result_reason(failure, result), teardown_failures}
 
@@ -624,7 +735,9 @@ defmodule PropertyDamage.Scheduler do
       |> Enum.reject(fn {failure, _primary?, _when} ->
         MapSet.member?(already_found, identity(failure))
       end)
-      |> Enum.split_with(fn {failure, _primary?, _when} -> failure.root != nil end)
+      |> Enum.split_with(fn {failure, _primary?, _when} ->
+        failure.root != nil or failure.kind == :setup_failed
+      end)
 
     primary_and_others(found ++ at_root, at_end)
   end
@@ -694,6 +807,7 @@ defmodule PropertyDamage.Scheduler do
 
     case call(variant.pid, &Variant.finish/1) do
       {:ok, result} ->
+        result = with_teardown_entries(result, variant)
         stop_variant(variant)
         {result, latency, {:finished, result}}
 
@@ -711,7 +825,22 @@ defmodule PropertyDamage.Scheduler do
          %{success: false, failure_reason: nil, check_failures: [first | _]}
        ) do
     reason = Failure.check_failed(first.check_name, first.reason)
-    failure(config, target, first.command_index, reason)
+
+    case first.command_index do
+      # A check recorded on a setup command's event is a setup failure.
+      {:setup, offset} ->
+        reason =
+          Failure.setup_failed(:check,
+            command: Enum.at(config.setup_commands, offset),
+            setup_index: offset,
+            detail: reason
+          )
+
+        failure(config, target, nil, reason)
+
+      root ->
+        failure(config, target, root, reason)
+    end
   end
 
   defp finalize_failure(config, target, %{success: false} = result) do
@@ -749,6 +878,18 @@ defmodule PropertyDamage.Scheduler do
     case call(variant.pid, &Variant.latencies/1) do
       {:ok, latencies} -> latencies
       {:crashed, _reason} -> []
+    end
+  end
+
+  # Runs the variant's teardown commands and appends their log entries to its
+  # result.
+  defp with_teardown_entries(result, variant) do
+    case call(variant.pid, &Variant.run_teardown/1) do
+      {:ok, {:ok, entries}} when is_map(result) ->
+        %{result | event_log: result.event_log ++ entries}
+
+      _no_entries ->
+        result
     end
   end
 

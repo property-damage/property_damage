@@ -4,7 +4,7 @@
 
 Defines the two-phase shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
 
-Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors)
+Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands)
 
 ## Requirements
 
@@ -217,7 +217,7 @@ The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned b
 
 ### Requirement: Variant-Aware Shrinking (DR-045)
 
-The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run `setup_each/1`, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The reference target's sequence SHALL be the shrink target, because all targets run the same commands. A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:` (`[converge_within: ms]`) and `check_mode:`. A candidate SHALL be judged by the primary failure of its run alone: `other_failures` SHALL NOT take part in the signature.
+The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run the model's setup commands, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The reference target's sequence SHALL be the shrink target, because all targets run the same commands. A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:` (`[converge_within: ms]`) and `check_mode:`. A candidate SHALL be judged by the primary failure of its run alone: `other_failures` SHALL NOT take part in the signature.
 
 #### Scenario: Divergence is shrunk
 - **WHEN** a run fails with kind `:diverged`
@@ -241,7 +241,7 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 
 #### Scenario: Setup failures are not shrunk
 - **WHEN** a run fails with kind `:setup_failed`
-- **THEN** the framework SHALL report the original sequence without shrinking
+- **THEN** the framework SHALL report the original sequence without shrinking (DR-048)
 
 #### Scenario: Branching sequences keep the linear engine
 - **WHEN** a branching sequence fails (one target only)
@@ -264,3 +264,28 @@ Before running a shrink candidate, the shrinker SHALL validate it against the mo
 - **WHEN** a shrink candidate keeps a command that references an entity whose creating command was removed
 - **THEN** the candidate's validation SHALL raise
 - **AND** the shrinker SHALL treat the candidate as invalid and SHALL NOT accept it as a reproduction
+
+### Requirement: Setup and Teardown Commands Under Shrinking (DR-048)
+
+The shrinker SHALL NOT treat a setup or teardown command as a candidate: it SHALL NOT drop, reorder, expand or simplify one. Every attempt SHALL re-execute the report's setup commands before the candidate roots in every target. Every attempt SHALL re-draw the teardown commands against the simulated state after that attempt's last root. Candidate validation SHALL start from the state the setup commands leave, so a candidate is simulated after the setup commands. An attempt in which a setup failed SHALL NOT be a reproduction: the shrinker SHALL reject the candidate, and the attempt SHALL count against the budget.
+
+#### Scenario: Setup commands survive every candidate
+- **GIVEN** a failing run with two setup commands and five roots
+- **WHEN** the shrinker removes roots
+- **THEN** every candidate SHALL run both setup commands, unchanged and in their original order
+
+#### Scenario: Teardown commands follow the candidate
+- **GIVEN** a teardown command whose `overrides:` reads an id the last root created
+- **WHEN** the shrinker removes the root that created it and a different root becomes last
+- **THEN** the attempt SHALL draw the teardown command against the state after the new last root
+
+#### Scenario: A candidate that depends on setup state is valid
+- **GIVEN** a root whose `when:` reads a user the setup commands created
+- **WHEN** the shrinker validates a candidate that keeps that root
+- **THEN** validation SHALL see the user in the state and SHALL accept the candidate
+
+#### Scenario: An attempt whose setup failed is not a reproduction
+- **GIVEN** a shrink attempt in which a setup command answers `{:error, _}`
+- **WHEN** the attempt ends
+- **THEN** the shrinker SHALL reject the candidate even if the original failure was also a setup failure
+- **AND** the attempt SHALL count against `max_shrink_attempts`

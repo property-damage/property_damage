@@ -128,10 +128,8 @@ defmodule PropertyDamage.IEx do
 
   defp print_optional_callbacks(model) do
     callbacks = [
-      {:setup_once, 1, "One-time setup before all runs"},
-      {:setup_each, 1, "Setup before each execution"},
-      {:teardown_each, 1, "Cleanup after each execution"},
-      {:teardown_once, 1, "Final cleanup after all runs"},
+      {:setup_each, 0, "Setup commands run before the roots of every run"},
+      {:teardown_each, 0, "Teardown commands run after the roots of every run"},
       {:terminate_early?, 3, "Custom termination condition"},
       {:injectable_events, 0, "Events from injector adapters"}
     ]

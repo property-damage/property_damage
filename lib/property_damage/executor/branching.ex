@@ -10,13 +10,14 @@ defmodule PropertyDamage.Executor.Branching do
   # observed events while satisfying the checks).
   #
   # The per-command/linear spine stays in PropertyDamage.Executor and is called
-  # back: build_initial_state, execute_command, restore_remaining_faults,
-  # run_phase_checks. Event folds come from Executor.Events, result
-  # finalization from Executor.Finalization, and auto-restore from Executor.Nemesis.
+  # back: execute_command and restore_remaining_faults. The executor builds the
+  # initial state, runs the startup checks and the setup commands before
+  # calling execute_body/6, and finalizes and runs the teardown commands after
+  # it. Event folds come from Executor.Events and auto-restore from
+  # Executor.Nemesis.
 
   alias PropertyDamage.Executor
   alias PropertyDamage.Executor.Events
-  alias PropertyDamage.Executor.Finalization
   alias PropertyDamage.Executor.Nemesis
   alias PropertyDamage.Failure
   alias PropertyDamage.Linearization
@@ -25,68 +26,13 @@ defmodule PropertyDamage.Executor.Branching do
   alias PropertyDamage.Sequence
   alias PropertyDamage.Sequence.Position
 
-  def execute_branching(
-        sequence,
-        model,
-        adapter,
-        adapter_context,
-        event_queue,
-        stutter_config,
-        mock_registry,
-        check_mode,
-        external_markers,
-        rng_seed \\ nil,
-        mint \\ {nil, 0},
-        telemetry \\ nil
-      ) do
-    initial_state =
-      Executor.build_initial_state(
-        model,
-        event_queue,
-        stutter_config,
-        mock_registry,
-        check_mode,
-        external_markers,
-        sequence.registry,
-        rng_seed,
-        mint,
-        telemetry
-      )
-
-    # DR-024: @check at: :startup runs once on the shared initial state,
-    # before any branch. A :halt failure aborts before any command runs.
-    case Executor.run_phase_checks(initial_state, :startup) do
-      {:halt, name, reason, _counters} ->
-        Finalization.finalize_result(
-          {:failed, nil, Failure.check_failed(name, reason), initial_state}
-        )
-
-      {:ok, startup_recorded, startup_counters} ->
-        initial_state = %{
-          initial_state
-          | check_failures: startup_recorded ++ initial_state.check_failures,
-            check_counters: startup_counters
-        }
-
-        execute_branching_phases(
-          sequence,
-          initial_state,
-          model,
-          adapter,
-          adapter_context,
-          event_queue
-        )
-    end
-  end
-
-  defp execute_branching_phases(
-         sequence,
-         initial_state,
-         model,
-         adapter,
-         adapter_context,
-         event_queue
-       ) do
+  # The branching sequence from `initial_state` (the state after the startup
+  # checks and the setup commands): prefix, branches, linearizability, then
+  # the merged suffix. Returns `{ended, linearization}`: the state or the
+  # failed tuple `{:failed, index, reason, state}` for
+  # Finalization.finalize_result/2, and the linearization to report (nil when
+  # the run ended before the branches merged).
+  def execute_body(sequence, initial_state, model, adapter, adapter_context, event_queue) do
     %Sequence{prefix: prefix, branches: branches, suffix: suffix} = sequence
 
     # Phase 1: Execute prefix
@@ -125,9 +71,11 @@ defmodule PropertyDamage.Executor.Branching do
 
     case prefix_result do
       {:failed, index, reason, state} ->
-        {:failed, index, reason, state}
-        |> Executor.restore_remaining_faults(adapter_context, event_queue)
-        |> Finalization.finalize_result()
+        {Executor.restore_remaining_faults(
+           {:failed, index, reason, state},
+           adapter_context,
+           event_queue
+         ), nil}
 
       prefix_state ->
         # Phase 2: Execute branches from forked state
@@ -188,14 +136,11 @@ defmodule PropertyDamage.Executor.Branching do
                 end
               end)
 
-            suffix_result
-            |> Executor.restore_remaining_faults(adapter_context, event_queue)
-            |> Finalization.finalize_result(linearization)
+            {Executor.restore_remaining_faults(suffix_result, adapter_context, event_queue),
+             linearization}
 
           {:error, branch_id, index, reason, state} ->
-            Finalization.finalize_result(
-              {:failed, index, Failure.in_branch(reason, branch_id), state}
-            )
+            {{:failed, index, Failure.in_branch(reason, branch_id), state}, nil}
 
           {:linearization_failed, branch_results, branch_event_logs, refutation} ->
             merged_state =
@@ -210,7 +155,7 @@ defmodule PropertyDamage.Executor.Branching do
             {failed_index, reason} =
               linearization_failure(refutation, branch_start_index)
 
-            Finalization.finalize_result({:failed, failed_index, reason, merged_state})
+            {{:failed, failed_index, reason, merged_state}, nil}
         end
     end
   end

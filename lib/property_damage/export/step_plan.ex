@@ -21,6 +21,17 @@ defmodule PropertyDamage.Export.StepPlan do
   #
   # The placeholder-structure knowledge lives here; targets match on `%Var{}`
   # and render their own syntax.
+  #
+  # The plan holds the run's setup commands first (`phase: :setup`), then the
+  # roots (`phase: :root`), then its teardown commands (`phase: :teardown`), so
+  # a script performs the fixture (a login, say) before it acts and cleans up
+  # after. Each step carries a `title` for its heading ("Step 3" for a root,
+  # "Setup step 1 (setup position 0)" for a setup command) and a `key` that
+  # names its response variable without colliding across phases ("3",
+  # "_setup_1", "_teardown_1"). A setup or teardown step has no
+  # `flattened_index`. A setup command's produced externals are bound from its
+  # response and wired into every step that consumes them, as a root
+  # producer's are.
 
   alias PropertyDamage.Export.{Common, HTTPSpec}
   alias PropertyDamage.{FailureReport, Placeholder}
@@ -41,8 +52,11 @@ defmodule PropertyDamage.Export.StepPlan do
     alias PropertyDamage.Sequence
 
     @type t :: %__MODULE__{
+            phase: :setup | :root | :teardown,
+            title: String.t(),
+            key: String.t(),
             position: Sequence.Position.t(),
-            flattened_index: non_neg_integer(),
+            flattened_index: non_neg_integer() | nil,
             command: struct(),
             label: String.t() | nil,
             failed?: boolean(),
@@ -54,6 +68,9 @@ defmodule PropertyDamage.Export.StepPlan do
           }
 
     defstruct [
+      :phase,
+      :title,
+      :key,
       :position,
       :flattened_index,
       :command,
@@ -76,28 +93,81 @@ defmodule PropertyDamage.Export.StepPlan do
   """
   @spec build(FailureReport.t(), module() | nil) :: [Step.t()]
   def build(%FailureReport{} = report, adapter) do
-    commands = Common.extract_commands(report)
+    commands =
+      report.setup_commands ++ Common.extract_commands(report) ++ report.teardown_commands
+
     var_map = placeholder_var_map(commands)
     extractions = producer_extractions(commands)
+    resolve = &resolved(&1, adapter, var_map, extractions)
 
-    report
-    |> FailureReport.steps()
-    |> Enum.map(fn step ->
-      spec = get_http_spec(step.command, adapter)
+    setup =
+      report.setup_commands
+      |> Enum.with_index()
+      |> Enum.map(fn {command, offset} ->
+        resolve.(%Step{
+          phase: :setup,
+          title: "Setup step #{offset + 1} (#{Position.describe(Position.setup(offset))})",
+          key: "_setup_#{offset + 1}",
+          position: Position.setup(offset),
+          command: command,
+          failed?: failed_setup_step?(report, offset)
+        })
+      end)
 
-      %Step{
-        position: step.position,
-        flattened_index: step.flattened_index,
-        command: step.command,
-        label: step.label,
-        failed?: step.failed?,
-        http_spec: spec,
+    roots =
+      report
+      |> FailureReport.steps()
+      |> Enum.map(fn step ->
+        resolve.(%Step{
+          phase: :root,
+          title: "Step #{step.flattened_index + 1}",
+          key: "#{step.flattened_index + 1}",
+          position: step.position,
+          flattened_index: step.flattened_index,
+          command: step.command,
+          label: step.label,
+          failed?: step.failed?
+        })
+      end)
+
+    teardown =
+      report.teardown_commands
+      |> Enum.with_index()
+      |> Enum.map(fn {command, offset} ->
+        resolve.(%Step{
+          phase: :teardown,
+          title: "Teardown step #{offset + 1} (#{Position.describe(Position.teardown(offset))})",
+          key: "_teardown_#{offset + 1}",
+          position: Position.teardown(offset),
+          command: command,
+          failed?: false
+        })
+      end)
+
+    setup ++ roots ++ teardown
+  end
+
+  # The step with its HTTP view: the spec, its params and body with consumed
+  # placeholders resolved to variables, and the externals it binds.
+  defp resolved(%Step{} = step, adapter, var_map, extractions) do
+    spec = get_http_spec(step.command, adapter)
+
+    %{
+      step
+      | http_spec: spec,
         resolved_path_params: resolve_path_params(spec, var_map),
         resolved_query_params: resolve_query_params(spec, var_map),
         resolved_body: resolve_body(spec, step.command, var_map),
-        producer_bindings: producer_bindings(extractions, step.flattened_index)
-      }
-    end)
+        producer_bindings: producer_bindings(extractions, extraction_key(step))
+    }
+  end
+
+  # A setup failure at a setup command marks that command's step.
+  defp failed_setup_step?(report, offset) do
+    match?(
+      %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{setup_index: ^offset}},
+      report.failure_reason
+    ) and report.kind == :setup_failed
   end
 
   @doc """
@@ -166,11 +236,16 @@ defmodule PropertyDamage.Export.StepPlan do
 
   defp tag(value, _var_map), do: value
 
-  defp producer_bindings(extractions, flattened_index) do
+  defp producer_bindings(extractions, key) do
     extractions
-    |> Map.get(flattened_index, [])
+    |> Map.get(key, [])
     |> Enum.map(fn {%Placeholder{path: path}, var} -> {path, var} end)
   end
+
+  # Where a step's produced externals are filed: a root by its flattened
+  # index, a setup or teardown command by its phase and offset.
+  defp extraction_key(%Step{phase: :root, flattened_index: index}), do: index
+  defp extraction_key(%Step{phase: phase, position: position}), do: {phase, position.offset}
 
   # ============================================================================
   # Placeholder Wiring (DR-021)
@@ -201,20 +276,36 @@ defmodule PropertyDamage.Export.StepPlan do
     |> Map.new(fn {ph, name} -> {ph.id, name} end)
   end
 
-  # Map from a producing command's linear index to the `[{placeholder, var_name}]`
-  # it must extract from its response.
+  # Map from a producing command to the `[{placeholder, var_name}]` it must
+  # extract from its response: a root by its linear index, a setup or teardown
+  # command by `{phase, offset}`.
   #
-  # Only linear (`:prefix`) producers are wired: in a linear sequence the prefix
-  # index equals the flattened command index a script iterates. Branch/suffix
-  # producers are omitted (standalone scripts are best-effort linear).
+  # Linear (`:prefix`) root producers are wired: in a linear sequence the
+  # prefix index equals the flattened command index a script iterates.
+  # Branch/suffix producers are omitted (standalone scripts are best-effort
+  # linear). Setup and teardown producers are wired by their own positions,
+  # which no root shares.
   @spec producer_extractions([struct()]) :: %{
-          non_neg_integer() => [{Placeholder.t(), String.t()}]
+          (non_neg_integer() | {:setup | :teardown, non_neg_integer()}) => [
+            {Placeholder.t(), String.t()}
+          ]
         }
   defp producer_extractions(commands) do
     commands
     |> placeholder_bindings()
-    |> Enum.filter(fn {ph, _name} -> match?(%Position{section: :prefix}, ph.position) end)
-    |> Enum.group_by(fn {ph, _name} -> ph.position.offset end)
+    |> Enum.flat_map(fn {ph, _name} = binding ->
+      case ph.position do
+        %Position{section: :prefix, offset: offset} ->
+          [{offset, binding}]
+
+        %Position{section: section, offset: offset} when section in [:setup, :teardown] ->
+          [{{section, offset}, binding}]
+
+        _other ->
+          []
+      end
+    end)
+    |> Enum.group_by(fn {key, _binding} -> key end, fn {_key, binding} -> binding end)
   end
 
   defp placeholder_var(%Placeholder{event_module: mod, path: path, position: position}) do
@@ -227,6 +318,8 @@ defmodule PropertyDamage.Export.StepPlan do
   defp position_suffix(%Position{section: :prefix, offset: i}), do: "_#{i}"
   defp position_suffix(%Position{section: {:branch, b}, offset: i}), do: "_b#{b}_#{i}"
   defp position_suffix(%Position{section: :suffix, offset: i}), do: "_s#{i}"
+  defp position_suffix(%Position{section: :setup, offset: i}), do: "_setup#{i}"
+  defp position_suffix(%Position{section: :teardown, offset: i}), do: "_teardown#{i}"
   defp position_suffix(_), do: ""
 
   defp collect_placeholders(%Placeholder{} = ph), do: [ph]

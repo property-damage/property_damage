@@ -37,10 +37,12 @@ suite must catch and shrink.
 --output lib/generated --namespace OpenapiBench.Generated`, then the documented
 "next steps" filled in:
 
-- `commands/*.ex` and `adapter.ex` are used **unmodified** apart from each
-  command's `events/3` (next-step 2: map an HTTP response to event structs).
-- `model.ex` is customized (next-steps 4 & 6): wires the projection, simulator,
-  and a `setup_each/1` that resets the SUT per sequence.
+- `commands/*.ex` are used **unmodified** apart from each command's
+  `events/3` (next-step 2: map an HTTP response to event structs).
+- `adapter.ex` is used unmodified apart from its `setup/1`, which resets the
+  SUT per sequence with the seeded-bug flags of the target's `config:`.
+- `model.ex` is customized (next-steps 4 & 6): wires the projection and the
+  simulator.
 
 The invariant pieces the scaffold cannot infer are hand-written under
 `lib/openapi_bench/`: `consistency.ex` (the read-consistency projection +

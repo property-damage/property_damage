@@ -15,10 +15,8 @@ defmodule PropertyDamage.ModelTest do
       assert function_exported?(FullModel, :command_sequence_projection, 0)
       assert function_exported?(FullModel, :check_projections, 0)
       assert function_exported?(FullModel, :injectable_events, 0)
-      assert function_exported?(FullModel, :setup_once, 1)
-      assert function_exported?(FullModel, :setup_each, 1)
-      assert function_exported?(FullModel, :teardown_each, 1)
-      assert function_exported?(FullModel, :teardown_once, 1)
+      assert function_exported?(FullModel, :setup_each, 0)
+      assert function_exported?(FullModel, :teardown_each, 0)
       assert function_exported?(FullModel, :terminate_early?, 3)
       assert function_exported?(FullModel, :simulate, 2)
     end
@@ -33,10 +31,8 @@ defmodule PropertyDamage.ModelTest do
 
       # Optional callbacks not exported
       refute function_exported?(MinimalModel, :injectable_events, 0)
-      refute function_exported?(MinimalModel, :setup_once, 1)
-      refute function_exported?(MinimalModel, :setup_each, 1)
-      refute function_exported?(MinimalModel, :teardown_each, 1)
-      refute function_exported?(MinimalModel, :teardown_once, 1)
+      refute function_exported?(MinimalModel, :setup_each, 0)
+      refute function_exported?(MinimalModel, :teardown_each, 0)
       refute function_exported?(MinimalModel, :terminate_early?, 3)
     end
   end
@@ -69,28 +65,20 @@ defmodule PropertyDamage.ModelTest do
       assert events == [ItemCreated, ItemViewed]
     end
 
-    test "setup_once/1 returns :ok" do
-      result = FullModel.setup_once(%{})
-
-      assert result == :ok
+    test "setup_each/0 and teardown_each/0 return command lists" do
+      assert FullModel.setup_each() == []
+      assert FullModel.teardown_each() == []
     end
 
-    test "setup_each/1 returns :ok" do
-      result = FullModel.setup_each(%{})
+    test "Model.setup_commands/1 and Model.teardown_commands/1 normalize the lists" do
+      assert Model.setup_commands(MinimalModel) == []
+      assert Model.teardown_commands(MinimalModel) == []
 
-      assert result == :ok
-    end
+      assert [{1, CreateItem, %{command: CreateItem}}] =
+               Model.setup_commands(PropertyDamage.Test.SetupListModel)
 
-    test "teardown_each/1 returns :ok" do
-      result = FullModel.teardown_each(%{})
-
-      assert result == :ok
-    end
-
-    test "teardown_once/1 returns :ok" do
-      result = FullModel.teardown_once(%{})
-
-      assert result == :ok
+      assert [{1, ViewItem, %{command: ViewItem}}] =
+               Model.teardown_commands(PropertyDamage.Test.SetupListModel)
     end
   end
 
@@ -297,10 +285,11 @@ defmodule PropertyDamage.ModelTest do
 
       assert {:check_projections, 0} in optional
       assert {:injectable_events, 0} in optional
-      assert {:setup_once, 1} in optional
-      assert {:setup_each, 1} in optional
-      assert {:teardown_each, 1} in optional
-      assert {:teardown_once, 1} in optional
+      assert {:setup_each, 0} in optional
+      assert {:teardown_each, 0} in optional
+      refute {:setup_each, 1} in optional
+      refute {:teardown_each, 1} in optional
+      refute Enum.any?(optional, fn {name, _arity} -> name in [:setup_once, :teardown_once] end)
       assert {:terminate_early?, 3} in optional
       assert {:simulator, 0} in optional
     end

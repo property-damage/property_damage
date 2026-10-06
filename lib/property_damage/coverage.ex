@@ -36,6 +36,10 @@ defmodule PropertyDamage.Coverage do
   - **State coverage**: Unique projection states reached (by hash)
   - **Check coverage**: Per-check firing counts, keyed `{projection,
     check}`, rolled up per invariant for anti-vacuity reporting (DR-026)
+  - **Setup commands**: How often each setup command
+    (`c:PropertyDamage.Model.setup_each/0`) was executed, under `setup`. Setup
+    commands are not roots: they never count as commands or transitions, while
+    check fires on their events count as fires.
 
   ## CI Integration
 
@@ -56,6 +60,7 @@ defmodule PropertyDamage.Coverage do
     :transition_counts,
     :state_hashes,
     :check_hits,
+    :setup_counts,
     :total_commands,
     :total_runs,
     :failures_found,
@@ -75,6 +80,7 @@ defmodule PropertyDamage.Coverage do
           transition_counts: %{{module(), module()} => non_neg_integer()},
           state_hashes: MapSet.t(integer()),
           check_hits: %{{module(), atom()} => non_neg_integer()},
+          setup_counts: %{module() => non_neg_integer()},
           total_commands: non_neg_integer(),
           total_runs: non_neg_integer(),
           failures_found: non_neg_integer(),
@@ -122,6 +128,7 @@ defmodule PropertyDamage.Coverage do
       transition_counts: %{},
       state_hashes: MapSet.new(),
       check_hits: %{},
+      setup_counts: %{},
       total_commands: 0,
       total_runs: 0,
       failures_found: 0,
@@ -139,25 +146,27 @@ defmodule PropertyDamage.Coverage do
   """
   @spec record(t(), {:ok, map()} | {:error, PropertyDamage.FailureReport.t()}) :: t()
   def record(tracker, {:ok, result}) do
-    record_from_data(
-      tracker,
+    tracker
+    |> record_from_data(
       result.sequence,
       result.event_log,
       result.projections,
       Map.get(result, :check_fires, %{}),
       false
     )
+    |> record_setup(Map.get(result, :executed, %{}))
   end
 
   def record(tracker, {:error, failure}) do
-    record_from_data(
-      tracker,
+    tracker
+    |> record_from_data(
       PropertyDamage.FailureReport.shrunk_sequence(failure),
       PropertyDamage.FailureReport.event_log(failure),
       failure.state_at_failure || %{},
       Map.get(failure, :check_fires, %{}),
       true
     )
+    |> record_setup(executed_of(failure))
   end
 
   @doc """
@@ -208,6 +217,7 @@ defmodule PropertyDamage.Coverage do
       transition_counts: merge_counts(tracker1.transition_counts, tracker2.transition_counts),
       state_hashes: MapSet.union(tracker1.state_hashes, tracker2.state_hashes),
       check_hits: merge_counts(tracker1.check_hits, tracker2.check_hits),
+      setup_counts: merge_counts(tracker1.setup_counts || %{}, tracker2.setup_counts || %{}),
       total_commands: tracker1.total_commands + tracker2.total_commands,
       total_runs: tracker1.total_runs + tracker2.total_runs,
       failures_found: tracker1.failures_found + tracker2.failures_found,
@@ -484,7 +494,8 @@ defmodule PropertyDamage.Coverage do
       commands_tested: map_size(tracker.command_counts),
       commands_total: MapSet.size(tracker.command_modules),
       transitions_tested: map_size(tracker.transition_counts),
-      untested_commands: untested_commands(tracker)
+      untested_commands: untested_commands(tracker),
+      setup: tracker.setup_counts || %{}
     }
   end
 
@@ -831,6 +842,21 @@ defmodule PropertyDamage.Coverage do
         state_class_transitions: state_class_transitions,
         last_state_class: last_class
     }
+  end
+
+  defp executed_of(%{trace: %{executed: executed}}) when is_map(executed), do: executed
+  defp executed_of(_failure), do: %{}
+
+  # Count the setup commands a run executed, from the commands it recorded at
+  # setup positions.
+  defp record_setup(tracker, executed) do
+    counts =
+      for {%Sequence.Position{section: :setup}, %module{}} <- executed,
+          reduce: tracker.setup_counts || %{} do
+        acc -> Map.update(acc, module, 1, &(&1 + 1))
+      end
+
+    %{tracker | setup_counts: counts}
   end
 
   defp track_state_classes(classifier, projections, counts, transitions, last_class) do

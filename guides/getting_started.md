@@ -215,8 +215,11 @@ model is just those two. The optional ones:
   (webhooks, callbacks) rather than from commands; defaults to `[]`.
 - `simulator/0` — a separate simulator module for sequence generation (defaults
   to the model itself).
-- `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1` — lifecycle
-  hooks (see the [Cheatsheet](cheatsheet.md) for their argument shapes).
+- `setup_each/0`, `teardown_each/0` — setup commands and teardown commands: a
+  fixture such as "a user is logged in" is a command that runs before the first
+  root of every run (or after the last), and each target's adapter decides how
+  to do it. Both default to `[]`. See
+  [Writing Commands](writing_commands.md#setup-and-teardown-commands).
 - `terminate_early?/3` — a predicate to stop generating a sequence early.
 
 This example spells out `check_projections/0` and `injectable_events/0`

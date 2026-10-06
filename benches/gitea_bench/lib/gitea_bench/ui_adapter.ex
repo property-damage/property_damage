@@ -17,13 +17,21 @@ defmodule GiteaBench.UiAdapter do
   form-submit reload, a live-update redirect) can never land on the next
   command's page and navigate it away mid-interaction. See `page_for/2`.
 
+  The model's `Login` setup command opens the admin's session: it logs the
+  admin in through the browser in a new context and keeps that context for the
+  admin's later actions (`CreateUser`). Users the run creates are still logged
+  in lazily, on their first action.
+
   Config (`config:` in the `targets:` entry): `:base_url` (required), `:admin_user`,
-  `:admin_password`, and `:seed_bug` (when true, label creation fills the wrong
+  `:admin_password`, `:login_password` (the password `Login` submits; default
+  `:admin_password`, while `setup/1` always resets the forge with
+  `:admin_password`), and `:seed_bug` (when true, label creation fills the wrong
   colour: a deliberate transport bug the oracle is meant to catch).
   """
 
   use PropertyDamage.Adapter
 
+  alias GiteaBench.Events.SessionOpened
   alias GiteaBench.Gitea
   alias Playwright.{Browser, BrowserContext, Page}
 
@@ -33,10 +41,14 @@ defmodule GiteaBench.UiAdapter do
     CreateIssue,
     CreateLabel,
     CreateRepo,
-    CreateUser
+    CreateUser,
+    Login
   }
 
   @nav_timeout 10_000
+  # How long `Login` waits for the login form to go away. A wrong password
+  # re-renders the form, so a failed login takes exactly this long.
+  @login_timeout 3_000
   @settle_timeout 6_000
   @seeded_wrong_color "#ff0000"
 
@@ -59,6 +71,7 @@ defmodule GiteaBench.UiAdapter do
        browser: browser,
        sessions: sessions,
        base_url: client.base_url,
+       login_password: Map.get(config, :login_password, client.admin_password),
        seed_bug: Map.get(config, :seed_bug, false)
      }}
   end
@@ -74,6 +87,25 @@ defmodule GiteaBench.UiAdapter do
   def teardown(_), do: :ok
 
   @impl true
+  def execute(%Login{}, ctx, _runtime) do
+    admin = ctx.client.admin_user
+    context = Browser.new_context(ctx.browser)
+    page = BrowserContext.new_page(context)
+    outcome = submit_login(page, ctx.base_url, admin, ctx.login_password)
+    Page.close(page)
+
+    case outcome do
+      :ok ->
+        # The admin's later actions find this context in context_for/2.
+        Agent.update(ctx.sessions, &Map.put(&1, admin, context))
+        {:ok, [%SessionOpened{user: admin}]}
+
+      {:error, reason} ->
+        BrowserContext.close(context)
+        {:error, {:login_failed, reason}}
+    end
+  end
+
   def execute(%CreateUser{login: login, email: email}, ctx, _runtime) do
     page = page_for(ctx, ctx.client.admin_user)
 
@@ -262,6 +294,37 @@ defmodule GiteaBench.UiAdapter do
       timeout: @nav_timeout
     })
   end
+
+  # The login `Login` performs: the form is filled and submitted as in
+  # login/4, and the login succeeded once the form went away within
+  # @login_timeout. Returns `:ok` or `{:error, reason}`, never raises.
+  defp submit_login(page, base_url, user, password) do
+    Page.goto(page, base_url <> "/user/login", %{timeout: @nav_timeout})
+
+    Page.wait_for_selector(page, "input[name=user_name]", %{
+      state: "visible",
+      timeout: @nav_timeout
+    })
+
+    Page.fill(page, "input[name=user_name]", user)
+    Page.fill(page, "input[name=password]", password)
+    Page.press(page, "input[name=password]", "Enter")
+
+    case Page.wait_for_selector(page, "input[name=user_name]", %{
+           state: "detached",
+           timeout: @login_timeout
+         }) do
+      {:error, error} -> {:error, error_message(error)}
+      _detached -> :ok
+    end
+  rescue
+    exception -> {:error, Exception.message(exception)}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp error_message(%{message: message}) when is_binary(message), do: message
+  defp error_message(error), do: error
 
   defp password_for(ctx, user) do
     if user == ctx.client.admin_user, do: ctx.client.admin_password, else: Gitea.user_password()

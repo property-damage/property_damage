@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors)
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands)
 
 ## Requirements
 
@@ -41,7 +41,7 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 - **WHEN** `PropertyDamage.run/1` runs a campaign of N runs against one or more targets
 - **THEN** the framework SHALL call each target's `setup/1` N times, once at the start of every run, and its `teardown/1` N times
 - **AND** `setup/1` SHALL be idempotent
-- **AND** `teardown_each/1` SHALL run at the end of each run, not after the last run
+- **AND** the model's teardown commands SHALL run at the end of each run, not after the last run (DR-048)
 
 #### Scenario: Check mode reaches the engine (DR-045)
 - **WHEN** `check_mode:` is given to `PropertyDamage.run/1`
@@ -441,7 +441,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 ### Requirement: Seed Library Replay Phase
 
-When the `seed_library:` option is enabled and the library is non-empty, the system SHALL run a replay phase before random exploration, as a sibling of the random run loop inside the same run lifecycle (DR-023). The phase SHALL reuse the existing per-sequence machinery (`setup_each` → executor → `teardown_each`, event queue, injectors) under the single `setup_once`/teardown the run already owns, and SHALL NOT invoke `PropertyDamage.run/1` recursively.
+When the `seed_library:` option is enabled and the library is non-empty, the system SHALL run a replay phase before random exploration, as a sibling of the random run loop inside the same run lifecycle (DR-023). The phase SHALL reuse the existing per-sequence machinery (setup commands → executor → teardown commands, event queue, injectors), and SHALL NOT invoke `PropertyDamage.run/1` recursively.
 
 #### Scenario: Replay precedes exploration
 - **WHEN** the seed library is enabled and non-empty
@@ -611,3 +611,120 @@ The scheduler's run result SHALL carry `compare_counts` for every declared `@com
 #### Scenario: Counters accumulate over runs
 - **WHEN** a campaign passes with two targets over several runs
 - **THEN** `stats.compare_counts` SHALL sum the per-run counts
+
+### Requirement: Order of One Execution per Variant (DR-048)
+
+For every variant and every execution (a run, a shrink attempt or a replay), the engine SHALL proceed in this order: `Adapter.setup/1`, the `@check at: :startup` checks, the model's setup commands, the roots, the final boundary, the `@check at: :teardown` checks, the model's teardown commands, `Adapter.teardown/1`. The runner SHALL serialize every target's `Adapter.setup/1` in target order and complete all of them before any variant executes a command.
+
+#### Scenario: Setup commands start after every adapter is set up
+- **GIVEN** two targets and a model with one setup command
+- **WHEN** a run starts
+- **THEN** both targets' `Adapter.setup/1` SHALL have returned and both `:startup` checks SHALL have passed before either target executes the setup command
+
+#### Scenario: Teardown commands precede the adapter's teardown
+- **WHEN** an execution ends, whether it passes or fails
+- **THEN** each target's teardown commands SHALL run after its `@check at: :teardown` checks and before its `Adapter.teardown/1`
+
+### Requirement: Engine Rules During Setup Commands (DR-048)
+
+While a variant executes setup commands, the engine SHALL resolve placeholders into that variant's registry, fold events into that variant's projections, run pollers and injectors, apply the per-command settle and adapter retry, and run checks (`@check` and `@eventually`). The engine SHALL NOT apply stutter or nemesis faults to a setup command, SHALL NOT record a latency sample for it, and SHALL NOT advance an `every: N` sampling counter with it. Events an injector delivers while setup commands run SHALL count toward `every: N` counters. Coverage SHALL report setup commands under a `setup` key. Telemetry command events SHALL carry `phase: :setup`.
+
+#### Scenario: A setup command's external id resolves
+- **WHEN** a setup command's adapter answer carries a server-assigned id for an `external()` field
+- **THEN** the variant's registry SHALL resolve that placeholder, and a later root that references it SHALL receive the resolved value
+
+#### Scenario: Sampling counters start at the first root
+- **GIVEN** a `@check every: 2` check and three setup commands
+- **WHEN** the setup commands run
+- **THEN** the check's counter SHALL still be zero when the first root starts
+
+#### Scenario: Faults and latency are off
+- **WHEN** a run enables stutter, a nemesis and `latency: true`
+- **THEN** no setup command SHALL be repeated by stutter, no fault SHALL be injected during setup commands, and no latency sample SHALL include a setup command
+
+#### Scenario: Setup commands are never compared
+- **GIVEN** a `@compare every: Login` where `Login` is also a setup command
+- **WHEN** the setup commands finish
+- **THEN** the comparison SHALL NOT fire on the setup instance
+
+### Requirement: Setup Completion Rule (DR-048)
+
+When a variant's last setup command has stepped, drained and settled, every `external()` that the setup commands produced SHALL be resolved in that variant. An unresolved one SHALL be a setup failure that names the command, the field and the target. This includes a command whose adapter answered with a different event than the simulator predicted.
+
+#### Scenario: Unresolved external after the last setup command
+- **GIVEN** a setup command whose simulated event carries an `external()` id
+- **WHEN** the adapter answers with an event that omits it
+- **THEN** the run SHALL fail with kind `:setup_failed`, cause `:unresolved_placeholder`, and the command, the field and the target named
+
+### Requirement: Setup Failure (DR-048)
+
+A setup failure SHALL have kind `:setup_failed` and carry a `PropertyDamage.Failure.Setup` with `cause`, `command`, `setup_index`, `field` and `detail`. Its causes SHALL be: the adapter's `setup/1` returning `{:error, _}` or raising (`:adapter_setup`); a setup command answering `{:error, _}` or raising (`:command`); a check failing on a setup command's event (`:check`); and the completion rule (`:unresolved_placeholder`). The report's `failed_at_index` SHALL be `nil`. A check failure whose triggering event belongs to a setup command SHALL be a setup failure wherever it is detected, including an `@eventually` window that a setup command's event opened and that times out after the first root started.
+
+#### Scenario: A setup command answers with an error
+- **WHEN** a setup command's adapter answer is `{:error, reason}`
+- **THEN** the run SHALL fail with kind `:setup_failed` and cause `:command`
+- **AND** the failure SHALL name the setup command and its `setup_index`
+
+#### Scenario: A check fails on a setup command's event
+- **WHEN** a `@check` fails on an event a setup command produced
+- **THEN** the run SHALL fail with kind `:setup_failed` and cause `:check`, not `:check_failed`
+
+#### Scenario: A setup-opened eventual window times out after the first root
+- **GIVEN** an `@eventually` window opened by a setup command's event
+- **WHEN** the window times out after the first root started
+- **THEN** the failure SHALL have kind `:setup_failed` and cause `:check`
+- **AND** this SHALL be the only setup failure detected after the first root
+
+#### Scenario: The reference fails during setup
+- **WHEN** a setup failure occurs in the first target (the reference)
+- **THEN** the run SHALL end before any root executes
+
+#### Scenario: A non-reference target fails during setup
+- **GIVEN** three targets, where the second fails in a setup command
+- **WHEN** the failure is detected before any target starts the first root
+- **THEN** that variant SHALL be retired: its pollers SHALL stop, its `:teardown` checks SHALL run, its teardown commands SHALL run, and its adapter's `teardown/1` SHALL run, before any target starts the first root
+- **AND** the other targets SHALL continue
+- **AND** the run SHALL end when no target other than the reference is left
+
+#### Scenario: A non-reference target's setup-opened eventual window times out after the first root
+- **GIVEN** two targets, where a setup command's event opened an `@eventually` window in the second
+- **WHEN** that window times out after the first root started
+- **THEN** the run SHALL end with a `:setup_failed` report naming the second target
+- **AND** every target SHALL be torn down
+
+### Requirement: Teardown Commands Are Best Effort (DR-048)
+
+The engine SHALL run a variant's teardown commands after every execution of that variant: after a pass, after a failure, after a setup failure (with whatever the setup commands created), after the variant is retired, and after every shrink attempt. It SHALL NOT run them for a variant whose `Adapter.setup/1` failed or whose process was killed. During teardown commands, stutter, nemesis and checks SHALL be off, placeholder resolution SHALL be on, events SHALL go to the event log without being folded into projections, and no latency sample SHALL be recorded. A teardown command whose placeholder never resolved SHALL be skipped with a warning, and an error or a raise SHALL be logged. Neither SHALL change the verdict.
+
+#### Scenario: Teardown after a setup failure
+- **WHEN** the second setup command fails after the first created a user
+- **THEN** the teardown commands SHALL run against what the first setup command created
+
+#### Scenario: A teardown command that cannot run
+- **WHEN** a teardown command references a placeholder that never resolved
+- **THEN** the engine SHALL skip it with a warning
+- **AND** the run's verdict SHALL be unchanged
+
+#### Scenario: A teardown error never changes the verdict
+- **GIVEN** a passing run whose teardown command answers `{:error, _}`
+- **THEN** the run SHALL still pass and the error SHALL be logged
+
+#### Scenario: No teardown without an adapter context
+- **WHEN** a target's `Adapter.setup/1` returned `{:error, _}`
+- **THEN** its teardown commands SHALL NOT run
+
+### Requirement: Setup and Teardown Commands in Reports and Replay (DR-048)
+
+`FailureReport.setup_commands` and `teardown_commands` SHALL hold the reported sequence's commands, and `stats` and the report SHALL count them separately from `total_commands`, which counts roots. `PropertyDamage.replay/2` and `PropertyDamage.Analysis.isolate_trigger/2` SHALL execute the report's setup commands before the sequence and its teardown commands after it, against one target; `PropertyDamage.RunTrace.capture/1` SHALL draw them from its seed as a run does and execute them in the same order. A branching run SHALL execute the setup commands before its own prefix segment and the teardown commands after its suffix segment. Exported scripts SHALL list the setup steps before the roots. The verbose printer and the formatter SHALL name a setup failure's cause and command. Telemetry `[:property_damage, :command, :start | :stop]` metadata SHALL carry `phase: :setup | :root | :teardown`.
+
+#### Scenario: A report reproduces without re-drawing
+- **WHEN** `PropertyDamage.replay/2` runs a report
+- **THEN** it SHALL execute the report's own setup commands, then its sequence, then its teardown commands, and SHALL NOT draw them again
+
+#### Scenario: Counts stay separate
+- **GIVEN** a model with two setup commands, one teardown command and a three-root sequence
+- **THEN** `total_commands` SHALL be 3 and the setup and teardown counts SHALL be 2 and 1
+
+#### Scenario: Telemetry names the phase
+- **WHEN** a setup command, a root and a teardown command execute
+- **THEN** their command events SHALL carry `phase: :setup`, `:root` and `:teardown` respectively

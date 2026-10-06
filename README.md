@@ -544,10 +544,8 @@ defmodule MyModel do
   # Optional
   def injectable_events, do: []  # For Adapter.Injector
   def simulator, do: MySimulatorModule  # Returns module implementing Simulator behaviour
-  def setup_once(config), do: :ok
-  def setup_each(config), do: :ok  # Called before each run/shrink attempt
-  def teardown_each(config), do: :ok
-  def teardown_once(config), do: :ok
+  def setup_each, do: []     # Setup commands: run before the first root of every run/shrink attempt
+  def teardown_each, do: []  # Teardown commands: run after the last root, pass or fail
   def terminate_early?(state, command, events), do: false  # Custom termination
 end
 ```

@@ -57,12 +57,39 @@ defmodule PropertyDamage.Executor.Stepping do
   Stepping assumes a **linear** sequence: each command's position is
   `Position.prefix(index)` (DR-021), where `index` is its 0-based offset. Do not
   use this API for branching/parallel sequences.
+
+  ## Setup and teardown commands
+
+  A model's setup commands and teardown commands (`c:PropertyDamage.Model.setup_each/0`,
+  `c:PropertyDamage.Model.teardown_each/0`) have an entry each, which every path
+  that executes them uses:
+
+    * `step_setup/4` runs the full `step/4` path at `Position.setup(offset)`,
+      with three differences: stutter is off, the step does not advance the
+      check sampling counters (an `every: N` check neither counts nor fires on
+      it, while `every: 1`, `every: Module`, `every: :command`/`:event` checks
+      and `@eventually` triggers evaluate as usual), and its event-log entries
+      carry `phase: :setup`. A failure it reports is a setup failure.
+    * `step_teardown/4` resolves placeholders, executes the command through
+      settle, captures its externals at `Position.teardown(offset)`, and logs
+      its events with `phase: :teardown` without folding them. It runs no
+      checks, no stutter and no pollers, opens no injection window, and never
+      fails: an unresolved placeholder, an error or a raise is logged.
+
+  Neither records an adapter time a caller would read as a root's. Both emit
+  the command telemetry events (`PropertyDamage.Telemetry`) with `phase:
+  :setup` or `phase: :teardown`; a teardown command skipped for an unresolved
+  placeholder emits none.
   """
 
+  require Logger
+
+  alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Executor
-  alias PropertyDamage.Executor.{Events, Finalization}
+  alias PropertyDamage.Executor.{Events, Finalization, Settle}
   alias PropertyDamage.Failure
   alias PropertyDamage.MockServiceRegistry
+  alias PropertyDamage.{Placeholder, PlaceholderRegistry}
   alias PropertyDamage.ResourcePoller
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.StatePoller
@@ -75,17 +102,19 @@ defmodule PropertyDamage.Executor.Stepping do
     rather than passed on every call: the `model` orchestrating the run, the
     `adapter` bridging to the SUT and the `adapter_context` its `setup/1`
     returned, and the `event_queue` async/injected events flow through (`nil`
-    when the run has no injector adapters).
+    when the run has no injector adapters). `target_name` names the target in
+    the warnings `step_teardown/4` logs (`nil` when there is no target name).
     """
 
     @enforce_keys [:model, :adapter, :adapter_context]
-    defstruct [:model, :adapter, :adapter_context, :event_queue]
+    defstruct [:model, :adapter, :adapter_context, :event_queue, :target_name]
 
     @type t :: %__MODULE__{
             model: module(),
             adapter: module(),
             adapter_context: term(),
-            event_queue: pid() | nil
+            event_queue: pid() | nil,
+            target_name: String.t() | nil
           }
   end
 
@@ -178,6 +207,175 @@ defmodule PropertyDamage.Executor.Stepping do
       ctx.event_queue
     )
   end
+
+  @doc """
+  Execute the setup command at `offset` against an existing stepping state.
+
+  The `step/4` path at `Position.setup(offset)`, with stutter off, the check
+  sampling counters and `step_count` left as they were, and the event-log
+  entries tagged `phase: :setup` (see the module doc). Returns what `step/4`
+  returns; a failure is the setup command's.
+  """
+  @spec step_setup(struct(), non_neg_integer(), map(), Context.t()) ::
+          {:ok, map(), outcome()} | {:error, Failure.t(), map(), outcome()}
+  def step_setup(command, offset, state, %Context{} = ctx) do
+    prepared = %{
+      state
+      | projections_before: state.projections,
+        current_position: Position.setup(offset),
+        stutter_config: nil
+    }
+
+    restore = fn stepped ->
+      %{stepped | stutter_config: state.stutter_config, step_count: state.step_count}
+    end
+
+    case Executor.execute_command_with_outcome(
+           command,
+           {:setup, offset},
+           prepared,
+           ctx.model,
+           ctx.adapter,
+           ctx.adapter_context,
+           ctx.event_queue
+         ) do
+      {:ok, stepped, outcome} -> {:ok, restore.(stepped), outcome}
+      {:error, failure, failed, outcome} -> {:error, failure, restore.(failed), outcome}
+    end
+  end
+
+  @doc """
+  Execute the teardown command at `offset` against an existing stepping state.
+
+  Resolves the command's placeholders, executes it through settle, captures
+  the externals it produces at `Position.teardown(offset)` and appends its
+  events to the event log with `phase: :teardown`, folded into no projection.
+  No check, stutter or poller runs and no injection window opens.
+
+  Never fails: a command whose placeholder is unresolved is skipped, and an
+  `{:error, _}` answer or a raise changes nothing; each is logged with
+  `Logger.warning`, naming the command, the field or error, and the target.
+  Returns `{:ok, state, outcome}`.
+  """
+  @spec step_teardown(struct(), non_neg_integer(), map(), Context.t()) ::
+          {:ok, map(), outcome()}
+  def step_teardown(command, offset, state, %Context{} = ctx) do
+    registry = state.placeholder_registry
+
+    case Executor.resolve_command_placeholders(
+           command,
+           registry,
+           {state.run_nonce, state.mint_epoch}
+         ) do
+      {:ok, resolved} ->
+        PropertyDamage.Telemetry.command_span(state.telemetry, command, {:teardown, offset}, fn ->
+          execute_teardown(command, resolved, offset, state, ctx)
+        end)
+
+      {:error, _reason} ->
+        Logger.warning(
+          "Teardown command #{module_name(command)} skipped in target " <>
+            "#{inspect(ctx.target_name)}: its field #{inspect(unresolved_field(command, registry))} " <>
+            "holds an unresolved placeholder"
+        )
+
+        {:ok, state, :not_called}
+    end
+  end
+
+  defp execute_teardown(command, resolved, offset, state, ctx) do
+    spec = if is_struct(command), do: Map.get(state.command_specs, command.__struct__)
+    runtime = Executor.inject_unavailable_runtime("in a teardown command")
+
+    result =
+      try do
+        Settle.execute_with_settle(resolved, ctx.adapter, ctx.adapter_context, runtime, spec)
+      rescue
+        exception -> {:raised, exception, __STACKTRACE__}
+      end
+
+    case result do
+      {tag, events} when tag in [:ok, :settled] and is_list(events) ->
+        position = Position.teardown(offset)
+
+        entries =
+          Enum.map(events, fn event ->
+            Entry.attribute(
+              %Entry{
+                timestamp: System.monotonic_time(:millisecond),
+                event: event,
+                source: :command
+              },
+              {:teardown, offset}
+            )
+          end)
+
+        stepped = %{
+          state
+          | event_log: Enum.reverse(entries, state.event_log),
+            placeholder_registry:
+              PlaceholderRegistry.capture(state.placeholder_registry, position, events),
+            executed: Map.put(state.executed, position, resolved)
+        }
+
+        {:ok, stepped, {:ok, events}}
+
+      {:raised, exception, _stacktrace} ->
+        Logger.warning(
+          "Teardown command #{module_name(command)} raised in target " <>
+            "#{inspect(ctx.target_name)}: " <> Exception.message(exception)
+        )
+
+        {:ok, state, {:raised, exception}}
+
+      other ->
+        Logger.warning(
+          "Teardown command #{module_name(command)} failed in target " <>
+            "#{inspect(ctx.target_name)}: #{inspect(other)}"
+        )
+
+        {:ok, state, {:error, other}}
+    end
+  end
+
+  @doc false
+  # The first field of `command` that holds a placeholder `registry` has not
+  # resolved, as `[field | path]` into the command, or nil.
+  @spec unresolved_field(struct() | map(), PlaceholderRegistry.t() | nil) :: [term()] | nil
+  def unresolved_field(_command, nil), do: nil
+
+  def unresolved_field(command, registry) when is_map(command) do
+    command
+    |> Map.drop([:__struct__])
+    |> Enum.sort()
+    |> Enum.find_value(fn {field, value} -> unresolved_path(value, registry, [field]) end)
+  end
+
+  defp unresolved_path(%Placeholder{id: id}, registry, path) do
+    case PlaceholderRegistry.get(registry, id) do
+      %Placeholder{resolved: nil} -> path
+      nil -> path
+      _resolved -> nil
+    end
+  end
+
+  defp unresolved_path(%{__struct__: _} = struct, registry, path),
+    do: unresolved_path(Map.from_struct(struct), registry, path)
+
+  defp unresolved_path(map, registry, path) when is_map(map) do
+    Enum.find_value(map, fn {key, value} -> unresolved_path(value, registry, path ++ [key]) end)
+  end
+
+  defp unresolved_path(list, registry, path) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.find_value(fn {value, i} -> unresolved_path(value, registry, path ++ [i]) end)
+  end
+
+  defp unresolved_path(_value, _registry, _path), do: nil
+
+  defp module_name(%{__struct__: module}), do: inspect(module)
+  defp module_name(command), do: inspect(command)
 
   @doc """
   Fold the events already waiting in the context's event queue into the state.
