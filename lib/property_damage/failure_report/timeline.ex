@@ -90,6 +90,10 @@ defmodule PropertyDamage.FailureReport.Timeline do
 
       %Sequence.Position{section: :suffix, offset: offset} ->
         prefix_len + branch_count + offset == index
+
+      # Setup and teardown commands are not roots: no root index names them.
+      %Sequence.Position{} ->
+        false
     end
   end
 

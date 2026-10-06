@@ -427,11 +427,6 @@ defmodule PropertyDamage.Analysis do
           # Regenerate idempotency keys
           modified_commands = regenerate_keys(modified_commands)
 
-          # Call setup_each before testing
-          if function_exported?(model, :setup_each, 1) do
-            model.setup_each(%{adapter_config: target.config})
-          end
-
           case Executor.run(modified_commands, model, target.adapter, config: target.config) do
             {:ok, result} ->
               if result.success do

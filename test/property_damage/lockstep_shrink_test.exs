@@ -51,6 +51,15 @@ defmodule PropertyDamage.LockstepShrinkTest do
     def generator(_overrides \\ %{}), do: StreamData.constant(%{})
   end
 
+  # A setup command: the adapter counts it.
+  defmodule Count do
+    use PropertyDamage.Command
+    defstruct []
+
+    @impl true
+    def generator(_overrides \\ %{}), do: StreamData.constant(%{})
+  end
+
   defmodule Noised, do: defstruct([:n])
   defmodule Armed, do: defstruct([])
   defmodule Flipped, do: defstruct([:value])
@@ -124,11 +133,24 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
     @impl true
     def check_projections, do: [Answers]
+  end
 
-    def setup_each(%{adapter_config: config}) do
-      if each = config[:each], do: :counters.add(each, 1, 1)
-      :ok
-    end
+  # DivergeModel with one setup command, which every run, shrink attempt and
+  # reproduction executes first in every target.
+  defmodule CountedDivergeModel do
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: [{Noise, weight: 3}, Flip]
+
+    @impl true
+    def command_sequence_projection, do: Tally
+
+    @impl true
+    def check_projections, do: [Answers]
+
+    @impl true
+    def setup_each, do: [Count]
   end
 
   # A Flip diverges whenever it runs; without an Arm before it, it fails
@@ -193,6 +215,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   #               :split - answer an armed Flip and an unarmed Ping with 1, and
   #               report every unarmed Ping to the registered test process
   #   :counts     :counters ref; index 1 counts setups, index 2 teardowns
+  #   :each       :counters ref; counts the Count setup commands executed
   defmodule FlipAdapter do
     use PropertyDamage.Adapter
 
@@ -213,6 +236,11 @@ defmodule PropertyDamage.LockstepShrinkTest do
     end
 
     @impl true
+    def execute(%Count{}, ctx, _runtime) do
+      if each = ctx[:each], do: :counters.add(each, 1, 1)
+      {:ok, []}
+    end
+
     def execute(%Noise{n: n}, ctx, _runtime) do
       :atomics.add(ctx.noise, 1, 1)
       {:ok, [%Noised{n: n}]}
@@ -306,8 +334,8 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
   # A generated sequence of at least 12 commands whose divergence is planted
   # at root 5 or later.
-  defp planted_seed do
-    find_seed(DivergeModel, fn commands ->
+  defp planted_seed(model \\ DivergeModel) do
+    find_seed(model, fn commands ->
       root = divergent_root(commands)
       length(commands) >= 12 and is_integer(root) and root >= 5
     end)
@@ -428,14 +456,14 @@ defmodule PropertyDamage.LockstepShrinkTest do
     end
 
     test "sets every target up and tears it down once per shrink attempt and reproduction" do
-      seed = planted_seed()
+      seed = planted_seed(CountedDivergeModel)
       each = :counters.new(1, [])
       ref_counts = :counters.new(2, [])
       cand_counts = :counters.new(2, [])
 
       assert {:error, report} =
                run(
-                 DivergeModel,
+                 CountedDivergeModel,
                  targets(
                    %{counts: ref_counts, each: each},
                    %{counts: cand_counts, skew: :after_two_noise}
@@ -444,9 +472,10 @@ defmodule PropertyDamage.LockstepShrinkTest do
                )
 
       assert report.kind == :diverged
-      # setup_each runs once for the exploration run and once before every
-      # shrink attempt, so the shrinker's scheduler runs are the rest.
-      shrink_runs = :counters.get(each, 1) - 1
+      # The setup command runs once in the exploration run, once in every
+      # shrink attempt and once in the reproduction, so the shrinker's
+      # scheduler runs are the rest.
+      shrink_runs = :counters.get(each, 1) - 2
       assert shrink_runs > 0
 
       for counts <- [ref_counts, cand_counts] do

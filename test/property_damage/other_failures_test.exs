@@ -168,10 +168,11 @@ defmodule PropertyDamage.OtherFailuresTest do
 
   describe "persistence" do
     @tag :tmp_dir
-    test "a report with other failures and comparison counts round-trips at version 10", %{
-      tmp_dir: dir,
-      recorder: recorder
-    } do
+    test "a report with other failures and comparison counts round-trips at the current version",
+         %{
+           tmp_dir: dir,
+           recorder: recorder
+         } do
       targets = [
         ActiveSet.target("a", recorder),
         ActiveSet.target("b", recorder, %{fail: %{4 => :error}}),
@@ -183,7 +184,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       assert [_ | _] = others(report)
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 10::8, _checksum::32, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", 11::8, _checksum::32, _rest::binary>>} = File.read(path)
 
       assert {:ok, loaded} = Persistence.load(path)
       assert others(loaded) == others(report)
@@ -210,7 +211,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 10}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, 11}} = Persistence.load(path)
     end
   end
 end

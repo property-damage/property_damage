@@ -9,7 +9,7 @@ defmodule PropertyDamage.RunTargetsTest do
   alias PropertyDamage.{EventQueue, Failure, FailureReport, Generator, Persistence, Sequence}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.RunResult
-  alias PropertyDamage.RunTargetsTest.{HookModel, Sink, SinkModel}
+  alias PropertyDamage.RunTargetsTest.{Sink, SinkModel}
 
   alias PropertyDamage.Test.Lockstep.{
     Answers,
@@ -298,11 +298,11 @@ defmodule PropertyDamage.RunTargetsTest do
   describe "persistence" do
     @describetag :tmp_dir
 
-    test "a two-target divergence report round-trips at version 10", %{tmp_dir: dir} do
+    test "a two-target divergence report round-trips at the current version", %{tmp_dir: dir} do
       {:error, report} = run([step("a"), step("b", %{behavior: :shift})])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 10::8, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", 11::8, _rest::binary>>} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.kind == :diverged
@@ -317,7 +317,7 @@ defmodule PropertyDamage.RunTargetsTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, :erlang.crc32(term_binary)::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 10}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, 11}} = Persistence.load(path)
     end
   end
 
@@ -437,26 +437,27 @@ defmodule PropertyDamage.RunTargetsTest do
       assert report.state_at_failure[Ledger].commands == Sequence.command_count(sequence)
     end
 
-    test "teardown_each runs at the end of each run, before the next setup_each" do
+    test "the teardown commands of a run execute before the next run's setup commands" do
+      alias PropertyDamage.Test.SetupCommands
+      alias PropertyDamage.Test.SetupCommands.{Cleanup, CreateUser}
+
+      recorder = start_recorder()
+
+      model =
+        SetupCommands.define_model!(PropertyDamage.RunTargetsTest.FixtureModel,
+          setup: [{CreateUser, overrides: %{name: "fixture"}}],
+          teardown: [{Cleanup, overrides: %{thing_id: "fixture"}}]
+        )
+
       assert {:ok, %{runs: 3}} =
-               run([step("hooks", %{hook_pid: self()})], model: HookModel, max_runs: 3)
+               run([SetupCommands.target("hooks", recorder)], model: model, max_runs: 3)
 
-      assert hook_calls([]) == [
-               {:setup_each, 0},
-               {:teardown_each, 0},
-               {:setup_each, 1},
-               {:teardown_each, 1},
-               {:setup_each, 2},
-               {:teardown_each, 2}
-             ]
-    end
-  end
+      fixtures =
+        for {:execute, "hooks", %module{}} <- recorded(recorder),
+            module in [CreateUser, Cleanup],
+            do: module
 
-  defp hook_calls(acc) do
-    receive do
-      {:hook, call, run_number} -> hook_calls([{call, run_number} | acc])
-    after
-      0 -> Enum.reverse(acc)
+      assert fixtures == [CreateUser, Cleanup, CreateUser, Cleanup, CreateUser, Cleanup]
     end
   end
 
@@ -525,27 +526,5 @@ defmodule PropertyDamage.RunTargetsTest do
 
     @impl true
     def check_projections, do: [PropertyDamage.RunTargetsTest.Sink]
-  end
-
-  defmodule HookModel do
-    @moduledoc false
-    # Reports each setup_each/teardown_each call with its run number.
-    @behaviour PropertyDamage.Model
-
-    @impl true
-    def commands, do: [Step]
-
-    @impl true
-    def command_sequence_projection, do: Ledger
-
-    def setup_each(%{adapter_config: config, run_number: run}) do
-      send(config.hook_pid, {:hook, :setup_each, run})
-      :ok
-    end
-
-    def teardown_each(%{adapter_config: config, run_number: run}) do
-      send(config.hook_pid, {:hook, :teardown_each, run})
-      :ok
-    end
   end
 end

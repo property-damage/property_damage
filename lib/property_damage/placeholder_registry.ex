@@ -80,7 +80,9 @@ defmodule PropertyDamage.PlaceholderRegistry do
   Remap the `producer_link` from original positions onto new positions (DR-021).
 
   `orig_to_new` maps each original producer position to the position it now
-  occupies. A producer whose original position is absent from the map is dropped
+  occupies. A setup or teardown producer keeps its position whatever the map
+  says: those commands are never removed or moved. Any other producer whose
+  original position is absent from the map is dropped
   (its placeholders simply will not resolve, which is correct: a surviving
   consumer of a removed producer makes a shrink candidate fail to reproduce).
   Resolution of embedded placeholders stays by id and is unaffected.
@@ -93,7 +95,7 @@ defmodule PropertyDamage.PlaceholderRegistry do
     new_link =
       Enum.reduce(reg.producer_link, %{}, fn {orig_position, ids}, acc ->
         case Map.get(orig_to_new, orig_position) do
-          nil -> acc
+          nil -> if Position.root?(orig_position), do: acc, else: Map.put(acc, orig_position, ids)
           new_position -> Map.put(acc, new_position, ids)
         end
       end)

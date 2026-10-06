@@ -224,12 +224,6 @@ defmodule PropertyDamage.Replay do
     sequence = FailureReport.shrunk_sequence(failure)
     commands = Sequence.to_list(sequence)
 
-    # Mirror the run loop: model.setup_each runs before adapter setup so the
-    # SUT starts in the same per-run state the original failure observed.
-    if function_exported?(model, :setup_each, 1) do
-      model.setup_each(%{adapter_config: config, replay: true})
-    end
-
     {:ok, event_queue} = EventQueue.start_link()
 
     case adapter.setup(config) do
@@ -398,9 +392,8 @@ defmodule PropertyDamage.Replay do
   @doc """
   Clean up session resources.
 
-  Stops any pollers spawned during stepping, the event queue, tears the adapter
-  down, and runs `teardown_each/1` if the model defines it. Safe to call more
-  than once.
+  Stops any pollers spawned during stepping, the event queue, and tears the
+  adapter down. Safe to call more than once.
   """
   @spec stop(t()) :: :ok
   def stop(%__MODULE__{} = session) do
@@ -413,14 +406,6 @@ defmodule PropertyDamage.Replay do
     if session.adapter && session.adapter_context do
       try do
         session.adapter.teardown(session.adapter_context)
-      rescue
-        _ -> :ok
-      end
-    end
-
-    if session.model && function_exported?(session.model, :teardown_each, 1) do
-      try do
-        session.model.teardown_each(%{adapter_config: session.config, replay: true})
       rescue
         _ -> :ok
       end

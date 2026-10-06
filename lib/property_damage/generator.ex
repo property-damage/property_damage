@@ -30,6 +30,19 @@ defmodule PropertyDamage.Generator do
   - Refs created in one branch CANNOT be used in another branch
   - Refs created in branches CAN be used in `suffix`
 
+  ## Setup and teardown commands
+
+  A model's setup commands (`c:PropertyDamage.Model.setup_each/0`) are drawn
+  first, inside the same draw as the roots: every entry in written order, with
+  no `when:` filter and no weighted pick, each simulated at its
+  `Position.setup/1` position. The roots are then drawn from the state the
+  setup commands left. A model without setup commands adds nothing to the
+  draw, so its seeds draw what they always drew.
+
+  Teardown commands depend on the roots, and a shrink attempt redraws them for
+  each candidate, so they are drawn by `teardown_commands/4` from the run seed
+  after the roots.
+
   ## Auto-Lifting
 
   Raw values passed as overrides are automatically wrapped in `StreamData.constant/1`:
@@ -105,21 +118,82 @@ defmodule PropertyDamage.Generator do
     markers = Keyword.get(opts, :external_markers, [])
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
     projection = model.command_sequence_projection()
+    setup = PropertyDamage.Model.setup_commands(model)
 
     StreamData.bind(StreamData.constant(nil), fn _ ->
-      if branching_opts do
-        do_generate_branching_sequence(
-          commands,
-          projection,
-          model,
-          max_commands,
-          branching_opts,
-          markers
-        )
-      else
-        do_generate_linear_sequence(commands, projection, model, max_commands, markers)
+      roots = fn initial_state ->
+        if branching_opts do
+          do_generate_branching_sequence(
+            commands,
+            projection,
+            model,
+            initial_state,
+            max_commands,
+            branching_opts,
+            markers
+          )
+        else
+          do_generate_linear_sequence(
+            commands,
+            projection,
+            model,
+            initial_state,
+            max_commands,
+            markers
+          )
+        end
+      end
+
+      case setup do
+        # No setup commands: no extra draw, so every seed keeps its sequence.
+        [] ->
+          roots.(projection.init())
+
+        _ ->
+          setup
+          |> generate_setup(projection, model, projection.init(), [], [], markers)
+          |> StreamData.bind(fn {setup_commands, setup_ph, state} ->
+            roots.(state)
+            |> StreamData.map(&with_setup(&1, setup_commands, setup_ph))
+          end)
       end
     end)
+  end
+
+  @doc """
+  Draw the model's teardown commands for `sequence` and return the sequence
+  carrying them.
+
+  The setup commands and the roots are simulated again from the projection's
+  initial state (for a branching sequence: the prefix, the merged branches,
+  then the suffix, as the generator reached them), and each teardown entry is
+  drawn in written order with its `overrides:` against that end state. The draw
+  is seeded by `:erlang.phash2({run_seed, :teardown})`, so it is a pure
+  function of the model, the sequence and the run seed, and it never changes
+  the roots a seed draws. Placeholders the teardown commands' simulated events
+  introduce are minted at `Position.teardown/1` positions and registered in the
+  sequence's registry.
+
+  Options: `:external_markers`, as for `generate_sequence/2`.
+  """
+  @spec teardown_commands(module(), Sequence.t(), integer(), keyword()) :: Sequence.t()
+  def teardown_commands(model, %Sequence{} = sequence, run_seed, opts \\ []) do
+    case PropertyDamage.Model.teardown_commands(model) do
+      [] ->
+        %{sequence | teardown: []}
+
+      entries ->
+        markers = Keyword.get(opts, :external_markers, [])
+        projection = model.command_sequence_projection()
+        state = end_state(model, projection, sequence, markers)
+
+        {teardown, minted} =
+          entries
+          |> generate_teardown(projection, model, state, [], [], markers)
+          |> generate_value(:erlang.phash2({run_seed, :teardown}))
+
+        %{sequence | teardown: teardown, registry: register_all(sequence.registry, minted)}
+    end
   end
 
   # Size passed to StreamData when realizing a value. Constant (rather than
@@ -209,9 +283,14 @@ defmodule PropertyDamage.Generator do
   # Linear Sequence Generation
   # ============================================================================
 
-  defp do_generate_linear_sequence(commands, projection, model, max_commands, markers) do
-    initial_state = projection.init()
-
+  defp do_generate_linear_sequence(
+         commands,
+         projection,
+         model,
+         initial_state,
+         max_commands,
+         markers
+       ) do
     generate_linear_recursive(
       commands,
       projection,
@@ -291,13 +370,19 @@ defmodule PropertyDamage.Generator do
   # Branching Sequence Generation
   # ============================================================================
 
-  defp do_generate_branching_sequence(commands, projection, model, max_commands, opts, markers) do
+  defp do_generate_branching_sequence(
+         commands,
+         projection,
+         model,
+         initial_state,
+         max_commands,
+         opts,
+         markers
+       ) do
     branch_probability = Keyword.get(opts, :branch_probability, @default_branch_probability)
     max_branches = Keyword.get(opts, :max_branches, @default_max_branches)
     max_branch_length = Keyword.get(opts, :max_branch_length, @default_max_branch_length)
     min_prefix_length = Keyword.get(opts, :min_prefix_length, @default_min_prefix_length)
-
-    initial_state = projection.init()
 
     # First, generate the prefix (before any branching)
     generate_prefix(
@@ -638,6 +723,99 @@ defmodule PropertyDamage.Generator do
       events = simulate_command(model, state, command)
       update_state(state, command, events, projection)
     end)
+  end
+
+  # ============================================================================
+  # Setup and Teardown Commands
+  # ============================================================================
+
+  # Draws every entry in written order: no `when:` filter, no weighted pick and
+  # no terminate_early?/3. Each one is simulated at its setup position so the
+  # next entry's `overrides:` (and the roots after them) see its state.
+  defp generate_setup([], _projection, _model, state, acc, acc_ph, _markers),
+    do: StreamData.constant({Enum.reverse(acc), acc_ph, state})
+
+  defp generate_setup([entry | rest], projection, model, state, acc, acc_ph, markers) do
+    {_weight, module, spec} = entry
+
+    StreamData.bind(get_command_generator(module, spec, state), fn command ->
+      position = Position.setup(length(acc))
+      {command, state, minted} = simulate_at(command, position, state, projection, model, markers)
+      generate_setup(rest, projection, model, state, [command | acc], acc_ph ++ minted, markers)
+    end)
+  end
+
+  defp generate_teardown([], _projection, _model, _state, acc, acc_ph, _markers),
+    do: StreamData.constant({Enum.reverse(acc), acc_ph})
+
+  defp generate_teardown([entry | rest], projection, model, state, acc, acc_ph, markers) do
+    {_weight, module, spec} = entry
+
+    StreamData.bind(get_command_generator(module, spec, state), fn command ->
+      position = Position.teardown(length(acc))
+      {command, state, minted} = simulate_at(command, position, state, projection, model, markers)
+
+      generate_teardown(
+        rest,
+        projection,
+        model,
+        state,
+        [command | acc],
+        acc_ph ++ minted,
+        markers
+      )
+    end)
+  end
+
+  # One generation step for a command already drawn: reify its mint markers,
+  # simulate it, mint its placeholders at `position` and fold it.
+  defp simulate_at(command, position, state, projection, model, markers) do
+    command = reify_command_mints(command, position)
+    events = simulate_command(model, state, command)
+    {events, minted} = instantiate_placeholders(events, position, markers)
+    {command, update_state(state, command, events, projection), minted}
+  end
+
+  # The generated root sequence with the setup commands in front: the setup
+  # placeholders join the sequence's registry.
+  defp with_setup(sequence, setup_commands, setup_ph) do
+    %{sequence | setup: setup_commands, registry: register_all(sequence.registry, setup_ph)}
+  end
+
+  defp register_all(registry, []), do: registry
+  defp register_all(nil, placeholders), do: build_registry(placeholders)
+
+  defp register_all(registry, placeholders),
+    do: Enum.reduce(placeholders, registry, &PlaceholderRegistry.register(&2, &1))
+
+  # The state the generator reached at the end of `sequence`: the setup
+  # commands and the roots simulated again from the initial state, with the
+  # placeholders minted at the positions generation minted them at. A
+  # branching sequence's branches are merged as generation merged them.
+  defp end_state(model, projection, %Sequence{} = sequence, markers) do
+    step = fn command, position, state ->
+      {_command, state, _minted} =
+        simulate_at(command, position, state, projection, model, markers)
+
+      state
+    end
+
+    fold = fn commands, pos_fun, state ->
+      commands
+      |> Enum.with_index()
+      |> Enum.reduce(state, fn {command, i}, acc -> step.(command, pos_fun.(i), acc) end)
+    end
+
+    state = fold.(sequence.setup, &Position.setup/1, projection.init())
+    state = fold.(sequence.prefix, &Position.prefix/1, state)
+
+    state =
+      case sequence.branches do
+        nil -> state
+        branches -> merge_branch_states(state, branches, projection, model)
+      end
+
+    fold.(sequence.suffix, &Position.suffix/1, state)
   end
 
   # ============================================================================

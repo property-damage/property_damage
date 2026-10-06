@@ -641,10 +641,21 @@ defmodule PropertyDamage.Executor do
     # Only a command that reaches the adapter's execute/3 records a time.
     state = %{state | last_execute_us: nil}
 
-    PropertyDamage.Telemetry.command_span(state.telemetry, command, index, fn ->
+    PropertyDamage.Telemetry.command_span(state.telemetry, command, offset(index), fn ->
       execute_any_command(command, index, state, model, adapter, adapter_context, event_queue)
     end)
   end
+
+  # The engine attributes a setup command by `{:setup, offset}` (see
+  # PropertyDamage.EventLog.Entry, "Phase"); its offset is what an index-shaped
+  # reader such as telemetry sees.
+  defp offset({_phase, offset}), do: offset
+  defp offset(index), do: index
+
+  # Whether a step advances the check sampling counters: a root does, a setup
+  # command does not (its `every: N` triggers neither count nor fire).
+  defp sampling?({:setup, _offset}), do: false
+  defp sampling?(_index), do: true
 
   defp execute_any_command(command, index, state, model, adapter, adapter_context, event_queue) do
     if Nemesis.nemesis_command?(command) do
@@ -1069,7 +1080,8 @@ defmodule PropertyDamage.Executor do
           step_count: state.step_count + 1,
           projections: projections,
           branch_id: state.branch_id,
-          telemetry: state.telemetry
+          telemetry: state.telemetry,
+          sampling: sampling?(index)
         }
 
         case run_checks(
@@ -1137,8 +1149,12 @@ defmodule PropertyDamage.Executor do
   # which honors `use PropertyDamage.Command, execution: :probe` and model-level
   # overrides.
   defp build_command_specs(model) do
-    model.commands()
-    |> PropertyDamage.Model.normalize_commands()
+    # A setup or teardown command's module gets its spec from its own entry,
+    # unless commands/0 lists the module too.
+    sequences =
+      PropertyDamage.Model.setup_commands(model) ++ PropertyDamage.Model.teardown_commands(model)
+
+    (sequences ++ PropertyDamage.Model.normalize_commands(model.commands()))
     |> Map.new(fn {_weight, module, spec} -> {module, spec} end)
   rescue
     # Never swallow a misconfigured model into an empty spec map: that silently
@@ -1337,9 +1353,14 @@ defmodule PropertyDamage.Executor do
     # checks (@check at:, DR-024) are also synchronous but fire only at a
     # phase boundary, not during the command loop, so they are excluded here and
     # dispatched separately by run_phase_checks/2.
+    # A step that does not sample (a setup command's) skips the `every: N`
+    # triggers: they read counters it did not advance.
+    sampling = Map.get(step_ctx, :sampling, true)
+
     sync_checks =
       Enum.filter(checks, fn check ->
-        check.type == :synchronous and not match?(%{type: :at}, check.trigger)
+        check.type == :synchronous and not match?(%{type: :at}, check.trigger) and
+          (sampling or not match?(%{type: :every_n}, check.trigger))
       end)
 
     Enum.reduce_while(sync_checks, {:ok, counters}, fn check, {:ok, acc_counters} ->
@@ -1538,19 +1559,18 @@ defmodule PropertyDamage.Executor do
         check_failures
       ) do
     command_module = check_ctx.command.__struct__
+    sampling = Map.get(check_ctx, :sampling, true)
 
     # Update counters
     counters =
-      check_counters
-      |> Map.update(:step, 1, &(&1 + 1))
-      |> Map.update(:command, 1, &(&1 + 1))
-      |> Map.update(command_module, 1, &(&1 + 1))
+      bump_sampling(check_counters, sampling, [:step, :command, command_module])
 
     # Run checks for command
     step_ctx = %{
       step_type: :command,
       module: command_module,
-      command_or_event: check_ctx.command
+      command_or_event: check_ctx.command,
+      sampling: sampling
     }
 
     case run_step_checks(
@@ -1600,18 +1620,16 @@ defmodule PropertyDamage.Executor do
          check_ctx
        ) do
     event_module = event.__struct__
+    sampling = Map.get(check_ctx, :sampling, true)
 
     # Update counters for this event
-    counters =
-      counters
-      |> Map.update(:step, 1, &(&1 + 1))
-      |> Map.update(:event, 1, &(&1 + 1))
-      |> Map.update(event_module, 1, &(&1 + 1))
+    counters = bump_sampling(counters, sampling, [:step, :event, event_module])
 
     step_ctx = %{
       step_type: :event,
       module: event_module,
-      command_or_event: event
+      command_or_event: event,
+      sampling: sampling
     }
 
     case run_step_checks(
@@ -1638,6 +1656,14 @@ defmodule PropertyDamage.Executor do
         error
     end
   end
+
+  # Advance the sampling counters `keys` by one, unless the step does not
+  # sample (a setup command's step, whose `every: N` triggers neither count
+  # nor fire).
+  defp bump_sampling(counters, false, _keys), do: counters
+
+  defp bump_sampling(counters, true, keys),
+    do: Enum.reduce(keys, counters, fn key, acc -> Map.update(acc, key, 1, &(&1 + 1)) end)
 
   # ============================================================================
   # Continuous async-observation checking (DR-025)
@@ -1704,7 +1730,7 @@ defmodule PropertyDamage.Executor do
 
         case check_async_event(model, projs, entry, c, mode, f, telemetry) do
           {:ok, c, f} -> {:cont, {projs, c, f}}
-          {:halt, name, reason, c} -> {:halt, {:halt, name, reason, entry.command_index, c}}
+          {:halt, name, reason, c} -> {:halt, {:halt, name, reason, Entry.attribution(entry), c}}
         end
       end)
 
@@ -1723,15 +1749,18 @@ defmodule PropertyDamage.Executor do
   defp check_async_event(model, projections, entry, counters, mode, failures, telemetry) do
     event = entry.event
     module = event.__struct__
+    # An event of a setup command does not advance the sampling counters.
+    sampling = entry.phase == :root
 
-    counters =
-      counters
-      |> Map.update(:step, 1, &(&1 + 1))
-      |> Map.update(:event, 1, &(&1 + 1))
-      |> Map.update(module, 1, &(&1 + 1))
+    counters = bump_sampling(counters, sampling, [:step, :event, module])
 
-    step_ctx = %{step_type: :event, module: module, command_or_event: event}
-    check_ctx = %{command: nil, command_index: entry.command_index, telemetry: telemetry}
+    step_ctx = %{step_type: :event, module: module, command_or_event: event, sampling: sampling}
+
+    check_ctx = %{
+      command: nil,
+      command_index: Entry.attribution(entry),
+      telemetry: telemetry
+    }
 
     case run_step_checks(model, projections, step_ctx, counters, mode, failures, check_ctx) do
       {:ok, counters, failures} -> {:ok, counters, failures}

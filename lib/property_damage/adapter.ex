@@ -20,28 +20,24 @@ defmodule PropertyDamage.Adapter do
   2. `execute/3` × N - Execute each command in the sequence
   3. `teardown/1` - Cleanup connections
 
-  The full lifecycle with model hooks:
+  The full lifecycle with the model's setup and teardown commands
+  (`c:PropertyDamage.Model.setup_each/0`, `c:PropertyDamage.Model.teardown_each/0`):
 
       Property test run
-      ├── Model.setup_once()           # Once at start
+      ├── Run 1 (in every target)
+      │   ├── Adapter.setup()                  # Reset the SUT, open connections
+      │   ├── @check at: :startup checks
+      │   ├── Adapter.execute() × setup cmds   # The setup commands
+      │   ├── Adapter.execute() × N            # The roots
+      │   ├── final boundary, @check at: :teardown checks
+      │   ├── Adapter.execute() × teardown cmds
+      │   └── Adapter.teardown()               # Cleanup connections
       │
-      ├── Run 1
-      │   ├── Model.setup_each()       # Reset SUT state
-      │   ├── Adapter.setup()          # Establish connections
-      │   ├── Adapter.execute() × N    # Execute each command
-      │   └── Adapter.teardown()       # Cleanup connections
+      ├── Run 2 ... Run N                      # Same as above
       │
-      ├── Run 2 ... Run N              # Same as above
-      │
-      ├── [On failure] Shrinking
-      │   ├── Shrink attempt 1
-      │   │   ├── Model.setup_each()
-      │   │   ├── Adapter.setup()
-      │   │   ├── Adapter.execute() × M
-      │   │   └── Adapter.teardown()
-      │   └── ...
-      │
-      └── Model.teardown_once()        # Once at end
+      └── [On failure] Shrinking
+          ├── Shrink attempt 1                 # Same as a run, fewer roots
+          └── ...
 
   ### `setup/1` must be idempotent
 

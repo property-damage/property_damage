@@ -72,6 +72,10 @@ defmodule PropertyDamage.FailureReport do
   seed generates). `reproduction_command/1` prints each one that differs from
   its default, and `PropertyDamage.shrink_further/2` re-shrinks under them.
 
+  `setup_commands` and `teardown_commands` list the setup and teardown
+  commands of the reported sequence (the shrunk one when it reproduced, else
+  the original), which every reproduction runs before and after the roots.
+
   `variant` names the target the failure happened in (`%{index:, name:}`, its
   position in `targets:` and its name; index 0 in a one-target run), and
   `targets` holds the run's `targets:` entries in order, the first being the
@@ -150,6 +154,12 @@ defmodule PropertyDamage.FailureReport do
           # `shrunk_sequence/1` and `event_log/1` are accessors over it.
           trace: RunTrace.t(),
 
+          # The setup and teardown commands of the reported sequence (the
+          # shrunk one when it reproduced, else the original), with concrete
+          # arguments and placeholders symbolic.
+          setup_commands: [struct()],
+          teardown_commands: [struct()],
+
           # The generated plan of the failing exploration run (before shrinking).
           # Distinct from `trace.plan`, which is the shrunk minimal reproduction
           # (or the original run when it didn't reproduce; see DR-033).
@@ -204,6 +214,9 @@ defmodule PropertyDamage.FailureReport do
           command_labels: %{non_neg_integer() => String.t()}
         }
 
+  # The report is the complete record of a run, so it holds more fields than
+  # the struct-size check allows.
+  # credo:disable-for-next-line Credo.Check.Warning.StructFieldAmount
   defstruct seed: nil,
             run_number: nil,
             failed_at_index: nil,
@@ -215,6 +228,8 @@ defmodule PropertyDamage.FailureReport do
             stutter: nil,
             max_commands: nil,
             trace: nil,
+            setup_commands: [],
+            teardown_commands: [],
             original_sequence: nil,
             failure_reason: nil,
             state_before_failure: nil,
@@ -348,6 +363,8 @@ defmodule PropertyDamage.FailureReport do
       stutter: Keyword.get(opts, :stutter),
       max_commands: Keyword.get(opts, :max_commands),
       trace: trace,
+      setup_commands: Sequence.setup_commands(shrunk_sequence),
+      teardown_commands: Sequence.teardown_commands(shrunk_sequence),
       original_sequence: original_sequence,
       failure_reason: failure_reason,
       state_before_failure: projections_before,
@@ -1030,10 +1047,32 @@ defmodule PropertyDamage.FailureReport do
       "(waited #{c.waited_ms} ms); still pending: #{inspect(c.reason)}"
   end
 
-  defp message_for(%Failure{type: %Failure.Setup{detail: detail}}),
-    do: "Adapter setup failed: " <> extract_message(detail)
+  defp message_for(%Failure{type: %Failure.Setup{cause: :adapter_setup, detail: detail}}),
+    do: "Adapter setup failed (cause: adapter_setup): " <> extract_message(detail)
+
+  defp message_for(%Failure{type: %Failure.Setup{cause: :unresolved_placeholder} = setup}) do
+    "Setup failed (cause: unresolved_placeholder) at setup command #{setup.setup_index} " <>
+      "(#{command_name(setup.command)}): its external() at field #{inspect(setup.field)} " <>
+      "never arrived"
+  end
+
+  defp message_for(%Failure{type: %Failure.Setup{cause: :check, detail: %Failure{} = check}} = f) do
+    "Setup failed (cause: check) at setup command #{f.type.setup_index} " <>
+      "(#{command_name(f.type.command)}): " <> failure_message(check)
+  end
+
+  defp message_for(%Failure{type: %Failure.Setup{} = setup}) do
+    "Setup failed (cause: #{setup.cause}) at setup command #{setup.setup_index} " <>
+      "(#{command_name(setup.command)}): " <> setup_detail_message(setup.detail)
+  end
 
   defp message_for(%Failure{type: type}), do: inspect(type.detail)
+
+  defp command_name(%{__struct__: module}), do: inspect(module)
+  defp command_name(nil), do: "no command"
+
+  defp setup_detail_message(%Failure{} = failure), do: failure_message(failure)
+  defp setup_detail_message(detail), do: extract_message(detail)
 
   # Extract a human message from a check/exception reason. The
   # is_exception clause MUST precede %{message: msg}: exceptions like

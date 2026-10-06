@@ -227,6 +227,8 @@ defmodule PropertyDamage.Export.StepPlan do
   defp position_suffix(%Position{section: :prefix, offset: i}), do: "_#{i}"
   defp position_suffix(%Position{section: {:branch, b}, offset: i}), do: "_b#{b}_#{i}"
   defp position_suffix(%Position{section: :suffix, offset: i}), do: "_s#{i}"
+  defp position_suffix(%Position{section: :setup, offset: i}), do: "_setup#{i}"
+  defp position_suffix(%Position{section: :teardown, offset: i}), do: "_teardown#{i}"
   defp position_suffix(_), do: ""
 
   defp collect_placeholders(%Placeholder{} = ph), do: [ph]

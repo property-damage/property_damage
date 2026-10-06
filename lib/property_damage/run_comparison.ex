@@ -741,9 +741,11 @@ defmodule PropertyDamage.RunComparison do
   defp location_sort_key({:state, %Sequence.Position{} = p, projection, path}),
     do: {section_rank(p.section), p.offset, :state, inspect({projection, path})}
 
+  defp section_rank(:setup), do: {-1, 0}
   defp section_rank(:prefix), do: {0, 0}
   defp section_rank({:branch, b}), do: {1, b}
   defp section_rank(:suffix), do: {2, 0}
+  defp section_rank(:teardown), do: {3, 0}
 
   # ---- Header ---------------------------------------------------------------
 

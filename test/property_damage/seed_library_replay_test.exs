@@ -52,23 +52,48 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     def check_projections, do: [Switchable]
   end
 
-  # Same model, but records the exact map its lifecycle callbacks receive. Used
-  # to pin the trace/single-run contract delivered by the seed-library replay
-  # phase (`with_sequence_execution`), which passes run_number: 0.
-  defmodule LifecycleModel do
+  # Fails every Cmd while the switch says :fail, and never a setup or
+  # teardown command.
+  defmodule CmdSwitch do
+    use PropertyDamage.Model.Projection
+    def init, do: %{}
+    def apply(state, _), do: state
+
+    @check every: PropertyDamage.SeedLibraryReplayTest.Cmd
+    def assert_mode(_state, _cmd) do
+      case :persistent_term.get({PropertyDamage.SeedLibraryReplayTest.Switchable, :mode}, :fail) do
+        :fail -> PropertyDamage.fail!("switched to fail")
+        :pass -> :ok
+      end
+    end
+  end
+
+  # Cmd roots with one setup command and one teardown command.
+  defmodule FixtureModel do
     @behaviour PropertyDamage.Model
+    alias PropertyDamage.Test.SetupCommands.{Cleanup, CreateUser}
     def commands, do: [Cmd]
     def command_sequence_projection, do: State
-    def check_projections, do: [Switchable]
+    def check_projections, do: [CmdSwitch]
+    def setup_each, do: [{CreateUser, overrides: %{name: "fixture"}}]
+    def teardown_each, do: [{Cleanup, overrides: %{thing_id: "fixture"}}]
+  end
 
-    def setup_each(config) do
-      send(config.adapter_config.test_pid, {:lifecycle, :setup_each, config})
-      :ok
+  # Reports every command it executes, and its setup and teardown, to the
+  # test process in its config.
+  defmodule RecordingAdapter do
+    use PropertyDamage.Adapter
+    def setup(config), do: send_back(config, :setup, {:ok, config})
+    def teardown(context), do: send_back(context, :teardown, :ok)
+
+    def execute(command, context, _runtime) do
+      send(context.test_pid, {:recorded, {:execute, command}})
+      {:ok, []}
     end
 
-    def teardown_each(config) do
-      send(config.adapter_config.test_pid, {:lifecycle, :teardown_each, config})
-      :ok
+    defp send_back(config, what, result) do
+      send(config.test_pid, {:recorded, what})
+      result
     end
   end
 
@@ -286,20 +311,20 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     end
   end
 
-  describe "lifecycle callback arguments on the trace/single-run replay path" do
-    test "setup_each and teardown_each receive adapter_config + run_number: 0" do
-      path = tmp_path("trace_lifecycle")
-      preseed(path, 7, model: "M")
-      # A still-failing preseeded seed reproduces via with_sequence_execution and
-      # halts before exploration, so the only tagged setup_each/teardown_each are
-      # the trace path's. shrink: false keeps the shrinker off this run entirely.
-      set_mode(:fail)
-      pid = self()
+  describe "setup and teardown commands on the replay path" do
+    test "a replayed seed executes the setup commands first and the teardown commands last" do
+      alias PropertyDamage.Test.SetupCommands.{Cleanup, CreateUser}
 
-      assert {:error, _} =
+      path = tmp_path("replay_fixtures")
+      preseed(path, 7, model: "M")
+      # A still-failing preseeded seed halts the run in the replay phase, so
+      # every recorded command belongs to the replay.
+      set_mode(:fail)
+
+      assert {:error, report} =
                PropertyDamage.run(
-                 model: LifecycleModel,
-                 targets: [{Adapter, config: %{test_pid: pid}}],
+                 model: FixtureModel,
+                 targets: [{RecordingAdapter, config: %{test_pid: self()}}],
                  max_commands: 2,
                  shrink: false,
                  validate: false,
@@ -307,16 +332,24 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
                  max_runs: 1
                )
 
-      assert_received {:lifecycle, :setup_each,
-                       %{adapter_config: %{test_pid: ^pid}, run_number: 0} = setup_config}
+      assert report.seed == 7
+      assert report.kind == :check_failed
 
-      assert map_size(setup_config) == 2
+      assert [
+               :setup,
+               {:execute, %CreateUser{name: "fixture"}},
+               {:execute, %Cmd{}} | rest
+             ] = take_recorded()
 
-      assert_received {:lifecycle, :teardown_each,
-                       %{adapter_config: %{test_pid: ^pid}, run_number: 0} = teardown_config}
+      assert [{:execute, %Cleanup{thing_id: "fixture"}}, :teardown] = Enum.take(rest, -2)
+    end
+  end
 
-      assert map_size(teardown_config) == 2
-      refute Map.has_key?(teardown_config, :replay)
+  defp take_recorded do
+    receive do
+      {:recorded, entry} -> [entry | take_recorded()]
+    after
+      0 -> []
     end
   end
 end

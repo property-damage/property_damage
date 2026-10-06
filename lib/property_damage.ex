@@ -270,9 +270,6 @@ defmodule PropertyDamage do
   fail the same way, the report keeps the original run. A setup failure
   implicates no command and is reported unshrunk.
 
-  The model's `setup_once/1`, `setup_each/1` and their teardowns receive the
-  reference target's config.
-
   ## Branching Options
 
   Pass `branching: [...]` to generate branching (parallel) sequences:
@@ -388,6 +385,9 @@ defmodule PropertyDamage do
     # Two or more targets are compared only through @compare observations:
     # refuse a model without any before anything runs, `validate:` or not.
     Comparison.check_model!(model, length(targets))
+    # A model that still defines a removed lifecycle hook fails here, before
+    # any target is set up.
+    PropertyDamage.Model.check_lifecycle!(model)
     [reference | _] = targets
     max_commands = opts[:max_commands]
     max_runs = opts[:max_runs]
@@ -473,66 +473,46 @@ defmodule PropertyDamage do
       end
     end
 
-    # Setup once (if model implements it). The model hooks receive the
-    # reference target's config.
-    setup_once_result =
-      if function_exported?(model, :setup_once, 1) do
-        model.setup_once(%{adapter_config: reference.config})
-      else
-        :ok
-      end
+    # Emit telemetry for run start
+    telemetry_metadata = %{
+      model: model,
+      targets: Enum.map(targets, &%{index: &1.index, name: &1.name, adapter: &1.adapter}),
+      max_runs: max_runs,
+      max_commands: max_commands,
+      seed: seed
+    }
 
-    case setup_once_result do
-      :ok ->
-        # Emit telemetry for run start
-        telemetry_metadata = %{
-          model: model,
-          targets: Enum.map(targets, &%{index: &1.index, name: &1.name, adapter: &1.adapter}),
-          max_runs: max_runs,
-          max_commands: max_commands,
-          seed: seed
-        }
+    start_time = System.system_time()
+    Telemetry.run_start(telemetry_metadata)
 
-        start_time = System.system_time()
-        Telemetry.run_start(telemetry_metadata)
+    try do
+      result = do_run(ctx)
 
-        try do
-          result = do_run(ctx)
+      # Auto-append a new exploration failure's seed to the working set
+      # (DR-023); deduplicated by seed, so a replayed halt is a no-op.
+      maybe_append_failure_seed(result, seed_library_path)
 
-          # Auto-append a new exploration failure's seed to the working set
-          # (DR-023); deduplicated by seed, so a replayed halt is a no-op.
-          maybe_append_failure_seed(result, seed_library_path)
-
-          # Emit telemetry for run stop
-          {result_type, result_data} =
-            case result do
-              {:ok, stats} -> {:ok, stats}
-              {:error, _} -> {:error, %{}}
-            end
-
-          Telemetry.run_stop(
-            start_time,
-            Map.merge(telemetry_metadata, %{
-              result: result_type,
-              runs_completed: if(result_type == :ok, do: result_data[:runs], else: 0),
-              total_commands: if(result_type == :ok, do: result_data[:total_commands], else: 0)
-            })
-          )
-
-          result
-        rescue
-          e ->
-            Telemetry.run_exception(start_time, :error, e, __STACKTRACE__, telemetry_metadata)
-            reraise e, __STACKTRACE__
-        after
-          # Teardown once
-          if function_exported?(model, :teardown_once, 1) do
-            model.teardown_once(%{adapter_config: reference.config})
-          end
+      # Emit telemetry for run stop
+      {result_type, result_data} =
+        case result do
+          {:ok, stats} -> {:ok, stats}
+          {:error, _} -> {:error, %{}}
         end
 
-      {:error, reason} ->
-        {:error, %{setup_once_failed: reason}}
+      Telemetry.run_stop(
+        start_time,
+        Map.merge(telemetry_metadata, %{
+          result: result_type,
+          runs_completed: if(result_type == :ok, do: result_data[:runs], else: 0),
+          total_commands: if(result_type == :ok, do: result_data[:total_commands], else: 0)
+        })
+      )
+
+      result
+    rescue
+      e ->
+        Telemetry.run_exception(start_time, :error, e, __STACKTRACE__, telemetry_metadata)
+        reraise e, __STACKTRACE__
     end
   end
 
@@ -574,6 +554,8 @@ defmodule PropertyDamage do
           compare_counts: Comparison.zero_counts(ctx.model),
           tracker: if(ctx.coverage, do: Coverage.new(ctx.model), else: nil),
           total_commands: 0,
+          setup_commands: 0,
+          teardown_commands: 0,
           samples: []
         }
 
@@ -586,6 +568,8 @@ defmodule PropertyDamage do
       %{
         runs: ctx.max_runs,
         total_commands: acc.total_commands,
+        setup_commands: acc.setup_commands,
+        teardown_commands: acc.teardown_commands,
         seed: ctx.seed,
         targets: Enum.map(ctx.targets, &%{index: &1.index, name: &1.name})
       }
@@ -613,14 +597,15 @@ defmodule PropertyDamage do
     end
   end
 
-  # One run: generate its sequence, then setup_each, execute, teardown_each.
-  # Returns `{:pass, acc}` or the run's `{:error, failure}`.
+  # One run: generate its sequence (setup commands, roots and teardown
+  # commands), then execute it. Returns `{:pass, acc}` or the run's
+  # `{:error, failure}`.
   defp run_once(ctx, run_number, acc) do
     # Generate a command sequence, deterministically derived from the seed.
     # Run 0 uses the base seed itself so a reported seed reproduces exactly
     # with max_runs: 1.
     run_seed = Generator.run_seed(ctx.seed, run_number)
-    sequence = generate_one(ctx.generator, run_seed)
+    sequence = generate_one(ctx, run_seed)
     command_count = Sequence.command_count(sequence)
 
     # Per-run heartbeat (DR-022). run_number is reported 1-based for consumers.
@@ -651,35 +636,9 @@ defmodule PropertyDamage do
       start: seq_start_time
     }
 
-    case call_setup_each(ctx, run_number) do
-      :ok ->
-        try do
-          if ctx.branching,
-            do: run_branching(ctx, run, acc),
-            else: run_lockstep(ctx, run, acc)
-        after
-          call_teardown_each(ctx, run_number)
-        end
-
-      {:error, reason} ->
-        {:error, %{setup_each_failed: reason, run_number: run_number}}
-    end
-  end
-
-  # Setup each and teardown each (if the model implements them) receive the
-  # reference target's config.
-  defp call_setup_each(ctx, run_number) do
-    if function_exported?(ctx.model, :setup_each, 1) do
-      ctx.model.setup_each(%{adapter_config: ctx.target.config, run_number: run_number})
-    else
-      :ok
-    end
-  end
-
-  defp call_teardown_each(ctx, run_number) do
-    if function_exported?(ctx.model, :teardown_each, 1) do
-      ctx.model.teardown_each(%{adapter_config: ctx.target.config, run_number: run_number})
-    end
+    if ctx.branching,
+      do: run_branching(ctx, run, acc),
+      else: run_lockstep(ctx, run, acc)
   end
 
   # A linear sequence runs on every target through the lockstep scheduler,
@@ -713,7 +672,12 @@ defmodule PropertyDamage do
     case outcome.failure do
       nil ->
         {:pass,
-         %{acc | total_commands: acc.total_commands + Sequence.command_count(run.sequence)}}
+         %{
+           acc
+           | total_commands: acc.total_commands + Sequence.command_count(run.sequence),
+             setup_commands: acc.setup_commands + length(run.sequence.setup),
+             teardown_commands: acc.teardown_commands + length(run.sequence.teardown)
+         }}
 
       _failure ->
         handle_failure(ctx, lockstep_found(run, outcome, acc.fires))
@@ -728,6 +692,8 @@ defmodule PropertyDamage do
         model: ctx.model,
         targets: ctx.targets,
         commands: Sequence.to_list(run.sequence),
+        setup_commands: run.sequence.setup,
+        teardown_commands: run.sequence.teardown,
         placeholder_registry: run.sequence.registry,
         seed: run.seed,
         run_number: run.run_number,
@@ -864,8 +830,11 @@ defmodule PropertyDamage do
   defp put_metrics(stats, ctx, samples),
     do: Map.put(stats, :metrics, LatencyMetrics.calculate(ctx.targets, samples))
 
-  defp generate_one(generator, run_seed) do
-    Generator.generate_value(generator, run_seed)
+  # The run's sequence: its setup commands and roots from the run seed, then
+  # its teardown commands drawn against the state the roots leave.
+  defp generate_one(ctx, run_seed) do
+    sequence = Generator.generate_value(ctx.generator, run_seed)
+    Generator.teardown_commands(ctx.model, sequence, run_seed)
   end
 
   # ============================================================================
@@ -961,8 +930,8 @@ defmodule PropertyDamage do
 
   # Replay previously-failing seeds before random exploration. Returns
   # `:proceed` to run exploration, or `{:halt, failure}` to stop with that
-  # failure (a shrunk `FailureReport` for a still-failing seed, a `:setup_failed`
-  # report, or a `setup_each_failed` map mirroring `run_loop`'s contract).
+  # failure (a shrunk `FailureReport` for a still-failing seed, or a
+  # `:setup_failed` report).
   #
   # A replayed seed runs against every target, as an exploration run does.
   defp replay_phase(nil, _ctx), do: :proceed
@@ -983,10 +952,6 @@ defmodule PropertyDamage do
 
         finish_replay(replay_entries(entries, library, ctx, k, verbose), path, k, ctx.reporter)
     end
-  end
-
-  defp finish_replay({:setup_each_failed, reason}, _path, _k, _reporter) do
-    {:halt, %{setup_each_failed: reason, phase: :seed_library_replay}}
   end
 
   defp finish_replay({:setup_failed, report}, _path, _k, _reporter) do
@@ -1034,7 +999,6 @@ defmodule PropertyDamage do
       end)
 
     case outcome do
-      {:setup_each_failed, _reason} = err -> err
       {:setup_failed, _report} = err -> err
       {lib, results, rep} -> {:ok, lib, Enum.reverse(results), rep}
     end
@@ -1042,9 +1006,6 @@ defmodule PropertyDamage do
 
   defp replay_entry(seed, lib, results, rep, ctx, k, verbose) do
     case replay_seed(seed, ctx, is_nil(rep)) do
-      {:setup_each_failed, _reason} = err ->
-        {:halt, err}
-
       {:setup_failed, _report} = err ->
         {:halt, err}
 
@@ -1061,36 +1022,26 @@ defmodule PropertyDamage do
     end
   end
 
-  # Replays one seed as run 0 of itself: setup_each, the sequence on every
-  # target (through the lockstep scheduler, or the linear engine for a
-  # branching run), teardown_each. A failure, when this seed is the
+  # Replays one seed as run 0 of itself: the sequence, setup and teardown
+  # commands included, on every target (through the lockstep scheduler, or the
+  # linear engine for a branching run). A failure, when this seed is the
   # representative (`build_rep?`), goes through the run's failure path: shrunk,
   # reproduced and reported. A target's setup failure halts the replay with its
   # report.
   defp replay_seed(seed, ctx, build_rep?) do
-    sequence = generate_one(ctx.generator, seed)
+    sequence = generate_one(ctx, seed)
     run = %{sequence: sequence, seed: seed, run_seed: seed, run_number: 0}
 
-    case call_setup_each(ctx, 0) do
-      :ok ->
-        try do
-          case replay_run(ctx, run) do
-            :passed ->
-              {:pass}
+    case replay_run(ctx, run) do
+      :passed ->
+        {:pass}
 
-            {:failed, %{failure: %{kind: :setup_failed}} = found} ->
-              {:error, report} = handle_failure(ctx, found)
-              {:setup_failed, report}
+      {:failed, %{failure: %{kind: :setup_failed}} = found} ->
+        {:error, report} = handle_failure(ctx, found)
+        {:setup_failed, report}
 
-            {:failed, found} ->
-              {:fail, replay_refresh(found.failure.reason), replay_report(ctx, found, build_rep?)}
-          end
-        after
-          call_teardown_each(ctx, 0)
-        end
-
-      {:error, reason} ->
-        {:setup_each_failed, reason}
+      {:failed, found} ->
+        {:fail, replay_refresh(found.failure.reason), replay_report(ctx, found, build_rep?)}
     end
   end
 
@@ -1333,6 +1284,8 @@ defmodule PropertyDamage do
         model: ctx.model,
         targets: ctx.targets,
         commands: Sequence.to_list(sequence),
+        setup_commands: sequence.setup,
+        teardown_commands: sequence.teardown,
         placeholder_registry: sequence.registry,
         seed: found.run_seed,
         run_number: 0,

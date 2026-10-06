@@ -260,7 +260,9 @@ defmodule PropertyDamage.Shrinker do
   registry, adapter state) carries over from one attempt to the next. A
   branching candidate runs on the one target through
   `PropertyDamage.Executor.run/4`, with its own event queue, injectors and mocks
-  per attempt. The model's `setup_each/1` runs before every attempt.
+  per attempt. A linear candidate keeps the sequence's setup and teardown
+  commands, which every target runs before and after the candidate's roots;
+  they are never removed or shrunk.
 
   ## Parameters
 
@@ -324,7 +326,9 @@ defmodule PropertyDamage.Shrinker do
         # removals so the placeholder registry's producer_link can be remapped to
         # each candidate's positions before re-execution.
         positions: original_positions(commands),
-        registry: sequence.registry
+        registry: sequence.registry,
+        setup_commands: sequence.setup,
+        teardown_commands: sequence.teardown
       })
 
     # Truncating at the failure point is an optimization, not an assumption
@@ -366,7 +370,7 @@ defmodule PropertyDamage.Shrinker do
       # replayed) still resolves its externals.
       sequence:
         Sequence.with_registry(
-          Sequence.linear(shrink_state.commands),
+          %{sequence | prefix: shrink_state.commands, branches: nil, suffix: []},
           remap_registry(shrink_state.registry, shrink_state.positions)
         ),
       iterations: shrink_state.iterations,
@@ -1099,104 +1103,81 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
-  # One linear shrink attempt: the model's setup_each/1, then the candidate on
-  # every target through the scheduler, which sets each target up and tears it
-  # down. Returns `{:failed, reason, variant_index, root}`, `:passed`, or
-  # `:not_run` when setup_each/1 failed (the candidate is then kept, as if it
-  # passed).
+  # One linear shrink attempt: the candidate, with the sequence's setup and
+  # teardown commands, on every target through the scheduler, which sets each
+  # target up and tears it down. Returns `{:failed, reason, variant_index,
+  # root}` or `:passed`.
   defp run_linear_attempt(commands, registry, state) do
-    case call_setup_each(state) do
-      :ok ->
-        {:ok, run} =
-          Scheduler.run(
-            model: state.model,
-            targets: state.targets,
-            commands: commands,
-            # A sequence built by hand may carry no registry: its candidates
-            # resolve nothing, as on the linear engine.
-            placeholder_registry: registry || PlaceholderRegistry.new(),
-            seed: state.rng_seed,
-            run_number: 0,
-            run_nonce: state.run_nonce,
-            mint_epoch: next_mint_epoch(state),
-            concurrency: state.concurrency,
-            compare: state.compare,
-            stutter_config: state.stutter_config,
-            check_mode: state.check_mode
-          )
+    {:ok, run} =
+      Scheduler.run(
+        model: state.model,
+        targets: state.targets,
+        commands: commands,
+        setup_commands: Map.get(state, :setup_commands, []),
+        teardown_commands: Map.get(state, :teardown_commands, []),
+        # A sequence built by hand may carry no registry: its candidates
+        # resolve nothing, as on the linear engine.
+        placeholder_registry: registry || PlaceholderRegistry.new(),
+        seed: state.rng_seed,
+        run_number: 0,
+        run_nonce: state.run_nonce,
+        mint_epoch: next_mint_epoch(state),
+        concurrency: state.concurrency,
+        compare: state.compare,
+        stutter_config: state.stutter_config,
+        check_mode: state.check_mode
+      )
 
-        case run.failure do
-          nil ->
-            :passed
+    case run.failure do
+      nil ->
+        :passed
 
-          %{reason: reason, variant: %{index: index}, root: root} ->
-            {:failed, reason, index, root}
-        end
-
-      {:error, _reason} ->
-        :not_run
+      %{reason: reason, variant: %{index: index}, root: root} ->
+        {:failed, reason, index, root}
     end
   end
 
   defp still_fails_branch?(sequence, positions, state) do
-    # Call setup_each to reset SUT state before each shrink attempt
-    case call_setup_each(state) do
-      :ok ->
-        # Regenerate idempotency keys to ensure fresh SUT state
-        sequence = regenerate_sequence_idempotency_keys(sequence)
+    # Regenerate idempotency keys to ensure fresh SUT state
+    sequence = regenerate_sequence_idempotency_keys(sequence)
 
-        # Attach a registry whose producer_link is remapped onto THIS candidate's
-        # positions (DR-021), so externals resolve against the shrunk sequence's
-        # own indices instead of the stale original ones.
-        sequence =
-          Sequence.with_registry(
-            sequence,
-            remap_branch_registry(state.registry, positions, sequence)
-          )
+    # Attach a registry whose producer_link is remapped onto THIS candidate's
+    # positions (DR-021), so externals resolve against the shrunk sequence's
+    # own indices instead of the stale original ones.
+    sequence =
+      Sequence.with_registry(
+        sequence,
+        remap_branch_registry(state.registry, positions, sequence)
+      )
 
-        # A branching sequence runs on its one target, through the linear
-        # engine, with its own event queue, injectors and mocks per attempt.
-        [target] = state.targets
+    # A branching sequence runs on its one target, through the linear
+    # engine, with its own event queue, injectors and mocks per attempt.
+    [target] = state.targets
 
-        run_result =
-          RunServices.with_services(target, fn event_queue, mock_registry ->
-            Executor.run(sequence, state.model, target.adapter,
-              config: target.config,
-              event_queue: event_queue,
-              mock_registry: mock_registry,
-              stutter_config: state.stutter_config,
-              rng_seed: state.rng_seed,
-              run_nonce: state.run_nonce,
-              mint_epoch: next_mint_epoch(state),
-              telemetry: Telemetry.engine_context(%{index: target.index, name: target.name}, 0)
-            )
-          end)
+    run_result =
+      RunServices.with_services(target, fn event_queue, mock_registry ->
+        Executor.run(sequence, state.model, target.adapter,
+          config: target.config,
+          event_queue: event_queue,
+          mock_registry: mock_registry,
+          stutter_config: state.stutter_config,
+          rng_seed: state.rng_seed,
+          run_nonce: state.run_nonce,
+          mint_epoch: next_mint_epoch(state),
+          telemetry: Telemetry.engine_context(%{index: target.index, name: target.name}, 0)
+        )
+      end)
 
-        case run_result do
-          {:ok, %{success: true}} ->
-            false
-
-          {:ok, result} ->
-            check_failure_equivalence(result.failure_reason, 0, state.original_signature)
-
-          # The adapter's setup/1 failed: a setup failure of the one target.
-          {:error, reason} ->
-            check_failure_equivalence(Failure.setup_failed(reason), 0, state.original_signature)
-        end
-
-      {:error, _reason} ->
-        # If setup_each fails, treat as if shrink candidate passed (don't remove)
+    case run_result do
+      {:ok, %{success: true}} ->
         false
-    end
-  end
 
-  # Call setup_each if the model implements it, with the reference target's
-  # config.
-  defp call_setup_each(%{model: model, targets: [reference | _]}) do
-    if function_exported?(model, :setup_each, 1) do
-      model.setup_each(%{adapter_config: reference.config})
-    else
-      :ok
+      {:ok, result} ->
+        check_failure_equivalence(result.failure_reason, 0, state.original_signature)
+
+      # The adapter's setup/1 failed: a setup failure of the one target.
+      {:error, reason} ->
+        check_failure_equivalence(Failure.setup_failed(reason), 0, state.original_signature)
     end
   end
 
