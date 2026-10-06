@@ -5,7 +5,7 @@ defmodule CachexBench.Projection do
   """
   use PropertyDamage.Model.Projection
 
-  alias CachexBench.Events.{CacheCleared, EntryDeleted, EntryPut, EntryRead}
+  alias CachexBench.Events.{CacheCleared, EntryDeleted, EntryIncremented, EntryPut, EntryRead}
 
   @impl true
   def init, do: %{expected: %{}, last_read: nil}
@@ -25,6 +25,10 @@ defmodule CachexBench.Projection do
 
   def apply(state, %EntryRead{key: key, value: value}) do
     %{state | last_read: {key, value}}
+  end
+
+  def apply(state, %EntryIncremented{key: key, amount: amount}) do
+    %{state | expected: Map.update(state.expected, key, amount, &(&1 + amount))}
   end
 
   def apply(state, _event), do: state
@@ -63,8 +67,8 @@ defmodule CachexBench.Simulator do
   @moduledoc "Predicts events during generation, before any cache exists."
   @behaviour PropertyDamage.Model.Simulator
 
-  alias CachexBench.Commands.{ClearCache, DelKey, GetKey, PutKey}
-  alias CachexBench.Events.{CacheCleared, EntryDeleted, EntryPut, EntryRead}
+  alias CachexBench.Commands.{ClearCache, DelKey, GetKey, Incr, PutKey}
+  alias CachexBench.Events.{CacheCleared, EntryDeleted, EntryIncremented, EntryPut, EntryRead}
 
   @impl true
   def simulate(%PutKey{key: key, value: value}, _state) do
@@ -84,14 +88,27 @@ defmodule CachexBench.Simulator do
     [%CacheCleared{}]
   end
 
+  def simulate(%Incr{key: key, amount: amount}, state) do
+    value = Map.get(state.expected, key, 0) + amount
+    [%EntryIncremented{key: key, amount: amount, value: value}]
+  end
+
   def simulate(_command, _state), do: []
 end
 
 defmodule CachexBench.Model do
-  @moduledoc "Ties cache commands and the consistency projection together."
+  @moduledoc """
+  Ties cache commands and the consistency projection together.
+
+  `Incr k n` has an expansion: a target may run it as itself or as two
+  increments of the same key that add up to `n` (`Incr k 5` as
+  `[Incr k 2, Incr k 3]`). Once the root is done, both leave the same counter
+  under `k`, which `CachexBench.Projection.expected_contents/2` compares after
+  every root.
+  """
   @behaviour PropertyDamage.Model
 
-  alias CachexBench.Commands.{ClearCache, DelKey, GetKey, PutKey}
+  alias CachexBench.Commands.{ClearCache, DelKey, GetKey, Incr, PutKey}
 
   @impl true
   def commands do
@@ -99,8 +116,27 @@ defmodule CachexBench.Model do
       {PutKey, weight: 5},
       {GetKey, weight: 5},
       {DelKey, weight: 2},
-      {ClearCache, weight: 1}
+      {ClearCache, weight: 1},
+      {Incr, weight: 2}
     ]
+  end
+
+  @impl true
+  def expansions, do: [{Incr, &incr_expansions/2}]
+
+  @doc """
+  The ways to run `Incr k n`: as itself (listed first, the simplest), and for
+  `n >= 2` as `Incr k div(n, 2)` then `Incr k (n - div(n, 2))`.
+  """
+  def incr_expansions(%Incr{key: key, amount: n} = incr, _state) do
+    [{[incr], weight: 2} | split(key, n)]
+  end
+
+  defp split(_key, n) when n < 2, do: []
+
+  defp split(key, n) do
+    a = div(n, 2)
+    [[{Incr, overrides: %{key: key, amount: a}}, {Incr, overrides: %{key: key, amount: n - a}}]]
   end
 
   @impl true

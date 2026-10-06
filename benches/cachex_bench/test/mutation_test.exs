@@ -25,7 +25,8 @@ defmodule CachexBench.MutationTest do
     CachexBench.Commands.PutKey,
     CachexBench.Commands.GetKey,
     CachexBench.Commands.DelKey,
-    CachexBench.Commands.ClearCache
+    CachexBench.Commands.ClearCache,
+    CachexBench.Commands.Incr
   ]
 
   # Kept CI-sane while leaving enough runs per mutation that a perturbed read is
