@@ -30,9 +30,19 @@ defmodule OpenapiBench.Generated.Adapter do
   alias OpenapiBench.Generated.Commands
   alias PropertyDamage.Export.HTTPSpec
 
+  # Reset the SUT before every run (and every shrink attempt) so runs never
+  # share key/value state. Each target resets with the flags of its own
+  # `config:` (`:bug`, `:idempotency_bug`; default false), which seed the
+  # SUT's bugs for the non-vacuity tests.
   @impl true
   def setup(config) do
     base_url = Map.get(config, :base_url, "http://localhost:4010")
+
+    OpenapiBench.Server.reset(
+      Map.get(config, :bug, false),
+      Map.get(config, :idempotency_bug, false)
+    )
+
     {:ok, Map.put(config, :base_url, base_url)}
   end
 

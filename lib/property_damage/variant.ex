@@ -34,7 +34,9 @@ defmodule PropertyDamage.Variant do
   `Stepping.step_setup/4`, drains the queue, and then checks the completion
   rule: every `external()` a setup command produces must be resolved in this
   variant's registry. `run_teardown/1` steps the teardown commands
-  (`:teardown_commands`) through `Stepping.step_teardown/4` once; `stop/1`
+  (`:teardown_commands`) through `Stepping.step_teardown/4` once. Every other path
+  that executes a run (`PropertyDamage.Executor.run/4`,
+  `PropertyDamage.Replay`) runs both phases the same way. `stop/1`
   runs them first when nobody did, so they run for every variant whose adapter
   `setup/1` succeeded, whatever happened after it, and never for one whose
   `setup/1` failed.
@@ -135,16 +137,13 @@ defmodule PropertyDamage.Variant do
     Executor,
     Failure,
     Generator,
-    PlaceholderRegistry,
     ResourcePoller,
     StatePoller,
     Target,
     Telemetry
   }
 
-  alias PropertyDamage.Sequence.Position
-
-  alias PropertyDamage.Executor.Stepping
+  alias PropertyDamage.Executor.{Phases, Stepping}
   alias PropertyDamage.Runtime.RunServices
 
   @typedoc "An observation of one command, as `advance_to/2` reports it."
@@ -377,7 +376,7 @@ defmodule PropertyDamage.Variant do
       target: target,
       model: Keyword.fetch!(opts, :model),
       commands: opts |> Keyword.fetch!(:commands) |> List.to_tuple(),
-      setup_commands: opts |> Keyword.get(:setup_commands, []) |> List.to_tuple(),
+      setup_commands: Keyword.get(opts, :setup_commands, []),
       teardown_commands: Keyword.get(opts, :teardown_commands, []),
       teardown_entries: nil,
       placeholder_registry: Keyword.fetch!(opts, :placeholder_registry),
@@ -619,74 +618,26 @@ defmodule PropertyDamage.Variant do
   # Setup and teardown commands
   # ==========================================================================
 
-  # Steps every setup command, drains, then applies the completion rule. Any
-  # failure halts the variant with a setup failure.
+  # Steps every setup command, drains, then applies the completion rule
+  # (`Executor.Phases.run_setup/4`). Any failure halts the variant with a
+  # setup failure.
   defp run_setup_commands(state) do
-    stepped =
-      state.setup_commands
-      |> Tuple.to_list()
-      |> Enum.with_index()
-      |> Enum.reduce_while(state, fn {command, offset}, state ->
-        case Stepping.step_setup(command, offset, state.exec, state.ctx) do
-          {:ok, exec, _outcome} ->
-            {:cont, guard_pollers(%{state | exec: exec})}
+    on_step = fn exec ->
+      guard_pollers(%{state | exec: exec})
+      exec
+    end
 
-          {:error, failure, failed, outcome} ->
-            reason = setup_step_reason(state, command, offset, failure, failed, outcome)
-            {:halt, halt_setup(state, failed, reason)}
-        end
-      end)
+    case Phases.run_setup(state.setup_commands, state.exec, state.ctx, on_step) do
+      {:ok, exec} ->
+        {:ok, %{state | exec: exec}}
 
-    with %{phase: :ready} <- stepped,
-         {:ok, state} <- drain_setup(stepped),
-         :ok <- completion_rule(state) do
-      {:ok, state}
-    else
-      %{phase: :halted} = halted -> {{:failed, halted.failure}, halted}
-      {:failed, %{phase: :halted} = halted} -> {{:failed, halted.failure}, halted}
+      {:failed, reason, failed} ->
+        halted = halt_setup(state, failed, reason)
+        {{:failed, halted.failure}, halted}
     end
   end
-
-  # What a failed setup step reports: a check that failed (on this command's
-  # event, or on an earlier setup command's event the step drained) is a
-  # `:check` setup failure; anything else means the command could not run.
-  defp setup_step_reason(state, command, offset, failure, failed, outcome) do
-    case {failed.async_failed_index, outcome} do
-      {{:setup, attributed}, _outcome} ->
-        setup_check_reason(state, attributed, failure)
-
-      {:unset, {:raised, exception}} ->
-        Failure.setup_failed(:command, command: command, setup_index: offset, detail: exception)
-
-      {:unset, {:error, reason}} ->
-        Failure.setup_failed(:command, command: command, setup_index: offset, detail: reason)
-
-      {_index, _outcome} ->
-        if Failure.class(failure) == :check,
-          do: setup_check_reason(state, offset, failure),
-          else:
-            Failure.setup_failed(:command, command: command, setup_index: offset, detail: failure)
-    end
-  end
-
-  defp setup_check_reason(state, offset, failure) do
-    Failure.setup_failed(:check,
-      command: setup_command(state, offset),
-      setup_index: offset,
-      detail: failure
-    )
-  end
-
-  defp setup_command(_state, nil), do: nil
-
-  defp setup_command(state, offset) when offset < tuple_size(state.setup_commands),
-    do: elem(state.setup_commands, offset)
-
-  defp setup_command(_state, _offset), do: nil
 
   defp halt_setup(state, failed, reason) do
-    failed = %{failed | async_failed_index: :unset}
-
     guard_pollers(%{
       state
       | phase: :halted,
@@ -694,50 +645,6 @@ defmodule PropertyDamage.Variant do
         halted: {:failed, nil, reason, failed},
         failure: %{kind: :setup_failed, root: nil, reason: reason}
     })
-  end
-
-  defp drain_setup(state) do
-    case Stepping.drain(state.exec, state.ctx) do
-      {:ok, exec} ->
-        {:ok, guard_pollers(%{state | exec: exec})}
-
-      {:error, failure, failed} ->
-        offset =
-          case failed.async_failed_index do
-            {:setup, offset} -> offset
-            _ambient -> nil
-          end
-
-        {:failed, halt_setup(state, failed, setup_check_reason(state, offset, failure))}
-    end
-  end
-
-  # Completion rule: every placeholder a setup command produces is resolved
-  # once the setup commands stepped and the queue drained.
-  defp completion_rule(state) do
-    unresolved =
-      state.exec.placeholder_registry
-      |> PlaceholderRegistry.unresolved()
-      |> Enum.filter(&match?(%Position{section: :setup}, &1.position))
-      |> Enum.sort_by(&{&1.position.offset, &1.event_index, &1.path})
-
-    case unresolved do
-      [] ->
-        :ok
-
-      [placeholder | _] ->
-        offset = placeholder.position.offset
-
-        reason =
-          Failure.setup_failed(:unresolved_placeholder,
-            command: setup_command(state, offset),
-            setup_index: offset,
-            field: placeholder.path,
-            detail: placeholder
-          )
-
-        {:failed, halt_setup(state, state.exec, reason)}
-    end
   end
 
   # Steps the teardown commands once. A variant whose adapter `setup/1`
@@ -748,17 +655,7 @@ defmodule PropertyDamage.Variant do
   defp run_teardown_commands(%{ctx: nil} = state), do: %{state | teardown_entries: []}
 
   defp run_teardown_commands(state) do
-    before = length(state.exec.event_log)
-
-    exec =
-      state.teardown_commands
-      |> Enum.with_index()
-      |> Enum.reduce(state.exec, fn {command, offset}, exec ->
-        {:ok, exec, _outcome} = Stepping.step_teardown(command, offset, exec, state.ctx)
-        exec
-      end)
-
-    entries = exec.event_log |> Enum.take(length(exec.event_log) - before) |> Enum.reverse()
+    {exec, entries} = Phases.run_teardown(state.teardown_commands, state.exec, state.ctx)
 
     result =
       case state.result do
@@ -785,15 +682,7 @@ defmodule PropertyDamage.Variant do
   # A finished result whose failure belongs to a setup command (an
   # `@eventually` window a setup command opened, a check on its drained
   # event) reports it as the setup failure it is, with no root index.
-  defp attribute(%{failed_at_index: {:setup, offset}} = result, state) do
-    %{
-      result
-      | failed_at_index: nil,
-        failure_reason: setup_check_reason(state, offset, result.failure_reason)
-    }
-  end
-
-  defp attribute(result, _state), do: result
+  defp attribute(result, state), do: Phases.attribute(result, state.setup_commands)
 
   # ==========================================================================
   # Stepping
@@ -1045,7 +934,7 @@ defmodule PropertyDamage.Variant do
           %{
             kind: :setup_failed,
             root: nil,
-            reason: setup_check_reason(state, offset, failure.reason)
+            reason: Phases.check_failure(state.setup_commands, offset, failure.reason)
           }
 
         root ->

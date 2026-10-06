@@ -922,6 +922,36 @@ defmodule PropertyDamage.FailureReport do
   end
 
   @doc """
+  Where a setup failure happened, for a reader: the setup command, its setup
+  index and the cause, and for an unresolved placeholder the field.
+
+  A setup failure implicates no root, so `failure_index/1` is `nil` for it;
+  this names the place instead, for example
+  `"setup command 1 (MyApp.Login), cause: command"` or
+  `"adapter setup/1, cause: adapter_setup"`. Takes a report or its
+  `%PropertyDamage.Failure{}`; returns `nil` for any other failure.
+  """
+  @spec setup_location(t() | Failure.t() | term()) :: String.t() | nil
+  def setup_location(%__MODULE__{failure_reason: reason}), do: setup_location(reason)
+
+  def setup_location(%Failure{type: %Failure.Setup{cause: :adapter_setup}}),
+    do: "adapter setup/1, cause: adapter_setup"
+
+  def setup_location(%Failure{type: %Failure.Setup{setup_index: nil} = setup}),
+    do: "setup phase, cause: #{setup.cause}"
+
+  def setup_location(%Failure{type: %Failure.Setup{cause: :unresolved_placeholder} = setup}) do
+    "setup command #{setup.setup_index} (#{command_name(setup.command)}), " <>
+      "cause: unresolved_placeholder, field #{inspect(setup.field)}"
+  end
+
+  def setup_location(%Failure{type: %Failure.Setup{} = setup}),
+    do:
+      "setup command #{setup.setup_index} (#{command_name(setup.command)}), cause: #{setup.cause}"
+
+  def setup_location(_reason), do: nil
+
+  @doc """
   Projection-purity check: does the faithful per-step state derived from the
   trace match the authoritative runtime snapshots? (P8 / DR-040.)
 

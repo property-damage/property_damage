@@ -48,7 +48,15 @@ defmodule PropertyDamage.Shrinker do
   entity whose creating command was removed. Model code may raise on such a
   sequence. The raise says the model cannot simulate the candidate, not that
   the system under test is wrong, so treating it as a failure would report a
-  bug the system does not have.
+  bug the system does not have. Validation starts from the state the
+  sequence's setup commands leave (`c:PropertyDamage.Model.setup_each/0`), as
+  generation does, so a root that needs fixture state is valid.
+
+  An attempt whose setup failed in any target (kind `:setup_failed`: an
+  adapter's `setup/1`, a setup command, a check on a setup command's event,
+  or the completion rule) is not a counterexample either. It says nothing
+  about the roots, so the candidate is rejected whatever the original
+  failure, and the attempt counts against the budget.
 
   A further property also holds: the failure occurs at the **same or an earlier
   command index** (the failing root) than in the original. This one is guaranteed *structurally*
@@ -151,6 +159,7 @@ defmodule PropertyDamage.Shrinker do
   alias PropertyDamage.{
     Executor,
     Failure,
+    Generator,
     Placeholder,
     PlaceholderRegistry,
     Scheduler,
@@ -260,9 +269,16 @@ defmodule PropertyDamage.Shrinker do
   registry, adapter state) carries over from one attempt to the next. A
   branching candidate runs on the one target through
   `PropertyDamage.Executor.run/4`, with its own event queue, injectors and mocks
-  per attempt. A linear candidate keeps the sequence's setup and teardown
-  commands, which every target runs before and after the candidate's roots;
-  they are never removed or shrunk.
+  per attempt.
+
+  The setup commands are never part of a candidate: no strategy removes,
+  reorders or simplifies one, and every attempt executes the sequence's setup
+  commands, with the arguments they were drawn with, before the candidate's
+  roots. The teardown commands are drawn again for every candidate
+  (`PropertyDamage.Generator.teardown_commands/4`, with `:rng_seed` as the run
+  seed), so a teardown command whose `overrides:` names something a root
+  created names what this candidate's roots create. The shrunk sequence
+  carries the setup commands and its own teardown commands.
 
   ## Parameters
 
@@ -327,29 +343,26 @@ defmodule PropertyDamage.Shrinker do
         # each candidate's positions before re-execution.
         positions: original_positions(commands),
         registry: sequence.registry,
-        setup_commands: sequence.setup,
-        teardown_commands: sequence.teardown
+        setup_commands: sequence.setup
       })
 
     # Truncating at the failure point is an optimization, not an assumption
     # we may act on blindly: the index can be nil (poll timeouts, record
     # mode) or branch-relative (converted branching sequences), so the
     # truncated base must be VERIFIED to still fail before it replaces the
-    # full sequence.
+    # full sequence. The verification is an attempt like any other and counts
+    # whether it reproduces or not.
     shrink_state =
-      with true <- is_integer(failed_at_index),
-           truncated = Enum.take(commands, failed_at_index + 1),
-           truncated_positions = Enum.take(shrink_state.positions, failed_at_index + 1),
-           true <- length(truncated) < length(commands),
-           true <- still_fails?(truncated, truncated_positions, shrink_state) do
-        %{
-          shrink_state
-          | commands: truncated,
-            positions: truncated_positions,
-            iterations: shrink_state.iterations + 1
-        }
+      if is_integer(failed_at_index) and failed_at_index + 1 < length(commands) do
+        truncated = Enum.take(commands, failed_at_index + 1)
+        truncated_positions = Enum.take(shrink_state.positions, failed_at_index + 1)
+        shrink_state = increment_iterations(shrink_state)
+
+        if still_fails?(truncated, truncated_positions, shrink_state),
+          do: %{shrink_state | commands: truncated, positions: truncated_positions},
+          else: shrink_state
       else
-        _ -> shrink_state
+        shrink_state
       end
 
     # Phase 1: Sequence shrinking
@@ -367,12 +380,12 @@ defmodule PropertyDamage.Shrinker do
 
     %{
       # Carry the remapped registry so the shrunk sequence (reported and
-      # replayed) still resolves its externals.
+      # replayed) still resolves its externals, and the teardown commands
+      # drawn for its own roots.
       sequence:
-        Sequence.with_registry(
-          %{sequence | prefix: shrink_state.commands, branches: nil, suffix: []},
-          remap_registry(shrink_state.registry, shrink_state.positions)
-        ),
+        %{sequence | prefix: shrink_state.commands, branches: nil, suffix: []}
+        |> Sequence.with_registry(remap_registry(shrink_state.registry, shrink_state.positions))
+        |> with_teardown(shrink_state),
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time
     }
@@ -462,7 +475,8 @@ defmodule PropertyDamage.Shrinker do
         # candidate position map the registry remap needs. This is the branching
         # analogue of shrink_linear's parallel `positions` list.
         positions: initial_branch_positions(sequence),
-        failed_at_index: Keyword.fetch!(opts, :failed_at_index)
+        failed_at_index: Keyword.fetch!(opts, :failed_at_index),
+        setup_commands: sequence.setup
       })
 
     # Strategy 1: Try converting to linear (maybe race isn't needed)
@@ -491,14 +505,15 @@ defmodule PropertyDamage.Shrinker do
       # Carry the remapped registry so the shrunk sequence (reported and
       # replayed) still resolves its externals against its own positions.
       sequence:
-        Sequence.with_registry(
-          shrink_state.sequence,
+        shrink_state.sequence
+        |> Sequence.with_registry(
           remap_branch_registry(
             shrink_state.registry,
             shrink_state.positions,
             shrink_state.sequence
           )
-        ),
+        )
+        |> with_teardown(shrink_state),
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time
     }
@@ -548,7 +563,11 @@ defmodule PropertyDamage.Shrinker do
       # prefix positions the flattened sequence runs at (DR-021); otherwise a
       # consumer strands and the linear re-run fails with a different signature,
       # spuriously blocking the (valid) conversion.
-      linear_base = Sequence.linear(Sequence.to_list(state.sequence))
+      linear_base = %{
+        Sequence.linear(Sequence.to_list(state.sequence))
+        | setup: state.setup_commands
+      }
+
       linear_registry = remap_branch_registry(state.registry, state.positions, linear_base)
       linear_seq = Sequence.with_registry(linear_base, linear_registry)
       state = increment_iterations(state)
@@ -1054,10 +1073,23 @@ defmodule PropertyDamage.Shrinker do
   # key no earlier command created. Model code may raise on such a candidate;
   # that makes the candidate invalid, not the run a failure.
   defp valid_candidate?(commands, state) do
-    Validator.valid_sequence?(commands, state.model)
+    Validator.valid_sequence?(commands, state.model, state.setup_commands)
   rescue
     _ -> false
   end
+
+  # A candidate as it runs: the sequence's setup commands, the candidate's
+  # roots and registry, and teardown commands drawn for those roots.
+  defp candidate(%Sequence{} = roots, registry, state) do
+    roots
+    |> Sequence.with_registry(registry || PlaceholderRegistry.new())
+    |> Map.put(:setup, state.setup_commands)
+    |> with_teardown(state)
+  end
+
+  # The teardown commands drawn against `sequence`'s roots, with the run seed.
+  defp with_teardown(%Sequence{} = sequence, state),
+    do: Generator.teardown_commands(state.model, sequence, state.rng_seed)
 
   # A fresh mint epoch for the next shrink attempt (DR-034). Monotonic across
   # this shrink's attempts (and never 0, the exploration run's epoch), so each
@@ -1103,21 +1135,24 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
-  # One linear shrink attempt: the candidate, with the sequence's setup and
-  # teardown commands, on every target through the scheduler, which sets each
-  # target up and tears it down. Returns `{:failed, reason, variant_index,
-  # root}` or `:passed`.
+  # One linear shrink attempt: the candidate, with the sequence's setup
+  # commands and teardown commands drawn for it, on every target through the
+  # scheduler, which sets each target up and tears it down. Returns
+  # `{:failed, reason, variant_index, root}`, `:setup_failed` when any target's
+  # setup failed (never a reproduction), or `:passed`.
   defp run_linear_attempt(commands, registry, state) do
+    # A sequence built by hand may carry no registry: its candidates resolve
+    # nothing, as on the linear engine.
+    candidate = candidate(Sequence.linear(commands), registry, state)
+
     {:ok, run} =
       Scheduler.run(
         model: state.model,
         targets: state.targets,
         commands: commands,
-        setup_commands: Map.get(state, :setup_commands, []),
-        teardown_commands: Map.get(state, :teardown_commands, []),
-        # A sequence built by hand may carry no registry: its candidates
-        # resolve nothing, as on the linear engine.
-        placeholder_registry: registry || PlaceholderRegistry.new(),
+        setup_commands: candidate.setup,
+        teardown_commands: candidate.teardown,
+        placeholder_registry: candidate.registry,
         seed: state.rng_seed,
         run_number: 0,
         run_nonce: state.run_nonce,
@@ -1128,11 +1163,15 @@ defmodule PropertyDamage.Shrinker do
         check_mode: state.check_mode
       )
 
-    case run.failure do
-      nil ->
+    cond do
+      is_nil(run.failure) ->
         :passed
 
-      %{reason: reason, variant: %{index: index}, root: root} ->
+      Enum.any?([run.failure | run.other_failures], &(&1.kind == :setup_failed)) ->
+        :setup_failed
+
+      true ->
+        %{reason: reason, variant: %{index: index}, root: root} = run.failure
         {:failed, reason, index, root}
     end
   end
@@ -1145,10 +1184,7 @@ defmodule PropertyDamage.Shrinker do
     # positions (DR-021), so externals resolve against the shrunk sequence's
     # own indices instead of the stale original ones.
     sequence =
-      Sequence.with_registry(
-        sequence,
-        remap_branch_registry(state.registry, positions, sequence)
-      )
+      candidate(sequence, remap_branch_registry(state.registry, positions, sequence), state)
 
     # A branching sequence runs on its one target, through the linear
     # engine, with its own event queue, injectors and mocks per attempt.
@@ -1164,7 +1200,9 @@ defmodule PropertyDamage.Shrinker do
           rng_seed: state.rng_seed,
           run_nonce: state.run_nonce,
           mint_epoch: next_mint_epoch(state),
-          telemetry: Telemetry.engine_context(%{index: target.index, name: target.name}, 0)
+          telemetry: Telemetry.engine_context(%{index: target.index, name: target.name}, 0),
+          setup_commands: sequence.setup,
+          teardown_commands: sequence.teardown
         )
       end)
 
@@ -1172,12 +1210,17 @@ defmodule PropertyDamage.Shrinker do
       {:ok, %{success: true}} ->
         false
 
+      # A setup failure (of a setup command, a check on its event, or the
+      # completion rule) says nothing about the roots.
+      {:ok, %{failure_reason: %Failure{type: %Failure.Setup{}}}} ->
+        false
+
       {:ok, result} ->
         check_failure_equivalence(result.failure_reason, 0, state.original_signature)
 
       # The adapter's setup/1 failed: a setup failure of the one target.
-      {:error, reason} ->
-        check_failure_equivalence(Failure.setup_failed(reason), 0, state.original_signature)
+      {:error, _reason} ->
+        false
     end
   end
 

@@ -116,9 +116,10 @@ defmodule PropertyDamage.Progress.Printer do
 
     IO.puts(
       "  Failed at:    " <>
-        case FailureReport.failure_index(report) do
-          nil -> "not localized to a command"
-          index -> "Command #{index + 1}"
+        case {FailureReport.failure_index(report), FailureReport.setup_location(report)} do
+          {_index, location} when is_binary(location) -> location
+          {nil, nil} -> "not localized to a command"
+          {index, nil} -> "Command #{index + 1}"
         end
     )
 

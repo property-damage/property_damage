@@ -255,6 +255,20 @@ defmodule PropertyDamage do
   `latency: true` requires `concurrency: :serial`, because overlapping targets
   would mix their load into each other's latency.
 
+  A model's fixtures are commands: `c:PropertyDamage.Model.setup_each/0` lists
+  the setup commands and `c:PropertyDamage.Model.teardown_each/0` the teardown
+  commands, drawn with each run's sequence. Every target executes them through
+  the engine, in this order per run: its adapter's `setup/1`, the `@check at:
+  :startup` checks, the setup commands, the roots, the final boundary, the
+  `@check at: :teardown` checks, the teardown commands, and its adapter's
+  `teardown/1`. Every path that executes the run again (a branching run, each
+  shrink attempt, the reproduction, `shrink_further/2`, the seed-library
+  replay, `replay/2`) runs them the same way; the shrinker never removes or
+  simplifies a setup command and draws the teardown commands again for each
+  candidate. A failing setup command, a check that fails on a setup
+  command's event, or an `external()` a setup command produces that stays
+  unresolved is a setup failure (`kind: :setup_failed`).
+
   The first failure ends the campaign: a target whose boundary observation
   still differs from the reference's at the convergence bound
   (`kind: :diverged`) or is still pending there (`kind: :did_not_converge`), a
@@ -725,8 +739,13 @@ defmodule PropertyDamage do
         acc = accumulate_coverage(acc, result, run.sequence)
 
         if result.success do
-          command_count = Sequence.command_count(run.sequence)
-          {:pass, %{acc | total_commands: acc.total_commands + command_count}}
+          {:pass,
+           %{
+             acc
+             | total_commands: acc.total_commands + Sequence.command_count(run.sequence),
+               setup_commands: acc.setup_commands + length(run.sequence.setup),
+               teardown_commands: acc.teardown_commands + length(run.sequence.teardown)
+           }}
         else
           handle_failure(ctx, branching_found(ctx, run, run_result, acc.fires))
         end
@@ -755,7 +774,9 @@ defmodule PropertyDamage do
         # epoch 0; the nonce is constant across the campaign's runs.
         run_nonce: ctx.run_nonce,
         mint_epoch: 0,
-        telemetry: Telemetry.engine_context(variant_of(target), run.run_number)
+        telemetry: Telemetry.engine_context(variant_of(target), run.run_number),
+        setup_commands: run.sequence.setup,
+        teardown_commands: run.sequence.teardown
       )
     end)
   end
@@ -1326,11 +1347,16 @@ defmodule PropertyDamage do
           rng_seed: found.run_seed,
           run_nonce: ctx.run_nonce,
           mint_epoch: epoch,
-          telemetry: Telemetry.engine_context(variant_of(target), found.run_number)
+          telemetry: Telemetry.engine_context(variant_of(target), found.run_number),
+          setup_commands: sequence.setup,
+          teardown_commands: sequence.teardown
         )
       end)
 
     case run_result do
+      {:ok, %{success: false, failure_reason: %Failure{type: %Failure.Setup{}} = reason}} ->
+        {:setup_failed, reason}
+
       {:ok, %{success: false, failure_reason: %Failure{} = reason} = result} ->
         failure = %{
           found.failure

@@ -265,7 +265,12 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
-  defp format_failure(:setup_failed, failure, context) do
+  defp format_failure(
+         :setup_failed,
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :adapter_setup}} =
+           failure,
+         context
+       ) do
     cmd_info = format_command_info(context)
 
     """
@@ -278,6 +283,26 @@ defmodule PropertyDamage.Error do
     Suggestions:
       - Check that the system under test is reachable with the target's `config:`
       - setup/1 runs once per run: make it idempotent
+    """
+    |> String.trim()
+  end
+
+  defp format_failure(:setup_failed, failure, context) do
+    cmd_info = format_command_info(context)
+
+    """
+    Setup Failed
+    #{cmd_info}
+    Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
+
+    The run's setup commands failed (#{PropertyDamage.FailureReport.setup_location(failure)}),
+    so no root ran.
+
+    Suggestions:
+      - Check the setup command against the target: its adapter answer, the
+        checks on its events, and the external() values it must produce
+      - A setup failure is never shrunk: the setup commands run before every
+        run and every shrink attempt
     """
     |> String.trim()
   end

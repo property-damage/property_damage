@@ -15,6 +15,9 @@ defmodule PropertyDamage.Sequence.Validator do
 
   - `commands` - List of command structs to validate
   - `model` - Model module defining state projection and command wiring
+  - `setup` - The run's setup commands. They are simulated first, without a
+    `when:` check, so the roots are validated from the state the setup
+    commands leave, as generation drew them (default `[]`)
 
   ## Returns
 
@@ -32,10 +35,14 @@ defmodule PropertyDamage.Sequence.Validator do
       Validator.valid_sequence?(commands, MyModel)
       # => false
   """
-  @spec valid_sequence?([struct()], module()) :: boolean()
-  def valid_sequence?(commands, model) do
+  @spec valid_sequence?([struct()], module(), [struct()]) :: boolean()
+  def valid_sequence?(commands, model, setup \\ []) do
     command_sequence_projection = model.command_sequence_projection()
-    initial_state = command_sequence_projection.init()
+
+    initial_state =
+      Enum.reduce(setup, command_sequence_projection.init(), fn command, state ->
+        simulate_and_apply(model, command, state, command_sequence_projection)
+      end)
 
     # Normalize the model's commands to get when:/overrides: options
     normalized_commands =
@@ -76,19 +83,21 @@ defmodule PropertyDamage.Sequence.Validator do
       end
 
     if precondition_passes do
-      # Simulate command to get events using Model's simulate/2
-      events = simulate_command(model, command, state)
-
-      # Update state with command and events
-      new_state =
-        state
-        |> projection.apply(command)
-        |> apply_events(events, projection)
-
+      new_state = simulate_and_apply(model, command, state, projection)
       validate_commands(rest, new_state, projection, model, lookup)
     else
       false
     end
+  end
+
+  # Simulate the command with the model's simulate/2, then fold the command
+  # and its events into the state.
+  defp simulate_and_apply(model, command, state, projection) do
+    events = simulate_command(model, command, state)
+
+    state
+    |> projection.apply(command)
+    |> apply_events(events, projection)
   end
 
   defp simulate_command(model, command, state) do

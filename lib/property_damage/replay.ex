@@ -74,7 +74,7 @@ defmodule PropertyDamage.Replay do
   """
 
   alias PropertyDamage.{EventQueue, Failure, FailureReport, Options, Sequence}
-  alias PropertyDamage.Executor.Stepping
+  alias PropertyDamage.Executor.{Phases, Stepping}
 
   defstruct [
     :failure,
@@ -168,9 +168,17 @@ defmodule PropertyDamage.Replay do
   @doc """
   Start an interactive replay session.
 
-  Sets up the adapter and an event queue, then leaves the session positioned
-  before the first command. Use `step/1` to advance, and `stop/1` when done to
-  tear the adapter and queue down.
+  Sets up the adapter and an event queue, runs the report's setup commands
+  (`setup_commands`), then leaves the session positioned before the first
+  root. `step/1` advances one root at a time (`current_index` and the steps'
+  `index` count roots only), and `stop/1`, when done, runs the report's
+  teardown commands and tears the adapter and queue down.
+
+  Returns `{:error, %PropertyDamage.Failure{}}` of kind `:setup_failed` when
+  the adapter's `setup/1` fails, or when the setup phase fails (a setup
+  command, a check on a setup command's event, or an `external()` a setup
+  command produces that stayed unresolved); in the second case the teardown
+  commands have run and everything is torn down.
 
   ## Options
 
@@ -254,7 +262,17 @@ defmodule PropertyDamage.Replay do
           status: :ready
         }
 
-        {:ok, session}
+        # The setup commands run before the first root, as on every path that
+        # executes the run. A setup failure ends the session at once: its
+        # teardown commands run and everything is torn down.
+        case Phases.run_setup(failure.setup_commands, exec_state, step_context(session)) do
+          {:ok, exec_state} ->
+            {:ok, %{session | exec_state: exec_state}}
+
+          {:failed, reason, failed_state} ->
+            stop(%{session | exec_state: failed_state})
+            {:error, reason}
+        end
 
       {:error, reason} ->
         EventQueue.stop(event_queue)
@@ -285,14 +303,7 @@ defmodule PropertyDamage.Replay do
     before_log_count = length(before_state.event_log)
     projections_before = before_state.projections
 
-    step_context = %Stepping.Context{
-      model: session.model,
-      adapter: session.adapter,
-      adapter_context: session.adapter_context,
-      event_queue: session.event_queue
-    }
-
-    case Stepping.step(command, next_index, before_state, step_context) do
+    case Stepping.step(command, next_index, before_state, step_context(session)) do
       {:ok, new_exec_state, _outcome} ->
         emit_step(
           session,
@@ -392,11 +403,20 @@ defmodule PropertyDamage.Replay do
   @doc """
   Clean up session resources.
 
-  Stops any pollers spawned during stepping, the event queue, and tears the
-  adapter down. Safe to call more than once.
+  Runs the report's teardown commands (`teardown_commands`), then stops any
+  pollers spawned during stepping and the event queue, and tears the adapter
+  down. Safe to call more than once; every call runs the teardown commands.
   """
   @spec stop(t()) :: :ok
   def stop(%__MODULE__{} = session) do
+    if session.exec_state && session.adapter_context do
+      Phases.run_teardown(
+        session.failure.teardown_commands,
+        session.exec_state,
+        step_context(session)
+      )
+    end
+
     if session.exec_state, do: Stepping.stop_pollers(session.exec_state)
 
     if is_pid(session.event_queue) and Process.alive?(session.event_queue) do
@@ -521,6 +541,15 @@ defmodule PropertyDamage.Replay do
   end
 
   defp normalize_result(reason), do: {:error, reason}
+
+  defp step_context(session) do
+    %Stepping.Context{
+      model: session.model,
+      adapter: session.adapter,
+      adapter_context: session.adapter_context,
+      event_queue: session.event_queue
+    }
+  end
 
   defp command_name(%{__struct__: mod}), do: mod |> Module.split() |> List.last()
   defp command_name(other), do: inspect(other)

@@ -17,7 +17,8 @@ defmodule GiteaBench.Simulator do
     CreateIssue,
     CreateLabel,
     CreateRepo,
-    CreateUser
+    CreateUser,
+    Login
   }
 
   alias GiteaBench.Events.{
@@ -26,10 +27,13 @@ defmodule GiteaBench.Simulator do
     LabelAssigned,
     LabelCreated,
     RepoCreated,
+    SessionOpened,
     UserCreated
   }
 
   @impl true
+  def simulate(%Login{}, _state), do: [%SessionOpened{}]
+
   def simulate(%CreateUser{login: login}, _state) do
     [%UserCreated{requested_login: login, login: login, id: nil}]
   end
@@ -99,7 +103,8 @@ defmodule GiteaBench.Model do
     CreateIssue,
     CreateLabel,
     CreateRepo,
-    CreateUser
+    CreateUser,
+    Login
   }
 
   @impl true
@@ -122,6 +127,12 @@ defmodule GiteaBench.Model do
 
   @impl true
   def simulator, do: GiteaBench.Simulator
+
+  # Every run, in every target, starts by opening the admin's session: the
+  # transports differ in how they log in, so the login is a command each
+  # adapter executes its own way, not adapter setup.
+  @impl true
+  def setup_each, do: [Login]
 
   # --- preconditions ---------------------------------------------------------
 

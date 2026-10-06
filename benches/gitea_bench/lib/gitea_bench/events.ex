@@ -17,6 +17,13 @@ defmodule GiteaBench.Events do
   by server id, so both transports navigate to the same logical entity.
   """
 
+  defmodule SessionOpened do
+    @moduledoc false
+    # The admin's session is open: `user` is the admin's login (nil in the
+    # simulator's prediction, which does not know the target's admin).
+    defstruct [:user]
+  end
+
   defmodule UserCreated do
     @moduledoc false
     defstruct [:requested_login, :login, :id]

@@ -108,7 +108,6 @@ defmodule PropertyDamage.Export.LiveBook do
   end
 
   defp generate_command_section(%StepPlan.Step{} = step, include_state) do
-    step_num = step.flattened_index + 1
     cmd_name = Common.command_name(step.command)
 
     failure_marker = if step.failed?, do: " (FAILURE)", else: ""
@@ -118,7 +117,7 @@ defmodule PropertyDamage.Export.LiveBook do
     code = generate_livebook_code(step, include_state)
 
     """
-    ### Step #{step_num}: #{cmd_name}#{label_suffix}#{failure_marker}
+    ### #{step.title}: #{cmd_name}#{label_suffix}#{failure_marker}
     #{warning}
     ```elixir
     # Command: #{Common.command_to_comment(step.command)}

@@ -79,7 +79,6 @@ defmodule PropertyDamage.Export.Script.Curl do
   end
 
   defp generate_step(%StepPlan.Step{} = step, env_var, verbose) do
-    step_num = step.flattened_index + 1
     cmd_name = Common.command_name(step.command)
 
     failure_marker = if step.failed?, do: " (FAILURE POINT)", else: ""
@@ -90,7 +89,7 @@ defmodule PropertyDamage.Export.Script.Curl do
         """
 
         echo ""
-        echo "=== Step #{step_num}: #{cmd_name}#{failure_marker} ==="
+        echo "=== #{step.title}: #{cmd_name}#{failure_marker} ==="
         """
       else
         ""
@@ -109,7 +108,7 @@ defmodule PropertyDamage.Export.Script.Curl do
   defp generate_curl_command(%StepPlan.Step{http_spec: nil} = step, _env_var) do
     # No HTTPSpec available, generate placeholder
     cmd_name = Common.command_name(step.command)
-    var_name = "RESP#{step.flattened_index + 1}"
+    var_name = "RESP#{step.key}"
 
     """
     # TODO: Add http_spec/2 to your adapter for #{cmd_name}
@@ -119,7 +118,7 @@ defmodule PropertyDamage.Export.Script.Curl do
   end
 
   defp generate_curl_command(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step, env_var) do
-    var_name = "RESP#{step.flattened_index + 1}"
+    var_name = "RESP#{step.key}"
     method = HTTPSpec.method_string(spec)
     path = resolve_path(spec.path, step.resolved_path_params)
     query = resolve_query(step.resolved_query_params)
@@ -219,7 +218,7 @@ defmodule PropertyDamage.Export.Script.Curl do
   defp generate_placeholder_extraction(%StepPlan.Step{producer_bindings: []}), do: ""
 
   defp generate_placeholder_extraction(%StepPlan.Step{} = step) do
-    resp_var = "RESP#{step.flattened_index + 1}"
+    resp_var = "RESP#{step.key}"
 
     Enum.map_join(step.producer_bindings, "", fn {path, var} ->
       """

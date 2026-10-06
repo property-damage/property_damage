@@ -151,25 +151,16 @@ defmodule Mix.Tasks.Pd.Gen.Model do
         ]
       end
 
-      # Optional: Uncomment to enable lifecycle hooks
+      # Optional: setup and teardown commands (setup_each/0, teardown_each/0).
+      # Setup commands run before every run in every target, and before every
+      # shrink attempt; teardown commands run after. Entries are written like
+      # commands/0 entries, for example:
       #
-      # def setup_once(config) do
-      #   # One-time setup (not repeated during shrinking)
-      #   :ok
-      # end
+      # @impl true
+      # def setup_each, do: [{Login, overrides: %{user: "fixture"}}]
       #
-      # def setup_each(config) do
-      #   # Reset state before each test run
-      #   :ok
-      # end
-      #
-      # def teardown_each(config) do
-      #   :ok
-      # end
-      #
-      # def teardown_once(config) do
-      #   :ok
-      # end
+      # @impl true
+      # def teardown_each, do: [Logout]
       #
       # def terminate_early?(state, command, events) do
       #   # Return true to stop command generation

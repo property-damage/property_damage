@@ -76,7 +76,10 @@ defmodule PropertyDamage.Executor.Stepping do
       checks, no stutter and no pollers, opens no injection window, and never
       fails: an unresolved placeholder, an error or a raise is logged.
 
-  Neither records an adapter time a caller would read as a root's.
+  Neither records an adapter time a caller would read as a root's. Both emit
+  the command telemetry events (`PropertyDamage.Telemetry`) with `phase:
+  :setup` or `phase: :teardown`; a teardown command skipped for an unresolved
+  placeholder emits none.
   """
 
   require Logger
@@ -265,7 +268,9 @@ defmodule PropertyDamage.Executor.Stepping do
            {state.run_nonce, state.mint_epoch}
          ) do
       {:ok, resolved} ->
-        execute_teardown(command, resolved, offset, state, ctx)
+        PropertyDamage.Telemetry.command_span(state.telemetry, command, {:teardown, offset}, fn ->
+          execute_teardown(command, resolved, offset, state, ctx)
+        end)
 
       {:error, _reason} ->
         Logger.warning(

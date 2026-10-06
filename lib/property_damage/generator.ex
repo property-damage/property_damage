@@ -789,15 +789,22 @@ defmodule PropertyDamage.Generator do
     do: Enum.reduce(placeholders, registry, &PlaceholderRegistry.register(&2, &1))
 
   # The state the generator reached at the end of `sequence`: the setup
-  # commands and the roots simulated again from the initial state, with the
-  # placeholders minted at the positions generation minted them at. A
+  # commands and the roots simulated again from the initial state. A
   # branching sequence's branches are merged as generation merged them.
+  #
+  # Each placeholder a simulated event introduces is the one the sequence's
+  # registry links to the command's position, so a teardown command drawn
+  # against this state consumes ids the run resolves. The two differ when the
+  # sequence is a shrink candidate: its commands moved to new positions, and
+  # its registry links each new position to the placeholders generation
+  # minted at the command's original one. The commands keep the mint markers
+  # generation reified for them.
   defp end_state(model, projection, %Sequence{} = sequence, markers) do
     step = fn command, position, state ->
-      {_command, state, _minted} =
-        simulate_at(command, position, state, projection, model, markers)
-
-      state
+      events = simulate_command(model, state, command)
+      {events, _minted} = instantiate_placeholders(events, position, markers)
+      events = relink(events, position, sequence.registry)
+      update_state(state, command, events, projection)
     end
 
     fold = fn commands, pos_fun, state ->
@@ -817,6 +824,39 @@ defmodule PropertyDamage.Generator do
 
     fold.(sequence.suffix, &Position.suffix/1, state)
   end
+
+  # The registry's placeholders for the command at `position`, in place of
+  # the ones simulating it there minted, matched by event index and path.
+  defp relink(events, _position, nil), do: events
+
+  defp relink(events, position, registry) do
+    linked =
+      registry
+      |> PlaceholderRegistry.ids_at_position(position)
+      |> Map.new(fn {_position, event_index, path} = id ->
+        {{event_index, path}, PlaceholderRegistry.get(registry, id)}
+      end)
+
+    if map_size(linked) == 0, do: events, else: relink_value(events, linked)
+  end
+
+  defp relink_value(%Placeholder{id: {_position, event_index, path}} = placeholder, linked),
+    do: Map.get(linked, {event_index, path}) || placeholder
+
+  defp relink_value(%module{} = struct, linked) do
+    struct
+    |> Map.from_struct()
+    |> Map.new(fn {key, value} -> {key, relink_value(value, linked)} end)
+    |> then(&struct(module, &1))
+  end
+
+  defp relink_value(map, linked) when is_map(map),
+    do: Map.new(map, fn {key, value} -> {key, relink_value(value, linked)} end)
+
+  defp relink_value(list, linked) when is_list(list),
+    do: Enum.map(list, &relink_value(&1, linked))
+
+  defp relink_value(value, _linked), do: value
 
   # ============================================================================
   # Shared Helpers

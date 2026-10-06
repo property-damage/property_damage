@@ -340,7 +340,8 @@ defmodule PropertyDamage.Analysis do
   """
   @spec isolate_trigger(FailureReport.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def isolate_trigger(%FailureReport{} = report, opts \\ []) do
-    commands = Sequence.to_list(FailureReport.shrunk_sequence(report))
+    sequence = FailureReport.shrunk_sequence(report)
+    commands = Sequence.to_list(sequence)
     # `commands` is the flattened list the modified sequence is re-run against,
     # so the trigger must be addressed by its flattened index (not the executor
     # failed_at_index, which diverges for branch failures).
@@ -365,14 +366,18 @@ defmodule PropertyDamage.Analysis do
           Options.override_target!(opts, reference, "PropertyDamage.Analysis.isolate_trigger/2")
 
         # Try variations of the trigger command
-        changes =
-          find_eliminating_changes(
-            trigger_cmd,
-            commands,
-            failed_at,
-            model,
-            target
-          )
+        # Every variation runs with the report's setup and teardown commands
+        # and the sequence's registry, so the roots resolve the externals the
+        # setup commands produce.
+        run = %{
+          model: model,
+          target: target,
+          registry: sequence.registry,
+          setup_commands: report.setup_commands,
+          teardown_commands: report.teardown_commands
+        }
+
+        changes = find_eliminating_changes(trigger_cmd, commands, failed_at, run)
 
         likely_cause = infer_cause(changes, trigger_cmd, commands, report)
 
@@ -386,32 +391,16 @@ defmodule PropertyDamage.Analysis do
     end
   end
 
-  defp find_eliminating_changes(trigger_cmd, commands, failed_at, model, target) do
+  defp find_eliminating_changes(trigger_cmd, commands, failed_at, run) do
     trigger_cmd
     |> Map.from_struct()
     |> Enum.reject(fn {k, _v} -> k in [:__struct__, :idempotency_key] end)
     |> Enum.flat_map(fn {field, original_value} ->
-      try_field_variations(
-        field,
-        original_value,
-        trigger_cmd,
-        commands,
-        failed_at,
-        model,
-        target
-      )
+      try_field_variations(field, original_value, trigger_cmd, commands, failed_at, run)
     end)
   end
 
-  defp try_field_variations(
-         field,
-         original,
-         trigger_cmd,
-         commands,
-         failed_at,
-         model,
-         target
-       ) do
+  defp try_field_variations(field, original, trigger_cmd, commands, failed_at, run) do
     # Skip placeholder fields - can't change those without breaking dependencies
     if match?(%Placeholder{}, original) do
       []
@@ -422,12 +411,19 @@ defmodule PropertyDamage.Analysis do
         modified_cmd = Map.put(trigger_cmd, field, variation)
         modified_commands = List.replace_at(commands, failed_at, modified_cmd)
 
-        # Check if modification is valid and eliminates failure
-        if Validator.valid_sequence?(modified_commands, model) do
+        # Check if modification is valid (from the state the setup commands
+        # leave) and eliminates failure
+        if Validator.valid_sequence?(modified_commands, run.model, run.setup_commands) do
           # Regenerate idempotency keys
           modified_commands = regenerate_keys(modified_commands)
 
-          case Executor.run(modified_commands, model, target.adapter, config: target.config) do
+          sequence = Sequence.with_registry(Sequence.linear(modified_commands), run.registry)
+
+          case Executor.run(sequence, run.model, run.target.adapter,
+                 config: run.target.config,
+                 setup_commands: run.setup_commands,
+                 teardown_commands: run.teardown_commands
+               ) do
             {:ok, result} ->
               if result.success do
                 [

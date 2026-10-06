@@ -79,7 +79,6 @@ defmodule PropertyDamage.Export.Script.Elixir do
   end
 
   defp generate_step(%StepPlan.Step{} = step, verbose) do
-    step_num = step.flattened_index + 1
     cmd_name = Common.command_name(step.command)
 
     failure_marker = if step.failed?, do: " (FAILURE POINT)", else: ""
@@ -90,7 +89,7 @@ defmodule PropertyDamage.Export.Script.Elixir do
         """
 
         IO.puts("")
-        IO.puts("=== Step #{step_num}: #{cmd_name}#{failure_marker} ===")
+        IO.puts("=== #{step.title}: #{cmd_name}#{failure_marker} ===")
         """
       else
         ""
@@ -113,12 +112,12 @@ defmodule PropertyDamage.Export.Script.Elixir do
     """
     # TODO: Add http_spec/2 to your adapter for #{cmd_name}
     IO.puts("Skipping #{cmd_name} - no HTTP mapping available")
-    resp#{step.flattened_index + 1} = nil
+    resp#{step.key} = nil
     """
   end
 
   defp generate_req_code(%StepPlan.Step{http_spec: %HTTPSpec{} = spec} = step) do
-    var_name = "resp#{step.flattened_index + 1}"
+    var_name = "resp#{step.key}"
     method = spec.method
 
     path =

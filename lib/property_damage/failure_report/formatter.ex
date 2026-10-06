@@ -146,11 +146,20 @@ defmodule PropertyDamage.FailureReport.Formatter do
     end
   end
 
+  # A setup failure implicates no root: name its setup command and cause
+  # instead of a command index.
+  defp location_line(report, color) do
+    case FailureReport.setup_location(report) do
+      nil -> "#{label("Command Index", color)} #{FailureReport.failure_index(report)}"
+      location -> "#{label("Setup", color)} #{location}"
+    end
+  end
+
   defp terminal_location(report, color) do
     """
     #{section_header("Failure Location", color)}
     #{label("Run Number", color)}    #{report.run_number + 1}
-    #{label("Command Index", color)} #{FailureReport.failure_index(report)}
+    #{location_line(report, color)}
     #{label("Random Seed", color)}   #{report.seed}
     #{label("Timestamp", color)}     #{DateTime.to_string(report.timestamp)}
     """
@@ -710,13 +719,19 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp markdown_location(report) do
+    location_row =
+      case FailureReport.setup_location(report) do
+        nil -> "| Command Index | #{FailureReport.failure_index(report)} |"
+        location -> "| Setup | #{location} |"
+      end
+
     """
     ## Failure Location
 
     | Property | Value |
     |----------|-------|
     | Run Number | #{report.run_number + 1} |
-    | Command Index | #{FailureReport.failure_index(report)} |
+    #{location_row}
     | Random Seed | `#{report.seed}` |
     """
   end

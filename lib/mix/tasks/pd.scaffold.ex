@@ -1392,18 +1392,15 @@ defmodule Mix.Tasks.Pd.Scaffold do
         []
       end
 
-      # Optional lifecycle callbacks
+      # Optional setup and teardown commands (setup_each/0, teardown_each/0).
+      # Setup commands run before every run in every target, and before every
+      # shrink attempt; teardown commands run after. Entries are written like
+      # commands/0 entries, for example:
       # @impl true
-      # def setup_once(_config), do: :ok
+      # def setup_each, do: [{Commands.Login, overrides: %{user: "fixture"}}]
       #
       # @impl true
-      # def setup_each(_config), do: :ok
-      #
-      # @impl true
-      # def teardown_each(_config), do: :ok
-      #
-      # @impl true
-      # def teardown_once(_config), do: :ok
+      # def teardown_each, do: [Commands.Logout]
     end
     """
     |> format_code()

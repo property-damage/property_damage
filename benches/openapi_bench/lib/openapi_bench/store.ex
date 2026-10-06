@@ -17,8 +17,9 @@ defmodule OpenapiBench.Store do
   flag makes it ignore the key, so a stutter retry double-creates: exactly the
   idempotency violation the framework's stutter testing must catch.
 
-  State is reset between PropertyDamage sequences via `POST /__reset__` (the
-  model's `setup_each/1` calls it), so runs never share state.
+  State is reset between PropertyDamage sequences via `POST /__reset__`: each
+  adapter's `setup/1` resets the store with the flags of its target's `config:`,
+  so runs never share state.
   """
   use Agent
 

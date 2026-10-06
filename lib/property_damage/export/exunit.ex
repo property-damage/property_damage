@@ -130,11 +130,24 @@ defmodule PropertyDamage.Export.ExUnit do
     # failure by re-running with the exact seed (max_runs: 1), so this list is
     # documentation of the shrunk sequence, not executed. Naming it `commands`
     # made every generated test fail `--warnings-as-errors` (unused variable).
+    # The seed draws the setup commands again too; they are listed as a
+    # comment for the reader.
     """
-        _commands = [
+    #{setup_comment(report.setup_commands)}    _commands = [
     #{command_strs}
         ]
     """
+  end
+
+  defp setup_comment([]), do: ""
+
+  defp setup_comment(setup_commands) do
+    lines =
+      Enum.map_join(setup_commands, "", fn command ->
+        "    #   " <> String.trim_leading(format_command(command)) <> "\n"
+      end)
+
+    "    # Setup commands, run before the roots:\n" <> lines
   end
 
   defp format_command(command) do

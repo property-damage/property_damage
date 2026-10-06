@@ -159,7 +159,9 @@ defmodule PropertyDamage.RunTrace do
   This is the input to `PropertyDamage.RunComparison`. Unlike the exploration
   loop it never shrinks and never stops early on failure: it captures the whole
   execution record of a single run. `plan_source` is always `:generated` (the
-  plan is a pure function of the effective seed).
+  plan is a pure function of the effective seed). The plan carries the setup
+  and teardown commands drawn as `PropertyDamage.run/1` draws them, and the
+  target runs them before and after the roots.
 
   ## Options
 
@@ -199,7 +201,14 @@ defmodule PropertyDamage.RunTrace do
       [max_commands: max_commands] ++ if(branching, do: [branching: branching], else: [])
 
     run_seed = Generator.run_seed(seed, run_number)
-    plan = model |> Generator.generate_sequence(gen_opts) |> Generator.generate_value(run_seed)
+
+    # The plan as `PropertyDamage.run/1` draws it: the setup commands and the
+    # roots, then the teardown commands drawn against them.
+    plan =
+      model
+      |> Generator.generate_sequence(gen_opts)
+      |> Generator.generate_value(run_seed)
+      |> then(&Generator.teardown_commands(model, &1, run_seed))
 
     {:ok, event_queue} = EventQueue.start_link()
     setup_injectors(injectors, event_queue)
@@ -211,7 +220,9 @@ defmodule PropertyDamage.RunTrace do
           event_queue: event_queue,
           rng_seed: run_seed,
           run_nonce: run_nonce,
-          mint_epoch: mint_epoch
+          mint_epoch: mint_epoch,
+          setup_commands: plan.setup,
+          teardown_commands: plan.teardown
         )
 
       new(

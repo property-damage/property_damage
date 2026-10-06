@@ -51,8 +51,15 @@ defmodule OpenapiBench.Idempotency.Adapter do
   alias OpenapiBench.Idempotency.Commands.CreateValue
   alias OpenapiBench.Idempotency.Events.ValueCreated
 
+  # Reset the SUT before every run (and every shrink attempt) with the flags
+  # of this target's `config:` (`:bug`, `:idempotency_bug`; default false).
   @impl true
   def setup(config) do
+    OpenapiBench.Server.reset(
+      Map.get(config, :bug, false),
+      Map.get(config, :idempotency_bug, false)
+    )
+
     {:ok, Map.put_new(config, :base_url, OpenapiBench.Server.base_url())}
   end
 
@@ -131,8 +138,9 @@ end
 defmodule OpenapiBench.Idempotency.Model do
   @moduledoc """
   Idempotency bench model: sequences of `CreateValue` against `POST /values`.
-  `setup_each/1` seeds the `idempotency_bug` flag from the target's `config:` so the
-  same model exercises both the retry-safe and the double-creating SUT.
+  The adapter's `setup/1` resets the SUT with the `idempotency_bug` flag of the
+  target's `config:`, so the same model exercises both the retry-safe and the
+  double-creating SUT.
   """
   @behaviour PropertyDamage.Model
 
@@ -146,10 +154,4 @@ defmodule OpenapiBench.Idempotency.Model do
 
   @impl true
   def simulator, do: OpenapiBench.Idempotency.Simulator
-
-  @impl true
-  def setup_each(%{adapter_config: config}) do
-    OpenapiBench.Server.reset(false, Map.get(config, :idempotency_bug, false))
-    :ok
-  end
 end

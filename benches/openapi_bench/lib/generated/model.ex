@@ -27,13 +27,4 @@ defmodule OpenapiBench.Generated.Model do
 
   @impl true
   def simulator, do: OpenapiBench.Simulator
-
-  # Reset the SUT between sequences (and shrink attempts) so runs never share
-  # key/value state. The `bug` flag (default false) rides in the target's `config:` and
-  # seeds the read-consistency violation for the non-vacuity test.
-  @impl true
-  def setup_each(%{adapter_config: config}) do
-    OpenapiBench.Server.reset(Map.get(config, :bug, false))
-    :ok
-  end
 end

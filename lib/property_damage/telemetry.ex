@@ -45,17 +45,24 @@ defmodule PropertyDamage.Telemetry do
 
   - `[:property_damage, :command, :start]` - Command execution started
     - Measurements: `%{system_time: integer()}`
-    - Metadata: `%{command: module(), index: integer(), run_number: integer(), variant: variant()}`
+    - Metadata: `%{command: module(), phase: phase(), index: integer(), run_number: integer(), variant: variant()}`
 
   - `[:property_damage, :command, :stop]` - Command execution completed
     - Measurements: `%{duration: integer()}`
-    - Metadata: `%{command: module(), index: integer(), run_number: integer(), variant: variant(), success: boolean(), events_count: integer()}`
+    - Metadata: `%{command: module(), phase: phase(), index: integer(), run_number: integer(), variant: variant(), success: boolean(), events_count: integer()}`
 
-  `command` is the command's module, `index` its position in the sequence (for
-  a branching sequence, the index within its prefix, branch or suffix), and
-  `success` whether the command completed (its adapter call, events and checks)
-  without failing the run. `variant()` is `%{index: non_neg_integer(), name: String.t()}`,
-  the target's position in `targets:` and its name (`index: 0` with one target).
+  `command` is the command's module. `phase()` is `:setup` for a setup
+  command (`c:PropertyDamage.Model.setup_each/0`), `:root` for a command of the
+  sequence, and `:teardown` for a teardown command
+  (`c:PropertyDamage.Model.teardown_each/0`). `index` is the command's offset
+  within its phase: the position among the setup commands or the teardown
+  commands, and for a root its index in the sequence (for a branching
+  sequence, the engine's command index across its prefix, branches and
+  suffix). `success` is whether the command completed (its adapter call,
+  events and checks) without failing the run; a teardown command never fails
+  the run, so its `success` is whether its adapter call answered `{:ok, _}`.
+  `variant()` is `%{index: non_neg_integer(), name: String.t()}`, the target's
+  position in `targets:` and its name (`index: 0` with one target).
 
   ### Check Execution
 
@@ -193,16 +200,30 @@ defmodule PropertyDamage.Telemetry do
 
   @doc false
   # Runs one command for the engine inside a command start/stop pair when
-  # `context` is set. `fun` returns the engine's step result; its `{:ok, _,
-  # {:ok, events}}` shape counts the events.
-  @spec command_span(map() | nil, term(), non_neg_integer(), (-> result)) :: result
+  # `context` is set. `index` is the engine's command index: an integer for a
+  # root, `{:setup, offset}` or `{:teardown, offset}` for a setup or teardown
+  # command. `fun` returns the engine's step result; its `{:ok, _, {:ok,
+  # events}}` shape counts the events.
+  @spec command_span(
+          map() | nil,
+          term(),
+          non_neg_integer() | {:setup | :teardown, non_neg_integer()},
+          (-> result)
+        ) :: result
         when result: term()
   def command_span(nil, _command, _index, fun), do: fun.()
 
   def command_span(context, command, index, fun) do
+    {phase, offset} =
+      case index do
+        {phase, offset} -> {phase, offset}
+        offset -> {:root, offset}
+      end
+
     metadata = %{
       command: command_module(command),
-      index: index,
+      phase: phase,
+      index: offset,
       run_number: context.run_number,
       variant: context.variant
     }
@@ -214,6 +235,7 @@ defmodule PropertyDamage.Telemetry do
     {success, events_count} =
       case result do
         {:ok, _state, {:ok, events}} when is_list(events) -> {true, length(events)}
+        {:ok, _state, _outcome} when phase == :teardown -> {false, 0}
         {:ok, _state, _outcome} -> {true, 0}
         _failed -> {false, 0}
       end
