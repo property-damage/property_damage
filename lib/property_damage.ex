@@ -1610,12 +1610,16 @@ defmodule PropertyDamage do
       expansion_counts:
         Expansion.merge_counts(
           found.expansion_counts,
-          Expansion.counts(found.expansion, failure.root)
+          Expansion.counts(found.expansion, counted_root(failure))
         ),
       latency: Map.get(ctx, :latency, false),
       metrics: Map.get(ctx, :measured_metrics)
     )
   end
+
+  # The last root the failing run executed: none when a setup command failed.
+  defp counted_root(%{kind: :setup_failed}), do: -1
+  defp counted_root(failure), do: failure.root
 
   # The concrete sequences of the run the report describes; a branching run
   # ran its one target's roots as generated.
