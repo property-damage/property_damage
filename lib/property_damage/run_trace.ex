@@ -57,7 +57,7 @@ defmodule PropertyDamage.RunTrace do
   """
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{EventQueue, Executor, Generator, Options}
+  alias PropertyDamage.{EventQueue, Executor, Expansion, Generator, Options, Scheduler}
   alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence
 
@@ -181,6 +181,13 @@ defmodule PropertyDamage.RunTrace do
   `:max_commands` (default 50), `:branching`, `:source_revision` (default
   detected). The target's `injectors:` (fault/async injectors) are set up around
   the run so their events land in the trace.
+
+  For a model with `c:PropertyDamage.Model.expansions/0`, the target chooses
+  at each root by its `expansion:` option exactly as `PropertyDamage.run/1`
+  does for the same seed, run number and target name, runs the leaves it
+  chose through the same engine path a run's target uses
+  (`PropertyDamage.Scheduler`, one target), and the trace records what it ran
+  in `expansion`.
   """
   @spec capture(keyword()) :: t()
   def capture(opts) do
@@ -193,7 +200,8 @@ defmodule PropertyDamage.RunTrace do
       "PropertyDamage.RunTrace.capture/1"
     )
 
-    %{adapter: adapter, config: config, injectors: injectors} = target
+    # A branching sequence runs without expansions, as on `run/1`.
+    Expansion.check_options!(model, opts)
     seed = Keyword.fetch!(opts, :seed)
     run_number = Keyword.get(opts, :run_number, 0)
 
@@ -217,6 +225,30 @@ defmodule PropertyDamage.RunTrace do
       |> Generator.generate_sequence(gen_opts)
       |> Generator.generate_value(run_seed)
       |> then(&Generator.teardown_commands(model, &1, run_seed))
+
+    if Expansion.defines?(model) do
+      capture_expanded(opts, model, target, plan, %{
+        seed: seed,
+        run_number: run_number,
+        run_seed: run_seed,
+        run_nonce: run_nonce,
+        mint_epoch: mint_epoch
+      })
+    else
+      capture_engine(opts, model, target, plan, %{
+        seed: seed,
+        run_number: run_number,
+        run_seed: run_seed,
+        run_nonce: run_nonce,
+        mint_epoch: mint_epoch
+      })
+    end
+  end
+
+  defp capture_engine(opts, model, target, plan, run) do
+    %{adapter: adapter, config: config, injectors: injectors} = target
+    %{seed: seed, run_number: run_number, run_seed: run_seed} = run
+    %{run_nonce: run_nonce, mint_epoch: mint_epoch} = run
 
     {:ok, event_queue} = EventQueue.start_link()
     setup_injectors(injectors, event_queue)
@@ -254,6 +286,50 @@ defmodule PropertyDamage.RunTrace do
       teardown_injectors(injectors)
       EventQueue.stop(event_queue)
     end
+  end
+
+  # A model with expansions: the target's concrete sequence, as a run draws it
+  # for this seed and target name, runs through the scheduler with that one
+  # target, which sets up its event queue and injectors.
+  defp capture_expanded(opts, model, target, plan, run) do
+    expansion = Expansion.expand(model, plan, [target], run.run_seed)
+
+    {:ok, outcome} =
+      Scheduler.run(
+        model: model,
+        targets: [target],
+        commands: Sequence.to_list(plan),
+        variants: Expansion.schedule([target], expansion),
+        setup_commands: plan.setup,
+        teardown_commands: plan.teardown,
+        placeholder_registry: plan.registry,
+        seed: run.seed,
+        run_number: run.run_number,
+        run_nonce: run.run_nonce,
+        mint_epoch: run.mint_epoch,
+        concurrency: :serial
+      )
+
+    [%{} = result] = outcome.results
+
+    new(
+      seed: run.seed,
+      run_number: run.run_number,
+      run_nonce: run.run_nonce,
+      mint_epoch: run.mint_epoch,
+      model: model,
+      adapter: target.adapter,
+      source_revision: Keyword.get_lazy(opts, :source_revision, &source_revision/0),
+      plan: plan,
+      plan_source: :generated,
+      executed: Map.get(result, :executed, %{}),
+      event_log: result.event_log,
+      command_labels: %{},
+      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+      linearization: linearization_of(result),
+      expansion: %{target.name => expansion.variants[target.name].choices},
+      outcome: outcome_of(result)
+    )
   end
 
   # Injector-adapter lifecycle for capture (mirrors the exploration run loop):

@@ -25,7 +25,10 @@ defmodule PropertyDamage.Export.StepPlan do
   # The plan holds the run's setup commands first (`phase: :setup`), then the
   # roots (`phase: :root`), then its teardown commands (`phase: :teardown`), so
   # a script performs the fixture (a login, say) before it acts and cleans up
-  # after. Each step carries a `title` for its heading ("Step 3" for a root,
+  # after. The roots are what the reference target ran: for a model with
+  # `expansions/0`, each root as itself or as the leaves of the expansion the
+  # reference chose there (one step per leaf), so a script runs what the
+  # reference ran. Each step carries a `title` for its heading ("Step 3" for a root,
   # "Setup step 1 (setup position 0)" for a setup command) and a `key` that
   # names its response variable without colliding across phases ("3",
   # "_setup_1", "_teardown_1"). A setup or teardown step has no
@@ -33,8 +36,8 @@ defmodule PropertyDamage.Export.StepPlan do
   # response and wired into every step that consumes them, as a root
   # producer's are.
 
-  alias PropertyDamage.Export.{Common, HTTPSpec}
-  alias PropertyDamage.{FailureReport, Placeholder}
+  alias PropertyDamage.Export.HTTPSpec
+  alias PropertyDamage.{FailureReport, Placeholder, RunTrace}
   alias PropertyDamage.Sequence.Position
 
   defmodule Var do
@@ -93,8 +96,10 @@ defmodule PropertyDamage.Export.StepPlan do
   """
   @spec build(FailureReport.t(), module() | nil) :: [Step.t()]
   def build(%FailureReport{} = report, adapter) do
+    root_steps = reference_steps(report)
+
     commands =
-      report.setup_commands ++ Common.extract_commands(report) ++ report.teardown_commands
+      report.setup_commands ++ Enum.map(root_steps, & &1.command) ++ report.teardown_commands
 
     var_map = placeholder_var_map(commands)
     extractions = producer_extractions(commands)
@@ -115,9 +120,7 @@ defmodule PropertyDamage.Export.StepPlan do
       end)
 
     roots =
-      report
-      |> FailureReport.steps()
-      |> Enum.map(fn step ->
+      Enum.map(root_steps, fn step ->
         resolve.(%Step{
           phase: :root,
           title: "Step #{step.flattened_index + 1}",
@@ -160,6 +163,32 @@ defmodule PropertyDamage.Export.StepPlan do
         resolved_body: resolve_body(spec, step.command, var_map),
         producer_bindings: producer_bindings(extractions, extraction_key(step))
     }
+  end
+
+  # The steps of the reference target: the report's own steps when the
+  # reference is the target the report traces (or no root ran as an
+  # expansion), else the plan laid out with the reference's choices.
+  defp reference_steps(%FailureReport{} = report) do
+    reference = FailureReport.reference_target(report)
+    traced = report.trace && report.trace.expansion
+
+    choices =
+      if reference && is_map(traced) && report.variant && report.variant.name != reference.name,
+        do: Map.get(traced, reference.name)
+
+    case choices do
+      nil ->
+        FailureReport.steps(report)
+
+      choices ->
+        RunTrace.build_steps(
+          report.trace.plan,
+          [],
+          report.trace.command_labels,
+          report.failed_at_index,
+          choices: choices
+        )
+    end
   end
 
   # A setup failure at a setup command marks that command's step.

@@ -60,9 +60,16 @@ defmodule PropertyDamage.Export.Script.Elixir do
     # Generated: #{timestamp}
     # Failure: #{failure_desc}
     # Seed: #{metadata.seed}
-    #
+    #{steps_note(report)}#
     # Run with: elixir #{Common.generate_filename(report, :elixir)}
     """
+  end
+
+  defp steps_note(report) do
+    case Common.steps_note(report) do
+      nil -> ""
+      note -> "# #{note}\n"
+    end
   end
 
   defp generate_setup(env_var, default_url) do

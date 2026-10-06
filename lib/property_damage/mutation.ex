@@ -31,6 +31,13 @@ defmodule PropertyDamage.Mutation do
       analysis = PropertyDamage.Mutation.analyze(report)
       IO.puts(PropertyDamage.Mutation.Analysis.format(analysis))
 
+  Each command module of the model's `commands/0` is a mutation target: a
+  mutant changes the events that module's commands answer. For a model with
+  `c:PropertyDamage.Model.expansions/0` the targets are still the roots of
+  `commands/0`, not the leaf modules an expansion produces. A leaf's events
+  are not mutated, and a mutant of a root that every run executes as an
+  expansion is never applied, so it is reported as survived.
+
   ## Mutation Operators
 
   - `:value` - Mutates numeric and string values (zero, negate, off-by-one)

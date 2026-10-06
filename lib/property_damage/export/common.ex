@@ -34,6 +34,20 @@ defmodule PropertyDamage.Export.Common do
     }
   end
 
+  @doc """
+  The line a script header carries about which commands its steps are, or nil
+  for a model without `expansions/0`, whose steps are the roots.
+  """
+  @spec steps_note(FailureReport.t()) :: String.t() | nil
+  def steps_note(%FailureReport{model: model} = report) do
+    reference = FailureReport.reference_target(report)
+
+    if reference && PropertyDamage.Expansion.defines?(model) do
+      "Steps: what the reference target #{inspect(reference.name)} ran, each root as " <>
+        "itself or as the leaves of the expansion it chose there"
+    end
+  end
+
   # ============================================================================
   # Command Serialization
   # ============================================================================

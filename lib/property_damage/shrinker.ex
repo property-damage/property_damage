@@ -206,6 +206,7 @@ defmodule PropertyDamage.Shrinker do
   """
   @type shrink_result :: %{
           sequence: Sequence.t(),
+          expansion: PropertyDamage.Expansion.t() | nil,
           iterations: non_neg_integer(),
           time_ms: non_neg_integer()
         }
@@ -280,6 +281,24 @@ defmodule PropertyDamage.Shrinker do
   created names what this candidate's roots create. The shrunk sequence
   carries the setup commands and its own teardown commands.
 
+  ## Expansions
+
+  For a model with `c:PropertyDamage.Model.expansions/0`, a candidate is still
+  a list of roots: the shrinker deletes roots and simplifies root arguments,
+  and never deletes, reorders or simplifies a leaf on its own. Each target
+  runs a candidate as it ran the failing run, root for root, without drawing
+  its expansions again: `:expansion` carries every target's choices, keyed by
+  the stable id of each root (`:root_ids`), and every attempt realizes each
+  surviving root's carried entry again with `PropertyDamage.Expansion.expand/5`
+  against the candidate's simulated state, with the leaf seed the failing run
+  drew. A root whose arguments were simplified realizes its leaves from the
+  simplified root through the same entry and leaf seed. When a leaf of the
+  carried entry no longer meets its precondition in a candidate, the root runs
+  as itself in that target, counted as "identity, forced". A `:reference`
+  target copies what the first target runs in the candidate. A candidate
+  whose expansion cannot be realized (an `overrides:` that raises on a
+  simplified root, for example) is invalid and never runs.
+
   ## Parameters
 
   - `sequence` - The original failing sequence (or list for backwards compatibility)
@@ -298,6 +317,11 @@ defmodule PropertyDamage.Shrinker do
     - `:run_nonce` - The run nonce for client-minted values (DR-034)
     - `:mint_epoch_counter` - `:atomics` counter every attempt draws a fresh
       mint epoch from (DR-034; default a new counter, so epochs start at 1)
+    - `:expansion` - What every target ran for the failing linear sequence
+      (`PropertyDamage.Expansion.expand/5`'s result, or a report trace's
+      `%{name => [choice]}`); default `nil`, every root runs as itself
+    - `:root_ids` - The stable id of each root of `sequence`, the ids
+      `:expansion` keys its choices by (default: each root's index)
     - `:stutter_config` - The run's stutter configuration; a stutter failure is
       reproduced with stutter forced on (DR-029)
     - `:config` - Shrinker.Config struct (default: Config.new())
@@ -343,7 +367,8 @@ defmodule PropertyDamage.Shrinker do
         # each candidate's positions before re-execution.
         positions: original_positions(commands),
         registry: sequence.registry,
-        setup_commands: sequence.setup
+        setup_commands: sequence.setup,
+        root_ids: Keyword.get(opts, :root_ids) || Enum.to_list(0..(length(commands) - 1)//1)
       })
 
     # Truncating at the failure point is an optimization, not an assumption
@@ -378,14 +403,17 @@ defmodule PropertyDamage.Shrinker do
 
     end_time = System.monotonic_time(:millisecond)
 
+    # Carry the remapped registry so the shrunk sequence (reported and
+    # replayed) still resolves its externals, and the teardown commands drawn
+    # for its own roots.
+    shrunk =
+      %{sequence | prefix: shrink_state.commands, branches: nil, suffix: []}
+      |> Sequence.with_registry(remap_registry(shrink_state.registry, shrink_state.positions))
+      |> with_teardown(shrink_state)
+
     %{
-      # Carry the remapped registry so the shrunk sequence (reported and
-      # replayed) still resolves its externals, and the teardown commands
-      # drawn for its own roots.
-      sequence:
-        %{sequence | prefix: shrink_state.commands, branches: nil, suffix: []}
-        |> Sequence.with_registry(remap_registry(shrink_state.registry, shrink_state.positions))
-        |> with_teardown(shrink_state),
+      sequence: shrunk,
+      expansion: carried_expansion(shrunk, shrink_state.positions, shrink_state),
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time
     }
@@ -426,8 +454,44 @@ defmodule PropertyDamage.Shrinker do
       # counter. On a non-resettable SUT that keeps attempts from re-sending the
       # exploration run's (epoch 0) minted values and colliding with it.
       run_nonce: Keyword.get(opts, :run_nonce),
-      mint_epoch_counter: Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false)
+      mint_epoch_counter:
+        Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false),
+      # Every target's choices in the failing run, by target name and root id;
+      # nil when no root runs as an expansion.
+      carry: carry(Keyword.fetch!(opts, :model), Keyword.get(opts, :expansion))
     }
+  end
+
+  defp carry(model, expansion) when is_map(expansion) do
+    if PropertyDamage.Expansion.defines?(model), do: PropertyDamage.Expansion.carry(expansion)
+  end
+
+  defp carry(_model, _expansion), do: nil
+
+  # What every target runs for `candidate`: each target's carried choices,
+  # realized again against the candidate (see "Expansions" in the moduledoc).
+  # Returns `{:ok, expansion}` (nil when nothing is carried) or `:invalid`
+  # when an expansion of the candidate cannot be realized.
+  defp candidate_expansion(_candidate, _positions, %{carry: nil}), do: {:ok, nil}
+  defp candidate_expansion(_candidate, nil, _state), do: {:ok, nil}
+
+  defp candidate_expansion(candidate, positions, state) do
+    root_ids = Enum.map(positions, &Enum.at(state.root_ids, &1.offset))
+
+    {:ok,
+     PropertyDamage.Expansion.expand(state.model, candidate, state.targets, state.rng_seed,
+       root_ids: root_ids,
+       carry: state.carry
+     )}
+  rescue
+    ArgumentError -> :invalid
+  end
+
+  defp carried_expansion(shrunk, positions, state) do
+    case candidate_expansion(shrunk, positions, state) do
+      {:ok, expansion} -> expansion
+      :invalid -> nil
+    end
   end
 
   # The original structured positions of a flat (linear) command list.
@@ -514,6 +578,7 @@ defmodule PropertyDamage.Shrinker do
           )
         )
         |> with_teardown(shrink_state),
+      expansion: nil,
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time
     }
@@ -1103,7 +1168,12 @@ defmodule PropertyDamage.Shrinker do
     # The candidate's registry has its producer_link remapped to the candidate's
     # positions (DR-021), so externals resolve against the shrunk sequence's own
     # indices.
-    case run_linear_attempt(commands, remap_registry(state.registry, positions), state) do
+    case run_linear_attempt(
+           commands,
+           positions,
+           remap_registry(state.registry, positions),
+           state
+         ) do
       {:failed, reason, variant_index, _root} ->
         check_failure_equivalence(reason, variant_index, state.original_signature)
 
@@ -1124,7 +1194,7 @@ defmodule PropertyDamage.Shrinker do
     # Regenerate idempotency keys to ensure fresh SUT state
     sequence = regenerate_sequence_idempotency_keys(sequence)
 
-    case run_linear_attempt(Sequence.to_list(sequence), sequence.registry, state) do
+    case run_linear_attempt(Sequence.to_list(sequence), nil, sequence.registry, state) do
       {:failed, reason, variant_index, root} ->
         if check_failure_equivalence(reason, variant_index, state.original_signature),
           do: {:reproduces, root},
@@ -1139,17 +1209,27 @@ defmodule PropertyDamage.Shrinker do
   # commands and teardown commands drawn for it, on every target through the
   # scheduler, which sets each target up and tears it down. Returns
   # `{:failed, reason, variant_index, root}`, `:setup_failed` when any target's
-  # setup failed (never a reproduction), or `:passed`.
-  defp run_linear_attempt(commands, registry, state) do
+  # setup failed (never a reproduction), `:invalid` when the candidate's
+  # expansions cannot be realized, or `:passed`. `positions` holds each root's
+  # original position (nil when no expansion is carried).
+  defp run_linear_attempt(commands, positions, registry, state) do
     # A sequence built by hand may carry no registry: its candidates resolve
     # nothing, as on the linear engine.
     candidate = candidate(Sequence.linear(commands), registry, state)
 
+    case candidate_expansion(candidate, positions, state) do
+      {:ok, expansion} -> run_candidate(commands, candidate, expansion, state)
+      :invalid -> :invalid
+    end
+  end
+
+  defp run_candidate(commands, candidate, expansion, state) do
     {:ok, run} =
       Scheduler.run(
         model: state.model,
         targets: state.targets,
         commands: commands,
+        variants: expansion && PropertyDamage.Expansion.schedule(state.targets, expansion),
         setup_commands: candidate.setup,
         teardown_commands: candidate.teardown,
         placeholder_registry: candidate.registry,

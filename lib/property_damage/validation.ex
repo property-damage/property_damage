@@ -560,6 +560,83 @@ defmodule PropertyDamage.Validation do
     end
   end
 
+  @doc """
+  Warns about the leaf modules of `c:PropertyDamage.Model.expansions/0` a
+  sample of generations produced (`reached`) or offered and never produced
+  (`unreached`), as `mix pd.validate --seeds` samples them.
+
+  A reached leaf is a command a run executes, so the observables and
+  orphan-event warnings of `validate!/3` apply to it as to a root. A leaf the
+  sample did not reach gets one line per event it would produce that no check
+  projection handles, saying it was not reached. Modules of
+  `commands/0` are roots and are left to `validate!/3`.
+  """
+  @spec expansion_warnings(module(), [module()], [module()]) :: [String.t()]
+  def expansion_warnings(model, reached, unreached) do
+    roots = model.commands() |> PropertyDamage.Model.normalize_commands()
+    root_modules = Enum.map(roots, fn {_weight, module, _spec} -> module end)
+    handled = MapSet.new(handled_events(model))
+    leaves = Enum.uniq(reached) -- root_modules
+    ignored = MapSet.new(root_modules ++ leaves ++ observables_of(roots))
+
+    reached_lines =
+      for leaf <- leaves, line <- leaf_lines(leaf, handled, ignored), do: line
+
+    covered = MapSet.union(ignored, MapSet.new(observables_of(normalize_leaves(leaves))))
+
+    unreached_lines =
+      for leaf <- Enum.uniq(unreached) -- (root_modules ++ leaves),
+          event <- observables_of(normalize_leaves([leaf])),
+          not MapSet.member?(handled, event),
+          not MapSet.member?(covered, event) do
+        "Event #{inspect(event)} of leaf #{inspect(leaf)} is not handled by any check " <>
+          "projection; #{inspect(leaf)} was not reached by the sample"
+      end
+
+    reached_lines ++ Enum.uniq(unreached_lines)
+  end
+
+  # A reached leaf's lines: no observables declared, or an event of it no check
+  # projection handles (an event a root already produces is a root's warning).
+  defp leaf_lines(leaf, handled, ignored) do
+    case observables_of(normalize_leaves([leaf])) do
+      [] ->
+        ["Command #{inspect(leaf)} declares no :observables - event coverage not verified"]
+
+      events ->
+        for event <- events,
+            not MapSet.member?(handled, event),
+            not MapSet.member?(ignored, event) do
+          "Event #{inspect(event)} produced but not handled by any check projection"
+        end
+    end
+  end
+
+  defp normalize_leaves(modules) do
+    Enum.each(modules, &Code.ensure_loaded/1)
+    PropertyDamage.Model.normalize_commands(modules)
+  end
+
+  defp observables_of(normalized) do
+    normalized
+    |> Enum.flat_map(fn {_weight, _module, spec} -> Map.get(spec, :observables, []) end)
+    |> Enum.uniq()
+  end
+
+  # Every event a check projection of `model` observes.
+  defp handled_events(model) do
+    projections =
+      if function_exported?(model, :check_projections, 0), do: model.check_projections(), else: []
+
+    for proj <- projections,
+        function_exported?(proj, :__checks__, 0),
+        check <- proj.__checks__(),
+        mod <- check_handled_modules(check),
+        uniq: true do
+      mod
+    end
+  end
+
   defp warn_orphan_events(model) do
     commands = model.commands()
     normalized = PropertyDamage.Model.normalize_commands(commands)

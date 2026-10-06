@@ -1401,6 +1401,12 @@ defmodule Mix.Tasks.Pd.Scaffold do
       #
       # @impl true
       # def teardown_each, do: [Commands.Logout]
+      #
+      # Optional expansions/0: a root listed there may run, per target, as one
+      # of several command sequences that mean the same as the root once it is
+      # done; list the root itself first, for example:
+      # @impl true
+      # def expansions, do: [{Commands.Deposit, &deposit_expansions/2}]
     end
     """
     |> format_code()

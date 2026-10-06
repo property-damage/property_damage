@@ -31,7 +31,10 @@ defmodule PropertyDamage.Suggestions do
   ## How It Works
 
   1. **Event Analysis**: Extracts all events produced by commands and analyzes
-     their field types to suggest appropriate checks.
+     their field types to suggest appropriate checks. The commands are the
+     roots of `commands/0`; the events of a leaf module that only an
+     expansion (`c:PropertyDamage.Model.expansions/0`) produces are not
+     analyzed.
 
   2. **Pattern Detection**: Identifies common patterns that warrant invariants:
      - Numeric fields (balance, amount, count) → non-negative checks

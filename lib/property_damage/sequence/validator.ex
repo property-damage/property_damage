@@ -1,5 +1,11 @@
 defmodule PropertyDamage.Sequence.Validator do
   @moduledoc false
+  # Validates a sequence of roots: each root's `when:` against the state the
+  # roots before it leave. It reads commands/0 as the list of roots on
+  # purpose: a shrink candidate is a list of roots, and a leaf of an
+  # expansion is checked when the expansion is realized for the candidate
+  # (PropertyDamage.Expansion), where a failed leaf precondition makes its
+  # root run as itself.
 
   alias PropertyDamage.Model
 

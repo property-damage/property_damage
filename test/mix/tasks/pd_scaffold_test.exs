@@ -703,6 +703,9 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       assert code =~ "setup_each/0"
       assert code =~ "teardown_each/0"
       refute code =~ "setup_once"
+
+      # ... and the optional expansions/0 callback.
+      assert code =~ "expansions/0"
     end
   end
 

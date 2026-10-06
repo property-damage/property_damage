@@ -28,7 +28,7 @@ defmodule PropertyDamage.Export.LiveBook do
     steps = StepPlan.build(report, adapter)
 
     sections = [
-      generate_header(title, metadata),
+      generate_header(title, metadata, Common.steps_note(report)),
       generate_setup_section(base_url, include_state),
       generate_command_sections(steps, include_state)
     ]
@@ -49,7 +49,7 @@ defmodule PropertyDamage.Export.LiveBook do
   # Header
   # ============================================================================
 
-  defp generate_header(title, metadata) do
+  defp generate_header(title, metadata, steps_note) do
     failure_desc =
       case metadata.check_name do
         nil -> to_string(metadata.failure_type)
@@ -71,6 +71,7 @@ defmodule PropertyDamage.Export.LiveBook do
 
     This notebook allows you to step through the command sequence that triggered a failure,
     inspect state at each step, and explore variations to understand the root cause.
+    #{if steps_note, do: "\n#{steps_note}.\n", else: ""}\
     """
   end
 

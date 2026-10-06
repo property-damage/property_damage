@@ -26,7 +26,16 @@ defmodule PropertyDamage.Expansion do
   # that already knows the entry passes it with `:carry` (see `expand/5`), and
   # the leaves are realized again without a draw.
 
-  alias PropertyDamage.{Comparison, Generator, Model, Placeholder, PlaceholderRegistry, Sequence}
+  alias PropertyDamage.{
+    Comparison,
+    Generator,
+    Model,
+    Placeholder,
+    PlaceholderRegistry,
+    Sequence,
+    Validation
+  }
+
   alias PropertyDamage.Sequence.Position
 
   @typedoc """
@@ -209,19 +218,8 @@ defmodule PropertyDamage.Expansion do
   #              without a draw; a root with no carried choice runs as itself.
   @spec expand(module(), Sequence.t(), [PropertyDamage.Target.t()], integer(), keyword()) :: t()
   def expand(model, %Sequence{} = sequence, targets, run_seed, opts \\ []) do
-    roots = Sequence.to_list(sequence)
-    root_ids = Keyword.get(opts, :root_ids, Enum.to_list(0..(length(roots) - 1)//1))
     carry = Keyword.get(opts, :carry)
-
-    walk = %{
-      model: model,
-      functions: functions(model) || %{},
-      preconditions: preconditions(model),
-      registry: sequence.registry || PlaceholderRegistry.new(),
-      start: start_state(model, sequence),
-      roots: Enum.zip([roots, root_ids, 0..(length(roots) - 1)//1]),
-      run_seed: run_seed
-    }
+    walk = walk_state(model, sequence, Keyword.get(opts, :root_ids), run_seed)
 
     {variants, warnings} =
       Enum.reduce(targets, {%{}, []}, fn target, {variants, warnings} ->
@@ -235,6 +233,96 @@ defmodule PropertyDamage.Expansion do
       end)
 
     %{variants: variants, warnings: Enum.uniq(warnings)}
+  end
+
+  @doc false
+  # What one target ran for `sequence`, realized again without a draw from the
+  # choices it made there (`choices`, one per root in order, as a report's
+  # trace keeps them): its choices and the registry its commands resolve
+  # against. The roots keep the root ids of `choices`. A model without
+  # `expansions/0` runs the roots of `sequence`.
+  @spec carried(module(), Sequence.t(), [choice()]) :: %{
+          choices: [choice()],
+          registry: PlaceholderRegistry.t()
+        }
+  def carried(model, %Sequence{} = sequence, choices) do
+    if defines?(model) do
+      walk = walk_state(model, sequence, Enum.map(choices, & &1.root_id), nil)
+      {variant, _warnings} = walk(walk, nil, :random, Map.new(choices, &{&1.root_id, &1}))
+      variant
+    else
+      %{variants: %{nil => variant}} = identity(sequence, [%{name: nil}])
+      variant
+    end
+  end
+
+  @doc false
+  # The choices of every target of `expansion`, keyed by target name and root
+  # id: the `:carry` option of `expand/5`. Accepts what `expand/5` returns or a
+  # report trace's `%{name => [choice]}`.
+  @spec carry(t() | %{String.t() => [choice()]}) :: %{
+          String.t() => %{non_neg_integer() => choice()}
+        }
+  def carry(%{variants: variants}),
+    do: carry(Map.new(variants, fn {name, %{choices: choices}} -> {name, choices} end))
+
+  def carry(choices_by_name) do
+    Map.new(choices_by_name, fn {name, choices} ->
+      {name, Map.new(choices, &{&1.root_id, &1})}
+    end)
+  end
+
+  @doc false
+  # The choices a report's trace carries (`traced`, `%{name => [choice]}`) for
+  # a path that re-executes the report's sequence on the targets named
+  # `names`: nil for a model without `expansions/0`, whose roots run as
+  # themselves. Raises `ArgumentError` naming `path` when the trace does not
+  # carry what one of those targets ran: running it as itself, or drawing its
+  # expansions again, would not re-execute the failure.
+  @spec traced!(module(), %{String.t() => [choice()]} | nil, [String.t()], String.t()) ::
+          %{String.t() => [choice()]} | nil
+  def traced!(model, traced, names, path) do
+    missing = names -- Map.keys(traced || %{})
+
+    cond do
+      not defines?(model) ->
+        nil
+
+      missing == [] ->
+        traced
+
+      true ->
+        raise ArgumentError,
+              "#{inspect(model)} defines expansions/0, and the report does not record what " <>
+                "target(s) #{Enum.map_join(missing, ", ", &inspect/1)} ran at each root, so " <>
+                "#{path} cannot re-execute the failure's expanded sequence on them yet; " <>
+                "re-execute it on the report's own targets"
+    end
+  end
+
+  @doc false
+  # The root ids of a report trace's choices, in root order (nil for nil).
+  @spec root_ids(%{String.t() => [choice()]} | nil) :: [non_neg_integer()] | nil
+  def root_ids(nil), do: nil
+
+  def root_ids(traced) when map_size(traced) > 0,
+    do: traced |> Map.values() |> hd() |> Enum.map(& &1.root_id)
+
+  def root_ids(_traced), do: nil
+
+  defp walk_state(model, sequence, root_ids, run_seed) do
+    roots = Sequence.to_list(sequence)
+    indices = Enum.to_list(0..(length(roots) - 1)//1)
+
+    %{
+      model: model,
+      functions: functions(model) || %{},
+      preconditions: preconditions(model),
+      registry: sequence.registry || PlaceholderRegistry.new(),
+      start: start_state(model, sequence),
+      roots: Enum.zip([roots, root_ids || indices, indices]),
+      run_seed: run_seed
+    }
   end
 
   # A model without expansions has nothing to fold: every walk runs the roots.
@@ -306,11 +394,22 @@ defmodule PropertyDamage.Expansion do
   defp choose(walk, name, :random, fun, base, _carried), do: draw(walk, name, fun, base)
 
   # The carried entry, from the list the function returns for the root and
-  # state of this walk.
+  # state of this walk. A function that no longer returns that entry (for a
+  # root whose arguments a shrink simplified, say) cannot run it: the walk
+  # fails as a generation error, which makes a shrink candidate invalid.
   defp carried_sequence(walk, base, index) do
     entries = entries!(walk, base, Map.fetch!(walk.functions, base.root_command.__struct__))
-    {sequence, _weight, ^index} = Enum.at(entries, index)
-    sequence
+
+    case Enum.at(entries, index) do
+      {sequence, _weight, ^index} ->
+        sequence
+
+      nil ->
+        raise ArgumentError,
+              "expansions/0: #{key(base, index)} (root #{base.root}) is no longer returned " <>
+                "for #{inspect(base.root_command)}: the function returned " <>
+                "#{length(entries)} expansion(s)"
+    end
   end
 
   defp as_itself(walk, base, entry, index) do
@@ -584,26 +683,50 @@ defmodule PropertyDamage.Expansion do
     end
   end
 
-  # The point where a leaf module is validated the first time a process
-  # produces it: a module that is not a command fails naming the callback.
+  # A leaf module is validated the first time this process realizes it: it
+  # must exist and have the callbacks of a command (`generator/1`, or `new!/2`
+  # for a nemesis). A pass is kept in the process dictionary for the rest of
+  # the process, so later realizations skip the check; a failure is never
+  # kept, so every realization of a broken module fails the same way. Each
+  # validation emits `[:property_damage, :expansion, :leaf_validated]`. The
+  # keys of a leaf's `overrides:` depend on the entry, not the module, and are
+  # checked at every realization when the leaf's generator is built.
   defp check_leaf_module!(base, key, module, leaf) do
-    cond do
-      not Code.ensure_loaded?(module) ->
-        raise ArgumentError,
-              "expansions/0: #{key} (root #{base.root}), leaf #{leaf}: " <>
-                "command module #{inspect(module)} does not exist"
+    if Process.get({__MODULE__, :valid_leaf, module}) do
+      :ok
+    else
+      validate_leaf_module!(base, key, module, leaf)
+    end
+  end
 
-      PropertyDamage.Nemesis.nemesis_module?(module) ->
+  defp command_callbacks(module) do
+    Validation.validate_command_callbacks!(module)
+  rescue
+    e in ArgumentError -> {:error, String.trim(e.message)}
+  end
+
+  defp validate_leaf_module!(base, key, module, leaf) do
+    result =
+      if Code.ensure_loaded?(module),
+        do: command_callbacks(module),
+        else: {:error, "command module #{inspect(module)} does not exist"}
+
+    :telemetry.execute([:property_damage, :expansion, :leaf_validated], %{}, %{
+      module: module,
+      root: base.root_command.__struct__,
+      entry: key,
+      result: if(result == :ok, do: :ok, else: :error)
+    })
+
+    case result do
+      :ok ->
+        Process.put({__MODULE__, :valid_leaf, module}, true)
         :ok
 
-      not function_exported?(module, :generator, 1) ->
+      {:error, message} ->
         raise ArgumentError,
               "expansions/0: #{key} (#{inspect(base.root_command.__struct__)}, root " <>
-                "#{base.root}), leaf #{leaf} #{inspect(module)} is missing required " <>
-                "callback generator/1"
-
-      true ->
-        :ok
+                "#{base.root}), leaf #{leaf} #{inspect(module)}: " <> message
     end
   end
 
@@ -616,7 +739,7 @@ defmodule PropertyDamage.Expansion do
   # event module at the same field path.
   defp aliases!(walk, base, key, done, minted) do
     walk.registry
-    |> PlaceholderRegistry.ids_at_position(Position.prefix(base.root_id))
+    |> PlaceholderRegistry.ids_at_position(Position.prefix(base.root))
     |> Enum.map(&PlaceholderRegistry.get(walk.registry, &1))
     |> Enum.reject(&is_nil/1)
     |> Enum.map(fn root -> {root, alias_leaf!(base, key, done, minted, root)} end)
@@ -760,13 +883,19 @@ defmodule PropertyDamage.Expansion do
   def schedule(targets, %{variants: variants}) do
     for target <- targets do
       %{choices: choices, registry: registry} = Map.fetch!(variants, target.name)
-      %{roots: Enum.map(choices, &steps/1), registry: registry}
+      %{roots: steps(choices), registry: registry}
     end
   end
 
-  defp steps(%{leaves?: false, commands: commands}), do: Enum.map(commands, &{&1, nil})
+  @doc false
+  # What a target executes per root for its `choices`: per root a list of
+  # `{command, position}`, position nil for a root that runs as itself.
+  @spec steps([choice()]) :: [[{struct(), Position.t() | nil}]]
+  def steps(choices) when is_list(choices), do: Enum.map(choices, &root_steps/1)
 
-  defp steps(%{leaves?: true, commands: commands, root_id: root_id}) do
+  defp root_steps(%{leaves?: false, commands: commands}), do: Enum.map(commands, &{&1, nil})
+
+  defp root_steps(%{leaves?: true, commands: commands, root_id: root_id}) do
     commands
     |> Enum.with_index()
     |> Enum.map(fn {command, leaf} -> {command, Position.leaf(root_id, leaf)} end)

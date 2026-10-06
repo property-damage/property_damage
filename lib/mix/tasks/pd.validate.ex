@@ -231,7 +231,8 @@ defmodule Mix.Tasks.Pd.Validate do
         warnings =
           base_warnings ++
             invariant_warnings(model) ++
-            PropertyDamage.Validation.target_warnings(targets) ++ sample_warnings(sample)
+            PropertyDamage.Validation.target_warnings(targets) ++
+            sample_warnings(model, sample)
 
         if verbose do
           for target <- targets do
@@ -281,8 +282,17 @@ defmodule Mix.Tasks.Pd.Validate do
     end
   end
 
-  defp sample_warnings(nil), do: []
-  defp sample_warnings(sample), do: sample.warnings
+  defp sample_warnings(_model, nil), do: []
+
+  # The sample's own warnings, then the observables and orphan-event warnings
+  # for the leaf modules it reached and the ones it never reached.
+  defp sample_warnings(model, sample) do
+    offered = sample.offered |> Map.values() |> List.flatten()
+    reached = MapSet.to_list(sample.leaves)
+
+    sample.warnings ++
+      PropertyDamage.Validation.expansion_warnings(model, reached, offered -- reached)
+  end
 
   defp print_sample(nil), do: :ok
 

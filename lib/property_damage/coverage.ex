@@ -40,6 +40,15 @@ defmodule PropertyDamage.Coverage do
     (`c:PropertyDamage.Model.setup_each/0`) was executed, under `setup`. Setup
     commands are not roots: they never count as commands or transitions, while
     check fires on their events count as fires.
+  - **Expansions**: For a model with `c:PropertyDamage.Model.expansions/0`,
+    the commands a run can execute are `commands/0` plus every leaf module
+    the expansions produce. Coverage counts what the reference target
+    executed: each leaf under its own module, beside the roots that ran as
+    themselves, so the command universe grows by every leaf module a run
+    produced and no executed command is ever outside it. Separately,
+    `expansion_counts` counts each expanded root module by the entry the
+    reference chose (`"Root[i]"`), and `:forced` for a root that ran as
+    itself because no listed entry could be realized.
 
   ## CI Integration
 
@@ -61,6 +70,7 @@ defmodule PropertyDamage.Coverage do
     :state_hashes,
     :check_hits,
     :setup_counts,
+    :expansion_counts,
     :total_commands,
     :total_runs,
     :failures_found,
@@ -81,6 +91,7 @@ defmodule PropertyDamage.Coverage do
           state_hashes: MapSet.t(integer()),
           check_hits: %{{module(), atom()} => non_neg_integer()},
           setup_counts: %{module() => non_neg_integer()},
+          expansion_counts: %{module() => %{(String.t() | :forced) => pos_integer()}},
           total_commands: non_neg_integer(),
           total_runs: non_neg_integer(),
           failures_found: non_neg_integer(),
@@ -129,6 +140,7 @@ defmodule PropertyDamage.Coverage do
       state_hashes: MapSet.new(),
       check_hits: %{},
       setup_counts: %{},
+      expansion_counts: %{},
       total_commands: 0,
       total_runs: 0,
       failures_found: 0,
@@ -142,13 +154,19 @@ defmodule PropertyDamage.Coverage do
   @doc """
   Record coverage from a test run result.
 
-  Works with both success and failure results.
+  Works with both success and failure results. A success result may carry
+  `:choices`, what the target ran at each root of its sequence
+  (`PropertyDamage.Expansion`); a failure report's `expansions` names what
+  its reference target ran up to the failing root.
   """
   @spec record(t(), {:ok, map()} | {:error, PropertyDamage.FailureReport.t()}) :: t()
   def record(tracker, {:ok, result}) do
+    choices = Map.get(result, :choices)
+
     tracker
+    |> record_expansions(choices)
     |> record_from_data(
-      result.sequence,
+      executed_modules(result.sequence, choices && Enum.map(choices, &leaf_modules/1)),
       result.event_log,
       result.projections,
       Map.get(result, :check_fires, %{}),
@@ -158,9 +176,15 @@ defmodule PropertyDamage.Coverage do
   end
 
   def record(tracker, {:error, failure}) do
+    ran = reference_ran(failure)
+
     tracker
+    |> record_expansions(ran)
     |> record_from_data(
-      PropertyDamage.FailureReport.shrunk_sequence(failure),
+      executed_modules(
+        PropertyDamage.FailureReport.shrunk_sequence(failure),
+        ran && Enum.map(ran, &leaf_modules/1)
+      ),
       PropertyDamage.FailureReport.event_log(failure),
       failure.state_at_failure || %{},
       Map.get(failure, :check_fires, %{}),
@@ -218,6 +242,12 @@ defmodule PropertyDamage.Coverage do
       state_hashes: MapSet.union(tracker1.state_hashes, tracker2.state_hashes),
       check_hits: merge_counts(tracker1.check_hits, tracker2.check_hits),
       setup_counts: merge_counts(tracker1.setup_counts || %{}, tracker2.setup_counts || %{}),
+      expansion_counts:
+        Map.merge(tracker1.expansion_counts || %{}, tracker2.expansion_counts || %{}, fn _m,
+                                                                                         a,
+                                                                                         b ->
+          merge_counts(a, b)
+        end),
       total_commands: tracker1.total_commands + tracker2.total_commands,
       total_runs: tracker1.total_runs + tracker2.total_runs,
       failures_found: tracker1.failures_found + tracker2.failures_found,
@@ -495,7 +525,8 @@ defmodule PropertyDamage.Coverage do
       commands_total: MapSet.size(tracker.command_modules),
       transitions_tested: map_size(tracker.transition_counts),
       untested_commands: untested_commands(tracker),
-      setup: tracker.setup_counts || %{}
+      setup: tracker.setup_counts || %{},
+      expansion_counts: tracker.expansion_counts || %{}
     }
   end
 
@@ -777,30 +808,72 @@ defmodule PropertyDamage.Coverage do
   # Private Helpers
   # ============================================================================
 
+  # The modules a target executed, in order: the roots of `sequence`, or, when
+  # what it ran per root is known (`per_root`, a list of module lists), those.
+  defp executed_modules(sequence, nil),
+    do: sequence |> Sequence.to_list() |> Enum.map(& &1.__struct__)
+
+  defp executed_modules(_sequence, per_root), do: List.flatten(per_root)
+
+  defp leaf_modules(%{commands: commands}), do: Enum.map(commands, & &1.__struct__)
+
+  # What a failure report's reference target ran at each root up to the
+  # failing one (its choices, from the report's trace), or nil when the report
+  # records nothing per root.
+  defp reference_ran(failure) do
+    reference = PropertyDamage.FailureReport.reference_target(failure)
+    traced = failure.trace && failure.trace.expansion
+
+    with %{name: name} <- reference,
+         %{} <- traced,
+         [_ | _] = choices <- Map.get(traced, name),
+         [_ | _] = ran <- Map.get(failure.expansions || %{}, name) do
+      Enum.take(choices, length(ran))
+    else
+      _none -> nil
+    end
+  end
+
+  # Counts each expanded root by the entry chosen (`entry` nil: no expansion
+  # applied, not counted).
+  defp record_expansions(tracker, nil), do: tracker
+
+  defp record_expansions(tracker, ran) do
+    counts =
+      for %{entry: entry, module: module} <- ran,
+          entry != nil,
+          reduce: tracker.expansion_counts || %{} do
+        acc ->
+          Map.update(acc, module, %{entry => 1}, &Map.update(&1, entry, 1, fn n -> n + 1 end))
+      end
+
+    %{tracker | expansion_counts: counts}
+  end
+
   defp record_from_data(
          tracker,
-         sequence,
+         modules,
          _event_log,
          projections,
          check_fires,
          is_failure
        ) do
-    commands = Sequence.to_list(sequence)
+    # Every executed module belongs to the command universe: a leaf of an
+    # expansion is added the first time a run produces it.
+    command_modules = Enum.into(modules, tracker.command_modules)
 
     # Count commands
     command_counts =
-      Enum.reduce(commands, tracker.command_counts, fn cmd, acc ->
-        mod = cmd.__struct__
+      Enum.reduce(modules, tracker.command_counts, fn mod, acc ->
         Map.update(acc, mod, 1, &(&1 + 1))
       end)
 
     # Count transitions (consecutive command pairs)
     transition_counts =
-      commands
+      modules
       |> Enum.chunk_every(2, 1, :discard)
-      |> Enum.reduce(tracker.transition_counts, fn [cmd1, cmd2], acc ->
-        pair = {cmd1.__struct__, cmd2.__struct__}
-        Map.update(acc, pair, 1, &(&1 + 1))
+      |> Enum.reduce(tracker.transition_counts, fn [mod1, mod2], acc ->
+        Map.update(acc, {mod1, mod2}, 1, &(&1 + 1))
       end)
 
     # Hash projection states
@@ -831,11 +904,12 @@ defmodule PropertyDamage.Coverage do
 
     %{
       tracker
-      | command_counts: command_counts,
+      | command_modules: command_modules,
+        command_counts: command_counts,
         transition_counts: transition_counts,
         state_hashes: state_hashes,
         check_hits: check_hits,
-        total_commands: tracker.total_commands + length(commands),
+        total_commands: tracker.total_commands + length(modules),
         total_runs: tracker.total_runs + 1,
         failures_found: tracker.failures_found + if(is_failure, do: 1, else: 0),
         state_class_counts: state_class_counts,

@@ -202,6 +202,9 @@ defmodule Mix.Tasks.PdGenTest do
       assert content =~ "teardown_each/0"
       refute content =~ "setup_once"
 
+      # ... and the optional expansions/0 callback.
+      assert content =~ "expansions/0"
+
       assert_compiles(content)
     end
 

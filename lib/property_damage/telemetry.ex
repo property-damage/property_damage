@@ -70,6 +70,18 @@ defmodule PropertyDamage.Telemetry do
   each of its leaves does, with its position among the leaves in
   `leaf_index`; a root that runs as itself has `leaf_index: nil`.
 
+  ### Expansion Leaf Validation
+
+  - `[:property_damage, :expansion, :leaf_validated]` - A leaf module of
+    `c:PropertyDamage.Model.expansions/0` was validated (it exists and has
+    the callbacks of a command). A process validates a module the first time
+    it realizes it and keeps a pass for the rest of the process, so the event
+    fires once per module per process; a failed validation is never kept and
+    fires again at the next realization.
+    - Measurements: `%{}`
+    - Metadata: `%{module: module(), root: module(), entry: String.t(), result: :ok | :error}`,
+      where `root` is the root module and `entry` the entry key (`"Root[i]"`)
+
   ### Check Execution
 
   The engine emits these around every evaluation of a `@check` (per command,

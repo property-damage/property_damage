@@ -49,6 +49,8 @@ defmodule PropertyDamage.Suggestions.Analyzer do
   # Model Extraction
   # ============================================================================
 
+  # The roots of commands/0: leaf modules of expansions/0 are not analyzed
+  # (see the moduledoc of PropertyDamage.Suggestions).
   defp get_commands(model) do
     # A model passed as a bare atom may not be loaded yet; reflecting with
     # function_exported?/3 before loading would silently yield an empty command

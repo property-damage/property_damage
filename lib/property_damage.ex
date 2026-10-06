@@ -759,14 +759,19 @@ defmodule PropertyDamage do
       variant: outcome.failure && outcome.failure.variant
     })
 
-    # Coverage and check firings come from the reference target's run (DR-026).
+    # Coverage and check firings come from the reference target's run (DR-026):
+    # what it executed per root, leaves included.
     acc =
       case outcome.results do
-        [%{} = reference | _] -> accumulate_coverage(acc, reference, run.sequence)
-        _ -> acc
+        [%{} = reference | _] ->
+          accumulate_coverage(acc, reference, run.sequence, reference_choices(ctx, run))
+
+        _ ->
+          acc
       end
 
     acc = record_sample(acc, ctx, run, outcome)
+    counts_before = acc.expansion_counts
 
     acc = %{
       acc
@@ -787,9 +792,11 @@ defmodule PropertyDamage do
          }}
 
       _failure ->
-        # The report carries the metrics measured up to this failed run.
+        # The report carries the metrics measured up to this failed run, and
+        # the entry counts of the runs before it (the report adds the counts
+        # of the run it describes).
         ctx = Map.put(ctx, :measured_metrics, campaign_metrics(ctx, acc.samples))
-        handle_failure(ctx, lockstep_found(run, outcome, acc.fires, acc.expansion_counts))
+        handle_failure(ctx, lockstep_found(run, outcome, acc.fires, counts_before))
     end
   end
 
@@ -832,7 +839,7 @@ defmodule PropertyDamage do
           variant: if(result.success, do: nil, else: variant_of(ctx.target))
         })
 
-        acc = accumulate_coverage(acc, result, run.sequence)
+        acc = accumulate_coverage(acc, result, run.sequence, nil)
 
         if result.success do
           {:pass,
@@ -985,7 +992,7 @@ defmodule PropertyDamage do
   # firings (always-on) are projected out of the executor's colocated counters
   # and summed; the heavier command/transition/state tracker (coverage: true
   # only) records the sequence via the existing Coverage path.
-  defp accumulate_coverage(acc, result, sequence) do
+  defp accumulate_coverage(acc, result, sequence, choices) do
     run_fires = project_fires(Map.get(result, :check_counters, %{}))
     fires = merge_fires(acc.fires, run_fires)
 
@@ -993,7 +1000,12 @@ defmodule PropertyDamage do
       if acc.tracker do
         # Feed the tracker a result carrying the sequence (for command/transition
         # coverage) and this sequence's firings (lifted into check_hits).
-        record = result |> Map.put(:sequence, sequence) |> Map.put(:check_fires, run_fires)
+        record =
+          result
+          |> Map.put(:sequence, sequence)
+          |> Map.put(:choices, choices)
+          |> Map.put(:check_fires, run_fires)
+
         Coverage.record(acc.tracker, {:ok, record})
       else
         nil
@@ -1001,6 +1013,10 @@ defmodule PropertyDamage do
 
     %{acc | fires: fires, tracker: tracker}
   end
+
+  # What the reference target ran at each root of a lockstep run.
+  defp reference_choices(ctx, %{expansion: %{variants: variants}}),
+    do: variants |> Map.fetch!(hd(ctx.targets).name) |> Map.fetch!(:choices)
 
   # Project the colocated {:fired, projection, name} keys out of the check
   # counters into the public %{{projection, name} => count} fire map, dropping
@@ -1204,7 +1220,7 @@ defmodule PropertyDamage do
       outcome = schedule(ctx, run)
 
       if outcome.failure,
-        do: {:failed, lockstep_found(run, outcome, %{}, Expansion.counts(run.expansion))},
+        do: {:failed, lockstep_found(run, outcome, %{}, %{})},
         else: :passed
     end
   end
@@ -1364,7 +1380,7 @@ defmodule PropertyDamage do
     # non-resettable SUT. Epoch 0 was the exploration run.
     mint_epoch_counter = :atomics.new(1, signed: false)
 
-    {shrunk_sequence, shrink_iterations, shrink_time_ms} =
+    {shrunk_sequence, shrunk_expansion, shrink_iterations, shrink_time_ms} =
       if ctx.shrink do
         shrink_result =
           Shrinker.shrink(found.sequence,
@@ -1385,12 +1401,16 @@ defmodule PropertyDamage do
             # the per-target RNG and the stutter base track the original run.
             rng_seed: found.run_seed,
             run_nonce: ctx.run_nonce,
-            mint_epoch_counter: mint_epoch_counter
+            mint_epoch_counter: mint_epoch_counter,
+            # Every target runs each candidate root as it ran the failing run:
+            # the entries are carried, with no new draw.
+            expansion: found.expansion
           )
 
-        {shrink_result.sequence, shrink_result.iterations, shrink_result.time_ms}
+        {shrink_result.sequence, shrink_result.expansion, shrink_result.iterations,
+         shrink_result.time_ms}
       else
-        {found.sequence, 0, 0}
+        {found.sequence, found.expansion, 0, 0}
       end
 
     shrink = %{iterations: shrink_iterations, time_ms: shrink_time_ms}
@@ -1405,7 +1425,7 @@ defmodule PropertyDamage do
     # intermittent failure may not reproduce on this single re-run, or may fail
     # differently (another kind, another target). Then the report falls back to
     # the original failing run: its sequence, reason, index, target and state.
-    expansion = reproduction_expansion(ctx, shrunk_sequence, found)
+    expansion = reproduction_expansion(ctx, shrunk_sequence, shrunk_expansion, found)
 
     report =
       case reproduce(ctx, shrunk_sequence, found, fresh_epoch, expansion) do
@@ -1437,7 +1457,7 @@ defmodule PropertyDamage do
   # primary failure has the found failure's signature (kind, name, target),
   # whatever its other failures, `{:setup_failed, reason}`
   # when a target's setup failed, else `:not_reproduced`.
-  defp reproduce(ctx, sequence, found, epoch, expansion \\ nil)
+  defp reproduce(ctx, sequence, found, epoch, expansion)
 
   defp reproduce(ctx, %Sequence{branches: nil} = sequence, found, epoch, expansion) do
     {:ok, outcome} =
@@ -1518,13 +1538,14 @@ defmodule PropertyDamage do
     end
   end
 
-  # What every target runs when the shrunk sequence is reproduced: the run's
-  # own concrete sequences when shrinking kept the sequence, else every root
-  # as itself.
-  defp reproduction_expansion(_ctx, _sequence, %{expansion: nil}), do: nil
-  defp reproduction_expansion(_ctx, sequence, %{sequence: sequence} = found), do: found.expansion
+  # What every target runs when the shrunk sequence is reproduced: the
+  # failing run's choices, realized again for the shrunk sequence (the
+  # shrinker carries them), or every root as itself for a model without
+  # expansions. A branching run has none.
+  defp reproduction_expansion(_ctx, _sequence, _shrunk, %{expansion: nil}), do: nil
+  defp reproduction_expansion(_ctx, _sequence, %{} = shrunk, _found), do: shrunk
 
-  defp reproduction_expansion(ctx, sequence, _found),
+  defp reproduction_expansion(ctx, sequence, nil, _found),
     do: Expansion.identity(sequence, ctx.targets)
 
   defp same_failure?(failure, found_failure) do
@@ -1586,7 +1607,8 @@ defmodule PropertyDamage do
       other_failures: Enum.map(found.other_failures, &other_failure/1),
       compare_counts: found.compare_counts,
       expansion: report_expansion(ctx, found, shrunk_sequence),
-      expansion_counts: found.expansion_counts,
+      expansion_counts:
+        Expansion.merge_counts(found.expansion_counts, Expansion.counts(found.expansion)),
       latency: Map.get(ctx, :latency, false),
       metrics: Map.get(ctx, :measured_metrics)
     )
@@ -1792,6 +1814,16 @@ defmodule PropertyDamage do
       }
     }
 
+    # Each target re-runs the roots as the report's run ran them: its choices
+    # come from the report's trace, never from a new draw.
+    traced =
+      Expansion.traced!(
+        report.model,
+        report.trace && report.trace.expansion,
+        Enum.map(targets, & &1.name),
+        "PropertyDamage.shrink_further/2"
+      )
+
     # A shared epoch counter keeps every SUT execution in this re-shrink
     # distinct (DR-034).
     mint_epoch_counter = :atomics.new(1, signed: false)
@@ -1819,7 +1851,9 @@ defmodule PropertyDamage do
         # The report's seed is the run's effective seed.
         rng_seed: report.seed,
         run_nonce: ctx.run_nonce,
-        mint_epoch_counter: mint_epoch_counter
+        mint_epoch_counter: mint_epoch_counter,
+        expansion: traced,
+        root_ids: Expansion.root_ids(traced)
       )
 
     fresh_epoch = :atomics.add_get(mint_epoch_counter, 1, 1)
@@ -1827,7 +1861,7 @@ defmodule PropertyDamage do
     # As in the run's failure path: only adopt the further-shrunk sequence on a
     # genuine reproduction. A re-execution that passes or fails differently
     # confirms nothing, so the incoming report comes back unchanged.
-    case reproduce(ctx, shrink_result.sequence, found, fresh_epoch) do
+    case reproduce(ctx, shrink_result.sequence, found, fresh_epoch, shrink_result.expansion) do
       {:reproduced, failure, result, other_failures} ->
         elapsed = System.monotonic_time(:millisecond) - start_time
 
@@ -1863,7 +1897,9 @@ defmodule PropertyDamage do
            stutter: ctx.stutter,
            max_commands: report.max_commands,
            linearization: Map.get(result, :linearization),
-           stacktrace: failure.stacktrace
+           stacktrace: failure.stacktrace,
+           expansion: shrink_result.expansion,
+           expansion_counts: report.expansion_counts
          )}
 
       # A re-execution whose adapter setup fails cannot confirm a further
