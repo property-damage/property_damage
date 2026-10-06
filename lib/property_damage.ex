@@ -804,7 +804,8 @@ defmodule PropertyDamage do
              kind: FailureReport.kind_of(result.failure_reason),
              variant: variant_of(ctx.target),
              root: result.failed_at_index,
-             reason: result.failure_reason
+             reason: result.failure_reason,
+             stacktrace: result.stacktrace
            }, result}
 
         {:error, reason} ->
@@ -812,7 +813,8 @@ defmodule PropertyDamage do
              kind: :setup_failed,
              variant: variant_of(ctx.target),
              root: nil,
-             reason: Failure.setup_failed(reason)
+             reason: Failure.setup_failed(reason),
+             stacktrace: nil
            }, nil}
       end
 
@@ -1358,7 +1360,12 @@ defmodule PropertyDamage do
 
     case run_result do
       {:ok, %{success: false, failure_reason: %Failure{} = reason} = result} ->
-        failure = %{found.failure | root: result.failed_at_index, reason: reason}
+        failure = %{
+          found.failure
+          | root: result.failed_at_index,
+            reason: reason,
+            stacktrace: result.stacktrace
+        }
 
         if same_failure?(failure, found.failure),
           do: {:reproduced, failure, result},
@@ -1420,7 +1427,7 @@ defmodule PropertyDamage do
       projections_before: Map.get(result, :projections_before),
       command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
       linearization: Map.get(result, :linearization),
-      stacktrace: Map.get(result, :stacktrace),
+      stacktrace: failure.stacktrace,
       model: ctx.model,
       targets: ctx.target_entries,
       concurrency: ctx.concurrency,
@@ -1618,7 +1625,8 @@ defmodule PropertyDamage do
         kind: report.kind,
         variant: report.variant || variant_of(ctx.target),
         root: report.failed_at_index,
-        reason: report.failure_reason
+        reason: report.failure_reason,
+        stacktrace: report.stacktrace
       }
     }
 
@@ -1692,7 +1700,7 @@ defmodule PropertyDamage do
            stutter: ctx.stutter,
            max_commands: report.max_commands,
            linearization: Map.get(result, :linearization),
-           stacktrace: Map.get(result, :stacktrace)
+           stacktrace: failure.stacktrace
          )}
 
       # A re-execution whose adapter setup fails cannot confirm a further

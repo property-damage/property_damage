@@ -320,38 +320,41 @@ defmodule PropertyDamage.Executor.Finalization do
   # Split an embedded {exception, stacktrace} out of a %Failure{}'s detail,
   # returning the failure with a bare-exception (or bare-message) detail plus the
   # separated stacktrace. The envelope's `branch_id` rides along untouched, so a
-  # branch failure is normalized by the same clauses as a linear one.
-  defp extract_stacktrace(
-         %Failure{
-           type: %Failure.Execution{kind: :adapter_error, detail: {exception, stacktrace}} = t
-         } =
-           f
-       )
-       when is_exception(exception) and is_list(stacktrace) do
+  # branch failure is normalized by the same clauses as a linear one. Public so
+  # the scheduler splits the failures its variants report the same way.
+  @doc false
+  @spec extract_stacktrace(Failure.t() | term()) :: {Failure.t() | term(), list() | nil}
+  def extract_stacktrace(
+        %Failure{
+          type: %Failure.Execution{kind: :adapter_error, detail: {exception, stacktrace}} = t
+        } =
+          f
+      )
+      when is_exception(exception) and is_list(stacktrace) do
     {%{f | type: %{t | detail: exception}}, stacktrace}
   end
 
-  defp extract_stacktrace(
-         %Failure{
-           type: %Failure.Check{kind: :check_failed, detail: {exception, stacktrace}} = t
-         } = f
-       )
-       when is_exception(exception) and is_list(stacktrace) do
+  def extract_stacktrace(
+        %Failure{
+          type: %Failure.Check{kind: :check_failed, detail: {exception, stacktrace}} = t
+        } = f
+      )
+      when is_exception(exception) and is_list(stacktrace) do
     {%{f | type: %{t | detail: exception}}, stacktrace}
   end
 
-  defp extract_stacktrace(
-         %Failure{
-           type:
-             %Failure.Framework{kind: :placeholder_resolution, detail: {message, stacktrace}} = t
-         } = f
-       )
-       when is_binary(message) and is_list(stacktrace) do
+  def extract_stacktrace(
+        %Failure{
+          type:
+            %Failure.Framework{kind: :placeholder_resolution, detail: {message, stacktrace}} = t
+        } = f
+      )
+      when is_binary(message) and is_list(stacktrace) do
     {%{f | type: %{t | detail: message}}, stacktrace}
   end
 
   # No embedded stacktrace
-  defp extract_stacktrace(reason), do: {reason, nil}
+  def extract_stacktrace(reason), do: {reason, nil}
 
   # ============================================================================
   # Settle Drain

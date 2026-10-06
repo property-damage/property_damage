@@ -82,6 +82,7 @@ defmodule PropertyDamage.Scheduler do
   """
 
   alias PropertyDamage.{Comparison, Failure, FailureReport, PlaceholderRegistry, Target, Variant}
+  alias PropertyDamage.Executor.Finalization
 
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
@@ -89,13 +90,17 @@ defmodule PropertyDamage.Scheduler do
   @typedoc """
   What ended a run, naming the target it happened in. `root` is the command the
   failure belongs to, `nil` for a setup failure or a failed `:startup` check.
+  A check that raised and an adapter that raised hold the exception alone in
+  `reason`'s detail; its stacktrace is in `stacktrace` (`nil` for every other
+  failure).
   """
   @type failure :: %{
           kind: :check_failed | :setup_failed | :execution_failed | :diverged,
           variant: variant(),
           run: non_neg_integer(),
           root: non_neg_integer() | nil,
-          reason: Failure.t()
+          reason: Failure.t(),
+          stacktrace: Exception.stacktrace() | nil
         }
 
   @typedoc """
@@ -406,7 +411,7 @@ defmodule PropertyDamage.Scheduler do
          target,
          %{success: false, failure_reason: nil, check_failures: [first | _]}
        ) do
-    reason = Failure.check_failed(first.check_name, without_stacktrace(first.reason))
+    reason = Failure.check_failed(first.check_name, first.reason)
     failure(config, target, first.command_index, reason)
   end
 
@@ -442,28 +447,20 @@ defmodule PropertyDamage.Scheduler do
   defp run_failure(_config, _target, _result, failure), do: failure
 
   # A variant reports an adapter raise by the exception alone; the failing
-  # variant's finished result holds the `%Failure{}` the engine built for it
-  # (the exception with its stacktrace), and the run reports that one.
+  # variant's finished result holds the `%Failure{}` the engine built for it,
+  # already split from its stacktrace, and the run reports that one.
   defp with_failure_reason(%{reason: %Failure{}} = failure, _results), do: failure
   defp with_failure_reason(nil, _results), do: nil
 
   defp with_failure_reason(failure, results) do
-    reason =
+    {reason, stacktrace} =
       case Enum.at(results, failure.variant.index) do
-        %{failure_reason: %Failure{} = reason} -> reason
-        _ -> Failure.adapter_error(failure.reason)
+        %{failure_reason: %Failure{} = reason} = result -> {reason, result.stacktrace}
+        _ -> {Failure.adapter_error(failure.reason), nil}
       end
 
-    %{failure | kind: FailureReport.kind_of(reason), reason: reason}
+    %{failure | kind: FailureReport.kind_of(reason), reason: reason, stacktrace: stacktrace}
   end
-
-  # A recorded check that raised keeps `{exception, stacktrace}`; a halting run
-  # reports the exception alone, and so does this.
-  defp without_stacktrace({exception, stacktrace})
-       when is_exception(exception) and is_list(stacktrace),
-       do: exception
-
-  defp without_stacktrace(reason), do: reason
 
   defp latencies(%{measure_latency: false}, _variant), do: []
 
@@ -501,13 +498,19 @@ defmodule PropertyDamage.Scheduler do
   # uses (`FailureReport.kind_of/1`), so the two always agree. A variant
   # reports an adapter raise by the bare exception; `with_failure_reason/2`
   # swaps in the engine's `%Failure{}` for it and derives the kind again.
+  # A reason that embeds `{exception, stacktrace}` (a check that raised, on
+  # any path) is split here as the engine splits its own result, so the
+  # reason holds the exception alone.
   defp failure(config, %Target{} = target, root, reason) do
+    {reason, stacktrace} = Finalization.extract_stacktrace(reason)
+
     %{
       kind: FailureReport.kind_of(reason) || :execution_failed,
       variant: variant_of(target),
       run: config.run_number,
       root: root,
-      reason: reason
+      reason: reason,
+      stacktrace: stacktrace
     }
   end
 

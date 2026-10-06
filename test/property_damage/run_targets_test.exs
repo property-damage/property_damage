@@ -353,6 +353,62 @@ defmodule PropertyDamage.RunTargetsTest do
   # Helpers
   # ==========================================================================
 
+  describe "a failure's stacktrace" do
+    # The report holds the exception in the failure's detail and its
+    # stacktrace in `report.stacktrace`, never the two as one tuple.
+    defp assert_split(report, exception_module) do
+      assert %Failure{} = reason = report.failure_reason
+      assert %{__struct__: ^exception_module} = Failure.detail(reason)
+      assert [_ | _] = report.stacktrace
+    end
+
+    test "a fail!/2 check on one target" do
+      assert {:error, report} = run([step("solo", %{bad_at: 1})], model: GuardedStepModel)
+
+      assert report.kind == :check_failed
+      assert_split(report, PropertyDamage.CheckFailed)
+    end
+
+    test "an adapter raise on one target" do
+      assert {:error, report} = run([step("solo", %{behavior: :raise})])
+
+      assert report.kind == :execution_failed
+      assert Failure.kind(report.failure_reason) == :adapter_error
+      assert_split(report, RuntimeError)
+    end
+
+    test "a fail!/2 check in variant 1 of two targets" do
+      assert {:error, report} =
+               run([step("a"), step("b", %{bad_at: 1})],
+                 model: GuardedStepModel,
+                 equivalence: PropertyDamage.Comparison.ignore_fields([:mark])
+               )
+
+      assert report.variant == %{index: 1, name: "b"}
+      assert_split(report, PropertyDamage.CheckFailed)
+    end
+
+    test "an adapter raise in variant 1 of two targets" do
+      assert {:error, report} = run([step("a"), step("b", %{behavior: :raise})])
+
+      assert report.variant == %{index: 1, name: "b"}
+      assert Failure.kind(report.failure_reason) == :adapter_error
+      assert_split(report, RuntimeError)
+    end
+
+    test "a check recorded under check_mode: :record" do
+      assert {:error, report} =
+               run([step("rec", %{bad_at: 1})],
+                 model: GuardedStepModel,
+                 max_commands: 6,
+                 check_mode: :record
+               )
+
+      assert report.kind == :check_failed
+      assert_split(report, PropertyDamage.CheckFailed)
+    end
+  end
+
   describe "run hooks and check mode" do
     test "check_mode: :record keeps executing after a failing check and reports the first one" do
       sequence = generated(GuardedStepModel, @seed, 0, 6)
