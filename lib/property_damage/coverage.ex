@@ -156,7 +156,7 @@ defmodule PropertyDamage.Coverage do
 
   Works with both success and failure results. A success result may carry
   `:choices`, what the target ran at each root of its sequence
-  (`PropertyDamage.Expansion`); a failure report's `expansions` names what
+  (the run's expansion choices); a failure report's `expansions` names what
   its reference target ran up to the failing root.
   """
   @spec record(t(), {:ok, map()} | {:error, PropertyDamage.FailureReport.t()}) :: t()

@@ -206,7 +206,7 @@ defmodule PropertyDamage.Shrinker do
   """
   @type shrink_result :: %{
           sequence: Sequence.t(),
-          expansion: PropertyDamage.Expansion.t() | nil,
+          expansion: map() | nil,
           iterations: non_neg_integer(),
           time_ms: non_neg_integer()
         }
@@ -289,7 +289,7 @@ defmodule PropertyDamage.Shrinker do
   runs a candidate as it ran the failing run, root for root, without drawing
   its expansions again: `:expansion` carries every target's choices, keyed by
   the stable id of each root (`:root_ids`), and every attempt realizes each
-  surviving root's carried entry again with `PropertyDamage.Expansion.expand/5`
+  surviving root's carried entry again, without a new pick,
   against the candidate's simulated state, with the leaf seed the failing run
   drew. A root whose arguments were simplified realizes its leaves from the
   simplified root through the same entry and leaf seed. When a leaf of the
@@ -318,7 +318,7 @@ defmodule PropertyDamage.Shrinker do
     - `:mint_epoch_counter` - `:atomics` counter every attempt draws a fresh
       mint epoch from (DR-034; default a new counter, so epochs start at 1)
     - `:expansion` - What every target ran for the failing linear sequence
-      (`PropertyDamage.Expansion.expand/5`'s result, or a report trace's
+      (the run's expansion choices, or a report trace's
       `%{name => [choice]}`); default `nil`, every root runs as itself
     - `:root_ids` - The stable id of each root of `sequence`, the ids
       `:expansion` keys its choices by (default: each root's index)

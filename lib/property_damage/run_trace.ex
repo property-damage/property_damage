@@ -388,7 +388,7 @@ defmodule PropertyDamage.RunTrace do
     * `:executed` - a `%{Position => command}` map of concrete resolved commands
       (defaults to `%{}`, i.e. `executed_command` is `nil` on every step).
     * `:choices` - what the traced target ran at each root of a linear
-      sequence, as `PropertyDamage.Expansion` records it (defaults to `nil`,
+      sequence, as the run's expansion choices record it (defaults to `nil`,
       every root ran as itself). A root the target ran as an expansion's
       leaves is one step per leaf, at its `Position.leaf/2` position, with the
       entries that leaf produced; the flattened indices then count every step.
