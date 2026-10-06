@@ -265,6 +265,25 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
+  defp format_failure(:latency_exceeded, failure, _context) do
+    latency = PropertyDamage.Failure.detail(failure)
+
+    """
+    Latency Exceeded
+    #{PropertyDamage.LatencyMetrics.describe(struct(PropertyDamage.Failure.Latency, latency))}
+
+    A target's latency statistic exceeded its `latency:` bound over the whole
+    campaign. The budget is judged once, after the last run, so no single
+    command is at fault and the failure is not shrunk.
+
+    Suggestions:
+      - Re-run with the same seed and compare the per-target metrics
+      - Measure on a quiet machine: other load shows up in every statistic
+      - Raise the bound if the measured value is acceptable
+    """
+    |> String.trim()
+  end
+
   defp format_failure(
          :setup_failed,
          %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{cause: :adapter_setup}} =

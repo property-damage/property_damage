@@ -1,7 +1,7 @@
 defmodule PropertyDamage.Progress.Printer do
   @moduledoc false
 
-  alias PropertyDamage.{Error, FailureReport, Sequence}
+  alias PropertyDamage.{Error, FailureReport, LatencyMetrics, Sequence}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{RunResult, RunUpdate}
 
@@ -27,17 +27,21 @@ defmodule PropertyDamage.Progress.Printer do
     print_run(update.run_number, update.total_runs, update.command_count, update.branch_count)
   end
 
-  defp render(%RunResult{outcome: :ok} = result, _model, _adapter, _opts) do
+  defp render(%RunResult{outcome: :ok} = result, _model, targets, _opts) do
     print_success(%{
       runs: result.runs_completed,
       total_commands: result.total_commands,
       seed: result.seed,
       invariants: result.invariants
     })
+
+    print_latency(result.metrics, targets)
   end
 
-  defp render(%RunResult{outcome: :error, failure: report}, _model, _adapter, _opts) do
+  defp render(%RunResult{outcome: :error, failure: report} = result, _model, targets, _opts) do
     print_failure(report)
+    print_latency(result.metrics, targets)
+    print_latency_verdicts(report)
   end
 
   # Phases without dedicated output (e.g. :shrink) are silently ignored.
@@ -162,6 +166,43 @@ defmodule PropertyDamage.Progress.Printer do
     IO.puts("-" |> String.duplicate(60))
     :ok
   end
+
+  @doc """
+  Print the latency metrics of every target side by side, one column per
+  target in target order. Prints nothing when `latency:` was off (`nil`).
+  """
+  @spec print_latency(%{String.t() => map()} | nil, [PropertyDamage.Target.t()]) :: :ok
+  def print_latency(nil, _targets), do: :ok
+
+  def print_latency(metrics, targets) do
+    IO.puts("  Latency:")
+
+    for line <- LatencyMetrics.table_lines(metrics, Enum.map(targets, & &1.name)) do
+      IO.puts("    #{line}")
+    end
+
+    IO.puts("")
+  end
+
+  @doc """
+  Print one verdict line for each latency breach a report records: the
+  reported failure, then its other failures. Prints nothing for a report of
+  another kind.
+  """
+  @spec print_latency_verdicts(FailureReport.t()) :: :ok
+  def print_latency_verdicts(%FailureReport{kind: :latency_exceeded} = report) do
+    breaches =
+      [{report.variant, report.failure_reason}] ++
+        Enum.map(report.other_failures, &{&1.variant, &1.failure})
+
+    for {variant, failure} <- breaches do
+      IO.puts("  #{LatencyMetrics.verdict(variant.name, failure.type)}")
+    end
+
+    IO.puts("")
+  end
+
+  def print_latency_verdicts(%FailureReport{}), do: :ok
 
   @doc """
   Print a success summary with statistics.

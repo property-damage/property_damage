@@ -99,17 +99,7 @@ defmodule PropertyDamage.LockstepRunTest do
     end
   end
 
-  @metric_keys [
-    :error_count,
-    :error_rate,
-    :latency_max,
-    :latency_mean,
-    :latency_min,
-    :latency_p50,
-    :latency_p95,
-    :latency_p99,
-    :total_commands
-  ]
+  @metric_keys [:by_command, :commands, :max, :mean, :min, :p50, :p95, :p99]
 
   defp step(name, config \\ %{}, entry \\ []) do
     {StepAdapter, [name: name, config: Map.merge(%{name: name}, config)] ++ entry}
@@ -201,16 +191,18 @@ defmodule PropertyDamage.LockstepRunTest do
       end
     end
 
-    test "latency: true with concurrency: :parallel is an option error" do
+    test "latency: with concurrency: :parallel is an option error" do
       # The same measurement runs under :serial.
       assert {:ok, _stats} = run!([step("a"), step("b")], latency: true, concurrency: :serial)
 
-      error =
-        assert_raise NimbleOptions.ValidationError, fn ->
-          run!([step("a"), step("b")], latency: true, concurrency: :parallel)
-        end
+      for latency <- [true, [p95: [max_ratio: 1.5]]] do
+        error =
+          assert_raise NimbleOptions.ValidationError, fn ->
+            run!([step("a"), step("b")], latency: latency, concurrency: :parallel)
+          end
 
-      assert error.message =~ "concurrency"
+        assert error.message =~ "concurrency: :serial"
+      end
     end
 
     test "the report names the failing target and its kind, and no longer an execution mode" do
@@ -478,15 +470,14 @@ defmodule PropertyDamage.LockstepRunTest do
   end
 
   describe "latency measurement" do
-    test "reports today's latency metrics per target and excludes warm-up runs" do
+    test "reports the latency metrics per target and excludes warm-up runs" do
       # "rejecting" answers every command with an event of its own, as a
       # system that rejects a request does; an event is never an error.
       assert {:ok, stats} =
                run!([step("fast"), step("rejecting", %{behavior: :shift})],
                  model: __MODULE__.LatencyModel,
-                 latency: true,
-                 max_runs: 3,
-                 warmup_runs: 1
+                 latency: [warmup: 1],
+                 max_runs: 3
                )
 
       assert stats.metrics |> Map.keys() |> Enum.sort() == ["fast", "rejecting"]
@@ -497,9 +488,7 @@ defmodule PropertyDamage.LockstepRunTest do
       for name <- ["fast", "rejecting"] do
         metrics = stats.metrics[name]
         assert metrics |> Map.keys() |> Enum.sort() == @metric_keys
-        assert metrics.total_commands == measured
-        assert metrics.error_count == 0
-        assert metrics.error_rate == 0.0
+        assert metrics.commands == measured
       end
     end
 
@@ -507,9 +496,8 @@ defmodule PropertyDamage.LockstepRunTest do
       assert {:error, report} =
                run!([step("fast"), step("broken", %{behavior: :error})],
                  model: __MODULE__.LatencyModel,
-                 latency: true,
+                 latency: [warmup: 1],
                  max_runs: 3,
-                 warmup_runs: 1,
                  shrink: false
                )
 

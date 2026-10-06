@@ -8,6 +8,9 @@ defmodule PropertyDamage.Progress.RunResult do
   On a failing run `failure` is the `PropertyDamage.FailureReport`, and `kind`
   and `variant` repeat its report kind and the target the failure happened in
   (`%{index:, name:}`); both are `nil` on a passing run.
+
+  `metrics` holds the latency metrics per target name (see
+  `PropertyDamage.run/1`) and is `nil` when `latency:` is off.
   """
 
   @type t :: %__MODULE__{
@@ -20,7 +23,8 @@ defmodule PropertyDamage.Progress.RunResult do
           variant: PropertyDamage.FailureReport.variant() | nil,
           # Anti-vacuity summary {covered, total} for the terse footer (DR-026),
           # nil when no invariants are declared or on a failing run.
-          invariants: {non_neg_integer(), non_neg_integer()} | nil
+          invariants: {non_neg_integer(), non_neg_integer()} | nil,
+          metrics: %{String.t() => map()} | nil
         }
 
   @enforce_keys [:outcome]
@@ -32,6 +36,7 @@ defmodule PropertyDamage.Progress.RunResult do
     :failure,
     :kind,
     :variant,
-    :invariants
+    :invariants,
+    :metrics
   ]
 end

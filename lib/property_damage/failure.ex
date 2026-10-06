@@ -150,6 +150,37 @@ defmodule PropertyDamage.Failure.Setup do
   defstruct cause: :adapter_setup, command: nil, setup_index: nil, field: nil, detail: nil
 end
 
+defmodule PropertyDamage.Failure.Latency do
+  @moduledoc """
+  A variant's latency statistic exceeded a `latency:` bound over the whole
+  campaign. See `PropertyDamage.Failure` for the kind table.
+
+  `statistic` is `:p50`, `:p95`, `:p99` or `:mean` and names the failure.
+  `bound` is `:max` (an absolute duration) or `:max_ratio` (a multiple of the
+  reference's statistic). `value` is what was measured: the statistic in
+  microseconds for `:max`, the variant's statistic divided by the reference's
+  for `:max_ratio` (`:infinity` when the reference's statistic is zero).
+  `limit` is the bound: microseconds for `:max`, the ratio for `:max_ratio`.
+  `reference_value` is the reference's statistic in microseconds for
+  `:max_ratio` and `nil` for `:max`. `metrics` is the variant's full metrics
+  map.
+  """
+
+  @type statistic :: :p50 | :p95 | :p99 | :mean
+  @type bound :: :max | :max_ratio
+
+  @type t :: %__MODULE__{
+          statistic: statistic() | nil,
+          bound: bound() | nil,
+          value: number() | :infinity | nil,
+          limit: number() | nil,
+          reference_value: number() | nil,
+          metrics: map() | nil
+        }
+
+  defstruct [:statistic, :bound, :value, :limit, :reference_value, :metrics]
+end
+
 defmodule PropertyDamage.Failure do
   @moduledoc """
   The structured reason a run failed (DR-041).
@@ -172,7 +203,8 @@ defmodule PropertyDamage.Failure do
           | %Failure.Framework{}
           | %Failure.Divergence{}
           | %Failure.Convergence{}
-          | %Failure.Setup{},
+          | %Failure.Setup{}
+          | %Failure.Latency{},
         branch_id: non_neg_integer() | nil
       }
 
@@ -238,6 +270,15 @@ defmodule PropertyDamage.Failure do
   |------|------|--------|
   | `:setup_failed` | `nil` | depends on `cause` (see `PropertyDamage.Failure.Setup`): the term or exception of `setup/1` or of a setup command, the failed check, or the unresolved placeholder |
 
+  ### `Failure.Latency` - a latency statistic exceeded its budget
+
+  | kind | name | detail |
+  |------|------|--------|
+  | `:latency_exceeded` | the statistic: `:p50`, `:p95`, `:p99` or `:mean` | `%{statistic:, bound:, value:, limit:, reference_value:, metrics:}` |
+
+  The campaign judges the budget once, after the last run, so the failure is
+  never localized to a command and never shrunk.
+
   ## Triage
 
   `class/1` groups a failure for serialization and reporting. For tuning noise in
@@ -246,9 +287,18 @@ defmodule PropertyDamage.Failure do
   more time (a tuning question), not necessarily a bug.
   """
 
-  alias PropertyDamage.Failure.{Check, Convergence, Divergence, Execution, Framework, Setup}
+  alias PropertyDamage.Failure.{
+    Check,
+    Convergence,
+    Divergence,
+    Execution,
+    Framework,
+    Latency,
+    Setup
+  }
 
-  @type class :: :check | :execution | :framework | :divergence | :convergence | :setup
+  @type class ::
+          :check | :execution | :framework | :divergence | :convergence | :setup | :latency
 
   @typedoc "A failure's name: a check name, a projection, or a `{projection, function}` key."
   @type name :: atom() | {module(), atom()} | nil
@@ -272,6 +322,7 @@ defmodule PropertyDamage.Failure do
           | :diverged
           | :did_not_converge
           | :setup_failed
+          | :latency_exceeded
 
   @type t :: %__MODULE__{
           type:
@@ -280,7 +331,8 @@ defmodule PropertyDamage.Failure do
             | Framework.t()
             | Divergence.t()
             | Convergence.t()
-            | Setup.t(),
+            | Setup.t()
+            | Latency.t(),
           branch_id: non_neg_integer() | nil
         }
 
@@ -292,7 +344,7 @@ defmodule PropertyDamage.Failure do
 
   @doc """
   The failure's class: `:check`, `:execution`, `:framework`, `:divergence`,
-  `:convergence`, or `:setup`.
+  `:convergence`, `:setup`, or `:latency`.
   """
   @spec class(t()) :: class()
   def class(%__MODULE__{type: %Check{}}), do: :check
@@ -301,12 +353,14 @@ defmodule PropertyDamage.Failure do
   def class(%__MODULE__{type: %Divergence{}}), do: :divergence
   def class(%__MODULE__{type: %Convergence{}}), do: :convergence
   def class(%__MODULE__{type: %Setup{}}), do: :setup
+  def class(%__MODULE__{type: %Latency{}}), do: :latency
 
   @doc "The failure's globally-unique kind atom."
   @spec kind(t()) :: kind()
   def kind(%__MODULE__{type: %Divergence{}}), do: :diverged
   def kind(%__MODULE__{type: %Convergence{}}), do: :did_not_converge
   def kind(%__MODULE__{type: %Setup{}}), do: :setup_failed
+  def kind(%__MODULE__{type: %Latency{}}), do: :latency_exceeded
   def kind(%__MODULE__{type: type}), do: type.kind
 
   @doc """
@@ -315,21 +369,24 @@ defmodule PropertyDamage.Failure do
   For a check failure it is the check or projection name, or the
   `{projection, function}` key of a `@compare` function that raised. For a
   divergence and a failure to converge it is the key of the boundary
-  observation, `{projection, function}`.
+  observation, `{projection, function}`. For a latency failure it is the
+  statistic, such as `:p95`.
   """
   @spec name(t()) :: name()
   def name(%__MODULE__{type: %Check{name: name}}), do: name
   def name(%__MODULE__{type: %Divergence{key: key}}), do: key
   def name(%__MODULE__{type: %Convergence{key: key}}), do: key
+  def name(%__MODULE__{type: %Latency{statistic: statistic}}), do: statistic
   def name(%__MODULE__{type: _}), do: nil
 
   @doc """
   The class-specific payload for the failure. For a divergence and a failure to
-  converge it is the struct's fields as a map.
+  converge it is the struct's fields as a map, and so is a latency failure's.
   """
   @spec detail(t()) :: term()
   def detail(%__MODULE__{type: %Divergence{} = divergence}), do: Map.from_struct(divergence)
   def detail(%__MODULE__{type: %Convergence{} = convergence}), do: Map.from_struct(convergence)
+  def detail(%__MODULE__{type: %Latency{} = latency}), do: Map.from_struct(latency)
 
   def detail(%__MODULE__{type: type}), do: type.detail
 
@@ -492,6 +549,16 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: struct!(Setup, Keyword.put(fields, :cause, cause))}
   end
 
+  @doc """
+  A variant's latency statistic exceeded a `latency:` bound. `fields` holds
+  `:statistic`, `:bound`, `:value`, `:limit`, `:reference_value` and `:metrics`
+  (see `PropertyDamage.Failure.Latency`).
+  """
+  @spec latency_exceeded(map()) :: t()
+  def latency_exceeded(fields) do
+    %__MODULE__{type: struct!(Latency, fields)}
+  end
+
   # ==========================================================================
   # Framework constructors
   # ==========================================================================
@@ -532,7 +599,7 @@ defmodule PropertyDamage.Failure do
 
   Used by the shrinker to reconstruct a comparable failure from the kind and
   name of a failure signature; the `detail` is left `nil`. Names are retained
-  for `Check` kinds, `:diverged` and `:did_not_converge`, so the rebuilt
+  for `Check` kinds, `:diverged`, `:did_not_converge` and `:latency_exceeded`, so the rebuilt
   failure has the signature it was built from.
   """
   @spec from_signature(kind(), name()) :: t()
@@ -548,6 +615,8 @@ defmodule PropertyDamage.Failure do
   def from_signature(:did_not_converge, name), do: %__MODULE__{type: %Convergence{key: name}}
 
   def from_signature(:setup_failed, _name), do: %__MODULE__{type: %Setup{}}
+
+  def from_signature(:latency_exceeded, name), do: %__MODULE__{type: %Latency{statistic: name}}
 
   def from_signature(kind, _name) do
     %__MODULE__{type: %Framework{kind: kind}}

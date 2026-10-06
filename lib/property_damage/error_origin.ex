@@ -244,6 +244,17 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
+  defp classify_kind(:latency_exceeded, failure, _stacktrace) do
+    %{
+      origin: :sut_error,
+      details: %{
+        reason: "A target's latency statistic exceeded its budget",
+        evidence: Failure.detail(failure),
+        confidence: :low
+      }
+    }
+  end
+
   defp classify_kind(:setup_failed, failure, _stacktrace) do
     %{
       origin: :unknown,

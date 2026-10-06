@@ -192,7 +192,7 @@ defmodule PropertyDamage.RunTargetsTest do
       assert error.message =~ "one target"
     end
 
-    test "latency: true with concurrency: :parallel is an option error" do
+    test "latency: with concurrency: :parallel is an option error" do
       error =
         assert_raise NimbleOptions.ValidationError, fn ->
           run([step("a"), step("b")], latency: true, concurrency: :parallel)
@@ -302,7 +302,7 @@ defmodule PropertyDamage.RunTargetsTest do
       {:error, report} = run([step("a"), step("b", %{behavior: :shift})])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 11::8, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", 12::8, _rest::binary>>} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.kind == :diverged
@@ -317,7 +317,7 @@ defmodule PropertyDamage.RunTargetsTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, :erlang.crc32(term_binary)::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 11}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, 12}} = Persistence.load(path)
     end
   end
 
@@ -326,7 +326,7 @@ defmodule PropertyDamage.RunTargetsTest do
       assert {:ok, stats} = run([step("solo")], latency: true, max_runs: 2)
 
       assert Map.keys(stats.metrics) == ["solo"]
-      assert is_number(stats.metrics["solo"].latency_p50)
+      assert is_number(stats.metrics["solo"].p50)
     end
 
     test "on two targets under :serial returns metrics keyed by both names" do

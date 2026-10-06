@@ -1,7 +1,7 @@
 defmodule PropertyDamage.CompareRunOptionsTest do
   # The run options of boundary comparison: `compare: [converge_within: ms]`,
   # the removed comparison options, the no-observation guard and the
-  # `latency:` measurement switch. Every option error is raised before any
+  # `latency:` measurement and budget grammar. Every option error is raised before any
   # adapter setup.
   use ExUnit.Case, async: true
 
@@ -41,17 +41,7 @@ defmodule PropertyDamage.CompareRunOptionsTest do
     """
   }
 
-  @metric_keys [
-    :error_count,
-    :error_rate,
-    :latency_max,
-    :latency_mean,
-    :latency_min,
-    :latency_p50,
-    :latency_p95,
-    :latency_p99,
-    :total_commands
-  ]
+  @metric_keys [:by_command, :commands, :max, :mean, :min, :p50, :p95, :p99]
 
   setup_all do
     compiled = Compare.compile_all(@sources)
@@ -119,7 +109,7 @@ defmodule PropertyDamage.CompareRunOptionsTest do
     end
 
     for mode <- [:performance, :both] do
-      test "compare: #{inspect(mode)} is an option error naming latency: true", ctx do
+      test "compare: #{inspect(mode)} is an option error naming latency:", ctx do
         assert option_error(ctx, compare: unquote(mode)) =~ "latency: true"
       end
     end
@@ -159,7 +149,7 @@ defmodule PropertyDamage.CompareRunOptionsTest do
   end
 
   describe "latency:" do
-    test "latency: true under :serial returns per-target metrics keyed by target name", ctx do
+    test "latency: true measures every run and reports per-target metrics by target name", ctx do
       assert {:ok, stats} =
                Compare.run(model!(ctx, :agree), two_targets(),
                  latency: true,
@@ -172,15 +162,10 @@ defmodule PropertyDamage.CompareRunOptionsTest do
 
       for name <- ["a", "b"] do
         assert metrics[name] |> Map.keys() |> Enum.sort() == @metric_keys
-        assert metrics[name].total_commands == 6
-        assert metrics[name].error_count == 0
+        assert metrics[name].commands == 6
+        assert metrics[name].by_command |> Map.keys() == [Compare.Pay]
+        assert metrics[name].by_command[Compare.Pay].commands == 6
       end
-    end
-
-    test "latency: true with concurrency: :parallel is an option error", ctx do
-      message = option_error(ctx, latency: true, concurrency: :parallel)
-      assert message =~ "latency"
-      assert message =~ ":serial"
     end
 
     test "latency: defaults to false and a run without it reports no metrics", ctx do
@@ -189,6 +174,127 @@ defmodule PropertyDamage.CompareRunOptionsTest do
 
       assert {:ok, stats} = Compare.run(model!(ctx, :agree), two_targets())
       refute Map.has_key?(stats, :metrics)
+    end
+
+    @accepted [
+      {true, [warmup: 0]},
+      {[warmup: 2], [warmup: 2]},
+      {[], [warmup: 0]},
+      {[p95: [max_ratio: 1.5]], [warmup: 0, p95: [max_ratio: 1.5]]},
+      {[p99: [max: {800, :milliseconds}]], [warmup: 0, p99: [max: {800, :milliseconds}]]},
+      {[warmup: 5, p95: [max_ratio: 1.5], p99: [max: {800, :milliseconds}]],
+       [warmup: 5, p95: [max_ratio: 1.5], p99: [max: {800, :milliseconds}]]},
+      {[mean: [max: {2, :seconds}, max_ratio: 3]],
+       [warmup: 0, mean: [max: {2, :seconds}, max_ratio: 3]]}
+    ]
+
+    for {given, normalized} <- @accepted do
+      test "latency: #{inspect(given)} validates and normalizes", ctx do
+        validated =
+          Options.validate_run!(
+            model: model!(ctx, :agree),
+            targets: two_targets(),
+            latency: unquote(Macro.escape(given))
+          )
+
+        assert Keyword.fetch!(validated, :latency) == unquote(Macro.escape(normalized))
+      end
+    end
+
+    test "a bare integer duration is an option error that says the unit must be written",
+         ctx do
+      message = option_error(ctx, latency: [p95: [max: 800]])
+      assert message =~ "latency"
+      assert message =~ "seconds"
+      assert message =~ "milliseconds"
+      assert message =~ "{800, :milliseconds}"
+    end
+
+    test "a non-positive or unknown-unit duration is an option error", ctx do
+      assert option_error(ctx, latency: [p95: [max: {0, :seconds}]]) =~ "positive"
+      assert option_error(ctx, latency: [p95: [max: {5, :hours}]]) =~ ":milliseconds"
+    end
+
+    test "a statistic with an empty bound list is an option error naming the statistic", ctx do
+      message = option_error(ctx, latency: [p95: []])
+      assert message =~ "p95"
+      assert message =~ "max"
+      assert message =~ "max_ratio"
+    end
+
+    test "an unknown statistic is an option error naming the allowed statistics", ctx do
+      message = option_error(ctx, latency: [p42: [max: {1, :seconds}]])
+      assert message =~ "p42"
+      assert message =~ "p50"
+      assert message =~ "p99"
+      assert message =~ "mean"
+    end
+
+    test "an unknown bound is an option error naming max and max_ratio", ctx do
+      message = option_error(ctx, latency: [p95: [min: {1, :seconds}]])
+      assert message =~ "min"
+      assert message =~ "max_ratio"
+    end
+
+    test "a non-positive ratio is an option error", ctx do
+      assert option_error(ctx, latency: [p95: [max_ratio: 0]]) =~ "positive"
+    end
+
+    test "a negative warmup is an option error naming warmup", ctx do
+      message = option_error(ctx, latency: [warmup: -1])
+      assert message =~ "warmup"
+      assert message =~ "non-negative"
+    end
+
+    for {key, value, replacement} <- [
+          {:metrics, [:latency], "latency:"},
+          {:percentiles, [50], "latency:"},
+          {:warmup_runs, 3, "latency: [warmup: n]"}
+        ] do
+      test "#{key}: is an option error naming #{replacement}", ctx do
+        message = option_error(ctx, [{unquote(key), unquote(value)}])
+        assert message =~ "`#{unquote(key)}:`"
+        assert message =~ unquote(replacement)
+      end
+    end
+
+    test "latency: of any truthy shape with concurrency: :parallel is an option error", ctx do
+      for latency <- [true, [p95: [max_ratio: 1.5]], [warmup: 1]] do
+        message = option_error(ctx, latency: latency, concurrency: :parallel)
+        assert message =~ "latency:"
+        assert message =~ "concurrency: :serial"
+      end
+    end
+
+    test "latency: false with concurrency: :parallel is not an error", ctx do
+      assert {:ok, _stats} =
+               Compare.run(model!(ctx, :agree), two_targets(),
+                 latency: false,
+                 concurrency: :parallel
+               )
+    end
+
+    test "max_ratio: on one target is an option error before any adapter setup", ctx do
+      error =
+        Compare.raised(fn ->
+          Compare.run(model!(ctx, :agree), [Compare.target("a")],
+            latency: [p95: [max_ratio: 1.5]]
+          )
+        end)
+
+      assert is_exception(error, NimbleOptions.ValidationError)
+      assert Exception.message(error) =~ "max_ratio"
+      assert Exception.message(error) =~ "at least two targets"
+      refute_received {:setup, _name}
+    end
+
+    test "max: on one target is accepted", ctx do
+      assert {:ok, stats} =
+               Compare.run(model!(ctx, :agree), [Compare.target("a")],
+                 latency: [p99: [max: {1, :minutes}]]
+               )
+
+      assert Map.keys(stats.metrics) == ["a"]
     end
   end
 end

@@ -396,9 +396,9 @@ defmodule PropertyDamage.ComparisonTest do
       assert Map.has_key?(stats.metrics, "slow")
 
       fast_metrics = stats.metrics["fast"]
-      assert Map.has_key?(fast_metrics, :latency_p50)
-      assert Map.has_key?(fast_metrics, :latency_p95)
-      assert Map.has_key?(fast_metrics, :latency_p99)
+      assert Map.has_key?(fast_metrics, :p50)
+      assert Map.has_key?(fast_metrics, :p95)
+      assert Map.has_key?(fast_metrics, :p99)
     end
 
     test "slow adapter has higher latency" do
@@ -415,8 +415,8 @@ defmodule PropertyDamage.ComparisonTest do
           seed: 12_345
         )
 
-      fast_p50 = stats.metrics["fast"].latency_p50
-      slow_p50 = stats.metrics["slow"].latency_p50
+      fast_p50 = stats.metrics["fast"].p50
+      slow_p50 = stats.metrics["slow"].p50
 
       # Slow adapter should have higher latency
       assert slow_p50 > fast_p50
@@ -443,7 +443,7 @@ defmodule PropertyDamage.ComparisonTest do
       assert Failure.detail(report.failure_reason) == :simulated_error
     end
 
-    test "counts no errors for targets that answer every command" do
+    test "reports exactly the timing keys for targets that answer every command" do
       {:ok, stats} =
         run_targets(
           model: LatencyModel,
@@ -458,8 +458,8 @@ defmodule PropertyDamage.ComparisonTest do
         )
 
       for name <- ["working", "slow"] do
-        assert stats.metrics[name].error_count == 0
-        assert stats.metrics[name].error_rate == 0.0
+        assert stats.metrics[name] |> Map.keys() |> Enum.sort() ==
+                 [:by_command, :commands, :max, :mean, :min, :p50, :p95, :p99]
       end
     end
   end
@@ -486,8 +486,8 @@ defmodule PropertyDamage.ComparisonTest do
       assert Enum.map(stats.targets, & &1.name) == ["fast-config", "slow-config"]
 
       # Verify different configs were used
-      fast_latency = stats.metrics["fast-config"].latency_p50
-      slow_latency = stats.metrics["slow-config"].latency_p50
+      fast_latency = stats.metrics["fast-config"].p50
+      slow_latency = stats.metrics["slow-config"].p50
 
       assert slow_latency > fast_latency
     end

@@ -54,7 +54,7 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
 
-  @version 11
+  @version 12
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -458,6 +458,9 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V12 format: a report records the run's `latency:` option as given and the
+  # latency `metrics` measured per target (`nil` when `latency:` was off), and
+  # a latency breach (`%Failure.Latency{}`) named by its statistic.
   # V10 format: a report records the run's `compare` options in place of v9's
   # `equivalence`, the failing run's per-observation `compare_counts`, the
   # run's `other_failures` when several targets failed, and a
@@ -488,7 +491,8 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v11 files (format versions 1-10) are refused (DR-041, following DR-039/DR-040).
+  # Pre-v12 files (format versions 1-11) are refused (DR-041, following DR-039/DR-040).
+  # A v11 report records neither the `latency` option nor the `metrics`.
   # A v10 sequence has no setup or teardown commands and a v10 report no
   # `setup_commands`/`teardown_commands`, where v11 records the commands a
   # reproduction runs around the roots. A v9 report records `equivalence` and a divergence of root events where v10
