@@ -347,7 +347,7 @@ For programmatic analysis:
 ### 1. Reset state between runs
 
 Each run should start from a clean SUT so failures reproduce independently. The
-bench resets its register before every sequence. `Adapter.setup/1` runs before
+bench resets its register in its adapter's `setup/1`, which runs before
 every run, shrink attempt and replay, so a reset there must be idempotent: it can
 find what a crashed run left. For your own service, either expose a reset endpoint or pass a `:reset_fn` to
 `PropertyDamage.Integration.run/1`. If the service cannot be reset, see
