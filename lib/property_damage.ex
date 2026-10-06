@@ -168,7 +168,7 @@ defmodule PropertyDamage do
           required(:seed) => integer(),
           required(:targets) => [%{index: non_neg_integer(), name: String.t()}],
           optional(:check_fires) => %{{module(), atom()} => non_neg_integer()},
-          optional(:compare_counts) => Comparison.counts(),
+          optional(:compare_counts) => Scheduler.compare_counts(),
           optional(:coverage) => term(),
           optional(:metrics) => %{String.t() => map()}
         }

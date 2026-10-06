@@ -650,7 +650,12 @@ defmodule PropertyDamage.Variant do
   # awaited the run's windows and nothing would await a new one. The finished
   # result takes the new events, projections and check results, so `observe/3`
   # and `finish/1` see them; a failure turns it into the failed result.
-  defp reread_finished(%{result: %{success: true} = result} = state, root) do
+  #
+  # A variant that has not halted re-reads, as before the end. Under
+  # `check_mode: :record` that includes a variant whose result holds a check
+  # failure an earlier re-read recorded: the recorded failure does not stop
+  # it, so every variant keeps re-reading alike.
+  defp reread_finished(%{halted: nil, result: result} = state, root) do
     log_before = length(result.event_log)
     state = %{state | phase: :ready, exec: finished_exec(state.exec, result)}
 
@@ -668,7 +673,7 @@ defmodule PropertyDamage.Variant do
     end
   end
 
-  # Only a run that finished cleanly is compared at its final boundary.
+  # A variant that halted steps nothing more.
   defp reread_finished(state, _root), do: {{:ok, 0}, state}
 
   # The executor state a finished run left: the result holds what

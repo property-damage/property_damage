@@ -32,13 +32,7 @@ defmodule PropertyDamage.Comparison do
   @type key :: {module(), atom()}
 
   @typedoc "Per-key counters: boundaries compared at, boundaries waited at, time waited."
-  @type counts :: %{
-          key() => %{
-            compared_at: non_neg_integer(),
-            waited_at: non_neg_integer(),
-            waited_ms: non_neg_integer()
-          }
-        }
+  @type counts :: PropertyDamage.Scheduler.compare_counts()
 
   # ==========================================================================
   # Declarations

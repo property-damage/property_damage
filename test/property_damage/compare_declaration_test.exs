@@ -98,4 +98,78 @@ defmodule PropertyDamage.CompareDeclarationTest do
              %{name: :observed, schedule: %{roots: :none, end: true}}
            ]
   end
+
+  describe "a function with several clauses" do
+    test "a second @compare on a later clause is a compile error naming the function" do
+      assert {:error, message} =
+               compile("""
+                 @impl true
+                 def init, do: %{paid: 0}
+
+                 @impl true
+                 def apply(s, _), do: s
+
+                 @compare every: 1
+                 def paid(%{paid: 0}, _root), do: 0
+
+                 @compare every: :end
+                 def paid(s, _root), do: s.paid
+               """)
+
+      assert message =~ "paid/2"
+      assert message =~ "a function carries one @compare, written above its first clause"
+    end
+
+    test "a single @compare above the first clause is evaluated once per boundary" do
+      name = :"compare_declaration_#{System.unique_integer([:positive])}"
+      Process.register(self(), name)
+      projection = Module.concat(__MODULE__, "Clauses#{System.unique_integer([:positive])}")
+
+      assert {:ok, _} =
+               Compare.compile("""
+               defmodule #{inspect(projection)} do
+                 use PropertyDamage.Model.Projection
+                 alias PropertyDamage.Test.Compare.Paid
+
+                 @impl true
+                 def init, do: %{by: nil, paid: 0}
+
+                 @impl true
+                 def apply(s, %Paid{by: by}), do: %{s | by: by, paid: s.paid + 1}
+                 def apply(s, _), do: s
+
+                 @compare every: 1
+                 def paid(%{paid: 0} = s, root), do: evaluated(s, root, 0)
+                 def paid(s, root), do: evaluated(s, root, s.paid)
+
+                 defp evaluated(s, root, value) do
+                   send(#{inspect(name)}, {:evaluated, s.by, root.n})
+                   value
+                 end
+               end
+               """)
+
+      model =
+        Compare.define_model!(Module.concat(projection, Model), [projection], [
+          Compare.Pay,
+          Compare.Pay
+        ])
+
+      targets = [Compare.target("a"), Compare.target("b")]
+      assert {:ok, stats} = Compare.run(model, targets, max_commands: 2)
+      assert Compare.counts(stats, {projection, :paid}).compared_at == 2
+
+      evaluated = evaluations()
+      assert for({:evaluated, "a", n} <- evaluated, do: n) == [0, 1]
+      assert for({:evaluated, "b", n} <- evaluated, do: n) == [0, 1]
+    end
+  end
+
+  defp evaluations do
+    receive do
+      {:evaluated, _by, _n} = message -> [message | evaluations()]
+    after
+      0 -> []
+    end
+  end
 end

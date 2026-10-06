@@ -221,6 +221,11 @@ defmodule PropertyDamage.Model.Projection do
   `compare: [converge_within: ms]` for the sides to agree. With one target no
   observation is evaluated.
 
+  A function carries one `@compare`, written above its first clause; its
+  other clauses take none, and the observation is evaluated once per
+  boundary whichever clause answers. A second `@compare` on a later clause is
+  a compile error.
+
   ## Simplified Usage (No State)
 
   For checks that only inspect commands/events, skip `init/0` and `apply/2`:
@@ -814,6 +819,16 @@ defmodule PropertyDamage.Model.Projection do
           description:
             "cannot combine @compare with @check or @eventually on #{name}/2; " <>
               "a boundary observation is not a check."
+
+      # A later clause of a function that already carries a `@compare`
+      # would register its key a second time.
+      Enum.any?(Module.get_attribute(env.module, :__pd_compares__), &(&1.name == name)) ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "#{name}/2 already carries a @compare: a function carries one @compare, " <>
+              "written above its first clause."
 
       true ->
         Module.put_attribute(env.module, :__pd_compares__, Map.put(pending, :name, name))
