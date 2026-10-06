@@ -297,8 +297,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   An `external()` a setup command produced that is still unresolved after the last
   setup command is a setup failure that names the command, the field and the
   target. A setup failure in the reference ends the run before any root; in
-  another target it retires that target alone. It is never shrunk, and a shrink
-  attempt in which setup failed is not a reproduction.
+  another target, detected before the first root, it retires that target alone
+  (a setup-opened `@eventually` window that times out after the first root ends
+  the run). It is never shrunk, and a shrink attempt in which setup failed is
+  not a reproduction.
 - **Setup and teardown commands in reports (DR-048).** `FailureReport` gains
   `setup_commands` and `teardown_commands`, so a report reproduces without
   re-drawing; `stats` and the report count them apart from `total_commands`,

@@ -681,10 +681,16 @@ A setup failure SHALL have kind `:setup_failed` and carry a `PropertyDamage.Fail
 
 #### Scenario: A non-reference target fails during setup
 - **GIVEN** three targets, where the second fails in a setup command
-- **WHEN** the failure is detected
-- **THEN** that variant SHALL be retired: its pollers SHALL stop, its `:teardown` checks SHALL run, its teardown commands SHALL run, and its adapter's `teardown/1` SHALL run, before any target starts the first root, or the next root if the failure is detected later
+- **WHEN** the failure is detected before any target starts the first root
+- **THEN** that variant SHALL be retired: its pollers SHALL stop, its `:teardown` checks SHALL run, its teardown commands SHALL run, and its adapter's `teardown/1` SHALL run, before any target starts the first root
 - **AND** the other targets SHALL continue
 - **AND** the run SHALL end when no target other than the reference is left
+
+#### Scenario: A non-reference target's setup-opened eventual window times out after the first root
+- **GIVEN** two targets, where a setup command's event opened an `@eventually` window in the second
+- **WHEN** that window times out after the first root started
+- **THEN** the run SHALL end with a `:setup_failed` report naming the second target
+- **AND** every target SHALL be torn down
 
 ### Requirement: Teardown Commands Are Best Effort (DR-048)
 

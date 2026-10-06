@@ -104,11 +104,15 @@ This record settles it.
    Which targets go on:
    - A setup failure in the first target (the reference) ends the run before
      any root.
-   - A setup failure in another target retires only that target. Its pollers
-     stop, its `:teardown` checks run, its teardown commands run, and its
-     adapter's `teardown/1` runs. All of that happens before any target
-     starts the first root, or the next root if the failure is detected
-     later.
+   - A setup failure in another target, detected before the first root,
+     retires only that target. Its pollers stop, its `:teardown` checks run,
+     its teardown commands run, and its adapter's `teardown/1` runs, all
+     before any target starts the first root.
+   - The one setup failure detected after the first root (the eventual
+     window above) ends the run with that report, every target torn down,
+     as a check failure after the first root does. Whether that late case
+     should retire only its target is open, together with the scope of the
+     retire rule for check failures.
    - The other targets go on. The run ends when no target other than the
      reference is left.
    - Setup failures are never shrunk.

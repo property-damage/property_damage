@@ -528,8 +528,10 @@ if it times out after the roots started.
 With several targets, the reference is the first one:
 
 - A setup failure in the reference ends the run before any root.
-- A setup failure in another target retires that target alone. The others go on,
-  and the run ends when only the reference is left.
+- A setup failure in another target, found before the first root, retires that
+  target alone. The others go on, and the run ends when only the reference is
+  left. The one setup failure found later, an `@eventually` window that a setup
+  command opened and that times out after the first root, ends the run.
 
 The shrinker never shrinks a setup failure. During shrinking, an attempt in which
 a setup command failed is not a reproduction, so the shrinker rejects that
