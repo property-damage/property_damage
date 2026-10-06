@@ -78,6 +78,13 @@ defmodule PropertyDamage.FailureReport do
   reference. `failed_at_index` is the index of the command the failure belongs
   to, and `nil` for a setup failure or a failed `:startup` check.
 
+  `other_failures` lists the run's other failures when several targets failed
+  in one run (see `PropertyDamage.Scheduler`): the reported failure is the
+  first in root order, then target order, and each other one is
+  `%{variant: %{index:, name:}, root: root, failure: %PropertyDamage.Failure{}}`,
+  in the same order. It is `[]` when the run failed once. Shrinking keeps the
+  reported failure only; the other failures of the shrunk run may differ.
+
   `compare_counts` holds, per boundary observation `{projection, function}`,
   how many boundaries the failing run compared it at, how many it waited at,
   and the total time it waited (`%{compared_at:, waited_at:, waited_ms:}`),
@@ -110,6 +117,13 @@ defmodule PropertyDamage.FailureReport do
 
   @typedoc "A target's position in `targets:` and its name."
   @type variant :: %{index: non_neg_integer(), name: String.t()}
+
+  @typedoc "Another failure of the same run: the target, the root and the failure."
+  @type other_failure :: %{
+          variant: variant(),
+          root: non_neg_integer() | nil,
+          failure: Failure.t()
+        }
 
   @typedoc "A `targets:` entry in its normalized form: the adapter module and its options."
   @type target_entry :: {module(), keyword()}
@@ -174,6 +188,7 @@ defmodule PropertyDamage.FailureReport do
           # description is resolved once at construction.
           invariant_description: String.t() | nil,
           check_fires: %{{module(), atom()} => non_neg_integer()},
+          other_failures: [other_failure()],
           compare_counts: %{
             {module(), atom()} => %{
               compared_at: non_neg_integer(),
@@ -216,6 +231,7 @@ defmodule PropertyDamage.FailureReport do
             stacktrace: nil,
             invariant_description: nil,
             check_fires: %{},
+            other_failures: [],
             compare_counts: %{},
             command_labels: %{}
 
@@ -249,6 +265,8 @@ defmodule PropertyDamage.FailureReport do
   - `:compare` - The run's `compare:` (default `[converge_within: 5_000]`)
   - `:compare_counts` - The failing run's per-observation compare counts
     (default `%{}`)
+  - `:other_failures` - The run's other failures, `[%{variant:, root:,
+    failure:}]` (default `[]`)
   - `:stutter` - The run's normalized `stutter:` option (default `nil`, stutter
     off)
   - `:max_commands` - The run's `max_commands:` (default `nil`, not recorded)
@@ -346,6 +364,7 @@ defmodule PropertyDamage.FailureReport do
       stacktrace: stacktrace,
       invariant_description: invariant_description,
       check_fires: Keyword.get(opts, :check_fires, %{}),
+      other_failures: Keyword.get(opts, :other_failures, []),
       compare_counts: Keyword.get(opts, :compare_counts, %{}),
       command_labels: command_labels
     }
@@ -660,10 +679,14 @@ defmodule PropertyDamage.FailureReport do
   @spec check_name(t()) :: Failure.name()
   def check_name(%__MODULE__{failure_reason: fr}), do: failure_check_name(fr)
 
-  @doc "A human-readable message describing the failure, or `nil`."
-  @spec failure_message(t()) :: String.t() | nil
+  @doc """
+  A human-readable message describing the report's failure, or `nil`. Also
+  takes a bare `%PropertyDamage.Failure{}`, such as one of `other_failures`.
+  """
+  @spec failure_message(t() | Failure.t()) :: String.t() | nil
   def failure_message(%__MODULE__{failure_reason: %Failure{} = f}), do: message_for(f)
   def failure_message(%__MODULE__{}), do: nil
+  def failure_message(%Failure{} = failure), do: message_for(failure)
 
   @doc "The `%Stutter.Violation{}` for an idempotency failure, or `nil`."
   @spec idempotency_violation(t()) :: map() | nil

@@ -93,20 +93,13 @@ defmodule PropertyDamage.Variant do
     * `{:ok, events}` - the event values of the command's `:injected` log entries
       followed by its `:command` entries, in fold order (for a `:probe` or
       `:async` command, its settled events)
-    * `{:error, reason}` - the adapter's error term, reported only under
-      `on_adapter_error: :continue`, where the variant keeps going from the
-      failed command's state
-    * `{:error, {:placeholder_resolution_failed, reason}}` - under
-      `on_adapter_error: :continue`, a command whose placeholder could not be
-      resolved (its producer errored earlier); the adapter was not called and
-      the variant keeps going
 
   Anything that ends the variant returns `{:failed, failure}`, where `failure`
   is `%{kind: kind, root: index | nil, reason: reason}`:
 
     * `kind: :execution_failed` - the adapter raised (`reason` is the exception),
-      or answered `{:error, _}` under `on_adapter_error: :halt`, or the command
-      could not be executed (`reason` is the `%PropertyDamage.Failure{}`)
+      or answered `{:error, _}`, or the command could not be executed (`reason`
+      is the `%PropertyDamage.Failure{}`)
     * `kind: :check_failed` - a check failed (`reason` is the
       `%PropertyDamage.Failure{}`); `root` is `nil` for a `:startup` check, and
       for a check that failed on a drained event it is the command that event
@@ -114,7 +107,8 @@ defmodule PropertyDamage.Variant do
 
   After a failure the variant steps nothing more: every later `advance_to/2`
   returns the same `{:failed, failure}`, and `finish/1` reports the failed run
-  as `Executor.run/4` would.
+  as `Executor.run/4` would. A run that goes on without the failed variant
+  calls `retire/1` instead of `finish/1`.
   """
 
   use GenServer
@@ -134,7 +128,7 @@ defmodule PropertyDamage.Variant do
   alias PropertyDamage.Runtime.RunServices
 
   @typedoc "An observation of one command, as `advance_to/2` reports it."
-  @type observation :: {:ok, [struct()]} | {:error, term()}
+  @type observation :: {:ok, [struct()]}
 
   @typedoc "Why a variant stopped stepping."
   @type failure :: %{
@@ -165,9 +159,6 @@ defmodule PropertyDamage.Variant do
       sent.
     * `:stutter_config` - stutter configuration (default `nil`)
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
-    * `:on_adapter_error` - `:halt` (default) ends the variant at an adapter
-      `{:error, _}`, as the linear engine does; `:continue` reports it as an
-      observation and keeps stepping from the failed command's state
     * `:measure_latency` - when `true`, record the wall-clock time of every
       command's `execute/3` (see `latencies/1`); default `false`
 
@@ -275,6 +266,24 @@ defmodule PropertyDamage.Variant do
   def finish(pid), do: GenServer.call(pid, :finish, :infinity)
 
   @doc """
+  Finalize a variant that failed, for a run that goes on without it.
+
+  Finalizes the failed run as `finish/1` does, which stops every poller the
+  variant started, then runs the model's `@check at: :teardown` checks on the
+  failed state. A run that ends with its failure skips those checks, as
+  `PropertyDamage.Executor.run/4` does; a retired variant runs them, because
+  it leaves while the system keeps being exercised by the other targets.
+  Call `stop/1` afterwards to tear the adapter down.
+
+  Returns `{:ok, result, teardown_failures}`: the result `finish/1` reports,
+  and a `%PropertyDamage.Failure{}` per `:teardown` check that failed (a
+  check that raised holds `{exception, stacktrace}` as its reason). Returns
+  `{:error, :not_failed}` for a variant that did not fail.
+  """
+  @spec retire(pid()) :: {:ok, Executor.result(), [Failure.t()]} | {:error, :not_failed}
+  def retire(pid), do: GenServer.call(pid, :retire, :infinity)
+
+  @doc """
   Release everything the variant owns, in the variant process, then exit.
 
   Stops the pollers, tears the mocks and injectors down, stops the event queue,
@@ -329,7 +338,6 @@ defmodule PropertyDamage.Variant do
       mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
-      on_adapter_error: Keyword.get(opts, :on_adapter_error, :halt),
       measure_latency: Keyword.get(opts, :measure_latency, false),
       latencies: [],
       owner_ref: owner_ref,
@@ -413,6 +421,15 @@ defmodule PropertyDamage.Variant do
 
   def handle_call(:finish, _from, %{phase: :finished} = state),
     do: {:reply, state.result, state}
+
+  def handle_call(:retire, _from, %{phase: :halted} = state) do
+    state.stash |> Enum.reverse() |> Enum.each(&send(self(), &1))
+    result = Stepping.finalize(state.halted, state.ctx)
+    failures = teardown_check_failures(state.exec)
+    {:reply, {:ok, result, failures}, %{state | phase: :finished, result: result, stash: []}}
+  end
+
+  def handle_call(:retire, _from, state), do: {:reply, {:error, :not_failed}, state}
 
   def handle_call(:finish, _from, state), do: {:reply, {:error, :not_set_up}, state}
 
@@ -574,17 +591,6 @@ defmodule PropertyDamage.Variant do
       {:ok, exec, _outcome} ->
         observation = {:ok, root_events(exec.event_log, before.event_log, index)}
         {:cont, after_step(state, exec, index), observation}
-
-      {:error, _failure, failed, {:error, reason}}
-      when state.on_adapter_error == :continue ->
-        {:cont, after_step(state, failed, index), {:error, reason}}
-
-      # A consumer of a value an errored producer never minted: every variant
-      # that errored alike observes the same unresolved placeholder.
-      {:error, %Failure{type: %Failure.Framework{detail: reason}}, failed, :not_called}
-      when state.on_adapter_error == :continue ->
-        {:cont, after_step(state, failed, index),
-         {:error, {:placeholder_resolution_failed, reason}}}
 
       {:error, failure, failed, outcome} ->
         {:halt,
@@ -806,6 +812,20 @@ defmodule PropertyDamage.Variant do
 
     for(%{source: :injected, event: event} <- added, do: event) ++
       for %{source: :command, event: event} <- added, do: event
+  end
+
+  # The `@check at: :teardown` checks on a failed variant's state, as
+  # `%Failure{}`s in check order.
+  defp teardown_check_failures(exec) do
+    case Executor.run_phase_checks(exec, :teardown) do
+      {:halt, name, reason, _counters} ->
+        [Failure.check_failed(name, reason)]
+
+      {:ok, recorded, _counters} ->
+        recorded
+        |> Enum.reverse()
+        |> Enum.map(&Failure.check_failed(&1.check_name, &1.reason))
+    end
   end
 
   defp failure_of(index, _failure, {:raised, exception}),

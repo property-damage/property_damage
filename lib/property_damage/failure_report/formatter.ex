@@ -1,7 +1,7 @@
 defmodule PropertyDamage.FailureReport.Formatter do
   @moduledoc false
 
-  alias PropertyDamage.{FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
 
   @type format :: :terminal | :markdown | :json | :compact
 
@@ -41,6 +41,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       terminal_header(report, color),
       terminal_location(report, color),
       terminal_failure_explanation(report, color),
+      terminal_other_failures(report, color),
       terminal_shrunk_sequence(report, opts),
       if(show_state, do: terminal_state_transition(report, color), else: nil),
       if(show_event_log, do: terminal_event_log(report, max_events, color), else: nil),
@@ -363,6 +364,31 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp terminal_compare_counts(_report, _color), do: nil
 
+  # One line per other failure of the run, in root order, then target order.
+  defp terminal_other_failures(%{other_failures: [_ | _] = others}, color) do
+    lines =
+      Enum.map_join(others, "\n", fn other ->
+        "  #{cyan(color)}#{other_failure_line(other)}#{reset(color)}"
+      end)
+
+    """
+    #{section_header("Other Failures In This Run", color)}
+    #{lines}
+    """
+  end
+
+  defp terminal_other_failures(_report, _color), do: nil
+
+  defp other_failure_line(%{variant: variant, root: root, failure: failure}) do
+    name = Failure.name(failure)
+    label = if name, do: " #{FailureReport.format_name(name)}", else: ""
+    message = FailureReport.failure_message(failure)
+
+    "#{Failure.kind(failure)}#{label} in target #{inspect(variant.name)} " <>
+      "(index #{variant.index}) at root #{inspect(root)}" <>
+      if(message, do: ": #{message}", else: "")
+  end
+
   defp format_poll_timeout_terminal(report, color) do
     info = FailureReport.poll_timeout_info(report)
 
@@ -642,6 +668,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       markdown_header(report),
       markdown_location(report),
       markdown_failure_reason(report),
+      markdown_other_failures(report),
       markdown_shrinking_stats(report),
       markdown_command_sequence(report, opts),
       if(show_state, do: markdown_state(report), else: nil),
@@ -827,6 +854,16 @@ defmodule PropertyDamage.FailureReport.Formatter do
     end
   end
 
+  defp markdown_other_failures(%{other_failures: [_ | _] = others}) do
+    """
+    ## Other Failures In This Run
+
+    #{Enum.map_join(others, "\n", &"- #{other_failure_line(&1)}")}
+    """
+  end
+
+  defp markdown_other_failures(_report), do: nil
+
   defp markdown_shrinking_stats(report) do
     original_count = Sequence.command_count(report.original_sequence)
     shrunk_count = Sequence.command_count(FailureReport.shrunk_sequence(report))
@@ -948,6 +985,18 @@ defmodule PropertyDamage.FailureReport.Formatter do
   # JSON Format
   # ============================================================================
 
+  defp serialize_other_failure(%{variant: variant, root: root, failure: failure}) do
+    name = Failure.name(failure)
+
+    %{
+      "variant" => %{"index" => variant.index, "name" => variant.name},
+      "root" => root,
+      "type" => to_string(Failure.kind(failure)),
+      "check_name" => name && FailureReport.format_name(name),
+      "message" => FailureReport.failure_message(failure)
+    }
+  end
+
   defp format_json(report, opts) do
     indent = Keyword.get(opts, :indent, 2)
 
@@ -984,7 +1033,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       },
       "sequence" =>
         serialize_sequence(FailureReport.shrunk_sequence(report), report.command_labels),
-      "reproduction" => FailureReport.reproduction_command(report)
+      "reproduction" => FailureReport.reproduction_command(report),
+      "other_failures" => Enum.map(report.other_failures, &serialize_other_failure/1)
     }
 
     # Add optional sections

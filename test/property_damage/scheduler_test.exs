@@ -192,15 +192,20 @@ defmodule PropertyDamage.SchedulerTest do
   end
 
   describe "adapter {:error, _} at a root" do
-    test "with two variants it is compared like any observation and both variants continue" do
+    test "with two variants it fails the reference and stops the run at that root" do
       recorder = start_recorder()
       targets = step_targets(["a", "b"], %{recorder: recorder})
       commands = [%Step{value: 1}, %Step{value: 2, fail: true}, %Step{value: 3}]
 
       assert {:ok, run} = run_scheduler(run_opts(StepModel, targets, commands, []))
-      assert run.failure == nil
-      assert entered(recorder, "a") == [0, 1, 2]
-      assert entered(recorder, "b") == [0, 1, 2]
+
+      assert %{kind: :execution_failed, variant: %{index: 0, name: "a"}, root: 1} = run.failure
+      assert %Failure{type: %Failure.Execution{kind: :adapter_error}} = run.failure.reason
+      assert run.other_failures == []
+
+      # Serial lockstep: "b" never starts the root the reference failed at.
+      assert entered(recorder, "a") == [0, 1]
+      assert entered(recorder, "b") == [0]
     end
 
     test "with one variant it ends the run as the linear engine does" do

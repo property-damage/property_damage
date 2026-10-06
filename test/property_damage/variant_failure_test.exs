@@ -1,5 +1,5 @@
 defmodule PropertyDamage.VariantFailureTest do
-  # How a variant reports what ends it, and its two adapter-error modes.
+  # How a variant reports what ends it, and how a failed variant is retired.
   use ExUnit.Case, async: true
 
   import PropertyDamage.Test.VariantSupport
@@ -52,24 +52,35 @@ defmodule PropertyDamage.VariantFailureTest do
     :ok = Variant.stop(v)
   end
 
-  test "an adapter error halts by default and is an observation under :continue" do
+  test "an adapter error ends the variant, and retire/1 finalizes it for a run that goes on" do
     commands = [%Step{value: 1, fail: true}, %Step{value: 2}]
 
-    halting = start(target(%{}), StepModel, commands)
-    :ok = Variant.setup(halting)
+    v = start(target(%{}), StepModel, commands)
+    :ok = Variant.setup(v)
 
-    assert {:failed, %{kind: :execution_failed, root: 0, reason: %Failure{}}} =
-             Variant.advance_to(halting, 1)
+    assert {:failed, %{kind: :execution_failed, root: 0, reason: %Failure{}} = failure} =
+             Variant.advance_to(v, 1)
 
-    :ok = Variant.stop(halting)
+    assert Variant.advance_to(v, 1) == {:failed, failure}
 
-    continuing = start(target(%{}), StepModel, commands, on_adapter_error: :continue)
-    :ok = Variant.setup(continuing)
+    assert {:ok, result, []} = Variant.retire(v)
+    refute result.success
+    assert result.failed_at_index == 0
 
-    assert {:ok, [{0, {:error, :refused}}, {1, {:ok, [%Stepped{value: 2}]}}]} =
-             Variant.advance_to(continuing, 1)
+    assert %Failure{type: %Failure.Execution{kind: :adapter_error, detail: :refused}} =
+             result.failure_reason
 
-    :ok = Variant.stop(continuing)
+    assert Variant.finish(v) == result
+    :ok = Variant.stop(v)
+  end
+
+  test "retire/1 refuses a variant that did not fail" do
+    v = start(target(%{}), StepModel, [%Step{value: 1}])
+    :ok = Variant.setup(v)
+
+    assert {:ok, [{0, {:ok, [%Stepped{value: 1}]}}]} = Variant.advance_to(v, 0)
+    assert Variant.retire(v) == {:error, :not_failed}
+    :ok = Variant.stop(v)
   end
 
   test "an adapter raise is an execution failure carrying the exception" do

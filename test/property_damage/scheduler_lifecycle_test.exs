@@ -216,7 +216,8 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
         max_runs: 1,
         max_commands: 12,
         seed: seed,
-        validate: false
+        validate: false,
+        shrink: false
       )
     end
 
@@ -224,34 +225,43 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
       for {:received, ^prefix, command} <- take_messages(:received), do: command
     end
 
-    test "is observed alike when every variant's producer errored, and the run goes on" do
-      {seed, commands, _first_create} = routing_seed()
+    test "when every variant's producer errored, the reference fails there and no Use runs" do
+      {seed, commands, first_create} = routing_seed()
 
-      assert {:ok, _stats} = run_routing(seed, [mint_target("a", true), mint_target("b", true)])
+      assert {:error, report} =
+               run_routing(seed, [mint_target("a", true), mint_target("b", true)])
+
+      assert report.kind == :execution_failed
+      assert report.variant == %{index: 0, name: "a"}
+      assert report.failed_at_index == first_create
+      assert Failure.detail(report.failure_reason) == :refused
+      assert report.other_failures == []
 
       messages = take_messages(:received)
-      creates = Enum.count(commands, &match?(%Create{}, &1))
+      sent = fn prefix -> for {:received, ^prefix, command} <- messages, do: command end
 
-      for prefix <- ["a", "b"] do
-        sent = for {:received, ^prefix, command} <- messages, do: command
-        # Every Create ran, including the ones after the unresolvable Use; no
-        # Use reached the adapter.
-        assert Enum.count(sent, &match?(%Create{}, &1)) == creates
-        refute Enum.any?(sent, &match?(%Use{}, &1))
-      end
+      # The run (and its reproduction) stopped at the first Create: the
+      # reference refused it, and under :serial "b" never started that root.
+      assert Enum.all?(sent.("a"), &match?(%Create{}, &1))
+      assert sent.("a") != []
+      assert sent.("b") == []
+      assert Enum.at(commands, first_create).__struct__ == Create
     end
 
-    test "control: when only one variant's producer errored, the run diverges at the producer" do
+    test "when only a non-reference producer errored, that variant fails at the producer" do
       {seed, _commands, first_create} = routing_seed()
 
-      assert {:error, %FailureReport{kind: :diverged} = report} =
+      assert {:error, %FailureReport{kind: :execution_failed} = report} =
                run_routing(seed, [mint_target("a", false), mint_target("b", true)])
 
-      divergence = Failure.detail(report.failure_reason)
-      assert divergence.root == first_create
+      assert report.variant == %{index: 1, name: "b"}
       assert report.failed_at_index == first_create
-      assert divergence.variant_value.created < divergence.reference_value.created
+      assert Failure.detail(report.failure_reason) == :refused
+
+      # With no other variant left to compare, the run ended there: no Use
+      # reached either adapter.
       assert received("b") != []
+      refute Enum.any?(received("a"), &match?(%Use{}, &1))
     end
   end
 

@@ -23,6 +23,13 @@ defmodule PropertyDamage.Shrinker do
     target). A candidate that fails in another target, or with another kind, is
     a different failure and is rejected.
 
+  When several targets fail in one run (a target other than the reference
+  whose adapter failed leaves the run and the others go on), a candidate is
+  judged by its primary failure only, the first in root order, then target
+  order (`PropertyDamage.Scheduler`). Its other failures take no part: a
+  candidate whose other failures differ from the original's, or that has none,
+  is accepted when its primary failure matches.
+
   For a divergence the name matters as much as the target. Suppose one target
   computes label counts wrongly, and a `@compare` function `labels/2` catches
   it. A candidate that drops a command the labels depend on may make another

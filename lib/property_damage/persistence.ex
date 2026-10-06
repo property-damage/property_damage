@@ -52,7 +52,7 @@ defmodule PropertyDamage.Persistence do
   file holds.
   """
 
-  alias PropertyDamage.{FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
 
   @version 10
   @extension ".pd"
@@ -355,6 +355,7 @@ defmodule PropertyDamage.Persistence do
       compare: Map.new(report.compare),
       compare_counts:
         Map.new(report.compare_counts, fn {key, counts} -> {name_string(key), counts} end),
+      other_failures: Enum.map(report.other_failures, &export_other_failure/1),
       stutter: report.stutter && inspect(report.stutter),
       max_commands: report.max_commands,
       shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
@@ -367,6 +368,16 @@ defmodule PropertyDamage.Persistence do
   # ============================================================================
   # Private Helpers
   # ============================================================================
+
+  defp export_other_failure(%{variant: variant, root: root, failure: failure}) do
+    %{
+      variant: variant,
+      root: root,
+      failure_type: Failure.kind(failure),
+      name: name_string(Failure.name(failure)),
+      message: FailureReport.failure_message(failure)
+    }
+  end
 
   # A failure's name as JSON and in a file name: a module by its Elixir name,
   # a `{projection, function}` key as `Projection.function`, any other atom as
@@ -446,7 +457,8 @@ defmodule PropertyDamage.Persistence do
   end
 
   # V10 format: a report records the run's `compare` options in place of v9's
-  # `equivalence`, the failing run's per-observation `compare_counts`, and a
+  # `equivalence`, the failing run's per-observation `compare_counts`, the
+  # run's `other_failures` when several targets failed, and a
   # divergence (`%Failure.Divergence{}`) or failure to converge
   # (`%Failure.Convergence{}`) named by its `{projection, function}` key.
   # As in v9, a report records the run's `targets` (the reference first), its

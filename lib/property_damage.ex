@@ -807,6 +807,7 @@ defmodule PropertyDamage do
       fires: fires,
       compare_counts: outcome.compare_counts,
       failure: outcome.failure,
+      other_failures: outcome.other_failures,
       result: Enum.at(outcome.results, outcome.failure.variant.index)
     }
   end
@@ -840,6 +841,7 @@ defmodule PropertyDamage do
       fires: fires,
       compare_counts: Comparison.zero_counts(ctx.model),
       failure: failure,
+      other_failures: [],
       result: result
     }
   end
@@ -1304,8 +1306,8 @@ defmodule PropertyDamage do
     # the original failing run: its sequence, reason, index, target and state.
     report =
       case reproduce(ctx, shrunk_sequence, found, fresh_epoch) do
-        {:reproduced, failure, result} ->
-          reproduced = %{found | failure: failure, result: result}
+        {:reproduced, failure, result, other_failures} ->
+          reproduced = %{found | failure: failure, result: result, other_failures: other_failures}
           failure_report(ctx, reproduced, {:shrunk, shrunk_sequence, fresh_epoch, shrink})
 
         # A passing re-run, or a re-execution whose adapter setup failed: not
@@ -1321,8 +1323,9 @@ defmodule PropertyDamage do
   # the scheduler, a branching one on the one target through the linear engine,
   # each with its own services. For a stutter failure, stutter is forced on
   # with the run's seed so the fresh state carries the reproduced violation
-  # (DR-029). Returns `{:reproduced, failure, result}` when it fails with the
-  # found failure's signature (kind, name, target), `{:setup_failed, reason}`
+  # (DR-029). Returns `{:reproduced, failure, result, other_failures}` when its
+  # primary failure has the found failure's signature (kind, name, target),
+  # whatever its other failures, `{:setup_failed, reason}`
   # when a target's setup failed, else `:not_reproduced`.
   defp reproduce(ctx, %Sequence{branches: nil} = sequence, found, epoch) do
     {:ok, outcome} =
@@ -1350,7 +1353,9 @@ defmodule PropertyDamage do
 
       failure ->
         if same_failure?(failure, found.failure),
-          do: {:reproduced, failure, Enum.at(outcome.results, failure.variant.index)},
+          do:
+            {:reproduced, failure, Enum.at(outcome.results, failure.variant.index),
+             outcome.other_failures},
           else: :not_reproduced
     end
   end
@@ -1382,7 +1387,7 @@ defmodule PropertyDamage do
         }
 
         if same_failure?(failure, found.failure),
-          do: {:reproduced, failure, result},
+          do: {:reproduced, failure, result, []},
           else: :not_reproduced
 
       {:error, reason} ->
@@ -1449,9 +1454,13 @@ defmodule PropertyDamage do
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
       check_fires: found.fires,
+      other_failures: Enum.map(found.other_failures, &other_failure/1),
       compare_counts: found.compare_counts
     )
   end
+
+  defp other_failure(failure),
+    do: %{variant: failure.variant, root: failure.root, failure: failure.reason}
 
   # Announces a failure report and returns it as the run's result.
   defp report_failure(ctx, failure_report) do
@@ -1680,7 +1689,7 @@ defmodule PropertyDamage do
     # genuine reproduction. A re-execution that passes or fails differently
     # confirms nothing, so the incoming report comes back unchanged.
     case reproduce(ctx, shrink_result.sequence, found, fresh_epoch) do
-      {:reproduced, failure, result} ->
+      {:reproduced, failure, result, other_failures} ->
         elapsed = System.monotonic_time(:millisecond) - start_time
 
         {:ok,
@@ -1711,6 +1720,7 @@ defmodule PropertyDamage do
            concurrency: ctx.concurrency,
            compare: ctx.compare,
            compare_counts: report.compare_counts,
+           other_failures: Enum.map(other_failures, &other_failure/1),
            stutter: ctx.stutter,
            max_commands: report.max_commands,
            linearization: Map.get(result, :linearization),

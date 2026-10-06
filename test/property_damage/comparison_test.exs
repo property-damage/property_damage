@@ -7,7 +7,7 @@ defmodule PropertyDamage.ComparisonTest do
     send(parent, {:telemetry, event, measurements, metadata})
   end
 
-  alias PropertyDamage.FailureReport
+  alias PropertyDamage.{Failure, FailureReport}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{RunResult, RunUpdate}
 
@@ -422,8 +422,8 @@ defmodule PropertyDamage.ComparisonTest do
       assert slow_p50 > fast_p50
     end
 
-    test "counts errors correctly" do
-      {:ok, stats} =
+    test "an erroring target ends the run as its execution failure instead of being counted" do
+      {:error, report} =
         run_targets(
           model: LatencyModel,
           targets: [
@@ -433,14 +433,34 @@ defmodule PropertyDamage.ComparisonTest do
           latency: true,
           max_runs: 2,
           max_commands: 2,
+          seed: 12_345,
+          shrink: false
+        )
+
+      assert report.kind == :execution_failed
+      assert report.variant == %{index: 1, name: "broken"}
+      assert Failure.kind(report.failure_reason) == :adapter_error
+      assert Failure.detail(report.failure_reason) == :simulated_error
+    end
+
+    test "counts no errors for targets that answer every command" do
+      {:ok, stats} =
+        run_targets(
+          model: LatencyModel,
+          targets: [
+            {ReferenceAdapter, name: "working"},
+            {SlowAdapter, name: "slow", config: %{delay_ms: 1}}
+          ],
+          latency: true,
+          max_runs: 2,
+          max_commands: 2,
           seed: 12_345
         )
 
-      working_metrics = stats.metrics["working"]
-      broken_metrics = stats.metrics["broken"]
-
-      assert working_metrics.error_count == 0
-      assert broken_metrics.error_count > 0
+      for name <- ["working", "slow"] do
+        assert stats.metrics[name].error_count == 0
+        assert stats.metrics[name].error_rate == 0.0
+      end
     end
   end
 

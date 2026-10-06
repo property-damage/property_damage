@@ -283,12 +283,17 @@ defmodule PropertyDamage.LockstepRunTest do
       assert [{_value, :bad} | _] = divergence.variant_value.stepped
     end
 
-    test "an adapter {:error, reason} in one target leaves that target's observation behind" do
-      report = failure!([step("a"), step("b", %{behavior: :error})])
+    test "an adapter {:error, reason} in one target is that target's failure, not a divergence" do
+      report = failure!([step("a"), step("b", %{behavior: :error})], shrink: false)
 
-      divergence = Failure.detail(report.failure_reason)
-      assert [{_value, nil}] = divergence.reference_value.stepped
-      assert divergence.variant_value.stepped == []
+      assert report.kind == :execution_failed
+      assert report.variant == %{index: 1, name: "b"}
+      assert report.failed_at_index == 0
+      assert Failure.kind(report.failure_reason) == :adapter_error
+      assert Failure.detail(report.failure_reason) == :refused
+
+      # The report's state is the failing target's: nothing it answered was folded.
+      assert report.state_at_failure[PropertyDamage.Test.Lockstep.Answers].stepped == []
     end
 
     test "an observation that folds no identifiers ignores them; one that folds them diverges" do
@@ -474,28 +479,43 @@ defmodule PropertyDamage.LockstepRunTest do
 
   describe "latency measurement" do
     test "reports today's latency metrics per target and excludes warm-up runs" do
+      # "rejecting" answers every command with an event of its own, as a
+      # system that rejects a request does; an event is never an error.
       assert {:ok, stats} =
-               run!([step("fast"), step("broken", %{behavior: :error})],
+               run!([step("fast"), step("rejecting", %{behavior: :shift})],
                  model: __MODULE__.LatencyModel,
                  latency: true,
                  max_runs: 3,
                  warmup_runs: 1
                )
 
-      assert stats.metrics |> Map.keys() |> Enum.sort() == ["broken", "fast"]
+      assert stats.metrics |> Map.keys() |> Enum.sort() == ["fast", "rejecting"]
 
       measured =
         Enum.sum(for run <- 1..2, do: length(generated(StepModel, @seed, run, 3)))
 
-      for name <- ["fast", "broken"] do
+      for name <- ["fast", "rejecting"] do
         metrics = stats.metrics[name]
         assert metrics |> Map.keys() |> Enum.sort() == @metric_keys
         assert metrics.total_commands == measured
+        assert metrics.error_count == 0
+        assert metrics.error_rate == 0.0
       end
+    end
 
-      assert stats.metrics["fast"].error_count == 0
-      assert stats.metrics["broken"].error_count == measured
-      assert stats.metrics["broken"].error_rate == 1.0
+    test "an adapter {:error, _} ends a latency run as that target's execution failure" do
+      assert {:error, report} =
+               run!([step("fast"), step("broken", %{behavior: :error})],
+                 model: __MODULE__.LatencyModel,
+                 latency: true,
+                 max_runs: 3,
+                 warmup_runs: 1,
+                 shrink: false
+               )
+
+      assert report.kind == :execution_failed
+      assert report.variant == %{index: 1, name: "broken"}
+      assert report.run_number == 0
     end
   end
 

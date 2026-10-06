@@ -262,9 +262,15 @@ defmodule PropertyDamage.RunTargetsTest do
       assert Failure.kind(report.failure_reason) == :adapter_error
     end
 
-    test "two targets that answer the same {:error, _} continue and pass" do
-      assert {:ok, %{runs: 2}} =
+    test "two targets that answer the same {:error, _} fail in the reference" do
+      assert {:error, report} =
                run([step("a", %{behavior: :error}), step("b", %{behavior: :error})], max_runs: 2)
+
+      assert report.kind == :execution_failed
+      assert report.variant == %{index: 0, name: "a"}
+      assert report.failed_at_index == 0
+      assert Failure.kind(report.failure_reason) == :adapter_error
+      assert report.other_failures == []
     end
   end
 
