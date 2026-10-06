@@ -97,6 +97,9 @@ defmodule PropertyDamage.EventLog.Entry do
   - `stutter_comparison` - Comparison result with original events (only for `:stutter` source)
   - `resource_poller_id` - Reference identifying the poller instance (only for `:resource_poller` source)
   - `phase` - `:root`, `:setup` or `:teardown` (see "Phase")
+  - `leaf_index` - For an entry of a root that ran as an expansion
+    (`c:PropertyDamage.Model.expansions/0`), the leaf that produced it; `nil`
+    otherwise. `command_index` stays the root's index.
   - `fold_index` - Monotonic per-run ordinal stamped when this entry's event was
     folded into the projections (P8 / DR-040). It records the *actual* fold order,
     which the faithful per-step state timeline (`PropertyDamage.RunTrace.state_at/2`)
@@ -127,7 +130,8 @@ defmodule PropertyDamage.EventLog.Entry do
           stutter_comparison: :match | {:mismatch, Exception.t()} | nil,
           resource_poller_id: reference() | nil,
           phase: phase(),
-          fold_index: non_neg_integer() | nil
+          fold_index: non_neg_integer() | nil,
+          leaf_index: non_neg_integer() | nil
         }
 
   @typedoc "Which part of a run an entry belongs to; see \"Phase\"."
@@ -155,6 +159,7 @@ defmodule PropertyDamage.EventLog.Entry do
     :stutter_comparison,
     :resource_poller_id,
     :fold_index,
+    :leaf_index,
     phase: :root
   ]
 

@@ -54,7 +54,7 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
 
-  @version 12
+  @version 13
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -458,6 +458,10 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V13 format: a report records the `expansions` each target ran at each root
+  # it executed and the `expansion_counts` per target and root module; its
+  # trace keeps every target's concrete commands per root (`expansion`), and an
+  # event-log entry names the leaf of an expansion that produced it.
   # V12 format: a report records the run's `latency:` option as given and the
   # latency `metrics` measured per target (`nil` when `latency:` was off), and
   # a latency breach (`%Failure.Latency{}`) named by its statistic.
@@ -494,7 +498,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v12 files (format versions 1-11) are refused (DR-041, following DR-039/DR-040).
+  # Pre-v13 files (format versions 1-12) are refused (DR-041, following DR-039/DR-040).
+  # A v12 report records neither `expansions` nor `expansion_counts`, and its
+  # trace no target's concrete commands.
   # A v11 report records neither the `latency` option nor the `metrics`.
   # A v10 sequence has no setup or teardown commands and a v10 report no
   # `setup_commands`/`teardown_commands`, where v11 records the commands a

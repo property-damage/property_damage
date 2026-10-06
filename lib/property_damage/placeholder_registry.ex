@@ -77,6 +77,25 @@ defmodule PropertyDamage.PlaceholderRegistry do
   end
 
   @doc """
+  Make the placeholder `root` resolve from the value `leaf` captures.
+
+  `root` keeps its id, so every command that holds it still resolves by that
+  id; its capture coordinates (position, event index, path) become `leaf`'s,
+  so the command at `leaf`'s position captures it. Used when a root runs as an
+  expansion: the placeholders its own simulation minted are produced by one of
+  its leaves instead.
+  """
+  @spec alias_to(t(), Placeholder.t(), Placeholder.t()) :: t()
+  def alias_to(%__MODULE__{} = reg, %Placeholder{} = root, %Placeholder{} = leaf) do
+    register(reg, %{
+      root
+      | position: leaf.position,
+        event_index: leaf.event_index,
+        path: leaf.path
+    })
+  end
+
+  @doc """
   Remap the `producer_link` from original positions onto new positions (DR-021).
 
   `orig_to_new` maps each original producer position to the position it now

@@ -45,11 +45,11 @@ defmodule PropertyDamage.Telemetry do
 
   - `[:property_damage, :command, :start]` - Command execution started
     - Measurements: `%{system_time: integer()}`
-    - Metadata: `%{command: module(), phase: phase(), index: integer(), run_number: integer(), variant: variant()}`
+    - Metadata: `%{command: module(), phase: phase(), index: integer(), root_index: integer() | nil, leaf_index: integer() | nil, run_number: integer(), variant: variant()}`
 
   - `[:property_damage, :command, :stop]` - Command execution completed
     - Measurements: `%{duration: integer()}`
-    - Metadata: `%{command: module(), phase: phase(), index: integer(), run_number: integer(), variant: variant(), success: boolean(), events_count: integer()}`
+    - Metadata: `%{command: module(), phase: phase(), index: integer(), root_index: integer() | nil, leaf_index: integer() | nil, run_number: integer(), variant: variant(), success: boolean(), events_count: integer()}`
 
   `command` is the command's module. `phase()` is `:setup` for a setup
   command (`c:PropertyDamage.Model.setup_each/0`), `:root` for a command of the
@@ -63,6 +63,12 @@ defmodule PropertyDamage.Telemetry do
   the run, so its `success` is whether its adapter call answered `{:ok, _}`.
   `variant()` is `%{index: non_neg_integer(), name: String.t()}`, the target's
   position in `targets:` and its name (`index: 0` with one target).
+
+  `root_index` is the index of the root a command belongs to, and `nil` for a
+  setup or teardown command. When a root runs as an expansion
+  (`c:PropertyDamage.Model.expansions/0`), the root itself emits no events and
+  each of its leaves does, with its position among the leaves in
+  `leaf_index`; a root that runs as itself has `leaf_index: nil`.
 
   ### Check Execution
 
@@ -204,16 +210,23 @@ defmodule PropertyDamage.Telemetry do
   # root, `{:setup, offset}` or `{:teardown, offset}` for a setup or teardown
   # command. `fun` returns the engine's step result; its `{:ok, _, {:ok,
   # events}}` shape counts the events.
+  #
+  # `leaf_index` names the leaf of a root's expansion the command is (nil for
+  # a root that runs as itself); the metadata carries it with the root's index
+  # (`root_index`, nil for a setup or teardown command).
   @spec command_span(
           map() | nil,
           term(),
           non_neg_integer() | {:setup | :teardown, non_neg_integer()},
-          (-> result)
+          (-> result),
+          non_neg_integer() | nil
         ) :: result
         when result: term()
-  def command_span(nil, _command, _index, fun), do: fun.()
+  def command_span(context, command, index, fun, leaf_index \\ nil)
 
-  def command_span(context, command, index, fun) do
+  def command_span(nil, _command, _index, fun, _leaf_index), do: fun.()
+
+  def command_span(context, command, index, fun, leaf_index) do
     {phase, offset} =
       case index do
         {phase, offset} -> {phase, offset}
@@ -224,6 +237,8 @@ defmodule PropertyDamage.Telemetry do
       command: command_module(command),
       phase: phase,
       index: offset,
+      root_index: if(phase == :root, do: offset),
+      leaf_index: if(phase == :root, do: leaf_index),
       run_number: context.run_number,
       variant: context.variant
     }

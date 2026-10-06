@@ -60,6 +60,10 @@ defmodule PropertyDamage.Validation do
     # commands, fails here as it fails PropertyDamage.run/1.
     PropertyDamage.Model.check_lifecycle!(model)
 
+    # The shape of expansions/0 and the @compare it needs fail here as they
+    # fail PropertyDamage.run/1.
+    PropertyDamage.Expansion.check_model!(model)
+
     # Phase 3: Validate commands and projections (requires callbacks)
     errors = []
     errors = errors ++ validate_commands(model)
@@ -101,9 +105,6 @@ defmodule PropertyDamage.Validation do
     end
   end
 
-  defp entry_opts({module, weight}) when is_atom(module) and is_integer(weight),
-    do: {module, [weight: weight]}
-
   defp entry_opts({module, opts}) when is_atom(module) and is_list(opts), do: {module, opts}
 
   defp entry_opts(%{command: module} = map),
@@ -120,6 +121,7 @@ defmodule PropertyDamage.Validation do
         reduce: [] do
       acc ->
         validate_command_spec!(entry)
+        PropertyDamage.Model.normalize_command_spec(entry)
         module = PropertyDamage.Model.entry_module(entry)
 
         cond do
@@ -224,10 +226,10 @@ defmodule PropertyDamage.Validation do
     :ok
   end
 
-  # {module, weight} format (bare integer)
+  # A bare integer is not a weight.
   defp validate_command_spec!({cmd, weight})
        when is_atom(cmd) and is_integer(weight) and weight > 0 do
-    :ok
+    raise ArgumentError, PropertyDamage.Model.weight_shorthand_message(cmd, weight)
   end
 
   defp validate_command_spec!({cmd, weight}) when is_atom(cmd) and is_integer(weight) do

@@ -112,6 +112,14 @@ defmodule PropertyDamage.LifecycleValidationTest do
       assert error.message =~ "NetworkLatency"
     end
 
+    test "a bare integer weight in teardown_each/0 is rejected naming weight:" do
+      model = model!(BareWeight, teardown: [{Login, 3}])
+
+      error = assert_raise ArgumentError, fn -> Validation.validate!(model, FixtureAdapter) end
+      assert error.message =~ "weight:"
+      assert error.message =~ inspect(Login)
+    end
+
     test "when: and weight: warn that they are ignored in a sequence" do
       model =
         model!(Ignored,

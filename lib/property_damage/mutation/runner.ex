@@ -95,7 +95,7 @@ defmodule PropertyDamage.Mutation.Runner do
 
   defp get_command_types(model) do
     # Use the canonical normalizer so every command-spec shape ({module, opts},
-    # {module, weight}, bare module, map form) resolves to its module. The prior
+    # bare module, map form) resolves to its module. The prior
     # ad-hoc `{_weight, cmd}` match destructured the standard `{module, opts}`
     # spec backwards, yielding the opts keyword list as the "command"; that
     # invalid target then crashed the MutatingAdapter and every mutant was

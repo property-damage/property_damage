@@ -32,7 +32,8 @@ defmodule Mix.Tasks.Pd.Validate do
   - Events produced but not handled by check projections
   - Missing optional callbacks that may be useful
   - A `when:` or `weight:` on a setup or teardown entry (`setup_each/0`,
-    `teardown_each/0`): every entry of a sequence runs, in order
+    `teardown_each/0`) or on a leaf of an expansion: every entry of a sequence
+    runs, in order
   - Two targets with the same adapter and an identical `config:`: such targets
     share state, so give each its own `config:` (for example a tenant)
 
@@ -41,6 +42,19 @@ defmodule Mix.Tasks.Pd.Validate do
       --verbose         Show detailed information about the model
       --strict          Treat warnings as errors
       --targets EXPR    Validate against a `targets:` list instead of a positional adapter
+      --seeds N         Root sequences to sample for a model with expansions/0 (default 100)
+      --seed S          Sample the seeds S, S+1, ... instead of fresh seeds
+
+  ## Expansions
+
+  For a model that defines `expansions/0`, the task generates `--seeds` root
+  sequences and realizes every target's expansions on each, as a run does
+  (without `--targets`, one `expansion: :random` target named after the
+  adapter). It prints the seeds it used, every entry key with how often the
+  sample realized it (summed over the targets) or that it was never realized,
+  the roots forced to identity at every sampled root, and the leaf modules
+  realized. A generation error fails the validation; a `when:` or `weight:` on
+  a leaf is a warning.
 
   ## Examples
 
@@ -75,23 +89,32 @@ defmodule Mix.Tasks.Pd.Validate do
   @spec exec([String.t()]) :: :ok | :error
   def exec(args) do
     {opts, argv, _} =
-      OptionParser.parse(args, strict: [verbose: :boolean, strict: :boolean, targets: :string])
+      OptionParser.parse(args,
+        strict: [
+          verbose: :boolean,
+          strict: :boolean,
+          targets: :string,
+          seeds: :integer,
+          seed: :integer
+        ]
+      )
 
     verbose = Keyword.get(opts, :verbose, false)
     strict = Keyword.get(opts, :strict, false)
+    checks = %{verbose: verbose, strict: strict, sample: Keyword.take(opts, [:seeds, :seed])}
 
     case Keyword.fetch(opts, :targets) do
-      {:ok, expr} -> dispatch_targets(argv, expr, verbose, strict)
-      :error -> dispatch(argv, verbose, strict)
+      {:ok, expr} -> dispatch_targets(argv, expr, checks)
+      :error -> dispatch(argv, checks)
     end
   end
 
-  defp dispatch_targets([model_str], expr, verbose, strict) do
+  defp dispatch_targets([model_str], expr, checks) do
     Mix.Task.run("compile", [])
 
     case evaluate_targets(expr) do
       {:ok, targets} ->
-        validate_and_report(parse_module(model_str), targets, verbose, strict)
+        validate_and_report(parse_module(model_str), targets, checks)
 
       {:error, message} ->
         print_color(:red, "ERROR: invalid --targets: #{message}\n")
@@ -99,7 +122,7 @@ defmodule Mix.Tasks.Pd.Validate do
     end
   end
 
-  defp dispatch_targets(_argv, _expr, _verbose, _strict) do
+  defp dispatch_targets(_argv, _expr, _checks) do
     print_color(:red, "Error: --targets takes a model and no positional adapter\n")
     print_usage()
     :error
@@ -114,7 +137,7 @@ defmodule Mix.Tasks.Pd.Validate do
     e -> {:error, Exception.message(e)}
   end
 
-  defp dispatch([model_str, adapter_str], verbose, strict) do
+  defp dispatch([model_str, adapter_str], checks) do
     # Ensure code is compiled
     Mix.Task.run("compile", [])
 
@@ -128,10 +151,10 @@ defmodule Mix.Tasks.Pd.Validate do
       index: 0
     }
 
-    validate_and_report(model, [target], verbose, strict)
+    validate_and_report(model, [target], checks)
   end
 
-  defp dispatch([model_str], verbose, strict) do
+  defp dispatch([model_str], %{verbose: verbose, strict: strict}) do
     # Only model provided - show helpful message
     Mix.Task.run("compile", [])
     model = parse_module(model_str)
@@ -141,12 +164,12 @@ defmodule Mix.Tasks.Pd.Validate do
     validate_model_only(model, verbose, strict)
   end
 
-  defp dispatch([], _verbose, _strict) do
+  defp dispatch([], _checks) do
     print_usage()
     :ok
   end
 
-  defp dispatch(_argv, _verbose, _strict) do
+  defp dispatch(_argv, _checks) do
     print_color(:red, "Error: Expected 1 or 2 arguments (model and optional adapter)\n")
     print_usage()
     :error
@@ -162,7 +185,7 @@ defmodule Mix.Tasks.Pd.Validate do
     |> String.to_atom()
   end
 
-  defp validate_and_report(model, targets, verbose, strict) do
+  defp validate_and_report(model, targets, %{verbose: verbose, strict: strict} = checks) do
     IO.puts("\n")
     print_header("PropertyDamage Validation")
     IO.puts("")
@@ -203,9 +226,12 @@ defmodule Mix.Tasks.Pd.Validate do
 
         # Surface declared-but-unchecked invariants (static vacuity, DR-026)
         # so they fail under --strict alongside the other warnings.
+        sample = sample_expansions(model, targets, checks.sample)
+
         warnings =
           base_warnings ++
-            invariant_warnings(model) ++ PropertyDamage.Validation.target_warnings(targets)
+            invariant_warnings(model) ++
+            PropertyDamage.Validation.target_warnings(targets) ++ sample_warnings(sample)
 
         if verbose do
           for target <- targets do
@@ -216,6 +242,7 @@ defmodule Mix.Tasks.Pd.Validate do
         end
 
         print_validation_results(model, targets, warnings, verbose)
+        print_sample(sample)
 
         if strict and warnings != [] do
           IO.puts("")
@@ -233,6 +260,56 @@ defmodule Mix.Tasks.Pd.Validate do
       IO.puts("")
       print_errors_with_hints(e.message)
       :error
+  end
+
+  # A model with expansions/0 is sampled: `--seeds N` root sequences (default
+  # 100), from seeds S, S+1, ... with `--seed S`, else from fresh seeds, each
+  # realized for every target as a run realizes it.
+  defp sample_expansions(model, targets, opts) do
+    if PropertyDamage.Expansion.defines?(model) do
+      count = Keyword.get(opts, :seeds, 100)
+
+      seeds =
+        case Keyword.fetch(opts, :seed) do
+          {:ok, first} -> Enum.to_list(first..(first + count - 1)//1)
+          :error -> for _ <- 1..count//1, do: :rand.uniform(1_000_000_000)
+        end
+
+      model
+      |> PropertyDamage.Expansion.sample(targets, seeds)
+      |> Map.put(:seeds, seeds)
+    end
+  end
+
+  defp sample_warnings(nil), do: []
+  defp sample_warnings(sample), do: sample.warnings
+
+  defp print_sample(nil), do: :ok
+
+  defp print_sample(sample) do
+    count = length(sample.seeds)
+    IO.puts("")
+    IO.puts("Expansions (sampled #{count} seed(s)):")
+    IO.puts("  Seeds: #{Enum.join(sample.seeds, ", ")}")
+
+    for {key, modules} <- Enum.sort(sample.offered) do
+      leaves = Enum.map_join(modules, ", ", &short_module/1)
+
+      case Map.fetch(sample.realized, key) do
+        {:ok, {_modules, n}} -> IO.puts("  #{key} = [#{leaves}]  realized #{n}")
+        :error -> IO.puts("  #{key} = [#{leaves}]  not realized in #{count} seeds")
+      end
+    end
+
+    for module <- sample.forced do
+      IO.puts("  #{short_module(module)}: forced to identity in every sampled state")
+    end
+
+    IO.puts("  Leaf modules realized:")
+
+    for module <- Enum.sort(sample.leaves) do
+      IO.puts("    #{inspect(module)}")
+    end
   end
 
   defp validate_model_only(model, verbose, strict) do

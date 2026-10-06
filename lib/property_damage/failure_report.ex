@@ -219,6 +219,22 @@ defmodule PropertyDamage.FailureReport do
             }
           },
 
+          # What each target ran at each root it executed, by target name: the
+          # entry key (`"Root[i]"`), nil when no expansion applied, or
+          # `:forced`, and the modules of the commands it executed for the root.
+          # `root` is the root's index in the reported sequence.
+          expansions: %{
+            String.t() => [
+              %{root: non_neg_integer(), entry: String.t() | nil | :forced, leaves: [module()]}
+            ]
+          },
+
+          # Per target name and root module: how many times each entry was
+          # realized, and `:forced` roots, over the runs up to the failure.
+          expansion_counts: %{
+            String.t() => %{module() => %{(String.t() | :forced) => pos_integer()}}
+          },
+
           # Human-readable command labels (DR-028 amendment, P7): keyed by the
           # flattened command index (the 0..n-1 index of `Sequence.to_list/1`,
           # which every formatter/exporter iterates with). Only commands whose
@@ -262,6 +278,8 @@ defmodule PropertyDamage.FailureReport do
             check_fires: %{},
             other_failures: [],
             compare_counts: %{},
+            expansions: %{},
+            expansion_counts: %{},
             command_labels: %{}
 
   @doc """
@@ -303,6 +321,11 @@ defmodule PropertyDamage.FailureReport do
   - `:metrics` - The latency metrics per target name measured so far (default
     `nil`, `latency:` off)
   - `:linearization` - Selected linearization (parallel)
+  - `:expansion` - What every target ran for the reported sequence
+    (`PropertyDamage.Expansion.t()`); the report's `expansions` lists it up to
+    the failing root, and its trace keeps the concrete commands
+  - `:expansion_counts` - The entry counts per target and root module
+    (default `%{}`)
   """
   @spec new(keyword()) :: t()
   def new(opts) do
@@ -365,14 +388,17 @@ defmodule PropertyDamage.FailureReport do
         # state timeline and the report can run the projection-purity check.
         command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
         linearization: Keyword.get(opts, :linearization),
+        expansion: expansion_choices(Keyword.get(opts, :expansion)),
         outcome: {:fail, failure_reason}
       )
+
+    kind = Keyword.get_lazy(opts, :kind, fn -> kind_of(failure_reason) end)
 
     %__MODULE__{
       seed: seed,
       run_number: run_number,
       failed_at_index: failed_at_index,
-      kind: Keyword.get_lazy(opts, :kind, fn -> kind_of(failure_reason) end),
+      kind: kind,
       variant: Keyword.get_lazy(opts, :variant, fn -> reference_variant(targets) end),
       targets: targets,
       concurrency: Keyword.get(opts, :concurrency, :serial),
@@ -402,9 +428,27 @@ defmodule PropertyDamage.FailureReport do
       check_fires: Keyword.get(opts, :check_fires, %{}),
       other_failures: Keyword.get(opts, :other_failures, []),
       compare_counts: Keyword.get(opts, :compare_counts, %{}),
+      expansions:
+        PropertyDamage.Expansion.report(
+          Keyword.get(opts, :expansion),
+          executed_root(kind, failed_at_index)
+        ),
+      expansion_counts: Keyword.get(opts, :expansion_counts, %{}),
       command_labels: command_labels
     }
   end
+
+  # The last root the failing run executed: none before a setup failure, the
+  # failing root, or every root for a failure at the end of the run.
+  defp executed_root(:setup_failed, _failed_at_index), do: -1
+  defp executed_root(_kind, failed_at_index), do: failed_at_index
+
+  # The trace keeps each target's choices with their concrete commands, not
+  # the registries they were realized with.
+  defp expansion_choices(nil), do: nil
+
+  defp expansion_choices(%{variants: variants}),
+    do: Map.new(variants, fn {name, %{choices: choices}} -> {name, choices} end)
 
   # Reconstruct command labels by folding the shrunk sequence through the model's
   # command_sequence_projection, computing each command's `label/2` against the
@@ -893,9 +937,20 @@ defmodule PropertyDamage.FailureReport do
     # stay report-level). Output is identical to the pre-move behavior.
     RunTrace.build_steps(plan, trace.event_log, trace.command_labels, report.failed_at_index,
       branch_id: report.branch_id,
-      executed: trace.executed
+      executed: trace.executed,
+      choices: traced_choices(report)
     )
   end
+
+  # The trace records the failing target's execution: its steps are what that
+  # target ran at each root.
+  defp traced_choices(%__MODULE__{trace: %RunTrace{expansion: expansion}} = report)
+       when is_map(expansion) do
+    name = (report.variant || reference_variant(report.targets) || %{})[:name]
+    Map.get(expansion, name)
+  end
+
+  defp traced_choices(_report), do: nil
 
   @doc """
   The `EventLog.Entry` structs observed for a single command, addressed by

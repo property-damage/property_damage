@@ -48,6 +48,11 @@ defmodule PropertyDamage.RunTrace do
     (linear runs, or a branching run with no verified order). Recorded so the
     per-step timeline can fold merged-branch state in the same order the executor
     did (P8 / DR-040).
+  - `expansion` — when the run's targets ran roots as expansions
+    (`c:PropertyDamage.Model.expansions/0`): per target name, what it ran at
+    each root (the entry, the concrete commands, and the seed key and aliases
+    the leaves were realized with); `nil` otherwise. The steps of a root a
+    target ran as leaves are its leaves (see `build_steps/5`).
   - `outcome` — `:pass` or `{:fail, reason}`.
   """
 
@@ -77,6 +82,7 @@ defmodule PropertyDamage.RunTrace do
           command_labels: %{non_neg_integer() => String.t()},
           command_fold_ordinals: %{Sequence.Position.t() => non_neg_integer()},
           linearization: [{non_neg_integer(), non_neg_integer(), struct()}] | nil,
+          expansion: %{String.t() => [map()]} | nil,
           outcome: outcome() | nil
         }
 
@@ -96,6 +102,7 @@ defmodule PropertyDamage.RunTrace do
             command_labels: %{},
             command_fold_ordinals: %{},
             linearization: nil,
+            expansion: nil,
             outcome: nil
 
   @doc """
@@ -139,6 +146,7 @@ defmodule PropertyDamage.RunTrace do
       command_labels: Keyword.get(opts, :command_labels, %{}),
       command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
       linearization: Keyword.get(opts, :linearization),
+      expansion: Keyword.get(opts, :expansion),
       outcome: Keyword.get(opts, :outcome)
     }
   end
@@ -303,6 +311,12 @@ defmodule PropertyDamage.RunTrace do
       the failing command's position (defaults to `nil`).
     * `:executed` - a `%{Position => command}` map of concrete resolved commands
       (defaults to `%{}`, i.e. `executed_command` is `nil` on every step).
+    * `:choices` - what the traced target ran at each root of a linear
+      sequence, as `PropertyDamage.Expansion` records it (defaults to `nil`,
+      every root ran as itself). A root the target ran as an expansion's
+      leaves is one step per leaf, at its `Position.leaf/2` position, with the
+      entries that leaf produced; the flattened indices then count every step.
+      When such a root failed, its failing step is the last leaf it executed.
   """
   @spec build_steps(
           Sequence.t(),
@@ -314,6 +328,7 @@ defmodule PropertyDamage.RunTrace do
   def build_steps(%Sequence{} = sequence, event_log, command_labels, failed_at_index, opts \\ []) do
     branch_id = Keyword.get(opts, :branch_id)
     executed = Keyword.get(opts, :executed, %{})
+    leaves = leaf_choices(sequence, Keyword.get(opts, :choices))
 
     # Group the command-attributed log entries by the position of the command
     # that produced them. Injector/telemetry entries carry no command_index and
@@ -342,8 +357,8 @@ defmodule PropertyDamage.RunTrace do
 
     sequence
     |> Sequence.indexed()
-    |> Enum.map(fn {position, flattened_index, command} ->
-      %Step{
+    |> Enum.flat_map(fn {position, flattened_index, command} ->
+      root_step = %Step{
         position: position,
         flattened_index: flattened_index,
         command: command,
@@ -352,7 +367,66 @@ defmodule PropertyDamage.RunTrace do
         label: Map.get(command_labels, flattened_index),
         failed?: failed_position != nil and position == failed_position
       }
+
+      case Map.get(leaves, position) do
+        nil -> [root_step]
+        choice -> leaf_steps(root_step, choice, executed)
+      end
     end)
+    |> renumber(leaves)
+  end
+
+  # The choices of the roots the target ran as leaves, by root position.
+  defp leaf_choices(%Sequence{branches: nil}, choices) when is_list(choices) do
+    for %{leaves?: true} = choice <- choices, into: %{} do
+      {Sequence.Position.prefix(choice.root), choice}
+    end
+  end
+
+  defp leaf_choices(_sequence, _choices), do: %{}
+
+  # One step per leaf of `choice`, each with the entries its leaf produced; an
+  # entry of the root no leaf claims (an event drained after the leaves)
+  # belongs to the last leaf.
+  defp leaf_steps(root_step, choice, executed) do
+    last = length(choice.commands) - 1
+    by_leaf = Enum.group_by(root_step.entries, &(&1.leaf_index || last))
+
+    failing =
+      if root_step.failed? do
+        executed_leaves =
+          for leaf <- 0..last, Map.has_key?(executed, leaf_position(choice, leaf)), do: leaf
+
+        List.last(executed_leaves) || last
+      end
+
+    choice.commands
+    |> Enum.with_index()
+    |> Enum.map(fn {command, leaf} ->
+      position = leaf_position(choice, leaf)
+
+      %Step{
+        position: position,
+        flattened_index: root_step.flattened_index,
+        command: command,
+        executed_command: Map.get(executed, position),
+        entries: Map.get(by_leaf, leaf, []),
+        label: nil,
+        failed?: leaf == failing
+      }
+    end)
+  end
+
+  defp leaf_position(choice, leaf), do: Sequence.Position.leaf(choice.root_id, leaf)
+
+  # Steps are numbered in reading order; with no leaves the numbers are the
+  # flattened indices of the sequence.
+  defp renumber(steps, leaves) when map_size(leaves) == 0, do: steps
+
+  defp renumber(steps, _leaves) do
+    steps
+    |> Enum.with_index()
+    |> Enum.map(fn {step, index} -> %{step | flattened_index: index} end)
   end
 
   @doc """

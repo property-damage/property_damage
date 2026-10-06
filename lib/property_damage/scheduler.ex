@@ -12,9 +12,11 @@ defmodule PropertyDamage.Scheduler do
   ## Lockstep
 
   Every command of the sequence is a root. For each root `r`, in order, every
-  variant executes command `r` and stops at boundary `r`; only then does the
+  variant executes root `r` and stops at boundary `r`; only then does the
   comparison run, and only after the variants agree does any variant start
-  command `r + 1`.
+  root `r + 1`. A variant may execute a root as an expansion, the leaves the
+  model's `expansions/0` lists for it (`:variants`); the boundary still comes
+  after the whole root.
   Two settings decide how the variants reach a boundary:
 
     * `concurrency: :serial` - one variant at a time, in target order. Commands
@@ -205,7 +207,9 @@ defmodule PropertyDamage.Scheduler do
           other_failures: [failure()],
           results: [map()],
           observations: [[{non_neg_integer(), Variant.observation()}]],
-          latencies: [[{non_neg_integer(), non_neg_integer()}]],
+          latencies: [
+            [{non_neg_integer() | {non_neg_integer(), non_neg_integer()}, non_neg_integer()}]
+          ],
           compare_counts: compare_counts()
         }
 
@@ -251,6 +255,12 @@ defmodule PropertyDamage.Scheduler do
       against (DR-021); optional, default the registry built from `:commands`.
       A shrunk sequence passes its own registry, whose producer positions were
       remapped onto the shrunk command list.
+    * `:variants` - what each target executes, in target order: per target
+      `%{roots: roots, registry: registry}`, with `roots` the steps of each
+      root (see `PropertyDamage.Variant`'s `:roots`) and `registry` the
+      target's own placeholder registry. Optional: by default every target
+      runs every root of `:commands` as itself. The boundaries, the
+      comparison and the schedules of `@compare` stay those of `:commands`.
 
   Returns `{:ok, run}`; see `t:run/0`.
   """
@@ -291,7 +301,8 @@ defmodule PropertyDamage.Scheduler do
       mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
-      registry: Keyword.get(opts, :placeholder_registry) || PlaceholderRegistry.build(commands)
+      registry: Keyword.get(opts, :placeholder_registry) || PlaceholderRegistry.build(commands),
+      variants: Keyword.get(opts, :variants)
     }
   end
 
@@ -347,12 +358,19 @@ defmodule PropertyDamage.Scheduler do
   end
 
   defp set_up_variant(config, target) do
+    {roots, registry} =
+      case config.variants do
+        nil -> {nil, config.registry}
+        variants -> variants |> Enum.at(target.index) |> then(&{&1.roots, &1.registry})
+      end
+
     {:ok, pid} =
       Variant.start(
         target: target,
         model: config.model,
         commands: config.commands,
-        placeholder_registry: config.registry,
+        roots: roots,
+        placeholder_registry: registry,
         setup_commands: config.setup_commands,
         teardown_commands: config.teardown_commands,
         seed: config.seed,

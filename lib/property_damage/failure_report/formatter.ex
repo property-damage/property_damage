@@ -1,7 +1,17 @@
 defmodule PropertyDamage.FailureReport.Formatter do
   @moduledoc false
 
-  alias PropertyDamage.{Failure, FailureReport, LatencyMetrics, RunTrace, Sequence}
+  alias PropertyDamage.{
+    Expansion,
+    Failure,
+    FailureReport,
+    LatencyMetrics,
+    RunTrace,
+    Sequence,
+    Target
+  }
+
+  alias PropertyDamage.Sequence.Position
 
   @type format :: :terminal | :markdown | :json | :compact
 
@@ -160,9 +170,69 @@ defmodule PropertyDamage.FailureReport.Formatter do
     #{section_header("Failure Location", color)}
     #{label("Run Number", color)}    #{report.run_number + 1}
     #{location_line(report, color)}
-    #{label("Random Seed", color)}   #{report.seed}
+    #{leaf_line(report, color)}#{label("Random Seed", color)}   #{report.seed}
     #{label("Timestamp", color)}     #{DateTime.to_string(report.timestamp)}
+    #{expansion_lines(report, color)}\
     """
+  end
+
+  # A failure inside a leaf of a root's expansion: which leaf of which root.
+  defp leaf_line(report, color) do
+    case FailureReport.failure_step(report) do
+      %{position: %Position{section: {:leaf, _root}} = position, command: command} ->
+        "#{label("Leaf", color)}          #{Position.describe(position)} " <>
+          "(#{inspect(command.__struct__)})\n"
+
+      _ ->
+        ""
+    end
+  end
+
+  # Beside a failure at a root, the expansion entry each target ran there, the
+  # reference's marked. Printed when some target ran an expansion entry there.
+  defp expansion_lines(%FailureReport{failed_at_index: root} = report, color)
+       when is_integer(root) do
+    ran =
+      for {name, index} <- target_names(report),
+          element = report.expansions |> Map.get(name, []) |> Enum.at(root),
+          element != nil,
+          do: {name, index, element}
+
+    if Enum.any?(ran, fn {_name, _index, element} -> element.entry != nil end) do
+      lines =
+        Enum.map_join(ran, "\n", fn {name, index, element} ->
+          reference = if index == 0, do: " (reference)", else: ""
+          "  #{name}#{reference}: #{entry_text(element)}"
+        end)
+
+      "#{label("Expansions", color)}    at root #{root}\n#{lines}\n"
+    else
+      ""
+    end
+  end
+
+  defp expansion_lines(_report, _color), do: ""
+
+  # The run's target names in target order, with their index.
+  defp target_names(%FailureReport{targets: [_ | _] = targets}) do
+    targets
+    |> Enum.map(fn {adapter, opts} ->
+      Keyword.get(opts, :name) || Target.default_name(adapter)
+    end)
+    |> Enum.with_index()
+  end
+
+  defp target_names(report),
+    do: report.expansions |> Map.keys() |> Enum.sort() |> Enum.with_index()
+
+  defp entry_text(%{entry: entry, leaves: leaves}) do
+    names = Enum.map_join(leaves, ", ", &Expansion.short/1)
+
+    case entry do
+      nil -> "#{names} (not expanded)"
+      :forced -> "#{names} (identity, forced)"
+      key -> "#{key} = [#{names}]"
+    end
   end
 
   # Headline the invariant the failing check validates (DR-026), with the check

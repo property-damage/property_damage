@@ -641,10 +641,20 @@ defmodule PropertyDamage.Executor do
     # The engine attributes a setup command by `{:setup, offset}` (see
     # PropertyDamage.EventLog.Entry, "Phase"); telemetry reports it as the
     # offset within the setup phase.
-    PropertyDamage.Telemetry.command_span(state.telemetry, command, index, fn ->
-      execute_any_command(command, index, state, model, adapter, adapter_context, event_queue)
-    end)
+    PropertyDamage.Telemetry.command_span(
+      state.telemetry,
+      command,
+      index,
+      fn ->
+        execute_any_command(command, index, state, model, adapter, adapter_context, event_queue)
+      end,
+      leaf_index(state.current_position)
+    )
   end
+
+  # The leaf a command is when it runs as part of a root's expansion.
+  defp leaf_index(%Position{section: {:leaf, _root}, offset: leaf}), do: leaf
+  defp leaf_index(_position), do: nil
 
   # Whether a step advances the check sampling counters: a root does, a setup
   # command does not (its `every: N` triggers neither count nor fire).
@@ -1165,7 +1175,7 @@ defmodule PropertyDamage.Executor do
 
     Suggestions:
       - Ensure #{inspect(model)}.commands/0 returns a list of command modules, \
-    {module, weight} tuples, or %{command: module, ...} maps.
+    {module, opts} tuples (such as {module, weight: 3}), or %{command: module, ...} maps.
       - Give each command a positive integer weight, and check any `when:`/`overrides:` \
     overrides have the expected shape.
       - Verify every listed command module is defined and uses `PropertyDamage.Command`.

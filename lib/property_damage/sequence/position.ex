@@ -13,6 +13,12 @@ defmodule PropertyDamage.Sequence.Position do
       %Sequence.Position{section: :setup, offset: 1}
       %Sequence.Position{section: :teardown, offset: 0}
 
+  A leaf of a root's expansion (`c:PropertyDamage.Model.expansions/0`) has the
+  section `{:leaf, root}` (the root's index as generated) and its offset within the expansion's leaves, so leaf
+  positions never collide with root positions:
+
+      %Sequence.Position{section: {:leaf, 3}, offset: 1}
+
   The `:setup` and `:teardown` sections hold the model's setup commands
   (`c:PropertyDamage.Model.setup_each/0`) and teardown commands
   (`c:PropertyDamage.Model.teardown_each/0`). They are not roots: a root's
@@ -36,7 +42,13 @@ defmodule PropertyDamage.Sequence.Position do
   a specific parallel branch identified by its `branch_id`, or the setup or
   teardown commands.
   """
-  @type section :: :prefix | :suffix | {:branch, non_neg_integer()} | :setup | :teardown
+  @type section ::
+          :prefix
+          | :suffix
+          | {:branch, non_neg_integer()}
+          | {:leaf, non_neg_integer()}
+          | :setup
+          | :teardown
 
   @type t :: %__MODULE__{
           section: section(),
@@ -66,7 +78,16 @@ defmodule PropertyDamage.Sequence.Position do
   @spec teardown(non_neg_integer()) :: t()
   def teardown(offset), do: %__MODULE__{section: :teardown, offset: offset}
 
-  @doc "Whether `position` belongs to a root (prefix, branch or suffix)."
+  @doc """
+  The position of leaf `leaf_index` of the expansion the root at `root` ran.
+
+  `root` identifies the root: its index in the sequence as generated, kept
+  when a shrink candidate moves the root.
+  """
+  @spec leaf(non_neg_integer(), non_neg_integer()) :: t()
+  def leaf(root, leaf_index), do: %__MODULE__{section: {:leaf, root}, offset: leaf_index}
+
+  @doc "Whether `position` belongs to a root (prefix, branch or suffix) or a root's leaf."
   @spec root?(t()) :: boolean()
   def root?(%__MODULE__{section: section}), do: section not in [:setup, :teardown]
 
@@ -75,7 +96,7 @@ defmodule PropertyDamage.Sequence.Position do
 
   The shared phrasing used by the determinism audit and `mix pd.audit`:
   `"prefix position 0"`, `"branch 1 position 2"`, `"suffix position 0"`,
-  `"setup position 0"`, `"teardown position 0"`.
+  `"setup position 0"`, `"teardown position 0"`, `"leaf 1 of root 3"`.
   """
   @spec describe(t()) :: String.t()
   def describe(%__MODULE__{section: :prefix, offset: i}), do: "prefix position #{i}"
@@ -83,4 +104,5 @@ defmodule PropertyDamage.Sequence.Position do
   def describe(%__MODULE__{section: :suffix, offset: i}), do: "suffix position #{i}"
   def describe(%__MODULE__{section: :setup, offset: i}), do: "setup position #{i}"
   def describe(%__MODULE__{section: :teardown, offset: i}), do: "teardown position #{i}"
+  def describe(%__MODULE__{section: {:leaf, r}, offset: i}), do: "leaf #{i} of root #{r}"
 end

@@ -149,5 +149,6 @@ defimpl Inspect, for: PropertyDamage.Placeholder do
   defp loc(%Position{section: :suffix, offset: i}), do: "suf#{i}"
   defp loc(%Position{section: :setup, offset: i}), do: "setup#{i}"
   defp loc(%Position{section: :teardown, offset: i}), do: "teardown#{i}"
+  defp loc(%Position{section: {:leaf, r}, offset: i}), do: "leaf#{r}.#{i}"
   defp loc(nil), do: "?"
 end

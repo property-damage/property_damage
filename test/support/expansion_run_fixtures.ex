@@ -19,7 +19,7 @@ defmodule PropertyDamage.Test.ExpansionRun do
   # and the fixture projections add:
   #
   #   {:compared, name}            Totals' @compare observation ran
-  #   {:every2, name}              EveryTwo's `every: 2` check fired
+  #   {:every2, name}              EveryTwo's `every: {2, :command}` check fired
   #
   # Models are defined at runtime by `define_model!/2`; their callback lists
   # (expansion functions included) are kept in `:persistent_term`.
@@ -353,7 +353,7 @@ defmodule PropertyDamage.Test.ExpansionRun do
 
   defmodule EveryTwo do
     @moduledoc false
-    # Records each firing of its `every: 2` check under the variant's name.
+    # Records each firing of its `every: {2, :command}` check under the variant's name.
     use PropertyDamage.Model.Projection
 
     @impl true
@@ -363,7 +363,7 @@ defmodule PropertyDamage.Test.ExpansionRun do
     def apply(state, %{by: by, sink: sink}) when not is_nil(by), do: %{state | by: by, sink: sink}
     def apply(state, _), do: state
 
-    @check every: 2
+    @check every: {2, :command}
     def assert_sampled(state, _item) do
       VariantSupport.record(state.sink, {:every2, state.by})
       :ok

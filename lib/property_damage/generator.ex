@@ -859,6 +859,82 @@ defmodule PropertyDamage.Generator do
   defp relink_value(value, _linked), do: value
 
   # ============================================================================
+  # Steps for expansions
+  # ============================================================================
+
+  @doc false
+  # The simulated state after the setup commands of `sequence`, from the
+  # projection's initial state: where a variant's walk over the roots starts.
+  @spec setup_state(module(), Sequence.t(), keyword()) :: map()
+  def setup_state(model, %Sequence{} = sequence, opts \\ []) do
+    markers = Keyword.get(opts, :external_markers, [])
+    projection = model.command_sequence_projection()
+
+    sequence.setup
+    |> Enum.with_index()
+    |> Enum.reduce(projection.init(), fn {command, offset}, state ->
+      simulate_linked(
+        model,
+        projection,
+        command,
+        Position.setup(offset),
+        state,
+        sequence.registry,
+        markers
+      )
+    end)
+  end
+
+  @doc false
+  # Simulates a root at `position` from `state` and folds it. The placeholders
+  # its events carry are the ones `registry` links to that position, so a walk
+  # over a shrink candidate folds the ids generation minted.
+  @spec simulate_root(module(), struct(), Position.t(), map(), PlaceholderRegistry.t() | nil) ::
+          map()
+  def simulate_root(model, command, position, state, registry) do
+    projection = model.command_sequence_projection()
+    simulate_linked(model, projection, command, position, state, registry, [])
+  end
+
+  defp simulate_linked(model, projection, command, position, state, registry, markers) do
+    events = simulate_command(model, state, command)
+    {events, _minted} = instantiate_placeholders(events, position, markers)
+    events = relink(events, position, registry)
+    update_state(state, command, events, projection)
+  end
+
+  @doc false
+  # One generation step for a command generated outside the root pick (a leaf of
+  # an expansion): reifies its mint markers at `position`, simulates it, mints
+  # its placeholders at `position` and folds it. Returns
+  # `{command, events, state, minted}`.
+  @spec simulate_step(module(), struct(), Position.t(), map(), keyword()) ::
+          {struct(), [struct()], map(), [Placeholder.t()]}
+  def simulate_step(model, command, position, state, opts \\ []) do
+    markers = Keyword.get(opts, :external_markers, [])
+    projection = model.command_sequence_projection()
+    command = reify_command_mints(command, position)
+    events = simulate_command(model, state, command)
+    {events, minted} = instantiate_placeholders(events, position, markers)
+    {command, events, update_state(state, command, events, projection), minted}
+  end
+
+  @doc false
+  # The generator of `module`'s commands with `overrides` (a map) applied, as
+  # the root draw builds it: a nemesis through `new!/2`, any other command
+  # through `generator/1`, with every override key checked against the
+  # command's fields.
+  @spec command_generator(module(), map(), map()) :: StreamData.t(struct())
+  def command_generator(module, overrides, state) do
+    get_command_generator(module, %{overrides: overrides}, state)
+  end
+
+  @doc false
+  # Whether `spec`'s `when:` holds in `state` (a spec without one always holds).
+  @spec precondition_holds?(map(), map()) :: boolean()
+  def precondition_holds?(spec, state), do: when_satisfied?(spec, state)
+
+  # ============================================================================
   # Shared Helpers
   # ============================================================================
 

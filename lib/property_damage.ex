@@ -136,6 +136,7 @@ defmodule PropertyDamage do
     Coverage,
     EventQueue,
     Executor,
+    Expansion,
     Failure,
     FailureReport,
     Generator,
@@ -429,6 +430,10 @@ defmodule PropertyDamage do
     # A model that still defines a removed lifecycle hook fails here, before
     # any target is set up.
     PropertyDamage.Model.check_lifecycle!(model)
+    # The rules for expansions/0, and the run options it rules out, fail here
+    # too, before any target is set up.
+    Expansion.check_options!(model, opts)
+    Expansion.check_model!(model)
     [reference | _] = targets
     max_commands = opts[:max_commands]
     max_runs = opts[:max_runs]
@@ -598,6 +603,7 @@ defmodule PropertyDamage do
           total_commands: 0,
           setup_commands: 0,
           teardown_commands: 0,
+          expansion_counts: Map.new(ctx.targets, &{&1.name, %{}}),
           samples: [],
           last_run: nil
         }
@@ -639,6 +645,7 @@ defmodule PropertyDamage do
       }
       |> put_coverage_stats(acc)
       |> Map.put(:compare_counts, acc.compare_counts)
+      |> Map.put(:expansion_counts, acc.expansion_counts)
       |> put_metrics(metrics)
 
     Reporter.emit(ctx.reporter, fn ->
@@ -726,6 +733,7 @@ defmodule PropertyDamage do
 
     run = %{
       sequence: sequence,
+      expansion: expand(ctx, sequence, run_seed),
       seed: ctx.seed,
       run_seed: run_seed,
       run_number: run_number,
@@ -762,7 +770,9 @@ defmodule PropertyDamage do
 
     acc = %{
       acc
-      | compare_counts: Comparison.merge_counts(acc.compare_counts, outcome.compare_counts)
+      | compare_counts: Comparison.merge_counts(acc.compare_counts, outcome.compare_counts),
+        expansion_counts:
+          Expansion.merge_counts(acc.expansion_counts, Expansion.counts(run.expansion))
     }
 
     case outcome.failure do
@@ -779,7 +789,7 @@ defmodule PropertyDamage do
       _failure ->
         # The report carries the metrics measured up to this failed run.
         ctx = Map.put(ctx, :measured_metrics, campaign_metrics(ctx, acc.samples))
-        handle_failure(ctx, lockstep_found(run, outcome, acc.fires))
+        handle_failure(ctx, lockstep_found(run, outcome, acc.fires, acc.expansion_counts))
     end
   end
 
@@ -791,6 +801,7 @@ defmodule PropertyDamage do
         model: ctx.model,
         targets: ctx.targets,
         commands: Sequence.to_list(run.sequence),
+        variants: Expansion.schedule(ctx.targets, run.expansion),
         setup_commands: run.sequence.setup,
         teardown_commands: run.sequence.teardown,
         placeholder_registry: run.sequence.registry,
@@ -871,9 +882,11 @@ defmodule PropertyDamage do
   # check firings so far, the scheduler-shaped failure (`kind`, `variant`,
   # `root`, `reason`), and the failing target's finished result (nil when its
   # setup failed).
-  defp lockstep_found(run, outcome, fires) do
+  defp lockstep_found(run, outcome, fires, expansion_counts) do
     %{
       sequence: run.sequence,
+      expansion: run.expansion,
+      expansion_counts: expansion_counts,
       run_seed: run.run_seed,
       run_number: run.run_number,
       fires: fires,
@@ -908,6 +921,8 @@ defmodule PropertyDamage do
 
     %{
       sequence: run.sequence,
+      expansion: nil,
+      expansion_counts: %{},
       run_seed: run.run_seed,
       run_number: run.run_number,
       fires: fires,
@@ -925,7 +940,11 @@ defmodule PropertyDamage do
   defp record_sample(%{samples: samples} = acc, ctx, run, outcome) do
     if ctx.measure_latency and run.run_number >= Keyword.fetch!(ctx.latency_budget, :warmup) do
       sample =
-        LatencyMetrics.sample(ctx.targets, outcome.latencies, Sequence.to_list(run.sequence))
+        LatencyMetrics.sample(
+          ctx.targets,
+          outcome.latencies,
+          Expansion.schedule(ctx.targets, run.expansion)
+        )
 
       %{acc | samples: [sample | samples]}
     else
@@ -945,6 +964,17 @@ defmodule PropertyDamage do
   defp generate_one(ctx, run_seed) do
     sequence = Generator.generate_value(ctx.generator, run_seed)
     Generator.teardown_commands(ctx.model, sequence, run_seed)
+  end
+
+  # Every target's concrete sequence for a generated linear sequence: the roots
+  # with each target's expansions realized, before any target is set up. A
+  # branching run has one target and runs its sequence as generated.
+  defp expand(%{branching: branching}, _sequence, _run_seed) when branching != nil, do: nil
+
+  defp expand(ctx, sequence, run_seed) do
+    if Expansion.defines?(ctx.model),
+      do: Expansion.expand(ctx.model, sequence, ctx.targets, run_seed),
+      else: Expansion.identity(sequence, ctx.targets)
   end
 
   # ============================================================================
@@ -1140,7 +1170,14 @@ defmodule PropertyDamage do
   # report.
   defp replay_seed(seed, ctx, build_rep?) do
     sequence = generate_one(ctx, seed)
-    run = %{sequence: sequence, seed: seed, run_seed: seed, run_number: 0}
+
+    run = %{
+      sequence: sequence,
+      expansion: expand(ctx, sequence, seed),
+      seed: seed,
+      run_seed: seed,
+      run_number: 0
+    }
 
     case replay_run(ctx, run) do
       :passed ->
@@ -1165,7 +1202,10 @@ defmodule PropertyDamage do
       end
     else
       outcome = schedule(ctx, run)
-      if outcome.failure, do: {:failed, lockstep_found(run, outcome, %{})}, else: :passed
+
+      if outcome.failure,
+        do: {:failed, lockstep_found(run, outcome, %{}, Expansion.counts(run.expansion))},
+        else: :passed
     end
   end
 
@@ -1365,10 +1405,19 @@ defmodule PropertyDamage do
     # intermittent failure may not reproduce on this single re-run, or may fail
     # differently (another kind, another target). Then the report falls back to
     # the original failing run: its sequence, reason, index, target and state.
+    expansion = reproduction_expansion(ctx, shrunk_sequence, found)
+
     report =
-      case reproduce(ctx, shrunk_sequence, found, fresh_epoch) do
+      case reproduce(ctx, shrunk_sequence, found, fresh_epoch, expansion) do
         {:reproduced, failure, result, other_failures} ->
-          reproduced = %{found | failure: failure, result: result, other_failures: other_failures}
+          reproduced = %{
+            found
+            | failure: failure,
+              result: result,
+              other_failures: other_failures,
+              expansion: expansion
+          }
+
           failure_report(ctx, reproduced, {:shrunk, shrunk_sequence, fresh_epoch, shrink})
 
         # A passing re-run, or a re-execution whose adapter setup failed: not
@@ -1388,12 +1437,15 @@ defmodule PropertyDamage do
   # primary failure has the found failure's signature (kind, name, target),
   # whatever its other failures, `{:setup_failed, reason}`
   # when a target's setup failed, else `:not_reproduced`.
-  defp reproduce(ctx, %Sequence{branches: nil} = sequence, found, epoch) do
+  defp reproduce(ctx, sequence, found, epoch, expansion \\ nil)
+
+  defp reproduce(ctx, %Sequence{branches: nil} = sequence, found, epoch, expansion) do
     {:ok, outcome} =
       Scheduler.run(
         model: ctx.model,
         targets: ctx.targets,
         commands: Sequence.to_list(sequence),
+        variants: expansion && Expansion.schedule(ctx.targets, expansion),
         setup_commands: sequence.setup,
         teardown_commands: sequence.teardown,
         placeholder_registry: sequence.registry,
@@ -1423,7 +1475,7 @@ defmodule PropertyDamage do
     end
   end
 
-  defp reproduce(ctx, sequence, found, epoch) do
+  defp reproduce(ctx, sequence, found, epoch, _expansion) do
     target = ctx.target
 
     run_result =
@@ -1465,6 +1517,15 @@ defmodule PropertyDamage do
         :not_reproduced
     end
   end
+
+  # What every target runs when the shrunk sequence is reproduced: the run's
+  # own concrete sequences when shrinking kept the sequence, else every root
+  # as itself.
+  defp reproduction_expansion(_ctx, _sequence, %{expansion: nil}), do: nil
+  defp reproduction_expansion(_ctx, sequence, %{sequence: sequence} = found), do: found.expansion
+
+  defp reproduction_expansion(ctx, sequence, _found),
+    do: Expansion.identity(sequence, ctx.targets)
 
   defp same_failure?(failure, found_failure) do
     Shrinker.failure_signature(failure.reason, failure.variant.index) ==
@@ -1524,10 +1585,17 @@ defmodule PropertyDamage do
       check_fires: found.fires,
       other_failures: Enum.map(found.other_failures, &other_failure/1),
       compare_counts: found.compare_counts,
+      expansion: report_expansion(ctx, found, shrunk_sequence),
+      expansion_counts: found.expansion_counts,
       latency: Map.get(ctx, :latency, false),
       metrics: Map.get(ctx, :measured_metrics)
     )
   end
+
+  # The concrete sequences of the run the report describes; a branching run
+  # ran its one target's roots as generated.
+  defp report_expansion(_ctx, %{expansion: %{} = expansion}, _sequence), do: expansion
+  defp report_expansion(ctx, _found, sequence), do: Expansion.identity(sequence, [ctx.target])
 
   defp other_failure(failure),
     do: %{variant: failure.variant, root: failure.root, failure: failure.reason}

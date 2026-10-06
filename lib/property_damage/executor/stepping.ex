@@ -209,6 +209,50 @@ defmodule PropertyDamage.Executor.Stepping do
   end
 
   @doc """
+  Execute one leaf of a root's expansion against an existing stepping state.
+
+  The `step/4` path for the root at `index`, with the command at `position`
+  (`Position.leaf/2`) instead of the root's own position: its externals are
+  captured there, and its event-log entries keep `index` as their command
+  index and name the leaf in `leaf_index`. Returns what `step/4` returns.
+  """
+  @spec step_leaf(struct(), non_neg_integer(), Position.t(), map(), Context.t()) ::
+          {:ok, map(), outcome()} | {:error, Failure.t(), map(), outcome()}
+  def step_leaf(command, index, %Position{section: {:leaf, _root}} = position, state, ctx) do
+    prepared = %{state | projections_before: state.projections, current_position: position}
+    logged = length(state.event_log)
+
+    tag = fn stepped -> tag_leaf_entries(stepped, logged, index, position.offset) end
+
+    case Executor.execute_command_with_outcome(
+           command,
+           index,
+           prepared,
+           ctx.model,
+           ctx.adapter,
+           ctx.adapter_context,
+           ctx.event_queue
+         ) do
+      {:ok, stepped, outcome} -> {:ok, tag.(stepped), outcome}
+      {:error, failure, failed, outcome} -> {:error, failure, tag.(failed), outcome}
+    end
+  end
+
+  # The entries the leaf's step added (the event log is newest first) name
+  # the leaf.
+  defp tag_leaf_entries(state, logged, index, leaf) do
+    {added, earlier} = Enum.split(state.event_log, length(state.event_log) - logged)
+
+    added =
+      Enum.map(added, fn
+        %Entry{phase: :root, command_index: ^index} = entry -> %{entry | leaf_index: leaf}
+        entry -> entry
+      end)
+
+    %{state | event_log: added ++ earlier}
+  end
+
+  @doc """
   Execute the setup command at `offset` against an existing stepping state.
 
   The `step/4` path at `Position.setup(offset)`, with stutter off, the check
