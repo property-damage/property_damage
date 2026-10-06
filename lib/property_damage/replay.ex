@@ -64,9 +64,9 @@ defmodule PropertyDamage.Replay do
     replay, pass it via `opts` (`:stutter_config`). It is deliberately not
     persisted yet: stutter is not seed-deterministic (decisions consume the
     process `:rand` stream at execution time), so persisting the config alone
-    would not make replay reproduce *which* commands stuttered, and a
-    `{:custom, fn}` comparison cannot survive the `[:safe]` term decode used by
-    `PropertyDamage.Persistence`. Persisting it belongs with the determinism
+    would not make replay reproduce *which* commands stuttered, and the
+    `using:` predicate, a function, cannot survive the `[:safe]` term decode
+    used by `PropertyDamage.Persistence`. Persisting it belongs with the determinism
     hardening that introduces a generation-time stutter plan; see that item in
     the project's fix checklist. (`external_markers` is not a gap: real runs
     never set it, and external paths are derived from the event struct

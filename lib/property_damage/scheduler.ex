@@ -110,13 +110,19 @@ defmodule PropertyDamage.Scheduler do
   a retired target is torn down is one of the others, never the primary
   failure: its target had already failed.
 
-  When the run went on after a retirement, a failure a remaining target
-  reports while it finalizes its run (an `@eventually` timeout, a
-  `:teardown` check, the reference's included) is one of the run's failures
-  in the same order. One that belongs to a root (an `@eventually` window
-  opened at that root) sorts at that root; one that belongs to no root (a
+  A failure a target reports while it finalizes its run (an `@eventually`
+  timeout, a `:teardown` check, a check that `check_mode: :record` recorded,
+  the reference's included) is one of the run's failures in the same order,
+  whether or not a target was retired. One that belongs to a root (an
+  `@eventually` window opened at that root, a check that failed while that
+  root was stepped) sorts at that root; one that belongs to no root (a
   `:teardown` check) happened at the end of the run and sorts after every
-  failure at a root, in target order.
+  failure at a root, in target order. Within one root in one target, a
+  check that failed while the root was stepped happened before the
+  comparison at that root's boundary, so it comes first; the comparison
+  failure is still one of the others. Each failure is listed once: a
+  failure that stopped a target is not listed again when that target
+  finalizes its run.
 
   A failure's kind is derived from its `reason` by
   `PropertyDamage.FailureReport.kind_of/1`, so a report's `kind` always agrees
@@ -572,11 +578,11 @@ defmodule PropertyDamage.Scheduler do
     variants = Enum.sort_by(run.active ++ run.retired, & &1.target.index)
     finished = Enum.map(variants, &finish_variant(config, &1))
     results = Enum.map(finished, fn {result, _latency, _outcome} -> result end)
-    {failure, others} = run_failures(config, run, Enum.zip(variants, finished))
+    {failure, others} = run_failures(config, run, Enum.zip(variants, finished), results)
 
     %{
-      failure: with_failure_reason(failure, results),
-      other_failures: Enum.map(others, &with_failure_reason(&1, results)),
+      failure: failure,
+      other_failures: others,
       results: results,
       observations: Enum.map(variants, &Enum.reverse(&1.observations)),
       latencies: Enum.map(finished, fn {_result, latency, _outcome} -> latency end),
@@ -585,53 +591,60 @@ defmodule PropertyDamage.Scheduler do
   end
 
   # The run's primary failure and its other failures, once every variant
-  # finished.
+  # finished. One rule serves every run, whether or not a variant was
+  # retired: the candidates are the failures the lockstep found and the
+  # failure each variant reports while it finalizes its run (an @eventually
+  # timeout, a :teardown check, a check `check_mode: :record` recorded, a
+  # crash), ordered by `primary_and_others/2`. One that belongs to a root
+  # sorts at that root; one with no root happened at the end of the run,
+  # after every failure at a root.
   #
-  # A run in which no variant was retired ended at its first failure, if it
-  # had one. A failure a variant reports while it finalizes (an @eventually
-  # timeout, a :teardown check, a check `check_mode: :record` recorded)
-  # becomes the run's failure when the run has none; next to a divergence,
-  # see `run_failure/4`.
-  #
-  # A run that went on after a retirement may have run on for many roots, so
-  # every remaining variant's finalize-time failure is one of the run's
-  # failures and competes for primary by the same order as the others (see
-  # `primary_and_others/2`). One attributed to a root sorts at that root; one
-  # with no root happened at the end of the run, after every failure at a
-  # root.
-  defp run_failures(config, %{retired: []} = run, finished) do
-    {primary, others} = primary_and_others(run.failures)
-
-    primary =
-      Enum.reduce(finished, primary, fn
-        {variant, {_result, _latency, {:finished, result}}}, failure ->
-          run_failure(config, variant.target, result, failure)
-
-        {_variant, {_result, _latency, {:crashed, crash}}}, failure ->
-          failure || crash
-
-        _gone, failure ->
-          failure
+  # A variant whose failure halted it during the lockstep reports that same
+  # failure again when it finalizes. A finalize-time failure is that same
+  # failure when the lockstep already found one in the same variant, at the
+  # same root, of the same kind and with the same name (see `identity/1`);
+  # it is listed once.
+  defp run_failures(config, run, finished, results) do
+    found =
+      Enum.map(run.failures, fn {failure, primary?} ->
+        {with_failure_reason(failure, results), primary?, :lockstep}
       end)
 
-    {primary, others}
+    already_found = MapSet.new(found, fn {failure, _primary?, _when} -> identity(failure) end)
+
+    {at_root, at_end} =
+      finished
+      |> Enum.map(fn {variant, {_result, _latency, outcome}} ->
+        end_failure(config, variant.target, outcome)
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(fn {failure, found_when} ->
+        {with_failure_reason(failure, results), true, found_when}
+      end)
+      |> Enum.reject(fn {failure, _primary?, _when} ->
+        MapSet.member?(already_found, identity(failure))
+      end)
+      |> Enum.split_with(fn {failure, _primary?, _when} -> failure.root != nil end)
+
+    primary_and_others(found ++ at_root, at_end)
   end
 
-  defp run_failures(config, run, finished) do
-    end_failures =
-      for {variant, {_result, _latency, outcome}} <- finished,
-          failure <- [end_failure(config, variant.target, outcome)],
-          failure != nil,
-          do: {failure, true}
+  defp identity(failure),
+    do: {failure.variant.index, failure.root, failure.kind, Failure.name(failure.reason)}
 
-    {at_root, at_end} = Enum.split_with(end_failures, fn {failure, _} -> failure.root != nil end)
-    primary_and_others(run.failures ++ at_root, at_end)
+  # A variant's finalize-time failure and when it happened: a check that
+  # `check_mode: :record` recorded failed while its root was stepped
+  # (`:stepped`), before that root's boundary was compared; any other one
+  # was found while the variant finalized its run (`:finalized`), after
+  # every comparison.
+  defp end_failure(config, target, {:finished, result}) do
+    case finalize_failure(config, target, result) do
+      nil -> nil
+      failure -> {failure, if(recorded?(result), do: :stepped, else: :finalized)}
+    end
   end
 
-  defp end_failure(config, target, {:finished, result}),
-    do: finalize_failure(config, target, result)
-
-  defp end_failure(_config, _target, {:crashed, crash}), do: crash
+  defp end_failure(_config, _target, {:crashed, crash}), do: {crash, :finalized}
   defp end_failure(_config, _target, _retired_or_gone), do: nil
 
   # The primary failure is the first in root order, then in target order (a
@@ -640,28 +653,34 @@ defmodule PropertyDamage.Scheduler do
   # no root) after all of them, in target order. The choice depends on the
   # order of `targets:`: the first target is the reference and the others
   # are compared with it in target order, so of two failures at one root the
-  # earlier target's is primary. A retired variant's `:teardown` check
-  # failure is never primary.
-  defp primary_and_others(failures, at_end \\ [])
-
+  # earlier target's is primary. Within one root in one variant, failures
+  # sort by when they happened: a check that failed while the root was
+  # stepped, then what the lockstep found (the comparison at that root's
+  # boundary), then what the variant reported while it finalized. A retired
+  # variant's `:teardown` check failure is never primary.
   defp primary_and_others([], []), do: {nil, []}
 
   defp primary_and_others(failures, at_end) do
     sorted =
-      Enum.sort_by(failures, fn {failure, _primary?} -> sort_key(failure) end) ++
-        Enum.sort_by(at_end, fn {failure, _primary?} -> failure.variant.index end)
+      Enum.sort_by(failures, &sort_key/1) ++
+        Enum.sort_by(at_end, fn {failure, _primary?, _when} -> failure.variant.index end)
 
-    case Enum.find_index(sorted, fn {_failure, primary?} -> primary? end) do
+    case Enum.find_index(sorted, fn {_failure, primary?, _when} -> primary? end) do
       nil ->
         {nil, Enum.map(sorted, &elem(&1, 0))}
 
       index ->
-        {{primary, true}, others} = List.pop_at(sorted, index)
+        {{primary, true, _when}, others} = List.pop_at(sorted, index)
         {primary, Enum.map(others, &elem(&1, 0))}
     end
   end
 
-  defp sort_key(%{root: root, variant: %{index: index}}), do: {root || -1, index}
+  defp sort_key({%{root: root, variant: %{index: index}}, _primary?, found_when}),
+    do: {root || -1, index, happened(found_when)}
+
+  defp happened(:stepped), do: 0
+  defp happened(:lockstep), do: 1
+  defp happened(:finalized), do: 2
 
   # Finalizes and stops one variant. Returns its result, its latencies, and
   # how it ended: `{:finished, result}`, `{:crashed, failure}`, or
@@ -701,37 +720,14 @@ defmodule PropertyDamage.Scheduler do
 
   defp finalize_failure(_config, _target, _result), do: nil
 
-  # The run's failure after one more variant finished. A finalize-time failure
-  # counts when the run has none. Under `check_mode: :record` a check failure
-  # the variant recorded at or before the root a divergence was found at
-  # happened first: the check failed while that root was stepped, before the
-  # boundary was compared.
-  defp run_failure(config, target, result, nil), do: finalize_failure(config, target, result)
-
-  defp run_failure(config, target, result, %{kind: kind, root: root} = divergence)
-       when kind in [:diverged, :did_not_converge] do
-    case result do
-      %{success: false, failure_reason: nil, check_failures: [_ | _]} ->
-        case finalize_failure(config, target, result) do
-          %{root: failed_root} = recorded when is_integer(failed_root) and failed_root <= root ->
-            recorded
-
-          _ ->
-            divergence
-        end
-
-      _ ->
-        divergence
-    end
-  end
-
-  defp run_failure(_config, _target, _result, failure), do: failure
+  # Whether `finalize_failure/3` reports a check `check_mode: :record`
+  # recorded.
+  defp recorded?(%{success: false, failure_reason: nil, check_failures: [_ | _]}), do: true
+  defp recorded?(_result), do: false
 
   # A variant reports an adapter raise by the exception alone; the failing
   # variant's finished result holds the `%Failure{}` the engine built for it,
   # already split from its stacktrace, and the run reports that one.
-  defp with_failure_reason(nil, _results), do: nil
-
   defp with_failure_reason(failure, results),
     do: with_result_reason(failure, Enum.at(results, failure.variant.index))
 
