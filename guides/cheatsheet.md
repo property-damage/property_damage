@@ -77,15 +77,11 @@ defmodule MyApp.TestModel do
   # @impl true
   # def injectable_events, do: [WebhookReceived]
 
-  # Lifecycle hooks
+  # Setup and teardown commands (sequences: every entry runs, in order)
   # @impl true
-  # def setup_once(config), do: :ok
+  # def setup_each, do: [{CreateUser, overrides: %{name: "fixture"}}, Login]
   # @impl true
-  # def setup_each(config), do: :ok
-  # @impl true
-  # def teardown_each(config), do: :ok
-  # @impl true
-  # def teardown_once(config), do: :ok
+  # def teardown_each, do: [DeleteUser]
 
   # Stop generation when condition is met
   # @impl true
@@ -94,36 +90,36 @@ defmodule MyApp.TestModel do
 end
 ```
 
-### Lifecycle callback arguments
+### Setup and teardown commands
 
-Every lifecycle callback receives a single map, and `:adapter_config` (the
-`config:` of the run's `targets:` entry, defaulting to `%{}`) is always present.
-The remaining keys are path tags:
+`setup_each/0` and `teardown_each/0` take no argument and return command specs,
+written as in `commands/0` (`Module` or `{Module, opts}`, with `overrides:`).
+Both default to `[]`.
 
-- `setup_each/1` and `teardown_each/1` get `run_number: n` on the normal run
-  path and `run_number: 0` on the trace/single-run derivation, so
-  `%{adapter_config: config, run_number: n}`. During a
-  `PropertyDamage.replay/2` they instead get `%{adapter_config: config,
-  replay: true}` (no `run_number`).
-- `setup_once/1` and `teardown_once/1` run on the normal run path only (replay
-  never calls the `_once` callbacks) and both get `%{adapter_config: config}`.
-
-Because `:adapter_config` is the only key guaranteed everywhere, destructure just
-that and treat `run_number`/`replay` as informational:
+| Rule | Behavior |
+|------|----------|
+| Sequence | every entry runs, in order; `when:` and `weight:` are ignored (`mix pd.validate` warns) |
+| Setup commands | run in every target after `Adapter.setup/1`, before the first root, in every run and shrink attempt |
+| Teardown commands | run after the roots, pass or fail, before `Adapter.teardown/1`; best effort, never change the verdict |
+| Not roots | never compared, expanded, or shrunk; `terminate_early?/3` and `max_commands` count roots only |
+| Engine | stutter, nemesis and latency samples are off; a nemesis module in either callback is an error |
+| Seeds | adding a setup command re-draws the roots for a given seed |
+| Old hooks | a model that defines a side-effect lifecycle hook (arity 1, or a `_once` hook) fails at run start |
 
 ```elixir
 @impl true
-def setup_each(%{adapter_config: config}) do
-  MyApp.Repo.reset(config)
-  :ok
-end
-
-@impl true
-def teardown_each(%{adapter_config: config}) do
-  MyApp.Repo.disconnect(config)
-  :ok
+def setup_each do
+  [
+    {CreateUser, overrides: %{name: "fixture"}},
+    {Login, overrides: fn state -> %{user_id: state.user} end}
+  ]
 end
 ```
+
+A failure in `Adapter.setup/1`, in a setup command, in a check on a setup
+command's event, or an `external()` a setup command left unresolved is kind
+`:setup_failed` (`failed_at_index` is `nil`) and is never shrunk. See
+[Writing Commands](writing_commands.md#setup-and-teardown-commands).
 
 ## Projection Template
 
@@ -379,30 +375,27 @@ PropertyDamage.run(
 ## Lifecycle Diagram
 
 ```
-setup_once/1
-├── Run 1
-│   ├── Model.setup_each/1
-│   ├── Adapter.setup/1
-│   ├── [Adapter.execute/3 x N]
-│   ├── Adapter.teardown/1
-│   └── Model.teardown_each/1
-├── Run 2
-│   ├── Model.setup_each/1
-│   ├── Adapter.setup/1
-│   ├── [Adapter.execute/3 x N]
-│   ├── Adapter.teardown/1
-│   └── Model.teardown_each/1
+Run 1
+├── Adapter.setup/1          (every target, one after another)
+├── @check at: :startup
+├── Model.setup_each/0       setup commands, in order
+├── [roots x N]              Adapter.execute/3, compared at each boundary
+├── final boundary
+├── @check at: :teardown
+├── Model.teardown_each/0    teardown commands, in order
+└── Adapter.teardown/1
+Run 2
+├── (same order)
 ├── ...
-├── [On failure] Shrinking
-│   ├── Shrink 1
-│   │   ├── Model.setup_each/1
-│   │   ├── Adapter.setup/1
-│   │   ├── [Adapter.execute/3 x M]  (shorter sequence)
-│   │   ├── Adapter.teardown/1
-│   │   └── Model.teardown_each/1
-│   └── ...
-└── Model.teardown_once/1
+[On failure] Shrinking
+├── Shrink 1                 same order, with a shorter sequence of roots
+│                            (setup commands re-run; teardown commands re-drawn)
+└── ...
 ```
+
+The order holds per target. A failure in setup (`:setup_failed`) skips the roots
+and still runs the teardown commands, except for a target whose
+`Adapter.setup/1` failed.
 
 ## Common Patterns
 

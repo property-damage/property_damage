@@ -347,7 +347,7 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 
 ### Requirement: Failure Report Is the Result (DR-045, DR-046)
 
-`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `compare_counts`, `coverage` when requested, and `metrics` keyed by target name under `latency: true`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `compare` (`[converge_within: ms]`), `compare_counts`, `other_failures`, `stutter` and `max_commands`, and SHALL NOT carry `adapter` or `equivalence`. A `setup_once/1` or `setup_each/1` failure SHALL keep returning `{:error, %{setup_once_failed: _}}` or `{:error, %{setup_each_failed: _, run_number: _}}`. There SHALL be no `Differential.Result`.
+`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `compare_counts`, `coverage` when requested, and `metrics` keyed by target name under `latency: true`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `compare` (`[converge_within: ms]`), `compare_counts`, `other_failures`, `stutter` and `max_commands`, and SHALL NOT carry `adapter` or `equivalence`. A setup failure (the adapter's `setup/1`, a setup command, or an unresolved `external()`) SHALL return a `:setup_failed` report whose `failed_at_index` is `nil` (DR-048). The report SHALL also carry `setup_commands` and `teardown_commands`, and `stats` SHALL count setup and teardown commands separately from `total_commands`. There SHALL be no `Differential.Result`.
 
 #### Scenario: Passing multi-target run
 
@@ -419,7 +419,7 @@ Each target SHALL be an entry of the `targets:` option: either an adapter module
 
 ### Requirement: The First Target Is the Reference (DR-043)
 
-The first entry of the `targets:` list SHALL be the reference target. The framework MUST NOT accept a per-target `role:` option, so a list has exactly one reference by construction. The failure report's `variant` and `targets` and the stats' `targets` SHALL identify targets by `%{index, name}`; the reference has index 0. `setup_once/1`, `setup_each/1` and their teardowns SHALL receive the reference target's config.
+The first entry of the `targets:` list SHALL be the reference target. The framework MUST NOT accept a per-target `role:` option, so a list has exactly one reference by construction. The failure report's `variant` and `targets` and the stats' `targets` SHALL identify targets by `%{index, name}`; the reference has index 0. The model's setup and teardown commands SHALL run in every target, and each target's adapter SHALL realize them with that target's own `config:` (DR-048).
 
 #### Scenario: Reference by position
 

@@ -278,6 +278,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   index. Best-effort: a raising `label/2` degrades to no annotation rather than
   failing the report.
 
+- **Setup and teardown commands: `setup_each/0` and `teardown_each/0` (DR-048).**
+  A model declares fixtures as commands. Both callbacks are optional and default
+  to `[]`; each returns command specs in the grammar of `commands/0` (typed
+  `PropertyDamage.Model.sequence`). Setup commands run in every target after
+  `Adapter.setup/1` and before the first root, in every run and shrink attempt;
+  teardown commands run after the last root and the final checks, whatever the
+  outcome, before `Adapter.teardown/1`. A list is a sequence: every entry runs in
+  order, and `when:` or `weight:` on an entry draws a `mix pd.validate` warning.
+  The generator draws and simulates setup commands before the roots, so
+  `overrides:` and `external()` ids flow into later commands, and adding a setup
+  command re-draws the roots for a given seed. Setup commands are never compared,
+  expanded or shrunk; stutter and nemesis faults are off (a nemesis module in
+  either callback is a validation error); teardown commands are best effort.
+- **`:setup_failed` carries a cause (DR-048).** `PropertyDamage.Failure.Setup`
+  gains `cause` (`:adapter_setup`, `:command`, `:check` or
+  `:unresolved_placeholder`), `command`, `setup_index`, `field` and `detail`.
+  An `external()` a setup command produced that is still unresolved after the last
+  setup command is a setup failure that names the command, the field and the
+  target. A setup failure in the reference ends the run before any root; in
+  another target it retires that target alone. It is never shrunk, and a shrink
+  attempt in which setup failed is not a reproduction.
+- **Setup and teardown commands in reports (DR-048).** `FailureReport` gains
+  `setup_commands` and `teardown_commands`, so a report reproduces without
+  re-drawing; `stats` and the report count them apart from `total_commands`,
+  which counts roots. `PropertyDamage.replay/2`, `RunTrace` and
+  `Analysis.isolate_trigger/2` execute them; a branching run executes the setup
+  commands before its own prefix segment; exported scripts list the setup steps
+  first. Telemetry command events carry `phase: :setup | :root | :teardown`, and
+  the coverage summary reports setup commands under a `setup` key.
+- **Persistence version 11 (DR-048).** Failure reports and traces store the setup
+  and teardown commands; loaders refuse older files.
+
 ### Changed
 
 - **BREAKING (DR-046): targets are compared through `@compare` observations only, with no compatibility layer.**
@@ -608,6 +640,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose event opened the poll window: its `failed_at_index` (previously `nil`) is
   that command's index, so the shrinker keeps locality. Code that asserted poll
   timeouts report `failed_at_index: nil` must update.
+
+- **BREAKING (DR-048): the model's lifecycle hooks are replaced by setup and teardown commands, with no compatibility layer.**
+  - Removed: the callbacks `setup_once/1`, `setup_each/1`, `teardown_each/1` and
+    `teardown_once/1`, and the `lifecycle_config` type. A model that defines one
+    of them, or `setup_once/0` or `teardown_once/0`, fails at run start with an
+    error that names the replacement. There is no once-per-campaign callback:
+    make `Adapter.setup/1` idempotent or wrap `PropertyDamage.run/1` yourself.
+  - Removed: the `{:error, %{setup_once_failed: _}}` and
+    `{:error, %{setup_each_failed: _}}` error maps. A failed setup is a
+    `:setup_failed` report (`failed_at_index: nil`).
+  - Replacement: `setup_each/0` and `teardown_each/0` return command specs that
+    run in every target. Move a side effect only the adapter can do (a database
+    reset, a pool) into the idempotent `Adapter.setup/1`, and move a fixture (a
+    user, a login) into a setup command.
+  - Persisted failure reports and traces are version 11; version 10 and older are
+    refused.
 
 ### Removed
 

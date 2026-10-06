@@ -1,6 +1,6 @@
 # DR-001: Models as Behaviour Modules
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed). Amended by DR-048: the four lifecycle hooks (`setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardown_once/1`) are removed; a model declares fixtures with the optional `setup_each/0` and `teardown_each/0`, which return command specs.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
 
 ## Decision
