@@ -36,6 +36,16 @@ defmodule PropertyDamage.Options do
       `PropertyDamage.Runtime` handle (`runtime.mock_registry`) so `execute/3`
       can drive `handle_request/2`. See `PropertyDamage.MockServiceAdapter`.
       """
+    ],
+    expansion: [
+      type: {:in, [:random, :identity, :reference]},
+      default: :random,
+      doc: """
+      How this target chooses among a root's expansions (`expansions/0` of the
+      model): `:random` draws by weight, `:identity` runs the root itself, and
+      `:reference` runs what the first target ran. The first target is the
+      reference and cannot be `:reference`.
+      """
     ]
   ]
 
@@ -89,7 +99,8 @@ defmodule PropertyDamage.Options do
   def validate_targets(value) when is_list(value) do
     with :ok <- check_non_empty(value),
          {:ok, targets} <- build_targets(value),
-         :ok <- check_unique_names(targets) do
+         :ok <- check_unique_names(targets),
+         :ok <- check_reference_first(targets) do
       {:ok, targets}
     end
   end
@@ -131,7 +142,8 @@ defmodule PropertyDamage.Options do
            index: index,
            config: validated[:config],
            injectors: validated[:injectors],
-           mocks: validated[:mocks]
+           mocks: validated[:mocks],
+           expansion: validated[:expansion]
          }}
       end
     else
@@ -159,6 +171,16 @@ defmodule PropertyDamage.Options do
       {:error, error} -> {:error, "targets entry #{index}: #{Exception.message(error)}"}
     end
   end
+
+  # A `:reference` target copies the first target's expansions, so the first
+  # target (the reference itself, or the sole target) cannot be one.
+  defp check_reference_first([%{expansion: :reference} | _]) do
+    {:error,
+     "targets entry 0: `expansion: :reference` runs what the reference ran, but the first " <>
+       "target is the reference and cannot copy it"}
+  end
+
+  defp check_reference_first(_targets), do: :ok
 
   defp check_unique_names(targets) do
     targets

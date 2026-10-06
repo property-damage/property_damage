@@ -321,6 +321,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the coverage summary reports setup commands under a `setup` key.
 - **Persistence version 11 (DR-048).** Failure reports and traces store the setup
   and teardown commands; loaders refuse older files.
+- **`expansions/0`, roots that run as several commands (DR-049).** The optional
+  `PropertyDamage.Model` callback returns `[{Root, fun}]`. `fun` takes the root
+  as generated and the target's simulated state, and returns a plain list of
+  entries: a sequence of command specs, or `{sequence, weight: n}`. The identity
+  is the received struct alone (`[root]`). Every expansion of a root means the
+  same as the root once it is done, under every `@compare` value of the model.
+  New types `command_spec`, `sequence`, `identity` and `choices(item)`. An
+  `overrides:` function of arity 2 (`fn state, prior_leaves -> map end`) reads
+  the earlier leaves of the same sequence with their simulated events. A root
+  placeholder is aliased to the one leaf that holds the same event module at
+  the same field; zero or several matches fail generation. A root with no
+  listed entry that fits runs as itself and is counted `:forced`.
+- **The `expansion:` target option (DR-049).** `:random` (default) picks an
+  entry per root by weight from a seed keyed on the run seed, the target's name
+  and the root; `:identity` runs the roots; `:reference` copies the first
+  target leaf for leaf. `:reference` on the first or the sole target is an
+  option error. Leaves are executed commands for checks, latency and coverage;
+  `@compare` schedules, `max_commands` and `total_commands` count roots.
+- **`mix pd.validate --seeds N` and `--seed S` (DR-049).** For a model with
+  `expansions/0`, the task samples N root sequences (default 100), realizes
+  every target's expansions and lists the leaf modules, each entry key with its
+  count, the entries never realized and the roots forced to the identity in
+  every sampled state. `--seed S --seeds 1` samples what `seed: S, max_runs: 1`
+  runs.
+- **Report fields `expansions` and `expansion_counts` (DR-049).**
+  `FailureReport.expansions` gives, per target name, the entry and leaf modules
+  of every executed root up to the failing root, and the reporter prints each
+  target's entry at the failing root. `expansion_counts` (also on `stats`)
+  counts entries per target and root module, and `:forced`. Coverage derives its
+  command universe from generation and counts expanded roots by entry.
+- **Telemetry for leaves (DR-049).** `[:property_damage, :command, :start | :stop]`
+  metadata carries `root_index` and `leaf_index`, and
+  `[:property_damage, :expansion, :leaf_validated]` reports each first
+  validation of a leaf module.
 
 ### Changed
 
@@ -406,7 +440,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`, and
     `reason` always a `%Failure{}`.
   - Persistence format version 8 becomes 9 for `.pd` reports and `.pdtrace`
-    traces (version 10 under DR-046, version 11 under DR-048, version 12 under DR-047). Loaders refuse version 8 files.
+    traces (version 10 under DR-046, version 11 under DR-048, version 12 under DR-047, version 13 under DR-049). Loaders refuse version 8 files.
   - `branching:` with two or more targets is an option error. Branching sequences,
     `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` and `RunTrace` stay
     one-target.
@@ -680,6 +714,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     user, a login) into a setup command.
   - Persisted failure reports and traces are version 11; version 10 and older are
     refused.
+- **BREAKING (DR-049): the `{Module, n}` weight shorthand is retired, expansions add load rules, and persistence moves to version 13, with no compatibility layer.**
+  - Removed: `{Module, 3}` as a command spec in `commands/0`, `setup_each/0`,
+    `teardown_each/0` and expansion sequences. It raises an error that names the
+    module and `weight:` before any adapter setup. Write `{Module, weight: 3}`.
+  - An `overrides:` function of arity 2 outside an expansion sequence (in
+    `commands/0`, `setup_each/0` or `teardown_each/0`) is a load error.
+  - New load errors, raised before any `Adapter.setup/1`: a model with
+    `expansions/0` and no `@compare` whose schedule reaches the end of the run
+    (`every: 1` or `:end`, one target included); a module in `expansions/0` that
+    is not in `commands/0`, is listed twice, or is an `execution: :probe` root;
+    `branching:` together with a model that defines `expansions/0`.
+  - `Analysis.isolate_trigger/2` raises for a target that ran any root as
+    leaves. `shrink_further/2` and `Replay` raise for a target whose choices the
+    report does not record.
+  - `%PropertyDamage.Target{}` gains the `expansion` field.
+  - Persisted failure reports and traces are version 13 (the `expansions` and
+    `expansion_counts` fields and the trace's concrete leaves); version 12 and
+    older are refused.
 
 ### Removed
 

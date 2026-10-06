@@ -38,10 +38,21 @@ defmodule PropertyDamage.Replay do
       {:ok, session, steps} = Replay.step_to(session, failure.failed_at_index)
       # Now at the exact point where the failure occurred
 
+  ## Expansions
+
+  For a model with `c:PropertyDamage.Model.expansions/0`, the replayed target
+  runs each root as it ran in the reported run: the root itself, or the
+  leaves of the expansion it chose there, realized again from the choices the
+  report's trace records, without a new draw. Each leaf is a step of its own.
+  A replay on a target whose choices the report does not record raises
+  `ArgumentError`.
+
   ## Step Information
 
   Each step returns:
-  - `index` - Command index in sequence
+  - `index` - Index of the root in the sequence (the root a leaf belongs to)
+  - `leaf_index` - The leaf's position within its root's expansion, or `nil`
+    for a root that runs as itself
   - `command` - The command struct
   - `command_name` - Short name for display
   - `events` - Events produced by this command (in chronological order)
@@ -73,12 +84,14 @@ defmodule PropertyDamage.Replay do
     definitions, which are reachable from the persisted model.)
   """
 
-  alias PropertyDamage.{EventQueue, Failure, FailureReport, Options, Sequence}
+  alias PropertyDamage.{EventQueue, Expansion, Failure, FailureReport, Options, Sequence}
   alias PropertyDamage.Executor.{Phases, Stepping}
 
   defstruct [
     :failure,
     :commands,
+    :plan,
+    :cursor,
     :model,
     :adapter,
     :config,
@@ -92,6 +105,7 @@ defmodule PropertyDamage.Replay do
 
   @type step :: %{
           index: non_neg_integer(),
+          leaf_index: non_neg_integer() | nil,
           command: struct(),
           command_name: String.t(),
           events: [struct()],
@@ -103,6 +117,8 @@ defmodule PropertyDamage.Replay do
   @type t :: %__MODULE__{
           failure: FailureReport.t(),
           commands: [struct()],
+          plan: [{non_neg_integer(), PropertyDamage.Sequence.Position.t() | nil}],
+          cursor: integer(),
           model: module(),
           adapter: module(),
           config: map(),
@@ -170,9 +186,10 @@ defmodule PropertyDamage.Replay do
 
   Sets up the adapter and an event queue, runs the report's setup commands
   (`setup_commands`), then leaves the session positioned before the first
-  root. `step/1` advances one root at a time (`current_index` and the steps'
-  `index` count roots only), and `stop/1`, when done, runs the report's
-  teardown commands and tears the adapter and queue down.
+  root. `step/1` executes one command at a time: a root that runs as itself,
+  or one leaf of a root's expansion. `current_index` and the steps' `index`
+  name roots: the root of the last command executed. `stop/1`, when done,
+  runs the report's teardown commands and tears the adapter and queue down.
 
   Returns `{:error, %PropertyDamage.Failure{}}` of kind `:setup_failed` when
   the adapter's `setup/1` fails, or when the setup phase fails (a setup
@@ -228,9 +245,9 @@ defmodule PropertyDamage.Replay do
     end
   end
 
-  defp do_start(failure, model, %{adapter: adapter, config: config}, opts) do
+  defp do_start(failure, model, %{adapter: adapter, config: config} = target, opts) do
     sequence = FailureReport.shrunk_sequence(failure)
-    commands = Sequence.to_list(sequence)
+    {commands, plan, registry} = replayed(failure, model, sequence, target)
 
     {:ok, event_queue} = EventQueue.start_link()
 
@@ -245,12 +262,14 @@ defmodule PropertyDamage.Replay do
             # Seed the placeholder registry from the failing sequence (DR-021),
             # so replaying a failure whose commands consume `external()` values
             # resolves them instead of raising "Unknown placeholder".
-            placeholder_registry: sequence.registry
+            placeholder_registry: registry
           )
 
         session = %__MODULE__{
           failure: failure,
           commands: commands,
+          plan: plan,
+          cursor: -1,
           model: model,
           adapter: adapter,
           config: config,
@@ -290,20 +309,22 @@ defmodule PropertyDamage.Replay do
   - `{:done, session}` - No more commands to execute
   """
   @spec step(t()) :: {:ok, t(), step()} | {:done, t()}
-  def step(%__MODULE__{current_index: idx, commands: commands} = session)
-      when idx + 1 >= length(commands) do
+  def step(%__MODULE__{cursor: cursor, commands: commands} = session)
+      when cursor + 1 >= length(commands) do
     {:done, %{session | status: :completed}}
   end
 
   def step(%__MODULE__{} = session) do
-    next_index = session.current_index + 1
-    command = Enum.at(session.commands, next_index)
+    cursor = session.cursor + 1
+    command = Enum.at(session.commands, cursor)
+    {next_index, leaf} = Enum.at(session.plan, cursor)
+    session = %{session | cursor: cursor}
 
     before_state = session.exec_state
     before_log_count = length(before_state.event_log)
     projections_before = before_state.projections
 
-    case Stepping.step(command, next_index, before_state, step_context(session)) do
+    case execute(command, next_index, leaf, before_state, step_context(session)) do
       {:ok, new_exec_state, _outcome} ->
         emit_step(
           session,
@@ -313,7 +334,8 @@ defmodule PropertyDamage.Replay do
           before_log_count,
           projections_before,
           :ok,
-          :in_progress
+          :in_progress,
+          leaf
         )
 
       {:error, reason, failed_state, _outcome} ->
@@ -325,10 +347,18 @@ defmodule PropertyDamage.Replay do
           before_log_count,
           projections_before,
           normalize_result(reason),
-          :failed
+          :failed,
+          leaf
         )
     end
   end
+
+  # A root that runs as itself steps at its own position; a leaf at its leaf
+  # position.
+  defp execute(command, index, nil, state, ctx), do: Stepping.step(command, index, state, ctx)
+
+  defp execute(command, index, leaf, state, ctx),
+    do: Stepping.step_leaf(command, index, leaf, state, ctx)
 
   defp emit_step(
          session,
@@ -338,12 +368,14 @@ defmodule PropertyDamage.Replay do
          before_log_count,
          projections_before,
          result,
-         status
+         status,
+         leaf
        ) do
     events = events_since(exec_state.event_log, before_log_count)
 
     step = %{
       index: index,
+      leaf_index: leaf && leaf.offset,
       command: command,
       command_name: command_name(command),
       events: events,
@@ -364,7 +396,8 @@ defmodule PropertyDamage.Replay do
   end
 
   @doc """
-  Execute commands up to (and including) the specified index.
+  Execute commands up to (and including) the root at the specified index:
+  every leaf of that root when it runs as an expansion.
 
   ## Returns
 
@@ -494,11 +527,14 @@ defmodule PropertyDamage.Replay do
     end
   end
 
-  defp step_to_loop(session, target_index, acc) when session.current_index >= target_index do
-    {:ok, session, Enum.reverse(acc)}
+  defp step_to_loop(session, target_index, acc) do
+    case Enum.at(session.plan, session.cursor + 1) do
+      {root, _leaf} when root <= target_index -> step_to_next(session, target_index, acc)
+      _later_or_none -> {:ok, session, Enum.reverse(acc)}
+    end
   end
 
-  defp step_to_loop(session, target_index, acc) do
+  defp step_to_next(session, target_index, acc) do
     case step(session) do
       {:ok, new_session, step} ->
         # Stop advancing once a command fails: there is nothing meaningful to
@@ -553,6 +589,36 @@ defmodule PropertyDamage.Replay do
 
   defp command_name(%{__struct__: mod}), do: mod |> Module.split() |> List.last()
   defp command_name(other), do: inspect(other)
+
+  # What the replayed target executes: the commands in order, each with its
+  # root index and leaf position (nil for a root that runs as itself), and the
+  # registry they resolve against. For a model with expansions the target's
+  # choices come from the report's trace.
+  defp replayed(failure, model, sequence, target) do
+    traced =
+      Expansion.traced!(
+        model,
+        failure.trace && failure.trace.expansion,
+        [target.name],
+        "PropertyDamage.Replay"
+      )
+
+    case traced do
+      nil ->
+        roots = Sequence.to_list(sequence)
+        {roots, Enum.map(Enum.with_index(roots), &{elem(&1, 1), nil}), sequence.registry}
+
+      %{} ->
+        variant = Expansion.carried(model, sequence, Map.fetch!(traced, target.name))
+
+        steps =
+          for {root_steps, root} <- Enum.with_index(Expansion.steps(variant.choices)),
+              {command, leaf} <- root_steps,
+              do: {command, {root, leaf}}
+
+        {Enum.map(steps, &elem(&1, 0)), Enum.map(steps, &elem(&1, 1)), variant.registry}
+    end
+  end
 
   defp branching?(%Sequence{} = seq), do: not Sequence.linear?(seq)
   defp branching?(_), do: false

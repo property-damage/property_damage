@@ -240,3 +240,56 @@ Run telemetry metadata SHALL carry `targets: [%{index, name, adapter}]` instead 
 - **WHEN** a multi-target run reports progress
 - **THEN** it SHALL use the `:test_run` operation
 - **AND** no `[:property_damage, :differential, :progress]` or `[:property_damage, :differential, :result]` event SHALL be emitted
+
+### Requirement: Coverage and Counts for Expansions (DR-049)
+
+For a model with `expansions/0`, the command universe of a run SHALL be derived from generation: `commands/0`, plus every leaf module that an expansion produced, plus the setup and teardown modules (which stay under `setup`). Coverage SHALL start from `commands/0` and add each leaf module when a run produces it, so an executed command is never outside the universe. Coverage SHALL count the commands the reference target executed, each leaf under its own module. Coverage SHALL also count each expanded root module by the entry the reference chose (`"Root[i]"`) and by `:forced` for a root that ran as itself because no listed entry could be realized, separately from the executed modules. `stats.expansion_counts` and a failure report's `expansion_counts` SHALL give, per target name and root module, the count per entry key and `:forced`. An `:identity` target SHALL count nothing, and a `:reference` target SHALL count the entries it copied. A failure report's counts SHALL stop at the failing root, so the counts and the `expansions` field describe the same executed roots. Latency samples SHALL be per leaf, `by_command` SHALL be keyed by the leaf module, and setup and teardown commands SHALL stay out of the samples.
+
+#### Scenario: A leaf module joins the universe
+- **GIVEN** a model whose `commands/0` lists `Pay` and whose `expansions/0` rewrites `Pay` as `[Authorize, Capture]`
+- **WHEN** a run produces that rewrite
+- **THEN** the coverage universe SHALL include `Authorize` and `Capture`
+- **AND** coverage SHALL NOT report either module as unknown
+
+#### Scenario: Entries are counted per root module
+- **WHEN** a run of 100 roots has 40 `Incr` roots, 15 of which the reference ran as `Incr[1]`
+- **THEN** `expansion_counts` for `Incr` SHALL hold `"Incr[0]" => 25` and `"Incr[1]" => 15`
+
+#### Scenario: Identity, forced
+- **WHEN** every listed entry of a root fails a leaf precondition and the function does not list the identity
+- **THEN** the root SHALL run as itself and `expansion_counts` SHALL count it under `:forced`
+
+#### Scenario: A failure report's counts stop at the failing root
+- **GIVEN** a run that fails at root 4 of 10
+- **THEN** the report's `expansion_counts` per target SHALL sum to the expanded roots among roots 0 to 4
+- **AND** the report's `expansions` per target SHALL hold 5 elements
+
+#### Scenario: Latency samples are per leaf
+- **GIVEN** `latency: true`, one setup command, one teardown command and two roots that a target ran as three leaves
+- **THEN** `metrics.commands` for that target SHALL count the three leaves of each expanded root and neither the setup nor the teardown command
+- **AND** `by_command` SHALL be keyed by the leaf modules
+
+### Requirement: Telemetry and Progress Name the Leaf (DR-049)
+
+`[:property_damage, :command, :start | :stop]` metadata SHALL carry `root_index` (the index of the root the command belongs to, `nil` for a setup or teardown command) and `leaf_index` (the leaf's position within an expanded root, `nil` for a root that runs as itself and for setup and teardown commands). The framework SHALL emit `[:property_damage, :expansion, :leaf_validated]` with metadata `%{module, root, entry, result}` when a process validates a leaf module for the first time, and again after a failed validation. A process SHALL keep a pass and SHALL NOT keep a failure. Progress printing SHALL name the leaf and its module on a failing command.
+
+#### Scenario: A leaf command event
+- **WHEN** a target executes the second leaf of root 3
+- **THEN** the command events SHALL carry `root_index: 3` and `leaf_index: 1`
+
+#### Scenario: A root that runs as itself
+- **WHEN** a target executes root 3 as itself
+- **THEN** the command events SHALL carry `root_index: 3` and `leaf_index: nil`
+
+#### Scenario: A setup command
+- **WHEN** a setup command executes
+- **THEN** the command events SHALL carry `root_index: nil` and `leaf_index: nil`
+
+#### Scenario: Leaf validation fires once per module per process
+- **WHEN** a process realizes the same leaf module twice and the first validation passed
+- **THEN** exactly one `[:property_damage, :expansion, :leaf_validated]` event SHALL fire for that module in the process
+
+#### Scenario: A failed validation is not cached
+- **WHEN** a leaf module fails validation twice in one process
+- **THEN** two events with `result: :error` SHALL fire, and both failures SHALL name the root, the entry, the leaf and the missing callback
+

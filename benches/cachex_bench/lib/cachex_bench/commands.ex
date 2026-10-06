@@ -17,6 +17,11 @@ defmodule CachexBench.Events do
   defmodule CacheCleared do
     defstruct []
   end
+
+  defmodule EntryIncremented do
+    # amount is what the SUT added; value is the counter it returned after
+    defstruct [:key, :amount, :value]
+  end
 end
 
 defmodule CachexBench.Commands.PutKey do
@@ -79,5 +84,24 @@ defmodule CachexBench.Commands.ClearCache do
   @impl true
   def generator(_overrides \\ %{}) do
     StreamData.constant(%{})
+  end
+end
+
+defmodule CachexBench.Commands.Incr do
+  @moduledoc "Add `amount` to the integer under a key (an absent key counts from 0)."
+  use PropertyDamage.Command
+
+  import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+  defstruct [:key, :amount]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{
+      key: StreamData.member_of(CachexBench.keys()),
+      amount: StreamData.integer(1..10)
+    }
+    |> merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
 end

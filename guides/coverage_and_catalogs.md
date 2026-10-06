@@ -220,6 +220,94 @@ tracker = PropertyDamage.coverage(result, Bank.Model)
 result **without** `coverage: true` carries no coverage data and raises, naming
 the option to set.
 
+## Expansions: the derived inventory and entry counts
+
+A model with `expansions/0` (see
+[Writing Commands](writing_commands.md#expansions-one-root-several-commands)) lets a
+root run as several commands, so the commands a run can execute are no longer
+only the ones `commands/0` lists. The inventory comes from generation:
+`commands/0`, plus every leaf module an expansion produced, plus the setup and
+teardown modules (those stay under `setup`).
+
+- Coverage starts from `commands/0` and adds each leaf module when a run
+  produces it, so an executed command is never "unknown". Leaves count under their
+  own module, beside the roots that ran as themselves.
+- Coverage counts what the **reference** target (the first) executed.
+- `expansion_counts` is separate from the executed modules. It counts each
+  expanded root module by the entry the reference chose (`"Root[i]"`), and by
+  `:forced` for a root that ran as itself because no listed entry could be
+  realized.
+
+The next fence adds a model on the bank above. A deposit of `n` may run as two
+deposits that add up to `n`, and the new projection compares the balance
+after every root:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule Bank.Observed do
+  use PropertyDamage.Model.Projection
+  alias Bank.Events.{Deposited, Withdrawn}
+
+  @impl true
+  def init, do: %{balance: 0}
+
+  @impl true
+  def apply(state, %Deposited{balance: b}), do: %{state | balance: b}
+  def apply(state, %Withdrawn{balance: b}), do: %{state | balance: b}
+  def apply(state, _event), do: state
+
+  @compare every: 1
+  def balance(state, _root), do: state.balance
+end
+
+defmodule Bank.SplitModel do
+  @behaviour PropertyDamage.Model
+  alias Bank.Commands.{Deposit, Withdraw}
+
+  @impl true
+  def commands, do: [{Deposit, weight: 3}, {Withdraw, weight: 2}]
+  @impl true
+  def command_sequence_projection, do: Bank.Ledger
+  @impl true
+  def check_projections, do: [Bank.Observed]
+  @impl true
+  def simulator, do: Bank.Model
+
+  @impl true
+  def expansions, do: [{Deposit, &deposit_expansions/2}]
+
+  def deposit_expansions(%Deposit{amount: a} = deposit, _state) when a >= 2 do
+    [
+      [deposit],
+      [{Deposit, overrides: %{amount: div(a, 2)}}, {Deposit, overrides: %{amount: a - div(a, 2)}}]
+    ]
+  end
+
+  def deposit_expansions(deposit, _state), do: [[deposit]]
+end
+
+{:ok, split_stats} =
+  PropertyDamage.run(
+    model: Bank.SplitModel,
+    targets: [Bank.Adapter],
+    max_commands: 20,
+    max_runs: 50,
+    seed: 7,
+    coverage: true,
+    verbose: false
+  )
+
+counts = split_stats.coverage.expansion_counts[Bank.Commands.Deposit]
+#=> %{"Deposit[0]" => n, "Deposit[1]" => m}  (counts of the deposits that ran each way)
+true = counts["Deposit[0]"] > 0 and counts["Deposit[1]"] > 0
+```
+
+A count of zero for an entry, or a missing key, says that the sample never
+realized the entry. `mix pd.validate Bank.SplitModel --targets "[Bank.Adapter]" --seeds 100`
+reports the same thing without a run: each entry key with its count over 100
+sampled root sequences, and a line such as "`Deposit[1]` not realized in 100
+seeds" for an entry that no sampled seed reached.
+
 ## The invariant catalog (DR-026)
 
 An **invariant** is a first-class, named property your model guarantees. You

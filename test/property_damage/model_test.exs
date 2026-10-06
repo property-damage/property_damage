@@ -187,8 +187,8 @@ defmodule PropertyDamage.ModelTest do
   end
 
   describe "normalize_commands/1" do
-    test "normalizes {module, weight} tuples to 3-tuple with spec map" do
-      commands = [{CreateItem, 3}, {ViewItem, 1}]
+    test "normalizes {module, weight: n} entries to 3-tuple with spec map" do
+      commands = [{CreateItem, weight: 3}, {ViewItem, weight: 1}]
 
       result = Model.normalize_commands(commands)
 
@@ -223,7 +223,7 @@ defmodule PropertyDamage.ModelTest do
     end
 
     test "handles mixed list" do
-      commands = [{CreateItem, 3}, ViewItem]
+      commands = [{CreateItem, weight: 3}, ViewItem]
 
       result = Model.normalize_commands(commands)
 

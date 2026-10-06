@@ -61,10 +61,17 @@ Failure Reproduction Script
 Generated: #{timestamp}
 Failure: #{failure_desc}
 Seed: #{metadata.seed}
-
+#{steps_note(report)}
 Prerequisites: pip install requests
 Run with: python #{Common.generate_filename(report, :python)}
 """)
+  end
+
+  defp steps_note(report) do
+    case Common.steps_note(report) do
+      nil -> ""
+      note -> note <> "\n"
+    end
   end
 
   defp generate_imports do

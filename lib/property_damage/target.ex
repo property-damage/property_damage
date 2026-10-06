@@ -30,6 +30,13 @@ defmodule PropertyDamage.Target do
     * `:mocks` (list, default `[]`): mock services the system under test calls;
       each entry is a `PropertyDamage.MockServiceAdapter` module or a
       `{module, config_map}` tuple.
+    * `:expansion` (`:random`, `:identity` or `:reference`, default `:random`):
+      how this target chooses at each root the model's `expansions/0` lists.
+      `:random` draws an expansion by weight from the run's seed, this
+      target's name and the root's index; `:identity` runs every root as
+      itself; `:reference` runs exactly what the first target ran, leaf for
+      leaf. The first target is the reference, so it cannot be `:reference`.
+      For a model without `expansions/0` every value runs the roots.
 
   The first entry is the reference: `PropertyDamage.run/1` compares every
   other target against it. Every other entry point takes exactly one entry.
@@ -46,10 +53,11 @@ defmodule PropertyDamage.Target do
           index: non_neg_integer(),
           config: map(),
           injectors: [module()],
-          mocks: [mock()]
+          mocks: [mock()],
+          expansion: :random | :identity | :reference
         }
 
-  defstruct [:adapter, :name, :index, config: %{}, injectors: [], mocks: []]
+  defstruct [:adapter, :name, :index, config: %{}, injectors: [], mocks: [], expansion: :random]
 
   @doc false
   # The name a target gets when its entry sets none: the last segment of the
@@ -65,6 +73,10 @@ defmodule PropertyDamage.Target do
   @spec to_entry(t()) :: {module(), keyword()}
   def to_entry(%__MODULE__{} = target) do
     {target.adapter,
-     name: target.name, config: target.config, injectors: target.injectors, mocks: target.mocks}
+     name: target.name,
+     config: target.config,
+     injectors: target.injectors,
+     mocks: target.mocks,
+     expansion: target.expansion}
   end
 end

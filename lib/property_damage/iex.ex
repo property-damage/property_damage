@@ -169,7 +169,9 @@ defmodule PropertyDamage.IEx do
   defp collect_hints(model) do
     hints = []
 
-    # Check for missing terminate_early?
+    # Check for missing terminate_early?. The roots are the commands to look
+    # at: terminate_early?/3 is consulted after each root and never after a
+    # leaf of an expansion.
     commands = model.commands() |> Model.normalize_commands()
 
     has_destructive =

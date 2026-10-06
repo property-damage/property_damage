@@ -23,10 +23,12 @@ defmodule PropertyDamage.Variant do
       {:ok, _entries} = Variant.run_teardown(pid)          # the teardown commands
       :ok = Variant.stop(pid)
 
-  `advance_to/2` steps every command from the next unexecuted index up to and
+  `advance_to/2` steps every root from the next unexecuted index up to and
   including the given index, then stops; the next call resumes from the same
-  state. Every command of the sequence is one root, so "boundary r" means
-  "after command r".
+  state. "Boundary r" means "after root r". A root is one command, or, when
+  the variant runs it as an expansion (`:roots`), the leaves of that
+  expansion in order: each leaf is an executed command, stepped through
+  `Stepping.step_leaf/5`.
 
   ## Setup and teardown commands
 
@@ -167,9 +169,13 @@ defmodule PropertyDamage.Variant do
 
     * `:target` (required) - the `%PropertyDamage.Target{}` to run
     * `:model` (required) - the model module
-    * `:commands` (required) - the concrete command list
+    * `:commands` (required) - the root commands, one per boundary
+    * `:roots` - what this variant executes for each root, as a list per root
+      of `{command, position}` steps: `nil` steps the root itself at its own
+      position, a `PropertyDamage.Sequence.Position.leaf/2` position steps a
+      leaf of the root's expansion there. Default: every root runs as itself.
     * `:placeholder_registry` (required) - this variant's copy of the registry
-      built once per run from `:commands`
+      built once per run from `:commands` (and from its leaves)
     * `:seed`, `:run_number` (required) - the campaign seed and the 0-based run
     * `:run_nonce` - the run nonce for client-minted values (DR-034)
     * `:mint_epoch` - the mint epoch for client-minted values (DR-034); default
@@ -339,9 +345,10 @@ defmodule PropertyDamage.Variant do
   def stop(pid), do: GenServer.call(pid, :stop, :infinity)
 
   @doc """
-  The wall-clock time of every adapter call so far, as `[{index, microseconds}]` in
-  index order, when the variant was started with `measure_latency: true`
-  (otherwise `[]`).
+  The wall-clock time of every adapter call so far, as `[{key, microseconds}]` in
+  execution order, when the variant was started with `measure_latency: true`
+  (otherwise `[]`). The key is the root's index, or `{index, leaf}` for a leaf
+  of the root's expansion.
 
   A command's time is what a client of the target experiences: the wall-clock
   of the adapter's `execute/3`, every retry of a `:probe` or `:async` command
@@ -349,7 +356,9 @@ defmodule PropertyDamage.Variant do
   (projections, checks and stutter are not timed). A command that never reached
   the adapter (a nemesis command, an unresolved placeholder) has no entry.
   """
-  @spec latencies(pid()) :: [{non_neg_integer(), non_neg_integer()}]
+  @spec latencies(pid()) :: [
+          {non_neg_integer() | {non_neg_integer(), non_neg_integer()}, non_neg_integer()}
+        ]
   def latencies(pid), do: GenServer.call(pid, :latencies, :infinity)
 
   # ==========================================================================
@@ -376,6 +385,7 @@ defmodule PropertyDamage.Variant do
       target: target,
       model: Keyword.fetch!(opts, :model),
       commands: opts |> Keyword.fetch!(:commands) |> List.to_tuple(),
+      roots: opts |> Keyword.get(:roots) |> root_steps(Keyword.fetch!(opts, :commands)),
       setup_commands: Keyword.get(opts, :setup_commands, []),
       teardown_commands: Keyword.get(opts, :teardown_commands, []),
       teardown_entries: nil,
@@ -718,23 +728,54 @@ defmodule PropertyDamage.Variant do
     end
   end
 
+  # Steps every command of root `index`: the root itself, or the leaves of the
+  # expansion this variant runs for it, in order.
   defp step_root(state, index) do
-    command = elem(state.commands, index)
     before = state.exec
 
-    stepped = Stepping.step(command, index, before, state.ctx)
-    state = record_latency(state, index, stepped)
+    state.roots
+    |> elem(index)
+    |> Enum.reduce_while({:cont, state}, fn {command, position}, {:cont, state} ->
+      case step_command(state, command, index, position) do
+        {:cont, state} -> {:cont, {:cont, state}}
+        {:halt, state} -> {:halt, {:halt, state}}
+      end
+    end)
+    |> case do
+      {:cont, state} ->
+        {:cont, state, {:ok, root_events(state.exec.event_log, before.event_log, index)}}
+
+      {:halt, state} ->
+        {:halt, state}
+    end
+  end
+
+  defp step_command(state, command, index, position) do
+    stepped =
+      case position do
+        nil -> Stepping.step(command, index, state.exec, state.ctx)
+        leaf -> Stepping.step_leaf(command, index, leaf, state.exec, state.ctx)
+      end
+
+    state = record_latency(state, latency_key(index, position), stepped)
 
     case stepped do
       {:ok, exec, _outcome} ->
-        observation = {:ok, root_events(exec.event_log, before.event_log, index)}
-        {:cont, after_step(state, exec, index), observation}
+        {:cont, after_step(state, exec, index)}
 
       {:error, failure, failed, outcome} ->
         {:halt,
          halt(state, {:failed, index, failure, failed}, failure_of(index, failure, outcome))}
     end
   end
+
+  defp latency_key(index, nil), do: index
+  defp latency_key(index, %{offset: leaf}), do: {index, leaf}
+
+  # The commands of each root, as `{command, position}` steps: by default
+  # every root runs as itself at its own position (`nil`).
+  defp root_steps(nil, commands), do: commands |> Enum.map(&[{&1, nil}]) |> List.to_tuple()
+  defp root_steps(roots, _commands), do: List.to_tuple(roots)
 
   # ==========================================================================
   # Boundary observations
@@ -905,10 +946,10 @@ defmodule PropertyDamage.Variant do
 
   defp record_latency(%{measure_latency: false} = state, _index, _stepped), do: state
 
-  defp record_latency(state, index, stepped) do
+  defp record_latency(state, key, stepped) do
     case elem(stepped, tuple_size(stepped) - 2).last_execute_us do
       nil -> state
-      elapsed -> %{state | latencies: [{index, elapsed} | state.latencies]}
+      elapsed -> %{state | latencies: [{key, elapsed} | state.latencies]}
     end
   end
 

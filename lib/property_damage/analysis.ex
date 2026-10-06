@@ -365,6 +365,8 @@ defmodule PropertyDamage.Analysis do
         target =
           Options.override_target!(opts, reference, "PropertyDamage.Analysis.isolate_trigger/2")
 
+        refuse_expansions!(report, model, target)
+
         # Try variations of the trigger command
         # Every variation runs with the report's setup and teardown commands
         # and the sequence's registry, so the roots resolve the externals the
@@ -389,6 +391,25 @@ defmodule PropertyDamage.Analysis do
            likely_cause: likely_cause
          }}
     end
+  end
+
+  # Each variation re-runs the sequence's roots through the linear engine, which
+  # runs every root as itself. A target that ran a root as an expansion's
+  # leaves would run something else, so the analysis refuses it.
+  defp refuse_expansions!(report, model, target) do
+    path = "PropertyDamage.Analysis.isolate_trigger/2"
+    traced = report.trace && report.trace.expansion
+
+    with %{} = choices <- PropertyDamage.Expansion.traced!(model, traced, [target.name], path),
+         true <- Enum.any?(Map.fetch!(choices, target.name), & &1.leaves?) do
+      raise ArgumentError,
+            "#{path} varies one command and re-runs the roots as themselves, but target " <>
+              "#{inspect(target.name)} ran roots of this report as an expansion's leaves " <>
+              "(#{inspect(model)} defines expansions/0); it cannot vary or re-run that " <>
+              "expanded sequence yet"
+    end
+
+    :ok
   end
 
   defp find_eliminating_changes(trigger_cmd, commands, failed_at, run) do

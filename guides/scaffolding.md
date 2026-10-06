@@ -319,6 +319,20 @@ generated files' "next steps" footer lists exactly what is left:
 5. **Point the adapter at your API** via `targets: [{Adapter, config: %{base_url: ...}}]` and
    any auth keys.
 
+6. **Optionally, say which command sequences mean the same.** The generated model
+   carries a commented `expansions/0` next to the setup and teardown callbacks. A
+   root listed there may run, per target, as one of several sequences that mean
+   the same once the root is done, and each target's `expansion:` option picks
+   (`:random`, the default, `:identity` or `:reference`). See
+   [Writing Commands](writing_commands.md#expansions-one-root-several-commands).
+
+7. **Validate the model.** `mix pd.validate WidgetTest.Model WidgetTest.Adapter`
+   checks the configuration. For a model with `expansions/0`, add `--seeds N`
+   (default 100) to sample N root sequences and list every expansion entry with
+   how often the sample realized it, and the entries it never did. `--seed S`
+   starts the sample at seed `S`, and `--seed S --seeds 1` samples exactly what
+   `seed: S, max_runs: 1` runs.
+
 ## 5. See it run against a real API
 
 The `openapi_bench` project in this repository is a complete, CI-gated worked

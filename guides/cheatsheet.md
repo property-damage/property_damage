@@ -83,6 +83,10 @@ defmodule MyApp.TestModel do
   # @impl true
   # def teardown_each, do: [DeleteUser]
 
+  # Command sequences a root may run as, per target (see Expansions below)
+  # @impl true
+  # def expansions, do: [{CreateOrder, &create_order_expansions/2}]
+
   # Stop generation when condition is met
   # @impl true
   # def terminate_early?(_state, %Shutdown{}, _events), do: true
@@ -120,6 +124,44 @@ A failure in `Adapter.setup/1`, in a setup command, in a check on a setup
 command's event, or an `external()` a setup command left unresolved is kind
 `:setup_failed` (`failed_at_index` is `nil`) and is never shrunk. See
 [Writing Commands](writing_commands.md#setup-and-teardown-commands).
+
+### Expansions
+
+`expansions/0` lists, for a root, command sequences that mean the same as the
+root once it is done. Each target picks one per root by its `expansion:` option.
+
+```elixir
+@impl true
+def expansions, do: [{Incr, &incr_expansions/2}]
+
+# fun.(root, state): a plain list of entries, simplest first
+def incr_expansions(%Incr{key: k, amount: n} = incr, _state) do
+  [
+    {[incr], weight: 2},                 # the identity, listed like any entry
+    [{Incr, overrides: %{key: k, amount: div(n, 2)}},
+     {Incr, overrides: fn _state, [%{events: [e]}] -> %{key: k, amount: n - e.amount} end}]
+  ]
+end
+```
+
+| Rule | Behavior |
+|------|----------|
+| Contract | every expansion means the same as the root once it is done, under every `@compare` value of the model |
+| Entry | a sequence, or `{sequence, weight: n}`; default weight 1; list order is the shrink preference |
+| Identity | the received root struct alone: `[root]` or `{[root], weight: n}`; nothing is chosen that is not listed |
+| `overrides:` | a map, `fn state -> map end`, or (in a sequence only) `fn state, prior_leaves -> map end` |
+| `target expansion:` | `:random` (default), `:identity` or `:reference` (copy the first target, leaf for leaf; error on the first target) |
+| Pick | keyed on the run seed, the target's name and the root; renaming a target picks again |
+| Nothing fits | the root runs as itself, counted `:forced` |
+| Load errors | no `@compare` that reaches the end; a listed module not in `commands/0`; a probe root; `branching:` |
+| Counts | leaves are commands; `@compare`, `max_commands` and `total_commands` count roots |
+| Retired | `{Module, 3}` is an error: write `{Module, weight: 3}` |
+
+Check which entries a seed range reaches with
+`mix pd.validate MyApp.Model --targets "[MyApp.Adapter]" --seeds 100`, and
+sample a failing seed with `--seed S --seeds 1`, which samples exactly what
+`seed: S, max_runs: 1` runs. See
+[Writing Commands](writing_commands.md#expansions-one-root-several-commands).
 
 ## Projection Template
 
@@ -291,7 +333,8 @@ PropertyDamage.run(
   targets: [{MyApp.Adapter,
     config: %{api_url: "http://localhost:4000"},
     injectors: [MyApp.WebhookInjector],
-    mocks: []
+    mocks: [],
+    expansion: :random       # :random (default) | :identity | :reference
   }],
 
   # Core options

@@ -17,6 +17,7 @@ defmodule PropertyDamage.Model do
   - `injectable_events/0` - Events that can arrive from Adapter.Injector modules
   - `setup_each/0` - The setup commands, run before the roots of every run
   - `teardown_each/0` - The teardown commands, run after the roots of every run
+  - `expansions/0` - Command sequences a root may run as, per target
   - `terminate_early?/3` - Control when command generation should stop
 
   ## Command Sequence Generation
@@ -63,6 +64,14 @@ defmodule PropertyDamage.Model do
         # Optional: projections that verify invariants
         @impl true
         def check_projections, do: [OrderBalances]
+
+        # Optional: a CreateOrder may also run as a draft plus its submission
+        @impl true
+        def expansions, do: [{CreateOrder, &create_order_expansions/2}]
+
+        def create_order_expansions(%CreateOrder{} = create, _state) do
+          [[create], [{DraftOrder, overrides: Map.from_struct(create)}, SubmitDraft]]
+        end
 
         # Terminate when order is deleted
         @impl true
@@ -204,26 +213,34 @@ defmodule PropertyDamage.Model do
 
   - `:weight` - Relative selection frequency (default: 1)
   - `:when` - Precondition function `(state -> boolean)` (default: always true)
-  - `:overrides` - Override function `(state -> map)` for command generation (default: %{})
+  - `:overrides` - A map, or a function `(state -> map)` for command generation
+    (default: %{}). Inside an expansion sequence a function may also take the
+    earlier leaves of its sequence: `(state, prior_leaves -> map)`; see
+    `c:expansions/0`.
   """
   @type command_opts :: [
           weight: pos_integer(),
           when: (map() -> boolean()),
-          overrides: (map() -> map())
+          overrides: map() | (map() -> map()) | (map(), [map()] -> map())
         ]
 
   @typedoc """
-  Command specification - module, `{module, weight}`, or `{module, opts}`.
+  Command specification: a module, or `{module, opts}`.
   """
-  @type command_spec :: module() | {module(), pos_integer()} | {module(), command_opts()}
+  @type command_spec :: module() | {module(), command_opts()}
+
+  @typedoc """
+  A list of items to choose from, each with an optional weight: `item` alone
+  has weight 1, `{item, weight: n}` has weight `n`, a positive integer.
+  """
+  @type choices(item) :: [item | {item, [weight: pos_integer()]}]
 
   @doc """
   Returns list of command specifications.
 
   Each command can be specified as:
   - `Module` - Simple module, weight 1, always enabled
-  - `{Module, weight}` - Module with custom weight
-  - `{Module, opts}` - Module with full options (weight, when, overrides)
+  - `{Module, opts}` - Module with options (weight, when, overrides)
 
   ## Examples
 
@@ -238,7 +255,7 @@ defmodule PropertyDamage.Model do
         ]
       end
   """
-  @callback commands() :: [command_spec()]
+  @callback commands() :: choices(command_spec())
 
   @doc """
   Returns the projection module used for command sequence generation.
@@ -300,10 +317,16 @@ defmodule PropertyDamage.Model do
 
   @typedoc """
   A sequence of command entries, written as `commands/0` entries are
-  (`Module`, `{Module, weight}` or `{Module, opts}`). Every entry runs, in
-  order; `when:` and `weight:` are ignored.
+  (`Module` or `{Module, opts}`). Every entry runs, in order; `when:` and
+  `weight:` are ignored.
   """
   @type sequence :: [command_spec()]
+
+  @typedoc """
+  The identity of an expansion: the root command the expansion function
+  received, alone in a list.
+  """
+  @type identity :: [struct()]
 
   @doc """
   The setup commands: run in every target after the adapter's `setup/1` and
@@ -335,6 +358,69 @@ defmodule PropertyDamage.Model do
   Optional - defaults to `[]`.
   """
   @callback teardown_each() :: sequence()
+
+  @doc """
+  Every expansion of a root means the same as the root once the root is done,
+  under every `@compare` value of the model. A rewrite that cannot meet that
+  under the model's observations is not an expansion of that model.
+
+  Returns one `{Root, fun}` pair per root command module that has expansions;
+  a root module absent from the list always runs as itself. `Root` must be a
+  module of `commands/0` (a setup or teardown command is not a root) and must
+  not be an `execution: :probe` command, and a module may be listed once.
+
+  `fun` takes the root command as generated and the variant's simulated state
+  at that root, and returns the expansions to choose from: each one a
+  `t:sequence/0` of leaf commands, or `{sequence, weight: n}`. The identity is
+  the received root struct alone in its list (`[root]` or
+  `{[root], weight: n}`); the struct may appear nowhere else. Nothing is
+  chosen that is not listed. The list order is the shrink preference,
+  simplest first, and by convention the identity comes first.
+
+      def expansions, do: [{Pay, &pay_expansions/2}]
+
+      def pay_expansions(%Pay{amount: a} = pay, _state) do
+        [
+          {[pay], weight: 3},
+          [
+            {Authorize, overrides: %{amount: a}},
+            {Capture,
+             overrides: fn _state, [%{events: [%Authorized{id: id}]}] ->
+               %{authorization_id: id, amount: a}
+             end}
+          ]
+        ]
+      end
+
+  Each leaf is generated from its module's generator with its `overrides:`,
+  evaluated against the variant's simulated state so far, and simulated
+  before the next leaf. An `overrides:` function of arity 2 also receives the
+  earlier leaves of the same sequence as `%{command: leaf, events: events}`
+  maps with their simulated events, so a leaf can take a sibling's
+  `external()` value (resolved per target at execution). `when:` and `weight:`
+  on a leaf are ignored, and `mix pd.validate --seeds` warns about them.
+
+  A leaf whose module has a `commands/0` entry whose `when:` is false at the
+  leaf's position withdraws its expansion, and the choice is made again among
+  the rest. When nothing remains, or `fun` returns `[]`, the root runs as
+  itself and the run counts it as "identity, forced".
+
+  Each target chooses per root by its `expansion:` option (see
+  `PropertyDamage.Target`): `:random` draws by weight from the run's seed, the
+  target's name and the root's index, `:identity` runs the roots themselves,
+  and `:reference` runs what the first target ran. The target name is a
+  generation input: renaming a target draws its expansions again.
+
+  An `external()` value the root's simulation produces is, in a target that
+  ran a rewrite, taken from the one leaf whose simulated events hold the same
+  event module at the same field; no such leaf, or several, is an error
+  before any target is set up. A model with expansions must also compare at
+  the end of the run: one `@compare` with `every: 1` or a schedule naming
+  `:end`.
+
+  Optional - a model without it runs every root as itself.
+  """
+  @callback expansions() :: [{module(), (struct(), map() -> choices(sequence() | identity()))}]
 
   @doc """
   Decides whether to end the sequence being generated before `max_commands`.
@@ -373,6 +459,7 @@ defmodule PropertyDamage.Model do
     injectable_events: 0,
     setup_each: 0,
     teardown_each: 0,
+    expansions: 0,
     terminate_early?: 3,
     simulator: 0
   ]
@@ -381,7 +468,7 @@ defmodule PropertyDamage.Model do
   Normalized command specification with weight, module, and resolved spec.
 
   The spec is a map containing all configuration for the command, resolved
-  from `command_spec/1` or legacy callbacks.
+  from `command_spec/1` or the framework defaults.
   """
   @type normalized_command :: {pos_integer(), module(), map()}
 
@@ -389,10 +476,12 @@ defmodule PropertyDamage.Model do
   Normalize command list to `{weight, module, spec}` format.
 
   Handles all input formats:
-  - `Module` → `{weight, Module, spec}` using command_spec/1 or legacy callbacks
-  - `{Module, weight}` → `{weight, Module, spec}` (legacy format)
+  - `Module` → `{weight, Module, spec}` using command_spec/1 or the framework defaults
   - `{Module, opts}` → `{weight, Module, spec}` opts passed to command_spec/1
   - `%{command: Module, ...}` → `{weight, Module, spec}` map merged with resolved spec
+
+  An entry `{Module, n}` with a bare integer raises an `ArgumentError`: a
+  weight is written `{Module, weight: n}`.
 
   ## Examples
 
@@ -410,35 +499,54 @@ defmodule PropertyDamage.Model do
   @doc """
   Normalize a single command specification.
 
-  Resolves the command's spec using `command_spec/1` if available,
-  otherwise falls back to legacy callbacks.
+  Resolves the command's spec using `command_spec/1` if available, otherwise
+  the framework defaults. An `overrides:` function must take one argument
+  (`fn state -> map end`): the two-argument form is legal only inside an
+  expansion sequence (see `c:expansions/0`).
   """
   @spec normalize_command_spec(command_spec()) :: normalized_command()
-  def normalize_command_spec(spec) do
+  def normalize_command_spec(spec), do: normalize(spec, false)
+
+  @doc false
+  # Normalizes one entry of an expansion sequence: as normalize_command_spec/1,
+  # except that an `overrides:` function may also take two arguments
+  # (`fn state, prior_leaves -> map end`).
+  @spec normalize_sequence_entry(command_spec()) :: normalized_command()
+  def normalize_sequence_entry(spec), do: normalize(spec, true)
+
+  @doc false
+  # The error for an entry `{module, weight}` with a bare integer.
+  @spec weight_shorthand_message(module(), integer()) :: String.t()
+  def weight_shorthand_message(module, weight) do
+    "Invalid command entry {#{inspect(module)}, #{weight}}: a bare integer is not a weight; " <>
+      "write `{#{inspect(module)}, weight: #{weight}}`."
+  end
+
+  defp normalize(spec, in_expansion?) do
     case spec do
       # Simple module
       module when is_atom(module) ->
-        finalize_spec(resolve_spec(module, []), module)
+        finalize_spec(resolve_spec(module, []), module, in_expansion?)
 
-      # {module, weight} format (legacy)
-      {module, weight} when is_atom(module) and is_integer(weight) and weight > 0 ->
-        finalize_spec(resolve_spec(module, weight: weight), module)
+      # A bare integer is not a weight.
+      {module, weight} when is_atom(module) and is_integer(weight) ->
+        raise ArgumentError, weight_shorthand_message(module, weight)
 
-      # {module, opts} format (new)
+      # {module, opts} format
       {module, opts} when is_atom(module) and is_list(opts) ->
-        finalize_spec(resolve_spec(module, opts), module)
+        finalize_spec(resolve_spec(module, opts), module, in_expansion?)
 
       # Map form with :command key
       %{command: module} = map when is_atom(module) ->
         opts = map |> Map.delete(:command) |> Map.to_list()
-        finalize_spec(resolve_spec(module, opts), module)
+        finalize_spec(resolve_spec(module, opts), module, in_expansion?)
     end
   end
 
   # Validate the resolved spec's selection/generation callbacks and return the
   # `{weight, module, spec}` tuple. Bad `when:`/`overrides:` arities used to fail
   # with an opaque CaseClauseError deep in generation; surface them here.
-  defp finalize_spec(resolved, module) do
+  defp finalize_spec(resolved, module, in_expansion?) do
     if Map.has_key?(resolved, :with) do
       raise ArgumentError,
             "Invalid `with:` for command #{inspect(module)}: `with:` was renamed `overrides:`."
@@ -451,7 +559,7 @@ defmodule PropertyDamage.Model do
     end
 
     validate_when!(Map.get(resolved, :when), module)
-    validate_overrides!(Map.get(resolved, :overrides), module)
+    validate_overrides!(Map.get(resolved, :overrides), module, in_expansion?)
     {validate_weight!(resolved.weight, module), module, resolved}
   end
 
@@ -486,19 +594,28 @@ defmodule PropertyDamage.Model do
   end
 
   # An `overrides:` option is either a map or invoked as `fun.(state)` to produce a
-  # map during generation; reject other shapes before they hit generation.
-  defp validate_overrides!(nil, _module), do: :ok
-  defp validate_overrides!(map, _module) when is_map(map), do: :ok
-  defp validate_overrides!(fun, _module) when is_function(fun, 1), do: :ok
+  # map during generation; inside an expansion sequence it may also be invoked as
+  # `fun.(state, prior_leaves)`. Reject other shapes before they hit generation.
+  defp validate_overrides!(nil, _module, _in_expansion?), do: :ok
+  defp validate_overrides!(map, _module, _in_expansion?) when is_map(map), do: :ok
+  defp validate_overrides!(fun, _module, _in_expansion?) when is_function(fun, 1), do: :ok
+  defp validate_overrides!(fun, _module, true) when is_function(fun, 2), do: :ok
 
-  defp validate_overrides!(fun, module) when is_function(fun) do
+  defp validate_overrides!(fun, module, false) when is_function(fun, 2) do
+    raise ArgumentError,
+          "Invalid `overrides:` for command #{inspect(module)}: a 2-arity function " <>
+            "`fn state, prior_leaves -> map end` is legal only inside an expansion sequence " <>
+            "(see expansions/0); here use a 1-arity function `fn state -> map end` or a map."
+  end
+
+  defp validate_overrides!(fun, module, _in_expansion?) when is_function(fun) do
     raise ArgumentError,
           "Invalid `overrides:` for command #{inspect(module)}: " <>
             "expected a 1-arity function `fn state -> map end` or a map, " <>
             "got a function of arity #{fun_arity(fun)}."
   end
 
-  defp validate_overrides!(other, module) do
+  defp validate_overrides!(other, module, _in_expansion?) do
     raise ArgumentError,
           "Invalid `overrides:` for command #{inspect(module)}: " <>
             "expected a 1-arity function `fn state -> map end` or a map, got #{inspect(other)}."

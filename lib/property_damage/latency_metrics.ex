@@ -3,11 +3,11 @@ defmodule PropertyDamage.LatencyMetrics do
   # Per-target latency metrics for `latency:` and the judgment of its budget.
   #
   # Every measured run contributes one sample per set-up target: the wall-clock
-  # time of each command's `execute/3`, with the module of the root command it
-  # belongs to. The metrics of a target summarize all of its samples, in
-  # microseconds: the 50th, 95th and 99th percentiles (linear interpolation),
-  # the mean, min and max, the number of timed commands, and the 95th
-  # percentile and count per root command module. A target with no timed
+  # time of each command's `execute/3`, with the command's module (a leaf's
+  # own module when the target ran a root as an expansion). The metrics of a
+  # target summarize all of its samples, in microseconds: the 50th, 95th and
+  # 99th percentiles (linear interpolation), the mean, min and max, the number
+  # of timed commands, and the 95th percentile and count per command module. A target with no timed
   # command has `%{error: :no_data}` and is never judged.
   #
   # The budget is judged once, on the metrics of the whole campaign: each
@@ -21,20 +21,28 @@ defmodule PropertyDamage.LatencyMetrics do
 
   @doc false
   # One run's sample, keyed by target name. `latencies` holds one list of
-  # `{root_index, elapsed_us}` per set-up target, in target order, as
-  # `PropertyDamage.Scheduler` reports them; `commands` is the run's flat
-  # command list, which the root index points into.
-  @spec sample([PropertyDamage.Target.t()], [list()], [struct()]) :: %{String.t() => map()}
-  def sample(targets, latencies, commands) do
-    modules = commands |> Enum.map(& &1.__struct__) |> List.to_tuple()
-
+  # `{key, elapsed_us}` per set-up target, in target order, as
+  # `PropertyDamage.Scheduler` reports them; `schedules` holds what each
+  # target executed per root (`PropertyDamage.Expansion.schedule/2`), which
+  # the key (a root index, or `{root_index, leaf}`) points into.
+  @spec sample([PropertyDamage.Target.t()], [list()], [map()]) :: %{String.t() => map()}
+  def sample(targets, latencies, schedules) do
     targets
     |> Enum.zip(latencies)
-    |> Map.new(fn {target, timings} ->
+    |> Enum.zip(schedules)
+    |> Map.new(fn {{target, timings}, %{roots: roots}} ->
+      roots = List.to_tuple(roots)
+
       {target.name,
-       %{timings: Enum.map(timings, fn {root, elapsed} -> {elem(modules, root), elapsed} end)}}
+       %{timings: Enum.map(timings, fn {key, elapsed} -> {module(roots, key), elapsed} end)}}
     end)
   end
+
+  # The command module a latency key names: a root's index, or `{index, leaf}`.
+  defp module(roots, {root, leaf}), do: roots |> elem(root) |> Enum.at(leaf) |> step_module()
+  defp module(roots, root), do: roots |> elem(root) |> hd() |> step_module()
+
+  defp step_module({command, _position}), do: command.__struct__
 
   @doc false
   # The metrics of every target over the samples of the measured runs, keyed by

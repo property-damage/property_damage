@@ -162,6 +162,18 @@ defmodule Mix.Tasks.Pd.Gen.Model do
       # @impl true
       # def teardown_each, do: [Logout]
       #
+      # Optional: expansions/0. A root listed there may run, per target, as
+      # one of several command sequences that mean the same as the root once
+      # it is done; list the root itself first, for example:
+      #
+      # @impl true
+      # def expansions, do: [{Deposit, &deposit_expansions/2}]
+      #
+      # def deposit_expansions(%Deposit{amount: n} = deposit, _state) do
+      #   half = div(n, 2)
+      #   [[deposit], [{Deposit, overrides: %{amount: half}}, {Deposit, overrides: %{amount: n - half}}]]
+      # end
+      #
       # def terminate_early?(state, command, events) do
       #   # Return true to stop command generation
       #   false

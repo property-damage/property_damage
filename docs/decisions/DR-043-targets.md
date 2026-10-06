@@ -1,6 +1,6 @@
 # DR-043: Targets Carry Every Per-Target Resource
 
-**Status:** Accepted. Amended by DR-045: `run/1` takes one or more `targets:`, so the rule that only `Differential.run/1` accepts several entries is gone; `Differential.run/1` is deleted.
+**Status:** Accepted. Amended by DR-045: `run/1` takes one or more `targets:`, so the rule that only `Differential.run/1` accepts several entries is gone; `Differential.run/1` is deleted. Amended by DR-049: a target entry gains `expansion: :random | :identity | :reference` (default `:random`).
 **Date:** 2026-10-05
 
 ## Context

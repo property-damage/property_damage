@@ -91,7 +91,7 @@ defmodule PropertyDamage.TargetsOptionTest do
         assert t.__struct__ == PropertyDamage.Target
 
         assert t |> Map.from_struct() |> Map.keys() |> Enum.sort() ==
-                 [:adapter, :config, :index, :injectors, :mocks, :name]
+                 [:adapter, :config, :expansion, :index, :injectors, :mocks, :name]
 
         assert t.index == 0
         assert t.name == "b"

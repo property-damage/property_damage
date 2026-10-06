@@ -88,6 +88,15 @@ defmodule PropertyDamage.Placeholder do
   end
 
   @doc """
+  The position of the command that produces the placeholder `id` names.
+
+  An export uses it to find the step a placeholder is bound after when it
+  holds only the id, as the aliases of a root that ran as leaves do.
+  """
+  @spec id_position(id()) :: position() | nil
+  def id_position({position, _event_index, _path}), do: position
+
+  @doc """
   Resolve a placeholder with a concrete value.
 
   Returns a new placeholder struct with the resolved value set.
@@ -149,5 +158,6 @@ defimpl Inspect, for: PropertyDamage.Placeholder do
   defp loc(%Position{section: :suffix, offset: i}), do: "suf#{i}"
   defp loc(%Position{section: :setup, offset: i}), do: "setup#{i}"
   defp loc(%Position{section: :teardown, offset: i}), do: "teardown#{i}"
+  defp loc(%Position{section: {:leaf, r}, offset: i}), do: "leaf#{r}.#{i}"
   defp loc(nil), do: "?"
 end

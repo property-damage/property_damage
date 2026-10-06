@@ -3,7 +3,8 @@ defmodule CachexBench.SeededBugTest do
   Validates that the bench is not passing vacuously: a deliberately buggy
   adapter (delete silently does nothing) must be caught by the model's
   read-consistency invariant, and the failure must shrink to the minimal
-  reproduction (put -> del -> get on the same key: 3 commands).
+  reproduction (a write -> del -> get on the same key: 3 commands; the write
+  is a put or an increment).
   """
   use ExUnit.Case, async: false
 
@@ -53,9 +54,17 @@ defmodule CachexBench.SeededBugTest do
            "expected a near-minimal reproduction, got #{length(commands)} commands: " <>
              inspect(commands)
 
-    # The repro must end in a read, and contain the put/del pair for its key
+    # The repro must end in a read, and contain a write and the del for its
+    # key. A write is a put or an increment: an Incr of an absent key stores
+    # its amount.
     %CachexBench.Commands.GetKey{key: key} = List.last(commands)
-    assert Enum.any?(commands, &match?(%CachexBench.Commands.PutKey{key: ^key}, &1))
+
+    assert Enum.any?(commands, fn
+             %CachexBench.Commands.PutKey{key: ^key} -> true
+             %CachexBench.Commands.Incr{key: ^key} -> true
+             _other -> false
+           end)
+
     assert Enum.any?(commands, &match?(%CachexBench.Commands.DelKey{key: ^key}, &1))
   end
 end

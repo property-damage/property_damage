@@ -8,7 +8,7 @@ Define the differential testing and mutation testing subsystems that allow Prope
 
 ### Requirement: Multi-Target Execution
 
-`PropertyDamage.run/1` SHALL run the same command sequences against every entry of `targets:` and compare their results (DR-045). One entry is a run without comparison; two or more entries compare every non-reference target with the first.
+`PropertyDamage.run/1` SHALL run the same root sequence against every entry of `targets:` and compare their results (DR-045). For a model with `expansions/0`, each target MAY run a root as a different command sequence (DR-049); the roots stay the same, and targets are compared at root boundaries only. One entry is a run without comparison; two or more entries compare every non-reference target with the first.
 
 #### Scenario: Oracle testing
 
@@ -449,7 +449,7 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 
 ### Requirement: Target Specification (DR-043)
 
-Each target SHALL be an entry of the `targets:` option: either an adapter module or `{AdapterModule, keyword}`, the same idiom the model's `commands/0` uses. The keyword MAY carry `name:`, `config:`, `injectors:` and `mocks:`; any other key, including `expansion:` until a decision record introduces expansions, MUST be rejected as an unknown option. The framework SHALL normalize every entry to a `%PropertyDamage.Target{}` with the fields `adapter`, `name`, `index`, `config`, `injectors` and `mocks`, where `index` is the zero-based position of the entry in the list.
+Each target SHALL be an entry of the `targets:` option: either an adapter module or `{AdapterModule, keyword}`, the same idiom the model's `commands/0` uses. The keyword MAY carry `name:`, `config:`, `injectors:`, `mocks:` and `expansion:` (DR-049); any other key MUST be rejected as an unknown option. The framework SHALL normalize every entry to a `%PropertyDamage.Target{}` with the fields `adapter`, `name`, `index`, `config`, `injectors`, `mocks` and `expansion`, where `index` is the zero-based position of the entry in the list.
 
 #### Scenario: Minimal target specification
 
@@ -491,6 +491,82 @@ The first entry of the `targets:` list SHALL be the reference target. The framew
 
 - **WHEN** a target entry carries `role:`
 - **THEN** the framework SHALL raise `NimbleOptions.ValidationError` with the message "targets entry 0: `role:` was removed; the first `targets:` entry is the reference" (the index is that of the offending entry)
+
+### Requirement: The `expansion:` Target Option (DR-049)
+
+A target entry SHALL accept `expansion: :random | :identity | :reference`, validated with the other target keys, with the default `:random` on every target, the reference included. An unknown value SHALL be a `NimbleOptions.ValidationError` that names the three values. `:random` SHALL pick an entry per root by weight, from a seed keyed on the run seed, the target's name and the root. `:identity` SHALL run the roots themselves, whatever the other targets run. `:reference` SHALL run the first target's concrete sequence, leaf for leaf: the reference's choice, its leaves and its leaf arguments, with placeholders symbolic and resolved per target. `:reference` on the first target, or on the sole target of a one-target run, SHALL be an option error that says the first target is the reference and cannot copy it. Any mix of values across the other targets SHALL be legal. For a model without `expansions/0` every value SHALL yield the same sequence and the option SHALL be accepted and inert.
+
+Every target SHALL generate its concrete sequence before any target is set up, and a generation error SHALL be raised before any `Adapter.setup/1`.
+
+#### Scenario: Random is the default
+- **WHEN** a target entry sets no `expansion:`
+- **THEN** its `%Target{}` SHALL have `expansion: :random`
+
+#### Scenario: An unknown value
+- **WHEN** a target sets `expansion: :shuffle`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` that names `:random`, `:identity` and `:reference`
+
+#### Scenario: The reference cannot copy itself
+- **WHEN** the first target sets `expansion: :reference`, or a one-target run sets it
+- **THEN** the framework SHALL raise an option error that says the first target cannot copy the reference
+
+#### Scenario: A differential run
+- **GIVEN** two targets, the second with `expansion: :reference`
+- **WHEN** a run executes a root that the reference ran as `Pay[1] = [Authorize, Capture]`
+- **THEN** the second target SHALL run `Authorize` then `Capture` with the same arguments
+
+#### Scenario: A path-equivalence run
+- **GIVEN** two targets on `:random` with different names
+- **WHEN** a run executes many roots
+- **THEN** each target SHALL pick its own entry per root, so the two sequences differ at some root
+
+#### Scenario: Identity beside a random reference
+- **GIVEN** a `:random` reference and a second target on `:identity`
+- **WHEN** the reference runs a root as an expansion
+- **THEN** the second target SHALL run the root itself
+
+#### Scenario: Inert without expansions
+- **GIVEN** a model that defines no `expansions/0`
+- **WHEN** targets set `:random`, `:identity` and `:reference`
+- **THEN** every target SHALL run the same roots
+
+### Requirement: The Pick Is Keyed on the Target's Name (DR-049)
+
+The `:random` pick at a root SHALL be a pure function of the run seed, the target's name and the root's id (its index at generation): the framework SHALL hash that term with SHA-256 and seed the pick from the first 64 bits, so the pick is the same in any process on any machine. A report's `seed` SHALL be the seed of its own run, so `seed: report.seed, max_runs: 1` SHALL pick the same entries. Reordering `targets:` SHALL change only which target is the reference and what a `:reference` target copies, and SHALL NOT change the sequence of any named `:random` target. Renaming a target SHALL pick its entries again. Two targets with one name SHALL be the existing duplicate-name error, and names that differ only in case SHALL pick independently.
+
+#### Scenario: The same seed and names pick the same entries
+- **WHEN** two runs, in one process or in two OS processes, use the same seed and target names
+- **THEN** their `expansions` fields SHALL be equal
+
+#### Scenario: Reordering targets keeps a random target's sequence
+- **GIVEN** targets "a" and "b" on `:random`
+- **WHEN** `targets:` lists "b" first
+- **THEN** "a" SHALL run the sequence it ran before
+
+#### Scenario: Renaming re-picks
+- **WHEN** a `:random` target is renamed
+- **THEN** its entries SHALL differ from the previous name's at some root of a long enough run
+
+### Requirement: Root Placeholder Aliasing (DR-049)
+
+In a target whose entry at a root is not the identity, every placeholder that the root's simulation minted SHALL be aliased, in that target's registry, to the placeholder of exactly one leaf whose simulated events hold the same event module at the same field path. Zero matches or several matches SHALL be a generation error that names the root, the entry key, the field and the candidate leaves (each as leaf index, module and event index), raised before any `Adapter.setup/1`. Several events of one leaf SHALL count as several matches. Resolution SHALL then happen at execution from the leaf's real events, as for any placeholder. A `:reference` target SHALL rebuild the reference's aliases in its own registry.
+
+#### Scenario: One matching leaf aliases
+- **GIVEN** a root `Open` that mints an account id and an expansion `[Reserve, Confirm]` in which only `Confirm` emits that event
+- **WHEN** a later root consumes the account id in a target that ran the expansion
+- **THEN** the consumer SHALL receive the id that the `Confirm` leaf's real events resolved
+
+#### Scenario: Two leaves match
+- **WHEN** two leaves of one entry emit the same event module at the same field
+- **THEN** generation SHALL fail with an error that names both leaves
+
+#### Scenario: One leaf emits two matching events
+- **WHEN** one leaf emits two events with the same module at the same field
+- **THEN** generation SHALL fail with an error that names the leaf and both event indexes
+
+#### Scenario: No leaf matches
+- **WHEN** no leaf of the entry emits the root's event at that field
+- **THEN** generation SHALL fail with an error that names the root, the entry and the field
 
 ### Requirement: Target Names Are Unique (DR-043)
 

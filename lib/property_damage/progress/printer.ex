@@ -4,6 +4,7 @@ defmodule PropertyDamage.Progress.Printer do
   alias PropertyDamage.{Error, FailureReport, LatencyMetrics, Sequence}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{RunResult, RunUpdate}
+  alias PropertyDamage.Sequence.Position
 
   @doc """
   Build the `verbose:` consumer for `PropertyDamage.run/1` (DR-022).
@@ -126,6 +127,18 @@ defmodule PropertyDamage.Progress.Printer do
           {index, nil} -> "Command #{index + 1}"
         end
     )
+
+    # A failure in a leaf of a root's expansion names the leaf and its root.
+    case FailureReport.failure_step(report) do
+      %{position: %{section: {:leaf, _root}} = position, command: command} ->
+        IO.puts(
+          "  Leaf:         #{Position.describe(position)} " <>
+            "(#{inspect(command.__struct__)})"
+        )
+
+      _ ->
+        :ok
+    end
 
     IO.puts("")
 

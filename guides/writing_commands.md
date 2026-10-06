@@ -571,6 +571,284 @@ verdict.
 The earlier side-effect lifecycle hooks no longer exist. A model that still
 defines one fails at run start with an error that names the replacement.
 
+## Expansions: One Root, Several Commands
+
+Some operations have more than one way to be done. A counter can add 5 in one
+call or add 3 and then add 2. A payment can be one `Pay` call or `Authorize`
+then `Capture`. If the model says that the ways mean the same, each target can
+run a different way, and a disagreement between the targets is a bug in one of
+the ways.
+
+The optional callback `expansions/0` lists the ways. Its contract is one
+sentence: **every expansion of a root means the same as the root once the root
+is done, under every `@compare` value of the model.** A rewrite that does not
+meet it under the model's observations is not an expansion of that model, so
+either stop observing the field that differs or leave the rewrite out.
+
+The vocabulary: a **root command** is a module that `commands/0` lists. A
+**root** is one occurrence of it in the generated sequence. An **expansion** is
+one command sequence the model lists for it, and the root run as itself is the
+**identity**. A **leaf** is a command that a target executes for an expanded
+root.
+
+### Example: Increment by Parts
+
+A counter service keeps one integer per key. The model has one command, `Incr`,
+and says that `Incr k 5` may also run as two increments of the same key that
+add up to 5:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule Counter.Events do
+  defmodule Incremented do
+    defstruct [:key, :amount]
+  end
+end
+
+defmodule Counter.Commands do
+  defmodule Incr do
+    use PropertyDamage.Command
+    import PropertyDamage.Generator, only: [merge_overrides: 2]
+
+    defstruct [:key, :amount]
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{key: StreamData.member_of(["a", "b"]), amount: StreamData.integer(1..10)}
+      |> merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+end
+
+defmodule Counter.Totals do
+  use PropertyDamage.Model.Projection
+
+  alias Counter.Events.Incremented
+
+  @impl true
+  def init, do: %{}
+
+  @impl true
+  def apply(totals, %Incremented{key: key, amount: amount}),
+    do: Map.update(totals, key, amount, &(&1 + amount))
+
+  def apply(totals, _event), do: totals
+
+  # Every target must hold the same totals after every root.
+  @compare every: 1
+  def totals(state, _root), do: state
+end
+
+defmodule Counter.Model do
+  @behaviour PropertyDamage.Model
+  @behaviour PropertyDamage.Model.Simulator
+
+  alias Counter.Commands.Incr
+  alias Counter.Events.Incremented
+
+  @impl true
+  def commands, do: [Incr]
+
+  @impl true
+  def command_sequence_projection, do: Counter.Totals
+
+  # The roots that have expansions, each with a function of the root and the
+  # simulated state. The function returns a plain list of entries.
+  @impl true
+  def expansions, do: [{Incr, &incr_expansions/2}]
+
+  # The identity comes first: it is the simplest entry, and the shrink
+  # preference follows the list order. Its weight is 2, the rewrite's is 1.
+  def incr_expansions(%Incr{key: key, amount: amount} = incr, _state) do
+    [{[incr], weight: 2} | split(key, amount)]
+  end
+
+  # `Incr k 1` has no rewrite. For a larger amount, the first leaf adds half and
+  # the second takes the rest from the first leaf's event (the arity-2 form of
+  # `overrides:`, legal only inside an expansion sequence).
+  defp split(_key, amount) when amount < 2, do: []
+
+  defp split(key, amount) do
+    [
+      [
+        {Incr, overrides: %{key: key, amount: div(amount, 2)}},
+        {Incr,
+         overrides: fn _state, [%{events: [%Incremented{amount: first}]}] ->
+           %{key: key, amount: amount - first}
+         end}
+      ]
+    ]
+  end
+
+  @impl true
+  def simulator, do: __MODULE__
+
+  @impl PropertyDamage.Model.Simulator
+  def simulate(%Incr{key: key, amount: amount}, _state),
+    do: [%Incremented{key: key, amount: amount}]
+end
+
+defmodule Counter.Adapter do
+  use PropertyDamage.Adapter
+
+  alias Counter.Commands.Incr
+  alias Counter.Events.Incremented
+
+  @impl true
+  def setup(_config) do
+    {:ok, agent} = Agent.start_link(fn -> %{} end)
+    {:ok, %{agent: agent}}
+  end
+
+  @impl true
+  def teardown(%{agent: agent}) do
+    Agent.stop(agent)
+    :ok
+  end
+
+  @impl true
+  def execute(%Incr{key: key, amount: amount}, %{agent: agent}, _runtime) do
+    Agent.update(agent, &Map.update(&1, key, amount, fn total -> total + amount end))
+    {:ok, [%Incremented{key: key, amount: amount}]}
+  end
+end
+
+{:ok, stats} =
+  PropertyDamage.run(
+    model: Counter.Model,
+    targets: [
+      {Counter.Adapter, name: "direct", expansion: :identity},
+      {Counter.Adapter, name: "split"}
+    ],
+    max_runs: 20,
+    max_commands: 10,
+    seed: 1
+  )
+
+# "direct" runs the roots themselves and counts nothing. "split" picked an
+# entry at every `Incr`; both entries came up in these 20 runs.
+%{"direct" => direct, "split" => %{Counter.Commands.Incr => entries}} = stats.expansion_counts
+true = direct == %{}
+true = entries["Incr[0]"] > 0 and entries["Incr[1]"] > 0
+```
+
+Two targets on one adapter module are two independent counters, because
+`setup/1` starts a new agent per target. The first target runs the roots (the
+simple path) and the second runs a rewrite where it picked one. After every
+root the framework compares `Counter.Totals.totals/2` of the two. A bug in
+the adapter that mishandles an amount below 3 would show up in "split" at the
+root that chose `Incr[1]`, because the rewrite sends such an amount.
+
+### The Entries
+
+- **A list of entries.** `fun` receives the root as generated and the target's
+  simulated state at that root, and returns a plain list. An entry is a
+  sequence, or `{sequence, weight: n}` with `n` a positive integer. The default
+  weight is 1.
+- **The identity is listed.** Write the received struct alone, as `[incr]` or
+  `{[incr], weight: 2}`. Nothing is chosen that the function did not list. The
+  struct may appear nowhere else in a sequence.
+- **A sequence is a list of command specs**, the grammar of `commands/0`:
+  `Module` or `{Module, opts}`. `overrides:` is a map, a function of the state, or
+  (inside a sequence only) a function of the state and the earlier leaves. In
+  `commands/0`, `setup_each/0` and `teardown_each/0` an arity-2 function is a load
+  error.
+- **The earlier leaves** reach the arity-2 function as
+  `%{command: leaf, events: simulated events}`, with `external()` fields as
+  placeholders. A value taken from a sibling's event is therefore the
+  sibling's placeholder, and each target resolves it from its own real events.
+- **`when:` and `weight:` on a leaf do nothing.** `mix pd.validate --seeds`
+  warns "ignored in a sequence".
+- **The order is the shrink preference**, simplest first. The order of
+  `commands/0` carries no meaning.
+- **Report keys** name an entry by its index and leaves: `Incr[1] = [Incr, Incr]`.
+  Reordering the list renames the keys, so keep the order stable once you read
+  reports.
+
+### Choosing per Target: `expansion:`
+
+Each target picks its entry per root by its `expansion:` option: `:random` (the
+default), `:identity` or `:reference`. The table, and what each mix tests, is in
+the [differential testing guide](differential_testing.md#when-the-model-has-expansions).
+
+The `:random` pick is keyed on the run seed, the target's **name** and the root.
+Reordering `targets:` therefore changes only which target is the reference.
+Renaming a target picks again, so a name is a generation input as a seed is for a
+fixed model. A report's `seed` replays its picks: `seed: report.seed, max_runs: 1`
+with the same target names runs the same entries.
+
+### Root Placeholders
+
+A later root may consume a value that an earlier root's simulation minted with
+`external()`. In a target that ran a rewrite, the framework aliases each such
+placeholder to the placeholder of exactly one leaf whose simulated events hold
+the same event module at the same field. Zero matches, or several (two leaves,
+or two events of one leaf), are a generation error that names the root, the
+entry and the candidate leaves. Make the leaves' events agree with the root's
+event to fix it.
+
+### When Nothing Fits: "Identity, Forced"
+
+A leaf whose module has a `commands/0` entry with a `when:` that is false at its
+position withdraws its entry, and the pick is made again among the rest. When no
+entry is left, or the function returns `[]`, the root runs as itself and the run
+counts it as `:forced`. A root forced in every sampled state shows in
+`mix pd.validate --seeds`.
+
+### Rules at Load
+
+The run stops before any `Adapter.setup/1` when:
+
+- the model defines `expansions/0` and declares no `@compare` that reaches the
+  end of the run (`every: 1`, the default, or a schedule that names `:end`). One
+  target needs it too;
+- `expansions/0` lists a module that `commands/0` does not (a setup or teardown
+  command is not a root), lists a module twice, or lists a root with
+  `execution: :probe`;
+- the run passes `branching:` for a model with `expansions/0`;
+- an expansion function has the wrong arity, or raises (the error names the
+  root);
+- a leaf module lacks the command callbacks (the error names the root, the entry
+  and the leaf), or an `overrides:` map names a key the leaf's struct lacks.
+
+Setup and teardown commands are never expanded.
+
+### What Counts
+
+Leaves are ordinary commands: `@check every: Module` fires on a leaf of that
+module, `@check every: N` counts steps per target, and latency samples and
+coverage count leaves under their own module. Roots are what `@compare`
+schedules, `max_commands` and `total_commands` count, and the comparison at root
+`r` waits until every target has stepped every leaf of `r`. `terminate_early?/3`
+is consulted after roots only.
+
+The run result and the failure report carry `expansion_counts` (per target and
+root module, the count per entry and `:forced`). A failure report also carries
+`expansions`: per target, one element per root up to the failing root, with the
+entry and the leaf modules. A failure's `failed_at_index` stays the root index.
+
+### Shrinking and Reproducing
+
+The shrinker deletes roots and simplifies root arguments, and keeps each
+target's entry for every surviving root. It never deletes or simplifies a leaf
+on its own, and it does not yet replace one entry with another, so a
+reproduction can be larger than the smallest rewrite that fails. A candidate
+whose expansion function raises, or stops offering the carried entry for a
+simplified root, is dropped. `shrink_further/2`, `Replay` and export run what
+each target ran, never a new pick. `Analysis.isolate_trigger/2` raises for a
+target that ran leaves.
+
+Check which entries a model's seeds reach before you trust a green run:
+
+```
+mix pd.validate Counter.Model --targets "[Counter.Adapter]" --seeds 50
+```
+
+The task lists every entry with how often 50 root sequences realized it, and
+names the entries it never realized. `--seed S --seeds 1` samples exactly the roots
+and entries that `seed: S, max_runs: 1` runs.
+
 ## Managing Model Verbosity
 
 With many commands, Models can grow large. Here are patterns to keep them manageable:

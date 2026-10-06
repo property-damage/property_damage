@@ -16,15 +16,20 @@ defmodule CachexBench.Adapter do
   @moduledoc "Executes cache commands against a real Cachex instance."
   use PropertyDamage.Adapter
 
-  alias CachexBench.Commands.{ClearCache, DelKey, GetKey, PutKey}
-  alias CachexBench.Events.{CacheCleared, EntryDeleted, EntryPut, EntryRead}
+  alias CachexBench.Commands.{ClearCache, DelKey, GetKey, Incr, PutKey}
+  alias CachexBench.Events.{CacheCleared, EntryDeleted, EntryIncremented, EntryPut, EntryRead}
 
+  # Config keys (all optional):
+  #
+  #   :incr_bug  true plants a bug: an Incr below 3 adds one too much, so a
+  #              target that runs `Incr k n` as two smaller increments diverges
+  #              from one that runs it as itself (default false)
   @impl true
-  def setup(_config) do
+  def setup(config) do
     # A fresh, uniquely named cache per run keeps runs isolated
     name = :"cachex_bench_#{System.unique_integer([:positive])}"
     {:ok, _pid} = Cachex.start_link(name)
-    {:ok, %{cache: name}}
+    {:ok, %{cache: name, incr_bug: Map.get(config || %{}, :incr_bug, false)}}
   end
 
   @impl true
@@ -56,5 +61,11 @@ defmodule CachexBench.Adapter do
   def execute(%ClearCache{}, %{cache: cache}, _runtime) do
     {:ok, _count} = Cachex.clear(cache)
     {:ok, [%CacheCleared{}]}
+  end
+
+  def execute(%Incr{key: key, amount: amount}, %{cache: cache} = ctx, _runtime) do
+    applied = if ctx[:incr_bug] && amount < 3, do: amount + 1, else: amount
+    {:ok, value} = Cachex.incr(cache, key, applied)
+    {:ok, [%EntryIncremented{key: key, amount: applied, value: value}]}
   end
 end

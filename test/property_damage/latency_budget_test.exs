@@ -11,6 +11,9 @@ defmodule PropertyDamage.LatencyBudgetTest do
   alias PropertyDamage.{Failure, FailureReport, Generator, Persistence, Sequence}
   alias PropertyDamage.Test.Lockstep.{GuardedStepModel, ProbeAdapter, ProbeModel, ProbeStep}
   alias PropertyDamage.Test.Lockstep.{Step, StepAdapter, StepModel}
+  alias PropertyDamage.Test.SetupCommands
+  alias PropertyDamage.Test.SetupCommands.{Cleanup, CreateUser, Other, Tick}
+  alias PropertyDamage.Test.VariantSupport
 
   @seed 4_321
   @metric_keys [:by_command, :commands, :max, :mean, :min, :p50, :p95, :p99]
@@ -339,12 +342,12 @@ defmodule PropertyDamage.LatencyBudgetTest do
   describe "report" do
     @describetag :tmp_dir
 
-    test "a latency report persists at format version 12 and a version-11 file is refused",
+    test "a latency report persists at format version 13 and a version-11 file is refused",
          %{tmp_dir: dir} do
       report = breach!(slow_pair(), p95: [max_ratio: @tiny])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 12::8, _rest::binary>> = binary} = File.read(path)
+      assert {:ok, <<"PD", 13::8, _rest::binary>> = binary} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.kind == :latency_exceeded
@@ -355,7 +358,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       <<"PD", _version::8, rest::binary>> = binary
       old = Path.join(dir, "old.pd")
       File.write!(old, <<"PD", 11::8, rest::binary>>)
-      assert {:error, {:unsupported_format_version, 11, 12}} = Persistence.load(old)
+      assert {:error, {:unsupported_format_version, 11, 13}} = Persistence.load(old)
     end
   end
 
@@ -439,6 +442,52 @@ defmodule PropertyDamage.LatencyBudgetTest do
       {:executed, _} -> flush_executed()
     after
       0 -> :ok
+    end
+  end
+
+  describe "setup and teardown commands" do
+    # One setup command, one teardown command and two roots per run, on two
+    # targets: the setup and teardown commands are never latency samples.
+    test "are not timed: commands counts the roots and by_command names root modules only" do
+      model =
+        SetupCommands.define_model!(Module.concat(__MODULE__, SetupTeardownModel),
+          commands: [Other, Tick],
+          setup: [{CreateUser, overrides: %{name: "fixture"}}],
+          teardown: [{Cleanup, overrides: %{thing_id: "x"}}]
+        )
+
+      recorder = VariantSupport.start_recorder()
+
+      assert {:ok, stats} =
+               PropertyDamage.run(
+                 model: model,
+                 targets: [
+                   SetupCommands.target("a", recorder),
+                   SetupCommands.target("b", recorder)
+                 ],
+                 compare: [converge_within: 30],
+                 latency: true,
+                 max_runs: 2,
+                 max_commands: 2,
+                 seed: @seed,
+                 shrink: false
+               )
+
+      assert stats.total_commands == 4
+      assert stats.setup_commands == 2
+      assert stats.teardown_commands == 2
+
+      for name <- ["a", "b"] do
+        metrics = stats.metrics[name]
+        assert metrics.commands == stats.total_commands
+
+        assert metrics.by_command |> Map.keys() |> Enum.all?(&(&1 in [Other, Tick]))
+        refute Map.has_key?(metrics.by_command, CreateUser)
+        refute Map.has_key?(metrics.by_command, Cleanup)
+
+        assert metrics.by_command |> Map.values() |> Enum.map(& &1.commands) |> Enum.sum() ==
+                 stats.total_commands
+      end
     end
   end
 end

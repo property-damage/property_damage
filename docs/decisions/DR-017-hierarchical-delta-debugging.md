@@ -1,6 +1,6 @@
 # DR-017: Hierarchical Delta Debugging
 
-**Status:** Accepted (reconstructed)
+**Status:** Accepted (reconstructed). Amended by DR-049: for a model with `expansions/0` a candidate is still a list of roots, and each target's carried expansion choices are realized again for the surviving roots instead of being picked again; the shrinker never deletes, reorders or simplifies a leaf on its own.
 **Reconstructed:** 2026-06-12 from spec references, code, and git history; the original record was never written.
 
 ## Decision
