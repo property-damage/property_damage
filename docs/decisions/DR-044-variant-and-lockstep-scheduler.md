@@ -1,6 +1,6 @@
 # DR-044: Variants and the Lockstep Scheduler
 
-**Status:** Accepted. Amended by DR-045: `Differential.run/1` and `Differential.Result` are deleted and `PropertyDamage.run/1` takes several targets; a divergence is a shrunk failure that ends the run, with no `divergences` list; the failure kinds gain `:diverged`.
+**Status:** Accepted. Amended by DR-045: `Differential.run/1` and `Differential.Result` are deleted and `PropertyDamage.run/1` takes several targets; a divergence is a shrunk failure that ends the run, with no `divergences` list; the failure kinds gain `:diverged`. Amended by DR-046: there is no default root observation (variants are compared only through `@compare`), and an adapter error is a failure, never compared and continued; `compare: :performance | :both` is `latency: true`.
 **Date:** 2026-10-05
 
 ## Context

@@ -175,8 +175,7 @@ defmodule PropertyDamage.Analysis do
     {role, reason} =
       cond do
         step.failed? ->
-          {:trigger,
-           "Triggers #{FailureReport.check_name(report) || FailureReport.failure_type(report)} failure"}
+          {:trigger, "Triggers #{failure_label(report)} failure"}
 
         MapSet.member?(ancestors, idx) ->
           # Ancestor in the dependency graph: produces state or values the
@@ -586,7 +585,7 @@ defmodule PropertyDamage.Analysis do
     commands = Sequence.to_list(FailureReport.shrunk_sequence(report))
 
     command_code = generate_command_code(commands)
-    check_name = FailureReport.check_name(report) || FailureReport.failure_type(report)
+    check_name = failure_label(report)
 
     """
     defmodule #{module_name} do
@@ -633,7 +632,7 @@ defmodule PropertyDamage.Analysis do
     command_code = generate_command_code(commands)
 
     """
-    # Reproduction script for #{FailureReport.check_name(report) || FailureReport.failure_type(report)} failure
+    # Reproduction script for #{failure_label(report)} failure
     # Original seed: #{report.seed}
     # Run with: mix run reproduction.exs
 
@@ -659,7 +658,7 @@ defmodule PropertyDamage.Analysis do
     explanation = explain(report)
 
     """
-    # Bug Report: #{FailureReport.check_name(report) || FailureReport.failure_type(report)}
+    # Bug Report: #{failure_label(report)}
 
     ## Summary
 
@@ -683,7 +682,7 @@ defmodule PropertyDamage.Analysis do
     ## Failure Details
 
     - **Type**: #{FailureReport.failure_type(report)}
-    - **Check**: #{FailureReport.check_name(report) || "N/A"}
+    - **Check**: #{if FailureReport.check_name(report), do: failure_label(report), else: "N/A"}
     - **Message**: #{FailureReport.failure_message(report) || "N/A"}
     - **Command Index**: #{FailureReport.failure_index(report)}
 
@@ -724,5 +723,13 @@ defmodule PropertyDamage.Analysis do
         _ -> "#{k}: #{inspect(v)}"
       end
     end)
+  end
+
+  # The failing check or observation as text, else the failure's kind.
+  defp failure_label(report) do
+    case FailureReport.check_name(report) do
+      nil -> to_string(FailureReport.failure_type(report))
+      name -> FailureReport.format_name(name)
+    end
   end
 end

@@ -75,6 +75,52 @@ defmodule PropertyDamage.TargetsEngineTest do
     def always_holds(_state, _cmd_or_event), do: :ok
   end
 
+  defmodule EchoValues do
+    @moduledoc false
+    # What the targets are compared on: the values they echoed.
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: []
+
+    @impl true
+    def apply(values, %Echoed{value: value}), do: [value | values]
+    def apply(values, _), do: values
+
+    @compare every: 1
+    def values(values, _root), do: values
+  end
+
+  defmodule EchoCount do
+    @moduledoc false
+    # Compares only how many values the targets echoed.
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: 0
+
+    @impl true
+    def apply(count, %Echoed{}), do: count + 1
+    def apply(count, _), do: count
+
+    @compare every: 1
+    def count(count, _root), do: count
+  end
+
+  defmodule EchoCountModel do
+    @moduledoc false
+    @behaviour PropertyDamage.Model
+
+    @impl PropertyDamage.Model
+    def commands, do: [Echo]
+
+    @impl PropertyDamage.Model
+    def command_sequence_projection, do: EchoProjection
+
+    @impl PropertyDamage.Model
+    def check_projections, do: [EchoCount]
+  end
+
   defmodule EchoModel do
     @moduledoc false
     @behaviour PropertyDamage.Model
@@ -87,7 +133,7 @@ defmodule PropertyDamage.TargetsEngineTest do
     def command_sequence_projection, do: EchoProjection
 
     @impl PropertyDamage.Model
-    def check_projections, do: [EchoChecks]
+    def check_projections, do: [EchoChecks, EchoValues]
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -153,7 +199,7 @@ defmodule PropertyDamage.TargetsEngineTest do
     [
       model: EchoModel,
       targets: targets,
-      compare: :correctness,
+      compare: [converge_within: 30],
       max_runs: 3,
       max_commands: 3,
       seed: 12_345,
@@ -238,7 +284,7 @@ defmodule PropertyDamage.TargetsEngineTest do
       assert {:ok, %{targets: ^targets}} =
                PropertyDamage.run(
                  diff_opts([PlainAdapter, {ShiftedAdapter, name: "ShiftedAdapter"}])
-                 |> Keyword.put(:equivalence, fn _, _ -> true end)
+                 |> Keyword.put(:model, EchoCountModel)
                )
 
       assert {:error, report} = PropertyDamage.run(diff_opts([PlainAdapter, ShiftedAdapter]))

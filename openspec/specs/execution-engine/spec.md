@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets)
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors)
 
 ## Requirements
 
@@ -387,7 +387,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 ### Requirement: Variant Process (DR-044)
 
-`PropertyDamage.Variant` SHALL run one target over one concrete command sequence in its own process, through `Executor.Stepping`. The variant process SHALL own the executor state (projections, event log, its copy of the placeholder registry), the event queue, the target's injectors and mocks, and every `@eventually` state poller and resource poller its commands start; the variant SHALL run every step itself, because pollers report to the process that runs the step. `Variant.setup/1` SHALL start the event queue, set up the injectors and mocks, call the adapter's `setup/1` with the target's `config:`, and run the `@check at: :startup` checks. `Variant.advance_to/2` SHALL step every command from the next unexecuted index up to and including the given index, then drain the event queue, and SHALL return `{:ok, [{index, observation}]}` or `{:failed, %{kind, root, reason}}`. After a failure every later `advance_to/2` SHALL return the same `{:failed, failure}`. When the variant process exits for any reason, including `Process.exit(pid, :kill)`, every poller, the event queue and the mock registry it started SHALL stop.
+`PropertyDamage.Variant` SHALL run one target over one concrete command sequence in its own process, through `Executor.Stepping`. The variant process SHALL own the executor state (projections, event log, its copy of the placeholder registry), the event queue, the target's injectors and mocks, and every `@eventually` state poller and resource poller its commands start; the variant SHALL run every step itself, because pollers report to the process that runs the step. `Variant.setup/1` SHALL start the event queue, set up the injectors and mocks, call the adapter's `setup/1` with the target's `config:`, and run the `@check at: :startup` checks. `Variant.advance_to/2` SHALL step every command from the next unexecuted index up to and including the given index, then drain the event queue, and SHALL return `{:ok, [{index, observation}]}` or `{:failed, %{kind, root, reason}}`. After a failure every later `advance_to/2` SHALL return the same `{:failed, failure}`. `Variant.observe/3` SHALL evaluate the given `@compare` keys on the variant's current projections with the root command; `Variant.catch_up/3` SHALL drain and fold the event queue and run the async checks, and with `:reread` re-execute the root first; `Variant.retire/1` SHALL finalize a variant that failed at a root and run its `:teardown` checks (DR-046). An adapter `{:error, _}` SHALL halt the variant in every mode. When the variant process exits for any reason, including `Process.exit(pid, :kill)`, every poller, the event queue and the mock registry it started SHALL stop.
 
 #### Scenario: Resume at the next index
 
@@ -426,7 +426,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 ### Requirement: Lockstep Scheduler (DR-044)
 
-`PropertyDamage.Scheduler.run/1` SHALL run one command sequence against every target as variants in lockstep and return `{:ok, run}` where `run` is a map with the keys `failure`, `results`, `observations` and `latencies`. `run.failure` SHALL be `nil` or `%{kind, variant, run, root, reason}`, with `kind` one of `:check_failed`, `:diverged`, `:setup_failed` and `:execution_failed` and `reason` always a `%PropertyDamage.Failure{}`. The scheduler SHALL accept the options `mint_epoch:` and `placeholder_registry:`. Variants SHALL be set up one after another in target order. The scheduler SHALL advance the variants to each boundary under `concurrency: :serial` (one at a time in target order) or `concurrency: :parallel` (all at once), run the comparison, and only then advance to the next boundary. At the end of the run, whether it ended in a pass or a failure, every variant that was set up SHALL be finalized and stopped.
+`PropertyDamage.Scheduler.run/1` SHALL run one command sequence against every target as variants in lockstep and return `{:ok, run}` where `run` is a map with the keys `failure`, `other_failures`, `results`, `observations`, `latencies` and `compare_counts`. `run.failure` SHALL be `nil` or `%{kind, variant, run, root, reason}`, with `kind` one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed` and `reason` always a `%PropertyDamage.Failure{}`. The scheduler SHALL accept the options `mint_epoch:` and `placeholder_registry:`. Variants SHALL be set up one after another in target order. The scheduler SHALL advance the variants to each boundary under `concurrency: :serial` (one at a time in target order) or `concurrency: :parallel` (all at once), run the comparison through the convergence loop (DR-046), and only then advance to the next boundary. At the end of the run, whether it ended in a pass or a failure, every variant that was set up SHALL be finalized and stopped.
 
 #### Scenario: Setup failure ends the run before command 0
 
@@ -553,9 +553,9 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 - **WHEN** a model needs a timeliness-dependent value (a JWT `exp`) or a per-run-unique identifier
 - **THEN** it SHALL carry a seeded relative offset (reified to absolute time in the adapter) or a `mint_per_run/1` marker in the plan, so the plan stays a pure function of the seed and the audit passes
 
-### Requirement: One Runner Over the Scheduler (DR-045)
+### Requirement: One Runner Over the Scheduler (DR-045, DR-046)
 
-`PropertyDamage.run/1` SHALL run every linear sequence through `PropertyDamage.Scheduler`, one target exactly as several. A run SHALL end in `{:ok, stats}` when no run failed in any kind, or in `{:error, %PropertyDamage.FailureReport{}}` for the first failing run. The report's `kind` SHALL be the failure kind: `:check_failed` (a check failed in a variant, including `@eventually` timeouts and startup and finalization checks), `:diverged` (a variant's observation of a root differs from the reference's), `:setup_failed` (a variant's adapter setup returned an error or raised, an injector or mock setup raised included) or `:execution_failed` (an adapter raised at a root, an adapter answered `{:error, _}` in a one-target run, or a nemesis, stutter, placeholder or unknown failure). The types `:did_not_converge` and `:latency_exceeded` SHALL be reserved for features that will produce them; no run produces them. The report SHALL carry `variant` (`%{index, name}`) and `failed_at_index`, the failing root, `nil` for a setup failure and a startup failure. `:execution_failed` is provisional: whether an agreed adapter error is a comparable observation in every run is open.
+`PropertyDamage.run/1` SHALL run every linear sequence through `PropertyDamage.Scheduler`, one target exactly as several. A run SHALL end in `{:ok, stats}` when no run failed in any kind, or in `{:error, %PropertyDamage.FailureReport{}}` for the first failing run. The report's `kind` SHALL be the failure kind: `:check_failed` (a check failed in a variant, including `@eventually` timeouts and startup and finalization checks), `:diverged` (ready sides of a `@compare` observation differ at the convergence bound), `:did_not_converge` (a side of a `@compare` observation is still pending at the bound), `:setup_failed` (a variant's adapter setup returned an error or raised, an injector or mock setup raised included) or `:execution_failed` (an adapter raised at a root or answered `{:error, _}` at a root, in every mode, or a nemesis, stutter, placeholder or unknown failure). The type `:latency_exceeded` SHALL be reserved for a feature that will produce it. The report SHALL carry `variant` (`%{index, name}`) and `failed_at_index`, the failing root, `nil` for a setup failure and a startup failure. `:execution_failed` is final: an adapter error is a failure and never an observation.
 
 #### Scenario: One target through the scheduler
 - **WHEN** `PropertyDamage.run/1` runs a linear sequence against one target
@@ -565,8 +565,8 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 - **WHEN** a check fails at a root in the second of two targets
 - **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :check_failed`, `report.variant` naming the second target, and `report.failed_at_index` the root
 
-#### Scenario: Adapter raise
-- **WHEN** an adapter raises in `execute/3` at a root, in a run of any number of targets
+#### Scenario: Adapter raise or error answer
+- **WHEN** an adapter raises in `execute/3` or answers `{:error, _}` at a root, in a run of any number of targets
 - **THEN** `report.kind` SHALL be `:execution_failed`
 
 #### Scenario: Setup failure is a value
@@ -579,3 +579,35 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 #### Scenario: Branching keeps the linear engine
 - **WHEN** a branching sequence runs (one target only)
 - **THEN** its run, shrink and reproduction SHALL use the linear engine
+
+### Requirement: Active Set of Variants and the Stop Rule (DR-046)
+
+The scheduler SHALL keep an active set of variants. An adapter failure (`:execution_failed`) of a non-reference variant at a root SHALL retire that variant before the next root starts in any variant: its pollers SHALL be finalized, its `:teardown` checks SHALL run, and its adapter's `teardown/1` SHALL run, at once. A retired variant SHALL start no command, and its placeholder registry SHALL never be consulted again. The remaining variants SHALL be compared among themselves at that root and continue. A failure of the reference, a `:check_failed` failure and a failure before the first root SHALL end the run, as before. The run SHALL end when no non-reference variant remains in the active set.
+
+The run SHALL report one primary failure: the first failure in root order and then in target order. In every run, with or without a retired variant, failures SHALL be ordered by root, then target, then by when they happened within that root and target (a check recorded under `check_mode: :record` while the root was stepped, then the comparison failure at that root's boundary, then a failure found while the target finalized). A failure with no root found at the end of the run SHALL come after every rooted failure, in target order. The first SHALL be the primary failure and every other one SHALL be in `other_failures`. A finalize-time repeat of a failure already found SHALL be listed once, and no failure SHALL be dropped. It SHALL carry every other failure of the run in `other_failures`, and `other_failures` SHALL NOT take part in shrinking. The choice among failures of one root depends on target order, because the first target is the reference and the others are compared in order.
+
+#### Scenario: Early teardown of a retired variant
+- **GIVEN** three targets, where the third fails at root 1
+- **WHEN** root 1 completes
+- **THEN** the third variant's pollers SHALL be stopped and its `teardown/1` SHALL have run before the other variants execute root 2
+
+#### Scenario: Survivors are compared without the retired variant
+- **WHEN** a variant has been retired
+- **THEN** root 2 SHALL be compared over the remaining variants only
+
+#### Scenario: A finalize-time failure joins the run's failures
+- **GIVEN** a run, with or without a retired variant, in which the reference's `:teardown` check fails at the end
+- **THEN** that failure SHALL be in the report, after every rooted failure
+
+#### Scenario: Primary failure order
+- **WHEN** variants fail at different roots, or at the same root in different variants
+- **THEN** the primary failure SHALL be the one at the earliest root, and among those the earliest in target order
+- **AND** the other failures SHALL be listed in `other_failures`
+
+### Requirement: Boundary Counters in the Run Result (DR-046)
+
+The scheduler's run result SHALL carry `compare_counts` for every declared `@compare` key (`compared_at`, `waited_at`, `waited_ms`), with zero counts for a run of one target or a key that never fired. `PropertyDamage.run/1` SHALL sum them over runs into the stats and the failure report.
+
+#### Scenario: Counters accumulate over runs
+- **WHEN** a campaign passes with two targets over several runs
+- **THEN** `stats.compare_counts` SHALL sum the per-run counts

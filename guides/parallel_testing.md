@@ -253,6 +253,14 @@ Skip parallel testing for:
 - Early development when the basic sequential model is not yet stable.
 - Commands that have no shared state interactions.
 
+## Branches Are Not Several Targets
+
+Parallel branches run against one target. `branching:` with two or more
+`targets:` is an option error. Comparing several targets is a different feature
+(see [Differential Testing](differential_testing.md)): its `concurrency:
+:parallel` option makes the targets advance at the same time, and has nothing to
+do with parallel branches.
+
 ## Combining with Stutter Testing
 
 Parallel and stutter testing compose. Enable both to test concurrent

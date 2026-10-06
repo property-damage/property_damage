@@ -74,14 +74,9 @@ The system SHALL support probabilistic command retries to verify that the SUT be
 - **THEN** the command SHALL be excluded from stutter selection
 - **AND** a command that declares no `:idempotent` value defaults to eligible (`true`)
 
-#### Scenario: Acceptable retry events from command spec
-- **WHEN** a command declares `:acceptable_retry_events` in its `command_spec/1` (DR-028)
-- **AND** a retry returns events whose modules are all in that list (or match the original)
-- **THEN** the retry SHALL be treated as a match, not an idempotency violation
-
 ### Requirement: Stutter Configuration
 
-Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (range or fixed), a commands filter, and a comparison mode.
+Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (range or fixed), a commands filter, and a `using:` predicate.
 
 #### Scenario: Configuration with defaults
 - **WHEN** stutter testing is enabled without custom options
@@ -89,38 +84,42 @@ Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (r
 - **AND** the default max_repeats SHALL be 2
 - **AND** the default delay SHALL be a random value between 0 and 100ms
 - **AND** the default commands filter SHALL be `:all`
-- **AND** the default comparison mode SHALL be `:strict`
+- **AND** the default `using:` predicate SHALL be `&==/2`
 
 #### Scenario: Commands filter limits scope
 - **WHEN** stutter is configured with a specific list of command modules
 - **THEN** only those command types SHALL be eligible for stuttering
 - **AND** all other commands SHALL execute normally without retries
 
-### Requirement: Stutter Comparison Modes
+### Requirement: Stutter Comparison Through `using:` (DR-046)
 
-The system SHALL support three comparison modes for evaluating retry results: strict (exact event equality), structural (ignoring specified fields), and custom (user-provided comparison function).
+The system SHALL compare a retry's events with the original events through the `using:` option of `stutter:`: a 2-arity predicate called `using.(original_events, retry_events)` with the contract of `@compare`'s `using:` (`:match` or `true` to agree; `false`, `{:mismatch, text}` or `{:mismatch, exception}` otherwise), `&==/2` by default. The `comparison:` option, with its `:strict`, `{:structural, _}`, `{:custom, _}` and `:acceptable` values, MUST be rejected with an error that names `using:`.
 
-#### Scenario: Strict comparison
-- **WHEN** comparison mode is `:strict`
-- **THEN** retry events MUST be exactly equal to the initial events for the result to be considered a match
+#### Scenario: Default comparison
+- **WHEN** `stutter:` has no `using:`
+- **THEN** retry events MUST equal the initial events under `==/2` for the result to be a match
 
-#### Scenario: Structural comparison
-- **WHEN** comparison mode is `{:structural, ignore_fields}`
-- **THEN** the specified fields SHALL be excluded from comparison
-- **AND** the remaining fields MUST match for the result to be considered equivalent
+#### Scenario: A predicate decides
+- **WHEN** `using:` is a 2-arity function
+- **THEN** it SHALL be called with the original and the retry events
+- **AND** its answer SHALL determine match or mismatch
 
-#### Scenario: Custom comparison function
-- **WHEN** comparison mode is `{:custom, function}`
-- **THEN** the provided function SHALL be called with the original and retry events
-- **AND** the function's return value SHALL determine match or mismatch
+#### Scenario: A predicate accepts an alternative answer
+- **GIVEN** a predicate that returns `:match` when the retry answers `AlreadyExists`
+- **WHEN** a retried command answers `AlreadyExists`
+- **THEN** the retry SHALL NOT be an idempotency violation
+
+#### Scenario: A removed key is rejected
+- **WHEN** `stutter:` carries `comparison:`
+- **THEN** the framework SHALL raise an option error that names `using:`
 
 ### Requirement: Stutter Violation Reporting
 
-When retry events do not match the initial execution according to the configured comparison mode, the system SHALL record an idempotency violation with all attempt details and comparison results.
+When retry events do not match the initial execution according to the `using:` predicate, the system SHALL record an idempotency violation with all attempt details and the mismatch (an exception, by default a `PropertyDamage.ComparisonMismatch` holding the original and the retry events).
 
 #### Scenario: Violation recorded
 - **WHEN** a stuttered command's retry produces different events than the initial execution
-- **THEN** the system SHALL record a violation containing the command, command index, all attempts with their events, and the comparison result
+- **THEN** the system SHALL record a violation containing the command, command index, all attempts with their events, and the mismatch
 
 ### Requirement: Command Opt-Out from Stuttering
 
@@ -139,11 +138,10 @@ During retry executions, the adapter SHALL receive stutter context containing th
 - **THEN** the adapter context SHALL include a stutter map with `attempt` (2 or higher), `is_retry: true`, and the `idempotency_key`
 - **AND** the adapter MAY use the idempotency key in outbound request headers
 
-### Requirement: Acceptable Retry Events
+### Requirement: Acceptable Retry Events Are Removed (DR-046)
 
-Commands MAY declare alternative event types that are acceptable responses on retry, allowing the system to distinguish expected idempotent variations from true violations.
+The command key `acceptable_retry_events:` SHALL NOT exist. A command that may answer a retry differently from the original SHALL be handled by the `using:` predicate of the `stutter:` option.
 
-#### Scenario: Acceptable alternative events
-- **WHEN** a command declares acceptable retry event types
-- **AND** the retry produces events matching those types
-- **THEN** the result SHALL be considered a match even if the event types differ from the initial execution
+#### Scenario: The key is rejected
+- **WHEN** a command passes `acceptable_retry_events:` to `use PropertyDamage.Command`
+- **THEN** compilation or model validation SHALL fail with an error that names `using:`

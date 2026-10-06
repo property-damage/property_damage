@@ -9,32 +9,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **One runner for one or more targets (DR-045).** `PropertyDamage.run/1` takes
-  `targets:` with several entries; the first is the reference. New run options:
-  `concurrency:`, `compare:`, `equivalence:`, `metrics:`, `percentiles:` and
-  `warmup_runs:`. `{:ok, stats}` carries `targets` and, under
-  `compare: :performance | :both`, `metrics` keyed by target name.
+- **Boundary observations: `@compare` (DR-046).** A public projection function
+  `def name(state, root)` marked `@compare every: ..., using: ...` is the only
+  cross-target oracle. `every:` takes the `@check` schedule vocabulary (`1`, `N`,
+  `{N, Module}`, `Module`, `[Modules]`) plus `:end`; `using:` is a 2-arity
+  predicate returning `:match`, `{:mismatch, exception}` or a boolean (default
+  `&==/2`; any expression). A function may return `{:pending, reason}` while its
+  target is catching up; a pending side is never a disagreement. A raise in a
+  `@compare` function or a `using:` predicate is a check failure naming the key.
+  A run with two or more targets and no `@compare` is an error at run start,
+  before any adapter setup; with one target no `@compare` function is called.
+- **The convergence loop and `compare: [converge_within: ms]` (DR-046).** At
+  every scheduled boundary the framework drains and folds every variant, runs the
+  async checks, re-reads a `:probe` root in every variant (the reference and the
+  final boundary included) and evaluates again, until the sides agree or the
+  convergence bound (default 5000 ms, measured from the last variant's arrival,
+  at most one iteration of overshoot) expires. A side still pending at the bound
+  is `:did_not_converge` (`Failure.Convergence`); ready sides that differ are
+  `:diverged`. Both are named by the `@compare` key and report the time waited.
+  An expired `@eventually` window is a check failure at once.
+- **`PropertyDamage.ComparisonMismatch` and `PropertyDamage.Equivalence` (DR-046).**
+  `Equivalence.by_key/1`, `normalize/1` and `drop_keys/2` build `using:`
+  predicates; `ComparisonMismatch` is the default mismatch detail.
+- **Boundary counters (DR-046).** `compare_counts` on `stats` and the failure
+  report holds `compared_at`, `waited_at` and `waited_ms` per `@compare` key. The
+  reporter prints it, and persistence stores it.
+- **`latency: true` (DR-046).** Measures each target's latency per command, with
+  `metrics:`, `percentiles:` and `warmup_runs:`. Requires `concurrency: :serial`.
+- **`FailureReport.other_failures` and `Variant.retire/1` (DR-046).** An adapter
+  `{:error, _}` or raise at a root is `:execution_failed` in every mode. A failure
+  of a non-reference variant retires that variant at once (pollers finalized,
+  `:teardown` checks and `teardown/1` run) and the other variants go on; the run
+  stops when no non-reference variant remains. The report names the primary
+  failure (first by root, then by target order) and lists the rest in
+  `other_failures`; only the primary failure is shrunk.
+- **Boundary comparison fixes (DR-046).** A function carries one `@compare`,
+  written above its first clause; a second on another clause is a compile error.
+  Under `check_mode: :record`, a variant whose check failed on a final re-read
+  keeps re-reading with the others. Every run, with or without a retired
+  variant, orders its failures by root, then target, then when it happened within
+  that root and target (a check recorded under `check_mode: :record`, then the
+  comparison failure at that root's boundary, then a failure found while the
+  target finalized); a failure with no root found at the end of the run (an
+  `@eventually` timeout, a `:teardown` check, the reference included) comes after
+  every rooted failure, in target order. The first is the primary failure and
+  every other one is in `other_failures`; a recorded check at the same root in
+  the same or an earlier target becomes primary and the divergence is listed
+  there; a finalize-time repeat is listed once and nothing is dropped. New public type
+  `t:PropertyDamage.Scheduler.compare_counts/0`.
+- **Stutter `using:` (DR-046).** `stutter: [using: fn original_events,
+  retry_events -> ... end]`, default `&==/2`, decides whether a retry agrees.
+  `Stutter.Violation` carries `mismatch` (an exception) in place of
+  `comparison_result`.
+- **One runner for one or more targets (DR-045, DR-046).** `PropertyDamage.run/1`
+  takes `targets:` with several entries; the first is the reference. New run
+  options: `concurrency:`, `compare: [converge_within: ms]`, `latency:`,
+  `metrics:`, `percentiles:` and `warmup_runs:`. `{:ok, stats}` carries
+  `targets`, `compare_counts` and, under `latency: true`, `metrics` keyed by
+  target name.
 - **`FailureReport` fields `kind`, `variant`, `targets`, `concurrency`,
-  `equivalence`, `stutter` and `max_commands` (DR-045).**
-  `kind` is `:check_failed`, `:diverged`, `:setup_failed` or `:execution_failed`
-  (`:did_not_converge` and `:latency_exceeded` are named for later features),
+  `compare`, `compare_counts`, `other_failures`, `stutter` and `max_commands`
+  (DR-045, DR-046).**
+  `kind` is `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed`
+  or `:execution_failed` (`:latency_exceeded` is named for a later feature),
   and always equals `kind_of(failure_reason)`.
   `variant` is `%{index, name}`. `targets` holds the run's entries, so
   `reproduction_command/1` prints the exact target list. It also prints
-  `equivalence:`, `stutter:` and `max_commands:` when the run used a
-  non-default value (a function equivalence that is not a named capture prints
-  as `<custom function>`), and `shrink_further/2` re-shrinks under the report's
-  `equivalence` and `stutter`. New helpers:
+  `compare: [converge_within: ms]` (when not 5000), `stutter:` and
+  `max_commands:` when the run used a non-default value, and `shrink_further/2`
+  re-shrinks under the report's `compare` and `stutter` (it accepts `compare:`
+  and rejects `equivalence:`). New helpers:
   `FailureReport.kind_of/1`, `reference_target/1` and `targets_source/1`; new
-  failure types `Failure.Divergence` and `Failure.Setup`.
-- **A divergence is shrunk and reproduced (DR-045).** It ends the run and `run/1`
-  returns `{:error, report}` with `kind: :diverged`. The shrinker accepts a
-  candidate only with the same `{kind, name, variant_index}` at the same or an
-  earlier root, and runs every attempt on every target. A divergence is
-  identified by its root command: `Failure.Divergence` carries the `command`,
-  `Failure.diverged/5` takes it, and `Failure.name/1` of a divergence is the
-  root command's module, so a candidate that diverges at a command of another
-  type is rejected.
+  failure types `Failure.Divergence`, `Failure.Convergence` and `Failure.Setup`.
+- **A divergence is shrunk and reproduced (DR-045, DR-046).** It ends the run and
+  `run/1` returns `{:error, report}` with `kind: :diverged` (or
+  `:did_not_converge`). The shrinker accepts a candidate only with the same
+  `{kind, name, variant_index}` at the same or an earlier root, and runs every
+  attempt on every target. A divergence is identified by its `@compare` key:
+  `Failure.Divergence` carries `key`, `root`, `command`, `reference_value`,
+  `variant_value` and `mismatch`, and `Failure.name/1` of a divergence or a
+  failure to converge is the key `{projection, function}`, so a candidate that
+  diverges on another observation is rejected.
 - **Command and check telemetry from the engine (DR-045).**
   `[:property_damage, :command, :start | :stop]` and
   `[:property_damage, :check, :start | :stop]` carry `variant` and `run_number`;
@@ -225,6 +280,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (DR-046): targets are compared through `@compare` observations only, with no compatibility layer.**
+  - Events are never compared across variants, and there is no default
+    observation. A run with two or more targets whose model declares no
+    `@compare` is an error at run start.
+  - Removed run options: `equivalence:` (`:exact`, `:structural`, a function) and
+    `compare: :correctness | :performance | :both`. Declare the observation with
+    `@compare ... using:`; `compare: :performance | :both` becomes `latency: true`.
+    `compare:` is now a keyword list with `converge_within:` (integer
+    milliseconds, default 5000); `compare: [settle: _]` and unknown keys are
+    option errors that name `converge_within:`. `shrink_further/2` rejects
+    `equivalence:` and accepts `compare:`.
+  - Removed: `PropertyDamage.Comparison.equivalent?/3`, `normalize/1`,
+    `ignore_fields/1` and `only_fields/1` (use `PropertyDamage.Equivalence`),
+    `FailureReport.equivalence` (replaced by `compare`), the `reference_result`
+    and `divergent_result` fields of `Failure.Divergence` (replaced by
+    `reference_value`, `variant_value`, `key` and `mismatch`), `results` on a
+    divergence, and `Failure.diverged/5` (now `Failure.diverged/1`, taking a map
+    of fields; `Failure.did_not_converge/1` is new).
+  - Removed stutter configuration: `comparison:` with `:strict`,
+    `{:structural, _}`, `{:custom, _}` and `:acceptable`, and the command key
+    `acceptable_retry_events:` (in `use PropertyDamage.Command`, `command_spec/1`
+    and a `commands/0` entry). Use the `using:` predicate of `stutter:`.
+    `Stutter.Violation.comparison_result` is renamed `mismatch`.
+  - An adapter `{:error, _}` answer is no longer an observation: with several
+    targets, an agreed error used to pass and the variants continued. It is now
+    `:execution_failed` (see `other_failures` above), and the internal agreed-error
+    continuation (`on_adapter_error: :continue` on `Variant`) is removed. A
+    placeholder consumer whose producer failed is never observed as
+    `{:error, {:placeholder_resolution_failed, _}}`.
+  - The failure `name` of a divergence is the `@compare` key, not the root
+    command's module. The latency `error_count` of a run that returns metrics is
+    always 0, because an adapter error ends the run.
+  - Persistence format version 9 becomes 10: reports carry `compare`,
+    `compare_counts` and `other_failures`. Loaders refuse every version before 10.
+
 - **BREAKING (DR-045): one runner for one or more targets, with no compatibility layer.**
   - `PropertyDamage.Differential` and `Differential.run/1` are removed. Call
     `PropertyDamage.run/1` with several `targets:`. `Differential.Result` is
@@ -232,7 +322,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     divergence is a report with `kind: :diverged`. There is no `divergences` list
     and no run after a divergence.
   - `Differential.Equivalence` is renamed PropertyDamage.Comparison (an internal module)
-    (`equivalent?/3`, `normalize/1`, `ignore_fields/1`, `only_fields/1`).
+    (`equivalent?/3`, `normalize/1`, `ignore_fields/1`, `only_fields/1`); DR-046
+    removes those functions (see its entry above).
   - `Progress.DifferentialUpdate`, `Progress.DifferentialResult`, the
     `:differential` progress operation, the
     `[:property_damage, :differential, :progress | :result]` telemetry events and
@@ -252,14 +343,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Shrinker.failure_signature/2`, which returns `{kind, name, variant_index}`.
     `equivalent_failures?/2` takes `{reason, variant_index}` pairs.
     `Shrinker.shrink/2` takes `targets:`, `variant_index:`, `concurrency:`,
-    `compare:`, `equivalence:` and `check_mode:` in place of `target:`,
-    `event_queue:` and `mock_registry:`.
+    `compare:` (`[converge_within: ms]`) and `check_mode:` in place of
+    `target:`, `event_queue:` and `mock_registry:`.
   - `Scheduler.run/1` has no `divergence` key. Its `failure` is `nil` or
     `%{kind, variant, run, root, reason}`, with `kind` one of `:check_failed`,
-    `:diverged`, `:setup_failed` and `:execution_failed`, and `reason` always a
-    `%Failure{}`.
+    `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`, and
+    `reason` always a `%Failure{}`.
   - Persistence format version 8 becomes 9 for `.pd` reports and `.pdtrace`
-    traces. Loaders refuse version 8 files.
+    traces (version 10 under DR-046). Loaders refuse version 8 files.
   - `branching:` with two or more targets is an option error. Branching sequences,
     `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` and `RunTrace` stay
     one-target.
@@ -275,8 +366,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `:sequential`). Use `concurrency:`: `:serial` (the default, one target at a
     time) or `:parallel` (all targets at once; targets that share a system must
     isolate their slices through `config:`). Passing `execution:` is an option error
-    that names `concurrency:`. `compare: :performance` and `:both` require
-    `concurrency: :serial`.
+    that names `concurrency:`. `compare: :performance` and `:both` (now
+    `latency: true`, DR-046) require `concurrency: :serial`.
   - `Differential.Result`: the `execution` field is replaced by `concurrency`;
     there is a new `failure` field; `status` may be `:failed`; `divergences` are
     listed oldest first. A divergence now has the keys `seed`, `run`, `root`,

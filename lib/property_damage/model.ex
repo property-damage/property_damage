@@ -493,6 +493,12 @@ defmodule PropertyDamage.Model do
             "Invalid `with:` for command #{inspect(module)}: `with:` was renamed `overrides:`."
     end
 
+    if Map.has_key?(resolved, :acceptable_retry_events) do
+      raise ArgumentError,
+            "Invalid command entry #{inspect(module)}: " <>
+              PropertyDamage.Command.retired_acceptable_retry_events()
+    end
+
     validate_when!(Map.get(resolved, :when), module)
     validate_overrides!(Map.get(resolved, :overrides), module)
     {validate_weight!(resolved.weight, module), module, resolved}

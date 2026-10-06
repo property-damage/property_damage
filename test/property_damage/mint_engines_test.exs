@@ -26,6 +26,18 @@ defmodule PropertyDamage.MintEnginesTest do
     def apply(state, _), do: state
   end
 
+  # What two targets are compared on: how many requests each was sent.
+  defmodule Sent do
+    use PropertyDamage.Model.Projection
+    @impl true
+    def init, do: 0
+    @impl true
+    def apply(count, %Send{}), do: count + 1
+    def apply(count, _), do: count
+    @compare every: 1
+    def sent(count, _root), do: count
+  end
+
   defmodule Model do
     @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
@@ -33,6 +45,8 @@ defmodule PropertyDamage.MintEnginesTest do
     def commands, do: [Send]
     @impl true
     def command_sequence_projection, do: Proj
+    @impl true
+    def check_projections, do: [Sent]
     @impl true
     def simulator, do: __MODULE__
     @impl PropertyDamage.Model.Simulator
@@ -80,7 +94,6 @@ defmodule PropertyDamage.MintEnginesTest do
             {TargetA, name: "a", config: %{test_pid: self()}},
             {TargetB, name: "b", config: %{test_pid: self()}}
           ],
-          compare: :correctness,
           run_nonce: 7,
           seed: 12_345,
           max_runs: 1,

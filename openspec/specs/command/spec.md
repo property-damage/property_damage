@@ -4,7 +4,7 @@
 
 Commands are the semantic building blocks of stateful property-based tests. Each command defines a pure generator that produces field maps, a specification describing execution and shrinking behavior, and optional metadata callbacks. Commands are deliberately decoupled from state shape and execution transport, enabling reuse across different models and adapters.
 
-Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits)
+Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors)
 
 ## Requirements
 
@@ -29,7 +29,7 @@ Commands SHALL define a `generator/1` callback that accepts an overrides map and
 
 ### Requirement: Command Spec Pattern
 
-Commands SHALL support a `command_spec/1` callback that returns a complete specification map. The spec map SHALL contain the keys `:command`, `:execution`, `:settle`, `:shrink`, `:when`, `:overrides`, `:weight`, `:observables`, `:idempotent`, and `:acceptable_retry_events`. `command_spec/1` is the single surface for a command's static metadata (DR-028); there are no separate per-metadata callbacks.
+Commands SHALL support a `command_spec/1` callback that returns a complete specification map. The spec map SHALL contain the keys `:command`, `:execution`, `:settle`, `:shrink`, `:when`, `:overrides`, `:weight`, `:observables`, and `:idempotent`. `command_spec/1` is the single surface for a command's static metadata (DR-028); there are no separate per-metadata callbacks.
 
 #### Scenario: Default spec from use macro
 - **WHEN** a module uses `PropertyDamage.Command` without options
@@ -42,7 +42,7 @@ Commands SHALL support a `command_spec/1` callback that returns a complete speci
 - **AND** `:overrides` defaults to an empty map
 - **AND** `:observables` defaults to an empty list
 - **AND** `:idempotent` defaults to `true`
-- **AND** `:acceptable_retry_events` defaults to an empty list
+- **AND** there is no `:acceptable_retry_events` key (DR-046)
 
 #### Scenario: Module-level defaults via use options
 - **WHEN** a module uses `PropertyDamage.Command` with options like `execution: :probe`
@@ -150,7 +150,7 @@ A command's static metadata for shrinking, validation, and debugging SHALL be de
 
 ### Requirement: Idempotency Testing Metadata
 
-Commands SHALL control stutter/idempotency testing behavior via `command_spec/1` keys (`:idempotent`, `:acceptable_retry_events`) and the per-instance `idempotency_key/1` callback.
+Commands SHALL control stutter/idempotency testing behavior via `command_spec/1` keys (`:idempotent`) and the per-instance `idempotency_key/1` callback.
 
 #### Scenario: Idempotent command included in stutter testing
 - **WHEN** a command's `command_spec/1` has `idempotent: true` (the default)
@@ -165,10 +165,10 @@ Commands SHALL control stutter/idempotency testing behavior via `command_spec/1`
 - **THEN** the returned key is passed to the adapter in the stutter context
 - **AND** the adapter can include the key in request metadata (e.g., HTTP headers)
 
-#### Scenario: Acceptable retry events declared
-- **WHEN** a command declares `:acceptable_retry_events` in its `command_spec/1`
-- **THEN** retry responses matching any listed event module are accepted as correct
-- **AND** this allows different-but-valid responses on retry (e.g., created vs. already exists)
+#### Scenario: Acceptable retry events are removed (DR-046)
+- **WHEN** a command declares `acceptable_retry_events:` through `use PropertyDamage.Command` or a `commands/0` entry
+- **THEN** the framework SHALL reject it with an error that names the stutter `using:` predicate as the replacement
+- **AND** a different-but-valid retry answer (created vs. already exists) SHALL be accepted by the `using:` predicate of the `stutter:` option
 
 ### Requirement: Event Correlation via Awaits
 

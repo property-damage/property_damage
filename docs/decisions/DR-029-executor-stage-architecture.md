@@ -1,6 +1,6 @@
 # DR-029: Executor Internal Stage Architecture (typed run-state, cohesive modules, explicit RNG)
 
-**Status:** Accepted (design pass; implementation in progress)
+**Status:** Accepted (design pass; implementation in progress). Amended by DR-046: a stutter retry is compared through `using:` (default `&==/2`); the `comparison:` atoms and tuples are removed.
 **Date:** 2026-06-29
 
 > Part of the served/servant clean-break campaign. Applies the framework's own layering

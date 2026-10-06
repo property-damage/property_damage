@@ -118,7 +118,7 @@ defmodule GiteaBench.Model do
   def command_sequence_projection, do: GiteaBench.State
 
   @impl true
-  def check_projections, do: [GiteaBench.State]
+  def check_projections, do: [GiteaBench.State, GiteaBench.LabelColors]
 
   @impl true
   def simulator, do: GiteaBench.Simulator

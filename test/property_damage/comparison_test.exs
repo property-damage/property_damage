@@ -7,7 +7,7 @@ defmodule PropertyDamage.ComparisonTest do
     send(parent, {:telemetry, event, measurements, metadata})
   end
 
-  alias PropertyDamage.{Comparison, FailureReport}
+  alias PropertyDamage.{Failure, FailureReport}
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{RunResult, RunUpdate}
 
@@ -210,6 +210,46 @@ defmodule PropertyDamage.ComparisonTest do
     def apply(state, _), do: state
   end
 
+  defmodule TestObservation do
+    # The values each target folded, in fold order: what the targets are
+    # compared on at every root boundary.
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{folded: []}
+
+    @impl true
+    def apply(state, %TestEvent{item_ref: ref, value: val}),
+      do: %{state | folded: [{ref, val} | state.folded]}
+
+    def apply(state, _), do: state
+
+    @compare every: 1
+    def folded(state, _root), do: Enum.reverse(state.folded)
+  end
+
+  defmodule TimingObservation do
+    # Latency tests compare nothing a target's speed or errors change: one
+    # observation at the end that every target agrees on.
+    use PropertyDamage.Model.Projection
+
+    @compare every: :end
+    def finished(_state, _root), do: :finished
+  end
+
+  defmodule LatencyModel do
+    @behaviour PropertyDamage.Model
+
+    @impl PropertyDamage.Model
+    def commands, do: [TestCommand]
+
+    @impl PropertyDamage.Model
+    def command_sequence_projection, do: TestProjection
+
+    @impl PropertyDamage.Model
+    def check_projections, do: [TimingObservation]
+  end
+
   defmodule TestChecks do
     use PropertyDamage.Model.Projection
 
@@ -234,7 +274,7 @@ defmodule PropertyDamage.ComparisonTest do
     def command_sequence_projection, do: TestProjection
 
     @impl PropertyDamage.Model
-    def check_projections, do: [TestChecks]
+    def check_projections, do: [TestChecks, TestObservation]
 
     @impl PropertyDamage.Model
     def simulator, do: __MODULE__
@@ -242,73 +282,6 @@ defmodule PropertyDamage.ComparisonTest do
     @impl PropertyDamage.Model.Simulator
     def simulate(%TestCommand{value: value}, _state) do
       [%TestEvent{value: value, item_ref: nil, id: nil, timestamp: nil}]
-    end
-  end
-
-  # ============================================================================
-  # Equivalence Tests
-  # ============================================================================
-
-  describe "Comparison.equivalent?/3" do
-    test "exact equivalence requires identical results" do
-      result = {:ok, [%TestEvent{value: 1, id: 1}]}
-
-      assert Comparison.equivalent?(result, result, :exact)
-      refute Comparison.equivalent?(result, {:ok, [%TestEvent{value: 2, id: 1}]}, :exact)
-    end
-
-    test "structural equivalence ignores id and timestamp" do
-      ref = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 1, timestamp: 1000}]}
-      sut = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 999, timestamp: 9999}]}
-
-      assert Comparison.equivalent?(ref, sut, :structural)
-    end
-
-    test "structural equivalence detects value differences" do
-      ref = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 1}]}
-      sut = {:ok, [%TestEvent{value: 2, item_ref: "a", id: 1}]}
-
-      refute Comparison.equivalent?(ref, sut, :structural)
-    end
-
-    test "custom equivalence function" do
-      custom = fn {:ok, [%{value: v1}]}, {:ok, [%{value: v2}]} ->
-        abs(v1 - v2) < 10
-      end
-
-      ref = {:ok, [%TestEvent{value: 100}]}
-      close = {:ok, [%TestEvent{value: 105}]}
-      far = {:ok, [%TestEvent{value: 200}]}
-
-      assert Comparison.equivalent?(ref, close, custom)
-      refute Comparison.equivalent?(ref, far, custom)
-    end
-
-    test "error results compared correctly" do
-      assert Comparison.equivalent?({:error, :timeout}, {:error, :timeout}, :exact)
-      refute Comparison.equivalent?({:error, :timeout}, {:error, :other}, :exact)
-    end
-  end
-
-  describe "Comparison.ignore_fields/1" do
-    test "creates strategy ignoring specific fields" do
-      strategy = Comparison.ignore_fields([:request_id, :correlation_id])
-
-      ref = {:ok, [%{value: 1, request_id: "abc", correlation_id: "xyz"}]}
-      sut = {:ok, [%{value: 1, request_id: "def", correlation_id: "uvw"}]}
-
-      assert Comparison.equivalent?(ref, sut, strategy)
-    end
-  end
-
-  describe "Comparison.only_fields/1" do
-    test "creates strategy comparing only specific fields" do
-      strategy = Comparison.only_fields([:value, :item_ref])
-
-      ref = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 1, timestamp: 1000}]}
-      sut = {:ok, [%TestEvent{value: 1, item_ref: "a", id: 999, timestamp: 9999}]}
-
-      assert Comparison.equivalent?(ref, sut, strategy)
     end
   end
 
@@ -321,29 +294,30 @@ defmodule PropertyDamage.ComparisonTest do
   describe "run/1 validation" do
     test "requires model option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :model option not found/, fn ->
-        run_targets(targets: [ReferenceAdapter], compare: :correctness)
+        run_targets(targets: [ReferenceAdapter])
       end
     end
 
     test "requires targets option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :targets option not found/, fn ->
-        run_targets(model: TestModel, compare: :correctness)
+        run_targets(model: TestModel)
       end
     end
 
-    test "compare defaults to :correctness" do
+    test "two targets are compared without any compare: option" do
       assert {:error, %FailureReport{kind: :diverged}} =
                run_targets(
                  model: TestModel,
                  targets: [ReferenceAdapter, {DivergentAdapter, name: "divergent"}],
                  max_runs: 1,
                  max_commands: 2,
-                 seed: 12_345
+                 seed: 12_345,
+                 shrink: false
                )
     end
 
-    test "validates compare mode" do
-      assert_raise NimbleOptions.ValidationError, ~r/:compare.*expected one of/, fn ->
+    test "validates the compare: option" do
+      assert_raise NimbleOptions.ValidationError, ~r/compare/, fn ->
         run_targets(
           model: TestModel,
           targets: [ReferenceAdapter],
@@ -354,7 +328,7 @@ defmodule PropertyDamage.ComparisonTest do
 
     test "rejects empty targets" do
       assert_raise NimbleOptions.ValidationError, ~r/expected a non-empty list/, fn ->
-        run_targets(model: TestModel, targets: [], compare: :correctness)
+        run_targets(model: TestModel, targets: [])
       end
     end
   end
@@ -372,7 +346,6 @@ defmodule PropertyDamage.ComparisonTest do
                    ReferenceAdapter,
                    {IdenticalAdapter, name: "identical"}
                  ],
-                 compare: :correctness,
                  max_runs: 5,
                  max_commands: 3,
                  seed: 12_345
@@ -390,7 +363,7 @@ defmodule PropertyDamage.ComparisonTest do
                    ReferenceAdapter,
                    {DivergentAdapter, name: "divergent"}
                  ],
-                 compare: :correctness,
+                 compare: [converge_within: 20],
                  max_runs: 5,
                  max_commands: 3,
                  seed: 12_345
@@ -398,29 +371,13 @@ defmodule PropertyDamage.ComparisonTest do
 
       assert report.variant == %{index: 1, name: "divergent"}
     end
-
-    test "uses structural equivalence when specified" do
-      assert {:ok, _stats} =
-               run_targets(
-                 model: TestModel,
-                 targets: [
-                   ReferenceAdapter,
-                   {IdenticalAdapter, name: "identical"}
-                 ],
-                 compare: :correctness,
-                 equivalence: :structural,
-                 max_runs: 3,
-                 max_commands: 2,
-                 seed: 12_345
-               )
-    end
   end
 
   # ============================================================================
-  # Performance Mode Tests
+  # Latency measurement
   # ============================================================================
 
-  describe "run/1 with performance mode" do
+  describe "run/1 with latency: true" do
     test "collects latency metrics" do
       {:ok, stats} =
         run_targets(
@@ -429,7 +386,7 @@ defmodule PropertyDamage.ComparisonTest do
             {ReferenceAdapter, name: "fast"},
             {SlowAdapter, name: "slow", config: %{delay_ms: 5}}
           ],
-          compare: :performance,
+          latency: true,
           max_runs: 3,
           max_commands: 2,
           seed: 12_345
@@ -452,7 +409,7 @@ defmodule PropertyDamage.ComparisonTest do
             {ReferenceAdapter, name: "fast"},
             {SlowAdapter, name: "slow", config: %{delay_ms: 10}}
           ],
-          compare: :performance,
+          latency: true,
           max_runs: 3,
           max_commands: 3,
           seed: 12_345
@@ -465,25 +422,45 @@ defmodule PropertyDamage.ComparisonTest do
       assert slow_p50 > fast_p50
     end
 
-    test "counts errors correctly" do
-      {:ok, stats} =
+    test "an erroring target ends the run as its execution failure instead of being counted" do
+      {:error, report} =
         run_targets(
-          model: TestModel,
+          model: LatencyModel,
           targets: [
             {ReferenceAdapter, name: "working"},
             {ErrorAdapter, name: "broken"}
           ],
-          compare: :performance,
+          latency: true,
+          max_runs: 2,
+          max_commands: 2,
+          seed: 12_345,
+          shrink: false
+        )
+
+      assert report.kind == :execution_failed
+      assert report.variant == %{index: 1, name: "broken"}
+      assert Failure.kind(report.failure_reason) == :adapter_error
+      assert Failure.detail(report.failure_reason) == :simulated_error
+    end
+
+    test "counts no errors for targets that answer every command" do
+      {:ok, stats} =
+        run_targets(
+          model: LatencyModel,
+          targets: [
+            {ReferenceAdapter, name: "working"},
+            {SlowAdapter, name: "slow", config: %{delay_ms: 1}}
+          ],
+          latency: true,
           max_runs: 2,
           max_commands: 2,
           seed: 12_345
         )
 
-      working_metrics = stats.metrics["working"]
-      broken_metrics = stats.metrics["broken"]
-
-      assert working_metrics.error_count == 0
-      assert broken_metrics.error_count > 0
+      for name <- ["working", "slow"] do
+        assert stats.metrics[name].error_count == 0
+        assert stats.metrics[name].error_rate == 0.0
+      end
     end
   end
 
@@ -500,7 +477,7 @@ defmodule PropertyDamage.ComparisonTest do
             {SlowAdapter, name: "fast-config", config: %{delay_ms: 1}},
             {SlowAdapter, name: "slow-config", config: %{delay_ms: 20}}
           ],
-          compare: :performance,
+          latency: true,
           max_runs: 2,
           max_commands: 2,
           seed: 12_345
@@ -526,6 +503,7 @@ defmodule PropertyDamage.ComparisonTest do
                run_targets(
                  model: TestModel,
                  targets: [ReferenceAdapter, DivergentAdapter],
+                 compare: [converge_within: 20],
                  max_runs: 2,
                  max_commands: 2,
                  seed: 12_345
@@ -538,6 +516,7 @@ defmodule PropertyDamage.ComparisonTest do
                  model: TestModel,
                  targets: [ReferenceAdapter, DivergentAdapter],
                  concurrency: :parallel,
+                 compare: [converge_within: 20],
                  max_runs: 2,
                  max_commands: 2,
                  seed: 12_345
@@ -556,7 +535,6 @@ defmodule PropertyDamage.ComparisonTest do
               {unquote(key), "x.json"},
               model: TestModel,
               targets: [ReferenceAdapter, IdenticalAdapter],
-              compare: :correctness,
               max_runs: 1,
               max_commands: 2,
               seed: 12_345
@@ -583,7 +561,6 @@ defmodule PropertyDamage.ComparisonTest do
             ReferenceAdapter,
             {IdenticalAdapter, name: "identical"}
           ],
-          compare: :correctness,
           max_runs: 3,
           max_commands: 2,
           seed: 12_345,
@@ -628,7 +605,6 @@ defmodule PropertyDamage.ComparisonTest do
           ReferenceAdapter,
           {IdenticalAdapter, name: "identical"}
         ],
-        compare: :correctness,
         max_runs: 2,
         max_commands: 2,
         seed: 12_345
@@ -645,16 +621,16 @@ defmodule PropertyDamage.ComparisonTest do
   # ============================================================================
   # Characterization: per-target injected-event capture
   #
-  # An adapter that injects mid-execution has the injected event folded into its
-  # root observation AHEAD of its returned events (injected ++ returned). If that
-  # folding drops, reorders, or double-counts injected events, the positive test
-  # flips to divergent; the negative control proves the tests actually observe
-  # the injected event.
+  # An adapter that injects mid-execution has the injected event folded AHEAD
+  # of its returned events (injected, then returned), as TestObservation's
+  # fold-order list shows. If that folding drops, reorders, or double-counts
+  # injected events, the positive test flips to divergent; the negative control
+  # proves the tests actually observe the injected event.
   # ============================================================================
   describe "injected-event folding (characterization)" do
     test "an injected event is folded ahead of returned events" do
-      # The injecting target's result equals [injected, returned], matching the
-      # reference that returns that stream directly: no divergence.
+      # The injecting target folds [injected, returned], matching the reference
+      # that returns that stream directly: no divergence.
       assert {:ok, _stats} =
                run_targets(
                  model: TestModel,
@@ -662,7 +638,6 @@ defmodule PropertyDamage.ComparisonTest do
                    PreCombinedAdapter,
                    {InjectingCandidateAdapter, name: "injecting"}
                  ],
-                 compare: :correctness,
                  max_runs: 3,
                  max_commands: 3,
                  seed: 12_345
@@ -671,7 +646,7 @@ defmodule PropertyDamage.ComparisonTest do
 
     test "the injected event is actually observed (negative control)" do
       # Reference emits only the returned event; the injecting target additionally
-      # carries the injected event, so the streams diverge. This proves the
+      # folds the injected event, so the observations diverge. This proves the
       # positive test above is not passing by silently dropping injected events.
       assert {:error, %FailureReport{kind: :diverged}} =
                run_targets(
@@ -680,7 +655,7 @@ defmodule PropertyDamage.ComparisonTest do
                    ReturnedOnlyAdapter,
                    {InjectingCandidateAdapter, name: "injecting"}
                  ],
-                 compare: :correctness,
+                 compare: [converge_within: 20],
                  max_runs: 3,
                  max_commands: 3,
                  seed: 12_345

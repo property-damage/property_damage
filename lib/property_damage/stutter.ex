@@ -8,7 +8,7 @@ defmodule PropertyDamage.Stutter.Config do
           max_repeats: pos_integer(),
           delay_ms: {non_neg_integer(), non_neg_integer()} | non_neg_integer(),
           commands: :all | [module()],
-          comparison: :strict | {:structural, [atom()]} | {:custom, function()},
+          using: PropertyDamage.Equivalence.predicate(),
           enabled: boolean()
         }
 
@@ -17,14 +17,18 @@ defmodule PropertyDamage.Stutter.Config do
     :max_repeats,
     :delay_ms,
     :commands,
-    :comparison,
-    :enabled
+    :enabled,
+    using: &Kernel.==/2
   ]
 end
 
 defmodule PropertyDamage.Stutter.Violation do
   @moduledoc """
   Represents an idempotency violation detected during stutter testing.
+
+  `mismatch` is the exception describing how a retry's events differ from
+  the original events: by default a `PropertyDamage.ComparisonMismatch` whose
+  `left` holds the original events and `right` the retry's.
   """
 
   @type attempt :: %{
@@ -37,14 +41,14 @@ defmodule PropertyDamage.Stutter.Violation do
           command: struct(),
           command_index: non_neg_integer(),
           attempts: [attempt()],
-          comparison_result: term()
+          mismatch: Exception.t()
         }
 
   defstruct [
     :command,
     :command_index,
     :attempts,
-    :comparison_result
+    :mismatch
   ]
 
   @doc """
@@ -98,7 +102,7 @@ defmodule PropertyDamage.Stutter do
           max_repeats: 2,        # Up to 2 retries (3 total executions)
           delay_ms: {0, 100},    # Random delay between retries
           commands: :all,        # Or list of specific command modules
-          comparison: :strict    # :strict, {:structural, fields}, {:custom, fn}
+          using: &==/2           # fn original_events, retry_events -> ... end
         ]
       )
 
@@ -107,17 +111,18 @@ defmodule PropertyDamage.Stutter do
   Commands tune idempotency testing through their `command_spec/1`:
 
   - `idempotent: false` - Exclude the command from stutter testing (default: `true`)
-  - `acceptable_retry_events: [...]` - Event modules acceptable as alternative retry
-    responses
 
   plus the per-instance `idempotency_key/1` callback, which returns the idempotency
   key passed to the adapter for each request.
 
-  ## Comparison Modes
+  ## Comparing a retry
 
-  - `:strict` - Events must be exactly equal
-  - `{:structural, ignore_fields}` - Ignore specified fields when comparing
-  - `{:custom, fun}` - Custom comparison function
+  A retry agrees with the original when the `using:` predicate accepts it,
+  called `using.(original_events, retry_events)` with the contract of
+  `@compare`'s `using:` (see `PropertyDamage.Equivalence`): it returns
+  `:match` or `true` to agree, and `false`, `{:mismatch, "text"}` or
+  `{:mismatch, exception}` otherwise. Without `using:`, the events must be
+  equal under `==/2`.
   """
 
   alias PropertyDamage.Stutter.Config
@@ -132,7 +137,7 @@ defmodule PropertyDamage.Stutter do
       max_repeats: 2,
       delay_ms: {0, 100},
       commands: :all,
-      comparison: :strict,
+      using: &Kernel.==/2,
       enabled: true
     }
   end
@@ -157,7 +162,7 @@ defmodule PropertyDamage.Stutter do
       max_repeats: Map.get(opts, :max_repeats, 2),
       delay_ms: Map.get(opts, :delay_ms, {0, 100}),
       commands: Map.get(opts, :commands, :all),
-      comparison: Map.get(opts, :comparison, :strict),
+      using: Map.get(opts, :using) || (&Kernel.==/2),
       enabled: true
     }
   end
@@ -264,84 +269,17 @@ defmodule PropertyDamage.Stutter do
   end
 
   @doc """
-  Compare events from first execution with retry execution.
+  Compare events from first execution with retry execution under the
+  configuration's `using:` predicate.
 
-  Returns `:match` if events are considered equivalent, or
-  `{:mismatch, details}` if they differ.
+  Returns `:match`, or `{:mismatch, exception}` (see
+  `PropertyDamage.Equivalence.verdict/3`): a `false` answer is a
+  `PropertyDamage.ComparisonMismatch` with the original events as `left` and
+  the retry's as `right`.
   """
-  @spec compare_events([struct()], [struct()], Config.t(), map() | nil) ::
-          :match | {:mismatch, map()}
-  def compare_events(original_events, retry_events, config, spec \\ nil) do
-    case config.comparison do
-      :strict ->
-        compare_strict(original_events, retry_events)
-
-      {:structural, ignore_fields} ->
-        compare_structural(original_events, retry_events, ignore_fields)
-
-      {:custom, fun} when is_function(fun, 2) ->
-        fun.(original_events, retry_events)
-
-      _ ->
-        compare_with_acceptable(original_events, retry_events, spec)
-    end
-  end
-
-  defp compare_strict(original, retry) do
-    if original == retry do
-      :match
-    else
-      {:mismatch, %{expected: original, actual: retry, mode: :strict}}
-    end
-  end
-
-  defp compare_structural(original, retry, ignore_fields) do
-    normalized_original = Enum.map(original, &drop_fields(&1, ignore_fields))
-    normalized_retry = Enum.map(retry, &drop_fields(&1, ignore_fields))
-
-    if normalized_original == normalized_retry do
-      :match
-    else
-      {:mismatch,
-       %{
-         expected: normalized_original,
-         actual: normalized_retry,
-         mode: :structural,
-         ignored_fields: ignore_fields
-       }}
-    end
-  end
-
-  defp drop_fields(event, fields) when is_struct(event) do
-    event
-    |> Map.from_struct()
-    |> Map.drop(fields)
-    |> then(&struct(event.__struct__, &1))
-  end
-
-  defp drop_fields(event, _fields), do: event
-
-  defp compare_with_acceptable(original_events, retry_events, spec) do
-    # Acceptable alternative retry events come from the resolved command spec
-    # (DR-028).
-    acceptable_modules = Map.get(spec || %{}, :acceptable_retry_events, [])
-
-    # If retry events are from acceptable modules, it's a match
-    retry_modules = Enum.map(retry_events, & &1.__struct__)
-
-    all_acceptable =
-      Enum.all?(retry_modules, fn mod ->
-        mod in acceptable_modules or mod in Enum.map(original_events, & &1.__struct__)
-      end)
-
-    if original_events == retry_events do
-      :match
-    else
-      if all_acceptable and length(retry_events) == length(original_events) do
-        :match
-      else
-        {:mismatch, %{expected: original_events, actual: retry_events, mode: :acceptable_check}}
-      end
-    end
+  @spec compare_events([struct()], [struct()], Config.t()) ::
+          :match | {:mismatch, Exception.t()}
+  def compare_events(original_events, retry_events, %Config{} = config) do
+    PropertyDamage.Equivalence.verdict(config.using, original_events, retry_events)
   end
 end

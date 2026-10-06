@@ -20,7 +20,15 @@ operation exists both as a REST API call and as an equivalent web-UI interaction
 
 `PropertyDamage.run/1` with both adapters as `targets:` generates one command
 sequence and runs it against both (API as the reference), asserting they reach identical
-observable state. Both adapters build their events from the **same neutral
+observable state. The model says what "observable state" means through two `@compare`
+observations, checked after the commands they are scheduled for:
+
+- `GiteaBench.State.forge/2` (`@compare every: 1`): users, repos, issues (title,
+  labels, open or closed) and label names.
+- `GiteaBench.LabelColors.label_colors/2` (`@compare every: CreateLabel`): each
+  label's color, keyed by repo and label name.
+
+Both adapters build their events from the **same neutral
 observation read** (the REST read API), so the only thing that varies is *how the
 mutation was performed*. The differential therefore answers one precise question:
 
@@ -34,16 +42,16 @@ Two design points make this honest:
   via basic auth, the UI by logging in). User creation is the one admin-scoped step.
 - **Linking by name, not id.** Commands are chained by client-chosen, stable keys
   (login, `owner/name`, per-repo issue number), identical across both transports,
-  so each navigates to the same logical entity. Server-assigned ids and timestamps
-  are ignored via `equivalence: :structural`.
+  so each navigates to the same logical entity. Neither observation holds a
+  server-assigned id or timestamp, so the two forges compare with plain equality.
 
 ## Non-vacuity
 
 `test/seeded_divergence_test.exs` proves the oracle can fail. With `seed_bug: true`
 the UI adapter fills the *wrong colour* when creating a label. The model never
 specifies a label's colour, so none of its own invariants fire on a single
-transport — only comparing the two transports reveals that the same intent produced
-different state. Without the flag, the same sequences are equivalent.
+transport — only the `label_colors` observation, comparing the two transports, reveals
+that the same intent produced different state. Without the flag, the same sequences agree.
 
 ## Layout
 
@@ -51,7 +59,8 @@ different state. Without the flag, the same sequences are equivalent.
 lib/gitea_bench/
   events.ex      shared event structs (both adapters emit the same shapes)
   commands.ex    six transport-agnostic command intents
-  state.ex       model state + DR-026 invariants + @check functions
+  state.ex       model state + DR-026 invariants + @check functions + forge observation
+  label_colors.ex label color observation compared across transports
   model.ex       commands/0 (weight/when/with), simulator
   gitea.ex       readiness, per-run reset, REST mutations + neutral observers
   api_adapter.ex REST transport

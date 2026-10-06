@@ -8,7 +8,9 @@ defmodule GiteaBenchTest do
        invariants hold.
     3. The **differential oracle** runs the same generated sequence against both
        transports (API as reference) and asserts they reach identical observable
-       state.
+       state, compared after every command through the model's `@compare`
+       observations (`GiteaBench.State.forge/2` and
+       `GiteaBench.LabelColors.label_colors/2`).
 
   Browser automation is slow, so command/run counts are modest. Each differential
   call uses `max_runs: 1` and loops here over seeds, so a failing seed is named by
@@ -105,8 +107,6 @@ defmodule GiteaBenchTest do
             {GiteaBench.ApiAdapter, name: "api", config: Map.new(api_opts())},
             {GiteaBench.UiAdapter, name: "ui", config: Map.new(ui_opts())}
           ],
-          compare: :correctness,
-          equivalence: :structural,
           max_commands: 10,
           max_runs: 1,
           seed: seed

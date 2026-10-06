@@ -68,6 +68,27 @@ defmodule PropertyDamage.LockstepShrinkTest do
     def apply(state, _), do: state
   end
 
+  # What the targets are compared on at every root boundary: the values their
+  # Flips answered, and separately the values their Pings answered, so a
+  # divergence at a Flip and one at a Ping are different failures.
+  defmodule Answers do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{flips: [], pings: []}
+
+    @impl true
+    def apply(state, %Flipped{value: v}), do: %{state | flips: [v | state.flips]}
+    def apply(state, %Pinged{value: v}), do: %{state | pings: [v | state.pings]}
+    def apply(state, _), do: state
+
+    @compare every: 1
+    def flips(state, _root), do: state.flips
+
+    @compare every: 1
+    def pings(state, _root), do: state.pings
+  end
+
   # Fails on a Flip that no Arm preceded. Every failure is reported to the
   # probe process, so a test can count the candidates that failed this way.
   defmodule ArmGuard do
@@ -101,6 +122,9 @@ defmodule PropertyDamage.LockstepShrinkTest do
     @impl true
     def command_sequence_projection, do: Tally
 
+    @impl true
+    def check_projections, do: [Answers]
+
     def setup_each(%{adapter_config: config}) do
       if each = config[:each], do: :counters.add(each, 1, 1)
       :ok
@@ -119,7 +143,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
     def command_sequence_projection, do: Tally
 
     @impl true
-    def check_projections, do: [ArmGuard]
+    def check_projections, do: [ArmGuard, Answers]
   end
 
   # Under the `:split` skew, an armed Flip diverges and an unarmed Ping
@@ -132,6 +156,9 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
     @impl true
     def command_sequence_projection, do: Tally
+
+    @impl true
+    def check_projections, do: [Answers]
   end
 
   # Divides by each Noise's n, which argument shrinking halves toward 0.
@@ -154,6 +181,9 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
     @impl true
     def command_sequence_projection, do: DivideTally
+
+    @impl true
+    def check_projections, do: [Answers]
   end
 
   # Config keys:
@@ -239,6 +269,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
           targets: targets,
           max_runs: 1,
           max_commands: @max_commands,
+          compare: [converge_within: 30],
           validate: false
         ],
         extra
@@ -450,37 +481,38 @@ defmodule PropertyDamage.LockstepShrinkTest do
           run_nonce: report.trace.run_nonce,
           mint_epoch: report.trace.mint_epoch + 1,
           concurrency: report.concurrency,
-          compare: :correctness,
-          equivalence: :exact
+          compare: report.compare
         )
 
       assert %{reason: reason, variant: %{index: index}} = rerun.failure
       assert Shrinker.failure_signature(reason, index) == signature(report)
-      assert signature(report) == {:diverged, Flip, 1}
+      assert signature(report) == {:diverged, {Answers, :flips}, 1}
     end
   end
 
   # ==========================================================================
-  # Divergence identity: the root command
+  # Divergence identity: the boundary observation
   # ==========================================================================
 
   describe "a divergence's identity" do
-    test "is its root command's module" do
+    test "is its boundary observation's key" do
       seed = planted_seed()
 
       assert {:error, report} = run(DivergeModel, targets(), seed: seed)
 
       assert_kind_agrees(report)
-      assert Failure.name(report.failure_reason) == Flip
+      assert Failure.name(report.failure_reason) == {Answers, :flips}
 
       root_command =
         report |> FailureReport.shrunk_sequence() |> Sequence.to_list() |> List.last()
 
       assert Failure.detail(report.failure_reason).command == root_command
-      assert FailureReport.classify_reason(report.failure_reason) == {:diverged, Flip}
+
+      assert FailureReport.classify_reason(report.failure_reason) ==
+               {:diverged, {Answers, :flips}}
     end
 
-    test "rejects a candidate that diverges at another command in the same target" do
+    test "rejects a candidate that diverges in another observation in the same target" do
       seed = split_seed()
       original = commands(SplitModel, seed)
       Process.register(self(), @probe)
@@ -497,8 +529,8 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
         shrunk = report |> FailureReport.shrunk_sequence() |> Sequence.to_list()
         assert Enum.map(shrunk, & &1.__struct__) == [Arm, Flip]
-        assert Failure.name(report.failure_reason) == Flip
-        assert signature(report) == {:diverged, Flip, 1}
+        assert Failure.name(report.failure_reason) == {Answers, :flips}
+        assert signature(report) == {:diverged, {Answers, :flips}, 1}
         assert length(shrunk) < length(original)
         assert %Flip{} = Failure.detail(report.failure_reason).command
 
@@ -518,7 +550,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
       assert {:ok, loaded} = PropertyDamage.Persistence.load(path)
 
       assert %Flip{} = Failure.detail(loaded.failure_reason).command
-      assert Failure.name(loaded.failure_reason) == Flip
+      assert Failure.name(loaded.failure_reason) == {Answers, :flips}
       assert loaded.failure_reason == report.failure_reason
     end
   end

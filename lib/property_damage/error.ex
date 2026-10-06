@@ -224,18 +224,43 @@ defmodule PropertyDamage.Error do
     detail = PropertyDamage.Failure.detail(failure)
 
     """
-    Divergence at command #{inspect(detail.root)}
+    Divergence of #{PropertyDamage.FailureReport.format_name(detail.key)} at root #{inspect(detail.root)}
     #{cmd_info}
-    Reference answered: #{format_message(detail.reference_result)}
-    Target answered:    #{format_message(detail.divergent_result)}
+    Reference value: #{inspect(detail.reference_value, pretty: true, limit: 10)}
+    Variant value:   #{inspect(detail.variant_value, pretty: true, limit: 10)}
+    Mismatch: #{format_message(detail.mismatch)}
 
-    A target answered this command differently from the reference target.
+    A target's boundary observation still differed from the reference's when
+    the convergence bound expired.
 
     Suggestions:
-      - Compare the two answers; one of the targets has a bug
-      - If the answers differ only in identifiers or timestamps, use
-        `equivalence: :structural` or a custom equivalence function
+      - Compare the two values; one of the targets has a bug
+      - If the values differ only in identifiers, timestamps or other noise,
+        give the @compare function a `using:` predicate that ignores it
+        (see PropertyDamage.Equivalence)
       - If the targets share one system, isolate each one through its `config:`
+    """
+    |> String.trim()
+  end
+
+  defp format_failure(:did_not_converge, failure, context) do
+    cmd_info = format_command_info(context)
+    detail = PropertyDamage.Failure.detail(failure)
+
+    """
+    #{PropertyDamage.FailureReport.format_name(detail.key)} did not converge within #{detail.within_ms} ms at root #{inspect(detail.root)}
+    #{cmd_info}
+    Still pending: #{inspect(detail.reason, pretty: true, limit: 10)}
+    Waited: #{detail.waited_ms} ms
+
+    A target's boundary observation was still pending when the convergence
+    bound expired.
+
+    Suggestions:
+      - If the system is only slower than the bound, raise
+        `compare: [converge_within: ms]`
+      - Check that the @compare function returns {:pending, reason} only while
+        the target can still catch up without a further command
     """
     |> String.trim()
   end

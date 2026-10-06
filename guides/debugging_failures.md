@@ -46,7 +46,8 @@ There are three **classes** (`PropertyDamage.Failure.class/1` returns the atom):
   `:projection_violation`). This is the class you usually want: it means the SUT
   misbehaved.
 - `:execution` — the machinery around the SUT failed to run a command
-  (`:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`,
+  (an adapter raise or `{:error, _}` answer is `:adapter_error` in every run,
+  never compared as an observation; `:adapter_error`, `:nemesis_error`, `:stutter_execution_failed`,
   `:resource_poller_error`, `:poll_error`, ...). Often a test-harness or
   infrastructure problem rather than a SUT bug.
 - `:framework` — PropertyDamage itself could not proceed
@@ -69,8 +70,8 @@ do not have to reach into the `%Failure{}` by hand:
   `%PropertyDamage.Stutter.Violation{}` for such a failure, or `nil` for any other
   failure kind.
 
-The violation records `command`, `command_index`, `comparison_result`, and
-`attempts`. `attempts` is the list you usually inspect: each entry is a map
+The violation records `command`, `command_index`, `mismatch` (the exception the
+`using:` predicate of `stutter:` produced), and `attempts`. `attempts` is the list you usually inspect: each entry is a map
 `%{attempt: n, events: [...], is_retry: boolean}`, so you can compare the events
 the SUT returned on the first execution against those from each retry.
 
@@ -573,9 +574,11 @@ index 15 in a 23-command sequence:
 Each candidate is only accepted if it reproduces the **same failure** — same failure
 type and same check name. If removing a command causes a different failure, it's
 rejected. This ensures the minimal sequence demonstrates the original bug, not a
-different one. For a divergence between targets, the name is the root command's
-module: a candidate that diverges at a command of another type, or in another
-target, is a different failure and is rejected too.
+different one. For a divergence between targets (or a failure to converge), the name is the
+`@compare` key `{Projection, function}`: a candidate that diverges on another
+observation, or in another target, is a different failure and is rejected too.
+When a run has several failures (in every run, retirement or not), only the primary one (the first by root, then by
+target order) is shrunk, and `report.other_failures` lists the rest.
 
 ### Shrinking and References
 

@@ -3,8 +3,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
   DR-028 (served/servant clean break, P6): `command_spec/1` is the single static
   metadata surface. Every servant read of static command metadata routes through
   the resolved spec map, not through scattered `function_exported?/3` probes of
-  per-callback functions (`semantics/0`, `settle_config/0`, `idempotent?/0`,
-  `acceptable_retry_events/0`, ...).
+  per-callback functions (`semantics/0`, `settle_config/0`, `idempotent?/0`, ...).
 
   These are failing-first behaviour-preservation tests: each declares a fact ONLY
   via `command_spec/1` (never the legacy callback) and asserts the framework
@@ -42,10 +41,8 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
 
   defmodule AcceptableRetryViaSpec do
     @moduledoc false
-    # Declares acceptable retry events ONLY through the spec (no
-    # acceptable_retry_events/0).
-    use PropertyDamage.Command,
-      acceptable_retry_events: [__MODULE__.AlreadyExists]
+    # A retry answers another event type than the first execution.
+    use PropertyDamage.Command
 
     defmodule Created, do: defstruct([:id])
     defmodule AlreadyExists, do: defstruct([:id])
@@ -79,7 +76,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     end
   end
 
-  # --- Stutter seam: idempotent / acceptable_retry_events via command_spec -----
+  # --- Stutter seam: idempotent via command_spec, retry agreement via using: ---
 
   defmodule PassthroughProjection do
     @moduledoc false
@@ -111,7 +108,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     def teardown(_context), do: :ok
 
     # Non-idempotent: tag with attempt number so a stutter retry's events differ
-    # from the first execution under :strict comparison.
+    # from the first execution's.
     @impl true
     def execute(%NonIdempotentViaSpec{id: id}, _ctx, runtime) do
       attempt =
@@ -126,7 +123,6 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     max_repeats: 1,
     delay_ms: 0,
     commands: :all,
-    comparison: :strict,
     enabled: true
   }
 
@@ -164,7 +160,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     def teardown(_context), do: :ok
 
     # First execution returns Created; a stutter retry returns AlreadyExists,
-    # which is an acceptable alternative declared via command_spec.
+    # which the stutter `using:` predicate accepts.
     @impl true
     def execute(%AcceptableRetryViaSpec{id: id}, _ctx, runtime) do
       if PropertyDamage.Runtime.stuttering?(runtime) do
@@ -180,11 +176,18 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     max_repeats: 1,
     delay_ms: 0,
     commands: :all,
-    comparison: :acceptable,
-    enabled: true
+    enabled: true,
+    using: &__MODULE__.created_or_already_exists/2
   }
 
-  test "acceptable_retry_events via command_spec are honored on stutter retry (RED on HEAD)" do
+  @doc false
+  # Agrees when every retry event is the original's Created or an AlreadyExists
+  # for the same id.
+  def created_or_already_exists([%{id: id}] = original, retry) do
+    retry == original or retry == [%AcceptableRetryViaSpec.AlreadyExists{id: id}]
+  end
+
+  test "a stutter using: predicate accepts an alternative retry answer" do
     {:ok, result} =
       Executor.run(
         Sequence.linear([%AcceptableRetryViaSpec{id: "x"}]),
@@ -194,8 +197,8 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
         rng_seed: 7
       )
 
-    # The retry returns a different event type, but it is declared acceptable via
-    # the spec, so the comparison matches and the run succeeds.
-    assert result.success, "expected acceptable_retry_events from command_spec to be honored"
+    # The retry returns a different event type, but the using: predicate
+    # accepts it, so the comparison matches and the run succeeds.
+    assert result.success, "expected the stutter using: predicate to accept the retry"
   end
 end

@@ -308,7 +308,6 @@ defmodule PropertyDamage.VariantTest do
         max_repeats: 2,
         delay_ms: 0,
         commands: :all,
-        comparison: :strict,
         enabled: true
       }
 

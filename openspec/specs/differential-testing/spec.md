@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the differential testing and mutation testing subsystems that allow PropertyDamage to compare multiple implementations against the same command sequences and to measure test suite quality by injecting faults into adapter responses. A multi-target run is `PropertyDamage.run/1` with several `targets:` entries (DR-045): each target runs as a variant in its own process and the variants advance in lockstep (DR-044). A divergence is a failure: it ends the run, is shrunk and reproduced, and is reported as a failure report (DR-045). This domain also defines run comparison (DR-035): the post-hoc comparison of two or more full run traces of the same plan, used to localize regressions and flakiness.
+Define the differential testing and mutation testing subsystems that allow PropertyDamage to compare multiple implementations against the same command sequences and to measure test suite quality by injecting faults into adapter responses. A multi-target run is `PropertyDamage.run/1` with several `targets:` entries (DR-045): each target runs as a variant in its own process and the variants advance in lockstep (DR-044). The targets are compared only through the `@compare` boundary observations of the model's projections (DR-046). A divergence is a failure: it ends the run, is shrunk and reproduced, and is reported as a failure report (DR-045). This domain also defines run comparison (DR-035): the post-hoc comparison of two or more full run traces of the same plan, used to localize regressions and flakiness.
 
 ## Requirements
 
@@ -14,13 +14,13 @@ Define the differential testing and mutation testing subsystems that allow Prope
 
 - **WHEN** `PropertyDamage.run/1` is called with a `targets:` list of two or more entries
 - **THEN** the framework SHALL execute the same command sequences against all targets
-- **AND** SHALL compare the results of every other target against the first target's results (DR-043)
+- **AND** SHALL compare the `@compare` observations of every other target against the first target's (DR-043, DR-046)
 
 #### Scenario: Removed entry point
 
 - **WHEN** a caller looks for a separate differential entry point module
 - **THEN** none SHALL exist; the multi-target entry point is `PropertyDamage.run/1` (DR-045)
-- **AND** the equivalence strategies SHALL live in `PropertyDamage.Comparison`
+- **AND** the helpers for comparing values SHALL live in `PropertyDamage.Equivalence` (DR-046)
 
 #### Scenario: Same adapter with different configurations
 
@@ -28,33 +28,133 @@ Define the differential testing and mutation testing subsystems that allow Prope
 - **THEN** the framework SHALL treat them as distinct targets
 - **AND** SHALL execute commands against each target's configured endpoint independently, passing each target's `config:` to its own `setup/1`
 
-### Requirement: Comparison Modes
+### Requirement: Comparison Through `@compare` Observations Only (DR-046)
 
-The framework SHALL support three comparison modes: `:correctness`, `:performance`, and `:both`.
+The framework SHALL compare the targets of a run only through the boundary observations that the model's projections declare with `@compare`. It MUST NOT compare the events of a root across variants, there SHALL be no default observation, and no option SHALL switch comparison between modes. The options `equivalence:`, `compare: :correctness`, `compare: :performance`, `compare: :both` and `compare: [settle: _]` SHALL be removed and rejected.
 
-#### Scenario: Correctness comparison
+#### Scenario: Events that differ are not a divergence
 
-- **WHEN** `compare: :correctness` is configured
-- **THEN** the framework SHALL compare the events returned by each target for equivalence
-- **AND** SHALL report a divergence as a failure of kind `:diverged` where results differ
+- **GIVEN** two targets whose adapters return different events for a root
+- **AND** a model whose `@compare` observations agree on both targets
+- **WHEN** the run executes
+- **THEN** it SHALL pass
 
-#### Scenario: Performance comparison
+#### Scenario: A removed option is rejected
 
-- **WHEN** `compare: :performance` is configured
-- **THEN** the framework SHALL compare latency and throughput metrics across targets
-- **AND** SHALL NOT check event equivalence
-
-#### Scenario: Combined comparison
-
-- **WHEN** `compare: :both` is configured
-- **THEN** the framework SHALL perform both correctness and performance comparison
-- **AND** `{:ok, stats}` SHALL carry `stats.metrics`, keyed by target name, under `:performance` and `:both`
-
-#### Scenario: Timed comparison requires serial concurrency (DR-044)
-
-- **WHEN** `compare: :performance` or `compare: :both` is configured together with `concurrency: :parallel`
-- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` naming `:concurrency` and stating that the comparison requires `concurrency: :serial`
+- **WHEN** `run/1` is called with `equivalence:`, with `compare: :correctness`, `:performance` or `:both`, or with `compare: [settle: _]`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` whose message names the replacement (`@compare` with `using:`, `latency: true`, or `compare: [converge_within: ms]`)
 - **AND** no command SHALL execute
+
+#### Scenario: Agreement is judged by using:
+
+- **WHEN** a boundary observation's reference value and variant value are judged
+- **THEN** the framework SHALL call the observation's `using:` predicate with the reference value first
+- **AND** SHALL treat `:match` and `true` as agreement
+- **AND** SHALL treat `false` and `{:mismatch, detail}` as a difference, whose detail is a `PropertyDamage.ComparisonMismatch` (holding both values or the given text) or the exception given
+
+#### Scenario: A raise is a check failure
+
+- **WHEN** a `@compare` function or a `using:` predicate raises
+- **THEN** the framework SHALL report a failure of kind `:check_failed` in the variant where it ran, naming the observation's key
+- **AND** SHALL NOT report a divergence
+
+### Requirement: The No-Observation Guard (DR-046)
+
+A run with two or more targets whose model declares no `@compare` function on any projection of `command_sequence_projection/0` and `check_projections/0` SHALL be an error at run start, before any adapter setup, because the variants would never be compared and the run would pass vacuously. A run with one target SHALL NOT call any `@compare` function.
+
+#### Scenario: Two targets and no observation
+
+- **WHEN** `run/1` is given two targets and a model that declares no `@compare`
+- **THEN** it SHALL raise `ArgumentError` naming `@compare`
+- **AND** no adapter `setup/1` SHALL be called
+
+#### Scenario: One target
+
+- **WHEN** `run/1` is given one target and the model declares `@compare` functions
+- **THEN** no `@compare` function SHALL be called
+
+### Requirement: The Convergence Loop (DR-046)
+
+At every boundary at which an observation is scheduled, the framework SHALL run the convergence loop: it SHALL evaluate every scheduled observation in every variant, and while a side is pending or ready sides differ, SHALL drain and fold every variant's event queue, run the async checks, re-read the root in every variant when it is a `:probe` command (the reference and the final boundary included), and evaluate again, until every side is ready and in agreement or the convergence bound expires. No boundary SHALL be skipped. The final boundary SHALL be compared after every variant finalized its run.
+
+The bound is `compare: [converge_within: ms]`, an integer of milliseconds with default `5_000`. It SHALL be measured from the arrival of the last variant at the boundary and checked between iterations, so the loop MAY overshoot the bound by at most one iteration. The loop SHALL evaluate again at most 50 ms after the last evaluation, and sooner when a drain delivered an event, and SHALL re-read a probe root at most once per 50 ms.
+
+Vocabulary: *settle* is one system catching up with itself per adapter call (the per-command `settle:` map); *convergence* is the variants reaching agreement at a boundary; *time to converge* is the measured duration; *did not converge* is a side still pending at the bound; *diverged* is ready sides that differ at the bound.
+
+#### Scenario: A pending side is waited for
+
+- **GIVEN** an observation that returns `{:pending, reason}` in one variant until its asynchronous events arrive
+- **WHEN** the events arrive before the bound
+- **THEN** the loop SHALL end in agreement and the run SHALL continue
+- **AND** the key's `waited_at` SHALL count the boundary
+
+#### Scenario: A side still pending at the bound did not converge
+
+- **WHEN** a side is still `{:pending, reason}` when the bound expires
+- **THEN** the framework SHALL report a failure of kind `:did_not_converge` naming the key, the root, the variant and the reason
+- **AND** the report SHALL state the time waited and the bound
+
+#### Scenario: Ready sides that differ at the bound diverged
+
+- **WHEN** no side is pending and the sides still differ when the bound expires
+- **THEN** the framework SHALL report a failure of kind `:diverged` carrying the key, the root, the reference value, the variant value and the mismatch
+
+#### Scenario: A probe root is re-read
+
+- **GIVEN** a `:probe` root whose first read is stale
+- **WHEN** the loop iterates
+- **THEN** the framework SHALL execute the root again in every variant, including the reference, under that root's per-command settle
+- **AND** the final boundary SHALL be re-read the same way
+
+#### Scenario: The bound overshoots by at most one iteration
+
+- **WHEN** a probe re-read that started before the bound outlasts it
+- **THEN** the loop SHALL report after that re-read ends, not earlier and not after a further iteration
+- **AND** the time waited in the report SHALL include the overshoot
+
+#### Scenario: A check failure recorded on a final re-read does not stop the re-reads
+- **GIVEN** `check_mode: :record` and a variant whose check fails on a final re-read
+- **THEN** that variant SHALL keep re-reading with the others
+
+#### Scenario: Convergence bound validation
+
+- **WHEN** `converge_within:` is not a positive integer
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` naming `converge_within:`
+
+#### Scenario: Expired eventually windows have precedence
+
+- **WHEN** an `@eventually` window expires while the loop runs
+- **THEN** the framework SHALL report a failure of kind `:check_failed` at once, without waiting for the bound
+- **AND** a polling `@eventually` window that has not expired SHALL NOT keep the boundary from agreeing
+
+### Requirement: Boundary Counters (DR-046)
+
+For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the reporter SHALL print them.
+
+#### Scenario: Counters of a passing run
+
+- **WHEN** a run with two targets passes
+- **THEN** `stats.compare_counts` SHALL hold an entry for every declared key, with `compared_at` equal to the number of boundaries at which the key was scheduled
+
+#### Scenario: Counters of one target
+
+- **WHEN** a run has one target
+- **THEN** every declared key SHALL be present with zero counts
+
+### Requirement: Latency Measurement (DR-046)
+
+`latency: true` SHALL measure each target's latency per command and put the metrics in `stats.metrics`, keyed by target name, together with `metrics:`, `percentiles:` and `warmup_runs:`. `latency:` defaults to `false`. `latency: true` with `concurrency: :parallel` SHALL be an option error. A run SHALL NOT measure latency unless `latency: true` is given.
+
+#### Scenario: Latency requires serial concurrency
+
+- **WHEN** `latency: true` is configured together with `concurrency: :parallel`
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` naming `:concurrency` and stating that latency measurement requires `concurrency: :serial`
+- **AND** no command SHALL execute
+
+#### Scenario: Metrics under latency: true
+
+- **WHEN** a run with `latency: true` passes
+- **THEN** `stats.metrics` SHALL map each target name to its latency metrics, excluding the warm-up runs
 
 ### Requirement: Lockstep Concurrency (DR-044)
 
@@ -124,74 +224,56 @@ The framework SHALL capture `external()` server-generated values and resolve the
 
 - **WHEN** a target's producer command errors before its external value is captured, and a later command consumes that value
 - **THEN** the framework SHALL NOT call the adapter for the consumer in that target
-- **AND** SHALL observe the consumer as `{:error, {:placeholder_resolution_failed, reason}}` for that target, compare it like any other observation, and continue the run
+- **AND** the producer's own adapter error SHALL already have ended the run as a failure of kind `:execution_failed` (see Failures Name the Variant), so no consumer runs after it
 
-### Requirement: Equivalence Strategies
+### Requirement: Equivalence Helpers (DR-046)
 
-The framework SHALL support multiple strategies for comparing results between targets: exact, structural, and custom function.
+`PropertyDamage.Equivalence` SHALL offer helpers for `using:` predicates: `by_key/1` lifts a 1-arity key function into a predicate comparing the two keys under `==/2` and keeping both keys in the mismatch; `normalize/1` strips the identifier and timestamp keys (`id`, `inserted_at`, `updated_at`, `created_at`, `timestamp`, `uuid`, `request_id`, `correlation_id`) at every depth and unwraps a top-level `{:ok, _}` or `{:error, _}`; `drop_keys/2` removes the given keys at every depth. The framework MUST NOT sort or normalize a value silently.
 
-#### Scenario: Exact equivalence
+#### Scenario: by_key compares keys
 
-- **WHEN** the equivalence strategy is `:exact`
-- **THEN** results from all targets MUST be strictly equal for the command to be considered equivalent
+- **WHEN** `using: by_key(&normalize/1)` judges two values that differ only in an `id`
+- **THEN** it SHALL return `:match`
+- **AND** WHEN they differ in another field, it SHALL return `{:mismatch, %ComparisonMismatch{}}` holding the two normalized values
 
-#### Scenario: Structural equivalence
+#### Scenario: drop_keys keeps struct types
 
-- **WHEN** the equivalence strategy is `:structural`
-- **THEN** the framework SHALL normalize results by removing common non-deterministic fields (id, inserted_at, updated_at, created_at, timestamp, uuid, request_id, correlation_id)
-- **AND** SHALL compare the normalized results for equality
+- **WHEN** `drop_keys/2` removes a field from a struct
+- **THEN** the result SHALL be a struct of the same type with that field set to `nil`
 
-#### Scenario: Custom equivalence function
+### Requirement: A Divergence Is a Failure (DR-045, DR-046)
 
-- **WHEN** the equivalence strategy is a custom function `fn ref_result, target_result -> boolean end`
-- **THEN** the framework SHALL call the function with the reference result and target result
-- **AND** SHALL treat the command as equivalent if the function returns `true`
-
-### Requirement: Root Observation and Comparison (DR-044)
-
-A variant SHALL observe a root as `{:ok, events}`, the events the command injected followed by the events it returned (for a `:probe` or `:async` root, the events it settled to), or as `{:error, reason}`, the adapter's own error term. At each boundary the framework SHALL compare the observation of every non-reference variant with the reference variant's observation through the configured equivalence strategy, in one comparison function. With two or more variants, an adapter `{:error, _}` SHALL be an observation: the variant continues from the failed command's state. With one variant, an adapter `{:error, _}` SHALL end the run, as it does in `PropertyDamage.run/1`.
-
-#### Scenario: Observation of a command that injects events
-
-- **WHEN** a root's command returns events and an injector delivers events attributed to it
-- **THEN** its observation SHALL be `{:ok, events}` with the injected events first, then the returned events
-
-#### Scenario: Probe root
-
-- **WHEN** a root's command has `:probe` or `:async` semantics
-- **THEN** its observation SHALL be taken after the command settles
-
-#### Scenario: Adapter error with two variants
-
-- **WHEN** one of two variants answers `{:error, reason}` for a root
-- **THEN** the framework SHALL compare that observation with the other variant's observation
-- **AND** SHALL NOT end the run unless the observations are not equivalent
-
-### Requirement: A Divergence Is a Failure (DR-045)
-
-The framework SHALL treat the first root at which a non-reference variant's observation is not equivalent to the reference's observation under `equivalence:` as a failure of kind `:diverged`. The failure SHALL end the run at that boundary and the campaign: no later run starts. The framework SHALL shrink the command sequence, reproduce the shrunk sequence, and return `{:error, %PropertyDamage.FailureReport{}}` from `run/1`. There SHALL be no list of divergences and no run after a divergence. `{:ok, stats}` SHALL mean that no run failed in any kind.
+The framework SHALL treat a boundary at which no side is pending and ready sides still differ when the convergence bound expires as a failure of kind `:diverged`, and a boundary at which a side is still pending when it expires as a failure of kind `:did_not_converge`. With several keys failing at one boundary, the framework SHALL report the first in declaration order, and within that key a pending side before a difference. The failure SHALL end the run at that boundary and the campaign: no later run starts. The framework SHALL shrink the command sequence, reproduce the shrunk sequence, and return `{:error, %PropertyDamage.FailureReport{}}` from `run/1`. There SHALL be no list of divergences and no run after a divergence. `{:ok, stats}` SHALL mean that no run failed in any kind.
 
 #### Scenario: Reporting a divergence
 
-- **WHEN** a root produces non-equivalent observations across variants
+- **WHEN** a boundary observation differs across ready sides at the bound
 - **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :diverged`
-- **AND** `report.variant` SHALL be `%{index, name}` of the first non-equivalent variant in target order
-- **AND** `report.failed_at_index` SHALL be the 0-based index of the diverging root
-- **AND** the failure reason SHALL be a `%PropertyDamage.Failure{}` of type `Failure.Divergence` carrying `root`, `command` (the root command), `reference_result`, `divergent_result` and `results` (every variant's observation, keyed by target name)
-- **AND** `Failure.name/1` of the failure reason SHALL be the root command's module
+- **AND** `report.variant` SHALL be `%{index, name}` of the first differing variant in target order
+- **AND** `report.failed_at_index` SHALL be the 0-based index of the root
+- **AND** the failure reason SHALL be a `%PropertyDamage.Failure{}` of type `Failure.Divergence` carrying `key`, `root`, `command` (the root command), `reference_value`, `variant_value` and `mismatch`
+- **AND** `Failure.name/1` of the failure reason SHALL be the `@compare` key `{projection, function}`
+
+#### Scenario: Reporting a failure to converge
+
+- **WHEN** a side is still pending at the bound
+- **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :did_not_converge`
+- **AND** the failure reason SHALL be of type `Failure.Convergence` carrying `key`, `root`, `command`, `reason`, the time waited and the bound
+- **AND** `Failure.name/1` SHALL be the `@compare` key
 
 #### Scenario: A divergence is shrunk and reproduced
 
-- **WHEN** a divergence is found in a run
+- **WHEN** a divergence or a failure to converge is found in a run
 - **THEN** the framework SHALL shrink the sequence with the reference's sequence as the shrink target, running every attempt through every target
-- **AND** SHALL accept a candidate only if it diverges in the same variant, at a root command of the same module, at the same or an earlier root
+- **AND** SHALL accept a candidate only if it fails with the same kind, in the same variant, on the same `@compare` key, at the same or an earlier root
 - **AND** `FailureReport.shrunk_sequence/1` SHALL return the shrunk sequence
-- **AND** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries
+- **AND** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries and `compare: [converge_within: ms]` when the bound is not the default
 
 #### Scenario: Record mode reports an earlier check failure
 
-- **WHEN** `check_mode: :record` is configured and a check failure is recorded at or before the divergence root
-- **THEN** the report SHALL describe the check failure (`kind: :check_failed`) instead of the divergence
+- **WHEN** `check_mode: :record` is configured and a check failure is recorded at an earlier root, or at the same root in the same or an earlier target
+- **THEN** the report SHALL describe the check failure (`kind: :check_failed`) as the primary failure
+- **AND** the divergence SHALL be listed in `other_failures`, not replaced
 
 ### Requirement: Per-Run Setup and Teardown (DR-044)
 
@@ -220,9 +302,11 @@ The framework SHALL treat the first root at which a non-reference variant's obse
 - **AND** the setup failure SHALL go through `on_failure`, the regression handler and the seed-library append like any other failure
 - **AND** a setup failure SHALL NOT be shrunk
 
-### Requirement: Failures Name the Variant (DR-044, DR-045)
+### Requirement: Failures Name the Variant (DR-044, DR-045, DR-046)
 
-A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. The `kind` SHALL be derived from the failure reason by `FailureReport.kind_of/1`, so a failure found while the run finalizes is `:execution_failed` when its reason is of the execution class. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
+A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. The `kind` SHALL be derived from the failure reason by `FailureReport.kind_of/1`, so a failure found while the run finalizes is `:execution_failed` when its reason is of the execution class. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
+
+An adapter that raises or answers `{:error, _}` at a root SHALL be an `:execution_failed` failure in every mode and SHALL NOT be an observation. A failure of the reference SHALL stop the run. A failure of a non-reference variant at a root SHALL retire that variant at once: the framework SHALL finalize its pollers and run its `:teardown` checks and `Adapter.teardown/1` before the next root starts anywhere, and the other variants SHALL continue and be compared among themselves. The run SHALL stop when no non-reference variant remains. The report SHALL carry as the primary failure the first failure in root order and then target order, and SHALL list the other failures found in the run in `other_failures` (each with the variant, the root and the failure). The primary failure SHALL be the only shrink target. In every run, with or without a retired variant, failures SHALL be ordered by root, then target, then by when they happened within that root and target (a check recorded under `check_mode: :record` while the root was stepped, then the comparison failure at that root's boundary, then a failure found while the target finalized). A failure with no root found at the end of the run SHALL come after every rooted failure, in target order. The first SHALL be the primary failure and every other one SHALL be in `other_failures`. A finalize-time repeat of a failure already found SHALL be listed once, and no failure SHALL be dropped.
 
 #### Scenario: Check failure
 
@@ -232,20 +316,38 @@ A failure SHALL name the variant `%{index, name}` that failed and the root where
 
 #### Scenario: Execution failure
 
-- **WHEN** a variant's adapter raises in `execute/3`, a command cannot be executed, or the variant process crashes
-- **THEN** the failure kind SHALL be `:execution_failed`
-- **AND** with one target, an adapter `{:error, _}` answer SHALL also be `:execution_failed`
-- **AND** with two or more targets, an adapter `{:error, _}` answer SHALL be an observation, not a failure of its own
+- **WHEN** a variant's adapter raises in `execute/3`, answers `{:error, _}`, a command cannot be executed, or the variant process crashes
+- **THEN** the failure kind SHALL be `:execution_failed`, with one target or several
+- **AND** the answer SHALL NOT be compared
 
-#### Scenario: No next root after a failure
+#### Scenario: Reference failure stops the run
 
-- **WHEN** a failure occurs at root `r` under `concurrency: :serial`
-- **THEN** no variant after the failing one in target order SHALL execute root `r`
+- **WHEN** the reference's adapter fails at root `r`
+- **THEN** the run SHALL end with that failure as primary
 - **AND** no variant SHALL start root `r + 1`
 
-### Requirement: Failure Report Is the Result (DR-045)
+#### Scenario: A non-reference failure retires the variant
 
-`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `coverage` when requested, and `metrics` keyed by target name under `compare: :performance | :both`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `equivalence`, `stutter` and `max_commands`, and SHALL NOT carry `adapter`. A `setup_once/1` or `setup_each/1` failure SHALL keep returning `{:error, %{setup_once_failed: _}}` or `{:error, %{setup_each_failed: _, run_number: _}}`. There SHALL be no `Differential.Result`.
+- **GIVEN** three targets a, b and c, where c's adapter answers `{:error, _}` at root `r`
+- **WHEN** root `r` completes
+- **THEN** c's pollers SHALL be finalized, its `:teardown` checks and its `teardown/1` SHALL run, and c SHALL start no later root
+- **AND** a and b SHALL execute root `r + 1` and be compared
+- **AND** the report SHALL name c as the primary failure unless an earlier failure exists
+
+#### Scenario: The run stops with no non-reference variant left
+
+- **WHEN** every non-reference variant has failed
+- **THEN** the run SHALL end with the primary failure
+- **AND** the failures other than the primary SHALL be in `report.other_failures`
+
+#### Scenario: No next root after a failure under serial concurrency
+
+- **WHEN** the reference fails at root `r` under `concurrency: :serial`
+- **THEN** no variant after it in target order SHALL execute root `r`
+
+### Requirement: Failure Report Is the Result (DR-045, DR-046)
+
+`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `compare_counts`, `coverage` when requested, and `metrics` keyed by target name under `latency: true`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `compare` (`[converge_within: ms]`), `compare_counts`, `other_failures`, `stutter` and `max_commands`, and SHALL NOT carry `adapter` or `equivalence`. A `setup_once/1` or `setup_each/1` failure SHALL keep returning `{:error, %{setup_once_failed: _}}` or `{:error, %{setup_each_failed: _, run_number: _}}`. There SHALL be no `Differential.Result`.
 
 #### Scenario: Passing multi-target run
 
@@ -259,9 +361,15 @@ A failure SHALL name the variant `%{index, name}` that failed and the root where
 - **THEN** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries (non-default `name:` and `config:`) and the non-default `concurrency:`
 
 #### Scenario: Reproduction names the run options that decide the outcome
-- **WHEN** a failure report comes from a run with a non-default `equivalence:`, `max_commands:` or with `stutter:`
-- **THEN** the report SHALL record `equivalence`, `stutter` and `max_commands`
-- **AND** `FailureReport.reproduction_command/1` SHALL print `equivalence:` (an atom as is, a named function as its capture, any other function as the placeholder `<custom function>`), `stutter:` and `max_commands:`
+- **WHEN** a failure report comes from a run with a non-default convergence bound, `max_commands:` or with `stutter:`
+- **THEN** the report SHALL record `compare`, `stutter` and `max_commands`
+- **AND** `FailureReport.reproduction_command/1` SHALL print `compare: [converge_within: ms]`, `stutter:` and `max_commands:`
+
+#### Scenario: Other failures are listed
+
+- **WHEN** a run ends with failures in more than one variant
+- **THEN** `report.other_failures` SHALL list each failure other than the primary with its variant, its root and its `%Failure{}`
+- **AND** the terminal, markdown and JSON formats SHALL show them
 
 ### Requirement: Per-Target Injectors, Mocks and Pollers in Multi-Target Runs (DR-044)
 

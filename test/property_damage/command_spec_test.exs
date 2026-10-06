@@ -103,7 +103,7 @@ defmodule PropertyDamage.CommandSpecTest do
       assert defaults.weight == 1
       assert defaults.observables == []
       assert defaults.idempotent == true
-      assert defaults.acceptable_retry_events == []
+      refute Map.has_key?(defaults, :acceptable_retry_events)
     end
   end
 

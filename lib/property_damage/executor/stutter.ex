@@ -41,7 +41,7 @@ defmodule PropertyDamage.Executor.Stutter do
     rng = stutter_rng(Map.get(state, :rng_seed), index)
 
     # The resolved command spec carries the static stutter metadata (DR-028):
-    # `:idempotent` eligibility and `:acceptable_retry_events`. nil for plain-map
+    # `:idempotent` eligibility. nil for plain-map
     # / spec-less commands, where the policy falls back to its defaults.
     spec =
       if is_struct(command) do
@@ -60,8 +60,7 @@ defmodule PropertyDamage.Executor.Stutter do
         adapter,
         adapter_context,
         state.branch_id,
-        rng,
-        spec
+        rng
       )
     else
       {:ok, event_log}
@@ -85,8 +84,7 @@ defmodule PropertyDamage.Executor.Stutter do
          adapter,
          adapter_context,
          branch_id,
-         rng,
-         spec
+         rng
        ) do
     {retry_count, rng} = Stutter.retry_count(stutter_config, rng)
     idempotency_key = Stutter.get_idempotency_key(resolved_command)
@@ -128,8 +126,7 @@ defmodule PropertyDamage.Executor.Stutter do
       index,
       event_log,
       stutter_config,
-      branch_id,
-      spec
+      branch_id
     )
   end
 
@@ -140,8 +137,7 @@ defmodule PropertyDamage.Executor.Stutter do
          index,
          event_log,
          stutter_config,
-         branch_id,
-         spec
+         branch_id
        ) do
     # Check for execution errors
     case Enum.find(retry_results, &match?({:error, _, _}, &1)) do
@@ -157,8 +153,7 @@ defmodule PropertyDamage.Executor.Stutter do
           index,
           event_log,
           stutter_config,
-          branch_id,
-          spec
+          branch_id
         )
     end
   end
@@ -170,21 +165,19 @@ defmodule PropertyDamage.Executor.Stutter do
          index,
          event_log,
          stutter_config,
-         branch_id,
-         spec
+         branch_id
        ) do
     # Compare each retry's events with original
     comparisons =
       Enum.map(retry_results, fn {:ok, attempt, retry_events} ->
-        comparison =
-          Stutter.compare_events(original_events, retry_events, stutter_config, spec)
+        comparison = Stutter.compare_events(original_events, retry_events, stutter_config)
 
         {attempt, retry_events, comparison}
       end)
 
     # Check for any mismatches
     case Enum.find(comparisons, fn {_, _, result} -> result != :match end) do
-      {_attempt, _retry_events, {:mismatch, details}} ->
+      {_attempt, _retry_events, {:mismatch, mismatch}} ->
         # Idempotency violation detected
         violation = %Stutter.Violation{
           command: command,
@@ -195,7 +188,7 @@ defmodule PropertyDamage.Executor.Stutter do
                 %{attempt: att, events: evts, is_retry: true}
               end)
           ],
-          comparison_result: details
+          mismatch: mismatch
         }
 
         {:error, :idempotency_violation, violation}

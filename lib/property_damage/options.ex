@@ -430,19 +430,24 @@ defmodule PropertyDamage.Options do
         "How the targets advance to each command boundary: `:serial` steps one " <>
           "target at a time in target order; `:parallel` steps every target at " <>
           "once (targets sharing a system need isolated slices through `config:`). " <>
-          "`compare: :performance` and `:both` require `:serial`."
+          "`latency: true` requires `:serial`."
     ],
     compare: [
-      type: {:in, [:correctness, :performance, :both]},
-      default: :correctness,
-      doc:
-        "Comparison mode: `:correctness` compares every target's answers with the " <>
-          "reference's, `:performance` measures each target's latency, `:both` does both."
+      type: {:custom, __MODULE__, :validate_compare, []},
+      default: [converge_within: 5_000],
+      doc: """
+      Boundary comparison of two or more targets, which is always on:
+      `[converge_within: ms]`, how long the comparison waits at a boundary for
+      the targets' `@compare` observations to agree (a positive integer number
+      of milliseconds, default `5_000`).
+      """
     ],
-    equivalence: [
-      type: :any,
-      default: :exact,
-      doc: "Equivalence strategy: `:exact`, `:structural`, or custom function."
+    latency: [
+      type: :boolean,
+      default: false,
+      doc:
+        "Measure each target's latency per command (`execute/3` wall-clock) and return " <>
+          "the metrics per target in `stats.metrics`. Requires `concurrency: :serial`."
     ],
     metrics: [
       type: {:list, {:in, [:latency, :throughput]}},
@@ -457,7 +462,7 @@ defmodule PropertyDamage.Options do
     warmup_runs: [
       type: :non_neg_integer,
       default: 0,
-      doc: "Runs to discard before measuring."
+      doc: "Runs to discard before measuring latency."
     ],
     check_mode: [
       type: {:in, [:disabled, :halt, :record, :log]},
@@ -523,14 +528,13 @@ defmodule PropertyDamage.Options do
           default: :all,
           doc: "`:all` or list of command modules to stutter."
         ],
-        comparison: [
-          type: :any,
-          default: :strict,
+        using: [
+          type: {:custom, __MODULE__, :validate_stutter_using, []},
           doc: """
-          Event comparison mode:
-          - `:strict` - Events must be exactly equal
-          - `{:structural, fields}` - Ignore specified fields
-          - `{:custom, fun}` - Custom comparison function
+          The predicate that decides whether a retry's events agree with the
+          original events, called `using.(original_events, retry_events)` with the
+          contract of `@compare`'s `using:` (see `PropertyDamage.Equivalence`).
+          Default `&==/2`.
           """
         ]
       ]
@@ -591,7 +595,11 @@ defmodule PropertyDamage.Options do
                       assertion_mode: :check_mode,
                       execution:
                         "`execution:` was removed; every target runs in lockstep, " <>
-                          "use `concurrency:` (`:serial`, the default, or `:parallel`)"
+                          "use `concurrency:` (`:serial`, the default, or `:parallel`)",
+                      equivalence:
+                        "`equivalence:` was removed; targets are compared only through " <>
+                          "`@compare` functions on the model's projections, each deciding " <>
+                          "agreement with its own `using:` predicate"
                     })
   @retired_load_test_keys Map.put(@retired_target_keys, :assertion_mode, :check_mode)
 
@@ -647,6 +655,7 @@ defmodule PropertyDamage.Options do
   def validate_run!(opts) do
     reject_retired_keys!(opts, @retired_run_keys)
     reject_retired_regression_keys!(opts)
+    reject_retired_stutter_keys!(opts)
 
     validated = NimbleOptions.validate!(opts, @run_schema)
 
@@ -680,17 +689,97 @@ defmodule PropertyDamage.Options do
   # Latency measured while other targets execute at the same moment would mix
   # their load into every sample.
   defp reject_timed_parallel!(opts) do
-    if opts[:concurrency] == :parallel and opts[:compare] in [:performance, :both] do
+    if opts[:concurrency] == :parallel and opts[:latency] do
       raise NimbleOptions.ValidationError,
         key: :concurrency,
         value: :parallel,
         message:
-          "`compare: #{inspect(opts[:compare])}` requires `concurrency: :serial`; " <>
+          "`latency: true` requires `concurrency: :serial`; " <>
             "under `concurrency: :parallel` the targets execute at the same time, " <>
             "so their load would mix into each other's latency"
     end
 
     opts
+  end
+
+  @doc false
+  # `compare:` option type: a keyword list with `converge_within:`, returned
+  # with the default filled in. The removed atom modes name their replacement.
+  def validate_compare(:correctness) do
+    {:error,
+     "`compare: :correctness` was removed: comparison is on by default for two or more " <>
+       "targets; to set how long a boundary may wait, pass `compare: [converge_within: ms]`"}
+  end
+
+  def validate_compare(mode) when mode in [:performance, :both] do
+    {:error,
+     "`compare: #{inspect(mode)}` was removed; to measure each target's latency pass " <>
+       "`latency: true`"}
+  end
+
+  def validate_compare(opts) when is_list(opts) do
+    if Keyword.keyword?(opts), do: validate_compare_keys(opts), else: compare_shape_error(opts)
+  end
+
+  def validate_compare(other), do: compare_shape_error(other)
+
+  defp validate_compare_keys(opts) do
+    case Keyword.keys(opts) -- [:converge_within] do
+      [] ->
+        case Keyword.get(opts, :converge_within, 5_000) do
+          ms when is_integer(ms) and ms > 0 ->
+            {:ok, [converge_within: ms]}
+
+          other ->
+            {:error,
+             "`compare: [converge_within: ...]` must be a positive integer number of " <>
+               "milliseconds, got: #{inspect(other)}"}
+        end
+
+      [:settle | _] ->
+        {:error,
+         "`compare: [settle: ...]` was renamed `compare: [converge_within: ms]`, how long " <>
+           "a boundary may wait for the targets to agree; the per-command `settle:` map " <>
+           "is unchanged"}
+
+      unknown ->
+        {:error, "`compare:` accepts only `converge_within:`, got: #{inspect(unknown)}"}
+    end
+  end
+
+  defp compare_shape_error(value) do
+    {:error,
+     "expected `compare:` to be a keyword list `[converge_within: ms]`, got: #{inspect(value)}"}
+  end
+
+  @doc false
+  # `stutter: [using:]` option type: a 2-arity predicate.
+  def validate_stutter_using(using) when is_function(using, 2), do: {:ok, using}
+
+  def validate_stutter_using(other) do
+    {:error,
+     "`stutter: [using: ...]` must be a 2-arity function " <>
+       "`fn original_events, retry_events -> ... end`, got: #{inspect(other)}"}
+  end
+
+  # The stutter comparison modes and the command-spec key they read were
+  # replaced by the `using:` predicate.
+  defp reject_retired_stutter_keys!(opts) do
+    case Keyword.get(opts, :stutter) do
+      stutter when is_list(stutter) ->
+        reject_retired_keys!(stutter, %{
+          comparison:
+            "`stutter: [comparison: ...]` was removed; pass `stutter: [using: " <>
+              "fn original_events, retry_events -> ... end]`, a predicate with the contract " <>
+              "of `@compare`'s `using:` (default `&==/2`)",
+          acceptable_retry_events:
+            "`acceptable_retry_events:` was removed; pass `stutter: [using: " <>
+              "fn original_events, retry_events -> ... end]` to decide which retry answers agree"
+        })
+
+      _ ->
+        :ok
+    end
   end
 
   defp reject_retired_regression_keys!(opts) do

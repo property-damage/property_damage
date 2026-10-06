@@ -14,7 +14,7 @@ defmodule PropertyDamage.Failure.Check do
 
   @type t :: %__MODULE__{
           kind: kind(),
-          name: atom() | nil,
+          name: atom() | {module(), atom()} | nil,
           detail: term()
         }
 
@@ -63,36 +63,55 @@ end
 
 defmodule PropertyDamage.Failure.Divergence do
   @moduledoc """
-  A target answered a command differently from the reference target. See
-  `PropertyDamage.Failure` for the kind table.
+  A variant's boundary observation differed from the reference's when the
+  convergence bound expired: both sides were ready, and the observation's
+  `using:` predicate did not accept them. See `PropertyDamage.Failure` for the
+  kind table.
 
-  `root` is the index of the command whose answers differ, and `command` that
-  command. Each observation is `{:ok, events}` (the events the command
-  injected, then the events it returned) or `{:error, reason}` (the adapter's
-  error answer). `reference_result` is the reference target's observation,
-  `divergent_result` the diverging target's, and `results` every target's,
-  keyed by target name.
-
-  `name` identifies what was observed, and so which divergence this is. The
-  default observation of a root is what the target answered to that command, so
-  `name` is the root command's module: two divergences at commands of different
-  types are different failures, and the shrinker keeps them apart. A later
-  comparison feature that names its own observations will supply that name
-  instead.
+  `key` is the observation, `{projection, function}`, and names the failure.
+  `root` is the index of the root command the boundary follows and `command`
+  that command. `reference_value` and `variant_value` are the two values the
+  predicate was last called with, and `mismatch` the exception describing the
+  difference (by default a `PropertyDamage.ComparisonMismatch`).
   """
 
-  @type observation :: {:ok, [struct()]} | {:error, term()}
+  @type key :: {module(), atom()}
 
   @type t :: %__MODULE__{
+          key: key() | nil,
           root: non_neg_integer() | nil,
           command: struct() | nil,
-          name: atom() | nil,
-          reference_result: observation() | nil,
-          divergent_result: observation() | nil,
-          results: %{String.t() => observation()} | nil
+          reference_value: term(),
+          variant_value: term(),
+          mismatch: Exception.t() | nil
         }
 
-  defstruct [:root, :command, :name, :reference_result, :divergent_result, :results]
+  defstruct [:key, :root, :command, :reference_value, :variant_value, :mismatch]
+end
+
+defmodule PropertyDamage.Failure.Convergence do
+  @moduledoc """
+  A variant's boundary observation was still pending when the convergence
+  bound expired: the variant did not converge. See `PropertyDamage.Failure` for
+  the kind table.
+
+  `key` is the observation, `{projection, function}`, and names the failure.
+  `root` is the index of the root command the boundary follows and `command`
+  that command. `reason` is the term the observation returned in
+  `{:pending, reason}`, `waited_ms` how long the comparison waited at the
+  boundary, and `within_ms` the convergence bound it waited against.
+  """
+
+  @type t :: %__MODULE__{
+          key: {module(), atom()} | nil,
+          root: non_neg_integer() | nil,
+          command: struct() | nil,
+          reason: term(),
+          waited_ms: non_neg_integer() | nil,
+          within_ms: pos_integer() | nil
+        }
+
+  defstruct [:key, :root, :command, :reason, :waited_ms, :within_ms]
 end
 
 defmodule PropertyDamage.Failure.Setup do
@@ -127,6 +146,7 @@ defmodule PropertyDamage.Failure do
           | %Failure.Execution{}
           | %Failure.Framework{}
           | %Failure.Divergence{}
+          | %Failure.Convergence{}
           | %Failure.Setup{},
         branch_id: non_neg_integer() | nil
       }
@@ -149,7 +169,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:check_failed` | the check name | the exception, message, or reason |
+  | `:check_failed` | the check name, or the `{projection, function}` key of a `@compare` function or `using:` predicate that raised | the exception, message, or reason |
   | `:idempotency_violation` | `nil` | the `%Stutter.Violation{}` |
   | `:linearization` | `nil` | a human message |
   | `:poll_timeout` | the eventually check name | the poll-timeout info map |
@@ -175,11 +195,17 @@ defmodule PropertyDamage.Failure do
   | `:placeholder_resolution` | why a server-minted placeholder could not be resolved |
   | `:unknown` | the raw, unclassified term |
 
-  ### `Failure.Divergence` - a target answered differently from the reference
+  ### `Failure.Divergence` - a boundary observation differed from the reference's
 
   | kind | name | detail |
   |------|------|--------|
-  | `:diverged` | the root command's module | `%{root:, command:, reference_result:, divergent_result:, results:}` |
+  | `:diverged` | the observation's `{projection, function}` key | `%{key:, root:, command:, reference_value:, variant_value:, mismatch:}` |
+
+  ### `Failure.Convergence` - a boundary observation stayed pending
+
+  | kind | name | detail |
+  |------|------|--------|
+  | `:did_not_converge` | the observation's `{projection, function}` key | `%{key:, root:, command:, reason:, waited_ms:, within_ms:}` |
 
   ### `Failure.Setup` - a target could not be brought up
 
@@ -195,9 +221,12 @@ defmodule PropertyDamage.Failure do
   more time (a tuning question), not necessarily a bug.
   """
 
-  alias PropertyDamage.Failure.{Check, Divergence, Execution, Framework, Setup}
+  alias PropertyDamage.Failure.{Check, Convergence, Divergence, Execution, Framework, Setup}
 
-  @type class :: :check | :execution | :framework | :divergence | :setup
+  @type class :: :check | :execution | :framework | :divergence | :convergence | :setup
+
+  @typedoc "A failure's name: a check name, a projection, or a `{projection, function}` key."
+  @type name :: atom() | {module(), atom()} | nil
 
   @type kind ::
           :check_failed
@@ -216,10 +245,17 @@ defmodule PropertyDamage.Failure do
           | :placeholder_resolution
           | :unknown
           | :diverged
+          | :did_not_converge
           | :setup_failed
 
   @type t :: %__MODULE__{
-          type: Check.t() | Execution.t() | Framework.t() | Divergence.t() | Setup.t(),
+          type:
+            Check.t()
+            | Execution.t()
+            | Framework.t()
+            | Divergence.t()
+            | Convergence.t()
+            | Setup.t(),
           branch_id: non_neg_integer() | nil
         }
 
@@ -230,50 +266,45 @@ defmodule PropertyDamage.Failure do
   # ==========================================================================
 
   @doc """
-  The failure's class: `:check`, `:execution`, `:framework`, `:divergence`, or
-  `:setup`.
+  The failure's class: `:check`, `:execution`, `:framework`, `:divergence`,
+  `:convergence`, or `:setup`.
   """
   @spec class(t()) :: class()
   def class(%__MODULE__{type: %Check{}}), do: :check
   def class(%__MODULE__{type: %Execution{}}), do: :execution
   def class(%__MODULE__{type: %Framework{}}), do: :framework
   def class(%__MODULE__{type: %Divergence{}}), do: :divergence
+  def class(%__MODULE__{type: %Convergence{}}), do: :convergence
   def class(%__MODULE__{type: %Setup{}}), do: :setup
 
   @doc "The failure's globally-unique kind atom."
   @spec kind(t()) :: kind()
   def kind(%__MODULE__{type: %Divergence{}}), do: :diverged
+  def kind(%__MODULE__{type: %Convergence{}}), do: :did_not_converge
   def kind(%__MODULE__{type: %Setup{}}), do: :setup_failed
   def kind(%__MODULE__{type: type}), do: type.kind
 
   @doc """
   The failure's name, or `nil` when a name is not meaningful.
 
-  For a check failure it is the check or projection name. For a divergence it
-  names the observation that differed: by default the root command's module,
-  since the default observation of a root is what the target answered to that
-  command. A later comparison feature that names its own observations will
-  supply that name instead.
+  For a check failure it is the check or projection name, or the
+  `{projection, function}` key of a `@compare` function that raised. For a
+  divergence and a failure to converge it is the key of the boundary
+  observation, `{projection, function}`.
   """
-  @spec name(t()) :: atom() | nil
+  @spec name(t()) :: name()
   def name(%__MODULE__{type: %Check{name: name}}), do: name
-  def name(%__MODULE__{type: %Divergence{name: name}}), do: name
+  def name(%__MODULE__{type: %Divergence{key: key}}), do: key
+  def name(%__MODULE__{type: %Convergence{key: key}}), do: key
   def name(%__MODULE__{type: _}), do: nil
 
   @doc """
-  The class-specific payload for the failure. For a divergence it is the map
-  `%{root:, command:, reference_result:, divergent_result:, results:}`.
+  The class-specific payload for the failure. For a divergence and a failure to
+  converge it is the struct's fields as a map.
   """
   @spec detail(t()) :: term()
-  def detail(%__MODULE__{type: %Divergence{} = divergence}) do
-    Map.take(Map.from_struct(divergence), [
-      :root,
-      :command,
-      :reference_result,
-      :divergent_result,
-      :results
-    ])
-  end
+  def detail(%__MODULE__{type: %Divergence{} = divergence}), do: Map.from_struct(divergence)
+  def detail(%__MODULE__{type: %Convergence{} = convergence}), do: Map.from_struct(convergence)
 
   def detail(%__MODULE__{type: type}), do: type.detail
 
@@ -300,7 +331,7 @@ defmodule PropertyDamage.Failure do
   # ==========================================================================
 
   @doc "A check or invariant failed (`name` identifies which)."
-  @spec check_failed(atom() | nil, term()) :: t()
+  @spec check_failed(name(), term()) :: t()
   def check_failed(name, detail) do
     %__MODULE__{type: %Check{kind: :check_failed, name: name, detail: detail}}
   end
@@ -396,25 +427,24 @@ defmodule PropertyDamage.Failure do
   # ==========================================================================
 
   @doc """
-  A target answered `command`, the command at index `root`, differently from
-  the reference target.
-
-  `reference_result` and `divergent_result` are the two observations; `results`
-  holds every target's observation of that command, keyed by target name. The
-  failure's name is the command's module (see `name/1`).
+  A variant's boundary observation differed from the reference's at the
+  convergence bound. `fields` holds `:key`, `:root`, `:command`,
+  `:reference_value`, `:variant_value` and `:mismatch` (see
+  `PropertyDamage.Failure.Divergence`).
   """
-  @spec diverged(non_neg_integer(), struct(), term(), term(), %{String.t() => term()}) :: t()
-  def diverged(root, %command_module{} = command, reference_result, divergent_result, results) do
-    %__MODULE__{
-      type: %Divergence{
-        root: root,
-        command: command,
-        name: command_module,
-        reference_result: reference_result,
-        divergent_result: divergent_result,
-        results: results
-      }
-    }
+  @spec diverged(map()) :: t()
+  def diverged(fields) do
+    %__MODULE__{type: struct!(Divergence, fields)}
+  end
+
+  @doc """
+  A variant's boundary observation was still pending at the convergence bound.
+  `fields` holds `:key`, `:root`, `:command`, `:reason`, `:waited_ms` and
+  `:within_ms` (see `PropertyDamage.Failure.Convergence`).
+  """
+  @spec did_not_converge(map()) :: t()
+  def did_not_converge(fields) do
+    %__MODULE__{type: struct!(Convergence, fields)}
   end
 
   @doc """
@@ -466,10 +496,10 @@ defmodule PropertyDamage.Failure do
 
   Used by the shrinker to reconstruct a comparable failure from the kind and
   name of a failure signature; the `detail` is left `nil`. Names are retained
-  for `Check` kinds and for `:diverged`, so the rebuilt failure has the
-  signature it was built from.
+  for `Check` kinds, `:diverged` and `:did_not_converge`, so the rebuilt
+  failure has the signature it was built from.
   """
-  @spec from_signature(kind(), atom() | nil) :: t()
+  @spec from_signature(kind(), name()) :: t()
   def from_signature(kind, name) when kind in @check_kinds do
     %__MODULE__{type: %Check{kind: kind, name: name}}
   end
@@ -478,7 +508,8 @@ defmodule PropertyDamage.Failure do
     %__MODULE__{type: %Execution{kind: kind}}
   end
 
-  def from_signature(:diverged, name), do: %__MODULE__{type: %Divergence{name: name}}
+  def from_signature(:diverged, name), do: %__MODULE__{type: %Divergence{key: name}}
+  def from_signature(:did_not_converge, name), do: %__MODULE__{type: %Convergence{key: name}}
 
   def from_signature(:setup_failed, _name), do: %__MODULE__{type: %Setup{}}
 
