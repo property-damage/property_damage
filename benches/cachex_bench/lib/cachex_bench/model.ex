@@ -29,6 +29,13 @@ defmodule CachexBench.Projection do
 
   def apply(state, _event), do: state
 
+  # Boundary observation: a run with two or more targets compares them only
+  # through observations like this one. Every target evaluates it on its own
+  # projection state after each root command, so the expected contents of the
+  # cache must agree between targets.
+  @compare every: 1
+  def expected_contents(state, _root), do: state.expected
+
   # DR-026 invariant catalog: the property the check below upholds. Enables
   # anti-vacuity (check) coverage reporting for this bench.
   @invariant id: :read_consistent,
