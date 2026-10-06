@@ -14,6 +14,7 @@ defmodule SeededDivergenceTest do
   use ExUnit.Case, async: false
 
   alias GiteaBench.Commands.CreateLabel
+  alias PropertyDamage.{Failure, FailureReport, Sequence}
 
   @api_url Application.compile_env(:gitea_bench, :api_url)
   @ui_url Application.compile_env(:gitea_bench, :ui_url)
@@ -27,21 +28,18 @@ defmodule SeededDivergenceTest do
     do: [base_url: @ui_url, admin_user: @admin_user, admin_password: @admin_password] ++ extra
 
   defp oracle(seed, ui_extra) do
-    {:ok, result} =
-      PropertyDamage.Differential.run(
-        model: GiteaBench.Model,
-        targets: [
-          {GiteaBench.ApiAdapter, name: "api", config: Map.new(api_opts())},
-          {GiteaBench.UiAdapter, name: "ui", config: Map.new(ui_opts(ui_extra))}
-        ],
-        compare: :correctness,
-        equivalence: :structural,
-        max_commands: 12,
-        max_runs: 1,
-        seed: seed
-      )
-
-    result
+    PropertyDamage.run(
+      model: GiteaBench.Model,
+      targets: [
+        {GiteaBench.ApiAdapter, name: "api", config: Map.new(api_opts())},
+        {GiteaBench.UiAdapter, name: "ui", config: Map.new(ui_opts(ui_extra))}
+      ],
+      compare: :correctness,
+      equivalence: :structural,
+      max_commands: 12,
+      max_runs: 1,
+      seed: seed
+    )
   end
 
   @tag timeout: 600_000
@@ -50,16 +48,23 @@ defmodule SeededDivergenceTest do
     # seeds for the first one that does.
     divergent =
       Enum.find_value(1..8, fn seed ->
-        result = oracle(seed, seed_bug: true)
-        if result.status == :divergent, do: result, else: nil
+        case oracle(seed, seed_bug: true) do
+          {:error, %FailureReport{kind: :diverged} = report} -> report
+          _ -> nil
+        end
       end)
 
     assert divergent, "expected at least one seeded sequence to diverge"
 
-    divergence = hd(divergent.divergences)
-    assert %CreateLabel{} = divergence.command
-    assert divergence.variant == %{index: 1, name: "ui"}
+    divergence = Failure.detail(divergent.failure_reason)
     assert is_integer(divergence.root)
+
+    # The report describes the shrunk reproduction, so its root indexes the
+    # shrunk sequence.
+    assert %CreateLabel{} =
+             Enum.at(Sequence.to_list(FailureReport.shrunk_sequence(divergent)), divergence.root)
+
+    assert divergent.variant == %{index: 1, name: "ui"}
 
     {:ok, [ref_label]} = divergence.reference_result
     {:ok, [ui_label]} = divergence.divergent_result
@@ -72,8 +77,8 @@ defmodule SeededDivergenceTest do
     for seed <- 1..3 do
       result = oracle(seed, [])
 
-      assert result.status == :equivalent,
-             "seed #{seed} unexpectedly diverged:\n" <> inspect(result.divergences, pretty: true)
+      assert match?({:ok, _stats}, result),
+             "seed #{seed} unexpectedly diverged:\n" <> inspect(result, pretty: true)
     end
   end
 end

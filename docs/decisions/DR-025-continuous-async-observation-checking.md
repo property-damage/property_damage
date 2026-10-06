@@ -1,6 +1,6 @@
 # DR-025: Continuous Async-Observation Checking (assertions fire on asynchronously-observed events)
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-045: the failure signature is `{kind, name, variant_index}`, from `Shrinker.failure_signature/2`.
 **Date:** 2026-06-23
 
 > Recorded as a design pass, to be implemented next. It completes the non-goal

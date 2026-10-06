@@ -4,7 +4,7 @@
 
 Persistence provides durable storage and retrieval of failure data, seed management, regression test orchestration, and step-by-step replay for debugging. It enables teams to save discovered failures, build regression suites, share seeds, and interactively debug failures without re-running full test suites.
 
-Reference: DR-020 (Composable, Version-Aware Libraries), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs)
+Reference: DR-020 (Composable, Version-Aware Libraries), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-045 (One Runner for One or More Targets)
 
 ## Requirements
 
@@ -17,7 +17,7 @@ The system SHALL save and load failure reports to `.pd` files using Erlang term 
 - **WHEN** a failure report is saved to a directory
 - **THEN** the system SHALL write a `.pd` file containing a version header, the Erlang term-encoded `FailureReport` struct, and a checksum for integrity verification
 - **AND** the filename SHALL follow the pattern `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
-- **AND** the version header SHALL record the current format version (`8`, since the persisted vocabulary is the check vocabulary: `%Failure.Check{}` and `check_fires` — DR-042; a report's `failure_reason` is a nested `%PropertyDamage.Failure{}` and the six denormalized failure fields are gone — DR-041; event-log entries carry a `fold_index` and the trace carries `command_fold_ordinals` + verified `linearization` for the derived per-step state timeline — DR-040; positions are `%Sequence.Position{}` structs — DR-039; the report composes a `RunTrace` — DR-033), which tracks the `FailureReport` struct shape
+- **AND** the version header SHALL record the current format version (`9`, since the report carries `kind`, `variant`, `targets` and `concurrency` in place of `adapter` — DR-045; the persisted vocabulary is the check vocabulary: `%Failure.Check{}` and `check_fires` — DR-042; a report's `failure_reason` is a nested `%PropertyDamage.Failure{}` and the six denormalized failure fields are gone — DR-041; event-log entries carry a `fold_index` and the trace carries `command_fold_ordinals` + verified `linearization` for the derived per-step state timeline — DR-040; positions are `%Sequence.Position{}` structs — DR-039; the report composes a `RunTrace` — DR-033), which tracks the `FailureReport` struct shape
 
 #### Scenario: Save with custom filename
 
@@ -63,13 +63,13 @@ The system SHALL include version metadata in persisted files and warn when loadi
 - **WHEN** a `.pd` file references a dependency not present in the current environment
 - **THEN** the system SHALL return a `{:dependency_missing, dep, saved_version}` warning
 
-#### Scenario: Pre-v8 format versions are refused
+#### Scenario: Pre-v9 format versions are refused
 
-- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1` through `7`) is loaded
-- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 8}}` without attempting to decode the payload
+- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1` through `8`) is loaded
+- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 9}}` without attempting to decode the payload
 - **AND** the system SHALL NOT synthesize the missing data: a v7 file stores `%Failure.Assertion{}` and `assertion_fires`, which v8 renamed to `%Failure.Check{}` and `check_fires` (DR-042), and older files predate the nested `%Failure{}` shape (DR-041); there is no honest in-place upgrade, so the user re-captures the failure under the current version (the framework is unpublished and such files exist only as regenerable test fixtures)
 
-> This supersedes the DR-041 requirement that named format version `7` and refused versions `1`-`6`; version `8` (DR-042) is now current and versions `1`-`7` are refused. It also carries forward the earlier supersessions of the tolerant-loading / trace-synthesis rules.
+> This supersedes the DR-041 requirement that named format version `7` and refused versions `1`-`6`; version `9` (DR-045) is now current and versions `1`-`8` are refused. A v8 file stores the report's `adapter` field, which v9 replaced with `kind`, `variant` and `targets` (DR-045), so it is refused like the older ones. `export_json/1` writes `kind`, `variant` and `targets` instead of `adapter`. It also carries forward the earlier supersessions of the tolerant-loading / trace-synthesis rules.
 
 ### Requirement: Seed Library
 

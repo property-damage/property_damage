@@ -11,11 +11,18 @@ defmodule PropertyDamage.Progress.PrinterTest do
     defstruct [:id]
   end
 
+  defp targets do
+    [
+      %PropertyDamage.Target{adapter: TestAdapter, name: "TestAdapter", index: 0},
+      %PropertyDamage.Target{adapter: TestAdapter, name: "second", index: 1}
+    ]
+  end
+
   describe "print_header/3" do
     test "prints configuration summary" do
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Printer.print_header(TestModel, TestAdapter,
+          Printer.print_header(TestModel, targets(),
             max_runs: 50,
             max_commands: 25
           )
@@ -24,8 +31,9 @@ defmodule PropertyDamage.Progress.PrinterTest do
       assert output =~ "PropertyDamage Test Run"
       assert output =~ "Model:"
       assert output =~ "TestModel"
-      assert output =~ "Adapter:"
-      assert output =~ "TestAdapter"
+      assert output =~ "Targets:"
+      assert output =~ "[0] TestAdapter: TestAdapter"
+      assert output =~ "[1] second: TestAdapter"
       assert output =~ "Max Runs:     50"
       assert output =~ "Max Commands: 25"
     end
@@ -33,7 +41,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
     test "prints seed when provided" do
       output =
         ExUnit.CaptureIO.capture_io(fn ->
-          Printer.print_header(TestModel, TestAdapter, seed: 12_345)
+          Printer.print_header(TestModel, targets(), seed: 12_345)
         end)
 
       assert output =~ "Seed:         12345"
@@ -72,7 +80,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
 
   describe "consumer/3" do
     test "RunUpdate{phase: :start} prints the configuration header" do
-      consumer = Printer.consumer(TestModel, TestAdapter, max_runs: 5, max_commands: 7)
+      consumer = Printer.consumer(TestModel, targets(), max_runs: 5, max_commands: 7)
 
       output =
         capture_io(fn ->
@@ -85,7 +93,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
     end
 
     test "RunUpdate{phase: :run} prints per-run progress" do
-      consumer = Printer.consumer(TestModel, TestAdapter, [])
+      consumer = Printer.consumer(TestModel, targets(), [])
 
       output =
         capture_io(fn ->
@@ -105,7 +113,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
     end
 
     test "RunResult{outcome: :ok} prints the success summary" do
-      consumer = Printer.consumer(TestModel, TestAdapter, [])
+      consumer = Printer.consumer(TestModel, targets(), [])
 
       output =
         capture_io(fn ->
@@ -137,7 +145,7 @@ defmodule PropertyDamage.Progress.PrinterTest do
         shrink_time_ms: 100
       }
 
-      consumer = Printer.consumer(TestModel, TestAdapter, [])
+      consumer = Printer.consumer(TestModel, targets(), [])
 
       output =
         capture_io(fn ->

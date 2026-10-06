@@ -61,6 +61,51 @@ defmodule PropertyDamage.Failure.Framework do
   defstruct kind: nil, detail: nil
 end
 
+defmodule PropertyDamage.Failure.Divergence do
+  @moduledoc """
+  A target answered a command differently from the reference target. See
+  `PropertyDamage.Failure` for the kind table.
+
+  `root` is the index of the command whose answers differ, and `command` that
+  command. Each observation is `{:ok, events}` (the events the command
+  injected, then the events it returned) or `{:error, reason}` (the adapter's
+  error answer). `reference_result` is the reference target's observation,
+  `divergent_result` the diverging target's, and `results` every target's,
+  keyed by target name.
+
+  `name` identifies what was observed, and so which divergence this is. The
+  default observation of a root is what the target answered to that command, so
+  `name` is the root command's module: two divergences at commands of different
+  types are different failures, and the shrinker keeps them apart. A later
+  comparison feature that names its own observations will supply that name
+  instead.
+  """
+
+  @type observation :: {:ok, [struct()]} | {:error, term()}
+
+  @type t :: %__MODULE__{
+          root: non_neg_integer() | nil,
+          command: struct() | nil,
+          name: atom() | nil,
+          reference_result: observation() | nil,
+          divergent_result: observation() | nil,
+          results: %{String.t() => observation()} | nil
+        }
+
+  defstruct [:root, :command, :name, :reference_result, :divergent_result, :results]
+end
+
+defmodule PropertyDamage.Failure.Setup do
+  @moduledoc """
+  A target could not be brought up: its adapter's `setup/1` returned
+  `{:error, term}` or raised. See `PropertyDamage.Failure` for the kind table.
+  """
+
+  @type t :: %__MODULE__{detail: term()}
+
+  defstruct [:detail]
+end
+
 defmodule PropertyDamage.Failure do
   @moduledoc """
   The structured reason a run failed (DR-041).
@@ -68,7 +113,7 @@ defmodule PropertyDamage.Failure do
   A `%Failure{}` is the single public vocabulary for *why* a run stopped. It
   replaces the loose family of `{:tag, ...}` tuples that earlier versions used as
   `failure_reason`. Every consumer that once matched a raw tuple
-  (`Shrinker.failure_signature/1`, `FailureReport`, the formatter, the exporters,
+  (`Shrinker.failure_signature/2`, `FailureReport`, the formatter, the exporters,
   `FailureIntelligence`) now reads a `%Failure{}`.
 
   ## Shape
@@ -77,7 +122,12 @@ defmodule PropertyDamage.Failure do
   represented:
 
       %PropertyDamage.Failure{
-        type: %Failure.Check{} | %Failure.Execution{} | %Failure.Framework{},
+        type:
+          %Failure.Check{}
+          | %Failure.Execution{}
+          | %Failure.Framework{}
+          | %Failure.Divergence{}
+          | %Failure.Setup{},
         branch_id: non_neg_integer() | nil
       }
 
@@ -91,7 +141,7 @@ defmodule PropertyDamage.Failure do
 
   ## Classes and kinds
 
-  Kinds are **globally unique atoms** across the three classes, so `{kind, name}`
+  Kinds are **globally unique atoms** across the classes, so `{kind, name}`
   identifies a failure without also naming the class (this is what keeps the
   shrinker's equivalence relation exact; see `PropertyDamage.Shrinker`).
 
@@ -125,6 +175,18 @@ defmodule PropertyDamage.Failure do
   | `:placeholder_resolution` | why a server-minted placeholder could not be resolved |
   | `:unknown` | the raw, unclassified term |
 
+  ### `Failure.Divergence` - a target answered differently from the reference
+
+  | kind | name | detail |
+  |------|------|--------|
+  | `:diverged` | the root command's module | `%{root:, command:, reference_result:, divergent_result:, results:}` |
+
+  ### `Failure.Setup` - a target could not be brought up
+
+  | kind | name | detail |
+  |------|------|--------|
+  | `:setup_failed` | `nil` | the term `setup/1` returned in `{:error, term}`, or the exception it raised |
+
   ## Triage
 
   `class/1` groups a failure for serialization and reporting. For tuning noise in
@@ -133,9 +195,9 @@ defmodule PropertyDamage.Failure do
   more time (a tuning question), not necessarily a bug.
   """
 
-  alias PropertyDamage.Failure.{Check, Execution, Framework}
+  alias PropertyDamage.Failure.{Check, Divergence, Execution, Framework, Setup}
 
-  @type class :: :check | :execution | :framework
+  @type class :: :check | :execution | :framework | :divergence | :setup
 
   @type kind ::
           :check_failed
@@ -153,9 +215,11 @@ defmodule PropertyDamage.Failure do
           | :malformed_adapter_return
           | :placeholder_resolution
           | :unknown
+          | :diverged
+          | :setup_failed
 
   @type t :: %__MODULE__{
-          type: Check.t() | Execution.t() | Framework.t(),
+          type: Check.t() | Execution.t() | Framework.t() | Divergence.t() | Setup.t(),
           branch_id: non_neg_integer() | nil
         }
 
@@ -165,23 +229,52 @@ defmodule PropertyDamage.Failure do
   # Accessors
   # ==========================================================================
 
-  @doc "The failure's class: `:check`, `:execution`, or `:framework`."
+  @doc """
+  The failure's class: `:check`, `:execution`, `:framework`, `:divergence`, or
+  `:setup`.
+  """
   @spec class(t()) :: class()
   def class(%__MODULE__{type: %Check{}}), do: :check
   def class(%__MODULE__{type: %Execution{}}), do: :execution
   def class(%__MODULE__{type: %Framework{}}), do: :framework
+  def class(%__MODULE__{type: %Divergence{}}), do: :divergence
+  def class(%__MODULE__{type: %Setup{}}), do: :setup
 
   @doc "The failure's globally-unique kind atom."
   @spec kind(t()) :: kind()
+  def kind(%__MODULE__{type: %Divergence{}}), do: :diverged
+  def kind(%__MODULE__{type: %Setup{}}), do: :setup_failed
   def kind(%__MODULE__{type: type}), do: type.kind
 
-  @doc "The check/projection name, or `nil` when a name is not meaningful."
+  @doc """
+  The failure's name, or `nil` when a name is not meaningful.
+
+  For a check failure it is the check or projection name. For a divergence it
+  names the observation that differed: by default the root command's module,
+  since the default observation of a root is what the target answered to that
+  command. A later comparison feature that names its own observations will
+  supply that name instead.
+  """
   @spec name(t()) :: atom() | nil
   def name(%__MODULE__{type: %Check{name: name}}), do: name
+  def name(%__MODULE__{type: %Divergence{name: name}}), do: name
   def name(%__MODULE__{type: _}), do: nil
 
-  @doc "The class-specific payload for the failure."
+  @doc """
+  The class-specific payload for the failure. For a divergence it is the map
+  `%{root:, command:, reference_result:, divergent_result:, results:}`.
+  """
   @spec detail(t()) :: term()
+  def detail(%__MODULE__{type: %Divergence{} = divergence}) do
+    Map.take(Map.from_struct(divergence), [
+      :root,
+      :command,
+      :reference_result,
+      :divergent_result,
+      :results
+    ])
+  end
+
   def detail(%__MODULE__{type: type}), do: type.detail
 
   @doc """
@@ -299,6 +392,41 @@ defmodule PropertyDamage.Failure do
   end
 
   # ==========================================================================
+  # Divergence and setup constructors
+  # ==========================================================================
+
+  @doc """
+  A target answered `command`, the command at index `root`, differently from
+  the reference target.
+
+  `reference_result` and `divergent_result` are the two observations; `results`
+  holds every target's observation of that command, keyed by target name. The
+  failure's name is the command's module (see `name/1`).
+  """
+  @spec diverged(non_neg_integer(), struct(), term(), term(), %{String.t() => term()}) :: t()
+  def diverged(root, %command_module{} = command, reference_result, divergent_result, results) do
+    %__MODULE__{
+      type: %Divergence{
+        root: root,
+        command: command,
+        name: command_module,
+        reference_result: reference_result,
+        divergent_result: divergent_result,
+        results: results
+      }
+    }
+  end
+
+  @doc """
+  A target's `setup/1` failed; `detail` is the term it returned in
+  `{:error, term}` or the exception it raised.
+  """
+  @spec setup_failed(term()) :: t()
+  def setup_failed(detail) do
+    %__MODULE__{type: %Setup{detail: detail}}
+  end
+
+  # ==========================================================================
   # Framework constructors
   # ==========================================================================
 
@@ -334,10 +462,12 @@ defmodule PropertyDamage.Failure do
   ]
 
   @doc """
-  Build a minimal `%Failure{}` carrying only a `{kind, name}` signature.
+  Build a minimal `%Failure{}` carrying only a kind and a name.
 
-  Used by the shrinker to reconstruct a comparable failure from a signature; the
-  `detail` is left `nil`. Names are only retained for `Check` kinds.
+  Used by the shrinker to reconstruct a comparable failure from the kind and
+  name of a failure signature; the `detail` is left `nil`. Names are retained
+  for `Check` kinds and for `:diverged`, so the rebuilt failure has the
+  signature it was built from.
   """
   @spec from_signature(kind(), atom() | nil) :: t()
   def from_signature(kind, name) when kind in @check_kinds do
@@ -347,6 +477,10 @@ defmodule PropertyDamage.Failure do
   def from_signature(kind, _name) when kind in @execution_kinds do
     %__MODULE__{type: %Execution{kind: kind}}
   end
+
+  def from_signature(:diverged, name), do: %__MODULE__{type: %Divergence{name: name}}
+
+  def from_signature(:setup_failed, _name), do: %__MODULE__{type: %Setup{}}
 
   def from_signature(kind, _name) do
     %__MODULE__{type: %Framework{kind: kind}}

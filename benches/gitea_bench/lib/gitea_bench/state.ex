@@ -8,6 +8,13 @@ defmodule GiteaBench.State do
   (login, `owner/name`, per-repo issue number, label names) is client-chosen and
   identical across transports, the same projection logic serves both phases and
   both adapters.
+
+  The projection raises an `ArgumentError` when it folds an event that
+  references an owner, repo or issue the state does not hold, such as a repo
+  created for a user no earlier command created. Generation never produces
+  such a sequence, but shrinking can: dropping `CreateUser u0` leaves a
+  `CreateRepo u0/r6` that references nobody. The shrinker treats a candidate
+  whose validation raises as invalid, so it never keeps such an orphan.
   """
 
   use PropertyDamage.Model.Projection
@@ -48,11 +55,15 @@ defmodule GiteaBench.State do
   end
 
   def apply(state, %RepoCreated{owner: owner, name: name, full_name: full_name}) do
+    fetch_user!(state, owner)
+
     repo = %{owner: owner, name: name, labels: MapSet.new(), issues: %{}, issue_count: 0}
     put_in(state, [:repos, full_name], repo)
   end
 
   def apply(state, %IssueCreated{full_name: full_name, number: number, title: title}) do
+    fetch_repo!(state, full_name)
+
     state
     |> put_in([:repos, full_name, :issues, number], %{
       title: title,
@@ -63,18 +74,55 @@ defmodule GiteaBench.State do
   end
 
   def apply(state, %LabelCreated{full_name: full_name, name: name}) do
+    fetch_repo!(state, full_name)
     update_in(state, [:repos, full_name, :labels], &MapSet.put(&1, name))
   end
 
   def apply(state, %LabelAssigned{full_name: full_name, number: number, requested_label: label}) do
+    fetch_issue!(state, full_name, number)
     update_in(state, [:repos, full_name, :issues, number, :labels], &MapSet.put(&1, label))
   end
 
   def apply(state, %IssueClosed{full_name: full_name, number: number}) do
+    fetch_issue!(state, full_name, number)
     put_in(state, [:repos, full_name, :issues, number, :state], :closed)
   end
 
   def apply(state, _event), do: state
+
+  # --- referential validity ------------------------------------------------
+
+  defp fetch_user!(state, login) do
+    case Map.fetch(state.users, login) do
+      {:ok, user} ->
+        user
+
+      :error ->
+        raise ArgumentError, "no user #{inspect(login)}: no earlier command created it"
+    end
+  end
+
+  defp fetch_repo!(state, full_name) do
+    case Map.fetch(state.repos, full_name) do
+      {:ok, repo} ->
+        repo
+
+      :error ->
+        raise ArgumentError, "no repo #{inspect(full_name)}: no earlier command created it"
+    end
+  end
+
+  defp fetch_issue!(state, full_name, number) do
+    case Map.fetch(fetch_repo!(state, full_name).issues, number) do
+      {:ok, issue} ->
+        issue
+
+      :error ->
+        raise ArgumentError,
+              "no issue #{inspect(number)} in repo #{inspect(full_name)}: " <>
+                "no earlier command created it"
+    end
+  end
 
   # --- SUT-fidelity checks (non-vacuous even on a single transport) -------
 

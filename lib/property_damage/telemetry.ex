@@ -13,15 +13,17 @@ defmodule PropertyDamage.Telemetry do
 
   - `[:property_damage, :run, :start]` - Test run started
     - Measurements: `%{system_time: integer()}`
-    - Metadata: `%{model: module(), adapter: module(), max_runs: integer(), max_commands: integer(), seed: integer()}`
+    - Metadata: `%{model: module(), targets: [target()], max_runs: integer(), max_commands: integer(), seed: integer()}`,
+      where each `target()` is `%{index: non_neg_integer(), name: String.t(), adapter: module()}`
+      (the run's `targets:` in order, the reference first)
 
   - `[:property_damage, :run, :stop]` - Test run completed
     - Measurements: `%{duration: integer(), total_commands: integer()}`
-    - Metadata: `%{model: module(), adapter: module(), result: :ok | :error, runs_completed: integer()}`
+    - Metadata: `%{model: module(), targets: [target()], result: :ok | :error, runs_completed: integer()}`
 
   - `[:property_damage, :run, :exception]` - Test run crashed
     - Measurements: `%{duration: integer()}`
-    - Metadata: `%{model: module(), adapter: module(), kind: atom(), reason: term(), stacktrace: list()}`
+    - Metadata: `%{model: module(), targets: [target()], kind: atom(), reason: term(), stacktrace: list()}`
 
   ### Sequence Execution
 
@@ -31,27 +33,47 @@ defmodule PropertyDamage.Telemetry do
 
   - `[:property_damage, :sequence, :stop]` - Sequence execution completed
     - Measurements: `%{duration: integer()}`
-    - Metadata: `%{run_number: integer(), success: boolean(), commands_executed: integer()}`
+    - Metadata: `%{run_number: integer(), success: boolean(), commands_executed: integer(), variant: variant() | nil}`,
+      one event per run; `variant` names the target the run failed in, `nil` when it passed
 
   ### Command Execution
 
+  The engine emits these around every command a target executes, in the
+  process that runs the target (each target of a run has its own). Shrink
+  attempts and the reproduction of a failure execute commands too and emit
+  them as well, with the `run_number` of that re-execution (`0`).
+
   - `[:property_damage, :command, :start]` - Command execution started
     - Measurements: `%{system_time: integer()}`
-    - Metadata: `%{command: module(), index: integer(), run_number: integer()}`
+    - Metadata: `%{command: module(), index: integer(), run_number: integer(), variant: variant()}`
 
   - `[:property_damage, :command, :stop]` - Command execution completed
     - Measurements: `%{duration: integer()}`
-    - Metadata: `%{command: module(), index: integer(), success: boolean(), events_count: integer()}`
+    - Metadata: `%{command: module(), index: integer(), run_number: integer(), variant: variant(), success: boolean(), events_count: integer()}`
+
+  `command` is the command's module, `index` its position in the sequence (for
+  a branching sequence, the index within its prefix, branch or suffix), and
+  `success` whether the command completed (its adapter call, events and checks)
+  without failing the run. `variant()` is `%{index: non_neg_integer(), name: String.t()}`,
+  the target's position in `targets:` and its name (`index: 0` with one target).
 
   ### Check Execution
 
+  The engine emits these around every evaluation of a `@check` (per command,
+  per event, and at the `:startup` and `:teardown` phases). `@eventually`
+  checks are polled in their own processes and emit nothing.
+
   - `[:property_damage, :check, :start]` - Check evaluation started
     - Measurements: `%{system_time: integer()}`
-    - Metadata: `%{check_name: atom(), projection: module()}`
+    - Metadata: `%{check_name: atom(), projection: module(), variant: variant(), run_number: integer()}`
 
   - `[:property_damage, :check, :stop]` - Check evaluation completed
     - Measurements: `%{duration: integer()}`
-    - Metadata: `%{check_name: atom(), passed: boolean(), message: String.t() | nil}`
+    - Metadata: `%{check_name: atom(), projection: module(), variant: variant(), run_number: integer(), passed: boolean(), message: String.t() | nil}`
+
+  Whether anything listens for command and check events is decided once per
+  target per run, when the target starts executing: a handler attached later
+  sees the next run's events.
 
   ### Shrinking
 
@@ -100,14 +122,6 @@ defmodule PropertyDamage.Telemetry do
     - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
     - Metadata: `%{data: PropertyDamage.Progress.MutationResult.t(), run_id: term()}`
 
-  - `[:property_damage, :differential, :progress]` - A differential run update
-    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
-    - Metadata: `%{data: PropertyDamage.Progress.DifferentialUpdate.t(), run_id: term()}`
-
-  - `[:property_damage, :differential, :result]` - The terminal differential result
-    - Measurements: `%{at: integer(), elapsed_ms: non_neg_integer()}`
-    - Metadata: `%{data: PropertyDamage.Progress.DifferentialResult.t(), run_id: term()}`
-
   These events fire only when a handler is attached for them, preserving the
   zero-cost-when-unobserved guarantee on the hot loop.
 
@@ -155,6 +169,100 @@ defmodule PropertyDamage.Telemetry do
       %{at: progress.at || 0, elapsed_ms: progress.elapsed_ms || 0},
       %{data: progress.data, run_id: progress.run_id}
     )
+  end
+
+  @command_and_check_events [
+    [:property_damage, :command, :start],
+    [:property_damage, :command, :stop],
+    [:property_damage, :check, :start],
+    [:property_damage, :check, :stop]
+  ]
+
+  @doc false
+  # The context the engine emits command and check events with, for one
+  # target's run: `%{variant: variant, run_number: run_number}`, or `nil` when
+  # no handler is attached to any command or check event. A `nil` context keeps
+  # the per-command and per-check paths free of telemetry work.
+  @spec engine_context(%{index: non_neg_integer(), name: String.t()}, non_neg_integer()) ::
+          %{variant: map(), run_number: non_neg_integer()} | nil
+  def engine_context(variant, run_number) do
+    if Enum.any?(@command_and_check_events, &(:telemetry.list_handlers(&1) != [])) do
+      %{variant: variant, run_number: run_number}
+    end
+  end
+
+  @doc false
+  # Runs one command for the engine inside a command start/stop pair when
+  # `context` is set. `fun` returns the engine's step result; its `{:ok, _,
+  # {:ok, events}}` shape counts the events.
+  @spec command_span(map() | nil, term(), non_neg_integer(), (-> result)) :: result
+        when result: term()
+  def command_span(nil, _command, _index, fun), do: fun.()
+
+  def command_span(context, command, index, fun) do
+    metadata = %{
+      command: command_module(command),
+      index: index,
+      run_number: context.run_number,
+      variant: context.variant
+    }
+
+    start_time = System.system_time()
+    command_start(metadata)
+    result = fun.()
+
+    {success, events_count} =
+      case result do
+        {:ok, _state, {:ok, events}} when is_list(events) -> {true, length(events)}
+        {:ok, _state, _outcome} -> {true, 0}
+        _failed -> {false, 0}
+      end
+
+    command_stop(start_time, Map.merge(metadata, %{success: success, events_count: events_count}))
+    result
+  end
+
+  defp command_module(%{__struct__: module}), do: module
+  defp command_module(command), do: command
+
+  @doc false
+  # Evaluates one check for the engine inside a check start/stop pair when
+  # `context` is set. `fun` raises when the check fails; the raise is caught and
+  # returned as `{:raised, exception, stacktrace}`, a pass as `:ok`.
+  @spec check_span(map() | nil, module(), atom(), (-> term())) ::
+          :ok | {:raised, Exception.t(), list()}
+  def check_span(context, projection, check_name, fun) do
+    metadata =
+      context &&
+        %{
+          check_name: check_name,
+          projection: projection,
+          variant: context.variant,
+          run_number: context.run_number
+        }
+
+    start_time = if metadata, do: System.system_time()
+    if metadata, do: check_start(metadata)
+
+    result =
+      try do
+        fun.()
+        :ok
+      rescue
+        exception -> {:raised, exception, __STACKTRACE__}
+      end
+
+    if metadata do
+      {passed, message} =
+        case result do
+          :ok -> {true, nil}
+          {:raised, exception, _stacktrace} -> {false, Exception.message(exception)}
+        end
+
+      check_stop(start_time, Map.merge(metadata, %{passed: passed, message: message}))
+    end
+
+    result
   end
 
   @doc """

@@ -127,7 +127,8 @@ defmodule PropertyDamage.Replay do
   ## Options
 
   - `:targets` - Single-entry target list overriding the system to replay
-    against (default: the report's adapter with an empty `config:`); see
+    against (default: the report's reference target: its adapter, name and
+    `config:`); see
     `PropertyDamage.Target`
   - `:stop_on_failure` - Stop at first failure (default: true)
   - `:stutter_config` - Stutter config to apply during replay (not stored in the report)
@@ -186,7 +187,7 @@ defmodule PropertyDamage.Replay do
   def start(%FailureReport{} = failure, opts \\ []) do
     opts = Options.validate_replay!(opts)
     model = failure.model
-    target = replay_target(opts, failure.adapter)
+    target = replay_target(opts, FailureReport.reference_target(failure))
 
     Options.reject_unsupported_target_keys!(
       [target],
@@ -212,17 +213,10 @@ defmodule PropertyDamage.Replay do
   end
 
   # `opts` is already validated, so `:targets` holds zero or one target.
-  defp replay_target(opts, default_adapter) do
+  defp replay_target(opts, reference) do
     case opts[:targets] do
-      [target] ->
-        target
-
-      nil ->
-        %PropertyDamage.Target{
-          adapter: default_adapter,
-          name: PropertyDamage.Target.default_name(default_adapter),
-          index: 0
-        }
+      [target] -> target
+      nil -> reference || %PropertyDamage.Target{index: 0}
     end
   end
 
@@ -270,7 +264,7 @@ defmodule PropertyDamage.Replay do
 
       {:error, reason} ->
         EventQueue.stop(event_queue)
-        {:error, {:adapter_setup_failed, reason}}
+        {:error, Failure.setup_failed(reason)}
     end
   end
 

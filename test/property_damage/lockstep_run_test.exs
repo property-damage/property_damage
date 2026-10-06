@@ -1,13 +1,12 @@
-defmodule PropertyDamage.DifferentialRunTest do
-  # `Differential.run/1` runs every run through the lockstep scheduler: each
+defmodule PropertyDamage.LockstepRunTest do
+  # `PropertyDamage.run/1` runs every run through the lockstep scheduler: each
   # target is a variant in its own process, set up and torn down per run, and
   # compared root by root.
   use ExUnit.Case, async: true
 
   import PropertyDamage.Test.VariantSupport
 
-  alias PropertyDamage.{Differential, Failure, Generator, Sequence}
-  alias PropertyDamage.Differential.{Equivalence, Result}
+  alias PropertyDamage.{Comparison, Failure, FailureReport, Generator, Sequence}
 
   alias PropertyDamage.Test.Lockstep.{
     CountingMock,
@@ -44,22 +43,25 @@ defmodule PropertyDamage.DifferentialRunTest do
   end
 
   defp run!(targets, extra \\ []) do
-    {:ok, result} =
-      Differential.run(
-        Keyword.merge(
-          [
-            model: StepModel,
-            targets: targets,
-            compare: :correctness,
-            max_runs: 1,
-            max_commands: 3,
-            seed: @seed
-          ],
-          extra
-        )
+    PropertyDamage.run(
+      Keyword.merge(
+        [
+          model: StepModel,
+          targets: targets,
+          compare: :correctness,
+          max_runs: 1,
+          max_commands: 3,
+          seed: @seed,
+          validate: false
+        ],
+        extra
       )
+    )
+  end
 
-    result
+  defp failure!(targets, extra \\ []) do
+    assert {:error, %FailureReport{} = report} = run!(targets, extra)
+    report
   end
 
   # The command list run `run_number` of a campaign generates, exactly as the
@@ -76,22 +78,36 @@ defmodule PropertyDamage.DifferentialRunTest do
   end
 
   describe "options" do
-    test "concurrency defaults to :serial" do
-      result = run!([step("a"), step("b")])
+    test "concurrency defaults to :serial: one target at a time, in target order" do
+      recorder = start_recorder()
 
-      assert result.status == :equivalent
-      assert Map.get(result, :concurrency) == :serial
+      assert {:ok, _stats} =
+               run!([step("a", %{recorder: recorder}), step("b", %{recorder: recorder})])
+
+      calls =
+        for {tag, name, index} <- recorded(recorder),
+            tag in [:enter, :exit],
+            do: {tag, name, index}
+
+      assert calls ==
+               Enum.flat_map(0..(div(length(calls), 4) - 1)//1, fn index ->
+                 [
+                   {:enter, "a", index},
+                   {:exit, "a", index},
+                   {:enter, "b", index},
+                   {:exit, "b", index}
+                 ]
+               end)
+
+      assert calls != []
     end
 
-    test "concurrency: :parallel is accepted and reported" do
-      result = run!([step("a"), step("b")], concurrency: :parallel)
-
-      assert result.status == :equivalent
-      assert Map.get(result, :concurrency) == :parallel
+    test "concurrency: :parallel is accepted" do
+      assert {:ok, _stats} = run!([step("a"), step("b")], concurrency: :parallel)
     end
 
     test "concurrency: :serial is accepted and any other value is rejected" do
-      assert Map.get(run!([step("a"), step("b")], concurrency: :serial), :concurrency) == :serial
+      assert {:ok, _stats} = run!([step("a"), step("b")], concurrency: :serial)
 
       assert_raise NimbleOptions.ValidationError, fn ->
         run!([step("a"), step("b")], concurrency: :interleaved)
@@ -115,7 +131,7 @@ defmodule PropertyDamage.DifferentialRunTest do
     for compare <- [:performance, :both] do
       test "compare: #{inspect(compare)} with concurrency: :parallel is an option error" do
         # The same comparison mode runs under :serial.
-        assert %Result{} =
+        assert {:ok, _stats} =
                  run!([step("a"), step("b")], compare: unquote(compare), concurrency: :serial)
 
         error =
@@ -127,52 +143,54 @@ defmodule PropertyDamage.DifferentialRunTest do
       end
     end
 
-    test "the result reports concurrency and failure, and no longer an execution mode" do
-      keys = Result |> struct() |> Map.keys()
+    test "the report names the failing target and its kind, and no longer an execution mode" do
+      keys = FailureReport |> struct() |> Map.keys()
 
-      assert :concurrency in keys
-      assert :failure in keys
+      assert :kind in keys
+      assert :variant in keys
+      assert :targets in keys
       refute :execution in keys
+      refute :adapter in keys
     end
 
     test "per-target injectors and mocks are accepted and set up per run" do
       mock = {CountingMock, %{name: "mock", test_pid: self()}}
 
-      result =
-        run!(
-          [step("a"), step("b", %{}, injectors: [NoteInjector], mocks: [mock])],
-          max_runs: 3
-        )
+      assert {:ok, _stats} =
+               run!(
+                 [step("a"), step("b", %{}, injectors: [NoteInjector], mocks: [mock])],
+                 max_runs: 3
+               )
 
-      assert result.status == :equivalent
       assert length(take_messages(:mock_setup)) == 3
     end
   end
 
   describe "root observations and divergences" do
     test "a divergence names the root, the variant and both observations, injected events first" do
-      result = run!([step("a", %{behavior: :inject}), step("b", %{behavior: :inject_shift})])
+      # Unshrunk, so the observations are those of the generated command.
+      report =
+        failure!([step("a", %{behavior: :inject}), step("b", %{behavior: :inject_shift})],
+          shrink: false
+        )
 
-      assert result.status == :divergent
-      assert [divergence] = result.divergences
+      assert report.kind == :diverged
+      divergence = Failure.detail(report.failure_reason)
 
       assert divergence |> Map.keys() |> Enum.sort() ==
-               [
-                 :command,
-                 :divergent_result,
-                 :reference_result,
-                 :results,
-                 :root,
-                 :run,
-                 :seed,
-                 :variant
-               ]
+               [:command, :divergent_result, :reference_result, :results, :root]
 
-      assert %Step{value: value} = divergence.command
-      assert divergence.seed == @seed
-      assert divergence.run == 0
+      assert %Step{value: value} =
+               Enum.at(Sequence.to_list(report.original_sequence), divergence.root)
+
+      assert divergence.command ==
+               Enum.at(Sequence.to_list(report.original_sequence), divergence.root)
+
+      assert report.seed == @seed
+      assert report.run_number == 0
       assert divergence.root == 0
-      assert divergence.variant == %{index: 1, name: "b"}
+      assert report.failed_at_index == 0
+      assert report.variant == %{index: 1, name: "b"}
 
       assert divergence.reference_result == {:ok, [%Noted{value: value}, %Stepped{value: value}]}
 
@@ -186,18 +204,21 @@ defmodule PropertyDamage.DifferentialRunTest do
     end
 
     test "a divergence after root 0 names that root and its command" do
-      result = run!([step("a"), step("b", %{bad_at: 1})], max_commands: 3)
+      report = failure!([step("a"), step("b", %{bad_at: 1})], max_commands: 3)
 
-      assert [divergence] = result.divergences
+      divergence = Failure.detail(report.failure_reason)
       assert divergence.root == 1
-      assert divergence.command == Enum.at(generated(StepModel, @seed, 0, 3), 1)
+
+      assert Enum.at(Sequence.to_list(report.original_sequence), 1) ==
+               Enum.at(generated(StepModel, @seed, 0, 3), 1)
+
       assert {:ok, [%Stepped{mark: :bad}]} = divergence.divergent_result
     end
 
     test "an adapter {:error, reason} is observed as {:error, reason}" do
-      result = run!([step("a"), step("b", %{behavior: :error})])
+      report = failure!([step("a"), step("b", %{behavior: :error})])
 
-      assert [divergence] = result.divergences
+      divergence = Failure.detail(report.failure_reason)
       assert {:ok, [%Stepped{}]} = divergence.reference_result
       assert divergence.divergent_result == {:error, :refused}
     end
@@ -205,8 +226,8 @@ defmodule PropertyDamage.DifferentialRunTest do
     test ":exact compares whole observations and :structural ignores identifiers" do
       targets = [step("a"), step("b", %{behavior: :new_id})]
 
-      assert run!(targets, equivalence: :exact).status == :divergent
-      assert run!(targets, equivalence: :structural).status == :equivalent
+      assert {:error, %FailureReport{kind: :diverged}} = run!(targets, equivalence: :exact)
+      assert {:ok, _stats} = run!(targets, equivalence: :structural)
     end
 
     test "a custom equivalence function receives the two observations" do
@@ -216,18 +237,27 @@ defmodule PropertyDamage.DifferentialRunTest do
         abs(x - y) <= 1
       end
 
-      assert run!(targets, equivalence: close_enough).status == :equivalent
-      assert run!(targets, equivalence: fn _, _ -> false end).status == :divergent
+      assert {:ok, _stats} = run!(targets, equivalence: close_enough)
+
+      assert {:error, %FailureReport{kind: :diverged}} =
+               run!(targets, equivalence: fn _, _ -> false end)
     end
 
-    test "divergences are listed oldest first and each run stops at its first divergence" do
+    test "a run stops at its first divergence and the campaign ends with it" do
       recorder = start_recorder()
-      result = run!([step("a"), step("b", %{behavior: :shift, recorder: recorder})], max_runs: 4)
 
-      assert result.status == :divergent
-      assert Enum.map(result.divergences, & &1.run) == [0, 1, 2, 3]
-      assert Enum.all?(result.divergences, &(&1.root == 0))
-      assert entered(recorder, "b") == [0, 0, 0, 0]
+      report =
+        failure!([step("a"), step("b", %{behavior: :shift, recorder: recorder})],
+          max_runs: 4,
+          shrink: false
+        )
+
+      assert report.kind == :diverged
+      assert report.run_number == 0
+      assert report.failed_at_index == 0
+      # Run 0 stepped root 0 and stopped; the second 0 is the failure's
+      # reproduction, a re-execution of run 0. No later run started.
+      assert entered(recorder, "b") == [0, 0]
     end
 
     test "a probe root that retries before settling is compared on its settled events" do
@@ -236,12 +266,10 @@ defmodule PropertyDamage.DifferentialRunTest do
         {ProbeAdapter, name: "b", config: %{retries: 2}}
       ]
 
-      equal = run!(targets, model: ProbeModel, max_runs: 2)
-      assert equal.status == :equivalent
-      assert Map.get(equal, :failure) == nil
+      assert {:ok, _stats} = run!(targets, model: ProbeModel, max_runs: 2)
 
       shifted =
-        run!(
+        failure!(
           [
             {ProbeAdapter, name: "a", config: %{retries: 2}},
             {ProbeAdapter, name: "b", config: %{retries: 1, offset: 1}}
@@ -249,7 +277,7 @@ defmodule PropertyDamage.DifferentialRunTest do
           model: ProbeModel
         )
 
-      assert [divergence] = shifted.divergences
+      divergence = Failure.detail(shifted.failure_reason)
       assert {:ok, [%Probed{value: value}]} = divergence.reference_result
       assert divergence.divergent_result == {:ok, [%Probed{value: value + 1}]}
     end
@@ -257,67 +285,64 @@ defmodule PropertyDamage.DifferentialRunTest do
 
   describe "failures" do
     test "an adapter raise in one variant is an execution failure naming it, never a divergence" do
-      result = run!([step("a"), step("b", %{behavior: :raise})])
+      report = failure!([step("a"), step("b", %{behavior: :raise})])
 
-      assert result.status == :failed
-      assert result.divergences == []
+      assert report.kind == :execution_failed
+      assert report.variant == %{index: 1, name: "b"}
+      assert report.run_number == 0
+      assert report.failed_at_index == 0
 
-      failure = Map.get(result, :failure)
-      assert failure |> Map.keys() |> Enum.sort() == [:kind, :reason, :root, :run, :variant]
-      assert failure.kind == :execution_failed
-      assert failure.variant == %{index: 1, name: "b"}
-      assert failure.run == 0
-      assert failure.root == 0
-      assert %RuntimeError{message: "candidate exploded"} = failure.reason
+      assert %Failure{
+               type: %Failure.Execution{
+                 kind: :adapter_error,
+                 detail: %RuntimeError{message: "candidate exploded"}
+               }
+             } = report.failure_reason
     end
 
     test "a check failure in the non-reference variant is a failure, and later variants of that root do not run" do
       recorder = start_recorder()
 
-      result =
-        run!(
+      report =
+        failure!(
           [
             step("a", %{recorder: recorder}),
             step("b", %{recorder: recorder, bad_at: 1}),
             step("c", %{recorder: recorder})
           ],
           model: GuardedStepModel,
-          equivalence: Equivalence.ignore_fields([:mark])
+          equivalence: Comparison.ignore_fields([:mark]),
+          shrink: false
         )
 
-      assert result.status == :failed
-      assert result.divergences == []
-
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, run: 0, root: 1} =
-               Map.get(result, :failure)
+      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} = report
+      assert report.failed_at_index == 1
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :step_is_good}} =
-               Map.get(result, :failure).reason
+               report.failure_reason
 
-      assert entered(recorder, "a") == [0, 1]
-      assert entered(recorder, "b") == [0, 1]
-      assert entered(recorder, "c") == [0]
+      # The run, then the failure's reproduction, each stopping at root 1.
+      assert entered(recorder, "a") == [0, 1, 0, 1]
+      assert entered(recorder, "b") == [0, 1, 0, 1]
+      assert entered(recorder, "c") == [0, 0]
     end
 
     test "under :parallel a check failure stops the run before the next root starts" do
       recorder = start_recorder()
 
-      result =
-        run!(
+      report =
+        failure!(
           [
             step("a", %{recorder: recorder}),
             step("b", %{recorder: recorder, bad_at: 1}),
             step("c", %{recorder: recorder})
           ],
           model: GuardedStepModel,
-          equivalence: Equivalence.ignore_fields([:mark]),
+          equivalence: Comparison.ignore_fields([:mark]),
           concurrency: :parallel
         )
 
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, root: 1} =
-               Map.get(result, :failure)
-
-      assert result.divergences == []
+      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, failed_at_index: 1} = report
 
       for name <- ["a", "b", "c"] do
         assert Enum.all?(entered(recorder, name), &(&1 <= 1))
@@ -325,89 +350,84 @@ defmodule PropertyDamage.DifferentialRunTest do
     end
 
     test "a :startup check that fails in one variant names it, with no root" do
-      result = run!([step("a"), step("b", %{fail_startup: true})], model: StartupModel)
+      report = failure!([step("a"), step("b", %{fail_startup: true})], model: StartupModel)
 
-      assert result.status == :failed
-
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, run: 0, root: nil} =
-               Map.get(result, :failure)
+      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}, run_number: 0} = report
+      assert report.failed_at_index == nil
 
       assert %Failure{type: %Failure.Check{kind: :check_failed, name: :ready}} =
-               Map.get(result, :failure).reason
+               report.failure_reason
     end
 
-    test "a failure ends the campaign and keeps the divergences of earlier runs" do
+    test "a failure ends the campaign: no run after the failing one starts" do
       {:ok, counter} = Agent.start_link(fn -> %{} end)
 
-      result =
-        run!(
+      report =
+        failure!(
           [
             step("a", %{counter: counter}),
-            step("b", %{counter: counter, behavior: :shift, raise_on_run: 2})
+            step("b", %{counter: counter, raise_on_run: 2})
           ],
-          max_runs: 5
+          max_runs: 5,
+          shrink: false
         )
 
-      assert result.status == :failed
-      assert Enum.map(result.divergences, & &1.run) == [0, 1]
-      assert %{kind: :execution_failed, run: 2, variant: %{index: 1}} = Map.get(result, :failure)
+      assert %{kind: :execution_failed, run_number: 2, variant: %{index: 1}} = report
 
-      # No run after the failing one was started.
-      assert Agent.get(counter, & &1) == %{"a" => 3, "b" => 3}
+      # Runs 0 to 2, then the reproduction of run 2 (which does not raise, so
+      # the report keeps the original run). No run after the failing one was
+      # started.
+      assert Agent.get(counter, & &1) == %{"a" => 4, "b" => 4}
+      assert report.trace.plan_source == :generated
     end
   end
 
   describe "pollers inside a multi-target run" do
     test "an adapter may start a resource poller and its events reach that variant" do
-      result =
-        run!(
-          [step("a", %{poll: :deliver}), step("b", %{poll: :deliver})],
-          model: PolledModel,
-          max_runs: 2
-        )
-
       # PolledModel's @eventually check passes only when every step's value was
       # delivered back by that variant's resource poller.
-      assert result.status == :equivalent
-      assert Map.get(result, :failure) == nil
+      assert {:ok, _stats} =
+               run!(
+                 [step("a", %{poll: :deliver}), step("b", %{poll: :deliver})],
+                 model: PolledModel,
+                 max_runs: 2
+               )
     end
 
     test "a variant whose poller never delivers fails its @eventually check (control)" do
-      result =
-        run!(
+      report =
+        failure!(
           [step("a", %{poll: :deliver}), step("b", %{poll: :never})],
           model: PolledModel
         )
 
-      assert result.status == :failed
-      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}} = Map.get(result, :failure)
+      assert %{kind: :check_failed, variant: %{index: 1, name: "b"}} = report
     end
   end
 
   describe "performance comparison" do
     test "reports today's latency metrics per target and excludes warm-up runs" do
-      result =
-        run!([step("fast"), step("broken", %{behavior: :error})],
-          compare: :performance,
-          max_runs: 3,
-          warmup_runs: 1
-        )
+      assert {:ok, stats} =
+               run!([step("fast"), step("broken", %{behavior: :error})],
+                 compare: :performance,
+                 max_runs: 3,
+                 warmup_runs: 1
+               )
 
-      assert Map.get(result, :concurrency) == :serial
-      assert result.metrics |> Map.keys() |> Enum.sort() == ["broken", "fast"]
+      assert stats.metrics |> Map.keys() |> Enum.sort() == ["broken", "fast"]
 
       measured =
         Enum.sum(for run <- 1..2, do: length(generated(StepModel, @seed, run, 3)))
 
       for name <- ["fast", "broken"] do
-        metrics = result.metrics[name]
+        metrics = stats.metrics[name]
         assert metrics |> Map.keys() |> Enum.sort() == @metric_keys
         assert metrics.total_commands == measured
       end
 
-      assert result.metrics["fast"].error_count == 0
-      assert result.metrics["broken"].error_count == measured
-      assert result.metrics["broken"].error_rate == 1.0
+      assert stats.metrics["fast"].error_count == 0
+      assert stats.metrics["broken"].error_count == measured
+      assert stats.metrics["broken"].error_rate == 1.0
     end
   end
 
@@ -416,8 +436,8 @@ defmodule PropertyDamage.DifferentialRunTest do
       recorder = start_recorder()
       config = %{test_pid: self(), recorder: recorder, setup_delay_ms: 20}
 
-      result = run!([step("a", config), step("b", config)], max_runs: 3, max_commands: 2)
-      assert result.status == :equivalent
+      assert {:ok, _stats} =
+               run!([step("a", config), step("b", config)], max_runs: 3, max_commands: 2)
 
       setups = take_messages(:setup)
       teardowns = take_messages(:teardown)
@@ -467,30 +487,29 @@ defmodule PropertyDamage.DifferentialRunTest do
       send(setup_b, :release_setup)
 
       assert_receive {:executed, "a", 0, _}, 2_000
-      assert %Result{status: :equivalent} = Task.await(task, 5_000)
+      assert {:ok, _stats} = Task.await(task, 5_000)
     end
 
     test "a setup error in variant 1 is a setup failure; variant 0 is torn down" do
-      result =
-        run!([step("a", %{test_pid: self()}), step("b", %{setup_result: :error})], max_runs: 3)
+      report =
+        failure!([step("a", %{test_pid: self()}), step("b", %{setup_result: :error})],
+          max_runs: 3
+        )
 
-      assert result.status == :failed
-      assert result.divergences == []
-
-      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}, run: 0, root: nil} =
-               Map.get(result, :failure)
+      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}, run_number: 0} = report
+      assert report.failed_at_index == nil
+      assert Failure.detail(report.failure_reason) == :no_backend
 
       assert [{:setup, "a", setup_a}] = take_messages(:setup)
       assert [{:teardown, "a", ^setup_a}] = take_messages(:teardown)
     end
 
     test "a raising setup in variant 1 is a setup failure; variant 0 is torn down" do
-      result = run!([step("a", %{test_pid: self()}), step("b", %{setup_result: :raise})])
+      report = failure!([step("a", %{test_pid: self()}), step("b", %{setup_result: :raise})])
 
-      assert result.status == :failed
-
-      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}, root: nil} =
-               Map.get(result, :failure)
+      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
+      assert report.failed_at_index == nil
+      assert %RuntimeError{message: "setup exploded"} = Failure.detail(report.failure_reason)
 
       assert [{:setup, "a", setup_a}] = take_messages(:setup)
       assert [{:teardown, "a", ^setup_a}] = take_messages(:teardown)
@@ -520,12 +539,12 @@ defmodule PropertyDamage.DifferentialRunTest do
   end
 
   describe "formatting" do
-    test "divergent and failed results format without error" do
-      divergent = run!([step("a"), step("b", %{behavior: :shift})])
-      assert is_binary(Result.format(divergent, format: :full))
+    test "divergent and failed reports format without error" do
+      divergent = failure!([step("a"), step("b", %{behavior: :shift})])
+      assert is_binary(FailureReport.Formatter.format(divergent, :terminal, color: false))
 
-      failed = run!([step("a"), step("b", %{behavior: :raise})])
-      assert is_binary(Result.format(failed, format: :full))
+      failed = failure!([step("a"), step("b", %{behavior: :raise})])
+      assert is_binary(FailureReport.Formatter.format(failed, :terminal, color: false))
     end
   end
 

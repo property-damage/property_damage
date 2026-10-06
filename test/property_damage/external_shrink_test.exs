@@ -121,7 +121,9 @@ defmodule PropertyDamage.ExternalShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        targets: [
+          %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        ]
       )
 
     commands = Sequence.to_list(shrunk.sequence)
@@ -172,7 +174,9 @@ defmodule PropertyDamage.ExternalShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        targets: [
+          %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        ]
       )
 
     commands = Sequence.to_list(shrunk.sequence)
@@ -221,7 +225,9 @@ defmodule PropertyDamage.ExternalShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        targets: [
+          %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        ]
       )
 
     commands = Sequence.to_list(shrunk.sequence)
@@ -271,7 +277,9 @@ defmodule PropertyDamage.ExternalShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        targets: [
+          %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        ]
       )
 
     commands = Sequence.to_list(shrunk.sequence)

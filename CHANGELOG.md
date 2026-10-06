@@ -9,11 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **One runner for one or more targets (DR-045).** `PropertyDamage.run/1` takes
+  `targets:` with several entries; the first is the reference. New run options:
+  `concurrency:`, `compare:`, `equivalence:`, `metrics:`, `percentiles:` and
+  `warmup_runs:`. `{:ok, stats}` carries `targets` and, under
+  `compare: :performance | :both`, `metrics` keyed by target name.
+- **`FailureReport` fields `kind`, `variant`, `targets`, `concurrency`,
+  `equivalence`, `stutter` and `max_commands` (DR-045).**
+  `kind` is `:check_failed`, `:diverged`, `:setup_failed` or `:execution_failed`
+  (`:did_not_converge` and `:latency_exceeded` are named for later features),
+  and always equals `kind_of(failure_reason)`.
+  `variant` is `%{index, name}`. `targets` holds the run's entries, so
+  `reproduction_command/1` prints the exact target list. It also prints
+  `equivalence:`, `stutter:` and `max_commands:` when the run used a
+  non-default value (a function equivalence that is not a named capture prints
+  as `<custom function>`), and `shrink_further/2` re-shrinks under the report's
+  `equivalence` and `stutter`. New helpers:
+  `FailureReport.kind_of/1`, `reference_target/1` and `targets_source/1`; new
+  failure types `Failure.Divergence` and `Failure.Setup`.
+- **A divergence is shrunk and reproduced (DR-045).** It ends the run and `run/1`
+  returns `{:error, report}` with `kind: :diverged`. The shrinker accepts a
+  candidate only with the same `{kind, name, variant_index}` at the same or an
+  earlier root, and runs every attempt on every target. A divergence is
+  identified by its root command: `Failure.Divergence` carries the `command`,
+  `Failure.diverged/5` takes it, and `Failure.name/1` of a divergence is the
+  root command's module, so a candidate that diverges at a command of another
+  type is rejected.
+- **Command and check telemetry from the engine (DR-045).**
+  `[:property_damage, :command, :start | :stop]` and
+  `[:property_damage, :check, :start | :stop]` carry `variant` and `run_number`;
+  `[:property_damage, :sequence, :stop]` carries `variant`. `Progress.RunResult`
+  gains `kind` and `variant`.
+- **`Scheduler.run/1` options `mint_epoch:` and `placeholder_registry:` (DR-045).**
+
 - **`Executor.Stepping.drain/2` and `finalize/2` (DR-044).** `drain/2` folds the
   events waiting in the context's event queue into a stepped state, checking each
   one as it folds. `finalize/2` finishes a stepped run into the result
   `Executor.run/4` reports.
-- **Pollers, injectors and mocks in `Differential.run/1` (DR-044).**
+- **Pollers, injectors and mocks in multi-target runs (DR-044).**
   `runtime.start_poller` is allowed in multi-target runs (the old refusal is gone),
   and each target's `injectors:` and `mocks:` are honored. Each belongs to its own
   variant.
@@ -192,7 +225,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING (DR-044): `Differential.run/1` runs every target as a variant in lockstep.**
+- **BREAKING (DR-045): one runner for one or more targets, with no compatibility layer.**
+  - `PropertyDamage.Differential` and `Differential.run/1` are removed. Call
+    `PropertyDamage.run/1` with several `targets:`. `Differential.Result` is
+    removed: `run/1` returns `{:ok, stats}` or `{:error, %FailureReport{}}`, and a
+    divergence is a report with `kind: :diverged`. There is no `divergences` list
+    and no run after a divergence.
+  - `Differential.Equivalence` is renamed PropertyDamage.Comparison (an internal module)
+    (`equivalent?/3`, `normalize/1`, `ignore_fields/1`, `only_fields/1`).
+  - `Progress.DifferentialUpdate`, `Progress.DifferentialResult`, the
+    `:differential` progress operation, the
+    `[:property_damage, :differential, :progress | :result]` telemetry events and
+    `Options.validate_differential!/1` are removed. Run telemetry metadata carries
+    `targets: [%{index, name, adapter}]` instead of `adapter:`.
+    `Progress.Printer.consumer/3` and `print_header/3` take the target list instead
+    of an adapter.
+  - `FailureReport.adapter` (the field and the `new/1` option) is removed; use
+    `targets`, `variant` and `FailureReport.reference_target/1`. `export_json/1`
+    writes `kind`, `variant` and `targets` instead of `adapter`.
+  - The `{:error, %{adapter_setup_failed: _}}` map and every
+    `{:adapter_setup_failed, reason}` tuple are removed. `run/1` returns a report
+    with `kind: :setup_failed`; `execute/2`, `Replay.start/2` and `shrink_further/2`
+    return `{:error, %Failure{type: %Failure.Setup{}}}`; `mix pd.replay` prints it.
+    The `setup_once_failed` and `setup_each_failed` shapes are unchanged.
+  - `Shrinker.failure_signature/1` (a 2-tuple) is replaced by
+    `Shrinker.failure_signature/2`, which returns `{kind, name, variant_index}`.
+    `equivalent_failures?/2` takes `{reason, variant_index}` pairs.
+    `Shrinker.shrink/2` takes `targets:`, `variant_index:`, `concurrency:`,
+    `compare:`, `equivalence:` and `check_mode:` in place of `target:`,
+    `event_queue:` and `mock_registry:`.
+  - `Scheduler.run/1` has no `divergence` key. Its `failure` is `nil` or
+    `%{kind, variant, run, root, reason}`, with `kind` one of `:check_failed`,
+    `:diverged`, `:setup_failed` and `:execution_failed`, and `reason` always a
+    `%Failure{}`.
+  - Persistence format version 8 becomes 9 for `.pd` reports and `.pdtrace`
+    traces. Loaders refuse version 8 files.
+  - `branching:` with two or more targets is an option error. Branching sequences,
+    `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` and `RunTrace` stay
+    one-target.
+  - `check_mode:` now reaches the engine (it was accepted without effect).
+    `teardown_each/1` runs at the end of each run, not after the last run. An
+    injector or mock setup that raises inside a target is a `:setup_failed` report.
+    `setup_once/1`, `setup_each/1` and their teardowns receive the reference
+    target's config.
+
+
+- **BREAKING (DR-044): `Differential.run/1` runs every target as a variant in lockstep.** (`Differential.run/1` itself is removed by DR-045, above.)
   - `execution:` is removed with no mapping (it took `:interleaved` or
     `:sequential`). Use `concurrency:`: `:serial` (the default, one target at a
     time) or `:parallel` (all targets at once; targets that share a system must

@@ -81,7 +81,7 @@ defmodule PropertyDamage.Export do
 
   - `:model` - Model module (defaults to report.model)
   - `:targets` - A list with exactly one entry: the target the generated test
-    runs against (defaults to report.adapter with an empty config); see
+    runs against (defaults to the report's reference target); see
     `PropertyDamage.Target`
   - `:module_name` - Module name for the test
   - `:test_name` - Custom test name

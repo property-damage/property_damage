@@ -1,14 +1,14 @@
 defmodule PropertyDamage.MintEnginesTest do
   @moduledoc """
-  DR-034: the Differential and LoadTest resolution engines thread a real run
-  nonce, so `mint_per_run` values are per-run unique (Differential: byte-identical
-  across targets; LoadTest: distinct per worker).
+  DR-034: the multi-target lockstep run and the LoadTest resolution engines
+  thread a real run nonce, so `mint_per_run` values are per-run unique (lockstep:
+  byte-identical across targets; LoadTest: distinct per worker).
   """
   use ExUnit.Case, async: false
 
+  alias PropertyDamage.Mint
   alias PropertyDamage.Sequence.Position
 
-  alias PropertyDamage.{Differential, Mint}
   alias PropertyDamage.LoadTest.{Metrics, Worker, WorkerPool}
 
   defmodule Send do
@@ -71,10 +71,10 @@ defmodule PropertyDamage.MintEnginesTest do
     |> Mint.resolve(nonce, epoch)
   end
 
-  describe "Differential threads a shared run nonce" do
+  describe "a multi-target run threads a shared run nonce" do
     test "all targets receive byte-identical minted requests derived from the nonce" do
-      {:ok, _result} =
-        Differential.run(
+      {:ok, _stats} =
+        PropertyDamage.run(
           model: Model,
           targets: [
             {TargetA, name: "a", config: %{test_pid: self()}},
@@ -84,7 +84,8 @@ defmodule PropertyDamage.MintEnginesTest do
           run_nonce: 7,
           seed: 12_345,
           max_runs: 1,
-          max_commands: 1
+          max_commands: 1,
+          validate: false
         )
 
       assert_receive {:got, :a, a_rid}

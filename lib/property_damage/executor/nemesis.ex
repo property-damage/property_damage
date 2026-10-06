@@ -156,7 +156,8 @@ defmodule PropertyDamage.Executor.Nemesis do
            event_log,
            state.check_counters,
            check_mode,
-           check_failures
+           check_failures,
+           state.telemetry
          ) do
       {:halt, async_name, async_reason, _idx, async_counters} ->
         failed_state =
@@ -181,7 +182,8 @@ defmodule PropertyDamage.Executor.Nemesis do
           step_count: state.step_count + 1,
           projections: projections,
           branch_id: state.branch_id,
-          active_faults: active_faults
+          active_faults: active_faults,
+          telemetry: state.telemetry
         }
 
         case Executor.run_checks(

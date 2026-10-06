@@ -136,7 +136,7 @@ The system SHALL support `@eventually` temporal checks that spawn a background p
 
 ### Requirement: Pollers in Multi-Target Runs (DR-044)
 
-In a multi-target run (`PropertyDamage.Differential.run/1`), every `@eventually` state poller and every resource poller SHALL belong to the variant whose command started it. A poller SHALL read only that variant's projections, and the events it pushes SHALL reach only that variant's event queue. `runtime.start_poller` SHALL be allowed in a multi-target run. A variant SHALL finalize its own pollers at the end of the run, and its pollers SHALL stop when the variant process exits.
+In a multi-target run (`PropertyDamage.run/1` with several `targets:`), every `@eventually` state poller and every resource poller SHALL belong to the variant whose command started it. A poller SHALL read only that variant's projections, and the events it pushes SHALL reach only that variant's event queue. `runtime.start_poller` SHALL be allowed in a multi-target run. A variant SHALL finalize its own pollers at the end of the run, and its pollers SHALL stop when the variant process exits.
 
 #### Scenario: `@eventually` poller reads its own variant
 

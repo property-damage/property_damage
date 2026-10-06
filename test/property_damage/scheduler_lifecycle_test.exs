@@ -7,8 +7,8 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
 
   import PropertyDamage.Test.VariantSupport
 
-  alias PropertyDamage.{Differential, Generator, Scheduler, Sequence, Variant}
-  alias PropertyDamage.Differential.Result
+  alias PropertyDamage.{Failure, FailureReport, Generator, Scheduler, Sequence, Variant}
+  alias PropertyDamage.Progress.Printer
   alias PropertyDamage.Test.LatencyFixtures.{RefusingMintAdapter, SlowFoldModel, TimedStepAdapter}
   alias PropertyDamage.Test.LazyInjector
 
@@ -100,8 +100,8 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     assert %{kind: :execution_failed, variant: %{index: 1, name: "b"}, run: 0, root: 1} =
              run.failure
 
-    assert run.failure.reason == {:exit, :killed}
-    assert run.divergence == nil
+    assert %Failure{} = run.failure.reason
+    assert Failure.detail(run.failure.reason) == {:exit, :killed}
   end
 
   test "a variant started with start/1 tears its adapter down when the process that started it exits" do
@@ -158,31 +158,27 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     assert events_from(result.event_log, :injector) == [%Noted{value: :lazy}]
   end
 
-  test "a failed result prints the failure's kind, variant, run, root and reason" do
-    result =
-      struct(Result,
-        mode: :correctness,
-        concurrency: :serial,
-        runs: 1,
+  test "a failed report prints the failure's kind, variant, run, root and reason" do
+    commands = for value <- 1..4, do: %Step{value: value}
+
+    report =
+      FailureReport.new(
         seed: 1,
-        reference: %{index: 0, name: "a"},
-        status: :failed,
-        divergences: [],
-        failure: %{
-          kind: :execution_failed,
-          variant: %{index: 1, name: "b"},
-          run: 0,
-          root: 3,
-          reason: %RuntimeError{message: "candidate exploded"}
-        },
-        metrics: %{},
-        targets: [%{index: 0, name: "a"}, %{index: 1, name: "b"}]
+        run_number: 0,
+        original_sequence: Sequence.linear(commands),
+        failed_at_index: 3,
+        failure_reason: Failure.adapter_error(%RuntimeError{message: "candidate exploded"}),
+        targets: [{StepAdapter, name: "a"}, {StepAdapter, name: "b"}],
+        variant: %{index: 1, name: "b"}
       )
 
-    output = Result.format(result, format: :full)
+    output =
+      ExUnit.CaptureIO.capture_io(fn -> Printer.print_failure(report) end)
 
-    assert output =~ "FAILED"
-    assert output =~ "execution_failed in b (run 0, root 3)"
+    assert output =~ "Kind:         execution_failed"
+    assert output =~ "Target:       [1] b"
+    assert output =~ "Run:          1"
+    assert output =~ "Failed at:    Command 4"
     assert output =~ "candidate exploded"
   end
 
@@ -215,17 +211,15 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     end
 
     defp run_routing(seed, targets) do
-      {:ok, result} =
-        Differential.run(
-          model: RoutingModel,
-          targets: targets,
-          compare: :correctness,
-          max_runs: 1,
-          max_commands: 12,
-          seed: seed
-        )
-
-      result
+      PropertyDamage.run(
+        model: RoutingModel,
+        targets: targets,
+        compare: :correctness,
+        max_runs: 1,
+        max_commands: 12,
+        seed: seed,
+        validate: false
+      )
     end
 
     defp received(prefix) do
@@ -235,10 +229,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     test "is observed alike when every variant's producer errored, and the run goes on" do
       {seed, commands, _first_create} = routing_seed()
 
-      result = run_routing(seed, [mint_target("a", true), mint_target("b", true)])
-
-      assert result.status == :equivalent
-      assert result.failure == nil
+      assert {:ok, _stats} = run_routing(seed, [mint_target("a", true), mint_target("b", true)])
 
       messages = take_messages(:received)
       creates = Enum.count(commands, &match?(%Create{}, &1))
@@ -255,12 +246,12 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
     test "control: when only one variant's producer errored, the run diverges at the producer" do
       {seed, _commands, first_create} = routing_seed()
 
-      result = run_routing(seed, [mint_target("a", false), mint_target("b", true)])
+      assert {:error, %FailureReport{kind: :diverged} = report} =
+               run_routing(seed, [mint_target("a", false), mint_target("b", true)])
 
-      assert result.status == :divergent
-      assert result.failure == nil
-      assert [divergence] = result.divergences
+      divergence = Failure.detail(report.failure_reason)
       assert divergence.root == first_create
+      assert report.failed_at_index == first_create
       assert divergence.divergent_result == {:error, :refused}
       assert received("b") != []
     end
@@ -268,17 +259,18 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
 
   describe "performance latency" do
     defp timed_run(targets) do
-      {:ok, result} =
-        Differential.run(
+      {:ok, stats} =
+        PropertyDamage.run(
           model: SlowFoldModel,
           targets: targets,
           compare: :performance,
           max_runs: 2,
           max_commands: 3,
-          seed: 31
+          seed: 31,
+          validate: false
         )
 
-      result
+      stats
     end
 
     test "times the adapter's execute/3, not the projection folds after it" do

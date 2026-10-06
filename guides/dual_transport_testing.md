@@ -3,7 +3,7 @@
 > #### Builds on Differential Testing {: .info}
 >
 > This guide is the applied half of [Differential Testing](differential_testing.md):
-> it takes the `PropertyDamage.Differential.run/1` oracle from that guide and points
+> it takes the multi-target `PropertyDamage.run/1` oracle from that guide and points
 > it at *two transports of one system* instead of two independent implementations.
 > Read [Differential Testing](differential_testing.md) first for the `run/1` API,
 > equivalence strategies, and `external()` capture. Everything here still reads
@@ -30,16 +30,16 @@ equivalent web UI) as the running example. A complete, runnable version lives in
        ApiAdapter            UiAdapter    (two realizations)
          (REST)              (Playwright)
             \                  /
-             Differential.run/1           (oracle: results must agree)
+            PropertyDamage.run/1          (oracle: results must agree)
 ```
 
 The model never mentions a transport. It defines commands as pure intents and
 declares invariants over the observed state. Each adapter knows how to *perform*
-an intent against its transport, and `Differential.run/1` runs the same generated
+an intent against its transport, and `PropertyDamage.run/1` runs the same generated
 sequence against both and compares the results:
 
 ```elixir
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: GiteaBench.Model,
   targets: [
     {GiteaBench.ApiAdapter, name: "api", config: %{base_url: api_url}},
@@ -50,9 +50,13 @@ PropertyDamage.Differential.run(
 )
 ```
 
-The first target in the `targets:` list is the oracle: divergences are reported
-as "the UI did something the API didn't." Each divergence names the variant that
-differed (`%{index: 1, name: "ui"}` here), the run and the command index (`root`).
+The first target in the `targets:` list is the oracle: a divergence is reported
+as "the UI did something the API didn't." The call returns `{:error, report}` with
+`kind: :diverged`. `report.variant` names the target that differed
+(`%{index: 1, name: "ui"}` here) and `report.failed_at_index` is the command index.
+The framework shrinks the sequence first, so
+`PropertyDamage.FailureReport.shrunk_sequence/1` is the minimal sequence that
+still diverges, and `PropertyDamage.FailureReport.reproduction_command/1` reruns it.
 Each target runs as its own variant (its own process), and the targets advance in
 lockstep: both execute command `r`, the results are compared, and only then does
 either start command `r + 1`.
@@ -129,7 +133,7 @@ equivalence: :structural   # ignores :id, timestamps, uuids
 ```
 
 Both transports then navigate to the same logical entity, and ids/timestamps never
-cause spurious divergences. (If a later command genuinely consumes a
+cause spurious divergence reports. (If a later command genuinely consumes a
 server-generated value, see the `external()` section of
 [Differential Testing](differential_testing.md) — each target captures its own.)
 
@@ -163,14 +167,14 @@ def setup(config) do
 end
 ```
 
-`Differential.run/1` calls each target's `setup/1` at the start of **every** run
+`PropertyDamage.run/1` calls each target's `setup/1` at the start of **every** run
 and tears it down at the end, so a `max_runs: N` campaign resets both forges N
 times. Because `setup/1` can find state a crashed run left behind, it must be
 idempotent, which a purge-and-recreate reset is:
 
 ```elixir
-{:ok, result} =
-  PropertyDamage.Differential.run(
+result =
+  PropertyDamage.run(
     model: GiteaBench.Model,
     targets: [
       {ApiAdapter, name: "api", config: Map.new(api_opts)},
@@ -183,17 +187,16 @@ idempotent, which a purge-and-recreate reset is:
     seed: 1
   )
 
-assert result.status == :equivalent, inspect(result.divergences, pretty: true)
+assert {:ok, _stats} = result, inspect(result, pretty: true)
 ```
 
 The two forges are separate instances, so the default `concurrency: :serial` is
 the right choice. If both targets shared one forge, `concurrency: :parallel`
 would need a distinct user namespace per target through `config:`.
 
-If setup or a command fails, the result has `status: :failed` and
-`result.failure` names the variant (`kind`, `variant`, `run`, `root`, `reason`),
-for example `%{kind: :setup_failed, variant: %{index: 1, name: "ui"}, ...}` when
-the UI forge is down.
+If setup or a command fails, `run/1` returns `{:error, report}` and the report
+names the variant and the kind, for example `report.kind == :setup_failed` and
+`report.variant == %{index: 1, name: "ui"}` when the UI forge is down.
 
 ## Prove the oracle isn't vacuous
 
@@ -207,19 +210,21 @@ only the differential notices that the same `CreateLabel` intent produced a
 different color via the UI:
 
 ```elixir
-divergent = oracle(seed, seed_bug: true)
-assert divergent.status == :divergent
+{:error, report} = oracle(seed, seed_bug: true)
+assert report.kind == :diverged
+assert report.variant == %{index: 1, name: "ui"}
 
-[divergence | _] = divergent.divergences
-assert %CreateLabel{} = divergence.command
-assert divergence.variant == %{index: 1, name: "ui"}
-{:ok, [ref]}  = divergence.reference_result
-{:ok, [ui]}   = divergence.divergent_result
+# the command at the diverging root of the shrunk sequence
+shrunk = PropertyDamage.FailureReport.shrunk_sequence(report)
+assert %CreateLabel{} = Enum.at(PropertyDamage.Sequence.to_list(shrunk), report.failed_at_index)
+
+%PropertyDamage.Failure.Divergence{reference_result: {:ok, [ref]}, divergent_result: {:ok, [ui]}} =
+  report.failure_reason.type
 assert ref.name == ui.name
 refute ref.color == ui.color           # caught only by the oracle
 ```
 
-Without the flag, the same seeds are all `:equivalent` — so the divergence is the
+Without the flag, the same seeds all return `{:ok, _stats}` — so the divergence is the
 bug, not flakiness. This is the canonical argument for what an oracle buys you over
 single-transport checks.
 
@@ -251,8 +256,8 @@ test the transports separately.
 
 ## Next steps
 
-- [Differential Testing](differential_testing.md) — the full `Differential.run/1`
-  API, equivalence strategies, and `concurrency:`
+- [Differential Testing](differential_testing.md) — the full multi-target
+  `PropertyDamage.run/1` API, equivalence strategies, and `concurrency:`
 - [Writing Commands](writing_commands.md) — `when:`/`overrides:` wiring and `external()`
 - [Integration Testing](integration_testing.md) — driving live services
 - `benches/gitea_bench/` — the complete, runnable example this guide is drawn from

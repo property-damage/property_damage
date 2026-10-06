@@ -1,4 +1,4 @@
-defmodule PropertyDamage.Differential.Equivalence do
+defmodule PropertyDamage.Comparison do
   @moduledoc false
 
   @type strategy :: :exact | :structural | (term(), term() -> boolean())

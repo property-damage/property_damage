@@ -208,7 +208,7 @@ defmodule Mix.Tasks.Pd.Replay do
       end
 
     IO.puts("Model:    #{inspect(failure.model)}")
-    IO.puts("Adapter:  #{inspect(failure.adapter)}")
+    IO.puts("Targets:  #{PropertyDamage.FailureReport.targets_source(failure)}")
     IO.puts("Seed:     #{inspect(failure.seed)}")
 
     IO.puts(
@@ -322,9 +322,11 @@ defmodule Mix.Tasks.Pd.Replay do
     )
   end
 
-  defp print_replay_error({:adapter_setup_failed, reason}) do
+  defp print_replay_error(
+         %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}} = failure
+       ) do
     print_color(:red, "ERROR: adapter setup failed\n")
-    IO.puts("  Reason: #{inspect(reason)}")
+    IO.puts("  Reason: #{inspect(PropertyDamage.Failure.detail(failure))}")
     print_hint("The SUT could not be brought up for replay. Check the adapter's setup/1.")
   end
 

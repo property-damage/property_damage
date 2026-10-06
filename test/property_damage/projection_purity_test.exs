@@ -148,7 +148,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
       command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
       linearization: result.linearization,
       model: model,
-      adapter: Adapter
+      targets: [{Adapter, []}]
     )
   end
 

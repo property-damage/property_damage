@@ -27,7 +27,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 - **Fault Injection (Nemesis)**: Built-in operations for network, resource, time, and process faults
-- **Differential Testing**: Compare implementations against oracles or each other
+- **Differential Testing**: Run one sequence against several targets and compare their answers; a divergence is shrunk like any failure
 
 ## Installation
 
@@ -1279,7 +1279,10 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 
 ## Differential Testing
 
-Compare multiple implementations by running the same command sequences against them.
+Compare multiple implementations by passing several `targets:` to `PropertyDamage.run/1`:
+every target runs the same command sequences, and the first target is the reference.
+A divergence is a failure: it is shrunk and reproduced, and `run/1` returns
+`{:error, report}` with `report.kind == :diverged` and `report.variant` naming the target.
 Use cases include oracle testing, performance comparison, migration validation, and
 regression testing.
 
@@ -1287,7 +1290,7 @@ regression testing.
 
 ```elixir
 # Oracle testing - the first target is the reference implementation
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [
     ReferenceAdapter,
@@ -1298,7 +1301,7 @@ PropertyDamage.Differential.run(
 )
 
 # Performance comparison
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [
     {RedisAdapter, name: "redis-backend"},
@@ -1308,7 +1311,7 @@ PropertyDamage.Differential.run(
 )
 
 # Same adapter, different configurations (e.g., staging vs prod)
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [
     {HTTPAdapter, name: "prod", config: %{base_url: "https://prod.example.com"}},
@@ -1468,9 +1471,10 @@ PropertyDamage
 │   ├── ExUnit       - ExUnit test generation
 │   └── Script       - Elixir / curl / Python scripts
 │
-├── Differential
-│   ├── Differential - Main API (run, compare modes)
-│   └── Equivalence  - Comparison strategies (exact, structural, custom)
+├── Comparison
+│   ├── Scheduler    - Runs one sequence on every target in lockstep
+│   ├── Variant      - One target's execution in its own process
+│   └── Comparison   - Equivalence strategies (exact, structural, custom)
 │
 └── Utilities
     ├── Persistence  - Save/load failures

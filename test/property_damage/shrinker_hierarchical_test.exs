@@ -61,7 +61,9 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
       failed_at_index: result.failed_at_index,
       failure_reason: result.failure_reason,
       model: LinkModel,
-      target: %PropertyDamage.Target{adapter: LinkAdapter, config: %{}, name: "adapter", index: 0},
+      targets: [
+        %PropertyDamage.Target{adapter: LinkAdapter, config: %{}, name: "adapter", index: 0}
+      ],
       config: config
     )
   end
@@ -156,12 +158,14 @@ defmodule PropertyDamage.ShrinkerHierarchicalTest do
           failed_at_index: result.failed_at_index,
           # no :failure_reason on purpose — exercises the nil-signature path
           model: LinkModel,
-          target: %PropertyDamage.Target{
-            adapter: LinkAdapter,
-            config: %{},
-            name: "adapter",
-            index: 0
-          },
+          targets: [
+            %PropertyDamage.Target{
+              adapter: LinkAdapter,
+              config: %{},
+              name: "adapter",
+              index: 0
+            }
+          ],
           config: Config.new(shrink_arguments: false)
         )
 

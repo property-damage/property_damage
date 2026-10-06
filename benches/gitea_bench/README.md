@@ -18,8 +18,8 @@ operation exists both as a REST API call and as an equivalent web-UI interaction
 
 ## The oracle
 
-`PropertyDamage.Differential.run/1` generates one command sequence and runs it
-against both adapters (API as the reference), asserting they reach identical
+`PropertyDamage.run/1` with both adapters as `targets:` generates one command
+sequence and runs it against both (API as the reference), asserting they reach identical
 observable state. Both adapters build their events from the **same neutral
 observation read** (the REST read API), so the only thing that varies is *how the
 mutation was performed*. The differential therefore answers one precise question:
@@ -78,10 +78,11 @@ Node on the host.
 - Each adapter's `setup/1` resets its instance (purges non-admin users) so reused
   containers never leak state between runs, and both transports start every run
   from identical empty forges.
-- `Differential.run/1` sets each target up at the start of every run, so a
+- `PropertyDamage.run/1` sets each target up at the start of every run, so a
   campaign resets both forges before every generated sequence. `setup/1` is
   idempotent, because a crashed run may leave state behind. The bench tests still
   call it once per seed (`max_runs: 1`) so each seed reports its own result.
-- A failure (`result.status == :failed`) names the variant, for example the
-  `"ui"` target; a divergence names it in `divergence.variant`.
+- A failure or divergence returns `{:error, report}`: `report.kind` is the failure
+  kind (`:diverged` for a divergence) and `report.variant` names the target, for
+  example `%{index: 1, name: "ui"}`. A divergence is shrunk before it is reported.
 - Browser automation is slow; command/run counts are kept modest.

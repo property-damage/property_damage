@@ -31,9 +31,8 @@ defmodule PropertyDamage.Target do
       each entry is a `PropertyDamage.MockServiceAdapter` module or a
       `{module, config_map}` tuple.
 
-  The first entry is the reference: `PropertyDamage.Differential.run/1` compares
-  every other target against it. Every other entry point takes exactly one
-  entry.
+  The first entry is the reference: `PropertyDamage.run/1` compares every
+  other target against it. Every other entry point takes exactly one entry.
 
   Validation turns each entry into a `%PropertyDamage.Target{}` whose `:index`
   is the entry's zero-based position in the list.

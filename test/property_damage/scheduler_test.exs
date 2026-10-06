@@ -65,7 +65,6 @@ defmodule PropertyDamage.SchedulerTest do
       commands = for value <- 1..3, do: %Step{value: value}
 
       assert {:ok, run} = run_scheduler(run_opts(StepModel, targets, commands, []))
-      assert run.divergence == nil
       assert run.failure == nil
 
       assert calls(recorder) ==
@@ -99,7 +98,6 @@ defmodule PropertyDamage.SchedulerTest do
       assert {:ok, run} =
                run_scheduler(run_opts(StepModel, targets, commands, concurrency: :parallel))
 
-      assert run.divergence == nil
       assert run.failure == nil
 
       log = recorded(recorder)
@@ -136,7 +134,6 @@ defmodule PropertyDamage.SchedulerTest do
       targets = step_targets(["solo"], %{recorder: recorder})
 
       assert {:ok, run} = run_scheduler(run_opts(GuardedStepModel, targets, commands, []))
-      assert run.divergence == nil
       assert run.failure == nil
       assert [result] = run.results
 
@@ -203,7 +200,6 @@ defmodule PropertyDamage.SchedulerTest do
       commands = [%Step{value: 1}, %Step{value: 2, fail: true}, %Step{value: 3}]
 
       assert {:ok, run} = run_scheduler(run_opts(StepModel, targets, commands, []))
-      assert run.divergence == nil
       assert run.failure == nil
       assert entered(recorder, "a") == [0, 1, 2]
       assert entered(recorder, "b") == [0, 1, 2]
@@ -217,7 +213,7 @@ defmodule PropertyDamage.SchedulerTest do
       targets = step_targets(["solo"], %{recorder: recorder})
 
       assert {:ok, run} = run_scheduler(run_opts(StepModel, targets, commands, []))
-      assert run.divergence == nil
+      refute match?(%{kind: :diverged}, run.failure)
       assert [result] = run.results
 
       assert entered(recorder, "solo") == [0, 1]
@@ -243,7 +239,7 @@ defmodule PropertyDamage.SchedulerTest do
       commands = [%Step{value: 1}, %Step{value: 2}]
 
       assert {:ok, run} = run_scheduler(run_opts(StepModel, targets, commands, []))
-      assert run.divergence == nil
+      refute match?(%{kind: :diverged}, run.failure)
       assert [result_a, result_b] = run.results
 
       assert events_from(result_a.event_log, :injector) == []

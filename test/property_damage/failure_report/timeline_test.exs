@@ -36,7 +36,7 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
       branch_id: 1,
       failure_reason: Failure.in_branch(Failure.check_failed(:TestCheck, "boom"), 1),
       model: TestModel,
-      adapter: TestAdapter
+      targets: [{TestAdapter, []}]
     )
   end
 
@@ -60,7 +60,7 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
         }
       ],
       model: TestModel,
-      adapter: TestAdapter
+      targets: [{TestAdapter, []}]
     )
   end
 
@@ -96,7 +96,7 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
             }
           ],
           model: TestModel,
-          adapter: TestAdapter
+          targets: [{TestAdapter, []}]
         )
 
       output = strip_ansi(Timeline.format_event_timeline(report, color: false))

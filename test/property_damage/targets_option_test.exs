@@ -6,14 +6,14 @@ defmodule PropertyDamage.TargetsOptionTest do
 
   @model ExecutorModel
 
-  # Both schemas share the per-entry and cross-entry target rules, so most tests
-  # run once per schema. Each schema gets a minimal otherwise-valid option list.
-  @schemas [:run, :differential]
+  # The run schema and a single-target schema share the per-entry and
+  # cross-entry target rules, so most tests run once per schema. Each schema
+  # gets a minimal otherwise-valid option list.
+  @schemas [:run, :execute]
 
   defp validate(:run, targets), do: Options.validate_run!(model: @model, targets: targets)
 
-  defp validate(:differential, targets),
-    do: Options.validate_differential!(model: @model, targets: targets, compare: :correctness)
+  defp validate(:execute, targets), do: Options.validate_execute!(targets: targets)
 
   defp assert_targets_error(fun, text) do
     error = assert_raise NimbleOptions.ValidationError, fun
@@ -28,7 +28,7 @@ defmodule PropertyDamage.TargetsOptionTest do
         fun =
           case unquote(schema) do
             :run -> fn -> Options.validate_run!(model: @model) end
-            :differential -> fn -> Options.validate_differential!(model: @model) end
+            :execute -> fn -> Options.validate_execute!([]) end
           end
 
         error = assert_raise NimbleOptions.ValidationError, fun
@@ -110,8 +110,8 @@ defmodule PropertyDamage.TargetsOptionTest do
       end
     end
 
-    test "differential keeps targets in input order with 0-based indexes" do
-      opts = validate(:differential, [SimpleAdapter, {TestAdapter, name: "b"}])
+    test "run keeps targets in input order with 0-based indexes" do
+      opts = validate(:run, [SimpleAdapter, {TestAdapter, name: "b"}])
 
       assert [t0, t1] = opts[:targets]
       assert t0.__struct__ == PropertyDamage.Target
@@ -120,8 +120,10 @@ defmodule PropertyDamage.TargetsOptionTest do
       assert {t1.index, t1.adapter, t1.name} == {1, TestAdapter, "b"}
     end
 
-    test "the differential target struct module is gone" do
-      refute Code.ensure_loaded?(PropertyDamage.Differential.Target)
+    test "the removed multi-target modules are gone" do
+      # Built at runtime: the removed names appear nowhere in source.
+      refute Code.ensure_loaded?(Module.concat([PropertyDamage, "Differential", "Target"]))
+      refute Code.ensure_loaded?(Module.concat([PropertyDamage, "Differential"]))
     end
   end
 
@@ -197,14 +199,14 @@ defmodule PropertyDamage.TargetsOptionTest do
       end
     end
 
-    test "the same adapter twice is valid in differential when names differ" do
+    test "the same adapter twice is valid in run when names differ" do
       assert [a, b] =
-               validate(:differential, [SimpleAdapter, {SimpleAdapter, name: "second"}])[:targets]
+               validate(:run, [SimpleAdapter, {SimpleAdapter, name: "second"}])[:targets]
 
       assert {a.name, b.name} == {"SimpleAdapter", "second"}
     end
 
-    test "the duplicate-name error wins over the single-target error in the run schema" do
+    test "two entries resolving to one name are a duplicate-name error in the run schema" do
       error =
         assert_raise NimbleOptions.ValidationError, fn ->
           Options.validate_run!(model: @model, targets: [SimpleAdapter, SimpleAdapter])
@@ -217,29 +219,27 @@ defmodule PropertyDamage.TargetsOptionTest do
   end
 
   describe "target count" do
-    test "run requires exactly one target (validation)" do
-      assert_targets_error(
-        fn ->
-          Options.validate_run!(
-            model: @model,
-            targets: [SimpleAdapter, {SimpleAdapter, name: "b"}]
-          )
-        end,
-        "exactly one"
-      )
+    test "run accepts several targets" do
+      assert [_, _] =
+               Options.validate_run!(
+                 model: @model,
+                 targets: [SimpleAdapter, {SimpleAdapter, name: "b"}]
+               )[:targets]
     end
 
-    test "PropertyDamage.run/1 requires exactly one target" do
-      assert_targets_error(
-        fn ->
-          PropertyDamage.run(model: @model, targets: [SimpleAdapter, {SimpleAdapter, name: "b"}])
-        end,
-        "exactly one"
-      )
+    test "a single-target entry point requires exactly one target and names run/1" do
+      error =
+        assert_targets_error(
+          fn -> validate(:execute, [SimpleAdapter, {SimpleAdapter, name: "b"}]) end,
+          "exactly one"
+        )
+
+      assert Exception.message(error) =~ "PropertyDamage.run/1"
+      refute Exception.message(error) =~ "Differential"
     end
 
-    test "differential accepts a single target" do
-      assert [t] = validate(:differential, [SimpleAdapter])[:targets]
+    test "run accepts a single target" do
+      assert [t] = validate(:run, [SimpleAdapter])[:targets]
       assert t.index == 0
     end
   end
@@ -271,14 +271,13 @@ defmodule PropertyDamage.TargetsOptionTest do
         assert Exception.message(error) =~ unquote(text)
       end
 
-      test "differential schema rejects #{key}:" do
+      test "run schema with two targets rejects #{key}:" do
         error =
           assert_raise NimbleOptions.ValidationError, fn ->
-            Options.validate_differential!([
+            Options.validate_run!([
               {unquote(key), unquote(Macro.escape(value))},
               model: @model,
-              targets: [SimpleAdapter, {TestAdapter, name: "other"}],
-              compare: :correctness
+              targets: [SimpleAdapter, {TestAdapter, name: "other"}]
             ])
           end
 

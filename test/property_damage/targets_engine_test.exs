@@ -1,8 +1,7 @@
 defmodule PropertyDamage.TargetsEngineTest do
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.Differential
-  alias PropertyDamage.Differential.Result
+  alias PropertyDamage.FailureReport
   alias PropertyDamage.Test.{ExecutorModel, SimpleAdapter}
 
   # ============================================================================
@@ -27,7 +26,7 @@ defmodule PropertyDamage.TargetsEngineTest do
   end
 
   # ============================================================================
-  # Differential support: a tiny model plus adapters that differ by module
+  # Multi-target support: a tiny model plus adapters that differ by module
   # ============================================================================
 
   defmodule Echoed do
@@ -157,7 +156,8 @@ defmodule PropertyDamage.TargetsEngineTest do
       compare: :correctness,
       max_runs: 3,
       max_commands: 3,
-      seed: 12_345
+      seed: 12_345,
+      validate: false
     ]
   end
 
@@ -191,13 +191,13 @@ defmodule PropertyDamage.TargetsEngineTest do
       assert Enum.all?(received, &(&1 == config))
     end
 
-    test "Differential.run/1 passes each target its own config map" do
+    test "run/1 with two targets passes each target its own config map" do
       pid = self()
       config_a = %{"tenant" => "t-a", :nested => %{"k" => [1]}, test_pid: pid}
       config_b = %{"tenant" => "t-b", :nested => %{"k" => [2]}, test_pid: pid}
 
-      assert {:ok, _result} =
-               Differential.run(
+      assert {:ok, _stats} =
+               PropertyDamage.run(
                  diff_opts([
                    {DiffRecorder, name: "a", config: config_a},
                    {DiffRecorder, name: "b", config: config_b}
@@ -217,42 +217,45 @@ defmodule PropertyDamage.TargetsEngineTest do
 
   describe "the first target is the reference" do
     test "a divergent second target is reported by name" do
-      assert {:ok, result} = Differential.run(diff_opts([PlainAdapter, ShiftedAdapter]))
+      assert {:error, %FailureReport{kind: :diverged} = report} =
+               PropertyDamage.run(diff_opts([PlainAdapter, ShiftedAdapter]))
 
-      assert result.status == :divergent
-      assert [divergence | _] = result.divergences
-      assert divergence.variant == %{index: 1, name: "ShiftedAdapter"}
+      assert report.variant == %{index: 1, name: "ShiftedAdapter"}
     end
 
     test "reversing the order moves the reference with the position" do
-      assert {:ok, result} = Differential.run(diff_opts([ShiftedAdapter, PlainAdapter]))
+      assert {:error, %FailureReport{kind: :diverged} = report} =
+               PropertyDamage.run(diff_opts([ShiftedAdapter, PlainAdapter]))
 
-      assert result.status == :divergent
-      assert [divergence | _] = result.divergences
-      assert divergence.variant == %{index: 1, name: "PlainAdapter"}
+      assert report.variant == %{index: 1, name: "PlainAdapter"}
     end
   end
 
   describe "the result names every variant by index and name" do
-    setup do
-      {:ok, result} = Differential.run(diff_opts([PlainAdapter, ShiftedAdapter]))
-      %{result: result}
+    test "the stats and the report carry every target's index and name" do
+      targets = [%{index: 0, name: "PlainAdapter"}, %{index: 1, name: "ShiftedAdapter"}]
+
+      assert {:ok, %{targets: ^targets}} =
+               PropertyDamage.run(
+                 diff_opts([PlainAdapter, {ShiftedAdapter, name: "ShiftedAdapter"}])
+                 |> Keyword.put(:equivalence, fn _, _ -> true end)
+               )
+
+      assert {:error, report} = PropertyDamage.run(diff_opts([PlainAdapter, ShiftedAdapter]))
+
+      assert Enum.map(report.targets, fn {_adapter, entry} -> entry[:name] end) ==
+               ["PlainAdapter", "ShiftedAdapter"]
     end
 
-    test "reference and targets carry index and name", %{result: result} do
-      assert result.reference == %{index: 0, name: "PlainAdapter"}
+    test "the verbose output lists them, the reference first, and names the failing one" do
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          PropertyDamage.run(diff_opts([PlainAdapter, ShiftedAdapter]) ++ [verbose: true])
+        end)
 
-      assert result.targets == [
-               %{index: 0, name: "PlainAdapter"},
-               %{index: 1, name: "ShiftedAdapter"}
-             ]
-    end
-
-    test "the formatted report lists them", %{result: result} do
-      text = Result.format(result)
-
-      assert text =~ "Reference: [0] PlainAdapter"
-      assert text =~ "Targets: [0] PlainAdapter, [1] ShiftedAdapter"
+      assert output =~ "[0] PlainAdapter"
+      assert output =~ "[1] ShiftedAdapter"
+      assert output =~ "Target:       [1] ShiftedAdapter"
     end
   end
 end

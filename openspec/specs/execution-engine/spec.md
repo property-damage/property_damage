@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded.
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets)
 
 ## Requirements
 
@@ -37,10 +37,15 @@ The adapter SHALL follow a strict setup/execute/teardown lifecycle: `setup/1` is
 - **THEN** the framework SHALL still call `teardown/1` for cleanup
 - **AND** the framework SHALL log a warning if teardown itself raises an error
 
-#### Scenario: Differential runs set up per run per target (DR-044)
-- **WHEN** `PropertyDamage.Differential.run/1` runs a campaign of N runs
+#### Scenario: Setup runs per run per target (DR-044, DR-045)
+- **WHEN** `PropertyDamage.run/1` runs a campaign of N runs against one or more targets
 - **THEN** the framework SHALL call each target's `setup/1` N times, once at the start of every run, and its `teardown/1` N times
 - **AND** `setup/1` SHALL be idempotent
+- **AND** `teardown_each/1` SHALL run at the end of each run, not after the last run
+
+#### Scenario: Check mode reaches the engine (DR-045)
+- **WHEN** `check_mode:` is given to `PropertyDamage.run/1`
+- **THEN** the engine SHALL apply it in every run, one target or several
 
 #### Scenario: Shrink attempts repeat the full lifecycle
 - **WHEN** the shrinker re-executes a candidate sequence
@@ -296,13 +301,18 @@ The adapter, its setup configuration, its injector adapters and its mock service
 - **THEN** each mock SHALL be registered for the run
 - **AND** a bare module SHALL be treated as `{module, %{}}`
 
-### Requirement: Single-Variant Entry Points Take One Target (DR-043)
+### Requirement: Single-Variant Entry Points Take One Target (DR-043, DR-045)
 
-Every entry point that runs commands, other than `PropertyDamage.Differential.run/1`, SHALL require `targets:` to hold exactly one entry. An entry point whose engine cannot honor a target's `injectors:` or `mocks:` SHALL raise instead of ignoring the key.
+`PropertyDamage.run/1` SHALL accept one or more `targets:` entries. Every other entry point that runs commands SHALL require `targets:` to hold exactly one entry; replay, trigger isolation and `RunTrace` capture use the report's reference target. An entry point whose engine cannot honor a target's `injectors:` or `mocks:` SHALL raise instead of ignoring the key.
 
 #### Scenario: More than one target
-- **WHEN** `PropertyDamage.run/1` is called with a `targets:` list of two entries
-- **THEN** the system SHALL raise `NimbleOptions.ValidationError` with the message "expected exactly one `targets:` entry (a single-variant run), got 2; use `PropertyDamage.Differential.run/1` to compare several targets"
+- **WHEN** an entry point other than `PropertyDamage.run/1` (for example `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` or `RunTrace.capture/1`) is called with a `targets:` list of two entries
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` stating that exactly one `targets:` entry is expected
+- **AND** no command SHALL execute
+
+#### Scenario: Branching with several targets (DR-045)
+- **WHEN** `PropertyDamage.run/1` is called with `branching:` and two or more `targets:` entries
+- **THEN** the system SHALL raise `NimbleOptions.ValidationError` naming `:branching` and stating that branching sequences run against one target only
 - **AND** no command SHALL execute
 
 #### Scenario: Empty or missing targets
@@ -416,7 +426,7 @@ Two targets that run against one system isolate their slices of state through `c
 
 ### Requirement: Lockstep Scheduler (DR-044)
 
-`PropertyDamage.Scheduler.run/1` SHALL run one command sequence against every target as variants in lockstep and return `{:ok, run}` where `run` is a map with the keys `divergence`, `failure`, `results`, `observations` and `latencies`. Variants SHALL be set up one after another in target order. The scheduler SHALL advance the variants to each boundary under `concurrency: :serial` (one at a time in target order) or `concurrency: :parallel` (all at once), run the comparison, and only then advance to the next boundary. At the end of the run, whether it ended in a pass, a divergence or a failure, every variant that was set up SHALL be finalized and stopped.
+`PropertyDamage.Scheduler.run/1` SHALL run one command sequence against every target as variants in lockstep and return `{:ok, run}` where `run` is a map with the keys `failure`, `results`, `observations` and `latencies`. `run.failure` SHALL be `nil` or `%{kind, variant, run, root, reason}`, with `kind` one of `:check_failed`, `:diverged`, `:setup_failed` and `:execution_failed` and `reason` always a `%PropertyDamage.Failure{}`. The scheduler SHALL accept the options `mint_epoch:` and `placeholder_registry:`. Variants SHALL be set up one after another in target order. The scheduler SHALL advance the variants to each boundary under `concurrency: :serial` (one at a time in target order) or `concurrency: :parallel` (all at once), run the comparison, and only then advance to the next boundary. At the end of the run, whether it ended in a pass or a failure, every variant that was set up SHALL be finalized and stopped.
 
 #### Scenario: Setup failure ends the run before command 0
 
@@ -542,3 +552,30 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 
 - **WHEN** a model needs a timeliness-dependent value (a JWT `exp`) or a per-run-unique identifier
 - **THEN** it SHALL carry a seeded relative offset (reified to absolute time in the adapter) or a `mint_per_run/1` marker in the plan, so the plan stays a pure function of the seed and the audit passes
+
+### Requirement: One Runner Over the Scheduler (DR-045)
+
+`PropertyDamage.run/1` SHALL run every linear sequence through `PropertyDamage.Scheduler`, one target exactly as several. A run SHALL end in `{:ok, stats}` when no run failed in any kind, or in `{:error, %PropertyDamage.FailureReport{}}` for the first failing run. The report's `kind` SHALL be the failure kind: `:check_failed` (a check failed in a variant, including `@eventually` timeouts and startup and finalization checks), `:diverged` (a variant's observation of a root differs from the reference's), `:setup_failed` (a variant's adapter setup returned an error or raised, an injector or mock setup raised included) or `:execution_failed` (an adapter raised at a root, an adapter answered `{:error, _}` in a one-target run, or a nemesis, stutter, placeholder or unknown failure). The types `:did_not_converge` and `:latency_exceeded` SHALL be reserved for features that will produce them; no run produces them. The report SHALL carry `variant` (`%{index, name}`) and `failed_at_index`, the failing root, `nil` for a setup failure and a startup failure. `:execution_failed` is provisional: whether an agreed adapter error is a comparable observation in every run is open.
+
+#### Scenario: One target through the scheduler
+- **WHEN** `PropertyDamage.run/1` runs a linear sequence against one target
+- **THEN** the scheduler SHALL execute it, with the same setup, check, settle and teardown behavior as for several targets
+
+#### Scenario: Check failure names its variant
+- **WHEN** a check fails at a root in the second of two targets
+- **THEN** `run/1` SHALL return `{:error, report}` with `report.kind == :check_failed`, `report.variant` naming the second target, and `report.failed_at_index` the root
+
+#### Scenario: Adapter raise
+- **WHEN** an adapter raises in `execute/3` at a root, in a run of any number of targets
+- **THEN** `report.kind` SHALL be `:execution_failed`
+
+#### Scenario: Setup failure is a value
+- **WHEN** a target's setup fails
+- **THEN** `PropertyDamage.run/1` SHALL return a `:setup_failed` report
+- **AND** `PropertyDamage.execute/2`, `Replay.start/2` and `PropertyDamage.shrink_further/2` SHALL return `{:error, %PropertyDamage.Failure{type: %PropertyDamage.Failure.Setup{}}}`
+- **AND** `mix pd.replay` SHALL print it
+- **AND** no `{:adapter_setup_failed, _}` result SHALL exist
+
+#### Scenario: Branching keeps the linear engine
+- **WHEN** a branching sequence runs (one target only)
+- **THEN** its run, shrink and reproduction SHALL use the linear engine

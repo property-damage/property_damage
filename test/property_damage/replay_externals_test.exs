@@ -99,7 +99,7 @@ defmodule PropertyDamage.ReplayExternalsTest do
       failed_at_index: 1,
       failure_reason: Failure.check_failed(:Dummy, "for replay"),
       model: Model,
-      adapter: Adapter
+      targets: [{Adapter, []}]
     )
   end
 

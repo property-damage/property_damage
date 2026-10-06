@@ -11,7 +11,7 @@ defmodule GiteaBench do
     * `GiteaBench.UiAdapter` drives the web UI with Playwright.
 
   Run the suite against each transport on its own (the model's invariants hold
-  either way), then run `PropertyDamage.Differential.run/1` with both adapters as
+  either way), then run `PropertyDamage.run/1` with both adapters as
   targets to assert the two transports agree, using the API as the reference
   oracle. See `test/gitea_bench_test.exs`.
   """

@@ -316,7 +316,8 @@ defmodule PropertyDamage.Analysis do
   ## Options
 
   - `:targets` - Single-entry target list overriding the system to re-execute
-    against (default: the report's adapter with an empty `config:`); see
+    against (default: the report's reference target: its adapter, name and
+    `config:`); see
     `PropertyDamage.Target`
 
   ## Returns
@@ -348,7 +349,7 @@ defmodule PropertyDamage.Analysis do
     failed_at = step && step.flattened_index
     trigger_cmd = step && step.command
     model = report.model
-    adapter = report.adapter
+    reference = FailureReport.reference_target(report)
 
     cond do
       is_nil(step) ->
@@ -356,13 +357,13 @@ defmodule PropertyDamage.Analysis do
         # no single trigger command to vary.
         {:error, :failure_not_localized}
 
-      is_nil(model) or is_nil(adapter) ->
+      is_nil(model) or is_nil(reference) ->
         {:error, :missing_model_or_adapter}
 
       true ->
-        # The target comes from opts, else the report's adapter with no config
+        # The target comes from opts, else the report's reference target
         target =
-          Options.override_target!(opts, adapter, "PropertyDamage.Analysis.isolate_trigger/2")
+          Options.override_target!(opts, reference, "PropertyDamage.Analysis.isolate_trigger/2")
 
         # Try variations of the trigger command
         changes =
@@ -604,7 +605,7 @@ defmodule PropertyDamage.Analysis do
         # Run the exact sequence that triggered the failure
         result = PropertyDamage.run(
           model: #{inspect(report.model)},
-          targets: [#{inspect(report.adapter)}],
+          targets: #{FailureReport.targets_source(report)},
           seed: #{report.seed},
           max_runs: 1
         )
@@ -639,7 +640,7 @@ defmodule PropertyDamage.Analysis do
     # Option 1: Re-run with same seed
     result = PropertyDamage.run(
       model: #{inspect(report.model)},
-      targets: [#{inspect(report.adapter)}],
+      targets: #{FailureReport.targets_source(report)},
       seed: #{report.seed},
       max_runs: 1
     )
@@ -669,7 +670,7 @@ defmodule PropertyDamage.Analysis do
     ```elixir
     PropertyDamage.run(
       model: #{inspect(report.model)},
-      targets: [#{inspect(report.adapter)}],
+      targets: #{FailureReport.targets_source(report)},
       seed: #{report.seed},
       max_runs: 1
     )

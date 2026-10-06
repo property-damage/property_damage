@@ -573,7 +573,29 @@ index 15 in a 23-command sequence:
 Each candidate is only accepted if it reproduces the **same failure** — same failure
 type and same check name. If removing a command causes a different failure, it's
 rejected. This ensures the minimal sequence demonstrates the original bug, not a
-different one.
+different one. For a divergence between targets, the name is the root command's
+module: a candidate that diverges at a command of another type, or in another
+target, is a different failure and is rejected too.
+
+### Shrinking and References
+
+Before it runs a candidate, the shrinker folds it through the model's projection,
+simulator and `when:` predicates. A candidate the model rejects there, or on which
+model code raises, is invalid and never counts as a reproduction. This matters for
+commands that reference an entity an earlier command created. Shrinking can drop
+the creating command and keep the one that references it. A reference stays valid
+under shrinking only in one of two ways:
+
+- The reference is a placeholder (an `external()` field): dropping the producer
+  leaves the placeholder unresolved, so the candidate fails with another kind and
+  is rejected.
+- The model's projection rejects the orphan: its `apply/2` raises when it folds an
+  event that references an entity the state does not hold.
+
+A reference held as a plain value, such as an owner login a model picked from
+state, passes neither check. A `CreateRepo` for owner `u0` then survives the
+removal of `CreateUser u0`, and the shrunk sequence reproduces a failure the
+generator could never produce.
 
 ### When Shrinking Gets Stuck
 

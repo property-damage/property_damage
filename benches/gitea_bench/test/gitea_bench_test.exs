@@ -12,7 +12,7 @@ defmodule GiteaBenchTest do
 
   Browser automation is slow, so command/run counts are modest. Each differential
   call uses `max_runs: 1` and loops here over seeds, so a failing seed is named by
-  its own call; `Differential.run/1` sets every target up per run, so each
+  its own call; `PropertyDamage.run/1` sets every target up per run, so each
   generated sequence starts from freshly reset forges (see README).
   """
 
@@ -98,22 +98,22 @@ defmodule GiteaBenchTest do
   @tag timeout: 600_000
   test "oracle: API and UI transports agree on every generated sequence" do
     for seed <- 1..4 do
-      assert {:ok, result} =
-               PropertyDamage.Differential.run(
-                 model: GiteaBench.Model,
-                 targets: [
-                   {GiteaBench.ApiAdapter, name: "api", config: Map.new(api_opts())},
-                   {GiteaBench.UiAdapter, name: "ui", config: Map.new(ui_opts())}
-                 ],
-                 compare: :correctness,
-                 equivalence: :structural,
-                 max_commands: 10,
-                 max_runs: 1,
-                 seed: seed
-               )
+      result =
+        PropertyDamage.run(
+          model: GiteaBench.Model,
+          targets: [
+            {GiteaBench.ApiAdapter, name: "api", config: Map.new(api_opts())},
+            {GiteaBench.UiAdapter, name: "ui", config: Map.new(ui_opts())}
+          ],
+          compare: :correctness,
+          equivalence: :structural,
+          max_commands: 10,
+          max_runs: 1,
+          seed: seed
+        )
 
-      assert result.status == :equivalent,
-             "seed #{seed} diverged:\n" <> inspect(result.divergences, pretty: true)
+      assert match?({:ok, _stats}, result),
+             "seed #{seed} diverged:\n" <> inspect(result, pretty: true)
     end
   end
 end

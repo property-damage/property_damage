@@ -219,6 +219,44 @@ defmodule PropertyDamage.Error do
     |> String.trim()
   end
 
+  defp format_failure(:diverged, failure, context) do
+    cmd_info = format_command_info(context)
+    detail = PropertyDamage.Failure.detail(failure)
+
+    """
+    Divergence at command #{inspect(detail.root)}
+    #{cmd_info}
+    Reference answered: #{format_message(detail.reference_result)}
+    Target answered:    #{format_message(detail.divergent_result)}
+
+    A target answered this command differently from the reference target.
+
+    Suggestions:
+      - Compare the two answers; one of the targets has a bug
+      - If the answers differ only in identifiers or timestamps, use
+        `equivalence: :structural` or a custom equivalence function
+      - If the targets share one system, isolate each one through its `config:`
+    """
+    |> String.trim()
+  end
+
+  defp format_failure(:setup_failed, failure, context) do
+    cmd_info = format_command_info(context)
+
+    """
+    Setup Failed
+    #{cmd_info}
+    Reason: #{format_message(PropertyDamage.Failure.detail(failure))}
+
+    A target's adapter setup/1 returned an error or raised, so no command ran.
+
+    Suggestions:
+      - Check that the system under test is reachable with the target's `config:`
+      - setup/1 runs once per run: make it idempotent
+    """
+    |> String.trim()
+  end
+
   defp format_failure(_kind, failure, context) do
     cmd_info = format_command_info(context)
 

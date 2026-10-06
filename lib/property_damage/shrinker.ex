@@ -13,13 +13,36 @@ defmodule PropertyDamage.Shrinker do
   This ensures the minimal reproduction demonstrates the same bug, not
   a different one.
 
-  The accepted candidate's failure must match the original on two dimensions,
-  compared by `check_failure_equivalence/2` (via its failure *signature*):
-  - Same failure type (`:check_failed`, `:idempotency_violation`, etc.)
-  - Same check name (for invariant violations)
+  The accepted candidate's failure must match the original on three dimensions,
+  compared through its failure *signature* (`failure_signature/2`):
+  - Same failure kind (`:check_failed`, `:idempotency_violation`, `:diverged`, etc.)
+  - Same name (`PropertyDamage.Failure.name/1`): the check name for an invariant
+    violation, and for a divergence the root command's module
+  - Same target: the index of the target the failure happened in (`0` with one
+    target). A candidate that fails in another target, or with another kind, is
+    a different failure and is rejected.
 
-  A third property also holds: the failure occurs at the **same or an earlier
-  command index** than in the original. This one is guaranteed *structurally*
+  For a divergence the name matters as much as the target. If one target
+  answers a `CreateLabel` differently, a candidate that drops the command the
+  `CreateLabel` depends on may diverge earlier, at a `CreateRepo`, for an
+  unrelated reason. That candidate diverges in the same target, but at a command
+  of another type, so it is another failure and the shrinker rejects it.
+
+  ## Invalid Candidates
+
+  Before a candidate runs, the shrinker validates it against the model: it folds
+  the candidate through the model's command-sequence projection and simulator
+  and checks each command's `when:` predicate. A candidate whose validation
+  returns false, or raises, is invalid and is never run, so it can never be a
+  counterexample. Shrinking makes up sequences the generator never would, such
+  as a command whose argument was halved to 0, or a command that references an
+  entity whose creating command was removed. Model code may raise on such a
+  sequence. The raise says the model cannot simulate the candidate, not that
+  the system under test is wrong, so treating it as a failure would report a
+  bug the system does not have.
+
+  A further property also holds: the failure occurs at the **same or an earlier
+  command index** (the failing root) than in the original. This one is guaranteed *structurally*
   rather than asserted by the signature comparison, and it holds on both the
   linear and the branching path for the same underlying reason: every shrink
   candidate is a subset or simplification of a fixed base sequence, so a
@@ -102,13 +125,15 @@ defmodule PropertyDamage.Shrinker do
   ## Usage
 
   ```elixir
-  # After a failure at index 5
+  # After a failure at index 5 in the first target
   shrunk = Shrinker.shrink(
     sequence,
     failed_at_index: 5,
     failure_reason: PropertyDamage.Failure.check_failed(:balance_invariant, "..."),
+    variant_index: 0,
     model: MyModel,
-    target: %PropertyDamage.Target{adapter: MyAdapter, name: "MyAdapter", index: 0},
+    targets: [%PropertyDamage.Target{adapter: MyAdapter, name: "MyAdapter", index: 0}],
+    rng_seed: run_seed,
     config: config
   )
   ```
@@ -119,10 +144,14 @@ defmodule PropertyDamage.Shrinker do
     Failure,
     Placeholder,
     PlaceholderRegistry,
+    Scheduler,
     Sequence,
     Settle,
-    Stutter
+    Stutter,
+    Telemetry
   }
+
+  alias PropertyDamage.Runtime.RunServices
 
   alias PropertyDamage.Sequence.Position
   alias PropertyDamage.Sequence.Validator
@@ -130,20 +159,28 @@ defmodule PropertyDamage.Shrinker do
   alias PropertyDamage.Shrinker.{Config, Graph}
 
   @typedoc """
-  Failure signature for equivalence checking: `{kind, name}`.
+  Failure signature for equivalence checking: `{kind, name, variant_index}`.
 
-  The two properties that must match for a shrunk sequence to be considered as
-  reproducing the "same" failure. `kind` is the failure's globally-unique kind
-  (so two failures of different *classes* can never collide), and `name` is the
-  check/projection name where one is meaningful (`nil` otherwise).
+  The three properties that must match for a shrunk sequence to be considered
+  as reproducing the "same" failure. `kind` is the failure's globally-unique
+  kind (`PropertyDamage.Failure.kind/1`, `:diverged` for a divergence), so two
+  failures of different *classes* can never collide; `name` is
+  `PropertyDamage.Failure.name/1`: the check/projection name for a check, the
+  root command's module for a divergence, `nil` where no name is meaningful; and
+  `variant_index` is the index of the target the failure happened in (`0` for a
+  run with one target).
 
   Keying on `kind` rather than the coarser class is load-bearing: a
   `:poll_timeout` of check `:x` and an `:check_failed` of `:x` share a
   name but are different bugs, so their signatures must differ. A class-based
   signature (`{:check, :x}` for both) would let the shrinker swap one bug's
-  identity for the other's.
+  identity for the other's. Keying on the target is load-bearing for the same
+  reason: a check that fails in the reference target is a different failure
+  from a divergence found in another target. Keying a divergence on its root
+  command's module keeps a divergence at one command type from standing in for
+  a divergence at another.
   """
-  @type failure_signature :: {Failure.kind(), atom() | nil}
+  @type failure_signature :: {Failure.kind(), atom() | nil, non_neg_integer()}
 
   @typedoc """
   Result of shrinking.
@@ -155,7 +192,8 @@ defmodule PropertyDamage.Shrinker do
         }
 
   @doc """
-  Extract a failure signature from a failure reason.
+  Extract a failure signature from a failure reason and the index of the target
+  the failure happened in.
 
   The signature captures the essential properties for equivalence checking.
   """
@@ -166,24 +204,26 @@ defmodule PropertyDamage.Shrinker do
   # linear path (matching the old branch-unwrapping behaviour). The `name` keeps
   # distinct checks from being conflated, and keeps an async-observed
   # check failure equivalent to a teardown failure of the same check.
-  @spec failure_signature(Failure.t() | term()) :: failure_signature()
-  def failure_signature(%Failure{} = failure) do
-    {Failure.kind(failure), Failure.name(failure)}
+  @spec failure_signature(Failure.t() | term(), non_neg_integer()) :: failure_signature()
+  def failure_signature(%Failure{} = failure, variant_index) do
+    {Failure.kind(failure), Failure.name(failure), variant_index}
   end
 
-  def failure_signature(_other) do
-    {:unknown, nil}
+  def failure_signature(_other, variant_index) do
+    {:unknown, nil, variant_index}
   end
 
   @doc """
-  Check if two failure reasons are equivalent.
+  Check if two failures are equivalent.
 
-  Two failures are equivalent if they have the same type and
-  (for check failures) the same check name.
+  Each failure is given as `{reason, variant_index}`. Two failures are
+  equivalent if they have the same kind, (for check failures) the same check
+  name, and happened in the same target.
   """
-  @spec equivalent_failures?(term(), term()) :: boolean()
-  def equivalent_failures?(reason1, reason2) do
-    failure_signature(reason1) == failure_signature(reason2)
+  @spec equivalent_failures?({term(), non_neg_integer()}, {term(), non_neg_integer()}) ::
+          boolean()
+  def equivalent_failures?({reason1, index1}, {reason2, index2}) do
+    failure_signature(reason1, index1) == failure_signature(reason2, index2)
   end
 
   # Stutter reproduction config for shrinking (DR-029). A stutter failure
@@ -194,7 +234,7 @@ defmodule PropertyDamage.Shrinker do
   # max_repeats) makes every eligible command stutter on every reproduction, so
   # the violation reproduces regardless of position. Non-stutter failures return
   # nil so the shrinker re-runs without stutter, exactly as before P4.
-  defp stutter_repro_config({kind, _name}, %Stutter.Config{} = config)
+  defp stutter_repro_config({kind, _name, _variant_index}, %Stutter.Config{} = config)
        when kind in [:idempotency_violation, :stutter_execution_failed] do
     %{config | probability: 1.0, enabled: true}
   end
@@ -204,16 +244,35 @@ defmodule PropertyDamage.Shrinker do
   @doc """
   Shrink a failing command sequence.
 
+  Every candidate is a fresh execution of the run's targets. A linear candidate
+  runs through `PropertyDamage.Scheduler.run/1` with every target, which sets
+  each target up and tears it down again, so nothing (an event queue, a mock
+  registry, adapter state) carries over from one attempt to the next. A
+  branching candidate runs on the one target through
+  `PropertyDamage.Executor.run/4`, with its own event queue, injectors and mocks
+  per attempt. The model's `setup_each/1` runs before every attempt.
+
   ## Parameters
 
   - `sequence` - The original failing sequence (or list for backwards compatibility)
   - `opts` - Shrinking options:
     - `:failed_at_index` - Index where the failure occurred (required)
     - `:failure_reason` - Original failure reason for equivalence checking (optional but recommended)
+    - `:variant_index` - Index of the target the failure happened in (default `0`)
     - `:model` - Model module (required)
-    - `:target` - `PropertyDamage.Target` to re-execute against (required)
+    - `:targets` - The run's `[%PropertyDamage.Target{}]`, reference first
+      (required); a branching sequence takes exactly one
+    - `:concurrency`, `:compare`, `:equivalence`, `:check_mode` - as on
+      `PropertyDamage.run/1` (defaults `:serial`, `:correctness`, `:exact`, `:halt`)
+    - `:rng_seed` - The run's effective seed: each attempt runs as run 0 of it,
+      so the per-target RNG and the stutter decisions match the original run
+      (default `0`)
+    - `:run_nonce` - The run nonce for client-minted values (DR-034)
+    - `:mint_epoch_counter` - `:atomics` counter every attempt draws a fresh
+      mint epoch from (DR-034; default a new counter, so epochs start at 1)
+    - `:stutter_config` - The run's stutter configuration; a stutter failure is
+      reproduced with stutter forced on (DR-029)
     - `:config` - Shrinker.Config struct (default: Config.new())
-    - `:event_queue` - EventQueue pid for injector events (optional)
 
   ## Returns
 
@@ -243,57 +302,20 @@ defmodule PropertyDamage.Shrinker do
 
   defp shrink_linear(sequence, opts) do
     failed_at_index = Keyword.fetch!(opts, :failed_at_index)
-    model = Keyword.fetch!(opts, :model)
-    target = Keyword.fetch!(opts, :target)
-    config = Keyword.get(opts, :config, Config.new())
-    event_queue = Keyword.get(opts, :event_queue)
-    original_failure = Keyword.get(opts, :failure_reason)
-
-    start_time = System.monotonic_time(:millisecond)
-
     commands = Sequence.to_list(sequence)
 
-    # Compute the failure signature we need to preserve
-    original_signature =
-      if original_failure do
-        failure_signature(original_failure)
-      else
-        nil
-      end
-
-    shrink_state = %{
-      commands: commands,
-      # Parallel to `commands`: the original structured position of each command
-      # (DR-021). A linear sequence is all prefix positions. Kept in lockstep with
-      # removals so the placeholder registry's producer_link can be remapped to
-      # each candidate's positions before re-execution.
-      positions: original_positions(commands),
-      registry: sequence.registry,
-      model: model,
-      target: target,
-      config: config,
-      event_queue: event_queue,
-      # Per-run mock registry (WP-C5), reused across shrink attempts so a
-      # mock-dependent failure keeps reproducing while it minimizes. nil when the
-      # run declared no mock services.
-      mock_registry: Keyword.get(opts, :mock_registry),
-      iterations: 0,
-      start_time: start_time,
-      original_signature: original_signature,
-      # Stutter reproduction (DR-029): when the original failure is a stutter
-      # failure, reproduce it during shrinking with stutter forced on (prob 1.0)
-      # so index-shift under truncation cannot un-stutter the offending command.
-      # nil for non-stutter failures, leaving normal shrinking unperturbed.
-      stutter_config:
-        stutter_repro_config(original_signature, Keyword.get(opts, :stutter_config)),
-      rng_seed: Keyword.get(opts, :rng_seed),
-      # Client-minted run-scoped values (DR-034): each shrink attempt is a fresh
-      # SUT execution, so it draws a distinct mint_epoch from this monotonic
-      # counter. On a non-resettable SUT that keeps attempts from re-sending the
-      # exploration run's (epoch 0) minted values and colliding with it.
-      run_nonce: Keyword.get(opts, :run_nonce),
-      mint_epoch_counter: Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false)
-    }
+    shrink_state =
+      opts
+      |> base_state()
+      |> Map.merge(%{
+        commands: commands,
+        # Parallel to `commands`: the original structured position of each command
+        # (DR-021). A linear sequence is all prefix positions. Kept in lockstep with
+        # removals so the placeholder registry's producer_link can be remapped to
+        # each candidate's positions before re-execution.
+        positions: original_positions(commands),
+        registry: sequence.registry
+      })
 
     # Truncating at the failure point is an optimization, not an assumption
     # we may act on blindly: the index can be nil (poll timeouts, record
@@ -321,7 +343,7 @@ defmodule PropertyDamage.Shrinker do
 
     # Phase 2: Argument shrinking (if enabled)
     shrink_state =
-      if config.shrink_arguments do
+      if shrink_state.config.shrink_arguments do
         shrink_arguments(shrink_state)
       else
         shrink_state
@@ -338,7 +360,47 @@ defmodule PropertyDamage.Shrinker do
           remap_registry(shrink_state.registry, shrink_state.positions)
         ),
       iterations: shrink_state.iterations,
-      time_ms: end_time - start_time
+      time_ms: end_time - shrink_state.start_time
+    }
+  end
+
+  # The state every shrink starts from: the run to re-execute, the failure to
+  # preserve, and the budget.
+  defp base_state(opts) do
+    variant_index = Keyword.get(opts, :variant_index, 0)
+
+    original_signature =
+      case Keyword.get(opts, :failure_reason) do
+        nil -> nil
+        reason -> failure_signature(reason, variant_index)
+      end
+
+    %{
+      model: Keyword.fetch!(opts, :model),
+      targets: Keyword.fetch!(opts, :targets),
+      concurrency: Keyword.get(opts, :concurrency, :serial),
+      compare: Keyword.get(opts, :compare, :correctness),
+      equivalence: Keyword.get(opts, :equivalence, :exact),
+      check_mode: Keyword.get(opts, :check_mode, :halt),
+      config: Keyword.get(opts, :config, Config.new()),
+      iterations: 0,
+      start_time: System.monotonic_time(:millisecond),
+      original_signature: original_signature,
+      # Stutter reproduction (DR-029): when the original failure is a stutter
+      # failure, reproduce it during shrinking with stutter forced on (prob 1.0)
+      # so index-shift under truncation cannot un-stutter the offending command.
+      # nil for non-stutter failures, leaving normal shrinking unperturbed.
+      stutter_config:
+        stutter_repro_config(original_signature, Keyword.get(opts, :stutter_config)),
+      # The run's effective seed: every attempt runs as run 0 of it, so the
+      # per-target RNG and the stutter base match the original run.
+      rng_seed: Keyword.get(opts, :rng_seed) || 0,
+      # Client-minted run-scoped values (DR-034): each shrink attempt is a fresh
+      # SUT execution, so it draws a distinct mint_epoch from this monotonic
+      # counter. On a non-resettable SUT that keeps attempts from re-sending the
+      # exploration run's (epoch 0) minted values and colliding with it.
+      run_nonce: Keyword.get(opts, :run_nonce),
+      mint_epoch_counter: Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false)
     }
   end
 
@@ -371,54 +433,24 @@ defmodule PropertyDamage.Shrinker do
   # ============================================================================
 
   defp shrink_branching(sequence, opts) do
-    failed_at_index = Keyword.fetch!(opts, :failed_at_index)
-    model = Keyword.fetch!(opts, :model)
-    target = Keyword.fetch!(opts, :target)
-    config = Keyword.get(opts, :config, Config.new())
-    event_queue = Keyword.get(opts, :event_queue)
-    original_failure = Keyword.get(opts, :failure_reason)
-
-    start_time = System.monotonic_time(:millisecond)
-
-    # Compute the failure signature we need to preserve
-    original_signature =
-      if original_failure do
-        failure_signature(original_failure)
-      else
-        nil
-      end
-
-    shrink_state = %{
-      sequence: sequence,
-      # The placeholder registry (DR-021), whose producer_link is keyed by the
-      # ORIGINAL structured positions. Kept pristine; each candidate is executed
-      # with a copy remapped onto the candidate's own positions (see
-      # still_fails_branch?), and the final result carries the same remap.
-      registry: sequence.registry,
-      # A structural mirror of `sequence` holding each surviving command's
-      # ORIGINAL Position (a %Sequence{} of positions, parallel to `sequence`).
-      # Kept in lockstep with every removal so we can rebuild the original ->
-      # candidate position map the registry remap needs. This is the branching
-      # analogue of shrink_linear's parallel `positions` list.
-      positions: initial_branch_positions(sequence),
-      model: model,
-      target: target,
-      config: config,
-      event_queue: event_queue,
-      # Per-run mock registry (WP-C5); see shrink_linear.
-      mock_registry: Keyword.get(opts, :mock_registry),
-      iterations: 0,
-      start_time: start_time,
-      failed_at_index: failed_at_index,
-      original_signature: original_signature,
-      # See shrink_linear: forced-stutter reproduction for stutter failures.
-      stutter_config:
-        stutter_repro_config(original_signature, Keyword.get(opts, :stutter_config)),
-      rng_seed: Keyword.get(opts, :rng_seed),
-      # Distinct mint_epoch per attempt (DR-034); see shrink_linear.
-      run_nonce: Keyword.get(opts, :run_nonce),
-      mint_epoch_counter: Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false)
-    }
+    shrink_state =
+      opts
+      |> base_state()
+      |> Map.merge(%{
+        sequence: sequence,
+        # The placeholder registry (DR-021), whose producer_link is keyed by the
+        # ORIGINAL structured positions. Kept pristine; each candidate is executed
+        # with a copy remapped onto the candidate's own positions (see
+        # still_fails_branch?), and the final result carries the same remap.
+        registry: sequence.registry,
+        # A structural mirror of `sequence` holding each surviving command's
+        # ORIGINAL Position (a %Sequence{} of positions, parallel to `sequence`).
+        # Kept in lockstep with every removal so we can rebuild the original ->
+        # candidate position map the registry remap needs. This is the branching
+        # analogue of shrink_linear's parallel `positions` list.
+        positions: initial_branch_positions(sequence),
+        failed_at_index: Keyword.fetch!(opts, :failed_at_index)
+      })
 
     # Strategy 1: Try converting to linear (maybe race isn't needed)
     shrink_state = try_convert_to_linear(shrink_state)
@@ -434,7 +466,7 @@ defmodule PropertyDamage.Shrinker do
 
     # Strategy 5: Argument shrinking (if enabled)
     shrink_state =
-      if config.shrink_arguments do
+      if shrink_state.config.shrink_arguments do
         shrink_branch_arguments(shrink_state)
       else
         shrink_state
@@ -455,7 +487,7 @@ defmodule PropertyDamage.Shrinker do
           )
         ),
       iterations: shrink_state.iterations,
-      time_ms: end_time - start_time
+      time_ms: end_time - shrink_state.start_time
     }
   end
 
@@ -523,18 +555,21 @@ defmodule PropertyDamage.Shrinker do
             shrink_linear(linear_seq,
               failed_at_index: linear_failed_at_index,
               model: state.model,
-              target: state.target,
+              targets: state.targets,
+              concurrency: state.concurrency,
+              compare: state.compare,
+              equivalence: state.equivalence,
+              check_mode: state.check_mode,
               config: state.config,
-              event_queue: state.event_queue,
-              mock_registry: state.mock_registry,
               failure_reason: reconstruct_failure_reason(state.original_signature),
+              variant_index: signature_variant(state.original_signature),
               # Carry stutter reproduction into the converted-linear shrink. The
               # config is already forced (re-forcing is idempotent).
               stutter_config: state.stutter_config,
               rng_seed: state.rng_seed,
-              # Carry the run nonce so the nested linear shrink mints too (it
-              # allocates its own per-attempt epoch counter).
-              run_nonce: state.run_nonce
+              # One mint-epoch counter for every attempt of this shrink (DR-034).
+              run_nonce: state.run_nonce,
+              mint_epoch_counter: state.mint_epoch_counter
             )
 
           # shrink_linear returns a linear sequence carrying a registry already
@@ -1002,8 +1037,14 @@ defmodule PropertyDamage.Shrinker do
     |> Enum.map(fn {cmd, _idx} -> cmd end)
   end
 
+  # Validation runs the model's own projection, simulator and when: predicates
+  # over a candidate the shrinker made up, such as an argument halved to 0 or a
+  # key no earlier command created. Model code may raise on such a candidate;
+  # that makes the candidate invalid, not the run a failure.
   defp valid_candidate?(commands, state) do
     Validator.valid_sequence?(commands, state.model)
+  rescue
+    _ -> false
   end
 
   # A fresh mint epoch for the next shrink attempt (DR-034). Monotonic across
@@ -1012,48 +1053,17 @@ defmodule PropertyDamage.Shrinker do
   defp next_mint_epoch(state), do: :atomics.add_get(state.mint_epoch_counter, 1, 1)
 
   defp still_fails?(commands, positions, state) do
-    # Call setup_each to reset SUT state before each shrink attempt
-    setup_each_result = call_setup_each(state.model, state.target.config)
+    # Regenerate idempotency keys to ensure fresh SUT state
+    commands = regenerate_idempotency_keys(commands)
 
-    case setup_each_result do
-      :ok ->
-        # Regenerate idempotency keys to ensure fresh SUT state
-        commands = regenerate_idempotency_keys(commands)
+    # The candidate's registry has its producer_link remapped to the candidate's
+    # positions (DR-021), so externals resolve against the shrunk sequence's own
+    # indices.
+    case run_linear_attempt(commands, remap_registry(state.registry, positions), state) do
+      {:failed, reason, variant_index, _root} ->
+        check_failure_equivalence(reason, variant_index, state.original_signature)
 
-        # Build the candidate as a sequence carrying a registry whose
-        # producer_link is remapped to the candidate's positions (DR-021), so
-        # externals resolve against the shrunk sequence's own indices.
-        candidate_sequence =
-          Sequence.with_registry(
-            Sequence.linear(commands),
-            remap_registry(state.registry, positions)
-          )
-
-        case Executor.run(candidate_sequence, state.model, state.target.adapter,
-               config: state.target.config,
-               event_queue: state.event_queue,
-               mock_registry: state.mock_registry,
-               stutter_config: state.stutter_config,
-               rng_seed: state.rng_seed,
-               run_nonce: state.run_nonce,
-               mint_epoch: next_mint_epoch(state)
-             ) do
-          {:ok, result} ->
-            if result.success do
-              false
-            else
-              # Check failure equivalence if we have an original signature
-              check_failure_equivalence(result.failure_reason, state.original_signature)
-            end
-
-          {:error, _} ->
-            # Execution errors are only equivalent if original was also an error
-            state.original_signature == nil or
-              match?({:adapter_error, _}, state.original_signature)
-        end
-
-      {:error, _reason} ->
-        # If setup_each fails, treat as if shrink candidate passed (don't remove)
+      _passed_or_not_run ->
         false
     end
   end
@@ -1063,60 +1073,67 @@ defmodule PropertyDamage.Shrinker do
   # is consistent with the (flattened) candidate sequence. Returns
   # `{:reproduces, linear_failed_at_index}` when the candidate reproduces the
   # equivalent failure (the index may be nil for poll/record-mode or
-  # execution-level failures, which shrink_linear tolerates by skipping
+  # setup-level failures, which shrink_linear tolerates by skipping
   # truncation), or `:no_reproduce` otherwise. Used only at the
   # convert-to-linear seam; the other branch strategies need only the boolean.
   defp linear_run_result(sequence, state) do
-    case call_setup_each(state.model, state.target.config) do
+    # Regenerate idempotency keys to ensure fresh SUT state
+    sequence = regenerate_sequence_idempotency_keys(sequence)
+
+    case run_linear_attempt(Sequence.to_list(sequence), sequence.registry, state) do
+      {:failed, reason, variant_index, root} ->
+        if check_failure_equivalence(reason, variant_index, state.original_signature),
+          do: {:reproduces, root},
+          else: :no_reproduce
+
+      _passed_or_not_run ->
+        :no_reproduce
+    end
+  end
+
+  # One linear shrink attempt: the model's setup_each/1, then the candidate on
+  # every target through the scheduler, which sets each target up and tears it
+  # down. Returns `{:failed, reason, variant_index, root}`, `:passed`, or
+  # `:not_run` when setup_each/1 failed (the candidate is then kept, as if it
+  # passed).
+  defp run_linear_attempt(commands, registry, state) do
+    case call_setup_each(state) do
       :ok ->
-        # Regenerate idempotency keys to ensure fresh SUT state
-        sequence = regenerate_sequence_idempotency_keys(sequence)
+        {:ok, run} =
+          Scheduler.run(
+            model: state.model,
+            targets: state.targets,
+            commands: commands,
+            # A sequence built by hand may carry no registry: its candidates
+            # resolve nothing, as on the linear engine.
+            placeholder_registry: registry || PlaceholderRegistry.new(),
+            seed: state.rng_seed,
+            run_number: 0,
+            run_nonce: state.run_nonce,
+            mint_epoch: next_mint_epoch(state),
+            concurrency: state.concurrency,
+            compare: state.compare,
+            equivalence: state.equivalence,
+            stutter_config: state.stutter_config,
+            check_mode: state.check_mode
+          )
 
-        case Executor.run(sequence, state.model, state.target.adapter,
-               config: state.target.config,
-               event_queue: state.event_queue,
-               mock_registry: state.mock_registry,
-               stutter_config: state.stutter_config,
-               rng_seed: state.rng_seed,
-               run_nonce: state.run_nonce,
-               mint_epoch: next_mint_epoch(state)
-             ) do
-          {:ok, result} ->
-            cond do
-              result.success ->
-                :no_reproduce
+        case run.failure do
+          nil ->
+            :passed
 
-              check_failure_equivalence(result.failure_reason, state.original_signature) ->
-                {:reproduces, result.failed_at_index}
-
-              true ->
-                :no_reproduce
-            end
-
-          {:error, _} ->
-            # Execution errors are only equivalent if the original was also an
-            # error. There is no reliable linear index for such a failure, so
-            # signal reproduction with a nil index (shrink_linear skips the
-            # truncation when the index is not an integer).
-            if state.original_signature == nil or
-                 match?({:adapter_error, _}, state.original_signature) do
-              {:reproduces, nil}
-            else
-              :no_reproduce
-            end
+          %{reason: reason, variant: %{index: index}, root: root} ->
+            {:failed, reason, index, root}
         end
 
       {:error, _reason} ->
-        # If setup_each fails, treat as if the candidate passed (don't convert)
-        :no_reproduce
+        :not_run
     end
   end
 
   defp still_fails_branch?(sequence, positions, state) do
     # Call setup_each to reset SUT state before each shrink attempt
-    setup_each_result = call_setup_each(state.model, state.target.config)
-
-    case setup_each_result do
+    case call_setup_each(state) do
       :ok ->
         # Regenerate idempotency keys to ensure fresh SUT state
         sequence = regenerate_sequence_idempotency_keys(sequence)
@@ -1130,27 +1147,34 @@ defmodule PropertyDamage.Shrinker do
             remap_branch_registry(state.registry, positions, sequence)
           )
 
-        case Executor.run(sequence, state.model, state.target.adapter,
-               config: state.target.config,
-               event_queue: state.event_queue,
-               mock_registry: state.mock_registry,
-               stutter_config: state.stutter_config,
-               rng_seed: state.rng_seed,
-               run_nonce: state.run_nonce,
-               mint_epoch: next_mint_epoch(state)
-             ) do
-          {:ok, result} ->
-            if result.success do
-              false
-            else
-              # Check failure equivalence if we have an original signature
-              check_failure_equivalence(result.failure_reason, state.original_signature)
-            end
+        # A branching sequence runs on its one target, through the linear
+        # engine, with its own event queue, injectors and mocks per attempt.
+        [target] = state.targets
 
-          {:error, _} ->
-            # Execution errors are only equivalent if original was also an error
-            state.original_signature == nil or
-              match?({:adapter_error, _}, state.original_signature)
+        run_result =
+          RunServices.with_services(target, fn event_queue, mock_registry ->
+            Executor.run(sequence, state.model, target.adapter,
+              config: target.config,
+              event_queue: event_queue,
+              mock_registry: mock_registry,
+              stutter_config: state.stutter_config,
+              rng_seed: state.rng_seed,
+              run_nonce: state.run_nonce,
+              mint_epoch: next_mint_epoch(state),
+              telemetry: Telemetry.engine_context(%{index: target.index, name: target.name}, 0)
+            )
+          end)
+
+        case run_result do
+          {:ok, %{success: true}} ->
+            false
+
+          {:ok, result} ->
+            check_failure_equivalence(result.failure_reason, 0, state.original_signature)
+
+          # The adapter's setup/1 failed: a setup failure of the one target.
+          {:error, reason} ->
+            check_failure_equivalence(Failure.setup_failed(reason), 0, state.original_signature)
         end
 
       {:error, _reason} ->
@@ -1159,45 +1183,52 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
-  # Call setup_each if the model implements it
-  defp call_setup_each(model, config) do
+  # Call setup_each if the model implements it, with the reference target's
+  # config.
+  defp call_setup_each(%{model: model, targets: [reference | _]}) do
     if function_exported?(model, :setup_each, 1) do
-      model.setup_each(%{adapter_config: config})
+      model.setup_each(%{adapter_config: reference.config})
     else
       :ok
     end
   end
 
   # Check if a failure matches the original signature
-  defp check_failure_equivalence(failure_reason, nil) do
+  defp check_failure_equivalence(failure_reason, variant_index, nil) do
     # No original signature: we can't prove equivalence, so for backwards
     # compatibility we accept any failure EXCEPT ones that are unmistakably
     # shrink artifacts. A dangling-ref / ref-resolution error only appears
     # because a producing command was removed; accepting it would pass off a
     # different bug as the "minimal repro". (When a signature IS present, the
-    # type check below already rejects these unless the original was itself a
+    # comparison below already rejects these unless the original was itself a
     # ref-resolution error.)
-    elem(failure_signature(failure_reason), 0) != :placeholder_resolution
+    elem(failure_signature(failure_reason, variant_index), 0) != :placeholder_resolution
   end
 
-  defp check_failure_equivalence(failure_reason, original_signature) do
-    # Same signature (kind + name) means the same bug. The kind carries whatever
-    # the old per-type/check-name logic needed: named kinds compare names,
-    # nameless kinds both carry nil.
-    failure_signature(failure_reason) == original_signature
+  defp check_failure_equivalence(failure_reason, variant_index, original_signature) do
+    # Same signature (kind + name + target) means the same bug. The kind carries
+    # whatever the old per-type/check-name logic needed: named kinds compare
+    # names, nameless kinds both carry nil. A failure in another target, or of
+    # another kind, is a different failure.
+    failure_signature(failure_reason, variant_index) == original_signature
   end
 
   # Reconstruct a minimal %Failure{} from a signature for passing to nested
-  # shrink calls, which only consult its signature (kind + name) for equivalence.
+  # shrink calls, which only consult its signature (kind + name) for equivalence;
+  # the target travels separately as the variant index. The rebuilt failure
+  # yields the signature it was built from, a divergence's name included.
   defp reconstruct_failure_reason(nil), do: nil
 
-  defp reconstruct_failure_reason({:check_failed, name}) do
+  defp reconstruct_failure_reason({:check_failed, name, _variant_index}) do
     Failure.check_failed(name, "")
   end
 
-  defp reconstruct_failure_reason({kind, name}) do
+  defp reconstruct_failure_reason({kind, name, _variant_index}) do
     Failure.from_signature(kind, name)
   end
+
+  defp signature_variant(nil), do: 0
+  defp signature_variant({_kind, _name, variant_index}), do: variant_index
 
   defp exceeded_limits?(state) do
     now = System.monotonic_time(:millisecond)

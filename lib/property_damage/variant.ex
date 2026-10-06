@@ -59,6 +59,14 @@ defmodule PropertyDamage.Variant do
   one-variant run therefore folds the same events in the same order as
   `PropertyDamage.Executor.run/4` on the same sequence.
 
+  ## Telemetry
+
+  Every command the variant steps and every check it evaluates emits the
+  `[:property_damage, :command, ...]` and `[:property_damage, :check, ...]`
+  events (`PropertyDamage.Telemetry`) with `variant: %{index, name}` naming
+  this target and the run number. Whether a handler listens is decided once,
+  when the variant sets up.
+
   ## Randomness
 
   A new process draws its own entropy for `:rand`. Before anything runs, the
@@ -118,7 +126,8 @@ defmodule PropertyDamage.Variant do
     Generator,
     ResourcePoller,
     StatePoller,
-    Target
+    Target,
+    Telemetry
   }
 
   alias PropertyDamage.Executor.Stepping
@@ -150,6 +159,10 @@ defmodule PropertyDamage.Variant do
       built once per run from `:commands`
     * `:seed`, `:run_number` (required) - the campaign seed and the 0-based run
     * `:run_nonce` - the run nonce for client-minted values (DR-034)
+    * `:mint_epoch` - the mint epoch for client-minted values (DR-034); default
+      `0`, the exploration run's epoch. A re-execution of the same sequence
+      passes a fresh epoch so it never sends the values an earlier execution
+      sent.
     * `:stutter_config` - stutter configuration (default `nil`)
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
     * `:on_adapter_error` - `:halt` (default) ends the variant at an adapter
@@ -271,7 +284,9 @@ defmodule PropertyDamage.Variant do
       commands: opts |> Keyword.fetch!(:commands) |> List.to_tuple(),
       placeholder_registry: Keyword.fetch!(opts, :placeholder_registry),
       run_seed: run_seed,
+      run_number: run_number,
       run_nonce: Keyword.get(opts, :run_nonce),
+      mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
       on_adapter_error: Keyword.get(opts, :on_adapter_error, :halt),
@@ -413,8 +428,13 @@ defmodule PropertyDamage.Variant do
         placeholder_registry: state.placeholder_registry,
         rng_seed: state.run_seed,
         run_nonce: state.run_nonce,
-        mint_epoch: 0,
-        on_resource_poller_start: guard_now_fun(state.guardian)
+        mint_epoch: state.mint_epoch,
+        on_resource_poller_start: guard_now_fun(state.guardian),
+        telemetry:
+          Telemetry.engine_context(
+            %{index: state.target.index, name: state.target.name},
+            state.run_number
+          )
       )
 
     ctx = %Stepping.Context{

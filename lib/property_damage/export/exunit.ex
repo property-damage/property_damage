@@ -12,7 +12,7 @@ defmodule PropertyDamage.Export.ExUnit do
   - `:module_name` - Module name for the test (optional, auto-generated)
   - `:model` - Model module to use (falls back to report.model)
   - `:targets` - Validated single-entry target list the generated test runs
-    against (falls back to report.adapter with an empty config)
+    against (falls back to the report's reference target)
   - `:test_name` - Custom test name (optional)
   - `:expect_fixed` - If true, expect the test to pass (default: false)
   """
@@ -233,11 +233,7 @@ defmodule PropertyDamage.Export.ExUnit do
   defp target_for(opts, metadata) do
     case Keyword.get(opts, :targets) do
       nil ->
-        %PropertyDamage.Target{
-          adapter: metadata.adapter,
-          name: PropertyDamage.Target.default_name(metadata.adapter),
-          index: 0
-        }
+        metadata.target || %PropertyDamage.Target{index: 0}
 
       entries ->
         PropertyDamage.Options.single_target!(entries)

@@ -1,7 +1,7 @@
 defmodule PropertyDamage.Export.Common do
   @moduledoc false
 
-  alias PropertyDamage.{FailureReport, Placeholder, Sequence}
+  alias PropertyDamage.{FailureReport, Placeholder, Sequence, Shrinker}
 
   # ============================================================================
   # Command Extraction
@@ -30,7 +30,7 @@ defmodule PropertyDamage.Export.Common do
       failed_at_index: report.failed_at_index,
       timestamp: report.timestamp,
       model: report.model,
-      adapter: report.adapter
+      target: FailureReport.reference_target(report)
     }
   end
 
@@ -141,15 +141,19 @@ defmodule PropertyDamage.Export.Common do
 
   # A short, stable content signature so two distinct failures that happen to
   # share a seed (across models, or a randomly-seeded run) don't silently
-  # overwrite each other, while an identical failure maps to the same file.
+  # overwrite each other, while an identical failure maps to the same file. The
+  # failure's identity (kind, check name, failing target) leads.
   defp failure_signature(%FailureReport{} = report) do
-    {FailureReport.failure_type(report), FailureReport.check_name(report), report.failure_reason,
-     FailureReport.shrunk_sequence(report)}
+    {Shrinker.failure_signature(report.failure_reason, variant_index(report)),
+     report.failure_reason, FailureReport.shrunk_sequence(report)}
     |> :erlang.phash2()
     |> Integer.to_string(16)
     |> String.downcase()
     |> String.pad_leading(8, "0")
   end
+
+  defp variant_index(%FailureReport{variant: %{index: index}}), do: index
+  defp variant_index(%FailureReport{}), do: 0
 
   defp extension_for_format(:exunit), do: ".exs"
   defp extension_for_format(:elixir), do: ".exs"

@@ -94,6 +94,15 @@ because Kratos reaches the mock over real HTTP and the listener needs the regist
 pid at request time regardless. A migration onto `mocks:` would hand the
 listener that same pid through the mock's `setup/1` config.
 
+The bench application owns the listener, not the adapter. `PropertyDamage.run/1`
+calls the adapter's `setup/1` once per run, in a process that exits when the run
+ends; a listener started as that process's child would shut down after every run
+while Kratos still holds connections to it. So `KratosBench.Application` starts
+the `Hub` and a supervisor for the listener. The first run's `setup/1` starts the
+listener under that supervisor, every later run finds it up, and each run's
+`setup/1` and `teardown/1` only point the `Hub` at that run's registry (or at
+none).
+
 ## Running
 
 ```bash

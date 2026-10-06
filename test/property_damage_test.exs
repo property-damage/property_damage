@@ -74,9 +74,10 @@ defmodule PropertyDamageTest do
     end
   end
 
-  # An injector whose setup/1 raises. It runs in the run (test) process, so it
-  # reports the run's EventQueue pid to that process's mailbox before blowing up,
-  # letting the test check whether the queue leaked.
+  # An injector whose setup/1 raises. It reports the run's EventQueue pid to the
+  # process it runs in and to the processes that started it (a target runs in
+  # its own process, started by the test process) before blowing up, letting
+  # the test check whether the queue leaked.
   defmodule LeakProbeInjector do
     use PropertyDamage.Adapter.Injector
 
@@ -84,7 +85,10 @@ defmodule PropertyDamageTest do
 
     @impl true
     def setup(%{event_queue: event_queue}) do
-      send(self(), {:leaked_event_queue, event_queue})
+      for pid <- [self() | Process.get(:"$ancestors", [])], is_pid(pid) do
+        send(pid, {:leaked_event_queue, event_queue})
+      end
+
       raise "injector setup boom"
     end
 
@@ -141,19 +145,22 @@ defmodule PropertyDamageTest do
 
   describe "run/1 error boundaries" do
     @tag :capture_log
-    test "an injector whose setup raises does not leak the EventQueue" do
-      assert_raise RuntimeError, ~r/injector setup boom/, fn ->
-        PropertyDamage.run(
-          model: ExecutorModel,
-          targets: [{SimpleAdapter, injectors: [LeakProbeInjector]}],
-          max_runs: 1,
-          max_commands: 3,
-          validate: false
-        )
-      end
+    test "an injector whose setup raises is a setup failure and does not leak the EventQueue" do
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+               PropertyDamage.run(
+                 model: ExecutorModel,
+                 targets: [{SimpleAdapter, injectors: [LeakProbeInjector]}],
+                 max_runs: 1,
+                 max_commands: 3,
+                 validate: false
+               )
+
+      assert %RuntimeError{message: "injector setup boom"} =
+               PropertyDamage.Failure.detail(report.failure_reason)
 
       assert_received {:leaked_event_queue, event_queue}
-      refute Process.alive?(event_queue)
+      ref = Process.monitor(event_queue)
+      assert_receive {:DOWN, ^ref, :process, ^event_queue, _reason}, 1_000
     end
 
     test "adapter setup failure surfaces as an error, not a MatchError crash" do
@@ -166,8 +173,10 @@ defmodule PropertyDamageTest do
           validate: false
         )
 
-      assert {:error, info} = result
-      assert info.adapter_setup_failed == :setup_failed
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} = result
+      assert PropertyDamage.Failure.detail(report.failure_reason) == :setup_failed
+      assert report.failed_at_index == nil
+      assert report.shrink_iterations == 0
     end
 
     @tag :capture_log

@@ -231,6 +231,28 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
+  defp classify_kind(:diverged, failure, _stacktrace) do
+    %{
+      origin: :sut_error,
+      details: %{
+        reason: "A target answered differently from the reference target",
+        evidence: Failure.detail(failure),
+        confidence: :medium
+      }
+    }
+  end
+
+  defp classify_kind(:setup_failed, failure, _stacktrace) do
+    %{
+      origin: :unknown,
+      details: %{
+        reason: "A target's adapter setup/1 failed",
+        evidence: %{reason: inspect(Failure.detail(failure))},
+        confidence: :low
+      }
+    }
+  end
+
   defp classify_kind(_kind, failure, _stacktrace) do
     %{
       origin: :unknown,

@@ -4,15 +4,16 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
 
   `PropertyDamage.run/1` and `execute/2` already captured server-generated
   values produced by one command and resolved them into later ones. These tests
-  cover the two paths that previously did NOT: `Differential.run/1` (which used
-  to pass unresolved placeholders straight through) and the `LoadTest.Worker`
+  cover the two paths that previously did NOT: the multi-target lockstep run of
+  `PropertyDamage.run/1` (which used to pass unresolved placeholders straight
+  through) and the `LoadTest.Worker`
   (which used to raise on the first unresolved placeholder). Each now builds a
   per-run placeholder registry, captures real values by the producer's linear
   position, and resolves consumers against it.
   """
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{Differential, Generator, Placeholder}
+  alias PropertyDamage.{Generator, Placeholder}
   alias PropertyDamage.LoadTest.{Metrics, Worker}
 
   # --- Shared producer/consumer surface (mirrors external_e2e_test.exs) -------
@@ -104,10 +105,10 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Differential
+  # Lockstep runs
   # ---------------------------------------------------------------------------
 
-  describe "Differential.run/1 captures external() values" do
+  describe "run/1 through the lockstep scheduler captures external() values" do
     test "a consumer receives the concrete value its producer yielded" do
       # Single target => no reference => no divergence halts the sequence, so the
       # whole Create -> Use sequence runs and we can observe resolution.
@@ -115,8 +116,8 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
         Enum.find_value(1..300, fn seed ->
           drain_used([])
 
-          {:ok, _result} =
-            Differential.run(
+          {:ok, _stats} =
+            PropertyDamage.run(
               model: RoutingModel,
               targets: [
                 {ProbingAdapter,
@@ -125,7 +126,8 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
               compare: :correctness,
               max_runs: 1,
               max_commands: 12,
-              seed: seed
+              seed: seed,
+              validate: false
             )
 
           case drain_used([]) do
@@ -152,8 +154,8 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
         Enum.find_value(1..300, fn seed ->
           drain_used([])
 
-          {:ok, _result} =
-            Differential.run(
+          {:ok, _stats} =
+            PropertyDamage.run(
               model: RoutingModel,
               targets: [
                 {ProbingAdapter, name: "a", config: %{test_pid: self(), prefix: "a", name: "a"}},
@@ -164,7 +166,8 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
               concurrency: :parallel,
               max_runs: 1,
               max_commands: 12,
-              seed: seed
+              seed: seed,
+              validate: false
             )
 
           targets = drain_used([])

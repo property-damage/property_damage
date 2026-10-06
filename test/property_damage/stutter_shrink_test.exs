@@ -136,7 +136,9 @@ defmodule PropertyDamage.StutterShrinkTest do
         failed_at_index: result.failed_at_index,
         failure_reason: result.failure_reason,
         model: Model,
-        target: %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0},
+        targets: [
+          %PropertyDamage.Target{adapter: Adapter, config: %{}, name: "adapter", index: 0}
+        ],
         stutter_config: @stutter,
         rng_seed: rng_seed
       )

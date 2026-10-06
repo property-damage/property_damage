@@ -88,14 +88,18 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
     def execute(_command, _context, _runtime), do: {:ok, []}
   end
 
-  # An injector whose setup/1 raises. It runs in the run (test) process during
-  # replay, so it reports the run's EventQueue pid before blowing up, letting the
-  # test check whether the queue leaked (A6).
+  # An injector whose setup/1 raises. It runs in the target's process during
+  # replay, so it reports the target's EventQueue pid to that process and its
+  # ancestors (the test process among them) before blowing up, letting the test
+  # check whether the queue leaked (A6).
   defmodule LeakProbeInjector do
     use PropertyDamage.Adapter.Injector
 
     def setup(%{event_queue: event_queue}) do
-      send(self(), {:leaked_event_queue, event_queue})
+      for pid <- [self() | Process.get(:"$ancestors", [])], is_pid(pid) do
+        send(pid, {:leaked_event_queue, event_queue})
+      end
+
       raise "injector setup boom"
     end
 
@@ -251,28 +255,34 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
           seed_library: path
         )
 
-      assert {:error, %{adapter_setup_failed: :setup_failed, phase: :seed_library_replay}} =
-               result
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} = result
+      assert PropertyDamage.Failure.detail(report.failure_reason) == :setup_failed
+      assert report.seed == 4242
     end
 
     @tag :capture_log
-    test "an injector whose setup raises during replay does not leak the EventQueue (A6)" do
+    test "an injector whose setup raises during replay is a setup failure and does not leak the EventQueue (A6)" do
       path = tmp_path("replay_leak")
       preseed(path, 4242, model: "M")
 
-      assert_raise RuntimeError, ~r/injector setup boom/, fn ->
-        PropertyDamage.run(
-          model: Model,
-          targets: [{Adapter, injectors: [LeakProbeInjector]}],
-          max_commands: 2,
-          shrink: false,
-          validate: false,
-          seed_library: path
-        )
-      end
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+               PropertyDamage.run(
+                 model: Model,
+                 targets: [{Adapter, injectors: [LeakProbeInjector]}],
+                 max_commands: 2,
+                 shrink: false,
+                 validate: false,
+                 seed_library: path
+               )
+
+      assert %RuntimeError{message: "injector setup boom"} =
+               PropertyDamage.Failure.detail(report.failure_reason)
+
+      assert report.seed == 4242
 
       assert_received {:leaked_event_queue, event_queue}
-      refute Process.alive?(event_queue)
+      ref = Process.monitor(event_queue)
+      assert_receive {:DOWN, ^ref, :process, ^event_queue, _reason}, 1_000
     end
   end
 

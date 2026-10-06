@@ -54,20 +54,21 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
-  @version 8
+  @version 9
   @extension ".pd"
   @trace_extension ".pdtrace"
 
   # Fields whose presence on a loaded report is expected (not struct drift) even
-  # though the current struct lacks them. Pre-v8 files are refused outright
-  # (DR-041, following the DR-039/DR-040 precedent), so there are no legacy shapes
-  # to whitelist: a v8 file carrying an unknown key IS drift and should be surfaced.
+  # though the current struct lacks them. Files older than the current version
+  # are refused outright (DR-041, following the DR-039/DR-040 precedent), so there
+  # are no legacy shapes to whitelist: a current-version file carrying an unknown
+  # key IS drift and should be surfaced.
   @removed_fields []
 
   # Fields whose absence on a loaded report is expected format evolution (not
-  # struct drift). Empty for the same reason as @removed_fields: only v8 files
-  # load, and a v8 file legitimately lacking a current field is a genuine shape
-  # change worth a warning.
+  # struct drift). Empty for the same reason as @removed_fields: only
+  # current-version files load, and such a file legitimately lacking a current
+  # field is a genuine shape change worth a warning.
   @added_fields []
 
   # Upper bound on the term size we are willing to reconstruct from a file.
@@ -342,13 +343,18 @@ defmodule PropertyDamage.Persistence do
       run_number: report.run_number,
       failed_at_index: report.failed_at_index,
       failure_type: FailureReport.failure_type(report),
-      check_name: FailureReport.check_name(report),
+      check_name: name_string(FailureReport.check_name(report)),
       failure_message: FailureReport.failure_message(report),
       shrink_iterations: report.shrink_iterations,
       shrink_time_ms: report.shrink_time_ms,
       timestamp: DateTime.to_iso8601(report.timestamp),
       model: report.model && inspect(report.model),
-      adapter: report.adapter && inspect(report.adapter),
+      kind: report.kind,
+      variant: report.variant,
+      targets: Enum.map(report.targets, &export_target/1),
+      equivalence: export_equivalence(report.equivalence),
+      stutter: report.stutter && inspect(report.stutter),
+      max_commands: report.max_commands,
       shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
       original_command_count: length(Sequence.to_list(report.original_sequence)),
       reproduction_command: FailureReport.reproduction_command(report)
@@ -359,6 +365,33 @@ defmodule PropertyDamage.Persistence do
   # ============================================================================
   # Private Helpers
   # ============================================================================
+
+  # A failure's name as JSON: a module (a divergence's root command) by its
+  # Elixir name, any other atom as its string.
+  defp name_string(nil), do: nil
+
+  defp name_string(name) when is_atom(name) do
+    case Atom.to_string(name) do
+      "Elixir." <> module -> module
+      string -> string
+    end
+  end
+
+  # A function cannot be written as JSON, so a custom equivalence is `custom`.
+  defp export_equivalence(equivalence) when is_function(equivalence), do: :custom
+  defp export_equivalence(equivalence), do: equivalence
+
+  # A `targets:` entry as JSON: the adapter and name as strings, the config,
+  # injectors and mocks inspected (they may hold terms JSON cannot encode).
+  defp export_target({adapter, entry}) do
+    %{
+      adapter: inspect(adapter),
+      name: Keyword.get(entry, :name),
+      config: inspect(Keyword.get(entry, :config, %{})),
+      injectors: Enum.map(Keyword.get(entry, :injectors, []), &inspect/1),
+      mocks: inspect(Keyword.get(entry, :mocks, []))
+    }
+  end
 
   defp do_save(report, path) do
     binary = encode(report)
@@ -410,16 +443,18 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
-  # V8 format (DR-041): a report's `failure_reason` is a `%PropertyDamage.Failure{}`
-  # (nested class struct), and the six denormalized failure fields
-  # (`failure_type` / `check_name` / `failure_message` / `invariant_name` /
-  # `idempotency_violation` / `poll_timeout_info`) are gone, replaced by accessors.
-  # V6's fold-order record (DR-040) is unchanged. Positions remain
+  # V9 format: a report records the run's `targets` (the reference first), its
+  # report `kind`, the failing `variant` and the run's `concurrency` in place of
+  # one `adapter`. As in v8 (DR-041), a report's `failure_reason` is a
+  # `%PropertyDamage.Failure{}` (nested class struct) and the six denormalized
+  # failure fields (`failure_type` / `check_name` / `failure_message` /
+  # `invariant_name` / `idempotency_violation` / `poll_timeout_info`) are
+  # accessors. V6's fold-order record (DR-040) is unchanged. Positions remain
   # `%Sequence.Position{}` structs (DR-039). The payload carries an explicit
   # `kind`; the loader dispatches on it rather than the file extension. A report
   # already embeds its trace, so it is returned as stored, with no legacy-field
   # folding or trace synthesis. A standalone trace payload returns the trace.
-  defp decode(<<"PD", 8::8, stored_checksum::32, term_binary::binary>>) do
+  defp decode(<<"PD", @version::8, stored_checksum::32, term_binary::binary>>) do
     with_decoded_payload(stored_checksum, term_binary, fn payload ->
       metadata_warnings = check_version_compatibility(payload[:metadata] || %{})
 
@@ -433,11 +468,13 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v8 files (format versions 1-7) are refused (DR-041, following DR-039/DR-040).
-  # A v7 file stores `%Failure{type: %Failure.Assertion{}}` and `assertion_fires`;
-  # v8 renamed both to the check vocabulary. Older files predate the `%Failure{}`
-  # shape entirely. There is no honest in-place upgrade: re-capture the failure
-  # under the current version.
+  # Pre-v9 files (format versions 1-8) are refused (DR-041, following DR-039/DR-040).
+  # A v8 report records one `adapter` where v9 records the run's `targets`, its
+  # `kind` and the failing `variant`; a v7 file stores
+  # `%Failure{type: %Failure.Assertion{}}` and `assertion_fires`, which v8
+  # renamed to the check vocabulary. Older files predate the `%Failure{}` shape
+  # entirely. There is no honest in-place upgrade: re-capture the failure under
+  # the current version.
   defp decode(<<"PD", version::8, _checksum::32, _term_binary::binary>>)
        when version < @version do
     {:error, {:unsupported_format_version, version, @version}}
@@ -659,7 +696,7 @@ defmodule PropertyDamage.Persistence do
       |> String.slice(0, 15)
 
     type = FailureReport.failure_type(report) || "unknown"
-    check = FailureReport.check_name(report) || "none"
+    check = name_string(FailureReport.check_name(report)) || "none"
     seed = report.seed
 
     "#{timestamp}-#{type}-#{check}-seed#{seed}#{@extension}"
@@ -719,9 +756,10 @@ defmodule PropertyDamage.Persistence do
   end
 
   defp parse_filename(filename) do
-    # Pattern: {timestamp}-{type}-{check}-seed{seed}.pd
+    # Pattern: {timestamp}-{type}-{check}-seed{seed}.pd; a divergence's check
+    # is its root command's module, so it may hold dots.
     case Regex.run(
-           ~r/^(\d{8}T\d{6})-(\w+)-(\w+)-seed(\d+)\.pd$/,
+           ~r/^(\d{8}T\d{6})-(\w+)-([\w.]+)-seed(\d+)\.pd$/,
            filename
          ) do
       [_, timestamp_str, type, check, seed_str] ->
@@ -732,7 +770,7 @@ defmodule PropertyDamage.Persistence do
            # to_existing_atom (not to_atom): a directory of crafted filenames must
            # not be able to exhaust the atom table. An unknown check-name raises
            # ArgumentError below and drops to the accurate full-load fallback.
-           check_name: String.to_existing_atom(check),
+           check_name: check_name_atom(check),
            seed: String.to_integer(seed_str)
          }}
 
@@ -741,6 +779,13 @@ defmodule PropertyDamage.Persistence do
     end
   rescue
     ArgumentError -> :error
+  end
+
+  # A check part with a dot names a module (see `name_string/1`).
+  defp check_name_atom(check) do
+    if String.contains?(check, "."),
+      do: String.to_existing_atom("Elixir." <> check),
+      else: String.to_existing_atom(check)
   end
 
   defp parse_timestamp(str) do

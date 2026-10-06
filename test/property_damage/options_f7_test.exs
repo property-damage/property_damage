@@ -189,7 +189,7 @@ defmodule PropertyDamage.OptionsF7Test do
     test "the run schema validates regression: [targets: [...]] and preserves it" do
       # The run-level :regression keys must accept :targets, or NimbleOptions
       # rejects it as an unknown key and the generated regression test silently
-      # falls back to report.adapter. Regression.handler/1 accepts :targets, so
+      # falls back to the report's reference target. Regression.handler/1 accepts :targets, so
       # the run option must reach it.
       opts =
         Options.validate_run!(

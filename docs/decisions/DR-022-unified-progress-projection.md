@@ -1,6 +1,6 @@
 # DR-022: Unified Progress Projection
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-045: `Differential.run/1`, its progress operation and its progress structs are removed; progress names the variant.
 **Date:** 2026-06-16
 
 > Unlike DR-001 through DR-020 (reconstructed after the fact), this is a

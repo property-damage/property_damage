@@ -1,7 +1,8 @@
 # Differential Testing
 
-PropertyDamage supports differential testing - running the same command sequences
-against multiple implementations and comparing results.
+PropertyDamage supports differential testing: `PropertyDamage.run/1` takes several
+`targets:` and runs the same command sequences against all of them, comparing
+the results. One target is an ordinary run; two or more targets add the comparison.
 
 ## What is Differential Testing?
 
@@ -31,7 +32,7 @@ If they diverge, something is wrong. This is particularly powerful when you have
 Compare your system under test against a reference implementation:
 
 ```elixir
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [
     ReferenceAdapter,
@@ -42,15 +43,17 @@ PropertyDamage.Differential.run(
 )
 ```
 
-The first target in the `targets:` list is the reference oracle - its results are
-treated as "correct" and divergences indicate bugs in other targets.
+The first target in the `targets:` list is the reference oracle: its results are
+treated as "correct" and a divergence indicates a bug in another target. The call
+returns `{:ok, stats}` when no run failed, or `{:error, report}` when a target
+diverged or failed (see [Understanding Results](#understanding-results)).
 
 ### 2. Performance Comparison
 
 Compare implementations for latency and throughput:
 
 ```elixir
-{:ok, result} = PropertyDamage.Differential.run(
+{:ok, stats} = PropertyDamage.run(
   model: MyModel,
   targets: [
     {RedisAdapter, name: "redis", config: %{host: "localhost"}},
@@ -61,7 +64,9 @@ Compare implementations for latency and throughput:
   warmup_runs: 10
 )
 
-IO.puts(PropertyDamage.Differential.Result.format(result, format: :full))
+for {name, metrics} <- stats.metrics do
+  IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
+end
 ```
 
 ### 3. Same Adapter, Different Configs
@@ -70,7 +75,7 @@ A powerful pattern is comparing the same adapter with different configurations:
 
 ```elixir
 # Compare staging vs production
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [
     {HTTPAdapter, name: "prod", config: %{base_url: "https://prod.example.com"}},
@@ -80,7 +85,7 @@ PropertyDamage.Differential.run(
 )
 
 # Compare different database configurations
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [
     {DBAdapter, name: "with-cache", config: %{cache: true}},
@@ -108,7 +113,9 @@ event queue, injectors, mocks and pollers. A variant runs the full engine, so
 checks, settle, stutter and nemesis work as they do in `PropertyDamage.run/1`.
 
 A run stops at the first root where a target answers differently from the
-reference. That is a divergence. The next run starts from a fresh setup.
+reference. That is a divergence, and it is a failure like any other: it ends the
+campaign, the framework shrinks the sequence and reproduces it, and `run/1`
+returns `{:error, report}` with `kind: :diverged`. The report is the only record: no later run starts.
 
 ### Concurrency
 
@@ -124,7 +131,7 @@ through `config:` (a tenant or a key prefix per target). Otherwise one target's
 command changes what another observes.
 
 ```elixir
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [...],
   compare: :correctness,
@@ -135,7 +142,7 @@ PropertyDamage.Differential.run(
 `compare: :performance` and `compare: :both` require `concurrency: :serial`,
 because overlapping targets would mix their load into each other's latency.
 
-The old `execution:` option is removed. Passing it raises an option error that
+The `execution:` option is removed. Passing it raises an option error that
 names `concurrency:`.
 
 ### Setup and teardown per run
@@ -143,8 +150,8 @@ names `concurrency:`.
 Every run sets every target up and tears it down again. Each variant calls
 `Adapter.setup/1` in its own process, one variant after another in target
 order. No variant executes the first command before every setup has returned.
-If a setup fails, the run ends with a failure that names the variant, and the
-variants already set up are torn down.
+If a setup fails, the run ends with a `:setup_failed` report that names the
+variant, and the variants already set up are torn down.
 
 So `setup/1` runs once per run per target, and it may find state that an
 earlier run left behind. Write it to be idempotent (see the `setup/1` notes in
@@ -168,7 +175,7 @@ exactly as in `PropertyDamage.run/1`.
 Each target captures its own values: the same consumer placeholder resolves to
 whatever *that* adapter produced. This is the point under differential testing,
 since two implementations legitimately hand out different ids for the same
-operation. The id fields then surface as ordinary divergences under exact
+operation. The id fields then surface as divergent answers under exact
 equivalence; ignore them with a [structural or custom](#equivalence-strategies)
 strategy if only the rest of the payload matters.
 
@@ -226,101 +233,105 @@ end
 
 ## Understanding Results
 
+`run/1` returns `{:ok, stats}` when no run failed in any kind, and
+`{:error, report}` (a `%PropertyDamage.FailureReport{}`) for the first run that did.
+
 ```elixir
-{:ok, result} = PropertyDamage.Differential.run(...)
+case PropertyDamage.run(model: MyModel, targets: [ReferenceAdapter, NewAdapter], max_runs: 100) do
+  {:ok, stats} ->
+    # stats.targets is a list of %{index: i, name: n}; the first is the reference
+    IO.puts("#{stats.runs} runs agreed across #{length(stats.targets)} targets")
 
-# Check status
-result.status
-# => :equivalent | :divergent | :failed
+  {:error, %PropertyDamage.FailureReport{kind: :diverged} = report} ->
+    %{index: _, name: name} = report.variant
+    IO.puts("#{name} diverged at root #{report.failed_at_index}")
 
-# The reference and every target are %{index: i, name: n}
-result.reference
-# => %{index: 0, name: "ReferenceAdapter"}
+    for command <- PropertyDamage.Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(report)) do
+      IO.puts("  #{inspect(command)}")
+    end
 
-# Check for divergences
-if PropertyDamage.Differential.Result.divergent?(result) do
-  IO.puts("Found #{length(result.divergences)} divergences")
+    IO.puts(PropertyDamage.FailureReport.reproduction_command(report))
 
-  for div <- result.divergences do
-    IO.puts("Run #{div.run}, root #{div.root}: #{inspect(div.command)}")
-    IO.puts("  Reference: #{inspect(div.reference_result)}")
-    IO.puts("  #{div.variant.name}: #{inspect(div.divergent_result)}")
-  end
-end
-
-# Check for a failure
-if result.status == :failed do
-  %{kind: kind, variant: variant, run: run, root: root, reason: reason} = result.failure
-  IO.puts("#{kind} in #{variant.name} (run #{run}, root #{inspect(root)}): #{inspect(reason)}")
-end
-
-# Get metrics per target
-for %{name: name} <- result.targets do
-  metrics = PropertyDamage.Differential.Result.metrics_for(result, name)
-  IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
+  {:error, %PropertyDamage.FailureReport{kind: kind, variant: variant}} ->
+    IO.puts("#{kind} in #{variant.name}")
 end
 ```
 
 ### Divergences
 
-Each entry of `result.divergences` is a map with these keys:
+A divergence is a report with `kind: :diverged`. It carries:
 
-| Key | Meaning |
-|-----|---------|
-| `variant` | `%{index, name}` of the target that diverged |
-| `root` | 0-based index of the command where it diverged |
-| `run` | 0-based run that found it |
-| `command` | the command struct |
-| `reference_result` | the reference target's answer |
-| `divergent_result` | the divergent target's answer |
-| `results` | every target's answer, keyed by target name |
+| Field | Meaning |
+|-------|---------|
+| `variant` | `%{index, name}` of the first target that answered differently from the reference |
+| `failed_at_index` | 0-based index of the root where it diverged |
+| `failure_reason` | a `%PropertyDamage.Failure{}` of type `Failure.Divergence`, holding `root`, `command` (the root command), `reference_result`, `divergent_result` and `results` (every target's answer, keyed by target name); `Failure.name/1` is the root command's module |
+| `targets` | the run's `targets:` entries, so the reproduction names the same targets |
+| `concurrency` | `:serial` or `:parallel` |
 | `seed` | the campaign seed |
 
-`result.divergences` lists the divergences oldest first. Nothing is shrunk: a
-divergence is the first differing root of its generated sequence.
+The framework shrinks a divergence before it reports it. Every shrink attempt
+runs the candidate sequence on every target, each set up and torn down for that
+attempt. A candidate counts only if the same target still diverges, at a command
+of the same type, at the same or an earlier root. A candidate that diverges at a
+command of another type is a different failure. The reference's sequence is
+what shrinks, because all targets run the same commands.
+`PropertyDamage.FailureReport.shrunk_sequence/1` returns the shrunk sequence, and
+`PropertyDamage.FailureReport.reproduction_command/1` returns a command that
+reruns the failure with the exact `targets:` entries (non-default `name:` and
+`config:`) and a non-default `concurrency:`, `equivalence:`, `stutter:` or
+`max_commands:`. An `equivalence:` function that is not a named capture such as
+`&MyApp.Compare.same?/2` prints as `<custom function>`, for you to replace.
+
+Under `check_mode: :record`, a check failure recorded at or before the
+divergence root is reported instead of the divergence.
 
 An answer is `{:ok, events}` (the events the command injected, then the events
 it returned; for a `:probe` or `:async` command, the events it settled to) or
 `{:error, reason}` (the adapter's own error). With two or more targets, an
 adapter error is an answer like any other: it is compared, and the target
-continues. With one target it ends the run, as in `PropertyDamage.run/1`.
+continues. With one target it ends the run with kind `:execution_failed`.
 
-### Failures
+### Failure kinds
 
-A failure ends the whole campaign: no later run starts. The result then has
-`status: :failed`, and divergences found in earlier runs stay listed.
-`result.failure` is a map:
+Every failed run is a report with a `kind`, the `variant` that failed and
+`failed_at_index`, the failing root. `failed_at_index` is `nil` for a setup
+failure and for a startup check, which belong to no command.
 
-| Key | Meaning |
-|-----|---------|
-| `kind` | `:check_failed`, `:setup_failed` or `:execution_failed` |
-| `variant` | `%{index, name}` of the target it happened in |
-| `run` | 0-based run |
-| `root` | 0-based command index, or `nil` when no command is to blame |
-| `reason` | the `%PropertyDamage.Failure{}`, the exception the adapter raised, or what `setup/1` returned |
+| Kind | Meaning |
+|------|---------|
+| `:check_failed` | A check failed in that target, at a command, at the `:startup` phase, or while the run finished (an `@eventually` timeout, a `:teardown` check). |
+| `:diverged` | The target's answer at a root differs from the reference's under `equivalence:`. |
+| `:setup_failed` | `setup/1` returned an error or raised. An injector or mock setup that raised inside the target counts too. A setup failure is not shrunk. |
+| `:execution_failed` | The adapter raised at a root, or answered `{:error, _}` in a one-target run, or a nemesis, stutter or placeholder step failed. |
 
-- `:check_failed`: a check failed in that target, at a command, at the
-  `:startup` phase (`root` is `nil`), or while the run finished (an
-  `@eventually` timeout, a `:teardown` check).
-- `:setup_failed`: `setup/1` returned an error or raised.
-- `:execution_failed`: the adapter raised, a command could not be executed, or
-  the target's process crashed. A failure is never compared.
+`:execution_failed` is provisional. Whether an agreed adapter error counts as a
+comparable answer in every run, a one-target run included, is not decided yet.
 
-### Result Formatting
+### Performance metrics
+
+Under `compare: :performance` or `:both`, `stats.metrics` maps each target name to
+its latency metrics (`latency_p50`, `latency_p95`, `latency_p99`, `latency_mean`,
+`latency_min`, `latency_max`, in microseconds, plus `total_commands` and
+`error_count`):
 
 ```elixir
-# Summary
-IO.puts(PropertyDamage.Differential.Result.format(result))
+{:ok, stats} = PropertyDamage.run(model: MyModel, targets: targets, compare: :performance)
 
-# Full with metrics and divergences
-IO.puts(PropertyDamage.Differential.Result.format(result, format: :full))
-
-# Just metrics
-IO.puts(PropertyDamage.Differential.Result.format(result, format: :metrics))
-
-# Just divergences
-IO.puts(PropertyDamage.Differential.Result.format(result, format: :divergences))
+for {name, metrics} <- stats.metrics do
+  IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
+end
 ```
+
+### What stays one-target
+
+Branching sequences run against one target: `branching:` with two or more
+targets is an option error. `PropertyDamage.replay/2`,
+`PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
+the report's reference target (with its name and config).
+`PropertyDamage.shrink_further/2` re-shrinks with the report's `targets`,
+`concurrency`, `equivalence` and `stutter` by default; pass `targets:` (one or
+more entries), `concurrency:` or `equivalence:` to override.
 
 ## Options Reference
 
@@ -329,8 +340,7 @@ IO.puts(PropertyDamage.Differential.Result.format(result, format: :divergences))
 | Option | Description |
 |--------|-------------|
 | `:model` | Model module implementing `PropertyDamage.Model` |
-| `:targets` | List of target specifications |
-| `:compare` | `:correctness`, `:performance`, or `:both` |
+| `:targets` | List of target specifications (one or more) |
 
 ### Target Specification
 
@@ -382,39 +392,47 @@ configuration mistake. Fix it by giving each target its own config.
 | `:max_runs` | 100 | Number of test sequences |
 | `:seed` | random | Random seed for reproducibility |
 | `:concurrency` | `:serial` | `:serial` or `:parallel` (see [Concurrency](#concurrency)) |
-| `:equivalence` | `:exact` | Equivalence strategy |
+| `:compare` | `:correctness` | `:correctness`, `:performance`, or `:both` |
+| `:equivalence` | `:exact` | `:exact`, `:structural` or a 2-arity function |
+| `:metrics`, `:percentiles` | | Parameters of the performance metrics |
 | `:warmup_runs` | 0 | Runs to discard before measuring |
+| `:check_mode` | `:halt` | How a failing check is handled |
 | `:verbose` | false | Print progress |
 | `:on_progress` | nil | Progress consumer (see [Monitoring Progress](#monitoring-progress)) |
 
 ## Monitoring Progress
 
 Pass an `on_progress` function to observe a run as it happens. It receives a
-`%PropertyDamage.Progress{}` projection (DR-022): a `DifferentialUpdate` per run,
-then a terminal `DifferentialResult`
-carrying a copy of the final result. The same stream also drives `verbose:` and
-the `[:property_damage, :differential, :progress | :result]` telemetry events.
+`%PropertyDamage.Progress{}` projection (DR-022): the same `RunUpdate` and
+`RunResult` payloads as a one-target run. `RunResult` carries the failure `kind`
+and the failing `variant`, and the verbose printer prints the failure kind and
+the target name. The same stream drives `verbose:`.
+
+The engine also emits `[:property_damage, :command, :start | :stop]` and
+`[:property_damage, :check, :start | :stop]` telemetry events with
+`variant: %{index, name}` and `run_number`, and
+`[:property_damage, :sequence, :stop]` carries the `variant` the run failed in
+(`nil` when it passed). Shrink attempts and the reproduction use `run_number: 0`.
+Nothing is emitted unless a handler is attached.
 
 ```elixir
 alias PropertyDamage.Progress
-alias PropertyDamage.Progress.{DifferentialResult, DifferentialUpdate}
+alias PropertyDamage.Progress.RunResult
 
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: MyModel,
   targets: [OracleAdapter, {SUTAdapter, name: "new-impl"}],
-  compare: :correctness,
   on_progress: fn
-    %Progress{data: %DifferentialUpdate{phase: :run, run_number: n, total_runs: total}} ->
-      IO.puts("run #{n}/#{total}")
+    %Progress{data: %RunResult{kind: kind, variant: variant}} when not is_nil(kind) ->
+      IO.puts("#{kind} in #{variant.name}")
 
-    %Progress{data: %DifferentialResult{result: result}} ->
-      IO.puts("done: #{result.status}")
+    %Progress{} ->
+      :ok
   end
 )
 ```
 
-The authoritative result is still the `{:ok, result}` return value;
-`DifferentialResult` is a copy emitted for consumers.
+The authoritative result is the return value of `run/1`.
 
 ## Example: Migration Validation
 
@@ -426,7 +444,7 @@ defmodule MigrationTest do
     # Define adapter that works with both databases
     # (same schema, different connection strings)
 
-    {:ok, result} = PropertyDamage.Differential.run(
+    result = PropertyDamage.run(
       model: OrderModel,
       targets: [
         {SQLAdapter, name: "postgres",
@@ -440,19 +458,21 @@ defmodule MigrationTest do
       verbose: true
     )
 
-    case result.status do
-      :equivalent ->
+    case result do
+      {:ok, stats} ->
         IO.puts("Migration validated! Results are equivalent.")
         IO.puts("Performance comparison:")
-        IO.puts(PropertyDamage.Differential.Result.format(result, format: :metrics))
 
-      :divergent ->
-        IO.puts("DIVERGENCE DETECTED!")
-        IO.puts(PropertyDamage.Differential.Result.format(result, format: :full))
+        for {name, metrics} <- stats.metrics do
+          IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
+        end
 
-      :failed ->
-        IO.puts("A target failed before the comparison finished.")
-        IO.puts(PropertyDamage.Differential.Result.format(result, format: :full))
+      {:error, %PropertyDamage.FailureReport{kind: :diverged} = report} ->
+        IO.puts("DIVERGENCE DETECTED in #{report.variant.name}!")
+        IO.puts(PropertyDamage.FailureReport.reproduction_command(report))
+
+      {:error, %PropertyDamage.FailureReport{kind: kind, variant: variant}} ->
+        IO.puts("#{kind} in #{variant.name} before the comparison finished.")
     end
   end
 end
@@ -463,7 +483,7 @@ end
 Comparing v1 and v2 of an API:
 
 ```elixir
-PropertyDamage.Differential.run(
+PropertyDamage.run(
   model: UserModel,
   targets: [
     {HTTPAdapter, name: "v1",
@@ -512,6 +532,6 @@ PropertyDamage.Differential.run(
 
 ## Next Steps
 
-- See `PropertyDamage.Differential` module docs for full API
+- See the `PropertyDamage.run/1` docs for the full API, and `PropertyDamage.FailureReport` for the report
 - Read about [Chaos Engineering](chaos_engineering.md) for fault injection
 - Use [Integration Testing](integration_testing.md) for live service testing
