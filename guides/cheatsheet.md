@@ -14,7 +14,6 @@ defmodule MyApp.Commands.CreateOrder do
   #   weight: 2,
   #   observables: [OrderCreated],       # event types this command produces
   #   idempotent: false,                 # exclude from stutter (default true)
-  #   acceptable_retry_events: [OrderAlreadyExists],
   #   settle: %{timeout_ms: 5_000, interval_ms: 200, backoff: :exponential}
 
   defstruct [:amount, :currency]
@@ -174,6 +173,25 @@ end
 | `@check every: {5, :command}` | Every 5th command |
 | `@check every: {3, CreateOrder}` | Every 3rd `CreateOrder` |
 
+
+### @compare Syntax
+
+A boundary observation compares the targets of a run with two or more `targets:`.
+It is a public `def name(state, root)` in a projection, and a run with two or
+more targets and no `@compare` is an error at run start.
+
+| Syntax | Meaning |
+|--------|---------|
+| `@compare every: 1` | Compare after every root (the default) |
+| `@compare every: 5` | Compare after every 5th root |
+| `@compare every: {3, CreateOrder}` | Every 3rd `CreateOrder` root |
+| `@compare every: [ClearingReport, :end]` | After those roots, and at the final boundary |
+| `@compare using: &within_cent/2` | Agreement predicate `fn reference, variant -> :match \| {:mismatch, exception} \| boolean end` (default `&==/2`) |
+| `{:pending, reason}` (a return value) | The target is still catching up; waited for, never a disagreement |
+
+Helpers: `PropertyDamage.Equivalence.by_key/1`, `normalize/1`, `drop_keys/2`.
+The wait at a boundary is bounded by `compare: [converge_within: ms]`.
+
 ### @eventually Syntax
 
 | Option | Type | Description |
@@ -302,8 +320,13 @@ PropertyDamage.run(
     max_repeats: 2,           # max retries per stuttered command
     delay_ms: {0, 100},       # delay between retries (min, max) or integer
     commands: :all,            # :all or [Module1, Module2]
-    comparison: :strict        # :strict | {:structural, fields} | {:custom, fun}
+    using: &==/2               # fn original_events, retry_events -> :match | {:mismatch, e} | boolean end
   },
+
+  # Several targets (compared through the model's @compare observations)
+  concurrency: :serial,      # :serial | :parallel
+  compare: [converge_within: 5_000], # ms a boundary waits for agreement
+  latency: false,            # true measures per-target latency (:serial only)
 
   # Callbacks
   on_failure: fn report -> IO.inspect(report) end,

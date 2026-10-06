@@ -430,8 +430,7 @@ use PropertyDamage.Command,
   execution: :probe,                       # :sync (default) | :probe | :async
   shrink: :prefer_remove,                   # read-only commands are pruned first
   observables: [OrderCreated, OrderRejected], # event types this command can produce
-  idempotent: false,                        # exclude from stutter testing (default true)
-  acceptable_retry_events: [OrderAlreadyExists] # acceptable alternative stutter responses
+  idempotent: false                         # exclude from stutter testing (default true)
 ```
 
 Each key has a sensible default, so you only declare what differs from the defaults.

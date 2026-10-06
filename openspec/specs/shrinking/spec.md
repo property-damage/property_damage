@@ -4,7 +4,7 @@
 
 Defines the two-phase shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
 
-Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets)
+Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors)
 
 ## Requirements
 
@@ -187,7 +187,7 @@ The system SHALL support re-running the shrinker over an already-shrunk failure 
 
 ### Requirement: Failure Signature
 
-The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned by `Shrinker.failure_signature/2`, where kind identifies the category of failure, name is `Failure.name/1` (the specific check for a check failure, the root command's module for a divergence, nil for other failures) and variant_index is the index of the target that failed. A signature rebuilt into a failure (`Failure.from_signature/2`) SHALL yield the same signature. `Shrinker.equivalent_failures?/2` SHALL compare `{reason, variant_index}` pairs.
+The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned by `Shrinker.failure_signature/2`, where kind identifies the category of failure, name is `Failure.name/1` (the specific check for a check failure, the `@compare` key `{projection, function}` for a divergence or a failure to converge, nil for other failures) and variant_index is the index of the target that failed. A signature rebuilt into a failure (`Failure.from_signature/2`) SHALL yield the same signature. `Shrinker.equivalent_failures?/2` SHALL compare `{reason, variant_index}` pairs.
 
 #### Scenario: Check failure signature
 - **WHEN** a failure is caused by a check violation
@@ -197,9 +197,15 @@ The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned b
 - **WHEN** a failure is caused by a non-check condition other than a divergence (e.g., adapter error, linearization failure)
 - **THEN** the signature SHALL contain the failure kind, nil for the check name and the variant index
 
-#### Scenario: Divergence signature names the root command
+#### Scenario: Divergence signature names the observation
 - **WHEN** a failure is a divergence
-- **THEN** the signature SHALL contain `:diverged`, the root command's module and the variant index (DR-045)
+- **THEN** the signature SHALL contain `:diverged`, the `@compare` key `{projection, function}` and the variant index (DR-046)
+- **AND** the `ComparisonMismatch` SHALL be detail and SHALL NOT be part of the signature
+
+#### Scenario: A failure to converge has a signature
+- **WHEN** a failure is a side still pending at the convergence bound
+- **THEN** the signature SHALL contain `:did_not_converge`, the `@compare` key and the variant index
+- **AND** `Failure.from_signature/2` SHALL rebuild a failure with the same signature
 
 #### Scenario: Check failure signature includes the check name
 - **WHEN** a failure is a named check failure (`@check` / `@check at:` check)
@@ -211,17 +217,27 @@ The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned b
 
 ### Requirement: Variant-Aware Shrinking (DR-045)
 
-The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run `setup_each/1`, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The reference target's sequence SHALL be the shrink target, because all targets run the same commands. A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:`, `equivalence:` and `check_mode:`.
+The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run `setup_each/1`, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The reference target's sequence SHALL be the shrink target, because all targets run the same commands. A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:` (`[converge_within: ms]`) and `check_mode:`. A candidate SHALL be judged by the primary failure of its run alone: `other_failures` SHALL NOT take part in the signature.
 
 #### Scenario: Divergence is shrunk
 - **WHEN** a run fails with kind `:diverged`
-- **THEN** the shrinker SHALL remove commands while the same variant still diverges from the reference, at a root command of the same module, at the same or an earlier root
+- **THEN** the shrinker SHALL remove commands while the same variant still diverges from the reference on the same `@compare` key, at the same or an earlier root
 - **AND** every candidate SHALL run in every target
 
-#### Scenario: A divergence at another command type is rejected
-- **GIVEN** a divergence at a command of type X in variant 1
-- **WHEN** a candidate diverges in variant 1 at a command of type Y
+#### Scenario: A failure to converge is shrunk
+- **WHEN** a run fails with kind `:did_not_converge`
+- **THEN** the shrinker SHALL remove commands while the same variant is still pending on the same key at the bound, at the same or an earlier root
+- **AND** every attempt SHALL wait the convergence bound at the failing boundary
+
+#### Scenario: A divergence on another observation is rejected
+- **GIVEN** a divergence on observation X in variant 1
+- **WHEN** a candidate diverges in variant 1 on observation Y
 - **THEN** the shrinker SHALL reject the candidate
+
+#### Scenario: The primary failure is the shrink target
+- **GIVEN** a run whose primary failure is in variant 1 and whose `other_failures` hold a failure in variant 2
+- **WHEN** a candidate fails in variant 1 with the primary's signature and variant 2 no longer fails
+- **THEN** the shrinker SHALL accept the candidate
 
 #### Scenario: Setup failures are not shrunk
 - **WHEN** a run fails with kind `:setup_failed`
@@ -234,8 +250,9 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 #### Scenario: Re-shrink with several targets
 - **WHEN** `shrink_further/2` is called
 - **THEN** it SHALL use `report.targets` by default
-- **AND** SHALL accept a `targets:` override with one or more entries and the options `concurrency:` and `equivalence:`
-- **AND** SHALL default `equivalence:` to the report's `equivalence` and re-shrink a stutter failure with the report's `stutter` configuration
+- **AND** SHALL accept a `targets:` override with one or more entries and the options `concurrency:` and `compare:`
+- **AND** SHALL default `compare:` to the report's `compare` and re-shrink a stutter failure with the report's `stutter` configuration
+- **AND** SHALL reject `equivalence:` with an error that names `@compare`
 - **AND** export file names SHALL hash the signature triple
 
 ### Requirement: Invalid Candidates Are Not Counterexamples (DR-045)

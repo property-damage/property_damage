@@ -1,6 +1,6 @@
 # DR-045: One Runner for One or More Targets
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-046: `Failure.Divergence` holds the `@compare` key, the two values and the mismatch instead of `reference_result` and `divergent_result`; `:execution_failed` is final, and `:did_not_converge` is now produced; `equivalence:` and `compare: :correctness | :performance | :both` are removed; persistence is version 10.
 **Date:** 2026-10-06
 
 ## Context

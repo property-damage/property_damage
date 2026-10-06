@@ -1,8 +1,8 @@
 # Idempotency Testing with Stutter
 
 PropertyDamage's stutter testing automatically retries commands against your SUT
-to verify idempotent behavior. This guide covers configuration, comparison modes,
-and writing commands that participate in idempotency testing.
+to verify idempotent behavior. This guide covers configuration, the `using:`
+predicate that compares a retry, and writing commands that participate in idempotency testing.
 
 ## Why Idempotency Matters
 
@@ -54,7 +54,7 @@ it.
 | `max_repeats` | `pos_integer` | `2` | Maximum retry count per stuttered command |
 | `delay_ms` | `integer \| {min, max}` | `{0, 100}` | Delay between retries in milliseconds |
 | `commands` | `:all \| [module]` | `:all` | Which commands to stutter |
-| `comparison` | see below | `:strict` | How to compare original and retry events |
+| `using` | `(original_events, retry_events -> answer)` | `&==/2` | How to compare original and retry events (see below) |
 
 ### Targeting Specific Commands
 
@@ -67,51 +67,93 @@ stutter: [
 ]
 ```
 
-## Comparison Modes
+## Comparing a Retry with `using:`
 
-### Strict (default)
+A retry agrees with the original when the `using:` predicate accepts it. The
+predicate is a 2-arity function called `using.(original_events, retry_events)`,
+with the same contract as `@compare`'s `using:` (see
+[Differential Testing](differential_testing.md#using-the-agreement-predicate)).
+It returns `:match` or `true` when the retry agrees, and `false`,
+`{:mismatch, "text"}` or `{:mismatch, exception}` when it does not.
 
-Events from the retry must exactly equal the original events:
+### Default: `==`
+
+Without `using:`, the retry events must equal the original events under `==/2`:
 
 ```elixir
-stutter: [comparison: :strict]
+stutter: [probability: 0.3]
 ```
 
-Use when your SUT returns identical responses on retry (e.g., same JSON body,
-same event payloads).
+Use when your SUT returns identical responses on retry (same JSON body, same
+event payloads).
 
-### Structural
+### Ignoring non-deterministic fields
 
-Ignore non-deterministic fields like timestamps or request IDs:
-
-```elixir
-stutter: [comparison: {:structural, [:timestamp, :updated_at, :request_id]}]
-```
-
-The framework drops the listed fields from both event sets before comparison.
-Two events that differ only in ignored fields are considered equivalent.
-
-### Custom
-
-Provide a function that receives the original and retry event lists:
+Strip the fields that legitimately differ with `PropertyDamage.Equivalence`:
 
 ```elixir
+import PropertyDamage.Equivalence
+
 stutter: [
-  comparison: {:custom, fn original_events, retry_events ->
-    if length(original_events) == length(retry_events) do
-      :match
-    else
-      {:mismatch, %{expected: original_events, actual: retry_events}}
-    end
-  end}
+  using: by_key(fn events -> drop_keys(events, [:timestamp, :updated_at, :request_id]) end)
 ]
 ```
 
-Return `:match` or `{:mismatch, details}`.
+`by_key/1` compares the two keys under `==/2` and keeps both in the mismatch, so
+a violation shows the events as the key function saw them.
+
+### Accepting an alternative answer
+
+A `CreateOrder` retry might return `OrderAlreadyExists` instead of
+`OrderCreated`: both are correct idempotent behavior. Write a predicate that
+accepts it:
+
+```elixir
+stutter: [
+  using: fn original, retry ->
+    cond do
+      original == retry -> :match
+      Enum.all?(retry, &match?(%OrderAlreadyExists{}, &1)) -> :match
+      true -> {:mismatch, "retry returned #{inspect(retry)}, expected #{inspect(original)}"}
+    end
+  end
+]
+```
+
+The mismatch is an exception: by default a `PropertyDamage.ComparisonMismatch`
+holding the original and the retry events, or the text you returned.
+
+The predicate is an ordinary function, so you can try it directly. Here
+`PropertyDamage.Equivalence.verdict/3` shows how the framework reads its answer:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+accept_already_exists = fn original, retry ->
+  if original == retry or Enum.all?(retry, &(&1 == :already_exists)),
+    do: :match,
+    else: {:mismatch, "retry differs"}
+end
+
+config = PropertyDamage.Stutter.parse_config(probability: 0.3, using: accept_already_exists)
+
+:match = PropertyDamage.Equivalence.verdict(config.using, [:created], [:already_exists])
+{:mismatch, %PropertyDamage.ComparisonMismatch{message: "retry differs"}} =
+  PropertyDamage.Equivalence.verdict(config.using, [:created], [:created, :created])
+
+# Without using:, events must be equal under ==/2
+default = PropertyDamage.Stutter.parse_config(probability: 0.3)
+:match = PropertyDamage.Equivalence.verdict(default.using, [:created], [:created])
+{:mismatch, %PropertyDamage.ComparisonMismatch{left: [:created], right: [:gone]}} =
+  PropertyDamage.Equivalence.verdict(default.using, [:created], [:gone])
+```
+
+The options `comparison:` (with `:strict`, `{:structural, _}`, `{:custom, _}`)
+and the command key `acceptable_retry_events:` are removed. Passing either is
+an error that names `using:`.
 
 ## Command Configuration
 
-Commands interact with stutter testing through two `command_spec/1` keys and one
+Commands interact with stutter testing through one `command_spec/1` key and one
 per-instance callback.
 
 ### `idempotent:` spec key
@@ -159,28 +201,6 @@ defmodule CreateOrder do
   end
 end
 ```
-
-### `acceptable_retry_events:` spec key
-
-Declare alternative event types that are valid on retry. A `CreateOrder` retry
-might return `OrderAlreadyExists` instead of `OrderCreated` -- both are correct
-idempotent behavior.
-
-```elixir
-defmodule CreateOrder do
-  use PropertyDamage.Command,
-    acceptable_retry_events: [OrderCreated, OrderAlreadyExists]
-
-  defstruct [:amount]
-
-  @impl true
-  def generator(_overrides), do: StreamData.fixed_map(%{amount: StreamData.integer(1..10_000)})
-end
-```
-
-When acceptable retry events are declared, the framework checks whether all
-retry event modules are either in the acceptable list or match the original
-event modules. Both count as a match.
 
 ## Adapter Integration
 
@@ -264,7 +284,9 @@ Command: CreateOrder
 ```
 
 In this example, the SUT created a second order on retry instead of returning
-an idempotent response.
+an idempotent response. The violation's `mismatch` field holds the exception the
+`using:` predicate produced (by default a `PropertyDamage.ComparisonMismatch`
+with the original and the retry events).
 
 Idempotency violations are **shrunk** like any other failure: the framework
 re-runs candidate sequences with stutter forced on so the violation reproduces
@@ -286,7 +308,9 @@ To debug violations:
 ## Full Example
 
 ```elixir
-# Run with stutter testing, ignoring timestamps in comparison
+# Run with stutter testing, ignoring timestamps in the comparison
+import PropertyDamage.Equivalence
+
 PropertyDamage.run(
   model: OrderModel,
   targets: [OrderApiAdapter],
@@ -295,7 +319,7 @@ PropertyDamage.run(
     probability: 0.3,
     max_repeats: 2,
     delay_ms: {10, 50},
-    comparison: {:structural, [:timestamp, :request_id]}
+    using: by_key(&drop_keys(&1, [:timestamp, :request_id]))
   ]
 )
 ```

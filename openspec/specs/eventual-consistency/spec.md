@@ -4,7 +4,7 @@
 
 Defines the settle retry logic, resource polling, state polling, and probe command semantics that enable the PropertyDamage framework to test eventually consistent systems where operations may not produce immediate results.
 
-Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-030 (Command-Correlated Injector Events -- liveness over a correlated set, poll-timeout locality), DR-044 (Variants and the Lockstep Scheduler -- pollers inside multi-target runs)
+Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-030 (Command-Correlated Injector Events -- liveness over a correlated set, poll-timeout locality), DR-044 (Variants and the Lockstep Scheduler -- pollers inside multi-target runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors -- convergence versus settle versus `@eventually`)
 
 ## Requirements
 
@@ -189,3 +189,27 @@ Probe commands SHALL represent read-only queries with settle semantics. During s
 #### Scenario: Probes prioritized during shrinking
 - **WHEN** the shrinker attempts to reduce a failing sequence
 - **THEN** probe commands SHALL be considered for removal before state-modifying commands
+
+### Requirement: Settle, Convergence and Eventually Are Three Waits (DR-046)
+
+The framework SHALL keep three waits apart, each with its own bound and its own failure. *Settle* is one system catching up with itself per adapter call, bounded by the command's `settle:` configuration. *Convergence* is the variants of a multi-target run reaching agreement at a boundary, bounded by `compare: [converge_within: ms]`. `@eventually` is a liveness predicate on one variant's projection state, bounded by its own `timeout:`. A report SHALL name which bound expired: a settle that ran out is an execution result of its command, a convergence that ran out is `:did_not_converge` or `:diverged`, and an `@eventually` that ran out is a poll timeout of kind `:check_failed`.
+
+The convergence loop (DR-046) SHALL drain and fold every variant's event queue and run the async checks at each iteration, so late events and poller events fold before the observations are evaluated again. A window of `@eventually` that expires while the loop runs SHALL be a check failure at once; a polling window that has not expired SHALL NOT keep a boundary from agreeing. A `:probe` root SHALL be re-read in every variant at each iteration, each re-read running under the root's own settle.
+
+#### Scenario: Convergence does not extend settle
+- **GIVEN** a `:probe` root with a per-command settle of 300 ms and `converge_within: 100`
+- **WHEN** the first read is stale
+- **THEN** the loop SHALL start a re-read that runs to its own settle
+- **AND** the report SHALL state the time waited, which exceeds the bound by at most that one iteration
+
+#### Scenario: An expired eventually window fails at once
+- **WHEN** an `@eventually` window expires while the convergence loop waits at a boundary
+- **THEN** the run SHALL fail with a poll timeout of kind `:check_failed` without waiting for `converge_within:`
+
+#### Scenario: A polling window does not block agreement
+- **WHEN** every `@compare` observation agrees and an `@eventually` window is still open
+- **THEN** the boundary SHALL be in agreement and the run SHALL continue
+
+#### Scenario: Late events fold before the next evaluation
+- **WHEN** an injector or poller delivers an event while the loop waits
+- **THEN** the loop SHALL fold the event and evaluate again without waiting for the full 50 ms cadence

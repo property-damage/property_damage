@@ -973,6 +973,44 @@ exactly-once. Detection is also observation-granular: a transient overshoot that
 invisible to the framework. The settled checkpoint covers every *persistent*
 overshoot fully.
 
+## Settle, Convergence and `@eventually`
+
+Three waits share this guide's subject, and each has its own bound and its own
+failure. Keep the words apart:
+
+| Term | Meaning |
+|------|---------|
+| settle | one system catching up with itself per adapter call (the per-command `settle:` map) |
+| convergence, the convergence loop | the variants reaching agreement at a boundary |
+| the convergence bound | `converge_within:` |
+| time to converge | the measured duration |
+| did not converge | a side still pending at the bound (`:did_not_converge`) |
+| diverged | ready sides that differ at the bound (`:diverged`) |
+
+**Settle** is local knowledge: "my system has not settled yet", so the adapter
+call is retried until it has or its own `settle:` timeout passes. It is how a
+`:probe` command waits for one system.
+
+**Convergence** applies to a run with two or more `targets:`. At each boundary
+where a `@compare` observation is scheduled, the framework evaluates the
+observation in every target and, while a side is `{:pending, reason}` or ready
+sides differ, drains and folds every target's event queue, runs the async
+checks, re-reads a `:probe` root in every target, and evaluates again, up to
+`compare: [converge_within: ms]` (default `5_000`). Each re-read of a probe root
+runs under that root's own `settle:`, so the loop can overshoot the bound by at
+most one iteration, and the report states the time waited. See
+[Differential Testing](differential_testing.md#the-convergence-loop).
+
+**`@eventually`** is a liveness predicate on one target's projection state with
+its own `timeout:`. A window that expires while the convergence loop waits is a
+check failure at once; a polling window that has not expired does not block
+agreement.
+
+The loop ends by convergence, by divergence, or by the bound expiring with a side still pending; only the third is did not converge.
+
+A report names the bound that expired, so "did not converge" is never mistaken
+for a settle timeout.
+
 ## Summary
 
 | Pattern | Use When | Implementation |

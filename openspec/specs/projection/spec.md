@@ -4,7 +4,7 @@
 
 Projections are the state management and invariant verification mechanism for stateful property-based tests. They serve a dual purpose: reducing commands and events into tracked state, and defining checks that verify invariants hold throughout test execution. A single behaviour supports both roles, from state-only projections that drive command generation to check-only projections that validate system correctness.
 
-Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs)
+Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors)
 
 ## Requirements
 
@@ -162,6 +162,44 @@ Projections SHALL support synchronous checks whose timing is a lifecycle phase b
 - **WHEN** a lifecycle-boundary check is detected
 - **THEN** its metadata includes the check name, type `:synchronous`, function name, and the normalized trigger spec recording the `at:` phase
 - **AND** the metadata shape is consistent with other synchronous checks (the `assert_` prefix is stripped from `name`)
+
+### Requirement: Boundary Observations via @compare (DR-046)
+
+Projections SHALL support boundary observations: public functions `def name(state, root)` decorated with `@compare`. A run with two or more targets compares its targets only through these functions. Each target evaluates the function on its own projection state with the root command as the second argument, and the value of every non-reference target is judged against the reference's. The observation's key is `{projection, name}`.
+
+`@compare` takes two options. `every:` is the schedule: `1` (default, every boundary), `N` (every Nth boundary), `{N, Module}` (every Nth root of that module), `Module` or `[Modules]` (after those roots) and `:end` or `[Modules, :end]` (the final boundary, compared after every target finalized its run). A key SHALL be compared at most once per boundary. `using:` is a 2-arity predicate called `using.(reference_value, variant_value)` that returns `:match`, `{:mismatch, exception}` or a boolean; it defaults to `&==/2` and MAY be any expression that evaluates to a 2-arity function.
+
+A boundary observation MAY return `{:pending, reason}` when its target will reach a comparable value with no further command, through asynchronous catch-up only. A pending side SHALL NOT be a disagreement.
+
+#### Scenario: A boundary observation is evaluated at its scheduled boundary
+- **GIVEN** a projection function marked `@compare every: CreateOrder`
+- **WHEN** a run with two targets completes a `CreateOrder` root
+- **THEN** both targets evaluate the function on their own projection state with that root as the second argument
+- **AND** the non-reference value is judged against the reference value by `using:`
+
+#### Scenario: The default predicate is equality
+- **GIVEN** a `@compare` without `using:`
+- **WHEN** two values are judged
+- **THEN** they agree if and only if `==/2` holds
+
+#### Scenario: A pending side is not a disagreement
+- **WHEN** one target's observation returns `{:pending, reason}` and the other returns a value
+- **THEN** the boundary is not in agreement yet
+- **AND** the result is neither a divergence nor a failure until the convergence bound expires
+
+#### Scenario: A misplaced @compare is a compile error
+- **WHEN** `@compare` precedes a private function, a function of another arity, `init/0` or `apply/2`, is combined with `@check` or `@eventually`, is repeated on one function, or has no function after it
+- **THEN** compilation fails with a message naming the problem
+
+#### Scenario: A using: that is not a 2-arity function is an error
+- **WHEN** `using:` is a literal that cannot be a 2-arity function
+- **THEN** compilation fails
+- **WHEN** `using:` is another expression that does not evaluate to a 2-arity function
+- **THEN** the run fails at run start, before any adapter setup
+
+#### Scenario: One target does not evaluate observations
+- **WHEN** a run has one target
+- **THEN** no `@compare` function is called
 
 ### Requirement: Check Detection and Metadata
 

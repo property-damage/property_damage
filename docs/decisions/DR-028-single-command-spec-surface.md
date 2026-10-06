@@ -1,6 +1,6 @@
 # DR-028: Single command_spec Surface for Static Command Metadata
 
-**Status:** Accepted (implemented)
+**Status:** Accepted (implemented). Amended by DR-046: `acceptable_retry_events:` is removed; a stutter `using:` predicate accepts an alternative retry answer.
 **Date:** 2026-06-29
 
 > Part of the served/servant clean-break campaign. Collapses the `Command` behaviour to one

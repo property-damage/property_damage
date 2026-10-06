@@ -27,7 +27,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Failure Export Hub**: Convert failures to portable artifacts (scripts, tests, notebooks)
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 - **Fault Injection (Nemesis)**: Built-in operations for network, resource, time, and process faults
-- **Differential Testing**: Run one sequence against several targets and compare their answers; a divergence is shrunk like any failure
+- **Differential Testing**: Run one sequence against several targets and compare the `@compare` observations of your projections; a divergence is shrunk like any failure
 
 ## Installation
 
@@ -1281,12 +1281,31 @@ IO.puts(PropertyDamage.Regression.format_batch_summary(summary))
 
 Compare multiple implementations by passing several `targets:` to `PropertyDamage.run/1`:
 every target runs the same command sequences, and the first target is the reference.
-A divergence is a failure: it is shrunk and reproduced, and `run/1` returns
-`{:error, report}` with `report.kind == :diverged` and `report.variant` naming the target.
-Use cases include oracle testing, performance comparison, migration validation, and
-regression testing.
+The targets are compared only through boundary observations: public projection
+functions marked `@compare`. A divergence is a failure: it is shrunk and reproduced,
+and `run/1` returns `{:error, report}` with `report.kind == :diverged` and
+`report.variant` naming the target. A target still catching up at the convergence
+bound (`compare: [converge_within: ms]`, default 5 seconds) is reported as
+`:did_not_converge`. Use cases include oracle testing, performance comparison,
+migration validation, and regression testing.
 
 ### Basic Usage
+
+Declare what must agree in a projection of the model:
+
+```elixir
+defmodule MyApp.Projections.Ledger do
+  use PropertyDamage.Model.Projection
+
+  # init/0 and apply/2 fold the balance each target reports
+
+  # Compared after every root; values agree under ==/2 unless using: says otherwise
+  @compare every: 1
+  def balance(state, _root), do: state.balance
+end
+```
+
+A run with two or more targets and no `@compare` in its model is an error at run start.
 
 ```elixir
 # Oracle testing - the first target is the reference implementation
@@ -1296,18 +1315,17 @@ PropertyDamage.run(
     ReferenceAdapter,
     {SUTAdapter, name: "new-impl"}
   ],
-  compare: :correctness,
   max_runs: 100
 )
 
-# Performance comparison
+# Latency comparison (the observations are still compared)
 PropertyDamage.run(
   model: MyModel,
   targets: [
     {RedisAdapter, name: "redis-backend"},
     {PostgresAdapter, name: "postgres-backend"}
   ],
-  compare: :performance
+  latency: true
 )
 
 # Same adapter, different configurations (e.g., staging vs prod)
@@ -1316,25 +1334,29 @@ PropertyDamage.run(
   targets: [
     {HTTPAdapter, name: "prod", config: %{base_url: "https://prod.example.com"}},
     {HTTPAdapter, name: "staging", config: %{base_url: "https://staging.example.com"}}
-  ],
-  compare: :correctness
+  ]
 )
 ```
 
-### Equivalence Strategies
+### Agreement Predicates
 
 ```elixir
-# Exact matching (default)
-compare: :correctness, equivalence: :exact
+# Equality (default)
+@compare every: 1
+def totals(state, _root), do: state.totals
 
-# Structural - ignores IDs, timestamps, UUIDs
-compare: :correctness, equivalence: :structural
+# Ignore identifiers and timestamps, or any other keys
+import PropertyDamage.Equivalence
+@compare using: by_key(fn v -> v |> normalize() |> drop_keys([:fees]) end)
+def orders(state, _root), do: state.orders
 
-# Custom comparison function
-compare: :correctness, equivalence: fn ref, target ->
-  ref.status == target.status && ref.amount == target.amount
-end
+# Custom predicate: :match, {:mismatch, exception} or a boolean
+@compare using: fn ref, target -> abs(ref - target) <= 1 end
+def total_cents(state, _root), do: state.total_cents
 ```
+
+A function may return `{:pending, reason}` while its target is still catching up: the
+comparison waits for it, up to the convergence bound.
 
 See [Differential Testing Guide](guides/differential_testing.md) for complete documentation.
 
@@ -1369,8 +1391,9 @@ benches/openapi_bench/
 ### oban_bench
 
 [Oban](https://hex.pm/packages/oban) on real Postgres: the eventual-consistency
-rung (`@eventually`, pollers, `external()` job ids). Provisions Postgres via
-Docker.
+rung (`@eventually`, pollers, `external()` job ids), plus a two-variant fixture
+that compares two runs of the same job queue through `@compare` observations,
+including a probe read that is stale at first. Provisions Postgres via Docker.
 
 ```
 benches/oban_bench/
@@ -1388,8 +1411,8 @@ benches/redis_bench/
 ### gitea_bench
 
 [Gitea](https://about.gitea.com) driven two ways (REST + Playwright UI) and
-compared by a differential oracle: the dual-transport rung. Provisions via
-Docker.
+compared through `@compare` observations of the forge's state and its label
+colors: the dual-transport rung. Provisions via Docker.
 
 ```
 benches/gitea_bench/
@@ -1474,7 +1497,8 @@ PropertyDamage
 ├── Comparison
 │   ├── Scheduler    - Runs one sequence on every target in lockstep
 │   ├── Variant      - One target's execution in its own process
-│   └── Comparison   - Equivalence strategies (exact, structural, custom)
+│   ├── Comparison   - Convergence loop over the `@compare` observations
+│   └── Equivalence  - `using:` predicate helpers (`by_key/1`, `normalize/1`, `drop_keys/2`)
 │
 └── Utilities
     ├── Persistence  - Save/load failures

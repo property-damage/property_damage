@@ -243,7 +243,8 @@ jobs:
       - run: mix test
 
   # Gitea bench drives the SAME model against two transports (REST API and a
-  # Playwright-driven UI) and compares them with PropertyDamage.Differential.
+  # Playwright-driven UI) and compares them through the model's @compare
+  # observations (the forge state and the label colors).
   # Unlike the other benches it is not run against service containers: it needs
   # two coordinated Gitea instances each with a bootstrapped admin, which its own
   # docker-compose + bench.db.up already provision (GitHub runners ship Docker

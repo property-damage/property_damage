@@ -237,6 +237,65 @@ maximum, a sticky flag) rather than snapshot, or a self-healed transient slips
 past. See the [Async and Eventual Consistency](async_and_eventual_consistency.md)
 guide for the safety/liveness pairing and the accumulator contract.
 
+## Comparing Targets with `@compare`
+
+A check looks at one run of one target. When a run has two or more `targets:`,
+the question "do they agree?" needs a function that both targets answer, and
+that function is a **boundary observation**: a public projection function
+`def name(state, root)` marked `@compare`. Each target evaluates it on its own
+projection state after a root, and every target's value is judged against the
+first target's (the reference's):
+
+```elixir
+defmodule Bank.Projections.Ledger do
+  use PropertyDamage.Model.Projection
+
+  # init/0 and apply/2 fold the balance each target reports
+
+  @compare every: 1
+  def balance(state, _root), do: state.balance
+end
+```
+
+`every:` takes the same schedule vocabulary as `@check` (`1`, `N`,
+`{N, Module}`, `Module`, `[Modules]`) plus `:end` for the final boundary.
+`using:` is a 2-arity predicate (default `&==/2`) returning `:match`,
+`{:mismatch, exception}` or a boolean. A function may return
+`{:pending, reason}` while its target is still catching up. A raise in a
+`@compare` function or a `using:` predicate is a check failure naming the
+observation. A `@compare` function cannot also carry `@check` or `@eventually`.
+
+The [Differential Testing](differential_testing.md) guide covers the schedule,
+the predicate helpers, `{:pending, reason}` and the convergence loop in full.
+
+### What `==` does not do
+
+`==` is what `assert a == b` uses, so authors are calibrated to it, and
+`using: &===/2` is the strict form. Five traps each produce a false
+"diverged":
+
+1. **List order.** Lists are ordered, and `normalize/1` does not sort. An
+   observation that returns a list whose order is not part of the contract
+   diverges when injector-delivered events were folded in a different order per
+   target. Return a map unless order is meant, or sort under
+   `by_key(&Enum.sort/1)`. The framework never sorts silently, because order is
+   sometimes the property under test.
+2. **Keyword lists.** Keyword lists compare as lists, so `[a: 1, b: 2]` and
+   `[b: 2, a: 1]` differ. Maps and `MapSet`s compare without regard to order.
+3. **Number coercion.** `==` coerces numbers: `100 == 100.0`. That hides an
+   integer-cents against float difference. Use `&===/2` when the
+   representation matters.
+4. **Value structs.** `Decimal`, `Money` and `DateTime` compare field by field:
+   `Decimal.new("1.0") != Decimal.new("1.00")`, and two `DateTime` values that
+   differ in microsecond precision or zone differ. Compare a key under
+   `by_key/1` instead.
+5. **Floats.** Floats differ in the last bit across implementations. Use a
+   tolerance predicate such as `fn a, b -> abs(a - b) <= 0.01 end`.
+
+Server-minted identifiers and timestamps break equality the same way: leave
+them out of the observation, or strip them with
+`PropertyDamage.Equivalence.normalize/1`.
+
 ## Tracking State for Checks
 
 Check projections can track their own state:
@@ -415,5 +474,6 @@ The authoritative report is still the `{:ok, report}` return value;
 ## Next Steps
 
 - [Debugging Failures](debugging_failures.md) - What to do when invariants catch bugs
+- [Differential Testing](differential_testing.md) - Comparing targets through `@compare`
 - [Chaos Engineering](chaos_engineering.md) - Testing resilience with nemesis
 - See `PropertyDamage.Suggestions` for invariant recommendations
