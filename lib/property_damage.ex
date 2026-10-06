@@ -794,7 +794,7 @@ defmodule PropertyDamage do
       _failure ->
         # The report carries the metrics measured up to this failed run, and
         # the entry counts of the runs before it (the report adds the counts
-        # of the run it describes).
+        # of the run it describes, up to that run's failing root).
         ctx = Map.put(ctx, :measured_metrics, campaign_metrics(ctx, acc.samples))
         handle_failure(ctx, lockstep_found(run, outcome, acc.fires, counts_before))
     end
@@ -1608,7 +1608,10 @@ defmodule PropertyDamage do
       compare_counts: found.compare_counts,
       expansion: report_expansion(ctx, found, shrunk_sequence),
       expansion_counts:
-        Expansion.merge_counts(found.expansion_counts, Expansion.counts(found.expansion)),
+        Expansion.merge_counts(
+          found.expansion_counts,
+          Expansion.counts(found.expansion, failure.root)
+        ),
       latency: Map.get(ctx, :latency, false),
       metrics: Map.get(ctx, :measured_metrics)
     )

@@ -206,9 +206,10 @@ defmodule PropertyDamage.Expansion do
 
   @doc false
   # Every target's concrete sequence for the linear `sequence`, generated from
-  # `run_seed`. Raises `ArgumentError` for a generation error (an entry of the
-  # wrong shape, an `overrides:` that raises, a root placeholder no single leaf
-  # produces), before any target is set up.
+  # `run_seed`. Raises `ArgumentError` for a generation error (an expansion
+  # function or an `overrides:` that raises, an entry of the wrong shape, a
+  # root placeholder no single leaf placeholder produces), before any target is
+  # set up.
   #
   # Options:
   #
@@ -495,7 +496,7 @@ defmodule PropertyDamage.Expansion do
 
   # The entries `fun` returns for the root, as `{sequence, weight, index}`.
   defp entries!(walk, base, fun) do
-    case fun.(base.root_command, base.state) do
+    case call_function!(base, fun) do
       entries when is_list(entries) ->
         entries
         |> Enum.with_index()
@@ -507,6 +508,23 @@ defmodule PropertyDamage.Expansion do
                 "(root #{base.root}) must return a list of expansions, got: " <>
                 inspect(other, limit: 8)
     end
+  end
+
+  # A function that raises for a root is a generation error naming the root,
+  # whatever it raised: in a shrink candidate (a root whose arguments were
+  # simplified outside the function's clauses, say) the candidate is invalid.
+  defp call_function!(base, fun) do
+    fun.(base.root_command, base.state)
+  rescue
+    e ->
+      reraise ArgumentError,
+              [
+                message:
+                  "expansions/0: the function for #{inspect(base.root_command.__struct__)} " <>
+                    "(root #{base.root}) raised #{inspect(e.__struct__)}: " <>
+                    Exception.message(e)
+              ],
+              __STACKTRACE__
   end
 
   defp entry!(_walk, _base, sequence, index) when is_list(sequence), do: {sequence, 1, index}
@@ -735,8 +753,9 @@ defmodule PropertyDamage.Expansion do
   # ==========================================================================
 
   # Each placeholder the root's simulation minted resolves, in a target that
-  # ran a rewrite, from the one leaf whose simulated events hold the same
-  # event module at the same field path.
+  # ran a rewrite, from the one leaf placeholder with the same event module and
+  # field path. Every matching placeholder is a candidate, so two matching
+  # events of one leaf are two candidates and fail generation as two leaves do.
   defp aliases!(walk, base, key, done, minted) do
     walk.registry
     |> PlaceholderRegistry.ids_at_position(Position.prefix(base.root))
@@ -747,9 +766,7 @@ defmodule PropertyDamage.Expansion do
 
   defp alias_leaf!(base, key, done, minted, root) do
     candidates =
-      minted
-      |> Enum.filter(&(&1.event_module == root.event_module and &1.path == root.path))
-      |> Enum.uniq_by(& &1.position)
+      Enum.filter(minted, &(&1.event_module == root.event_module and &1.path == root.path))
 
     case candidates do
       [leaf] ->
@@ -757,16 +774,17 @@ defmodule PropertyDamage.Expansion do
 
       _zero_or_several ->
         produced =
-          Enum.map_join(candidates, ", ", fn %{position: %{offset: leaf}} ->
-            "leaf #{leaf} (#{inspect(Enum.at(done, leaf).command.__struct__)})"
+          Enum.map_join(candidates, ", ", fn %{position: %{offset: leaf}, event_index: event} ->
+            "leaf #{leaf} (#{short(Enum.at(done, leaf).command.__struct__)}) event #{event}"
           end)
 
         leaves = Enum.map_join(done, ", ", &inspect(&1.command.__struct__))
 
         raise ArgumentError,
-              "expansions/0: #{key} (root #{base.root}) must produce the root's external() " <>
-                "field #{inspect(root.path)} of #{inspect(root.event_module)} from exactly one " <>
-                "leaf, so later commands can use it; " <>
+              "expansions/0: #{key} (#{inspect(base.root_command.__struct__)}, root " <>
+                "#{base.root}) must produce the root's external() field #{inspect(root.path)} " <>
+                "of #{inspect(root.event_module)} from exactly one leaf event, so later " <>
+                "commands can use it; " <>
                 if(candidates == [],
                   do: "no leaf of [#{leaves}] produces it",
                   else: "several do: #{produced}"
@@ -780,9 +798,13 @@ defmodule PropertyDamage.Expansion do
 
   @doc false
   # Generates a root sequence for each seed, realizes every target's
-  # expansions on it, and summarizes what the sample realized:
+  # expansions on it, and summarizes what the targets that pick expansions
+  # (`expansion: :random`) realized. A `:reference` target copies the first
+  # target's choices and an `:identity` target picks none, so neither is
+  # counted:
   #
-  #   realized    %{key => {leaf modules, count}}, counts summed over targets
+  #   pickers     the names of the targets that pick, in target order
+  #   realized    %{key => {leaf modules, count}}, counts summed over pickers
   #   offered     %{key => leaf modules}: every entry a function returned
   #   forced      the root modules forced to identity at every root a target
   #               chose at
@@ -793,12 +815,13 @@ defmodule PropertyDamage.Expansion do
   @spec sample(module(), [PropertyDamage.Target.t()], [integer()], keyword()) :: map()
   def sample(model, targets, seeds, opts \\ []) do
     generator = Generator.generate_sequence(model, Keyword.take(opts, [:max_commands]))
+    pickers = for %{expansion: :random, name: name} <- targets, do: name
 
     choices_and_warnings =
       for seed <- seeds do
         sequence = Generator.generate_value(generator, seed)
         expansion = expand(model, sequence, targets, seed)
-        choices = for {_name, %{choices: choices}} <- expansion.variants, c <- choices, do: c
+        choices = Enum.flat_map(pickers, &Map.fetch!(expansion.variants, &1).choices)
         {choices, expansion.warnings}
       end
 
@@ -815,6 +838,7 @@ defmodule PropertyDamage.Expansion do
       end
 
     %{
+      pickers: pickers,
       realized: realized,
       offered: chosen |> Enum.flat_map(& &1.offered) |> Map.new(),
       forced:
@@ -904,16 +928,22 @@ defmodule PropertyDamage.Expansion do
   @doc false
   # Per target name, per listed root module: how many times each entry was
   # realized, and `:forced` for a root that ran as itself because no entry
-  # could be. Roots no expansion applied to are not counted.
-  @spec counts(t() | nil) :: %{
+  # could be. Roots no expansion applied to are not counted. A failing run
+  # executed its roots up to the failing root (`failed_at`) only, so only
+  # those are counted; `failed_at` nil counts every root.
+  @spec counts(t() | nil, non_neg_integer() | nil) :: %{
           String.t() => %{module() => %{(String.t() | :forced) => pos_integer()}}
         }
-  def counts(nil), do: %{}
+  def counts(expansion, failed_at \\ nil)
 
-  def counts(%{variants: variants}) do
+  def counts(nil, _failed_at), do: %{}
+
+  def counts(%{variants: variants}, failed_at) do
     Map.new(variants, fn {name, %{choices: choices}} ->
+      executed = if failed_at, do: Enum.take(choices, failed_at + 1), else: choices
+
       {name,
-       Enum.reduce(choices, %{}, fn
+       Enum.reduce(executed, %{}, fn
          %{entry: nil}, acc ->
            acc
 

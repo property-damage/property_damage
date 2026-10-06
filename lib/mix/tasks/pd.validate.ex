@@ -51,10 +51,13 @@ defmodule Mix.Tasks.Pd.Validate do
   sequences and realizes every target's expansions on each, as a run does
   (without `--targets`, one `expansion: :random` target named after the
   adapter). It prints the seeds it used, every entry key with how often the
-  sample realized it (summed over the targets) or that it was never realized,
-  the roots forced to identity at every sampled root, and the leaf modules
-  realized. A generation error fails the validation; a `when:` or `weight:` on
-  a leaf is a warning.
+  sample realized it or that it was never realized, the roots forced to
+  identity at every sampled root, and the leaf modules realized. The counts are
+  summed over the targets that pick expansions (`expansion: :random`), and a
+  line names them; a `:reference` target copies the first target's choices and
+  is not counted again. When no target picks (every target is `:identity` or
+  `:reference`), one line says so. A generation error fails the validation; a
+  `when:` or `weight:` on a leaf is a warning.
 
   ## Examples
 
@@ -301,6 +304,7 @@ defmodule Mix.Tasks.Pd.Validate do
     IO.puts("")
     IO.puts("Expansions (sampled #{count} seed(s)):")
     IO.puts("  Seeds: #{Enum.join(sample.seeds, ", ")}")
+    print_pickers(sample.pickers)
 
     for {key, modules} <- Enum.sort(sample.offered) do
       leaves = Enum.map_join(modules, ", ", &short_module/1)
@@ -320,6 +324,22 @@ defmodule Mix.Tasks.Pd.Validate do
     for module <- Enum.sort(sample.leaves) do
       IO.puts("    #{inspect(module)}")
     end
+  end
+
+  defp print_pickers([]) do
+    IO.puts(
+      "  No target picks expansions (each is `expansion: :identity` or copies the " <>
+        "first target with `:reference`), so the sample realizes no entry"
+    )
+  end
+
+  defp print_pickers(names) do
+    targets =
+      if length(names) == 1, do: "1 target that picks", else: "#{length(names)} targets that pick"
+
+    IO.puts(
+      "  Counts are summed over #{targets} expansions: #{Enum.map_join(names, ", ", &inspect/1)}"
+    )
   end
 
   defp validate_model_only(model, verbose, strict) do

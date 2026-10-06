@@ -35,6 +35,13 @@ defmodule PropertyDamage.Export.StepPlan do
   # `flattened_index`. A setup command's produced externals are bound from its
   # response and wired into every step that consumes them, as a root
   # producer's are.
+  #
+  # A value is bound after the step that produced it in the reference's run.
+  # Steps and producers are matched by the position the producing command had
+  # when the sequence was generated, never by step number: a root that runs as
+  # several leaves moves the step numbers of every later root. A root that ran
+  # as leaves had its own values produced by one of its leaves (the reference's
+  # `aliases`), so those values are bound after that leaf's step.
 
   alias PropertyDamage.Export.HTTPSpec
   alias PropertyDamage.{FailureReport, Placeholder, RunTrace}
@@ -96,14 +103,16 @@ defmodule PropertyDamage.Export.StepPlan do
   """
   @spec build(FailureReport.t(), module() | nil) :: [Step.t()]
   def build(%FailureReport{} = report, adapter) do
-    root_steps = reference_steps(report)
+    choices = reference_choices(report)
+    root_steps = reference_steps(report, choices)
 
     commands =
       report.setup_commands ++ Enum.map(root_steps, & &1.command) ++ report.teardown_commands
 
     var_map = placeholder_var_map(commands)
-    extractions = producer_extractions(commands)
-    resolve = &resolved(&1, adapter, var_map, extractions)
+    extractions = producer_extractions(commands, aliases(choices))
+    root_ids = Map.new(choices || [], &{&1.root, &1.root_id})
+    resolve = &resolved(&1, adapter, var_map, extractions, root_ids)
 
     setup =
       report.setup_commands
@@ -152,7 +161,7 @@ defmodule PropertyDamage.Export.StepPlan do
 
   # The step with its HTTP view: the spec, its params and body with consumed
   # placeholders resolved to variables, and the externals it binds.
-  defp resolved(%Step{} = step, adapter, var_map, extractions) do
+  defp resolved(%Step{} = step, adapter, var_map, extractions, root_ids) do
     spec = get_http_spec(step.command, adapter)
 
     %{
@@ -161,33 +170,34 @@ defmodule PropertyDamage.Export.StepPlan do
         resolved_path_params: resolve_path_params(spec, var_map),
         resolved_query_params: resolve_query_params(spec, var_map),
         resolved_body: resolve_body(spec, step.command, var_map),
-        producer_bindings: producer_bindings(extractions, extraction_key(step))
+        producer_bindings: producer_bindings(extractions, generated_position(step, root_ids))
     }
+  end
+
+  # What the reference target ran at each root, as the report's trace records
+  # it; nil when the trace records no choices.
+  defp reference_choices(%FailureReport{} = report) do
+    reference = FailureReport.reference_target(report)
+    traced = report.trace && report.trace.expansion
+    if reference && is_map(traced), do: Map.get(traced, reference.name)
   end
 
   # The steps of the reference target: the report's own steps when the
   # reference is the target the report traces (or no root ran as an
   # expansion), else the plan laid out with the reference's choices.
-  defp reference_steps(%FailureReport{} = report) do
-    reference = FailureReport.reference_target(report)
-    traced = report.trace && report.trace.expansion
-
-    choices =
-      if reference && is_map(traced) && report.variant && report.variant.name != reference.name,
-        do: Map.get(traced, reference.name)
-
-    case choices do
-      nil ->
-        FailureReport.steps(report)
-
-      choices ->
-        RunTrace.build_steps(
-          report.trace.plan,
-          [],
-          report.trace.command_labels,
-          report.failed_at_index,
-          choices: choices
-        )
+  defp reference_steps(%FailureReport{} = report, choices) do
+    # Choices are recorded only when the report names a reference target.
+    if choices != nil and report.variant != nil and
+         report.variant.name != FailureReport.reference_target(report).name do
+      RunTrace.build_steps(
+        report.trace.plan,
+        [],
+        report.trace.command_labels,
+        report.failed_at_index,
+        choices: choices
+      )
+    else
+      FailureReport.steps(report)
     end
   end
 
@@ -271,10 +281,21 @@ defmodule PropertyDamage.Export.StepPlan do
     |> Enum.map(fn {%Placeholder{path: path}, var} -> {path, var} end)
   end
 
-  # Where a step's produced externals are filed: a root by its flattened
-  # index, a setup or teardown command by its phase and offset.
-  defp extraction_key(%Step{phase: :root, flattened_index: index}), do: index
-  defp extraction_key(%Step{phase: phase, position: position}), do: {phase, position.offset}
+  # The position the step's command had when the sequence was generated,
+  # which is where the placeholders it produces were minted: a leaf's and a
+  # setup or teardown command's own position, and for a root that ran as
+  # itself the position of its root id (a shrunk sequence keeps the ids of the
+  # roots it kept).
+  defp generated_position(%Step{position: %Position{section: :prefix, offset: i}}, root_ids),
+    do: Position.prefix(Map.get(root_ids, i, i))
+
+  defp generated_position(%Step{position: position}, _root_ids), do: position
+
+  # Every root placeholder the reference aliased to a leaf placeholder.
+  defp aliases(nil), do: %{}
+
+  defp aliases(choices),
+    do: Enum.reduce(choices, %{}, fn choice, acc -> Map.merge(acc, choice.aliases) end)
 
   # ============================================================================
   # Placeholder Wiring (DR-021)
@@ -305,30 +326,32 @@ defmodule PropertyDamage.Export.StepPlan do
     |> Map.new(fn {ph, name} -> {ph.id, name} end)
   end
 
-  # Map from a producing command to the `[{placeholder, var_name}]` it must
-  # extract from its response: a root by its linear index, a setup or teardown
-  # command by `{phase, offset}`.
+  # Map from a producing command's generated position to the
+  # `[{placeholder, var_name}]` it must extract from its response. A root
+  # placeholder in `aliases` is produced by the leaf its alias names.
   #
-  # Linear (`:prefix`) root producers are wired: in a linear sequence the
-  # prefix index equals the flattened command index a script iterates.
-  # Branch/suffix producers are omitted (standalone scripts are best-effort
-  # linear). Setup and teardown producers are wired by their own positions,
-  # which no root shares.
-  @spec producer_extractions([struct()]) :: %{
-          (non_neg_integer() | {:setup | :teardown, non_neg_integer()}) => [
-            {Placeholder.t(), String.t()}
-          ]
+  # Linear (`:prefix`) roots, leaves, and setup and teardown commands are
+  # wired. Branch/suffix producers are omitted (standalone scripts are
+  # best-effort linear).
+  @spec producer_extractions([struct()], %{Placeholder.id() => Placeholder.id()}) :: %{
+          Position.t() => [{Placeholder.t(), String.t()}]
         }
-  defp producer_extractions(commands) do
+  defp producer_extractions(commands, aliases) do
     commands
     |> placeholder_bindings()
     |> Enum.flat_map(fn {ph, _name} = binding ->
-      case ph.position do
-        %Position{section: :prefix, offset: offset} ->
-          [{offset, binding}]
+      position =
+        case Map.fetch(aliases, ph.id) do
+          {:ok, leaf_id} -> Placeholder.id_position(leaf_id)
+          :error -> ph.position
+        end
 
-        %Position{section: section, offset: offset} when section in [:setup, :teardown] ->
-          [{{section, offset}, binding}]
+      case position do
+        %Position{section: section} when section in [:prefix, :setup, :teardown] ->
+          [{position, binding}]
+
+        %Position{section: {:leaf, _root}} ->
+          [{position, binding}]
 
         _other ->
           []
@@ -349,6 +372,7 @@ defmodule PropertyDamage.Export.StepPlan do
   defp position_suffix(%Position{section: :suffix, offset: i}), do: "_s#{i}"
   defp position_suffix(%Position{section: :setup, offset: i}), do: "_setup#{i}"
   defp position_suffix(%Position{section: :teardown, offset: i}), do: "_teardown#{i}"
+  defp position_suffix(%Position{section: {:leaf, root}, offset: l}), do: "_#{root}_leaf#{l}"
   defp position_suffix(_), do: ""
 
   defp collect_placeholders(%Placeholder{} = ph), do: [ph]
