@@ -431,7 +431,7 @@ defmodule PropertyDamage.SetupCommandsRunTest do
                )
 
       for name <- ["a", "b"] do
-        assert stats.metrics[name].total_commands == stats.total_commands
+        assert stats.metrics[name].commands == stats.total_commands
       end
 
       assert_setup_ran(recorded(recorder), "a")

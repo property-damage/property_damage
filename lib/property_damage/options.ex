@@ -430,7 +430,7 @@ defmodule PropertyDamage.Options do
         "How the targets advance to each command boundary: `:serial` steps one " <>
           "target at a time in target order; `:parallel` steps every target at " <>
           "once (targets sharing a system need isolated slices through `config:`). " <>
-          "`latency: true` requires `:serial`."
+          "`latency:` requires `:serial`."
     ],
     compare: [
       type: {:custom, __MODULE__, :validate_compare, []},
@@ -443,26 +443,18 @@ defmodule PropertyDamage.Options do
       """
     ],
     latency: [
-      type: :boolean,
+      type: {:custom, __MODULE__, :validate_latency, []},
       default: false,
-      doc:
-        "Measure each target's latency per command (`execute/3` wall-clock) and return " <>
-          "the metrics per target in `stats.metrics`. Requires `concurrency: :serial`."
-    ],
-    metrics: [
-      type: {:list, {:in, [:latency, :throughput]}},
-      default: [:latency, :throughput],
-      doc: "Performance metrics to collect."
-    ],
-    percentiles: [
-      type: {:list, :pos_integer},
-      default: [50, 95, 99],
-      doc: "Latency percentiles to calculate."
-    ],
-    warmup_runs: [
-      type: :non_neg_integer,
-      default: 0,
-      doc: "Runs to discard before measuring latency."
+      doc: """
+      Measure each target's latency per command (`execute/3` wall-clock),
+      return the metrics per target in `stats.metrics` and, when given bounds,
+      judge them once after the last run. `true` measures with no bound; a
+      keyword list takes `warmup: n` (default `0`, the runs left out of the
+      metrics) and any of `p50`, `p95`, `p99` and `mean`, each a keyword list
+      of `max: {n, :milliseconds | :seconds | :minutes}` and/or
+      `max_ratio: ratio` (the target's statistic divided by the reference's;
+      needs at least two targets). Requires `concurrency: :serial`.
+      """
     ],
     check_mode: [
       type: {:in, [:disabled, :halt, :record, :log]},
@@ -593,6 +585,13 @@ defmodule PropertyDamage.Options do
   # raises a validation error that names the replacement.
   @retired_run_keys Map.merge(@retired_target_keys, %{
                       assertion_mode: :check_mode,
+                      metrics:
+                        "`metrics:` was removed; `latency:` measures p50, p95, p99, mean, min, " <>
+                          "max and the command counts of every target, so pass `latency: true`",
+                      percentiles:
+                        "`percentiles:` was removed; `latency:` reports p50, p95, p99 and the " <>
+                          "mean, so pass `latency: true`",
+                      warmup_runs: "`warmup_runs:` was replaced by `latency: [warmup: n]`",
                       execution:
                         "`execution:` was removed; every target runs in lockstep, " <>
                           "use `concurrency:` (`:serial`, the default, or `:parallel`)",
@@ -667,6 +666,7 @@ defmodule PropertyDamage.Options do
     validated
     |> reject_multi_target_branching!()
     |> reject_timed_parallel!()
+    |> reject_single_target_ratio!()
     |> validate_branching_bounds!()
   end
 
@@ -694,12 +694,163 @@ defmodule PropertyDamage.Options do
         key: :concurrency,
         value: :parallel,
         message:
-          "`latency: true` requires `concurrency: :serial`; " <>
+          "`latency:` requires `concurrency: :serial`; " <>
             "under `concurrency: :parallel` the targets execute at the same time, " <>
             "so their load would mix into each other's latency"
     end
 
     opts
+  end
+
+  # A ratio compares a target with the reference, so one target has nothing to
+  # compare with.
+  defp reject_single_target_ratio!(opts) do
+    budget = if is_list(opts[:latency]), do: opts[:latency], else: []
+
+    if length(opts[:targets]) < 2 and Enum.any?(budget, &ratio_bound?/1) do
+      raise NimbleOptions.ValidationError,
+        key: :latency,
+        value: opts[:latency],
+        message:
+          "`latency: [... max_ratio: ...]` compares each target with the reference, so it " <>
+            "needs at least two targets; got #{length(opts[:targets])} `targets:` entry. " <>
+            "Use `max:` to bound one target's latency"
+    end
+
+    opts
+  end
+
+  defp ratio_bound?({:warmup, _}), do: false
+  defp ratio_bound?({_statistic, bounds}), do: Keyword.has_key?(bounds, :max_ratio)
+
+  @latency_statistics [:p50, :p95, :p99, :mean]
+
+  @doc false
+  # `latency:` option type: `false`, `true` (measure, no bound) or a keyword
+  # list of `warmup: n` and statistic bounds, returned as `false` or
+  # `[warmup: n, statistic: bounds, ...]` with the warm-up filled in.
+  def validate_latency(false), do: {:ok, false}
+  def validate_latency(true), do: {:ok, [warmup: 0]}
+
+  def validate_latency(opts) when is_list(opts) do
+    with true <- Keyword.keyword?(opts) || latency_shape_error(opts),
+         :ok <- check_latency_keys(opts),
+         {:ok, warmup} <- fetch_warmup(opts),
+         {:ok, budget} <- validate_latency_budget(Keyword.delete(opts, :warmup)) do
+      {:ok, [warmup: warmup] ++ budget}
+    end
+  end
+
+  def validate_latency(other), do: latency_shape_error(other)
+
+  defp latency_shape_error(value) do
+    {:error,
+     "`latency:` must be `true`, `false` or a keyword list such as " <>
+       "`[warmup: 1, p95: [max_ratio: 1.5]]`, got: #{inspect(value)}"}
+  end
+
+  defp check_latency_keys(opts) do
+    keys = Keyword.keys(opts)
+
+    cond do
+      unknown = Enum.find(keys, &(&1 not in [:warmup | @latency_statistics])) ->
+        {:error,
+         "`latency:` has no key `#{unknown}`; the statistics are " <>
+           "`p50`, `p95`, `p99` and `mean`, and `warmup:` sets the runs left out"}
+
+      duplicate = Enum.find(keys, &(Enum.count(keys, fn key -> key == &1 end) > 1)) ->
+        {:error, "`latency:` lists `#{duplicate}` more than once"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp fetch_warmup(opts) do
+    case Keyword.get(opts, :warmup, 0) do
+      n when is_integer(n) and n >= 0 ->
+        {:ok, n}
+
+      other ->
+        {:error,
+         "`latency: [warmup: n]` must be a non-negative integer number of runs, " <>
+           "got: #{inspect(other)}"}
+    end
+  end
+
+  defp validate_latency_budget(statistics) do
+    Enum.reduce_while(statistics, {:ok, []}, fn {statistic, bounds}, {:ok, acc} ->
+      case validate_latency_bounds(statistic, bounds) do
+        {:ok, bounds} -> {:cont, {:ok, acc ++ [{statistic, bounds}]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_latency_bounds(statistic, bounds) when is_list(bounds) do
+    cond do
+      bounds == [] ->
+        {:error,
+         "`latency: [#{statistic}: []]` needs at least one bound: " <>
+           "`max: {n, unit}` or `max_ratio: ratio`"}
+
+      not Keyword.keyword?(bounds) ->
+        latency_bounds_error(statistic, bounds)
+
+      unknown = Enum.find(Keyword.keys(bounds), &(&1 not in [:max, :max_ratio])) ->
+        {:error,
+         "`latency: [#{statistic}: [#{unknown}: ...]]` is not a bound; " <>
+           "the bounds are `max:` (a duration) and `max_ratio:` (a ratio)"}
+
+      length(Keyword.keys(bounds)) != length(Enum.uniq(Keyword.keys(bounds))) ->
+        {:error, "`latency: [#{statistic}: ...]` lists a bound more than once"}
+
+      true ->
+        validate_latency_values(statistic, bounds)
+    end
+  end
+
+  defp validate_latency_bounds(statistic, bounds), do: latency_bounds_error(statistic, bounds)
+
+  defp latency_bounds_error(statistic, bounds) do
+    {:error,
+     "`latency: [#{statistic}: ...]` must be a keyword list of bounds " <>
+       "(`max:` and/or `max_ratio:`), got: #{inspect(bounds)}"}
+  end
+
+  defp validate_latency_values(statistic, bounds) do
+    Enum.reduce_while(bounds, {:ok, bounds}, fn {bound, value}, acc ->
+      case validate_latency_value(statistic, bound, value) do
+        :ok -> {:cont, acc}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_latency_value(_statistic, :max, {n, unit})
+       when is_integer(n) and n > 0 and unit in [:milliseconds, :seconds, :minutes],
+       do: :ok
+
+  defp validate_latency_value(statistic, :max, n) when is_integer(n) do
+    {:error,
+     "`latency: [#{statistic}: [max: #{n}]]` has no unit: the repo reads a bare integer as " <>
+       "seconds in adapter timeouts and as milliseconds in poller intervals, so write the " <>
+       "unit, for example `max: {#{n}, :milliseconds}`"}
+  end
+
+  defp validate_latency_value(statistic, :max, other) do
+    {:error,
+     "`latency: [#{statistic}: [max: ...]]` must be `{n, :milliseconds | :seconds | " <>
+       ":minutes}` with a positive integer n, got: #{inspect(other)}"}
+  end
+
+  defp validate_latency_value(_statistic, :max_ratio, ratio) when is_number(ratio) and ratio > 0,
+    do: :ok
+
+  defp validate_latency_value(statistic, :max_ratio, other) do
+    {:error,
+     "`latency: [#{statistic}: [max_ratio: ...]]` must be a positive number, " <>
+       "got: #{inspect(other)}"}
   end
 
   @doc false

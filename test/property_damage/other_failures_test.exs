@@ -184,7 +184,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       assert [_ | _] = others(report)
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 11::8, _checksum::32, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", 12::8, _checksum::32, _rest::binary>>} = File.read(path)
 
       assert {:ok, loaded} = Persistence.load(path)
       assert others(loaded) == others(report)
@@ -211,7 +211,7 @@ defmodule PropertyDamage.OtherFailuresTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 11}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, 12}} = Persistence.load(path)
     end
   end
 end

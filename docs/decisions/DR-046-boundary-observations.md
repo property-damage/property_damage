@@ -1,6 +1,6 @@
 # DR-046: Boundary Observations, the Convergence Loop and Adapter Errors
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-047: `latency:` gains a budget grammar (`warmup:`, `p50`, `p95`, `p99` and `mean` with `max:` and `max_ratio:`), `:latency_exceeded` is produced, and persistence is version 12.
 **Date:** 2026-10-06
 
 ## Context
@@ -134,6 +134,8 @@ comparable observation.
 14. **`latency: true` measures.** The old `compare: :performance | :both` is
     replaced by `latency: true | false` (default `false`), which measures each
     target's latency per command. It requires `concurrency: :serial`.
+    *Amended by DR-047: `latency:` also takes `warmup:` and a budget judged
+    once at campaign end.*
 15. **The failure name.** For `:diverged` and `:did_not_converge` the failure
     name is the `@compare` key. It is the shrinker identity's name, so
     `{kind, key, variant_index}` identifies the failure and a candidate that
@@ -209,5 +211,5 @@ comparable observation.
 ## Open questions
 
 - A budget grammar for `latency:` (a threshold per target) is not decided;
-  `latency: true` measures only.
+  `latency: true` measures only. *Decided by DR-047.*
 - Branching sequences run with one target only.

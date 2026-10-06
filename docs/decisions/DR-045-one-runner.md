@@ -1,6 +1,6 @@
 # DR-045: One Runner for One or More Targets
 
-**Status:** Accepted. Amended by DR-046: `Failure.Divergence` holds the `@compare` key, the two values and the mismatch instead of `reference_result` and `divergent_result`; `:execution_failed` is final, and `:did_not_converge` is now produced; `equivalence:` and `compare: :correctness | :performance | :both` are removed; persistence is version 10. Under `check_mode: :record`, a check failure at an earlier root, or at the same root in the same or an earlier target, is the primary failure and the divergence is listed in `other_failures`; it no longer replaces the divergence. Amended by DR-048: `setup_once/1`, `setup_each/1` and their teardowns are removed in favor of setup and teardown commands, `:setup_failed` carries a `Failure.Setup` with a cause, and persistence is version 11.
+**Status:** Accepted. Amended by DR-046: `Failure.Divergence` holds the `@compare` key, the two values and the mismatch instead of `reference_result` and `divergent_result`; `:execution_failed` is final, and `:did_not_converge` is now produced; `equivalence:` and `compare: :correctness | :performance | :both` are removed; persistence is version 10. Amended by DR-047: `metrics:`, `percentiles:` and `warmup_runs:` are removed (see the note under item 2) and `:latency_exceeded` is produced. Under `check_mode: :record`, a check failure at an earlier root, or at the same root in the same or an earlier target, is the primary failure and the divergence is listed in `other_failures`; it no longer replaces the divergence. Amended by DR-048: `setup_once/1`, `setup_each/1` and their teardowns are removed in favor of setup and teardown commands, `:setup_failed` carries a `Failure.Setup` with a cause, and persistence is version 11.
 **Date:** 2026-10-06
 
 ## Context
@@ -34,6 +34,8 @@ a note that two targets disagreed.
    options of `run/1`. `execution:` is an option error that names
    `concurrency:`. `compare: :performance | :both` with
    `concurrency: :parallel` is an option error.
+   *Amended by DR-047: `metrics:` and `percentiles:` were never applied and
+   are removed, and `warmup_runs:` is `latency: [warmup: n]`.*
 3. **The failure kinds.** The report's `kind` is one of:
    - `:check_failed`: a check failed in a variant. This includes
      `@eventually` timeouts and startup and finalization checks.
@@ -47,6 +49,8 @@ a note that two targets disagreed.
    `:did_not_converge` and `:latency_exceeded` are named in the type and
    documented for the features that will produce them. No run produces them
    yet.
+   *Amended by DR-047: `:latency_exceeded` is now produced, when a
+   `latency:` budget is breached at campaign end.*
 4. **`:execution_failed` is provisional.** It covers an adapter raise at a
    root in any run, an adapter error answer in a one-target run, and the
    nemesis, stutter, placeholder and unknown failures. With two or more

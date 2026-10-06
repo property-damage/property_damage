@@ -287,21 +287,21 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
 
       for name <- ["a", "b"] do
         metrics = result.metrics[name]
-        assert metrics.total_commands > 0
+        assert metrics.commands > 0
         # Each step folds through a projection that sleeps 40 ms per event.
-        assert metrics.latency_max < 20_000
+        assert metrics.max < 20_000
       end
     end
 
-    test "control: an adapter that sleeps shows in latency_min" do
+    test "control: an adapter that sleeps shows in min" do
       result =
         timed_run([
           {TimedStepAdapter, name: "a"},
           {TimedStepAdapter, name: "b", config: %{sleep_ms: 30}}
         ])
 
-      assert result.metrics["b"].latency_min >= 30_000
-      assert result.metrics["a"].latency_max < 20_000
+      assert result.metrics["b"].min >= 30_000
+      assert result.metrics["a"].max < 20_000
     end
   end
 end

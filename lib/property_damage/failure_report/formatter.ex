@@ -1,7 +1,7 @@
 defmodule PropertyDamage.FailureReport.Formatter do
   @moduledoc false
 
-  alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, LatencyMetrics, RunTrace, Sequence}
 
   @type format :: :terminal | :markdown | :json | :compact
 
@@ -227,6 +227,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
         :did_not_converge ->
           format_convergence_terminal(report, color)
 
+        :latency_exceeded ->
+          format_latency_terminal(report, color)
+
         _ ->
           reason = """
           #{label("Reason", color)}
@@ -337,6 +340,26 @@ defmodule PropertyDamage.FailureReport.Formatter do
     why = """
     #{yellow(color)}Why it failed:#{reset(color)} #{observation} did not converge within #{convergence.within_ms} ms at root #{convergence.root} in variant #{inspect(variant)}:
     it was still pending after the comparison waited #{convergence.waited_ms} ms.
+    """
+
+    {reason, why}
+  end
+
+  defp format_latency_terminal(report, color) do
+    latency = report.failure_reason.type
+    variant = variant_name(report)
+
+    reason = """
+    #{label("Type", color)}          Latency Exceeded
+    #{label("Target", color)}        #{cyan(color)}#{variant}#{reset(color)}
+    #{label("Statistic", color)}     #{latency.statistic}
+    #{label("Bound", color)}         #{latency.bound}
+    #{label("Verdict", color)}       #{LatencyMetrics.describe(latency)}
+    """
+
+    why = """
+    #{yellow(color)}Why it failed:#{reset(color)} #{LatencyMetrics.verdict(variant, latency)}.
+    The budget is judged once, over every measured run, so no single command is at fault.
     """
 
     {reason, why}

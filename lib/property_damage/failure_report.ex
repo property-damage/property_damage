@@ -59,8 +59,12 @@ defmodule PropertyDamage.FailureReport do
     adapter `{:error, _}` answer.
   - `:did_not_converge` - a target's boundary observation was still pending
     when the convergence bound expired.
-  - `:latency_exceeded` - a target exceeded a latency budget. No run produces
-    this kind yet.
+  - `:latency_exceeded` - a target's latency statistic exceeded a `latency:`
+    bound over the whole campaign. The campaign judges the budget once after
+    its last run, so the report is not localized to a command
+    (`failed_at_index: nil`) and is never shrunk (`shrink_iterations: 0`);
+    `original_sequence` and `shrunk_sequence` hold the last run's sequence for
+    the record, and `seed` and `run_number` that run's.
 
   ## Reproduction inputs
 
@@ -89,6 +93,12 @@ defmodule PropertyDamage.FailureReport do
   in the same order. It is `[]` when the run failed once. Shrinking keeps the
   reported failure only; the other failures of the shrunk run may differ.
 
+  `latency` holds the run's `latency:` option as given (`false` when off) and
+  `metrics` the latency metrics measured per target name, `%{target_name =>
+  metrics}` (see `PropertyDamage.run/1`): all of the campaign's measured runs
+  in a `:latency_exceeded` report, the runs measured up to the failure in a
+  report of another kind, and `nil` when `latency:` is off.
+
   `compare_counts` holds, per boundary observation `{projection, function}`,
   how many boundaries the failing run compared it at, how many it waited at,
   and the total time it waited (`%{compared_at:, waited_at:, waited_ms:}`),
@@ -97,7 +107,7 @@ defmodule PropertyDamage.FailureReport do
   `failure_message/1`, `idempotency_violation/1`, and `poll_timeout_info/1`.
   """
 
-  alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Failure, RunTrace, Sequence}
+  alias PropertyDamage.{ErrorOrigin, EventLog.Entry, Failure, LatencyMetrics, RunTrace, Sequence}
   alias PropertyDamage.Failure.Check
 
   # The `max_commands:` default of `PropertyDamage.run/1`; a reproduction
@@ -148,6 +158,8 @@ defmodule PropertyDamage.FailureReport do
           compare: [converge_within: pos_integer()],
           stutter: keyword() | nil,
           max_commands: pos_integer() | nil,
+          latency: false | true | keyword(),
+          metrics: %{String.t() => map()} | nil,
 
           # The execution record of the run this report describes (DR-033). The
           # deep structures (plan, event_log, executed) live here once;
@@ -227,6 +239,8 @@ defmodule PropertyDamage.FailureReport do
             compare: [converge_within: 5_000],
             stutter: nil,
             max_commands: nil,
+            latency: false,
+            metrics: nil,
             trace: nil,
             setup_commands: [],
             teardown_commands: [],
@@ -285,6 +299,9 @@ defmodule PropertyDamage.FailureReport do
   - `:stutter` - The run's normalized `stutter:` option (default `nil`, stutter
     off)
   - `:max_commands` - The run's `max_commands:` (default `nil`, not recorded)
+  - `:latency` - The run's `latency:` option as given (default `false`)
+  - `:metrics` - The latency metrics per target name measured so far (default
+    `nil`, `latency:` off)
   - `:linearization` - Selected linearization (parallel)
   """
   @spec new(keyword()) :: t()
@@ -362,6 +379,8 @@ defmodule PropertyDamage.FailureReport do
       compare: Keyword.get(opts, :compare, converge_within: @default_converge_within),
       stutter: Keyword.get(opts, :stutter),
       max_commands: Keyword.get(opts, :max_commands),
+      latency: Keyword.get(opts, :latency, false),
+      metrics: Keyword.get(opts, :metrics),
       trace: trace,
       setup_commands: Sequence.setup_commands(shrunk_sequence),
       teardown_commands: Sequence.teardown_commands(shrunk_sequence),
@@ -563,8 +582,8 @@ defmodule PropertyDamage.FailureReport do
 
   @doc """
   The report kind for a failure reason: `:check_failed` for every check kind,
-  `:diverged`, `:did_not_converge`, `:setup_failed`, and `:execution_failed`
-  for every execution and framework kind. `nil` for anything that is not a
+  `:diverged`, `:did_not_converge`, `:setup_failed`, `:latency_exceeded`, and
+  `:execution_failed` for every execution and framework kind. `nil` for anything that is not a
   `%Failure{}`.
   """
   @spec kind_of(term()) :: kind() | nil
@@ -574,6 +593,7 @@ defmodule PropertyDamage.FailureReport do
       :divergence -> :diverged
       :convergence -> :did_not_converge
       :setup -> :setup_failed
+      :latency -> :latency_exceeded
       class when class in [:execution, :framework] -> :execution_failed
     end
   end
@@ -676,6 +696,7 @@ defmodule PropertyDamage.FailureReport do
       :diverged -> "Divergence: #{format_name(check_name)}"
       :did_not_converge -> "Did Not Converge: #{format_name(check_name)}"
       :setup_failed -> "Setup Failed"
+      :latency_exceeded -> "Latency Exceeded: #{format_name(check_name)}"
       :unknown -> "Unknown Failure"
       # Total fallback (e.g. nil on a hand-built struct) so rendering/Inspect
       # never crashes with a CaseClauseError
@@ -799,8 +820,9 @@ defmodule PropertyDamage.FailureReport do
   It names the run's exact `targets:` list (see `targets_source/1`) and, for
   several targets, a `concurrency:` other than the default `:serial`. It also
   prints `max_commands:` when it differs from the default, `stutter:` when the
-  run used stutter, and `compare: [converge_within: ms]` when the run's
-  convergence bound is not the default.
+  run used stutter, `compare: [converge_within: ms]` when the run's
+  convergence bound is not the default, and `latency:` exactly as the run was
+  given it when it was not `false`.
   """
   @spec reproduction_command(t()) :: String.t()
   def reproduction_command(%__MODULE__{seed: seed, model: model, targets: targets} = report) do
@@ -812,6 +834,7 @@ defmodule PropertyDamage.FailureReport do
           "concurrency: #{inspect(report.concurrency)}",
         converge_within(report) != @default_converge_within &&
           "compare: [converge_within: #{converge_within(report)}]",
+        report.latency != false && "latency: #{inspect(report.latency)}",
         report.stutter && "stutter: #{inspect(report.stutter)}",
         report.max_commands not in [nil, @default_max_commands] &&
           "max_commands: #{report.max_commands}",
@@ -1076,6 +1099,9 @@ defmodule PropertyDamage.FailureReport do
     "#{format_name(c.key)} did not converge within #{c.within_ms} ms at root #{c.root} " <>
       "(waited #{c.waited_ms} ms); still pending: #{inspect(c.reason)}"
   end
+
+  defp message_for(%Failure{type: %Failure.Latency{} = latency}),
+    do: LatencyMetrics.describe(latency)
 
   defp message_for(%Failure{type: %Failure.Setup{cause: :adapter_setup, detail: detail}}),
     do: "Adapter setup failed (cause: adapter_setup): " <> extract_message(detail)

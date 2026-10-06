@@ -235,12 +235,11 @@ defmodule PropertyDamage do
   - `:compare` - `[converge_within: ms]`: how long the comparison of two or
     more targets waits at a boundary for their `@compare` observations to
     agree (default `[converge_within: 5_000]`)
-  - `:latency` - `true` measures each target's latency per command and
-    returns it in `stats.metrics` (default `false`); requires
-    `concurrency: :serial`
-  - `:metrics`, `:percentiles`, `:warmup_runs` - Parameters of
-    `latency: true`; `warmup_runs` (default 0) runs are left out of the
-    metrics
+  - `:latency` - Measures each target's latency per command and returns it
+    in `stats.metrics` (default `false`); requires `concurrency: :serial`.
+    `true` only measures. A keyword list adds `warmup: n` (the first `n` runs
+    are left out of the metrics, default `0`) and a budget judged once after
+    the last run (see "Latency Budget")
 
   ## Several Targets
 
@@ -252,7 +251,7 @@ defmodule PropertyDamage do
   with two or more targets whose model declares none is an error before any
   adapter is set up. Each target runs in its own process with its own event queue,
   injectors, mocks and pollers, and is set up and torn down once per run.
-  `latency: true` requires `concurrency: :serial`, because overlapping targets
+  `latency:` requires `concurrency: :serial`, because overlapping targets
   would mix their load into each other's latency.
 
   A model's fixtures are commands: `c:PropertyDamage.Model.setup_each/0` lists
@@ -268,6 +267,30 @@ defmodule PropertyDamage do
   candidate. A failing setup command, a check that fails on a setup
   command's event, or an `external()` a setup command produces that stays
   unresolved is a setup failure (`kind: :setup_failed`).
+
+  ## Latency Budget
+
+  `latency:` takes any of `p50`, `p95`, `p99` and `mean`, each a keyword list
+  with `max: {n, :milliseconds | :seconds | :minutes}` (an absolute bound, `n`
+  a positive integer) and/or `max_ratio: ratio` (a positive number: the
+  target's statistic divided by the reference's). A bare integer has no unit
+  and is an option error.
+
+      latency: [warmup: 2, p95: [max_ratio: 1.5], p99: [max: {800, :milliseconds}]]
+
+  The budget is judged once, after the last run passes, on the metrics of the
+  measured runs: every target is judged on `max:`, every target but the
+  reference on `max_ratio:` (which needs at least two targets). A breach ends
+  the campaign with a report of `kind: :latency_exceeded`. It names the target,
+  the statistic, the measured value and the limit, and it is neither shrunk nor
+  re-executed: latency is statistical, so re-run the seed to reproduce it. A run
+  that fails for another reason ends the campaign first, and the budget is
+  never judged.
+
+  The metrics of each target are `p50`, `p95`, `p99`, `mean`, `min` and `max`
+  in microseconds, `commands` (the commands timed) and `by_command` (`p95` and
+  `commands` per root command module). A target with no timed command has
+  `%{error: :no_data}` and is never judged.
 
   The first failure ends the campaign: a target whose boundary observation
   still differs from the reference's at the convergence bound
@@ -333,7 +356,7 @@ defmodule PropertyDamage do
     `seed`, `targets` (`[%{index:, name:}]`), the coverage keys,
     `compare_counts` (per `@compare` key `{projection, function}`: the
     boundaries it was compared at, waited at, and the time waited), and under
-    `latency: true` the latency `metrics` of each target, keyed by target name
+    `latency:` the latency `metrics` of each target, keyed by target name
   - `{:error, failure_report}` - A run failed; see `PropertyDamage.FailureReport`
     for its `kind` and the failing `variant`. A target whose adapter `setup/1`
     fails is a report of kind `:setup_failed`
@@ -390,6 +413,10 @@ defmodule PropertyDamage do
   """
   @spec run(keyword()) :: {:ok, stats()} | {:error, failure_report()}
   def run(opts) do
+    # The reproduction command prints `latency:` as the caller wrote it, which
+    # validation normalizes away.
+    latency_given = Keyword.get(opts, :latency, false)
+
     # Validate options with NimbleOptions - applies defaults and provides helpful errors
     opts = Options.validate_run!(opts)
 
@@ -457,8 +484,9 @@ defmodule PropertyDamage do
       coverage: opts[:coverage],
       concurrency: opts[:concurrency],
       compare: opts[:compare],
-      warmup_runs: opts[:warmup_runs],
-      measure_latency: opts[:latency]
+      measure_latency: opts[:latency] != false,
+      latency: latency_given,
+      latency_budget: opts[:latency]
     }
 
     # Validate configuration against every target's adapter and injectors
@@ -570,7 +598,8 @@ defmodule PropertyDamage do
           total_commands: 0,
           setup_commands: 0,
           teardown_commands: 0,
-          samples: []
+          samples: [],
+          last_run: nil
         }
 
         run_loop(ctx, 0, acc)
@@ -578,6 +607,27 @@ defmodule PropertyDamage do
   end
 
   defp run_loop(ctx, run_number, acc) when run_number >= ctx.max_runs do
+    metrics = campaign_metrics(ctx, acc.samples)
+
+    case judge_latency(ctx, metrics) do
+      [] -> finish_campaign(ctx, acc, metrics)
+      breaches -> report_failure(ctx, latency_report(ctx, acc, metrics, breaches))
+    end
+  end
+
+  defp run_loop(ctx, run_number, acc) do
+    case run_once(ctx, run_number, acc) do
+      {:pass, acc} -> run_loop(ctx, run_number + 1, acc)
+      {:error, _failure} = error -> error
+    end
+  end
+
+  defp judge_latency(%{latency_budget: budget} = ctx, metrics) when is_list(budget),
+    do: LatencyMetrics.judge(ctx.targets, metrics, budget)
+
+  defp judge_latency(_ctx, _metrics), do: []
+
+  defp finish_campaign(ctx, acc, metrics) do
     stats =
       %{
         runs: ctx.max_runs,
@@ -589,7 +639,7 @@ defmodule PropertyDamage do
       }
       |> put_coverage_stats(acc)
       |> Map.put(:compare_counts, acc.compare_counts)
-      |> put_metrics(ctx, acc.samples)
+      |> put_metrics(metrics)
 
     Reporter.emit(ctx.reporter, fn ->
       %RunResult{
@@ -597,18 +647,50 @@ defmodule PropertyDamage do
         runs_completed: ctx.max_runs,
         total_commands: acc.total_commands,
         seed: ctx.seed,
-        invariants: invariant_summary(acc.fires, ctx.model)
+        invariants: invariant_summary(acc.fires, ctx.model),
+        metrics: metrics
       }
     end)
 
     {:ok, stats}
   end
 
-  defp run_loop(ctx, run_number, acc) do
-    case run_once(ctx, run_number, acc) do
-      {:pass, acc} -> run_loop(ctx, run_number + 1, acc)
-      {:error, _failure} = error -> error
-    end
+  # The budget is judged once, after every run passed, so the report is not
+  # localized to a command and nothing is shrunk or re-executed. It records the
+  # last run's sequence, seed and number.
+  defp latency_report(ctx, acc, metrics, [{target, failure} | rest]) do
+    last = acc.last_run
+
+    FailureReport.new(
+      seed: last.run_seed,
+      run_number: last.run_number,
+      original_sequence: last.sequence,
+      shrunk_sequence: last.sequence,
+      plan_source: :generated,
+      source_revision: RunTrace.source_revision(),
+      run_nonce: ctx.run_nonce,
+      mint_epoch: 0,
+      failed_at_index: nil,
+      failure_reason: failure,
+      kind: :latency_exceeded,
+      variant: variant_of(target),
+      shrink_iterations: 0,
+      shrink_time_ms: 0,
+      model: ctx.model,
+      targets: ctx.target_entries,
+      concurrency: ctx.concurrency,
+      compare: ctx.compare,
+      stutter: ctx.stutter,
+      max_commands: ctx.max_commands,
+      check_fires: acc.fires,
+      compare_counts: acc.compare_counts,
+      other_failures:
+        for({other, other_failure} <- rest) do
+          %{variant: variant_of(other), root: nil, failure: other_failure}
+        end,
+      latency: ctx.latency,
+      metrics: metrics
+    )
   end
 
   # One run: generate its sequence (setup commands, roots and teardown
@@ -676,7 +758,7 @@ defmodule PropertyDamage do
         _ -> acc
       end
 
-    acc = record_sample(acc, ctx, run.run_number, outcome)
+    acc = record_sample(acc, ctx, run, outcome)
 
     acc = %{
       acc
@@ -690,10 +772,13 @@ defmodule PropertyDamage do
            acc
            | total_commands: acc.total_commands + Sequence.command_count(run.sequence),
              setup_commands: acc.setup_commands + length(run.sequence.setup),
-             teardown_commands: acc.teardown_commands + length(run.sequence.teardown)
+             teardown_commands: acc.teardown_commands + length(run.sequence.teardown),
+             last_run: Map.take(run, [:sequence, :run_seed, :run_number])
          }}
 
       _failure ->
+        # The report carries the metrics measured up to this failed run.
+        ctx = Map.put(ctx, :measured_metrics, campaign_metrics(ctx, acc.samples))
         handle_failure(ctx, lockstep_found(run, outcome, acc.fires))
     end
   end
@@ -835,21 +920,25 @@ defmodule PropertyDamage do
 
   defp variant_of(target), do: %{index: target.index, name: target.name}
 
-  # Under `latency: true`, each run at or after `warmup_runs`
-  # contributes its per-target latencies and observations to the metrics.
-  defp record_sample(%{samples: samples} = acc, ctx, run_number, outcome) do
-    if ctx.measure_latency and run_number >= ctx.warmup_runs do
-      sample = LatencyMetrics.sample(ctx.targets, outcome.latencies, outcome.observations)
+  # Under `latency:`, each run at or after the warm-up contributes its
+  # per-target timings to the metrics.
+  defp record_sample(%{samples: samples} = acc, ctx, run, outcome) do
+    if ctx.measure_latency and run.run_number >= Keyword.fetch!(ctx.latency_budget, :warmup) do
+      sample =
+        LatencyMetrics.sample(ctx.targets, outcome.latencies, Sequence.to_list(run.sequence))
+
       %{acc | samples: [sample | samples]}
     else
       acc
     end
   end
 
-  defp put_metrics(stats, %{measure_latency: false}, _samples), do: stats
+  # The metrics of the samples recorded so far, or `nil` when `latency:` is off.
+  defp campaign_metrics(%{measure_latency: false}, _samples), do: nil
+  defp campaign_metrics(ctx, samples), do: LatencyMetrics.calculate(ctx.targets, samples)
 
-  defp put_metrics(stats, ctx, samples),
-    do: Map.put(stats, :metrics, LatencyMetrics.calculate(ctx.targets, samples))
+  defp put_metrics(stats, nil), do: stats
+  defp put_metrics(stats, metrics), do: Map.put(stats, :metrics, metrics)
 
   # The run's sequence: its setup commands and roots from the run seed, then
   # its teardown commands drawn against the state the roots leave.
@@ -1434,7 +1523,9 @@ defmodule PropertyDamage do
       max_commands: ctx.max_commands,
       check_fires: found.fires,
       other_failures: Enum.map(found.other_failures, &other_failure/1),
-      compare_counts: found.compare_counts
+      compare_counts: found.compare_counts,
+      latency: Map.get(ctx, :latency, false),
+      metrics: Map.get(ctx, :measured_metrics)
     )
   end
 
@@ -1450,7 +1541,8 @@ defmodule PropertyDamage do
         outcome: :error,
         failure: failure_report,
         kind: failure_report.kind,
-        variant: failure_report.variant
+        variant: failure_report.variant,
+        metrics: failure_report.metrics
       }
     end)
 
@@ -1592,7 +1684,7 @@ defmodule PropertyDamage do
       is_nil(report.model) or is_nil(FailureReport.reference_target(report)) ->
         {:error, :missing_model_or_adapter}
 
-      report.kind == :setup_failed ->
+      report.kind in [:setup_failed, :latency_exceeded] ->
         {:ok, report}
 
       true ->

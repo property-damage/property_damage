@@ -1,6 +1,6 @@
 # DR-044: Variants and the Lockstep Scheduler
 
-**Status:** Accepted. Amended by DR-045: `Differential.run/1` and `Differential.Result` are deleted and `PropertyDamage.run/1` takes several targets; a divergence is a shrunk failure that ends the run, with no `divergences` list; the failure kinds gain `:diverged`. Amended by DR-046: there is no default root observation (variants are compared only through `@compare`), and an adapter error is a failure, never compared and continued; `compare: :performance | :both` is `latency: true`. Amended by DR-048: per-run setup gains the model's setup commands, which run after `Adapter.setup/1` and the `:startup` checks and before the first root, and `:setup_failed` gains the causes of `Failure.Setup`.
+**Status:** Accepted. Amended by DR-045: `Differential.run/1` and `Differential.Result` are deleted and `PropertyDamage.run/1` takes several targets; a divergence is a shrunk failure that ends the run, with no `divergences` list; the failure kinds gain `:diverged`. Amended by DR-046: there is no default root observation (variants are compared only through `@compare`), and an adapter error is a failure, never compared and continued; `compare: :performance | :both` is `latency: true`. Amended by DR-047: `latency:` takes `warmup:` and a budget. Amended by DR-048: per-run setup gains the model's setup commands, which run after `Adapter.setup/1` and the `:startup` checks and before the first root, and `:setup_failed` gains the causes of `Failure.Setup`.
 **Date:** 2026-10-05
 
 ## Context
@@ -38,6 +38,7 @@ multi-target run schedules them.
 4. **`compare: :performance` and `:both` require `concurrency: :serial`.**
    Under `:parallel` the targets' load would mix into each other's timings.
    The combination is an option error.
+   *Amended by DR-047: the option is `latency:`, which keeps the rule and also takes a budget.*
 5. **Setup and teardown run per run.** Each run calls `Adapter.setup/1` once
    per variant, in the variant's own process, one variant after another in
    target order. A barrier holds root 0 back until every setup has returned
