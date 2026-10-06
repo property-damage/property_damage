@@ -9,9 +9,10 @@ defmodule GiteaBench.Events do
   so a transport that silently drops or mangles an attribute is caught even in a
   single-transport run, not only by the cross-transport oracle.
 
-  Server-assigned ids are kept as plain fields: the API adapter fills the real id,
-  the UI adapter leaves it `nil`, and `:structural` equivalence ignores `:id`, so
-  they never cause a spurious divergence. Entities are linked across commands by
+  Server-assigned ids are kept as plain fields: the API adapter fills the real id
+  and the UI adapter leaves it `nil`. The two transports are compared through the
+  model's `@compare` observations, which never read an id, so ids never cause a
+  spurious divergence. Entities are linked across commands by
   stable, client-chosen names (login, `owner/name`, per-repo issue number), never
   by server id, so both transports navigate to the same logical entity.
   """

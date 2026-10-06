@@ -124,6 +124,15 @@ defmodule GiteaBench.State do
     end
   end
 
+  # --- Cross-transport observation --------------------------------------------
+
+  # With two targets, both forges must hold the same users, repos, issues
+  # (title, labels, open or closed) and label names after every command. The
+  # state is keyed by client-chosen names only, so it holds no server id and
+  # compares with plain equality.
+  @compare every: 1
+  def forge(state, _root), do: state
+
   # --- SUT-fidelity checks (non-vacuous even on a single transport) -------
 
   @check every: UserCreated, validates: :user_login_faithful

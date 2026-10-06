@@ -24,14 +24,14 @@ defmodule OpenapiBench.StutterTest do
 
   @moduletag timeout: 120_000
 
-  # probability 1.0 => every CreateValue is stuttered; strict => retry events
-  # must equal the first execution's exactly.
+  # probability 1.0 => every CreateValue is stuttered; the default `using:`
+  # predicate (`==`) requires the retry events to equal the first execution's
+  # exactly.
   @stutter [
     probability: 1.0,
     max_repeats: 1,
     delay_ms: 0,
-    commands: [CreateValue],
-    comparison: :strict
+    commands: [CreateValue]
   ]
 
   test "stutter catches the double-create when the SUT ignores the idempotency key" do

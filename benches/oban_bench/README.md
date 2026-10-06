@@ -37,6 +37,17 @@ What it validates:
     is green) and proves the `when:`-gated consumers actually ran via coverage
     counts.
 
+- **Two variants compared at every boundary** (`lib/oban_bench/compare.ex`,
+  `test/compare_test.exs`): one model runs against two targets on the same
+  database and queue, each isolated by the run id its `setup/1` mints. The
+  `@compare every: 1` observation `ObanBench.Compare.Counters.counters/2` is
+  pending until a variant's jobs have landed, so the comparison waits at each
+  boundary, then compares the applied values. A target's `worker:` config plants
+  a wrong amount (the run diverges) or a job that never lands (the run does not
+  converge within the bound). `ObanBench.Compare.ReadModel` adds `ReadCounter`,
+  a probe that reads a counter from the database: a read taken before the job
+  ran is pending, and the comparison re-reads the probe until it is fresh.
+
 ## Postgres
 
 The bench owns a dedicated, ephemeral Postgres container (see
@@ -97,6 +108,8 @@ any Postgres you provide; the container step is then skipped entirely.
   simulator, model
 - `lib/oban_bench/job_refs.ex` — the `external()` server-generated-id bench
   (producer/consumer commands, projection, simulator, model, adapter)
+- `lib/oban_bench/compare.ex` — the two-variant comparison bench (observations,
+  the `ReadCounter` probe, models, adapter with a configurable worker)
 - `lib/oban_bench.ex` — the adapter (enqueues jobs, starts resource pollers)
 
 ## Note: the invariant checked here
