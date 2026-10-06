@@ -42,7 +42,7 @@ The framework SHALL compare the targets of a run only through the boundary obser
 #### Scenario: A removed option is rejected
 
 - **WHEN** `run/1` is called with `equivalence:`, with `compare: :correctness`, `:performance` or `:both`, or with `compare: [settle: _]`
-- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` whose message names the replacement (`@compare` with `using:`, `latency: true`, or `compare: [converge_within: ms]`)
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` whose message names the replacement (`@compare` with `using:`, `latency: true` (or a `latency:` budget), or `compare: [converge_within: ms]`)
 - **AND** no command SHALL execute
 
 #### Scenario: Agreement is judged by using:
@@ -141,20 +141,79 @@ For every `@compare` key the framework SHALL count `compared_at` (the boundaries
 - **WHEN** a run has one target
 - **THEN** every declared key SHALL be present with zero counts
 
-### Requirement: Latency Measurement (DR-046)
+### Requirement: Latency Measurement and Budget (DR-046, DR-047)
 
-`latency: true` SHALL measure each target's latency per command and put the metrics in `stats.metrics`, keyed by target name, together with `metrics:`, `percentiles:` and `warmup_runs:`. `latency:` defaults to `false`. `latency: true` with `concurrency: :parallel` SHALL be an option error. A run SHALL NOT measure latency unless `latency: true` is given.
+`latency:` SHALL be `false` (the default), `true` or a keyword list: `warmup: n` (a non-negative integer, default `0`) and any of `p50`, `p95`, `p99` and `mean`, each a non-empty keyword list of `max: {n, :milliseconds | :seconds | :minutes}` (`n` a positive integer) and/or `max_ratio: ratio` (a positive number). A run SHALL NOT measure latency unless `latency:` is `true` or a keyword list. Latency SHALL be a measurement and SHALL NOT be a boundary observation. `latency:` SHALL require `concurrency: :serial`.
+
+The measurement SHALL be the wall-clock time of each `Adapter.execute/3` call per command, retries included, excluding the re-reads of the comparison and excluding setup and teardown commands. `stats.metrics` SHALL map each target name to `p50`, `p95`, `p99`, `mean`, `min` and `max` in microseconds, `commands` and `by_command` (`p95` and `commands` per root command module), over the measured runs only. A target with no timed command SHALL have `%{error: :no_data}` and SHALL NOT be judged.
+
+The budget SHALL be judged once, at campaign end, on the aggregates of the measured runs. It SHALL NOT be judged per run or at a boundary. `max:` SHALL apply to every target, the reference included. `max_ratio:` SHALL compare a target's statistic with the reference's statistic, SHALL apply to every target except the reference, and SHALL need at least two targets. A breach SHALL end the campaign with kind `:latency_exceeded`.
+
+#### Scenario: The grammar is accepted
+
+- **WHEN** `latency:` is `false`, `true`, or `[warmup: 5, p95: [max_ratio: 1.5], p99: [max: {800, :milliseconds}]]`
+- **THEN** the framework SHALL accept it
+
+#### Scenario: A malformed budget is rejected
+
+- **WHEN** `latency:` has a bare integer `max:` (`p95: [max: 800]`), an unknown statistic, an empty bound list, a repeated statistic or bound key, a `max_ratio:` that is not a positive number, or a `warmup:` that is not a non-negative integer
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` before any command executes
+- **AND** the message for a bare integer SHALL show the `{n, unit}` tuple to write
 
 #### Scenario: Latency requires serial concurrency
 
-- **WHEN** `latency: true` is configured together with `concurrency: :parallel`
+- **WHEN** `latency:` is `true` or a keyword list together with `concurrency: :parallel`
 - **THEN** the framework SHALL raise `NimbleOptions.ValidationError` naming `:concurrency` and stating that latency measurement requires `concurrency: :serial`
 - **AND** no command SHALL execute
 
-#### Scenario: Metrics under latency: true
+#### Scenario: Metrics under latency
 
 - **WHEN** a run with `latency: true` passes
-- **THEN** `stats.metrics` SHALL map each target name to its latency metrics, excluding the warm-up runs
+- **THEN** `stats.metrics` SHALL map each target name to its metrics, keyed `p50`, `p95`, `p99`, `mean`, `min`, `max`, `commands` and `by_command`
+
+#### Scenario: Warm-up runs are left out
+
+- **WHEN** `latency: [warmup: 2]` is configured
+- **THEN** the first two runs SHALL execute and SHALL NOT contribute to the metrics
+
+#### Scenario: The budget is judged once at campaign end
+
+- **WHEN** a run with a budget has a slow command in one run and passes every check
+- **THEN** the framework SHALL judge the budget after the last run, on the aggregates
+- **AND** a run that fails for another kind SHALL end the campaign first, the budget SHALL NOT be judged, and the report SHALL carry the metrics measured so far
+
+#### Scenario: An absolute bound
+
+- **WHEN** a target's `p95` exceeds `max: {n, unit}`
+- **THEN** the report SHALL have kind `:latency_exceeded`, name the target, the statistic, the measured value and the limit
+- **AND** this SHALL hold for the reference and for a run with one target
+
+#### Scenario: A ratio bound
+
+- **WHEN** a non-reference target's statistic divided by the reference's exceeds `max_ratio:`
+- **THEN** the report SHALL have kind `:latency_exceeded` and carry the reference's value
+- **AND** a zero reference with a positive statistic SHALL breach as infinity, and both zero SHALL NOT breach
+
+#### Scenario: The reference is judged on max only
+
+- **WHEN** the reference is slower than every other target
+- **THEN** a `max_ratio:` bound SHALL NOT report it
+
+#### Scenario: A ratio needs two targets
+
+- **WHEN** `max_ratio:` is configured with one target
+- **THEN** the framework SHALL raise `NimbleOptions.ValidationError` naming `:latency` before any adapter setup
+
+#### Scenario: Several breaches
+
+- **WHEN** more than one bound is breached
+- **THEN** the primary breach SHALL be the first in target order, then `p50`, `p95`, `p99`, `mean`, then `max` before `max_ratio`
+- **AND** the others SHALL be in `report.other_failures`
+
+#### Scenario: A latency failure is not shrunk
+
+- **WHEN** a budget is breached
+- **THEN** the framework SHALL NOT shrink or re-execute, the report SHALL have `failed_at_index` `nil` and no replay artifact, and `on_failure` SHALL be called once
 
 ### Requirement: Lockstep Concurrency (DR-044)
 
@@ -347,7 +406,7 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 
 ### Requirement: Failure Report Is the Result (DR-045, DR-046)
 
-`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `compare_counts`, `coverage` when requested, and `metrics` keyed by target name under `latency: true`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `compare` (`[converge_within: ms]`), `compare_counts`, `other_failures`, `stutter` and `max_commands`, and SHALL NOT carry `adapter` or `equivalence`. A setup failure (the adapter's `setup/1`, a setup command, or an unresolved `external()`) SHALL return a `:setup_failed` report whose `failed_at_index` is `nil` (DR-048). The report SHALL also carry `setup_commands` and `teardown_commands`, and `stats` SHALL count setup and teardown commands separately from `total_commands`. There SHALL be no `Differential.Result`.
+`PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `compare_counts`, `coverage` when requested, and `metrics` keyed by target name under `latency:`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `compare` (`[converge_within: ms]`), `compare_counts`, `other_failures`, `latency` (the option as given), `metrics` (per target name, `nil` when `latency:` is off), `stutter` and `max_commands`, and SHALL NOT carry `adapter` or `equivalence`. A setup failure (the adapter's `setup/1`, a setup command, or an unresolved `external()`) SHALL return a `:setup_failed` report whose `failed_at_index` is `nil` (DR-048). The report SHALL also carry `setup_commands` and `teardown_commands`, and `stats` SHALL count setup and teardown commands separately from `total_commands`. There SHALL be no `Differential.Result`.
 
 #### Scenario: Passing multi-target run
 

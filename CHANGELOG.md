@@ -34,8 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Boundary counters (DR-046).** `compare_counts` on `stats` and the failure
   report holds `compared_at`, `waited_at` and `waited_ms` per `@compare` key. The
   reporter prints it, and persistence stores it.
-- **`latency: true` (DR-046).** Measures each target's latency per command, with
-  `metrics:`, `percentiles:` and `warmup_runs:`. Requires `concurrency: :serial`.
+- **`latency: true` (DR-046).** Measures each target's latency per command
+  (`p50`, `p95`, `p99`, `mean`, `min`, `max`, `commands` and `by_command`).
+  Requires `concurrency: :serial`. DR-047 adds `warmup:` and a budget.
+- **The latency budget and failure kind `:latency_exceeded` (DR-047).**
+  `latency: [warmup: n, p50 | p95 | p99 | mean: [max: {n, unit}, max_ratio: r]]`
+  judges the aggregates once, after the last run: `max:` (a
+  `{n, :milliseconds | :seconds | :minutes}` tuple; a bare integer is an option
+  error) for every target, `max_ratio:` against the reference (two or more
+  targets). A breach is a `:latency_exceeded` failure naming the target,
+  statistic, value and limit. It is never shrunk, never re-executed and has no
+  replay artifact; re-run the seed to reproduce it. A run that fails for another
+  reason ends the campaign first and the budget is not judged. Reports carry
+  `latency` and `metrics`.
 - **`FailureReport.other_failures` and `Variant.retire/1` (DR-046).** An adapter
   `{:error, _}` or raise at a root is `:execution_failed` in every mode. A failure
   of a non-reference variant retires that variant at once (pollers finalized,
@@ -63,15 +74,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `comparison_result`.
 - **One runner for one or more targets (DR-045, DR-046).** `PropertyDamage.run/1`
   takes `targets:` with several entries; the first is the reference. New run
-  options: `concurrency:`, `compare: [converge_within: ms]`, `latency:`,
-  `metrics:`, `percentiles:` and `warmup_runs:`. `{:ok, stats}` carries
-  `targets`, `compare_counts` and, under `latency: true`, `metrics` keyed by
-  target name.
+  options: `concurrency:`, `compare: [converge_within: ms]` and `latency:`.
+  `{:ok, stats}` carries `targets`, `compare_counts` and, under `latency:`,
+  `metrics` keyed by target name.
 - **`FailureReport` fields `kind`, `variant`, `targets`, `concurrency`,
   `compare`, `compare_counts`, `other_failures`, `stutter` and `max_commands`
   (DR-045, DR-046).**
   `kind` is `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed`
-  or `:execution_failed` (`:latency_exceeded` is named for a later feature),
+  or `:execution_failed` or `:latency_exceeded` (DR-047),
   and always equals `kind_of(failure_reason)`.
   `variant` is `%{index, name}`. `targets` holds the run's entries, so
   `reproduction_command/1` prints the exact target list. It also prints
@@ -314,6 +324,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (DR-047): `latency:` takes its options inside the keyword list, and
+  the metrics are renamed, with no compatibility layer.**
+  - Removed run options: `metrics:` and `percentiles:` (accepted but never
+    applied; the statistics are fixed at `p50`, `p95`, `p99` and `mean`) and
+    `warmup_runs:` (now `latency: [warmup: n]`).
+  - Removed metrics: `error_count` and `error_rate` (always zero, because an
+    adapter error fails the run in every mode). The `latency_` prefix is
+    dropped (`latency_p95` is `p95`, and likewise `p50`, `p99`, `mean`, `min`,
+    `max`). A target's `total_commands` is `commands`.
+  - A new failure kind, `:latency_exceeded`, ends a campaign whose budget is
+    breached; code that matches on `kind` should handle it.
+  - Persistence format version 11 becomes 12: reports carry `latency` and
+    `metrics`. Loaders refuse version 11 and older.
 - **BREAKING (DR-046): targets are compared through `@compare` observations only, with no compatibility layer.**
   - Events are never compared across variants, and there is no default
     observation. A run with two or more targets whose model declares no
@@ -344,8 +367,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     placeholder consumer whose producer failed is never observed as
     `{:error, {:placeholder_resolution_failed, _}}`.
   - The failure `name` of a divergence is the `@compare` key, not the root
-    command's module. The latency `error_count` of a run that returns metrics is
-    always 0, because an adapter error ends the run.
+    command's module.
   - Persistence format version 9 becomes 10: reports carry `compare`,
     `compare_counts` and `other_failures`. Loaders refuse every version before 10.
 
@@ -384,7 +406,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`, and
     `reason` always a `%Failure{}`.
   - Persistence format version 8 becomes 9 for `.pd` reports and `.pdtrace`
-    traces (version 10 under DR-046). Loaders refuse version 8 files.
+    traces (version 10 under DR-046, version 12 under DR-047). Loaders refuse version 8 files.
   - `branching:` with two or more targets is an option error. Branching sequences,
     `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` and `RunTrace` stay
     one-target.

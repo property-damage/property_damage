@@ -175,7 +175,8 @@ shrinks the failing sequence before it reports it.
 
 ### 3. Measure Latency
 
-Compare implementations for latency and throughput with `latency: true`:
+Compare implementations for latency with `latency:`. `latency: true` measures
+and sets no bound; a keyword list adds a warm-up and a budget:
 
 ```elixir
 {:ok, stats} = PropertyDamage.run(
@@ -184,18 +185,18 @@ Compare implementations for latency and throughput with `latency: true`:
     {RedisAdapter, name: "redis", config: %{host: "localhost"}},
     {PostgresAdapter, name: "postgres", config: %{url: "postgres://localhost/db"}}
   ],
-  latency: true,
-  max_runs: 100,
-  warmup_runs: 10
+  latency: [warmup: 10, p95: [max_ratio: 1.5]],
+  max_runs: 100
 )
 
 for {name, metrics} <- stats.metrics do
-  IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
+  IO.puts("#{name}: p50=#{metrics.p50}µs, p99=#{metrics.p99}µs")
 end
 ```
 
-The model still declares its `@compare` observations: `latency: true` adds
-the measurement, not a different kind of comparison.
+The model still declares its `@compare` observations: `latency:` adds the
+measurement, not a different kind of comparison. A run passes only if the
+budget holds, as [Latency](#latency) describes.
 
 ### 4. Same Adapter, Different Configs
 
@@ -218,7 +219,7 @@ PropertyDamage.run(
     {DBAdapter, name: "with-cache", config: %{cache: true}},
     {DBAdapter, name: "no-cache", config: %{cache: false}}
   ],
-  latency: true  # Compare the observations and measure latency
+  latency: true  # Compare the observations and measure latency (no bound)
 )
 ```
 
@@ -438,8 +439,8 @@ PropertyDamage.run(
 )
 ```
 
-`latency: true` requires `concurrency: :serial`, because overlapping targets
-would mix their load into each other's latency.
+`latency:` (any value but `false`) requires `concurrency: :serial`, because
+overlapping targets would mix their load into each other's latency.
 
 The `execution:` option is removed. Passing it raises an option error that
 names `concurrency:`.
@@ -601,24 +602,79 @@ nothing is dropped. Which failure is primary for two failures at one root depend
 on target order, because the first target is the reference and the others are
 compared in order.
 
-### Latency metrics
+### Latency
 
-Under `latency: true`, `stats.metrics` maps each target name to its latency
-metrics (`latency_p50`, `latency_p95`, `latency_p99`, `latency_mean`,
-`latency_min`, `latency_max`, in microseconds, plus `total_commands`,
-`error_count` and `error_rate`):
+Latency is a measurement. It is never a boundary observation: projections do
+not see timings, a per-command number is noise, and judging it at each
+boundary would make runs flaky. The run times the wall-clock of each
+`Adapter.execute/3` call, retries included, and leaves out the comparison's
+re-reads and the setup and teardown commands.
+
+`stats.metrics` maps each target name to its metrics in microseconds: `p50`,
+`p95`, `p99`, `mean`, `min`, `max`, `commands` (the commands timed) and
+`by_command` (the `p95` and `commands` per root command module). A target
+with no timed command has `%{error: :no_data}` and is never judged.
 
 ```elixir
 {:ok, stats} = PropertyDamage.run(model: MyModel, targets: targets, latency: true)
 
 for {name, metrics} <- stats.metrics do
-  IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
+  IO.puts("#{name}: p50=#{metrics.p50}µs, p99=#{metrics.p99}µs")
 end
 ```
 
-An adapter error ends the run (see [Adapter errors](#adapter-errors)), so
-`error_count` is 0 in every metric a passing run returns. `latency: true`
-requires `concurrency: :serial`.
+With `verbose: true` the run also prints the metrics of every target side by
+side, one column per target, after the last run.
+
+#### The grammar
+
+```elixir
+latency: [warmup: 5, p95: [max_ratio: 1.5], p99: [max: {800, :milliseconds}]]
+```
+
+- `warmup: n` leaves the first `n` runs out of the metrics (default `0`).
+  Use it to skip cold caches and connection set-up.
+- `p50`, `p95`, `p99` and `mean` each take a keyword list of bounds. A
+  statistic may carry both.
+- `max: {n, unit}` is an absolute bound for every target, the reference
+  included. `unit` is `:milliseconds`, `:seconds` or `:minutes`, and `n` a
+  positive integer. A bare integer is an option error, because this library
+  reads a bare integer as seconds in adapter timeouts and as milliseconds in
+  poller intervals.
+- `max_ratio: r` bounds a target's statistic divided by the reference's. It
+  applies to every target but the reference and needs at least two targets;
+  with one target it is an option error at run start. Use `max:` to bound a
+  single target.
+- A statistic or a bound written twice, an empty bound list and any other key
+  are option errors.
+
+#### When the budget is judged
+
+The budget is judged once, after the last run, on the metrics of all measured
+runs. It is never judged per run or at a boundary. If a run fails for another
+reason (a check, a divergence, a setup or execution failure), that failure
+ends the campaign and the budget is not judged.
+
+A breach returns `{:error, report}` with `report.kind == :latency_exceeded`.
+The report names the target, the statistic, the measured value and the limit,
+and for a ratio the reference's value. It also carries `metrics` and
+`latency`:
+
+```
+variant postgres exceeded p95 max_ratio: 2.310 against 1.5 (reference p95 410.0 us)
+```
+
+If one bound is breached by several targets, or several bounds are breached,
+the primary failure is the first in target order, then `p50`, `p95`, `p99`,
+`mean`, and `max` before `max_ratio`. The others are in
+`report.other_failures`.
+
+A latency failure is not shrunk, not re-executed and has no replay artifact:
+the finding is statistical, so no shorter sequence reproduces it. Run the
+same `seed:` again to reproduce it. `on_failure` is still called once.
+
+If the reference statistic is zero, a positive value of the same statistic
+in another target breaches `max_ratio:` as infinity; two zeros do not breach.
 
 ### What stays one-target
 
@@ -691,9 +747,7 @@ configuration mistake. Fix it by giving each target its own config.
 | `:seed` | random | Random seed for reproducibility |
 | `:concurrency` | `:serial` | `:serial` or `:parallel` (see [Concurrency](#concurrency)) |
 | `:compare` | `[converge_within: 5_000]` | `converge_within:`, the convergence bound in integer milliseconds (see [The bound](#the-bound-converge_within)) |
-| `:latency` | `false` | `true` measures each target's latency per command; requires `concurrency: :serial` |
-| `:metrics`, `:percentiles` | | Parameters of the latency metrics |
-| `:warmup_runs` | 0 | Runs to discard before measuring |
+| `:latency` | `false` | `true` measures each target's latency per command; a keyword list adds `warmup: n` and a budget (see [Latency](#latency)); requires `concurrency: :serial` |
 | `:check_mode` | `:halt` | How a failing check is handled |
 | `:verbose` | false | Print progress |
 | `:on_progress` | nil | Progress consumer (see [Monitoring Progress](#monitoring-progress)) |
@@ -758,7 +812,7 @@ defmodule MigrationTest do
         {SQLAdapter, name: "cockroach",
          config: %{url: "postgres://localhost:26257/orders"}}
       ],
-      latency: true,
+      latency: [warmup: 5, p95: [max_ratio: 2.0]],
       max_runs: 500,
       verbose: true
     )
@@ -769,7 +823,7 @@ defmodule MigrationTest do
         IO.puts("Performance comparison:")
 
         for {name, metrics} <- stats.metrics do
-          IO.puts("#{name}: p50=#{metrics.latency_p50}µs, p99=#{metrics.latency_p99}µs")
+          IO.puts("#{name}: p50=#{metrics.p50}µs, p99=#{metrics.p99}µs")
         end
 
       {:error, %PropertyDamage.FailureReport{kind: kind} = report}
@@ -824,10 +878,15 @@ PropertyDamage.run(
    that must agree and leave out auto-generated fields, instead of
    comparing everything
 
-3. **Warmup for latency measurement** - Discard initial runs to avoid JIT effects
+3. **Warm up for latency measurement** - `latency: [warmup: n]` discards the
+   first runs, so cold caches do not enter the metrics
 
 4. **Keep `concurrency: :serial` for latency** - Overlapping targets mix
    their load into each other's latency
+
+   Bound the percentile that matches the claim: `p95` or `p99` for
+   user-facing delay, `mean` for throughput. One target takes `max:`; two or
+   more can take `max_ratio:` against the reference.
 
 5. **Make `setup/1` idempotent** - Every run calls it again, and a crashed run
    may have left state behind
@@ -844,7 +903,7 @@ PropertyDamage.run(
 ## What Differential Testing Detects
 
 - Implementation bugs (oracle testing)
-- Performance regressions (with `latency: true`)
+- Performance regressions (with a `latency:` budget)
 - Behavior changes between versions
 - Environment-specific bugs
 - Race conditions (with `concurrency: :parallel`, when the targets are isolated)

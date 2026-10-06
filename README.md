@@ -1316,7 +1316,8 @@ PropertyDamage.run(
   max_runs: 100
 )
 
-# Latency comparison (the observations are still compared)
+# Latency comparison (the observations are still compared); a keyword list
+# adds a budget, for example `[warmup: 5, p95: [max_ratio: 1.5]]`
 PropertyDamage.run(
   model: MyModel,
   targets: [

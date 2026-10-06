@@ -322,7 +322,7 @@ PropertyDamage.run(
   # Several targets (compared through the model's @compare observations)
   concurrency: :serial,      # :serial | :parallel
   compare: [converge_within: 5_000], # ms a boundary waits for agreement
-  latency: false,            # true measures per-target latency (:serial only)
+  latency: false,            # true measures; [warmup: n, p95: [max_ratio: r]] adds a budget (:serial only)
 
   # Callbacks
   on_failure: fn report -> IO.inspect(report) end,
