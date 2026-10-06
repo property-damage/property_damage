@@ -12,7 +12,8 @@ defmodule KratosBench.RegistrationMock do
       `{:ok, response, events}`. The HTTP response steers Kratos (a 4xx aborts the
       flow pre-persistence; a 2xx body can rewrite traits); the injected
       `RegistrationHandled` records what the mock decided (the model's expectation).
-    * `setup/1` / `teardown/1` — own the host HTTP listener Kratos calls.
+    * `setup/1` / `teardown/1` — make sure the host HTTP listener Kratos calls is
+      up, and point it at the current run's registry (or at none).
 
   ## How the mock reaches a run
 
@@ -24,9 +25,13 @@ defmodule KratosBench.RegistrationMock do
   `handle_request/2`, and pushes the returned events back (`push_events/3`) for the
   adapter to flush into the run.
 
-  A single Bandit listener is started once and kept up across sequences (the run
-  process owns it); each sequence points `Hub` at its own registry, so a request
-  always reaches the current sequence's mock.
+  A single Bandit listener is started on the first run's `setup/1` and kept up
+  for the rest of the campaign. The bench application owns it
+  (`KratosBench.Application` starts it under `ListenerSupervisor`), not the
+  process that runs `setup/1`: `PropertyDamage.run/1` calls `setup/1` once per
+  run in a process that exits when the run ends, and a listener linked to that
+  process would shut down with it. Each run points `Hub` at its own registry, so
+  a request always reaches the current run's mock.
   """
 
   use PropertyDamage.MockServiceAdapter
@@ -82,7 +87,6 @@ defmodule KratosBench.RegistrationMock do
 
   @impl true
   def setup(%{registry: registry} = config) do
-    Hub.ensure_started()
     ensure_listener(Map.get(config, :mock_listen_port, 4500))
     Hub.put(registry: registry)
     {:ok, %{}}
@@ -138,10 +142,17 @@ defmodule KratosBench.RegistrationMock do
     end
   end
 
+  # The listener runs under the application's ListenerSupervisor, so it outlives
+  # the run process that asked for it. It is temporary: a listener that died is
+  # started again by the next run's setup/1, never restarted behind the Hub's back.
   defp start_listener(port) do
-    {:ok, pid} =
-      Bandit.start_link(plug: __MODULE__.Router, scheme: :http, ip: {0, 0, 0, 0}, port: port)
+    listener =
+      Supervisor.child_spec(
+        {Bandit, plug: __MODULE__.Router, scheme: :http, ip: {0, 0, 0, 0}, port: port},
+        restart: :temporary
+      )
 
+    {:ok, pid} = DynamicSupervisor.start_child(__MODULE__.ListenerSupervisor, listener)
     Hub.put(listener: pid)
     :ok
   end
@@ -165,16 +176,12 @@ defmodule KratosBench.RegistrationMock do
 
   defmodule Hub do
     @moduledoc false
-    # Holds the current sequence's registry pid and the shared listener pid. Owned
-    # by the run/test process (linked), so it survives across sequences.
+    # Holds the current run's registry pid and the shared listener pid. Started
+    # by KratosBench.Application, so it outlives every run.
     use Agent
 
-    def ensure_started do
-      case Process.whereis(__MODULE__) do
-        nil -> Agent.start_link(fn -> %{registry: nil, listener: nil} end, name: __MODULE__)
-        pid -> {:ok, pid}
-      end
-    end
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{registry: nil, listener: nil} end, name: __MODULE__)
 
     def put(fields), do: Agent.update(__MODULE__, &Map.merge(&1, Map.new(fields)))
     def get, do: Agent.get(__MODULE__, & &1)
