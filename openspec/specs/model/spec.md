@@ -4,7 +4,7 @@
 
 Models orchestrate stateful property-based tests by defining which commands run, when they are valid, how they are parameterized, and the test lifecycle. A model ties together commands, projections, and optional simulators without knowing transport details or command internals.
 
-Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-048 (Setup and Teardown Commands)
+Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands)
 
 ## Requirements
 
@@ -24,15 +24,16 @@ Models SHALL implement two required callbacks: `commands/0` returning a list of 
 
 ### Requirement: Command Specification Formats
 
-Models SHALL accept commands in multiple formats. All formats SHALL be normalized to a consistent internal representation of `{weight, module, spec}` tuples.
+Models SHALL accept commands as a bare module, as `{Module, opts}` with a keyword list, or as a map with a `:command` key. All formats SHALL be normalized to a consistent internal representation of `{weight, module, spec}` tuples.
 
 #### Scenario: Bare module format
 - **WHEN** a command is specified as a bare module atom (e.g., `CreateOrder`)
 - **THEN** it is normalized with weight 1 and the command's default spec
 
-#### Scenario: Tuple with integer weight (legacy)
-- **WHEN** a command is specified as `{Module, weight}` where weight is a positive integer
-- **THEN** it is normalized with the given weight and the command's default spec
+#### Scenario: Tuple with a bare integer is rejected
+- **WHEN** a command is specified as `{Module, 3}` where the second element is an integer
+- **THEN** the framework SHALL raise an `ArgumentError` that names the module and `weight:` and says to write `{Module, weight: 3}` (DR-049)
+- **AND** the entry SHALL NOT be accepted with the integer treated as a weight
 
 #### Scenario: Tuple with keyword options
 - **WHEN** a command is specified as `{Module, opts}` where opts is a keyword list
@@ -191,6 +192,112 @@ A model that defines `setup_once/1`, `setup_each/1`, `teardown_each/1`, `teardow
 #### Scenario: A nemesis among the setup commands
 - **WHEN** `setup_each/0` lists a nemesis module
 - **THEN** validation fails with an error that names the callback and the module
+
+### Requirement: Expansions Callback (DR-049)
+
+A model MAY implement `expansions/0`, returning `[{Root, fun}]` with one pair per root command that has expansions. `fun` SHALL take the root as generated and the target's simulated state at that root, and SHALL return a plain list of entries. An entry SHALL be a sequence or `{sequence, weight: n}` with `n` a positive integer (default 1). A sequence SHALL be a list of command specs in the grammar that `commands/0`, `setup_each/0` and `teardown_each/0` use. The first sentence of the callback's documentation SHALL state the contract: every expansion of a root means the same as the root once the root is done, under every `@compare` value of the model. A root that `expansions/0` does not list SHALL run as itself, and a model without the callback SHALL run every root as itself.
+
+#### Scenario: A listed root runs as one of its entries
+- **GIVEN** a model whose `expansions/0` lists `Incr` with the entries `[incr]` and a two-leaf rewrite
+- **WHEN** a run generates an `Incr` root
+- **THEN** each target SHALL run either the root alone or the two leaves, as its `expansion:` option chooses
+
+#### Scenario: An unlisted root runs as itself
+- **GIVEN** a model whose `expansions/0` lists only `Incr`
+- **WHEN** a run generates a `GetKey` root
+- **THEN** every target SHALL run `GetKey` as itself
+
+#### Scenario: The identity is written as the received struct
+- **WHEN** an entry is the received root struct alone (`[root]` or `{[root], weight: 3}`)
+- **THEN** the entry SHALL run the root as itself
+- **AND** the framework SHALL NOT add an identity that the function did not list
+
+#### Scenario: A misplaced or foreign struct is a generation error
+- **WHEN** the received struct appears in a sequence beside other entries, or a struct other than the received one appears as an entry
+- **THEN** generation SHALL fail with an error that names the root, the entry index and the position
+
+#### Scenario: An entry option other than weight
+- **WHEN** an entry is `{sequence, opts}` with any option other than a single positive `weight:`
+- **THEN** generation SHALL fail with an error that names the key and `weight:`
+
+#### Scenario: A raise from the function is a generation error
+- **WHEN** an expansion function raises while the framework generates a sequence
+- **THEN** the framework SHALL raise an `ArgumentError` that names the root and the original message
+- **AND** no target's `Adapter.setup/1` SHALL have run
+
+### Requirement: Expansion Types and Order (DR-049)
+
+`PropertyDamage.Model` SHALL define the types `command_spec` (`module | {module, opts}`), `sequence` (a list of command specs that run in order, every entry), `identity` (a list holding the root struct) and `choices(item)` (a list from which one item is picked by weight). `commands/0` SHALL return `choices(command_spec)`, `setup_each/0` and `teardown_each/0` SHALL return `sequence`, and `expansions/0` SHALL return pairs of a root module and a function from a root struct and a state to `choices(sequence | identity)`. The order of `commands/0` SHALL carry no meaning. The order of the list that an expansion function returns SHALL be the shrink preference, simplest first, and the documentation of `expansions/0` SHALL say so.
+
+#### Scenario: Weights default to 1
+- **WHEN** an entry has no `weight:`
+- **THEN** it SHALL have weight 1
+
+#### Scenario: Order of commands/0 is inert
+- **WHEN** the shrinker simplifies a failing sequence
+- **THEN** it SHALL delete roots and SHALL NOT replace a root by an earlier entry of `commands/0`
+
+### Requirement: Expansion Load Rules (DR-049)
+
+At run start, before any `Adapter.setup/1`, and in `Validation.validate!/3` and `mix pd.validate`, the framework SHALL enforce four rules.
+
+1. A model that defines `expansions/0` SHALL declare at least one `@compare` whose schedule reaches the final boundary (`every: 1`, the default, or a schedule that names `:end`), with one target too.
+2. A module that `expansions/0` lists SHALL be in `commands/0`, SHALL NOT be listed twice, and SHALL NOT be a root with `execution: :probe`.
+3. A model that defines `expansions/0` SHALL NOT be run with the `branching:` option.
+4. An `expansions/0` function SHALL have arity 2.
+
+#### Scenario: No comparison reaches the end
+- **WHEN** a model defines `expansions/0` and declares no `@compare` that reaches the end
+- **THEN** the run SHALL fail with an error that names `expansions/0` and `@compare every: :end`
+- **AND** the error SHALL be the same with one target
+
+#### Scenario: A non-root module in expansions/0
+- **WHEN** `expansions/0` lists a module that is not in `commands/0`
+- **THEN** the run SHALL fail with an error that names the module
+- **AND** a module that only `setup_each/0` or `teardown_each/0` lists SHALL fail the same way
+
+#### Scenario: A probe root with expansions
+- **WHEN** `expansions/0` lists a root whose spec declares `execution: :probe`
+- **THEN** the run SHALL fail with an error that names the module
+
+#### Scenario: A module listed twice
+- **WHEN** `expansions/0` lists one module in two pairs
+- **THEN** the run SHALL fail with an error that names the module
+
+#### Scenario: Branching with expansions
+- **WHEN** a run passes `branching:` for a model that defines `expansions/0`
+- **THEN** the run SHALL fail with an option error that names both
+
+### Requirement: Arity-2 Overrides Only Inside Expansion Sequences (DR-049)
+
+An `overrides:` function of arity 2, `fn state, prior_leaves -> map end`, SHALL be legal only in a sequence that an expansion function returns. `prior_leaves` SHALL be the list, in order, of `%{command: leaf, events: simulated events}` for the leaves earlier in the same sequence, with `external()` fields as placeholders. In `commands/0`, `setup_each/0` or `teardown_each/0` the form SHALL be a load error that names the command and says the form is legal only inside an expansion sequence.
+
+#### Scenario: A leaf takes a sibling's value
+- **GIVEN** a sequence `[Authorize, Capture]` whose `Capture` has an arity-2 `overrides:` that reads the id from the `Authorized` event of the first leaf
+- **WHEN** the framework realizes the sequence
+- **THEN** the `Capture` leaf SHALL carry the placeholder of the `Authorize` leaf's id
+- **AND** each target SHALL resolve it from that target's real events
+
+#### Scenario: Arity 2 in commands/0
+- **WHEN** `commands/0` lists `{Capture, overrides: fn state, leaves -> %{} end}`
+- **THEN** validation SHALL fail with an error that names `Capture` and the expansion-only rule
+
+#### Scenario: `when:` and `weight:` inside a sequence
+- **WHEN** a leaf entry carries `when:` or `weight:`
+- **THEN** the framework SHALL ignore the key
+- **AND** `mix pd.validate --seeds` SHALL warn "ignored in a sequence", naming the root, the entry index and the key
+
+### Requirement: The Weight Shorthand Is Retired (DR-049)
+
+`{Module, n}` with an integer `n` SHALL be rejected wherever a command spec is accepted: `commands/0`, `setup_each/0`, `teardown_each/0` and a sequence in `expansions/0`. The error SHALL name the module and `weight:`, and SHALL be raised by `Validation.validate!/3`, `mix pd.validate` and `PropertyDamage.run/1` before any `Adapter.setup/1`.
+
+#### Scenario: The shorthand in a setup list
+- **WHEN** `setup_each/0` returns `[{Login, 2}]`
+- **THEN** validation SHALL fail with an error that names `Login` and `weight:`
+
+#### Scenario: The shorthand in a root list at run start
+- **WHEN** `PropertyDamage.run/1` receives a model whose `commands/0` lists `{CreateOrder, 3}`
+- **THEN** it SHALL raise before any target's adapter is set up
 
 ### Requirement: Terminal States
 

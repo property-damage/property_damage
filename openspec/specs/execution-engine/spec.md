@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-048 (Setup and Teardown Commands)
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands)
 
 ## Requirements
 
@@ -728,3 +728,136 @@ The engine SHALL run a variant's teardown commands after every execution of that
 #### Scenario: Telemetry names the phase
 - **WHEN** a setup command, a root and a teardown command execute
 - **THEN** their command events SHALL carry `phase: :setup`, `:root` and `:teardown` respectively
+
+### Requirement: Per-Target Concrete Sequences (DR-049)
+
+Before any target executes a command and after the shared root sequence is generated, the engine SHALL generate each target's concrete sequence by walking the roots in order, with the target's own simulated state starting from the state the setup commands leave. The walk SHALL fold, root after root, either the root or the realized leaves of the chosen entry into the target's simulated state, so an expansion function and a leaf's `overrides:` see what that target ran before. A `:random` target SHALL pick at each root by weight among the entries the function returned. An `:identity` target SHALL take the root as generated. A `:reference` target SHALL take the first target's concrete sequence, leaf for leaf. A leaf SHALL be generated from its module's generator with its `overrides:` evaluated against the target's simulated state so far, and SHALL be simulated before the next leaf is generated. Every generation error SHALL be raised before any `Adapter.setup/1`.
+
+A leaf whose module has a `commands/0` entry with a `when:` that is false at the leaf's position SHALL withdraw its entry, and the pick SHALL be made again among the remaining entries. When no entry remains, or the function returns `[]`, the root SHALL run as itself and the engine SHALL count it as `:forced` for that target.
+
+#### Scenario: A target walks its own state
+- **GIVEN** two `:random` targets that ran different entries at root 2
+- **WHEN** the engine generates the function's input at root 3
+- **THEN** each target's function SHALL receive that target's own simulated state
+
+#### Scenario: A withdrawn entry is picked around
+- **GIVEN** three entries and a leaf of the first whose `commands/0` entry has a false `when:`
+- **WHEN** a `:random` target picks the first entry
+- **THEN** the engine SHALL pick again among the other two with the same pick state
+
+#### Scenario: Nothing fits
+- **WHEN** every entry fails a leaf precondition and the identity is not listed
+- **THEN** the root SHALL run as itself and SHALL be counted `:forced`
+
+#### Scenario: Setup commands are never expanded
+- **WHEN** a setup or teardown command module also has an `expansions/0` entry as a root
+- **THEN** the setup or teardown instance SHALL run as itself, and only the root instance SHALL expand
+
+### Requirement: Roots Are the Boundaries and Leaves Are Commands (DR-049)
+
+Each variant SHALL execute its own concrete sequence through the stepping engine. `Variant.advance_to/2` for root `r` SHALL step every leaf of root `r`, in order, before the scheduler runs the comparison at `r`. The lockstep boundaries, the convergence loop, the probe re-read and the active-set rule SHALL be per root. A leaf SHALL be an executed command: `@check every: Module` SHALL fire on a leaf of that module, `@check every: N` SHALL count steps per variant (leaves included), stutter, nemesis, per-command settle and adapter retry SHALL apply per leaf, and `terminate_early?/3` SHALL NOT be consulted for a leaf. `@compare` schedules, `max_commands` and `total_commands` SHALL count roots. A root with `execution: :probe` SHALL run as itself in every target. A leaf SHALL have a position of its own, `{:leaf, root_id}` with the leaf's offset, so a placeholder id never collides with the id of a root, a setup command or a branch segment.
+
+#### Scenario: All leaves run before the comparison
+- **GIVEN** a root that one target runs as three leaves and another runs as itself
+- **WHEN** the scheduler reaches that root's boundary
+- **THEN** the first target SHALL have executed all three leaves and the second its one command before the observations are compared
+
+#### Scenario: A failing leaf is named
+- **WHEN** an adapter error occurs in the second leaf of root 3
+- **THEN** the failure SHALL carry `failed_at_index: 3`
+- **AND** the failure detail and the trace position SHALL name leaf index 1
+
+#### Scenario: Roots count against max_commands
+- **GIVEN** `max_commands: 10`
+- **WHEN** a target runs every root as a three-leaf expansion
+- **THEN** the run SHALL execute at most 10 roots and `total_commands` SHALL count roots
+
+#### Scenario: terminate_early?/3 is not consulted after a leaf
+- **WHEN** a model defines `terminate_early?/3` and a target executes a leaf
+- **THEN** the function SHALL NOT be called for that leaf
+
+### Requirement: Leaf Validation at First Production (DR-049)
+
+The engine SHALL validate a leaf module the first time a process realizes it, with `validate_command_callbacks!/1`, and SHALL cache a pass per module per process. A failed validation SHALL NOT be cached: the next realization SHALL validate again and fail the same way. The failure SHALL name the root, the entry index, the leaf and the missing callback. The `overrides:` key check SHALL run at every realization, because it depends on the entry and not on the module. A leaf module that fails validation SHALL fail in the second process as in the first.
+
+#### Scenario: A leaf without a generator
+- **WHEN** an entry names a module that lacks the command callbacks
+- **THEN** generation SHALL fail with an error that names the root, the entry index, the leaf module and the missing callback
+
+#### Scenario: The cache does not hide a failure
+- **GIVEN** a leaf module that failed validation once in a process
+- **WHEN** the same entry is realized again in that process
+- **THEN** generation SHALL fail again
+
+#### Scenario: A bad overrides key
+- **WHEN** a leaf's `overrides:` map names a key that the leaf's struct lacks
+- **THEN** generation SHALL fail with an error that names the leaf and the key, at every realization
+
+### Requirement: Static and Sampled Validation of Expansions (DR-049)
+
+`Validation.validate!/3` SHALL check the shape of `expansions/0` statically: a function of the wrong arity, a key that is not a root, a duplicate key. It SHALL NOT sample, so its warnings about orphan events and missing downstream observables SHALL stay root-based. `mix pd.validate` SHALL take `--seeds N` (default 100) and `--seed S`. For a model with `expansions/0`, the task SHALL generate N root sequences (seeds `S`, `S + 1`, and so on when `--seed` is given, otherwise N fresh seeds that it prints), realize the expansions of every target in `--targets` on each (with `--targets` absent, one `:random` target named after the model's adapter), and report:
+
+- the leaf modules realized;
+- every entry key seen, with its realization count;
+- every entry never realized, as "`Root[i]` not realized in N seeds";
+- the root modules forced to the identity in every sampled state.
+
+The counts SHALL sum over the targets that pick (`expansion: :random`), and a line SHALL name them. A `:reference` target SHALL NOT be counted again. When no target picks, the task SHALL say so and print no entry counts. The task SHALL warn "ignored in a sequence" for a `when:` or `weight:` on a leaf, naming the root, the entry index and the key. It SHALL warn about the orphan events and the missing downstream observables of reached leaves, and SHALL say that an unreached leaf was not reached by the sample. A generation error SHALL fail the task.
+
+#### Scenario: An entry never realized
+- **GIVEN** an entry whose function offers it only for `amount >= 6` and a seed that never generates such a root
+- **WHEN** `mix pd.validate Model --seed 18 --seeds 1` runs
+- **THEN** the output SHALL say that the entry was not realized in 1 seeds
+- **AND** the task SHALL exit 0
+
+#### Scenario: The seed flag samples what a run runs
+- **WHEN** `mix pd.validate` runs with `--seed S --seeds 1`
+- **THEN** it SHALL sample exactly the roots and entries that `seed: S, max_runs: 1` runs
+
+#### Scenario: Counts sum over the picking targets
+- **GIVEN** targets `"a"` on `:random` and `"b"` on `:reference`
+- **WHEN** the task samples 20 seeds
+- **THEN** the count of each root module SHALL sum over `"a"` alone
+- **AND** the output SHALL name `"a"` as the one target that picks
+
+#### Scenario: No target picks
+- **GIVEN** targets on `:identity` and `:reference` only
+- **WHEN** the task samples
+- **THEN** the output SHALL say that no target picks expansions
+- **AND** SHALL print no entry line
+
+#### Scenario: A leaf with an ignored option
+- **WHEN** a sampled entry carries `when:` on a leaf
+- **THEN** the output SHALL warn "ignored in a sequence" with the root, the entry index and the key
+
+### Requirement: Reports and Re-execution Paths Carry the Choices (DR-049)
+
+`FailureReport.expansions` SHALL map each target name to one element per executed root, up to and including the failing root: `%{root: index, entry: "Root[i]" | nil | :forced, leaves: [modules]}`. The reporter SHALL print, beside a failure at root `r`, the entry each target ran at `r`, with the reference marked. `failed_at_index` SHALL stay the root index. Every path that executes a failure again SHALL carry each target's choices and SHALL NOT pick again: the shrinker, `shrink_further/2`, `PropertyDamage.Replay`, the seed-library replay (which recomputes the choices from the seed) and export. `RunTrace.capture/1` SHALL recompute the choices from the seed, execute them through the scheduler with its one target, and record them in the trace. `PropertyDamage.Analysis.isolate_trigger/2` SHALL raise an `ArgumentError` for a target that ran any root as leaves. `shrink_further/2` and `Replay` SHALL raise an error that names the target when its choices are not recorded. Export SHALL emit the reference target's concrete leaves as the steps, SHALL say so in the header, and SHALL bind a root placeholder from the step of the leaf it was aliased to. The exported ExUnit test and `reproduction_command/1` SHALL be unchanged.
+
+#### Scenario: The report names each target's entry
+- **WHEN** a run fails at root 5 with target "second" on `Incr[1]` and the reference on `Incr[0]`
+- **THEN** the report's `expansions["second"]` SHALL hold six elements, the last with `entry: "Incr[1]"` and the two leaf modules
+- **AND** the terminal output SHALL print the entry of each target at root 5, the reference marked
+
+#### Scenario: A report reproduces from its seed
+- **WHEN** `PropertyDamage.run/1` runs again with `seed: report.seed, max_runs: 1` and the same target names
+- **THEN** the new report's `expansions` SHALL equal the original's for the unshrunk run
+
+#### Scenario: isolate_trigger refuses a target that ran leaves
+- **WHEN** `Analysis.isolate_trigger/2` receives a report whose target ran a root as leaves
+- **THEN** it SHALL raise `ArgumentError`
+
+#### Scenario: An exported script runs what the reference ran
+- **WHEN** a report from a model with expansions is exported as a script
+- **THEN** the script's steps SHALL be the reference target's concrete leaves
+- **AND** the header SHALL name the reference target
+
+#### Scenario: An aliased value is bound from its leaf
+- **GIVEN** a root `Open` that ran as `[Reserve, Confirm]` and a later root that consumes the id `Confirm` produced
+- **WHEN** the report is exported as a curl script
+- **THEN** the script SHALL extract the id in the `Confirm` step
+
+#### Scenario: A stored report without choices cannot be replayed
+- **WHEN** `Replay` runs a report that records no choices for the replayed target of a model with expansions
+- **THEN** it SHALL raise an error that names the target
+

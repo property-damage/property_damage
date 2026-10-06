@@ -1,6 +1,6 @@
 # DR-026: Invariant Catalog and Anti-Vacuity Coverage (first-class invariant identity + per-assertion firing)
 
-**Status:** Accepted. Amended by DR-042: the assertion identifiers are now check identifiers (`check_coverage/2`, `check_catalog/1`, `check_fires`, `@check`).
+**Status:** Accepted. Amended by DR-042: the assertion identifiers are now check identifiers (`check_coverage/2`, `check_catalog/1`, `check_fires`, `@check`). Amended by DR-049: the command universe of a run is derived from generation (`commands/0` plus every leaf module an expansion produced, plus setup and teardown modules), and coverage counts expanded roots by entry.
 **Date:** 2026-06-24
 
 > Recorded as a design pass, to be implemented next. It gives a model's assertions a

@@ -1,6 +1,6 @@
 # DR-048: Setup and Teardown Commands, Fixtures as Commands
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-049: setup and teardown commands are never expanded (stated here), and a sequence in `expansions/0` follows the same grammar and the same "ignored in a sequence" rule.
 **Date:** 2026-10-06
 
 ## Context

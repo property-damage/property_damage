@@ -1,7 +1,7 @@
 # Differential Testing
 
 PropertyDamage supports differential testing: `PropertyDamage.run/1` takes several
-`targets:` and runs the same command sequences against all of them, comparing
+`targets:` and runs the same root sequence against all of them, comparing
 what the model's `@compare` observations report. One target is an ordinary run;
 two or more targets add the comparison.
 
@@ -687,6 +687,41 @@ the report's reference target (with its name and config).
 more entries), `concurrency:` or `compare:` to override. `equivalence:` is
 removed.
 
+## When the Model Has Expansions
+
+A model can list, for a root command, other command sequences that mean the same
+once the root is done (see [Expansions](writing_commands.md#expansions-one-root-several-commands)).
+The `expansion:` option of each target then says which sequence the target
+runs at each root:
+
+| Value | The target runs |
+|-------|-----------------|
+| `:random` (default) | an entry it picks per root, keyed on the run seed, its name and the root |
+| `:identity` | the roots themselves |
+| `:reference` | what the first target ran, leaf for leaf |
+
+A differential run is a path-equivalence run whose non-reference targets copy the
+reference. Put `expansion: :reference` on every target after the first, and every
+target executes the same concrete commands, so a divergence points at the
+implementation:
+
+```elixir
+targets: [
+  {LegacyAdapter, name: "legacy"},
+  {NewAdapter, name: "new", expansion: :reference}
+]
+```
+
+Leave the second target on `:random` and the two targets run different commands
+for the same roots. A divergence then points at a path, or at the implementation
+when the targets also differ. Put a third target on `:reference` beside a `:random`
+one, and the failure shows which axis (implementation or path) it needs.
+
+The first target is the reference, so `expansion: :reference` on it is an option
+error. A model without `expansions/0` runs the same roots whatever the value.
+Targets are still compared only at root boundaries: the comparison waits until
+every target has run every leaf of the root.
+
 ## Options Reference
 
 ### Required Options
@@ -703,6 +738,7 @@ AdapterModule                           # Bare module name
 {AdapterModule, name: "display-name"}   # Explicit display name
 {AdapterModule, config: %{key: value}}  # Configuration for setup/1
 {AdapterModule, name: "name", config: %{key: value}}  # Both
+{AdapterModule, expansion: :reference}  # Run what the first target ran
 ```
 
 The **first entry in the `targets:` list is the reference oracle** (no special marker needed).
@@ -713,6 +749,9 @@ Each target may have the same adapter module with different configs for isolatio
 A bare module takes its last module segment as its name (`MyApp.ReferenceAdapter`
 is `"ReferenceAdapter"`). Two entries must not share a name, so give entries on the
 same adapter distinct `name:` values.
+
+`expansion:` is `:random` (the default), `:identity` or `:reference`; see
+[When the Model Has Expansions](#when-the-model-has-expansions).
 
 An entry may also carry `injectors:` (a list of injector adapter modules) and
 `mocks:` (a list of `Mod` or `{Mod, config_map}`). Both are set up per run for that
@@ -911,6 +950,7 @@ PropertyDamage.run(
 
 ## Next Steps
 
+- [Writing Commands](writing_commands.md#expansions-one-root-several-commands) for `expansions/0`, the callback that lets targets run different commands
 - See the `PropertyDamage.run/1` docs for the full API, and `PropertyDamage.FailureReport` for the report
 - [Writing Invariants](writing_invariants.md#comparing-targets-with-compare) for `@compare` and the `==` traps
 - [Async and Eventual Consistency](async_and_eventual_consistency.md) for settle, convergence and `@eventually`

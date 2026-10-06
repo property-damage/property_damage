@@ -4,7 +4,7 @@
 
 Projections are the state management and invariant verification mechanism for stateful property-based tests. They serve a dual purpose: reducing commands and events into tracked state, and defining checks that verify invariants hold throughout test execution. A single behaviour supports both roles, from state-only projections that drive command generation to check-only projections that validate system correctness.
 
-Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors)
+Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-049 (Expansions, Roots That Run as Several Commands)
 
 ## Requirements
 
@@ -204,6 +204,49 @@ A boundary observation MAY return `{:pending, reason}` when its target will reac
 #### Scenario: One target does not evaluate observations
 - **WHEN** a run has one target
 - **THEN** no `@compare` function is called
+
+### Requirement: A Model with Expansions Compares at the End (DR-049)
+
+A model that defines `expansions/0` SHALL declare at least one `@compare` whose schedule reaches the final boundary: `every: 1` (the default) or a schedule that names `:end`. The framework SHALL check the declaration at run start, before any `Adapter.setup/1`, with one target as with several. Targets that ran different leaves are compared only at root boundaries, so each boundary observation SHALL return a value on which every target can agree: no identifier that differs per target and no count that differs per path.
+
+#### Scenario: The default schedule reaches the end
+- **GIVEN** a model with `expansions/0` and a `@compare` without `every:`
+- **WHEN** the run starts
+- **THEN** the model SHALL load
+
+#### Scenario: An explicit end schedule
+- **GIVEN** a model with `expansions/0` whose only `@compare` is `every: :end`
+- **WHEN** the run starts
+- **THEN** the model SHALL load
+
+#### Scenario: Only a mid-run schedule
+- **GIVEN** a model with `expansions/0` whose only `@compare` is `every: {5, CreateOrder}`
+- **WHEN** the run starts
+- **THEN** the run SHALL fail with an error that names `expansions/0` and `@compare every: :end`
+
+#### Scenario: One target still needs the declaration
+- **GIVEN** a one-target run of a model with `expansions/0` and no `@compare`
+- **WHEN** the run starts
+- **THEN** the run SHALL fail with the same error
+
+### Requirement: Checks Fire per Leaf (DR-049)
+
+For a root that runs as an expansion, a `@check every: Module` SHALL fire on a leaf of that module, and a `@check every: N` SHALL count steps per target, leaves included. A `@compare` schedule SHALL count roots.
+
+#### Scenario: A module check fires on a leaf
+- **GIVEN** a `@check every: Capture` and a root `Pay` that one target runs as `[Authorize, Capture]`
+- **WHEN** that target executes the `Capture` leaf
+- **THEN** the check SHALL fire after that leaf
+
+#### Scenario: A step counter differs between targets
+- **GIVEN** a `@check every: 2` and two targets that ran different numbers of leaves for the same roots
+- **WHEN** both targets finish the run
+- **THEN** each target's check count SHALL follow the steps that target executed
+
+#### Scenario: A compare schedule counts roots
+- **GIVEN** a `@compare every: {2, Pay}` and two `Pay` roots that one target ran as three leaves each
+- **WHEN** the run reaches the second `Pay` root
+- **THEN** the comparison SHALL happen once, after every leaf of that root
 
 ### Requirement: Check Detection and Metadata
 

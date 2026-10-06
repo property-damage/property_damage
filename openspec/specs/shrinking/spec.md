@@ -4,7 +4,7 @@
 
 Defines the two-phase shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
 
-Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands)
+Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands)
 
 ## Requirements
 
@@ -217,7 +217,7 @@ The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned b
 
 ### Requirement: Variant-Aware Shrinking (DR-045)
 
-The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run the model's setup commands, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The reference target's sequence SHALL be the shrink target, because all targets run the same commands. A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:` (`[converge_within: ms]`) and `check_mode:`. A candidate SHALL be judged by the primary failure of its run alone: `other_failures` SHALL NOT take part in the signature.
+The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run the model's setup commands, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The reference target's sequence SHALL be the shrink target, because every target runs the same roots. A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:` (`[converge_within: ms]`) and `check_mode:`. A candidate SHALL be judged by the primary failure of its run alone: `other_failures` SHALL NOT take part in the signature.
 
 #### Scenario: Divergence is shrunk
 - **WHEN** a run fails with kind `:diverged`
@@ -289,3 +289,44 @@ The shrinker SHALL NOT treat a setup or teardown command as a candidate: it SHAL
 - **WHEN** the attempt ends
 - **THEN** the shrinker SHALL reject the candidate even if the original failure was also a setup failure
 - **AND** the attempt SHALL count against `max_shrink_attempts`
+
+### Requirement: Expansions Under Shrinking (DR-049)
+
+For a model with `expansions/0`, a shrink candidate SHALL be a list of roots. The shrinker SHALL delete roots and SHALL simplify root arguments, and SHALL NOT delete, reorder or simplify a leaf on its own, and SHALL NOT replace the entry a target ran at a root. A failing run SHALL carry, per target name, the choice at every root: the entry key, the leaf sequence, the aliases and the leaf pick seed. Roots SHALL carry a stable id, their index at generation. Every candidate SHALL realize each target's choices again for the surviving roots, against the candidate's simulated state, without picking again: the surviving root keeps its entry and leaf seed, `overrides:` functions of arity 1 and 2 are evaluated again, and the aliases are rebuilt. A simplified root SHALL go through the same entry and leaf seed. A `:reference` target SHALL copy the reference's candidate sequence. The failure signature SHALL stay `{kind, name, variant_index}` with the root index as the index.
+
+A candidate in which a leaf of a carried entry fails its precondition SHALL run that root as itself in that target and SHALL count it as "identity, forced". A candidate whose expansion function raises, or no longer returns the carried entry for a simplified root, SHALL be invalid: the shrinker SHALL NOT run it and SHALL NOT accept it.
+
+#### Scenario: A surviving root keeps its entry
+- **GIVEN** a failing run in which target "second" ran `Pay[1] = [Authorize, Capture]` at root 3
+- **WHEN** the shrinker deletes root 0
+- **THEN** the candidate SHALL run the same entry for that root in "second", with the same leaf seed, at the root's new index
+- **AND** the reproduction's report SHALL name `Pay[1]` for "second" at the failing root
+
+#### Scenario: A candidate never picks again
+- **WHEN** the shrinker runs a candidate
+- **THEN** the framework SHALL NOT pick an entry for any root of any target
+
+#### Scenario: Argument simplification re-realizes the leaves
+- **GIVEN** a root `Incr k 5` that ran as `Incr[1]`
+- **WHEN** the shrinker simplifies the amount to 3
+- **THEN** the leaves SHALL come from `Incr k 3` through entry index 1 and the same leaf seed
+
+#### Scenario: A failing leaf precondition forces the identity
+- **WHEN** a candidate state makes a leaf's `when:` false in a carried entry
+- **THEN** that root SHALL run as itself in that target
+- **AND** the report's `expansion_counts` SHALL count it as `:forced`
+
+#### Scenario: A vanished entry invalidates the candidate
+- **GIVEN** an expansion function that offers entry 1 only for `amount >= 2`
+- **WHEN** the shrinker simplifies a root that ran entry 1 to `amount: 1`
+- **THEN** the candidate SHALL be invalid and SHALL NOT run
+
+#### Scenario: A raise invalidates the candidate
+- **WHEN** an expansion function raises for a simplified root during shrinking
+- **THEN** the candidate SHALL be invalid, the shrink SHALL go on, and `PropertyDamage.run/1` SHALL return the failure report
+
+#### Scenario: Re-shrinking carries the recorded choices
+- **WHEN** `shrink_further/2` re-shrinks a saved report
+- **THEN** it SHALL carry the choices the report recorded for every target
+- **AND** it SHALL raise an error that names the target when the report records no choices for it
+
