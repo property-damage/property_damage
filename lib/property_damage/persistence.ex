@@ -461,6 +461,9 @@ defmodule PropertyDamage.Persistence do
   # V12 format: a report records the run's `latency:` option as given and the
   # latency `metrics` measured per target (`nil` when `latency:` was off), and
   # a latency breach (`%Failure.Latency{}`) named by its statistic.
+  # V11 format: a report records the `setup_commands` and `teardown_commands`
+  # a reproduction runs around the roots, and a sequence carries its setup and
+  # teardown sections.
   # V10 format: a report records the run's `compare` options in place of v9's
   # `equivalence`, the failing run's per-observation `compare_counts`, the
   # run's `other_failures` when several targets failed, and a

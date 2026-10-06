@@ -406,7 +406,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`, and
     `reason` always a `%Failure{}`.
   - Persistence format version 8 becomes 9 for `.pd` reports and `.pdtrace`
-    traces (version 10 under DR-046, version 12 under DR-047). Loaders refuse version 8 files.
+    traces (version 10 under DR-046, version 11 under DR-048, version 12 under DR-047). Loaders refuse version 8 files.
   - `branching:` with two or more targets is an option error. Branching sequences,
     `PropertyDamage.replay/2`, `Analysis.isolate_trigger/2` and `RunTrace` stay
     one-target.
