@@ -29,7 +29,7 @@ defmodule PropertyDamage.StutterShrinkTest do
 
   defmodule Charge do
     # Non-idempotent under stutter: a retry yields a different event than the
-    # first execution (see Adapter), tripping :strict comparison.
+    # first execution (see Adapter), so the retry events differ from the original events.
     defstruct [:id]
   end
 
@@ -76,7 +76,7 @@ defmodule PropertyDamage.StutterShrinkTest do
 
     # Non-idempotent: tag the event with the attempt number. The first execution
     # is attempt 1; a stutter retry carries attempt >= 2 in its Runtime context,
-    # so retry events differ from the original under :strict comparison.
+    # so retry events are not equal to the original events.
     def execute(%Charge{id: id}, _context, runtime) do
       attempt =
         if PropertyDamage.Runtime.stuttering?(runtime) do
@@ -94,7 +94,6 @@ defmodule PropertyDamage.StutterShrinkTest do
     max_repeats: 1,
     delay_ms: 0,
     commands: [Charge],
-    comparison: :strict,
     enabled: true
   }
 

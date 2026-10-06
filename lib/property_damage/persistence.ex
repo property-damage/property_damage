@@ -54,7 +54,7 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
 
-  @version 9
+  @version 10
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -352,7 +352,9 @@ defmodule PropertyDamage.Persistence do
       kind: report.kind,
       variant: report.variant,
       targets: Enum.map(report.targets, &export_target/1),
-      equivalence: export_equivalence(report.equivalence),
+      compare: Map.new(report.compare),
+      compare_counts:
+        Map.new(report.compare_counts, fn {key, counts} -> {name_string(key), counts} end),
       stutter: report.stutter && inspect(report.stutter),
       max_commands: report.max_commands,
       shrunk_command_count: length(Sequence.to_list(FailureReport.shrunk_sequence(report))),
@@ -366,9 +368,13 @@ defmodule PropertyDamage.Persistence do
   # Private Helpers
   # ============================================================================
 
-  # A failure's name as JSON: a module (a divergence's root command) by its
-  # Elixir name, any other atom as its string.
+  # A failure's name as JSON and in a file name: a module by its Elixir name,
+  # a `{projection, function}` key as `Projection.function`, any other atom as
+  # its string.
   defp name_string(nil), do: nil
+
+  defp name_string({projection, function}) when is_atom(projection) and is_atom(function),
+    do: name_string(projection) <> "." <> Atom.to_string(function)
 
   defp name_string(name) when is_atom(name) do
     case Atom.to_string(name) do
@@ -376,10 +382,6 @@ defmodule PropertyDamage.Persistence do
       string -> string
     end
   end
-
-  # A function cannot be written as JSON, so a custom equivalence is `custom`.
-  defp export_equivalence(equivalence) when is_function(equivalence), do: :custom
-  defp export_equivalence(equivalence), do: equivalence
 
   # A `targets:` entry as JSON: the adapter and name as strings, the config,
   # injectors and mocks inspected (they may hold terms JSON cannot encode).
@@ -443,7 +445,11 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
-  # V9 format: a report records the run's `targets` (the reference first), its
+  # V10 format: a report records the run's `compare` options in place of v9's
+  # `equivalence`, the failing run's per-observation `compare_counts`, and a
+  # divergence (`%Failure.Divergence{}`) or failure to converge
+  # (`%Failure.Convergence{}`) named by its `{projection, function}` key.
+  # As in v9, a report records the run's `targets` (the reference first), its
   # report `kind`, the failing `variant` and the run's `concurrency` in place of
   # one `adapter`. As in v8 (DR-041), a report's `failure_reason` is a
   # `%PropertyDamage.Failure{}` (nested class struct) and the six denormalized
@@ -468,7 +474,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v9 files (format versions 1-8) are refused (DR-041, following DR-039/DR-040).
+  # Pre-v10 files (format versions 1-9) are refused (DR-041, following DR-039/DR-040).
+  # A v9 report records `equivalence` and a divergence of root events where v10
+  # records `compare`, `compare_counts` and boundary-observation failures.
   # A v8 report records one `adapter` where v9 records the run's `targets`, its
   # `kind` and the failing `variant`; a v7 file stores
   # `%Failure{type: %Failure.Assertion{}}` and `assertion_fires`, which v8
@@ -756,8 +764,8 @@ defmodule PropertyDamage.Persistence do
   end
 
   defp parse_filename(filename) do
-    # Pattern: {timestamp}-{type}-{check}-seed{seed}.pd; a divergence's check
-    # is its root command's module, so it may hold dots.
+    # Pattern: {timestamp}-{type}-{check}-seed{seed}.pd; a check may be a
+    # module or a `Projection.function` key, so it may hold dots.
     case Regex.run(
            ~r/^(\d{8}T\d{6})-(\w+)-([\w.]+)-seed(\d+)\.pd$/,
            filename
@@ -781,7 +789,9 @@ defmodule PropertyDamage.Persistence do
     ArgumentError -> :error
   end
 
-  # A check part with a dot names a module (see `name_string/1`).
+  # A check part with a dot names a module (see `name_string/1`). A
+  # `Projection.function` key names no existing atom, so its file drops to the
+  # full-load fallback.
   defp check_name_atom(check) do
     if String.contains?(check, "."),
       do: String.to_existing_atom("Elixir." <> check),

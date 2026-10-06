@@ -57,9 +57,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
         seed: 7,
         run_number: 0,
         run_nonce: 1,
-        concurrency: :serial,
-        compare: :correctness,
-        equivalence: :exact
+        concurrency: :serial
       ],
       extra
     )
@@ -214,7 +212,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
       PropertyDamage.run(
         model: RoutingModel,
         targets: targets,
-        compare: :correctness,
+        compare: [converge_within: 30],
         max_runs: 1,
         max_commands: 12,
         seed: seed,
@@ -252,18 +250,18 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
       divergence = Failure.detail(report.failure_reason)
       assert divergence.root == first_create
       assert report.failed_at_index == first_create
-      assert divergence.divergent_result == {:error, :refused}
+      assert divergence.variant_value.created < divergence.reference_value.created
       assert received("b") != []
     end
   end
 
-  describe "performance latency" do
+  describe "latency measurement" do
     defp timed_run(targets) do
       {:ok, stats} =
         PropertyDamage.run(
           model: SlowFoldModel,
           targets: targets,
-          compare: :performance,
+          latency: true,
           max_runs: 2,
           max_commands: 3,
           seed: 31,

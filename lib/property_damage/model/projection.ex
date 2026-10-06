@@ -3,10 +3,11 @@ defmodule PropertyDamage.Model.Projection do
   Behaviour for projections that track state and optionally define checks.
 
   Projections are the core building block for stateful property-based testing.
-  They serve two purposes:
+  They serve three purposes:
 
   1. **State tracking**: Reduce commands and events into state via `apply/2`
   2. **Invariant checking**: Define checks via `@check` and `@eventually`
+  3. **Comparing targets**: Define boundary observations via `@compare`
 
   ## Basic Usage
 
@@ -191,6 +192,35 @@ defmodule PropertyDamage.Model.Projection do
         fn s -> s.payments[id] == :confirmed end
       end
 
+  ## Boundary Observations (`@compare`)
+
+  A run with two or more targets compares them only through boundary
+  observations: public functions `def name(state, root)` marked `@compare`.
+  At each root boundary its schedule names, every target evaluates the
+  function on its own projection state (with the root command as the second
+  argument), and each target's value is judged against the first target's
+  (the reference's). The observation's key, `{projection, name}`, names any
+  failure it causes.
+
+      @compare every: [ClearingReport, :end], using: &within_cent/2
+      def totals(state, _root) do
+        if state.unsettled == %{},
+          do: %{net: state.net, fees: state.fees},
+          else: {:pending, unsettled: map_size(state.unsettled)}
+      end
+
+  `every:` is the schedule: `1` (the default, every root boundary), `N`
+  (every Nth boundary), `{N, Module}` (every Nth root of that module),
+  `Module` or `[Modules]` (after those roots), and `:end` or
+  `[Modules, :end]` (the final boundary, which is compared after every target
+  finalized its run). `using:` is a 2-arity predicate called
+  `using.(reference_value, variant_value)`, `&==/2` when absent; see
+  `PropertyDamage.Equivalence`. A function may return `{:pending, reason}`
+  while its target can still catch up without a further command: a pending
+  side is never a disagreement, and the comparison waits up to the run's
+  `compare: [converge_within: ms]` for the sides to agree. With one target no
+  observation is evaluated.
+
   ## Simplified Usage (No State)
 
   For checks that only inspect commands/events, skip `init/0` and `apply/2`:
@@ -277,6 +307,15 @@ defmodule PropertyDamage.Model.Projection do
       # keyword-list argument to PropertyDamage.Invariants.Invariant.new!/1, e.g.
       # `@invariant id: :balance_nonneg, description: "..."`.
       Module.register_attribute(__MODULE__, :invariant, accumulate: true)
+      # Boundary observations (`@compare`): the pending options of the next
+      # definition, and every observation registered so far.
+      Module.register_attribute(__MODULE__, :__pd_pending_compare__, [])
+      Module.register_attribute(__MODULE__, :__pd_compares__, accumulate: true)
+
+      # `@compare` keeps its options as code; every other attribute goes to
+      # Kernel.@/1 unchanged.
+      import Kernel, except: [@: 1]
+      import PropertyDamage.Model.Projection.CompareAttribute, only: [@: 1]
 
       # Register on_definition callback to capture check definitions
       @on_definition PropertyDamage.Model.Projection
@@ -294,7 +333,15 @@ defmodule PropertyDamage.Model.Projection do
         description: "dangling @check/@eventually with no following 2-arity check function."
     end
 
+    if Module.get_attribute(env.module, :__pd_pending_compare__) do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description: "dangling @compare with no following public 2-arity function."
+    end
+
     checks = Module.get_attribute(env.module, :checks) |> Enum.reverse()
+    compares = Module.get_attribute(env.module, :__pd_compares__) |> Enum.reverse()
 
     # Build the invariant registry (DR-026): %{id => %Invariant{}}, enforcing
     # id-uniqueness and validates: resolution, warning on declared-but-unchecked.
@@ -345,6 +392,36 @@ defmodule PropertyDamage.Model.Projection do
       owns by default.
       """
       def __invariants__, do: unquote(Macro.escape(invariants))
+
+      unquote(compare_definitions(compares))
+    end
+  end
+
+  # `__compares__/0` lists the boundary observations with their schedules;
+  # `__compare_using__/1` evaluates an observation's `using:` code inside a
+  # function body of the projection, where private captures, imports and
+  # closures are legal.
+  defp compare_definitions(compares) do
+    entries = Enum.map(compares, &Map.take(&1, [:name, :schedule]))
+
+    using_clauses =
+      for %{name: name, using: using} <- compares do
+        quote do
+          def __compare_using__(unquote(name)), do: unquote(using || quote(do: &Kernel.==/2))
+        end
+      end
+
+    quote do
+      @doc false
+      def __compares__, do: unquote(Macro.escape(entries))
+
+      unquote_splicing(using_clauses)
+
+      @doc false
+      def __compare_using__(name) do
+        raise ArgumentError,
+              "#{inspect(__MODULE__)} has no @compare function named #{inspect(name)}"
+      end
     end
   end
 
@@ -434,12 +511,16 @@ defmodule PropertyDamage.Model.Projection do
     # accumulate: true means these come back as lists (newest first), or [].
     check_opts = Module.get_attribute(env.module, :check) || []
     eventually_opts = Module.get_attribute(env.module, :eventually) || []
+    pending_compare = Module.get_attribute(env.module, :__pd_pending_compare__)
     has_check? = check_opts != []
     has_eventually? = eventually_opts != []
     decorated? = has_check? or has_eventually?
     already_registered? = name in (Module.get_attribute(env.module, :__pd_check_fns__) || [])
 
     cond do
+      pending_compare != nil ->
+        register_compare!(env, name, pending_compare, decorated?)
+
       # A @check/@eventually landing on the projection's own init/apply is a
       # misplaced (dangling) attribute, not a check.
       decorated? and name in [:init, :apply] ->
@@ -540,7 +621,16 @@ defmodule PropertyDamage.Model.Projection do
   # Any other definition while a @check/@eventually is pending means the
   # attribute did not land on a 2-arity check (e.g. it sat above init/0 or
   # a helper). Raise rather than silently attaching it to the wrong function.
-  def __on_definition__(env, kind, name, _args, _guards, _body) do
+  def __on_definition__(env, kind, name, args, _guards, _body) do
+    if Module.get_attribute(env.module, :__pd_pending_compare__) do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "dangling @compare: it must immediately precede a public 2-arity function " <>
+            "`def name(state, root)`, but the next definition is #{kind} #{name}/#{length(args)}."
+    end
+
     if Module.get_attribute(env.module, :check) not in [nil, []] or
          Module.get_attribute(env.module, :eventually) not in [nil, []] do
       raise CompileError,
@@ -552,6 +642,183 @@ defmodule PropertyDamage.Model.Projection do
     end
 
     :ok
+  end
+
+  # ============================================================================
+  # @compare (boundary observations)
+  # ============================================================================
+
+  @compare_schedules "every: 1, every: N, every: {N, Module}, every: Module, " <>
+                       "every: [Modules], every: :end or every: [Modules, :end]"
+
+  @doc false
+  # Expands `@compare opts` at its call site: validates the options, normalizes
+  # the `every:` schedule, and records both until the next definition claims
+  # them. The `using:` expression is kept as code, never evaluated here.
+  def __compare_attribute__(opts, meta, caller) do
+    line = Keyword.get(meta, :line, caller.line)
+
+    unless is_list(opts) and Keyword.keyword?(opts) do
+      compare_error!(caller, line, "@compare takes a keyword list, got: #{Macro.to_string(opts)}")
+    end
+
+    case Keyword.keys(opts) -- [:every, :using] do
+      [] ->
+        :ok
+
+      unknown ->
+        compare_error!(
+          caller,
+          line,
+          "@compare accepts only every: and using:, got: #{inspect(unknown)}. " <>
+            "A boundary observation is compared at root boundaries; its schedule is " <>
+            @compare_schedules
+        )
+    end
+
+    schedule =
+      opts |> Keyword.get(:every, 1) |> expand_every(caller) |> compare_schedule!(caller, line)
+
+    using = Keyword.get(opts, :using)
+    if using, do: check_using!(using, caller, line)
+
+    pending = %{schedule: schedule, using: using}
+
+    quote do
+      if Module.get_attribute(__MODULE__, :__pd_pending_compare__) do
+        raise CompileError,
+          file: __ENV__.file,
+          line: unquote(line),
+          description: "multiple @compare attributes on one function; it may have only one."
+      end
+
+      Module.put_attribute(__MODULE__, :__pd_pending_compare__, unquote(Macro.escape(pending)))
+    end
+  end
+
+  defp compare_error!(caller, line, message) do
+    raise CompileError, file: caller.file, line: line, description: message
+  end
+
+  # `every:` is data: module aliases expand in the caller's scope, and the
+  # result must be a literal.
+  defp expand_every(ast, caller) do
+    expanded =
+      Macro.prewalk(ast, fn
+        {:__aliases__, _, _} = alias_ast -> Macro.expand(alias_ast, caller)
+        other -> other
+      end)
+
+    if Macro.quoted_literal?(expanded) do
+      {value, _binding} = Code.eval_quoted(expanded)
+      value
+    else
+      {:not_literal, Macro.to_string(ast)}
+    end
+  end
+
+  # The schedule of a boundary observation: which root boundaries it is
+  # compared at (`roots`), and whether it is compared at the final boundary
+  # whatever that root is (`end`).
+  defp compare_schedule!(value, caller, line) do
+    case normalize_compare_every(value) do
+      {:ok, schedule} ->
+        schedule
+
+      :error ->
+        shown = with {:not_literal, source} <- value, do: source
+
+        compare_error!(
+          caller,
+          line,
+          "@compare every: #{if is_binary(shown), do: shown, else: inspect(shown)} is not a " <>
+            "boundary schedule; expected #{@compare_schedules}, with N a positive integer " <>
+            "and Module a command module"
+        )
+    end
+  end
+
+  defp normalize_compare_every(1), do: {:ok, %{roots: :all, end: false}}
+
+  defp normalize_compare_every(n) when is_integer(n) and n > 1,
+    do: {:ok, %{roots: {:every, n}, end: false}}
+
+  defp normalize_compare_every(:end), do: {:ok, %{roots: :none, end: true}}
+
+  defp normalize_compare_every({n, modules}) when is_integer(n) and n > 0 do
+    modules = List.wrap(modules)
+
+    if modules != [] and Enum.all?(modules, &module_name?/1),
+      do: {:ok, %{roots: {:every_of, n, modules}, end: false}},
+      else: :error
+  end
+
+  defp normalize_compare_every([_ | _] = list) do
+    {ends, modules} = Enum.split_with(list, &(&1 == :end))
+
+    cond do
+      not Enum.all?(modules, &module_name?/1) -> :error
+      modules == [] -> {:ok, %{roots: :none, end: true}}
+      true -> {:ok, %{roots: {:modules, Enum.uniq(modules)}, end: ends != []}}
+    end
+  end
+
+  defp normalize_compare_every(value) do
+    if module_name?(value), do: {:ok, %{roots: {:modules, [value]}, end: false}}, else: :error
+  end
+
+  defp module_name?(value) when is_atom(value),
+    do: match?("Elixir." <> _, Atom.to_string(value))
+
+  defp module_name?(_value), do: false
+
+  # A `using:` written as a literal that cannot be a 2-arity function is
+  # rejected here; any other expression is checked when a run starts.
+  defp check_using!(using, caller, line) do
+    arity =
+      case using do
+        {:fn, _, [{:->, _, [args, _body]} | _]} -> fn_arity(args)
+        {:&, _, [{:/, _, [_function, arity]}]} when is_integer(arity) -> arity
+        literal when is_atom(literal) or is_number(literal) or is_binary(literal) -> :literal
+        _expression -> 2
+      end
+
+    unless arity == 2 do
+      compare_error!(
+        caller,
+        line,
+        "@compare using: must be a 2-arity function " <>
+          "`fn reference_value, variant_value -> ... end`, got: #{Macro.to_string(using)}"
+      )
+    end
+  end
+
+  defp fn_arity([{:when, _, args_and_guard}]), do: length(args_and_guard) - 1
+  defp fn_arity(args), do: length(args)
+
+  # Binds the pending `@compare` to the function being defined.
+  defp register_compare!(env, name, pending, decorated?) do
+    cond do
+      name in [:init, :apply] ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "@compare must immediately precede a boundary observation " <>
+              "`def name(state, root)`, not #{name}/2."
+
+      decorated? ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "cannot combine @compare with @check or @eventually on #{name}/2; " <>
+              "a boundary observation is not a check."
+
+      true ->
+        Module.put_attribute(env.module, :__pd_compares__, Map.put(pending, :name, name))
+        Module.put_attribute(env.module, :__pd_pending_compare__, nil)
+    end
   end
 
   # Split the invariant-linking keys (DR-026) out of a @check/@eventually

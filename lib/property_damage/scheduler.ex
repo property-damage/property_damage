@@ -1,7 +1,7 @@
 defmodule PropertyDamage.Scheduler do
   @moduledoc """
   Runs one command sequence against several targets in lockstep and compares
-  their answers command by command.
+  their boundary observations root by root.
 
   Each target runs as a `PropertyDamage.Variant`: its own process with its own
   executor state, event queue, injectors, mocks and pollers. The scheduler only
@@ -13,7 +13,8 @@ defmodule PropertyDamage.Scheduler do
 
   Every command of the sequence is a root. For each root `r`, in order, every
   variant executes command `r` and stops at boundary `r`; only then does the
-  comparison run, and only after it does any variant start command `r + 1`.
+  comparison run, and only after the variants agree does any variant start
+  command `r + 1`.
   Two settings decide how the variants reach a boundary:
 
     * `concurrency: :serial` - one variant at a time, in target order. Commands
@@ -38,28 +39,38 @@ defmodule PropertyDamage.Scheduler do
   find state a previous run (or a crashed one) left behind: it must be
   idempotent.
 
-  ## Observation and comparison
+  ## Comparison
 
-  A variant observes each root as `{:ok, events}` (the events the command
-  injected, then the events it returned; for a `:probe` or `:async` command,
-  the settled events) or `{:error, reason}` (the adapter's error answer). The
-  first target is the reference. At each boundary, each other target's
-  observation is compared with the reference's under the run's equivalence
-  strategy (`:exact`, `:structural` or a 2-arity function); the first target (in target order)
-  that is not equivalent is the run's divergence, a failure of kind `:diverged`,
-  and the run stops at that boundary. One function holds this comparison, so the observation compared at
-  a boundary can be changed in one place. With one target there is no
-  comparison, and an adapter `{:error, _}` ends the run as it does in
-  `PropertyDamage.run/1`; with two or more it is an observation like any other.
+  Variants are compared only through boundary observations: the functions
+  the model's projections mark with `@compare`. The first target is the
+  reference. At each root boundary an observation's `every:` schedule names,
+  every variant evaluates it on its own projection state, and
+  `PropertyDamage.Comparison` judges each other variant's value against the
+  reference's with the observation's `using:` predicate. When a side is
+  pending or the values differ, the convergence loop lets the variants catch
+  up until they agree or the convergence bound (`compare: [converge_within:
+  ms]`) expires; then a pending side did not converge and differing sides
+  diverged, and the run stops at that boundary. The final boundary is
+  compared after every variant finalized its run (pollers awaited, queue
+  drained); when the last root is a `:probe` command, the convergence loop
+  still re-reads it there, because finalizing stops a variant's pollers, not
+  the system it reads. With one target there is no comparison.
+
+  An adapter `{:error, _}` ends the run as it does in `PropertyDamage.run/1`
+  with one target; with two or more it is an observation the variant keeps
+  stepping past.
 
   ## Failures
 
   A failure ends the run and names the target it happened in. Its `reason` is
   always a `%PropertyDamage.Failure{}`:
 
-    * `:diverged` - a target answered a root differently from the reference
-      (`PropertyDamage.Failure.diverged/5`). Its name is the root command's
-      module, so a divergence at a command of another type is another failure.
+    * `:diverged` - a target's boundary observation still differed from the
+      reference's at the convergence bound (`PropertyDamage.Failure.diverged/1`).
+      Its name is the observation's `{projection, function}` key.
+    * `:did_not_converge` - a target's boundary observation was still pending
+      at the convergence bound (`PropertyDamage.Failure.did_not_converge/1`),
+      named by its key.
     * `:setup_failed` - a target's `setup/1` returned an error or raised
       (`PropertyDamage.Failure.setup_failed/1`, holding the error term or the
       exception). Targets already set up are torn down; the failing one is not.
@@ -72,6 +83,9 @@ defmodule PropertyDamage.Scheduler do
       poll predicate that raised), or the target's process crashed
       (`PropertyDamage.Failure.unknown/1` holding the exit reason).
 
+  A `@compare` function or `using:` predicate that raises is a `:check_failed`
+  in the target whose value it was producing or judging.
+
   A failure's kind is derived from its `reason` by
   `PropertyDamage.FailureReport.kind_of/1`, so a report's `kind` always agrees
   with its `failure_reason`.
@@ -81,7 +95,16 @@ defmodule PropertyDamage.Scheduler do
   starts the next root.
   """
 
-  alias PropertyDamage.{Comparison, Failure, FailureReport, PlaceholderRegistry, Target, Variant}
+  alias PropertyDamage.{
+    Comparison,
+    Failure,
+    FailureReport,
+    Model,
+    PlaceholderRegistry,
+    Target,
+    Variant
+  }
+
   alias PropertyDamage.Executor.Finalization
 
   @typedoc "A target's position in `targets:` and its name."
@@ -95,7 +118,7 @@ defmodule PropertyDamage.Scheduler do
   failure).
   """
   @type failure :: %{
-          kind: :check_failed | :setup_failed | :execution_failed | :diverged,
+          kind: :check_failed | :setup_failed | :execution_failed | :diverged | :did_not_converge,
           variant: variant(),
           run: non_neg_integer(),
           root: non_neg_integer() | nil,
@@ -108,12 +131,16 @@ defmodule PropertyDamage.Scheduler do
   entry per target in target order, for every target that was set up (all of
   them unless setup failed, then none). Each result is what
   `PropertyDamage.Executor.run/4` reports for that target's run.
+  `compare_counts` holds, per boundary observation the model declares, the
+  boundaries it was compared at, the boundaries it waited at, and the time it
+  waited (every count 0 with one target).
   """
   @type run :: %{
           failure: failure() | nil,
           results: [map()],
           observations: [[{non_neg_integer(), Variant.observation()}]],
-          latencies: [[{non_neg_integer(), non_neg_integer()}]]
+          latencies: [[{non_neg_integer(), non_neg_integer()}]],
+          compare_counts: Comparison.counts()
         }
 
   # The boundary before command 0: asking a variant to advance to it steps
@@ -131,9 +158,8 @@ defmodule PropertyDamage.Scheduler do
     * `:seed`, `:run_number` - the campaign seed and the 0-based run
     * `:run_nonce` - the run nonce shared by every target
     * `:concurrency` - `:serial` or `:parallel` (see the module doc)
-    * `:compare` - `:correctness`, `:performance` or `:both`; targets are
-      compared only under `:correctness` and `:both`
-    * `:equivalence` - `:exact`, `:structural` or a 2-arity function
+    * `:compare` - `[converge_within: ms]`, the convergence bound of each
+      boundary comparison (optional, default `[converge_within: 5_000]`)
     * `:measure_latency` - record the wall-clock time of each target's `execute/3` per command
       into `latencies` (optional, default `false`)
     * `:mint_epoch` - the mint epoch every target's run uses for client-minted
@@ -155,24 +181,28 @@ defmodule PropertyDamage.Scheduler do
         {:ok, finish_run(config, lockstep(config, variants))}
 
       {:error, failure} ->
-        {:ok, empty_run(failure)}
+        {:ok, empty_run(config, failure)}
     end
   end
 
   defp build_config(opts) do
+    model = Keyword.fetch!(opts, :model)
     targets = Keyword.fetch!(opts, :targets)
     commands = Keyword.fetch!(opts, :commands)
 
     %{
-      model: Keyword.fetch!(opts, :model),
+      model: model,
       targets: targets,
       commands: commands,
       seed: Keyword.fetch!(opts, :seed),
       run_number: Keyword.fetch!(opts, :run_number),
       run_nonce: Keyword.get(opts, :run_nonce),
       concurrency: Keyword.fetch!(opts, :concurrency),
-      compare?: Keyword.fetch!(opts, :compare) in [:correctness, :both] and length(targets) > 1,
-      equivalence: Keyword.fetch!(opts, :equivalence),
+      compare?: length(targets) > 1,
+      converge_within: opts |> Keyword.get(:compare, []) |> Keyword.get(:converge_within, 5_000),
+      plan: Comparison.plan(Comparison.observations(model), commands),
+      zero_counts: Comparison.zero_counts(model),
+      probes: probe_modules(model),
       measure_latency: Keyword.get(opts, :measure_latency, false),
       mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
@@ -182,8 +212,23 @@ defmodule PropertyDamage.Scheduler do
     }
   end
 
-  defp empty_run(failure) do
-    %{failure: failure, results: [], observations: [], latencies: []}
+  defp empty_run(config, failure) do
+    %{
+      failure: failure,
+      results: [],
+      observations: [],
+      latencies: [],
+      compare_counts: config.zero_counts
+    }
+  end
+
+  # The command modules the model runs as `:probe`: a boundary after one of
+  # them is re-read while the comparison waits.
+  defp probe_modules(model) do
+    for {_weight, module, spec} <- Model.normalize_commands(model.commands()),
+        Map.get(spec, :execution) == :probe,
+        into: MapSet.new(),
+        do: module
   end
 
   # ==========================================================================
@@ -252,30 +297,34 @@ defmodule PropertyDamage.Scheduler do
   # Lockstep
   # ==========================================================================
 
-  # Returns {variants, failure}, the variants carrying what they observed so
-  # far; a divergence is the failure of the boundary it was found at.
+  # Returns {variants, failure, counts}: the variants carrying what they
+  # observed so far, the run's failure (nil when it passed), and the compare
+  # counts of the boundaries compared.
   defp lockstep(config, variants) do
     # The barrier: every setup returned and every :startup check passed before
     # any variant executes command 0.
     case advance_all(config, variants, @before_first_root) do
       {:ok, variants} -> step_roots(config, variants)
-      {:failed, variants, failure} -> {variants, failure}
+      {:failed, variants, failure} -> {variants, failure, config.zero_counts}
     end
   end
 
   defp step_roots(config, variants) do
+    last = length(config.commands) - 1
+
     config.commands
     |> Enum.with_index()
-    |> Enum.reduce_while({variants, nil}, fn {command, root}, {variants, nil} ->
-      case advance_all(config, variants, root) do
-        {:ok, variants} ->
-          case compare_boundary(config, variants, root, command) do
-            nil -> {:cont, {variants, nil}}
-            divergence -> {:halt, {variants, divergence}}
-          end
+    |> Enum.reduce_while({variants, nil, config.zero_counts}, fn {command, root},
+                                                                 {variants, nil, counts} ->
+      with {:ok, variants} <- advance_all(config, variants, root),
+           {:agree, boundary} <- compare_boundary(config, variants, root, command, root == last) do
+        {:cont, {variants, nil, Comparison.merge_counts(counts, boundary)}}
+      else
+        {:failed, variants, failure} when is_list(variants) ->
+          {:halt, {variants, failure, counts}}
 
-        {:failed, variants, failure} ->
-          {:halt, {variants, failure}}
+        {:failed, failure, boundary} ->
+          {:halt, {variants, failure, Comparison.merge_counts(counts, boundary)}}
       end
     end)
   end
@@ -339,36 +388,68 @@ defmodule PropertyDamage.Scheduler do
   # Comparison
   # ==========================================================================
 
-  # The one place a boundary is compared: each non-reference variant's
-  # observation of `root` (the index of `command`) against the reference's.
-  # Returns the `:diverged` failure of the first non-equivalent variant, or nil.
-  defp compare_boundary(%{compare?: false}, _variants, _root, _command), do: nil
+  # Compares the boundary observations scheduled at `root`. The final
+  # boundary is compared after every variant finalized its run; a variant
+  # whose finalization failed ends the run with that failure instead (found
+  # when the run finishes). Returns `{:agree, counts}` or
+  # `{:failed, failure, counts}`.
+  defp compare_boundary(%{compare?: false}, _variants, _root, _command, _last?),
+    do: {:agree, %{}}
 
-  defp compare_boundary(config, variants, root, command) do
-    observed = Enum.map(variants, &{&1.target, observation_at(&1, root)})
-    [{_reference, reference_result} | others] = observed
+  defp compare_boundary(config, variants, root, command, last?) do
+    case elem(config.plan, root) do
+      [] ->
+        {:agree, %{}}
 
-    case Enum.find(others, fn {_target, result} ->
-           not Comparison.equivalent?(reference_result, result, config.equivalence)
-         end) do
-      nil ->
-        nil
-
-      {target, divergent_result} ->
-        results = Map.new(observed, fn {target, result} -> {target.name, result} end)
-        reason = Failure.diverged(root, command, reference_result, divergent_result, results)
-        failure(config, target, root, reason)
+      keys ->
+        if last? and not finalized?(config, variants),
+          do: {:agree, %{}},
+          else: compare_keys(config, variants, root, command, keys, last?)
     end
   end
 
-  # Observations are kept newest first, so the latest root is at the head.
-  defp observation_at(%{observations: [{root, observation} | _]}, root), do: observation
+  defp compare_keys(config, variants, root, command, keys, last?) do
+    opts = [
+      within: config.converge_within,
+      concurrency: config.concurrency,
+      final: last?,
+      probe: MapSet.member?(config.probes, command.__struct__),
+      arrived_at: System.monotonic_time(:millisecond)
+    ]
+
+    case Comparison.compare(root, command, keys, variants, opts) do
+      {:agree, counts} ->
+        {:agree, counts}
+
+      {:failed, target, failed_root, reason, counts} ->
+        {:failed, failure(config, target, failed_root, reason), counts}
+    end
+  end
+
+  # Finalizes every variant (its result is kept for the end of the run) and
+  # tells whether all of them finished without a failure.
+  defp finalized?(config, variants) do
+    finish = fn variant -> call(variant.pid, &Variant.finish/1) end
+
+    results =
+      case config.concurrency do
+        :serial ->
+          Enum.map(variants, finish)
+
+        :parallel ->
+          variants
+          |> Enum.map(fn variant -> Task.async(fn -> finish.(variant) end) end)
+          |> Task.await_many(:infinity)
+      end
+
+    Enum.all?(results, &match?({:ok, %{success: true}}, &1))
+  end
 
   # ==========================================================================
   # End of run
   # ==========================================================================
 
-  defp finish_run(config, {variants, failure}) do
+  defp finish_run(config, {variants, failure, counts}) do
     {results, latencies, failure} =
       Enum.reduce(variants, {[], [], failure}, fn variant, {results, latencies, failure} ->
         {result, latency, failure} = finish_variant(config, variant, failure)
@@ -381,7 +462,8 @@ defmodule PropertyDamage.Scheduler do
       failure: with_failure_reason(failure, results),
       results: results,
       observations: Enum.map(variants, &Enum.reverse(&1.observations)),
-      latencies: Enum.reverse(latencies)
+      latencies: Enum.reverse(latencies),
+      compare_counts: counts
     }
   end
 
@@ -428,7 +510,8 @@ defmodule PropertyDamage.Scheduler do
   # boundary was compared.
   defp run_failure(config, target, result, nil), do: finalize_failure(config, target, result)
 
-  defp run_failure(config, target, result, %{kind: :diverged, root: root} = divergence) do
+  defp run_failure(config, target, result, %{kind: kind, root: root} = divergence)
+       when kind in [:diverged, :did_not_converge] do
     case result do
       %{success: false, failure_reason: nil, check_failures: [_ | _]} ->
         case finalize_failure(config, target, result) do

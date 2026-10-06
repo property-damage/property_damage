@@ -34,9 +34,7 @@ defmodule PropertyDamage.SchedulerTest do
         seed: @seed,
         run_number: @run_number,
         run_nonce: @run_nonce,
-        concurrency: :serial,
-        compare: :correctness,
-        equivalence: :exact
+        concurrency: :serial
       ],
       extra
     )

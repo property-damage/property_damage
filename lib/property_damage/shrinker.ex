@@ -17,16 +17,18 @@ defmodule PropertyDamage.Shrinker do
   compared through its failure *signature* (`failure_signature/2`):
   - Same failure kind (`:check_failed`, `:idempotency_violation`, `:diverged`, etc.)
   - Same name (`PropertyDamage.Failure.name/1`): the check name for an invariant
-    violation, and for a divergence the root command's module
+    violation, and for a divergence or a failure to converge the key of the
+    `@compare` observation that disagreed, `{projection, function}`
   - Same target: the index of the target the failure happened in (`0` with one
     target). A candidate that fails in another target, or with another kind, is
     a different failure and is rejected.
 
-  For a divergence the name matters as much as the target. If one target
-  answers a `CreateLabel` differently, a candidate that drops the command the
-  `CreateLabel` depends on may diverge earlier, at a `CreateRepo`, for an
-  unrelated reason. That candidate diverges in the same target, but at a command
-  of another type, so it is another failure and the shrinker rejects it.
+  For a divergence the name matters as much as the target. Suppose one target
+  computes label counts wrongly, and a `@compare` function `labels/2` catches
+  it. A candidate that drops a command the labels depend on may make another
+  observation, `repos/2`, disagree first, for an unrelated reason. That
+  candidate diverges in the same target, but under another observation, so it
+  is another failure and the shrinker rejects it.
 
   ## Invalid Candidates
 
@@ -166,7 +168,8 @@ defmodule PropertyDamage.Shrinker do
   kind (`PropertyDamage.Failure.kind/1`, `:diverged` for a divergence), so two
   failures of different *classes* can never collide; `name` is
   `PropertyDamage.Failure.name/1`: the check/projection name for a check, the
-  root command's module for a divergence, `nil` where no name is meaningful; and
+  `{projection, function}` key of the boundary observation for a divergence or
+  a failure to converge, `nil` where no name is meaningful; and
   `variant_index` is the index of the target the failure happened in (`0` for a
   run with one target).
 
@@ -176,11 +179,11 @@ defmodule PropertyDamage.Shrinker do
   signature (`{:check, :x}` for both) would let the shrinker swap one bug's
   identity for the other's. Keying on the target is load-bearing for the same
   reason: a check that fails in the reference target is a different failure
-  from a divergence found in another target. Keying a divergence on its root
-  command's module keeps a divergence at one command type from standing in for
-  a divergence at another.
+  from a divergence found in another target. Keying a divergence on its
+  observation keeps a divergence of one `@compare` function from standing in
+  for a divergence of another; the mismatch itself is detail, not identity.
   """
-  @type failure_signature :: {Failure.kind(), atom() | nil, non_neg_integer()}
+  @type failure_signature :: {Failure.kind(), Failure.name(), non_neg_integer()}
 
   @typedoc """
   Result of shrinking.
@@ -262,8 +265,8 @@ defmodule PropertyDamage.Shrinker do
     - `:model` - Model module (required)
     - `:targets` - The run's `[%PropertyDamage.Target{}]`, reference first
       (required); a branching sequence takes exactly one
-    - `:concurrency`, `:compare`, `:equivalence`, `:check_mode` - as on
-      `PropertyDamage.run/1` (defaults `:serial`, `:correctness`, `:exact`, `:halt`)
+    - `:concurrency`, `:compare`, `:check_mode` - as on `PropertyDamage.run/1`
+      (defaults `:serial`, `[converge_within: 5_000]`, `:halt`)
     - `:rng_seed` - The run's effective seed: each attempt runs as run 0 of it,
       so the per-target RNG and the stutter decisions match the original run
       (default `0`)
@@ -379,8 +382,7 @@ defmodule PropertyDamage.Shrinker do
       model: Keyword.fetch!(opts, :model),
       targets: Keyword.fetch!(opts, :targets),
       concurrency: Keyword.get(opts, :concurrency, :serial),
-      compare: Keyword.get(opts, :compare, :correctness),
-      equivalence: Keyword.get(opts, :equivalence, :exact),
+      compare: Keyword.get(opts, :compare, converge_within: 5_000),
       check_mode: Keyword.get(opts, :check_mode, :halt),
       config: Keyword.get(opts, :config, Config.new()),
       iterations: 0,
@@ -558,7 +560,6 @@ defmodule PropertyDamage.Shrinker do
               targets: state.targets,
               concurrency: state.concurrency,
               compare: state.compare,
-              equivalence: state.equivalence,
               check_mode: state.check_mode,
               config: state.config,
               failure_reason: reconstruct_failure_reason(state.original_signature),
@@ -1113,7 +1114,6 @@ defmodule PropertyDamage.Shrinker do
             mint_epoch: next_mint_epoch(state),
             concurrency: state.concurrency,
             compare: state.compare,
-            equivalence: state.equivalence,
             stutter_config: state.stutter_config,
             check_mode: state.check_mode
           )

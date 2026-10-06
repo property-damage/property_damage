@@ -20,7 +20,6 @@ defmodule PropertyDamage.StutterTest do
         max_repeats: 2,
         delay_ms: {0, 0},
         commands: :all,
-        comparison: :strict,
         enabled: false
       }
 
@@ -33,7 +32,6 @@ defmodule PropertyDamage.StutterTest do
         max_repeats: 2,
         delay_ms: {0, 0},
         commands: :all,
-        comparison: :strict,
         enabled: true
       }
 
@@ -46,7 +44,6 @@ defmodule PropertyDamage.StutterTest do
         max_repeats: 2,
         delay_ms: {0, 0},
         commands: :all,
-        comparison: :strict,
         enabled: true
       }
 
@@ -91,7 +88,7 @@ defmodule PropertyDamage.StutterTest do
           max_repeats: 3,
           delay_ms: {10, 100},
           commands: [Cmd],
-          comparison: :strict
+          using: &Kernel.===/2
         )
 
       assert %Config{
@@ -99,9 +96,10 @@ defmodule PropertyDamage.StutterTest do
                max_repeats: 3,
                delay_ms: {10, 100},
                commands: [Cmd],
-               comparison: :strict,
                enabled: true
              } = config
+
+      assert config.using == (&Kernel.===/2)
     end
 
     test "keyword list and equivalent map parse identically" do

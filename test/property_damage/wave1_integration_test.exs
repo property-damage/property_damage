@@ -156,7 +156,6 @@ defmodule PropertyDamage.Wave1IntegrationTest do
       max_repeats: 1,
       delay_ms: 0,
       commands: [Charge],
-      comparison: :strict,
       enabled: true
     }
 

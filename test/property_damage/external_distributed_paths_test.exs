@@ -54,6 +54,19 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
     def apply(state, _other), do: state
   end
 
+  # What two targets are compared on: how many ids each created. The ids
+  # themselves are minted per target, so they are not compared.
+  defmodule CreatedCount do
+    use PropertyDamage.Model.Projection
+    @impl true
+    def init, do: 0
+    @impl true
+    def apply(count, %Created{}), do: count + 1
+    def apply(count, _other), do: count
+    @compare every: 1
+    def created(count, _root), do: count
+  end
+
   # Create yields a server id whose value is keyed by the per-target `prefix`, so
   # two targets capture distinct concretes for the same consumer placeholder.
   # Use reports the (resolved) target it received so tests can assert it is a
@@ -98,6 +111,8 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
     @impl true
     def command_sequence_projection, do: Projection
     @impl true
+    def check_projections, do: [CreatedCount]
+    @impl true
     def simulator, do: __MODULE__
     @impl PropertyDamage.Model.Simulator
     def simulate(%Create{label: l}, _state), do: [%Created{label: l}]
@@ -123,7 +138,6 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
                 {ProbingAdapter,
                  name: "solo", config: %{test_pid: self(), prefix: "solo", name: "solo"}}
               ],
-              compare: :correctness,
               max_runs: 1,
               max_commands: 12,
               seed: seed,
@@ -148,8 +162,9 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
     test "parallel: each target resolves the consumer to its OWN captured value" do
       # Distinct id prefixes per target prove the registries are per-target: the
       # same consumer placeholder resolves to "a_id" under target a and "b_id"
-      # under target b. Structural equivalence ignores the differing ids, so no
-      # divergence truncates the sequence before its consumers run.
+      # under target b. The targets are compared on how many ids they created,
+      # not on the ids, so no divergence truncates the sequence before its
+      # consumers run.
       used =
         Enum.find_value(1..300, fn seed ->
           drain_used([])
@@ -161,8 +176,6 @@ defmodule PropertyDamage.ExternalDistributedPathsTest do
                 {ProbingAdapter, name: "a", config: %{test_pid: self(), prefix: "a", name: "a"}},
                 {ProbingAdapter, name: "b", config: %{test_pid: self(), prefix: "b", name: "b"}}
               ],
-              compare: :correctness,
-              equivalence: :structural,
               concurrency: :parallel,
               max_runs: 1,
               max_commands: 12,

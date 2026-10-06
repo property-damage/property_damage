@@ -6,25 +6,98 @@ defmodule PropertyDamage.LockstepRunTest do
 
   import PropertyDamage.Test.VariantSupport
 
-  alias PropertyDamage.{Comparison, Failure, FailureReport, Generator, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, Generator, Sequence}
 
   alias PropertyDamage.Test.Lockstep.{
     CountingMock,
     GuardedStepModel,
-    Noted,
     NoteInjector,
     PolledModel,
     ProbeAdapter,
-    Probed,
     ProbeModel,
     StartupModel,
     Step,
     StepAdapter,
-    StepModel,
-    Stepped
+    StepModel
   }
 
+  alias PropertyDamage.Test.Lockstep.Ledger
+
   @seed 12_345
+
+  defmodule IdObservation do
+    # Compares the ids every Stepped event carries.
+    use PropertyDamage.Model.Projection
+
+    alias PropertyDamage.Test.Lockstep.Stepped
+
+    @impl true
+    def init, do: []
+
+    @impl true
+    def apply(ids, %Stepped{id: id}), do: [id | ids]
+    def apply(ids, _other), do: ids
+
+    @compare every: 1
+    def ids(ids, _root), do: ids
+  end
+
+  defmodule CloseValues do
+    # Compares Stepped values, agreeing when they differ by at most one.
+    use PropertyDamage.Model.Projection
+
+    alias PropertyDamage.Test.Lockstep.Stepped
+
+    @impl true
+    def init, do: []
+
+    @impl true
+    def apply(values, %Stepped{value: v}), do: [v | values]
+    def apply(values, _other), do: values
+
+    @compare using: fn reference, variant ->
+               Enum.zip(reference, variant) |> Enum.all?(fn {x, y} -> abs(x - y) <= 1 end)
+             end
+    def values(values, _root), do: values
+  end
+
+  defmodule NeverAgree do
+    # A predicate that never accepts the variant's value.
+    use PropertyDamage.Model.Projection
+
+    @compare using: fn _reference, _variant -> false end
+    def anything(_state, root), do: root
+  end
+
+  defmodule Finished do
+    # Latency runs compare nothing a target's speed or errors change: one
+    # observation at the end that every target agrees on.
+    use PropertyDamage.Model.Projection
+
+    @compare every: :end
+    def finished(_state, _root), do: :finished
+  end
+
+  for {name, observation} <- [
+        IdModel: IdObservation,
+        CloseModel: CloseValues,
+        NeverModel: NeverAgree,
+        LatencyModel: Finished
+      ] do
+    defmodule Module.concat(__MODULE__, name) do
+      @moduledoc false
+      @behaviour PropertyDamage.Model
+
+      @impl true
+      def commands, do: [PropertyDamage.Test.Lockstep.Step]
+
+      @impl true
+      def command_sequence_projection, do: Ledger
+
+      @impl true
+      def check_projections, do: [unquote(observation)]
+    end
+  end
 
   @metric_keys [
     :error_count,
@@ -48,7 +121,7 @@ defmodule PropertyDamage.LockstepRunTest do
         [
           model: StepModel,
           targets: targets,
-          compare: :correctness,
+          compare: [converge_within: 30],
           max_runs: 1,
           max_commands: 3,
           seed: @seed,
@@ -128,19 +201,16 @@ defmodule PropertyDamage.LockstepRunTest do
       end
     end
 
-    for compare <- [:performance, :both] do
-      test "compare: #{inspect(compare)} with concurrency: :parallel is an option error" do
-        # The same comparison mode runs under :serial.
-        assert {:ok, _stats} =
-                 run!([step("a"), step("b")], compare: unquote(compare), concurrency: :serial)
+    test "latency: true with concurrency: :parallel is an option error" do
+      # The same measurement runs under :serial.
+      assert {:ok, _stats} = run!([step("a"), step("b")], latency: true, concurrency: :serial)
 
-        error =
-          assert_raise NimbleOptions.ValidationError, fn ->
-            run!([step("a"), step("b")], compare: unquote(compare), concurrency: :parallel)
-          end
+      error =
+        assert_raise NimbleOptions.ValidationError, fn ->
+          run!([step("a"), step("b")], latency: true, concurrency: :parallel)
+        end
 
-        assert error.message =~ "concurrency"
-      end
+      assert error.message =~ "concurrency"
     end
 
     test "the report names the failing target and its kind, and no longer an execution mode" do
@@ -166,9 +236,10 @@ defmodule PropertyDamage.LockstepRunTest do
     end
   end
 
-  describe "root observations and divergences" do
-    test "a divergence names the root, the variant and both observations, injected events first" do
-      # Unshrunk, so the observations are those of the generated command.
+  describe "boundary observations and divergences" do
+    test "a divergence names the root, the variant, the observation and both values" do
+      # Unshrunk, so the values are those of the generated command. Both
+      # targets inject a Noted event, which the observation does not fold.
       report =
         failure!([step("a", %{behavior: :inject}), step("b", %{behavior: :inject_shift})],
           shrink: false
@@ -178,7 +249,9 @@ defmodule PropertyDamage.LockstepRunTest do
       divergence = Failure.detail(report.failure_reason)
 
       assert divergence |> Map.keys() |> Enum.sort() ==
-               [:command, :divergent_result, :reference_result, :results, :root]
+               [:command, :key, :mismatch, :reference_value, :root, :variant_value]
+
+      assert divergence.key == {PropertyDamage.Test.Lockstep.Answers, :answers}
 
       assert %Step{value: value} =
                Enum.at(Sequence.to_list(report.original_sequence), divergence.root)
@@ -192,15 +265,10 @@ defmodule PropertyDamage.LockstepRunTest do
       assert report.failed_at_index == 0
       assert report.variant == %{index: 1, name: "b"}
 
-      assert divergence.reference_result == {:ok, [%Noted{value: value}, %Stepped{value: value}]}
-
-      assert divergence.divergent_result ==
-               {:ok, [%Noted{value: value}, %Stepped{value: value + 1}]}
-
-      assert divergence.results == %{
-               "a" => divergence.reference_result,
-               "b" => divergence.divergent_result
-             }
+      assert divergence.reference_value == %{stepped: [{value, nil}], probed: []}
+      assert divergence.variant_value == %{stepped: [{value + 1, nil}], probed: []}
+      assert divergence.mismatch.left == divergence.reference_value
+      assert divergence.mismatch.right == divergence.variant_value
     end
 
     test "a divergence after root 0 names that root and its command" do
@@ -212,35 +280,33 @@ defmodule PropertyDamage.LockstepRunTest do
       assert Enum.at(Sequence.to_list(report.original_sequence), 1) ==
                Enum.at(generated(StepModel, @seed, 0, 3), 1)
 
-      assert {:ok, [%Stepped{mark: :bad}]} = divergence.divergent_result
+      assert [{_value, :bad} | _] = divergence.variant_value.stepped
     end
 
-    test "an adapter {:error, reason} is observed as {:error, reason}" do
+    test "an adapter {:error, reason} in one target leaves that target's observation behind" do
       report = failure!([step("a"), step("b", %{behavior: :error})])
 
       divergence = Failure.detail(report.failure_reason)
-      assert {:ok, [%Stepped{}]} = divergence.reference_result
-      assert divergence.divergent_result == {:error, :refused}
+      assert [{_value, nil}] = divergence.reference_value.stepped
+      assert divergence.variant_value.stepped == []
     end
 
-    test ":exact compares whole observations and :structural ignores identifiers" do
+    test "an observation that folds no identifiers ignores them; one that folds them diverges" do
       targets = [step("a"), step("b", %{behavior: :new_id})]
 
-      assert {:error, %FailureReport{kind: :diverged}} = run!(targets, equivalence: :exact)
-      assert {:ok, _stats} = run!(targets, equivalence: :structural)
-    end
-
-    test "a custom equivalence function receives the two observations" do
-      targets = [step("a"), step("b", %{behavior: :shift})]
-
-      close_enough = fn {:ok, [%Stepped{value: x}]}, {:ok, [%Stepped{value: y}]} ->
-        abs(x - y) <= 1
-      end
-
-      assert {:ok, _stats} = run!(targets, equivalence: close_enough)
+      assert {:ok, _stats} = run!(targets)
 
       assert {:error, %FailureReport{kind: :diverged}} =
-               run!(targets, equivalence: fn _, _ -> false end)
+               run!(targets, model: __MODULE__.IdModel)
+    end
+
+    test "a using: predicate decides whether the two values agree" do
+      targets = [step("a"), step("b", %{behavior: :shift})]
+
+      assert {:ok, _stats} = run!(targets, model: __MODULE__.CloseModel)
+
+      assert {:error, %FailureReport{kind: :diverged}} =
+               run!(targets, model: __MODULE__.NeverModel)
     end
 
     test "a run stops at its first divergence and the campaign ends with it" do
@@ -260,7 +326,7 @@ defmodule PropertyDamage.LockstepRunTest do
       assert entered(recorder, "b") == [0, 0]
     end
 
-    test "a probe root that retries before settling is compared on its settled events" do
+    test "a probe root that retries before settling is compared on its settled value" do
       targets = [
         {ProbeAdapter, name: "a", config: %{retries: 2}},
         {ProbeAdapter, name: "b", config: %{retries: 2}}
@@ -277,9 +343,12 @@ defmodule PropertyDamage.LockstepRunTest do
           model: ProbeModel
         )
 
+      # The comparison re-read the probe root while it waited, so each side
+      # folded its settled value more than once; the latest read leads.
       divergence = Failure.detail(shifted.failure_reason)
-      assert {:ok, [%Probed{value: value}]} = divergence.reference_result
-      assert divergence.divergent_result == {:ok, [%Probed{value: value + 1}]}
+      assert [value | _] = divergence.reference_value.probed
+      assert [shifted_value | _] = divergence.variant_value.probed
+      assert shifted_value == value + 1
     end
   end
 
@@ -311,7 +380,6 @@ defmodule PropertyDamage.LockstepRunTest do
             step("c", %{recorder: recorder})
           ],
           model: GuardedStepModel,
-          equivalence: Comparison.ignore_fields([:mark]),
           shrink: false
         )
 
@@ -338,7 +406,6 @@ defmodule PropertyDamage.LockstepRunTest do
             step("c", %{recorder: recorder})
           ],
           model: GuardedStepModel,
-          equivalence: Comparison.ignore_fields([:mark]),
           concurrency: :parallel
         )
 
@@ -405,11 +472,12 @@ defmodule PropertyDamage.LockstepRunTest do
     end
   end
 
-  describe "performance comparison" do
+  describe "latency measurement" do
     test "reports today's latency metrics per target and excludes warm-up runs" do
       assert {:ok, stats} =
                run!([step("fast"), step("broken", %{behavior: :error})],
-                 compare: :performance,
+                 model: __MODULE__.LatencyModel,
+                 latency: true,
                  max_runs: 3,
                  warmup_runs: 1
                )

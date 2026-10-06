@@ -51,23 +51,22 @@ defmodule PropertyDamage.FailureReport do
   - `:check_failed` - a check did not hold: a check at a command, an
     `@eventually` timeout, a `:startup` or finalization check, an idempotency
     or linearization violation.
-  - `:diverged` - a target answered a command differently from the reference
-    target.
+  - `:diverged` - a target's boundary observation (a `@compare` function)
+    still differed from the reference's when the convergence bound expired.
   - `:setup_failed` - a target's adapter `setup/1` returned an error or raised.
   - `:execution_failed` - a command could not be executed: an adapter raise,
     a command the framework could not run, and, in a one-target run, an
-    adapter `{:error, _}` answer. With two or more targets an adapter error
-    answer is compared like any other answer, so it can only diverge.
-  - `:did_not_converge` - a target did not converge within the settle time
-    after a command. No run produces this kind yet.
+    adapter `{:error, _}` answer.
+  - `:did_not_converge` - a target's boundary observation was still pending
+    when the convergence bound expired.
   - `:latency_exceeded` - a target exceeded a latency budget. No run produces
     this kind yet.
 
   ## Reproduction inputs
 
   Besides `seed`, `targets` and `concurrency`, a report records the run
-  options that decide whether the failure reproduces: `equivalence` (the run's
-  `equivalence:`, an atom or the function as given), `stutter` (the run's
+  options that decide whether the failure reproduces: `compare` (the run's
+  `compare:`, `[converge_within: ms]`), `stutter` (the run's
   normalized `stutter:` option, or `nil` when stutter was off) and
   `max_commands` (the run's `max_commands:`, which decides the sequence the
   seed generates). `reproduction_command/1` prints each one that differs from
@@ -77,7 +76,12 @@ defmodule PropertyDamage.FailureReport do
   position in `targets:` and its name; index 0 in a one-target run), and
   `targets` holds the run's `targets:` entries in order, the first being the
   reference. `failed_at_index` is the index of the command the failure belongs
-  to, and `nil` for a setup failure or a failed `:startup` check. Convenience accessors
+  to, and `nil` for a setup failure or a failed `:startup` check.
+
+  `compare_counts` holds, per boundary observation `{projection, function}`,
+  how many boundaries the failing run compared it at, how many it waited at,
+  and the total time it waited (`%{compared_at:, waited_at:, waited_ms:}`),
+  beside `check_fires`. Convenience accessors
   derive the common views: `failure_type/1` (the kind), `check_name/1`,
   `failure_message/1`, `idempotency_violation/1`, and `poll_timeout_info/1`.
   """
@@ -88,6 +92,8 @@ defmodule PropertyDamage.FailureReport do
   # The `max_commands:` default of `PropertyDamage.run/1`; a reproduction
   # command prints the option only when the run used another value.
   @default_max_commands 50
+  # The `compare: [converge_within:]` default; printed only when another.
+  @default_converge_within 5_000
   alias PropertyDamage.RunTrace.Step
 
   @typedoc "The failure's kind (`PropertyDamage.Failure.kind/1`)."
@@ -121,7 +127,7 @@ defmodule PropertyDamage.FailureReport do
           concurrency: :serial | :parallel,
 
           # The run options a reproduction needs (see "Reproduction inputs").
-          equivalence: :exact | :structural | (term(), term() -> boolean()) | nil,
+          compare: [converge_within: pos_integer()],
           stutter: keyword() | nil,
           max_commands: pos_integer() | nil,
 
@@ -168,6 +174,13 @@ defmodule PropertyDamage.FailureReport do
           # description is resolved once at construction.
           invariant_description: String.t() | nil,
           check_fires: %{{module(), atom()} => non_neg_integer()},
+          compare_counts: %{
+            {module(), atom()} => %{
+              compared_at: non_neg_integer(),
+              waited_at: non_neg_integer(),
+              waited_ms: non_neg_integer()
+            }
+          },
 
           # Human-readable command labels (DR-028 amendment, P7): keyed by the
           # flattened command index (the 0..n-1 index of `Sequence.to_list/1`,
@@ -183,7 +196,7 @@ defmodule PropertyDamage.FailureReport do
             variant: nil,
             targets: [],
             concurrency: :serial,
-            equivalence: :exact,
+            compare: [converge_within: 5_000],
             stutter: nil,
             max_commands: nil,
             trace: nil,
@@ -203,6 +216,7 @@ defmodule PropertyDamage.FailureReport do
             stacktrace: nil,
             invariant_description: nil,
             check_fires: %{},
+            compare_counts: %{},
             command_labels: %{}
 
   @doc """
@@ -232,7 +246,9 @@ defmodule PropertyDamage.FailureReport do
   - `:kind` - The report kind (default: derived from `:failure_reason` by
     `kind_of/1`)
   - `:concurrency` - The run's `concurrency:` (default `:serial`)
-  - `:equivalence` - The run's `equivalence:` (default `:exact`)
+  - `:compare` - The run's `compare:` (default `[converge_within: 5_000]`)
+  - `:compare_counts` - The failing run's per-observation compare counts
+    (default `%{}`)
   - `:stutter` - The run's normalized `stutter:` option (default `nil`, stutter
     off)
   - `:max_commands` - The run's `max_commands:` (default `nil`, not recorded)
@@ -310,7 +326,7 @@ defmodule PropertyDamage.FailureReport do
       variant: Keyword.get_lazy(opts, :variant, fn -> reference_variant(targets) end),
       targets: targets,
       concurrency: Keyword.get(opts, :concurrency, :serial),
-      equivalence: Keyword.get(opts, :equivalence, :exact),
+      compare: Keyword.get(opts, :compare, converge_within: @default_converge_within),
       stutter: Keyword.get(opts, :stutter),
       max_commands: Keyword.get(opts, :max_commands),
       trace: trace,
@@ -330,6 +346,7 @@ defmodule PropertyDamage.FailureReport do
       stacktrace: stacktrace,
       invariant_description: invariant_description,
       check_fires: Keyword.get(opts, :check_fires, %{}),
+      compare_counts: Keyword.get(opts, :compare_counts, %{}),
       command_labels: command_labels
     }
   end
@@ -510,14 +527,16 @@ defmodule PropertyDamage.FailureReport do
 
   @doc """
   The report kind for a failure reason: `:check_failed` for every check kind,
-  `:diverged`, `:setup_failed`, and `:execution_failed` for every execution and
-  framework kind. `nil` for anything that is not a `%Failure{}`.
+  `:diverged`, `:did_not_converge`, `:setup_failed`, and `:execution_failed`
+  for every execution and framework kind. `nil` for anything that is not a
+  `%Failure{}`.
   """
   @spec kind_of(term()) :: kind() | nil
   def kind_of(%Failure{} = failure) do
     case Failure.class(failure) do
       :check -> :check_failed
       :divergence -> :diverged
+      :convergence -> :did_not_converge
       :setup -> :setup_failed
       class when class in [:execution, :framework] -> :execution_failed
     end
@@ -592,7 +611,7 @@ defmodule PropertyDamage.FailureReport do
   `failure_reason` and only need the descriptive kind/name, without building a
   full report.
   """
-  @spec classify_reason(term()) :: {failure_type() | nil, atom() | nil}
+  @spec classify_reason(term()) :: {failure_type() | nil, Failure.name()}
   def classify_reason(%Failure{} = failure), do: {Failure.kind(failure), Failure.name(failure)}
   def classify_reason(_failure_reason), do: {nil, nil}
 
@@ -604,10 +623,10 @@ defmodule PropertyDamage.FailureReport do
     check_name = check_name(report)
 
     case failure_type(report) do
-      :check_failed -> "Invariant Violation: #{check_name}"
-      :projection_violation -> "Invariant Violation: #{check_name}"
+      :check_failed -> "Invariant Violation: #{format_name(check_name)}"
+      :projection_violation -> "Invariant Violation: #{format_name(check_name)}"
       :idempotency_violation -> "Idempotency Violation"
-      :poll_timeout -> "Poll Timeout: #{check_name}"
+      :poll_timeout -> "Poll Timeout: #{format_name(check_name)}"
       :poll_error -> "Poll Predicate Error"
       :adapter_error -> "Adapter Error"
       :settle_timeout -> "Settle Timeout"
@@ -618,7 +637,8 @@ defmodule PropertyDamage.FailureReport do
       :malformed_adapter_return -> "Malformed Adapter Return"
       :linearization -> "Linearization Failed"
       :placeholder_resolution -> "Placeholder Resolution Error"
-      :diverged -> "Divergence"
+      :diverged -> "Divergence: #{format_name(check_name)}"
+      :did_not_converge -> "Did Not Converge: #{format_name(check_name)}"
       :setup_failed -> "Setup Failed"
       :unknown -> "Unknown Failure"
       # Total fallback (e.g. nil on a hand-built struct) so rendering/Inspect
@@ -637,7 +657,7 @@ defmodule PropertyDamage.FailureReport do
   def failure_type(%__MODULE__{}), do: :unknown
 
   @doc "The failing check/projection name, or `nil`."
-  @spec check_name(t()) :: atom() | nil
+  @spec check_name(t()) :: Failure.name()
   def check_name(%__MODULE__{failure_reason: fr}), do: failure_check_name(fr)
 
   @doc "A human-readable message describing the failure, or `nil`."
@@ -739,10 +759,8 @@ defmodule PropertyDamage.FailureReport do
   It names the run's exact `targets:` list (see `targets_source/1`) and, for
   several targets, a `concurrency:` other than the default `:serial`. It also
   prints `max_commands:` when it differs from the default, `stutter:` when the
-  run used stutter, and `equivalence:` when it is not `:exact`: an atom as is,
-  a named function as its capture (`&Mod.fun/2`). Any other function cannot be
-  printed, so the command shows `equivalence: <custom function>`, which the
-  reader replaces with the function the run used.
+  run used stutter, and `compare: [converge_within: ms]` when the run's
+  convergence bound is not the default.
   """
   @spec reproduction_command(t()) :: String.t()
   def reproduction_command(%__MODULE__{seed: seed, model: model, targets: targets} = report) do
@@ -752,8 +770,8 @@ defmodule PropertyDamage.FailureReport do
         targets != [] && "targets: #{targets_source(report)}",
         (length(targets) > 1 and report.concurrency != :serial) &&
           "concurrency: #{inspect(report.concurrency)}",
-        report.equivalence not in [nil, :exact] &&
-          "equivalence: #{equivalence_source(report.equivalence)}",
+        converge_within(report) != @default_converge_within &&
+          "compare: [converge_within: #{converge_within(report)}]",
         report.stutter && "stutter: #{inspect(report.stutter)}",
         report.max_commands not in [nil, @default_max_commands] &&
           "max_commands: #{report.max_commands}",
@@ -765,18 +783,30 @@ defmodule PropertyDamage.FailureReport do
     "PropertyDamage.run(#{Enum.join(options, ", ")})"
   end
 
-  # An equivalence as Elixir source: an atom as is, a named function as its
-  # capture, any other function as a placeholder that does not compile.
-  defp equivalence_source(equivalence) when is_atom(equivalence), do: inspect(equivalence)
+  defp converge_within(%__MODULE__{compare: compare}) when is_list(compare),
+    do: Keyword.get(compare, :converge_within, @default_converge_within)
 
-  defp equivalence_source(equivalence) when is_function(equivalence) do
-    case Function.info(equivalence, :type) do
-      {:type, :external} -> inspect(equivalence)
-      _ -> "<custom function>"
+  defp converge_within(%__MODULE__{}), do: @default_converge_within
+
+  @doc """
+  A failure name as text: a `{projection, function}` key as
+  `Projection.function`, a module by its name, a check name as is, `nil` as
+  an empty string.
+  """
+  @spec format_name(Failure.name()) :: String.t()
+  def format_name({projection, function}) when is_atom(projection) and is_atom(function),
+    do: "#{inspect(projection)}.#{function}"
+
+  def format_name(nil), do: ""
+
+  def format_name(name) when is_atom(name) do
+    case Atom.to_string(name) do
+      "Elixir." <> _module -> inspect(name)
+      string -> string
     end
   end
 
-  defp equivalence_source(_equivalence), do: "<custom function>"
+  def format_name(name), do: inspect(name)
 
   @doc """
   The failed run as a timeline of `Step` structs, in flattened (reading) order.
@@ -969,18 +999,18 @@ defmodule PropertyDamage.FailureReport do
        do: inspect(reason)
 
   defp message_for(%Failure{type: %Failure.Divergence{} = d}) do
-    "Command #{d.root}#{divergence_name(d.name)} diverged: " <>
-      "the reference answered #{inspect(d.reference_result)}, " <>
-      "the target answered #{inspect(d.divergent_result)}"
+    "#{format_name(d.key)} diverged at root #{d.root}: " <> extract_message(d.mismatch)
+  end
+
+  defp message_for(%Failure{type: %Failure.Convergence{} = c}) do
+    "#{format_name(c.key)} did not converge within #{c.within_ms} ms at root #{c.root} " <>
+      "(waited #{c.waited_ms} ms); still pending: #{inspect(c.reason)}"
   end
 
   defp message_for(%Failure{type: %Failure.Setup{detail: detail}}),
     do: "Adapter setup failed: " <> extract_message(detail)
 
   defp message_for(%Failure{type: type}), do: inspect(type.detail)
-
-  defp divergence_name(nil), do: ""
-  defp divergence_name(name), do: " (#{inspect(name)})"
 
   # Extract a human message from a check/exception reason. The
   # is_exception clause MUST precede %{message: msg}: exceptions like
@@ -1001,9 +1031,11 @@ defmodule PropertyDamage.FailureReport do
     """
   end
 
-  defp format_idempotency_message(%{command: command, comparison_result: result}) do
+  defp format_idempotency_message(%{command: command, mismatch: mismatch}) do
     cmd_name = command.__struct__ |> Module.split() |> List.last()
-    "Command #{cmd_name} produced different events on retry: #{inspect(result)}"
+
+    "Command #{cmd_name} produced different events on retry (original, then retry):\n" <>
+      extract_message(mismatch)
   end
 
   defp format_idempotency_message(violation) do

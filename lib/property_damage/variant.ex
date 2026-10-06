@@ -217,6 +217,46 @@ defmodule PropertyDamage.Variant do
   def advance_to(pid, boundary), do: GenServer.call(pid, {:advance_to, boundary}, :infinity)
 
   @doc """
+  Evaluate the boundary observations `keys` (`{projection, function}`) of
+  root `root` on this variant's current projection state, after `finish/1` on
+  the finalized state.
+
+  Each function is called with its projection's state and the root command.
+  Returns `{:ok, %{key => result}}`, where a result is `{:value, value}`,
+  `{:pending, reason}` (the function returned `{:pending, reason}`) or
+  `{:raised, exception}`; or `{:failed, failure}` when the variant stopped.
+  """
+  @spec observe(pid(), non_neg_integer(), [{module(), atom()}]) ::
+          {:ok, %{{module(), atom()} => term()}} | {:failed, failure()}
+  def observe(pid, root, keys), do: GenServer.call(pid, {:observe, root, keys}, :infinity)
+
+  @doc """
+  Let the variant catch up at root `root`, the boundary it stopped at, while
+  a comparison waits for it.
+
+  With `:drain` the variant folds the events waiting in its queue
+  (`Stepping.drain/2`, async checks included). With `:reread` it first
+  executes root `root` again through the engine (a `:probe` read whose answer
+  may have changed: its per-command settle applies, and the new events are
+  appended to the log under the same command index), then drains. Either way,
+  an `@eventually` check whose window expired since the last request fails
+  the variant now (under `check_mode: :halt`).
+
+  After `finish/1`, `:drain` changes nothing and returns `{:ok, 0}`, while
+  `:reread` still executes the root: finalizing stopped the variant's pollers,
+  not the system under test. The re-read's events are folded into the
+  finished result and its checks run, as before the end; a poller it starts
+  is stopped at once, since finalization already awaited the run's windows.
+  `observe/3` and `finish/1` then report the result with the re-read in it.
+
+  Returns `{:ok, delivered}`, the number of log entries the call added, or
+  `{:failed, failure}`.
+  """
+  @spec catch_up(pid(), non_neg_integer(), :drain | :reread) ::
+          {:ok, non_neg_integer()} | {:failed, failure()}
+  def catch_up(pid, root, mode), do: GenServer.call(pid, {:catch_up, root, mode}, :infinity)
+
+  @doc """
   The variant's executor state: `:projections`, `:event_log` (newest first),
   `:placeholder_registry`, `:active_pollers`, `:active_resource_pollers`,
   `:step_count`, `:event_queue` and the rest of the state map. After a failure
@@ -331,6 +371,34 @@ defmodule PropertyDamage.Variant do
 
   def handle_call({:advance_to, _boundary}, _from, state),
     do: {:reply, {:error, not_steppable(state)}, state}
+
+  def handle_call({:observe, root, keys}, _from, %{phase: phase} = state)
+      when phase in [:ready, :finished] do
+    projections =
+      if phase == :finished, do: state.result.projections, else: state.exec.projections
+
+    command = elem(state.commands, root)
+    {:reply, {:ok, Map.new(keys, &{&1, observe_key(&1, projections, command)})}, state}
+  end
+
+  def handle_call({:observe, _root, _keys}, _from, %{phase: :halted} = state),
+    do: {:reply, {:failed, state.failure}, state}
+
+  def handle_call({:catch_up, _root, :drain}, _from, %{phase: :finished} = state),
+    do: {:reply, {:ok, 0}, state}
+
+  def handle_call({:catch_up, root, :reread}, _from, %{phase: :finished} = state) do
+    {reply, state} = reread_finished(state, root)
+    {:reply, reply, state}
+  end
+
+  def handle_call({:catch_up, root, mode}, _from, %{phase: :ready} = state) do
+    {reply, state} = catch_up_at(state, root, mode)
+    {:reply, reply, state}
+  end
+
+  def handle_call({:catch_up, _root, _mode}, _from, %{phase: :halted} = state),
+    do: {:reply, {:failed, state.failure}, state}
 
   def handle_call(:snapshot, _from, state), do: {:reply, state.exec, state}
 
@@ -521,6 +589,168 @@ defmodule PropertyDamage.Variant do
       {:error, failure, failed, outcome} ->
         {:halt,
          halt(state, {:failed, index, failure, failed}, failure_of(index, failure, outcome))}
+    end
+  end
+
+  # ==========================================================================
+  # Boundary observations
+  # ==========================================================================
+
+  defp observe_key({projection, function} = _key, projections, command) do
+    case apply(projection, function, [Map.fetch!(projections, projection), command]) do
+      {:pending, reason} -> {:pending, reason}
+      value -> {:value, value}
+    end
+  rescue
+    exception -> {:raised, exception}
+  end
+
+  defp catch_up_at(state, root, mode) do
+    log_before = length(state.exec.event_log)
+
+    stepped =
+      case mode do
+        :reread -> reread_root(state, root)
+        :drain -> {:cont, state}
+      end
+
+    with {:cont, state} <- stepped,
+         {{:ok, _observed}, state} <- finish_advance({state, []}, root),
+         {:ok, state} <- surface_expired_eventually(state) do
+      {{:ok, length(state.exec.event_log) - log_before}, state}
+    else
+      {:halt, state} -> {{:failed, state.failure}, state}
+      {{:failed, _failure} = failed, state} -> {failed, state}
+    end
+  end
+
+  # Executes a root again, as `step_root/2` does, without recording its
+  # latency: a re-read is the comparison's, not the client's.
+  defp reread_root(state, index) do
+    case step_root(%{state | measure_latency: false}, index) do
+      {:cont, stepped, _observation} ->
+        {:cont, %{stepped | measure_latency: state.measure_latency}}
+
+      {:halt, halted} ->
+        {:halt, %{halted | measure_latency: state.measure_latency}}
+    end
+  end
+
+  # A re-read after `finish/1`. Finalizing stopped the variant's pollers, not
+  # the system under test, so the root is executed again exactly as before the
+  # end, on an executor state rebuilt from the finished result: settle applies,
+  # the events are appended and folded, and the step's checks run. A poller
+  # the re-read starts is stopped at once, because finalization already
+  # awaited the run's windows and nothing would await a new one. The finished
+  # result takes the new events, projections and check results, so `observe/3`
+  # and `finish/1` see them; a failure turns it into the failed result.
+  defp reread_finished(%{result: %{success: true} = result} = state, root) do
+    log_before = length(result.event_log)
+    state = %{state | phase: :ready, exec: finished_exec(state.exec, result)}
+
+    case reread_root(state, root) do
+      {:cont, state} ->
+        Stepping.stop_pollers(state.exec)
+        exec = %{state.exec | active_pollers: [], active_resource_pollers: []}
+        result = refinished_result(result, exec)
+        delivered = length(result.event_log) - log_before
+        {{:ok, delivered}, %{state | phase: :finished, exec: exec, result: result}}
+
+      {:halt, state} ->
+        result = Stepping.finalize(state.halted, state.ctx)
+        {{:failed, state.failure}, %{state | phase: :finished, result: result}}
+    end
+  end
+
+  # Only a run that finished cleanly is compared at its final boundary.
+  defp reread_finished(state, _root), do: {{:ok, 0}, state}
+
+  # The executor state a finished run left: the result holds what
+  # finalization folded and checked after the last request.
+  defp finished_exec(exec, result) do
+    %{
+      exec
+      | projections: result.projections,
+        event_log: Enum.reverse(result.event_log),
+        check_counters: result.check_counters,
+        check_failures: Enum.reverse(result.check_failures),
+        command_fold_ordinals: result.command_fold_ordinals,
+        fold_counter: next_fold(exec.fold_counter, result),
+        active_pollers: [],
+        active_resource_pollers: []
+    }
+  end
+
+  # The next fold ordinal after everything finalization folded.
+  defp next_fold(counter, result) do
+    folded =
+      for(%{fold_index: index} when is_integer(index) <- result.event_log, do: index + 1) ++
+        Enum.map(Map.values(result.command_fold_ordinals), &(&1 + 1))
+
+    Enum.max([counter | folded])
+  end
+
+  defp refinished_result(result, exec) do
+    %{
+      result
+      | event_log: Enum.reverse(exec.event_log),
+        executed: exec.executed,
+        projections: exec.projections,
+        check_counters: exec.check_counters,
+        check_failures: Enum.reverse(exec.check_failures),
+        command_fold_ordinals: exec.command_fold_ordinals,
+        success: exec.check_failures == []
+    }
+  end
+
+  # An `@eventually` poller whose window expired reported its timeout to this
+  # process, which keeps poller results until `finish/1` replays them. Under
+  # `check_mode: :halt` the timeout fails the variant now, at the command whose
+  # event opened the window, instead of at the end of the run.
+  defp surface_expired_eventually(%{check_mode: :halt} = state) do
+    state = collect_poller_results(state)
+    active = MapSet.new(state.exec.active_pollers, & &1.id)
+
+    expired =
+      Enum.find(Enum.reverse(state.stash), fn
+        {:poller_result, id, {:timeout, _id, _info}} -> MapSet.member?(active, id)
+        _other -> false
+      end)
+
+    case expired do
+      nil ->
+        {:ok, state}
+
+      {:poller_result, id, {:timeout, _id, info} = result} ->
+        failure = Failure.poll_timeout(info)
+        root = Map.get(info.triggered_by, :command_index)
+
+        exec = %{
+          state.exec
+          | active_pollers: Enum.reject(state.exec.active_pollers, &(&1.id == id))
+        }
+
+        state = %{state | stash: List.delete(state.stash, {:poller_result, id, result})}
+
+        state =
+          halt(state, {:failed, root, failure, exec}, %{
+            kind: :check_failed,
+            root: root,
+            reason: failure
+          })
+
+        {{:failed, state.failure}, state}
+    end
+  end
+
+  defp surface_expired_eventually(state), do: {:ok, state}
+
+  defp collect_poller_results(state) do
+    receive do
+      {tag, _id, _result} = message when tag in [:poller_result, :resource_poller_result] ->
+        collect_poller_results(%{state | stash: [message | state.stash]})
+    after
+      0 -> state
     end
   end
 

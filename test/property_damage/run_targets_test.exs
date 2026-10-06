@@ -12,14 +12,14 @@ defmodule PropertyDamage.RunTargetsTest do
   alias PropertyDamage.RunTargetsTest.{HookModel, Sink, SinkModel}
 
   alias PropertyDamage.Test.Lockstep.{
+    Answers,
     GuardedStepModel,
     Ledger,
     PolledModel,
     StartupModel,
     Step,
     StepAdapter,
-    StepModel,
-    Stepped
+    StepModel
   }
 
   @seed 12_345
@@ -35,6 +35,7 @@ defmodule PropertyDamage.RunTargetsTest do
         [
           model: StepModel,
           targets: targets,
+          compare: [converge_within: 30],
           max_runs: 1,
           max_commands: 3,
           seed: @seed,
@@ -53,7 +54,7 @@ defmodule PropertyDamage.RunTargetsTest do
 
   describe "a divergence" do
     for concurrency <- [:serial, :parallel] do
-      test "is a :diverged report naming the variant, the root and both observations (#{concurrency})" do
+      test "is a :diverged report naming the variant, the root, the observation and both values (#{concurrency})" do
         assert {:error, %FailureReport{} = report} =
                  run([step("a"), step("b", %{behavior: :shift})],
                    concurrency: unquote(concurrency)
@@ -67,13 +68,13 @@ defmodule PropertyDamage.RunTargetsTest do
 
         assert %Failure{} = reason = report.failure_reason
         assert Failure.kind(reason) == :diverged
-        assert Failure.name(reason) == Step
+        assert Failure.name(reason) == {Answers, :answers}
 
         detail = Failure.detail(reason)
         assert detail.root == 0
-        assert {:ok, [%Stepped{value: value}]} = detail.reference_result
-        assert detail.divergent_result == {:ok, [%Stepped{value: value + 1}]}
-        assert detail.results == %{"a" => detail.reference_result, "b" => detail.divergent_result}
+        assert %Step{} = detail.command
+        assert %{stepped: [{value, nil}]} = detail.reference_value
+        assert detail.variant_value.stepped == [{value + 1, nil}]
       end
     end
 
@@ -191,10 +192,10 @@ defmodule PropertyDamage.RunTargetsTest do
       assert error.message =~ "one target"
     end
 
-    test "compare: :performance with concurrency: :parallel is an option error" do
+    test "latency: true with concurrency: :parallel is an option error" do
       error =
         assert_raise NimbleOptions.ValidationError, fn ->
-          run([step("a"), step("b")], compare: :performance, concurrency: :parallel)
+          run([step("a"), step("b")], latency: true, concurrency: :parallel)
         end
 
       assert error.message =~ "concurrency"
@@ -205,8 +206,7 @@ defmodule PropertyDamage.RunTargetsTest do
     test "a sync check failing only in variant 1 is :check_failed naming it" do
       assert {:error, report} =
                run([step("a"), step("b", %{bad_at: 1})],
-                 model: GuardedStepModel,
-                 equivalence: PropertyDamage.Comparison.ignore_fields([:mark])
+                 model: GuardedStepModel
                )
 
       assert report.kind == :check_failed
@@ -292,11 +292,11 @@ defmodule PropertyDamage.RunTargetsTest do
   describe "persistence" do
     @describetag :tmp_dir
 
-    test "a two-target divergence report round-trips at version 9", %{tmp_dir: dir} do
+    test "a two-target divergence report round-trips at version 10", %{tmp_dir: dir} do
       {:error, report} = run([step("a"), step("b", %{behavior: :shift})])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 9::8, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", 10::8, _rest::binary>>} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.kind == :diverged
@@ -305,26 +305,26 @@ defmodule PropertyDamage.RunTargetsTest do
       assert loaded.failure_reason == report.failure_reason
     end
 
-    test "a version-8 file is refused", %{tmp_dir: dir} do
+    test "a version-9 file is refused", %{tmp_dir: dir} do
       {:error, report} = run([step("a"), step("b", %{behavior: :shift})])
-      term_binary = :erlang.term_to_binary(%{format_version: 8, report: report})
-      path = Path.join(dir, "v8.pd")
-      File.write!(path, <<"PD", 8::8, :erlang.crc32(term_binary)::32, term_binary::binary>>)
+      term_binary = :erlang.term_to_binary(%{format_version: 9, report: report})
+      path = Path.join(dir, "v9.pd")
+      File.write!(path, <<"PD", 9::8, :erlang.crc32(term_binary)::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 8, 9}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, 10}} = Persistence.load(path)
     end
   end
 
-  describe "compare: :performance" do
+  describe "latency: true" do
     test "on one target returns metrics for its variant" do
-      assert {:ok, stats} = run([step("solo")], compare: :performance, max_runs: 2)
+      assert {:ok, stats} = run([step("solo")], latency: true, max_runs: 2)
 
       assert Map.keys(stats.metrics) == ["solo"]
       assert is_number(stats.metrics["solo"].latency_p50)
     end
 
     test "on two targets under :serial returns metrics keyed by both names" do
-      assert {:ok, stats} = run([step("a"), step("b")], compare: :performance, max_runs: 2)
+      assert {:ok, stats} = run([step("a"), step("b")], latency: true, max_runs: 2)
 
       assert stats.metrics |> Map.keys() |> Enum.sort() == ["a", "b"]
     end
@@ -380,8 +380,7 @@ defmodule PropertyDamage.RunTargetsTest do
     test "a fail!/2 check in variant 1 of two targets" do
       assert {:error, report} =
                run([step("a"), step("b", %{bad_at: 1})],
-                 model: GuardedStepModel,
-                 equivalence: PropertyDamage.Comparison.ignore_fields([:mark])
+                 model: GuardedStepModel
                )
 
       assert report.variant == %{index: 1, name: "b"}

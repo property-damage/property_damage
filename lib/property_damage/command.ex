@@ -33,8 +33,7 @@ defmodule PropertyDamage.Command do
         overrides: (state -> map) | map,      # Generator overrides
         weight: pos_integer(),                # Generation weight
         observables: [module()],              # Events this command can produce
-        idempotent: boolean(),                # Eligible for stutter testing
-        acceptable_retry_events: [module()]   # Acceptable stutter-retry responses
+        idempotent: boolean()                 # Eligible for stutter testing
       }
 
   ## Using PropertyDamage.Command
@@ -160,7 +159,6 @@ defmodule PropertyDamage.Command do
   | `:shrink`                  | Shrinking priority (read-only -> `:prefer_remove`) |
   | `:observables`             | Event modules this command can produce             |
   | `:idempotent`              | Eligibility for stutter testing                    |
-  | `:acceptable_retry_events` | Acceptable alternative stutter-retry responses     |
   | `:when` / `:overrides` / `:weight` | Model-level wiring (precondition/overrides/weight) |
 
   ## Design Principles
@@ -273,8 +271,6 @@ defmodule PropertyDamage.Command do
   - `:weight` - Generation weight (positive integer)
   - `:observables` - Event modules this command can produce (default `[]`)
   - `:idempotent` - Whether the command is eligible for stutter testing (default `true`)
-  - `:acceptable_retry_events` - Event modules acceptable as alternative stutter-retry
-    responses (default `[]`)
 
   ## Example
 
@@ -334,8 +330,6 @@ defmodule PropertyDamage.Command do
   - `:weight` - Default generation weight, default `1`
   - `:observables` - Event modules this command can produce, default `[]`
   - `:idempotent` - Whether the command is eligible for stutter testing, default `true`
-  - `:acceptable_retry_events` - Event modules acceptable as alternative stutter-retry
-    responses, default `[]`
 
   ## Example
 
@@ -364,6 +358,10 @@ defmodule PropertyDamage.Command do
       # }
   """
   defmacro __using__(opts \\ []) do
+    if Keyword.keyword?(opts) and Keyword.has_key?(opts, :acceptable_retry_events) do
+      raise ArgumentError, retired_acceptable_retry_events()
+    end
+
     quote bind_quoted: [opts: opts] do
       @behaviour PropertyDamage.Command
       @command_defaults opts
@@ -397,9 +395,16 @@ defmodule PropertyDamage.Command do
       overrides: %{},
       weight: 1,
       observables: [],
-      idempotent: true,
-      acceptable_retry_events: []
+      idempotent: true
     }
+  end
+
+  @doc false
+  # The error for the removed `acceptable_retry_events:` key.
+  def retired_acceptable_retry_events do
+    "`acceptable_retry_events:` was removed; a stutter retry agrees with the original " <>
+      "when `stutter: [using: fn original_events, retry_events -> ... end]` accepts it " <>
+      "(default `&==/2`)"
   end
 
   @doc """

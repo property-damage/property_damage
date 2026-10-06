@@ -45,6 +45,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       if(show_state, do: terminal_state_transition(report, color), else: nil),
       if(show_event_log, do: terminal_event_log(report, max_events, color), else: nil),
       terminal_reproduction(report, color),
+      terminal_compare_counts(report, color),
       terminal_shrinking_stats(report, color),
       if(show_original, do: terminal_original_sequence(report, opts), else: nil)
     ]
@@ -182,7 +183,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
           reason =
             invariant_section(report, color) <>
               """
-              #{label("Check", color)}         #{cyan(color)}#{FailureReport.check_name(report)}#{reset(color)}
+              #{label("Check", color)}         #{cyan(color)}#{FailureReport.format_name(FailureReport.check_name(report))}#{reset(color)}
               #{label("Message", color)}
               #{indent_text(FailureReport.failure_message(report), "    ")}
               """
@@ -210,6 +211,12 @@ defmodule PropertyDamage.FailureReport.Formatter do
         :poll_timeout ->
           {format_poll_timeout_terminal(report, color), nil}
 
+        :diverged ->
+          format_divergence_terminal(report, color)
+
+        :did_not_converge ->
+          format_convergence_terminal(report, color)
+
         _ ->
           reason = """
           #{label("Reason", color)}
@@ -236,7 +243,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
         """
         #{yellow(color)}Why it failed:#{reset(color)} Command #{cyan(color)}#{cmd_name}#{reset(color)} at index #{index}
-        violated the #{cyan(color)}#{FailureReport.check_name(report)}#{reset(color)} invariant.
+        violated the #{cyan(color)}#{FailureReport.format_name(FailureReport.check_name(report))}#{reset(color)} invariant.
         """
 
       nil ->
@@ -256,8 +263,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
           "  Attempt #{att.attempt}#{retry_label}: [#{events_summary}]"
         end)
 
-      diff_text = format_comparison_diff(violation.comparison_result, color)
-
       """
       #{label("Type", color)}          Idempotency Violation
       #{label("Command", color)}       #{module_name(violation.command.__struct__)}
@@ -265,8 +270,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       #{yellow(color)}Attempts:#{reset(color)}
       #{attempts_text}
 
-      #{yellow(color)}Difference:#{reset(color)}
-      #{diff_text}
+      #{yellow(color)}Difference (original, then retry):#{reset(color)}
+      #{indent_text(mismatch_text(violation.mismatch), "  ")}
       """
     else
       """
@@ -277,14 +282,86 @@ defmodule PropertyDamage.FailureReport.Formatter do
     end
   end
 
-  defp format_comparison_diff(result, color) when is_map(result) do
-    result
-    |> Enum.map_join("\n", fn {key, value} ->
-      "  #{yellow(color)}#{key}:#{reset(color)} #{inspect(value)}"
-    end)
+  defp mismatch_text(mismatch) when is_exception(mismatch), do: Exception.message(mismatch)
+  defp mismatch_text(other), do: inspect(other, pretty: true)
+
+  # A divergence: the observation, the root, both targets' values and the
+  # mismatch the observation's `using:` predicate reported.
+  defp format_divergence_terminal(report, color) do
+    divergence = report.failure_reason.type
+    observation = FailureReport.format_name(divergence.key)
+    {reference, variant} = {reference_name(report), variant_name(report)}
+
+    reason = """
+    #{label("Type", color)}          Divergence
+    #{label("Observation", color)}   #{cyan(color)}#{observation}#{reset(color)}
+    #{label("Root", color)}          #{divergence.root} #{dim(color)}#{inspect(divergence.command, limit: 5)}#{reset(color)}
+    #{label("Reference", color)}     #{inspect(reference)}: #{inspect(divergence.reference_value, limit: 10)}
+    #{label("Variant", color)}       #{inspect(variant)}: #{inspect(divergence.variant_value, limit: 10)}
+    #{label("Mismatch", color)}
+    #{indent_text(mismatch_text(divergence.mismatch), "    ")}
+    """
+
+    why = """
+    #{yellow(color)}Why it failed:#{reset(color)} #{observation} in variant #{inspect(variant)} still differed
+    from the reference #{inspect(reference)} at root #{divergence.root} when the convergence bound expired.
+    """
+
+    {reason, why}
   end
 
-  defp format_comparison_diff(result, _color), do: "  #{inspect(result)}"
+  # A failure to converge: the observation stayed pending until the bound.
+  defp format_convergence_terminal(report, color) do
+    convergence = report.failure_reason.type
+    observation = FailureReport.format_name(convergence.key)
+    variant = variant_name(report)
+
+    reason = """
+    #{label("Type", color)}          Did Not Converge
+    #{label("Observation", color)}   #{cyan(color)}#{observation}#{reset(color)}
+    #{label("Root", color)}          #{convergence.root} #{dim(color)}#{inspect(convergence.command, limit: 5)}#{reset(color)}
+    #{label("Pending", color)}       #{inspect(convergence.reason, limit: 10)}
+    #{label("Waited", color)}        #{convergence.waited_ms} ms
+    """
+
+    why = """
+    #{yellow(color)}Why it failed:#{reset(color)} #{observation} did not converge within #{convergence.within_ms} ms at root #{convergence.root} in variant #{inspect(variant)}:
+    it was still pending after the comparison waited #{convergence.waited_ms} ms.
+    """
+
+    {reason, why}
+  end
+
+  defp variant_name(%{variant: %{name: name}}), do: name
+  defp variant_name(_report), do: nil
+
+  defp reference_name(report) do
+    case FailureReport.reference_target(report) do
+      %{name: name} -> name
+      nil -> nil
+    end
+  end
+
+  # One line per boundary observation: the boundaries the failing run compared
+  # it at, waited at, and the time it waited.
+  defp terminal_compare_counts(%{compare_counts: counts}, color)
+       when is_map(counts) and map_size(counts) > 0 do
+    lines =
+      counts
+      |> Enum.map(fn {key, count} -> {FailureReport.format_name(key), count} end)
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map_join("\n", fn {name, count} ->
+        "  #{cyan(color)}#{name}#{reset(color)}  compared at #{count.compared_at}, " <>
+          "waited at #{count.waited_at} (#{count.waited_ms} ms)"
+      end)
+
+    """
+    #{section_header("Boundary Comparisons", color)}
+    #{lines}
+    """
+  end
+
+  defp terminal_compare_counts(_report, _color), do: nil
 
   defp format_poll_timeout_terminal(report, color) do
     info = FailureReport.poll_timeout_info(report)
@@ -636,7 +713,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
         kind when kind in [:check_failed, :projection_violation] ->
           markdown_invariant_section(report) <>
             """
-            **Check:** `#{FailureReport.check_name(report)}`
+            **Check:** `#{FailureReport.format_name(FailureReport.check_name(report))}`
 
             **Message:**
             ```
@@ -735,10 +812,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
       |---------|------|--------|
       #{attempts_text}
 
-      ### Difference
+      ### Difference (original, then retry)
 
-      ```elixir
-      #{inspect(violation.comparison_result, pretty: true)}
+      ```
+      #{mismatch_text(violation.mismatch)}
       ```
       """
     else
@@ -886,7 +963,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       "failure" => %{
         "type" => to_string(FailureReport.failure_type(report)),
         "check_name" =>
-          FailureReport.check_name(report) && to_string(FailureReport.check_name(report)),
+          FailureReport.check_name(report) &&
+            FailureReport.format_name(FailureReport.check_name(report)),
         "message" => FailureReport.failure_message(report),
         "summary" => FailureReport.failure_type_summary(report)
       },
@@ -982,7 +1060,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
             "events" => Enum.map(att.events, &module_name(&1.__struct__))
           }
         end),
-      "comparison_result" => serialize_value(violation.comparison_result)
+      "mismatch" => mismatch_text(violation.mismatch)
     }
   end
 

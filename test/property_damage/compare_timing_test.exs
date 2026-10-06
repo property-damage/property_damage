@@ -11,7 +11,7 @@ defmodule PropertyDamage.CompareTimingTest do
 
   @header """
     use PropertyDamage.Model.Projection
-    alias PropertyDamage.Test.Compare.{Balance, Paid, Settled}
+    alias PropertyDamage.Test.Compare.{Balance, Paid, Read, Settled}
 
     @impl true
     def init, do: %{unsettled: %{}, settled: 0, paid: 0, balance: nil, fresh: true}

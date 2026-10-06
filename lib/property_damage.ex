@@ -132,6 +132,7 @@ defmodule PropertyDamage do
   """
 
   alias PropertyDamage.{
+    Comparison,
     Coverage,
     EventQueue,
     Executor,
@@ -167,6 +168,7 @@ defmodule PropertyDamage do
           required(:seed) => integer(),
           required(:targets) => [%{index: non_neg_integer(), name: String.t()}],
           optional(:check_fires) => %{{module(), atom()} => non_neg_integer()},
+          optional(:compare_counts) => Comparison.counts(),
           optional(:coverage) => term(),
           optional(:metrics) => %{String.t() => map()}
         }
@@ -230,31 +232,34 @@ defmodule PropertyDamage do
   - `:concurrency` - How the targets reach each command boundary: `:serial`
     (default) steps one target at a time in target order; `:parallel` steps
     every target at once
-  - `:compare` - `:correctness` (default) compares every target's answers with
-    the reference's; `:performance` measures each target's latency instead;
-    `:both` does both
-  - `:equivalence` - How two answers are compared: `:exact` (default),
-    `:structural` (ignores identifier and timestamp fields), or a function
-    `fn reference_answer, target_answer -> boolean end`
+  - `:compare` - `[converge_within: ms]`: how long the comparison of two or
+    more targets waits at a boundary for their `@compare` observations to
+    agree (default `[converge_within: 5_000]`)
+  - `:latency` - `true` measures each target's latency per command and
+    returns it in `stats.metrics` (default `false`); requires
+    `concurrency: :serial`
   - `:metrics`, `:percentiles`, `:warmup_runs` - Parameters of
-    `compare: :performance | :both`; `warmup_runs` (default 0) runs are left
-    out of the metrics
+    `latency: true`; `warmup_runs` (default 0) runs are left out of the
+    metrics
 
   ## Several Targets
 
   Each linear run executes its command sequence against every target in
   lockstep (`PropertyDamage.Scheduler`): every target executes command `r`,
-  their answers are compared, and only then does any target start command
-  `r + 1`. Each target runs in its own process with its own event queue,
+  their boundary observations scheduled there are compared, and only once they
+  agree does any target start command `r + 1`. Targets are compared only
+  through the functions the model's projections mark with `@compare`: a run
+  with two or more targets whose model declares none is an error before any
+  adapter is set up. Each target runs in its own process with its own event queue,
   injectors, mocks and pollers, and is set up and torn down once per run.
-  `compare: :performance | :both` requires `concurrency: :serial`, because
-  overlapping targets would mix their load into each other's latency.
+  `latency: true` requires `concurrency: :serial`, because overlapping targets
+  would mix their load into each other's latency.
 
-  The first failure ends the campaign: a target answering differently from the
-  reference (`kind: :diverged`), a failing check in any target, a setup failure
-  or an execution failure. The report names the target in `variant`. With two
-  or more targets an adapter `{:error, _}` answer is compared like any other
-  answer.
+  The first failure ends the campaign: a target whose boundary observation
+  still differs from the reference's at the convergence bound
+  (`kind: :diverged`) or is still pending there (`kind: :did_not_converge`), a
+  failing check in any target, a setup failure or an execution failure. The
+  report names the target in `variant`.
 
   A failure is shrunk and reproduced the same way for one target or several:
   every shrink attempt runs the candidate sequence on every target through the
@@ -288,10 +293,9 @@ defmodule PropertyDamage do
   - `:max_repeats` - Maximum retry attempts per stuttered command (default: 2)
   - `:delay_ms` - Delay between retries, `{min, max}` tuple or integer (default: {0, 100})
   - `:commands` - `:all` or list of command modules to stutter (default: :all)
-  - `:comparison` - Event comparison mode (default: :strict)
-    - `:strict` - Events must be exactly equal
-    - `{:structural, fields}` - Ignore specified fields when comparing
-    - `{:custom, fun}` - Custom comparison function `fn(events1, events2) -> :match | {:mismatch, map()}`
+  - `:using` - The predicate deciding whether a retry agrees with the
+    original, called `using.(original_events, retry_events)` with the contract
+    of `@compare`'s `using:` (default `&==/2`)
 
   Stutter testing verifies that retrying commands produces consistent results
   (idempotency). Retry events are captured but not applied to projections.
@@ -315,9 +319,10 @@ defmodule PropertyDamage do
   ## Returns
 
   - `{:ok, stats}` - All runs passed. `stats` holds `runs`, `total_commands`,
-    `seed`, `targets` (`[%{index:, name:}]`), the coverage keys, and under
-    `compare: :performance | :both` the latency `metrics` of each target,
-    keyed by target name
+    `seed`, `targets` (`[%{index:, name:}]`), the coverage keys,
+    `compare_counts` (per `@compare` key `{projection, function}`: the
+    boundaries it was compared at, waited at, and the time waited), and under
+    `latency: true` the latency `metrics` of each target, keyed by target name
   - `{:error, failure_report}` - A run failed; see `PropertyDamage.FailureReport`
     for its `kind` and the failing `variant`. A target whose adapter `setup/1`
     fails is a report of kind `:setup_failed`
@@ -379,6 +384,10 @@ defmodule PropertyDamage do
 
     model = opts[:model]
     targets = opts[:targets]
+
+    # Two or more targets are compared only through @compare observations:
+    # refuse a model without any before anything runs, `validate:` or not.
+    Comparison.check_model!(model, length(targets))
     [reference | _] = targets
     max_commands = opts[:max_commands]
     max_runs = opts[:max_runs]
@@ -434,9 +443,8 @@ defmodule PropertyDamage do
       coverage: opts[:coverage],
       concurrency: opts[:concurrency],
       compare: opts[:compare],
-      equivalence: opts[:equivalence],
       warmup_runs: opts[:warmup_runs],
-      measure_latency: opts[:compare] in [:performance, :both]
+      measure_latency: opts[:latency]
     }
 
     # Validate configuration against every target's adapter and injectors
@@ -563,6 +571,7 @@ defmodule PropertyDamage do
         # only when `coverage: true` was requested.
         acc = %{
           fires: %{},
+          compare_counts: Comparison.zero_counts(ctx.model),
           tracker: if(ctx.coverage, do: Coverage.new(ctx.model), else: nil),
           total_commands: 0,
           samples: []
@@ -581,6 +590,7 @@ defmodule PropertyDamage do
         targets: Enum.map(ctx.targets, &%{index: &1.index, name: &1.name})
       }
       |> put_coverage_stats(acc)
+      |> Map.put(:compare_counts, acc.compare_counts)
       |> put_metrics(ctx, acc.samples)
 
     Reporter.emit(ctx.reporter, fn ->
@@ -695,6 +705,11 @@ defmodule PropertyDamage do
 
     acc = record_sample(acc, ctx, run.run_number, outcome)
 
+    acc = %{
+      acc
+      | compare_counts: Comparison.merge_counts(acc.compare_counts, outcome.compare_counts)
+    }
+
     case outcome.failure do
       nil ->
         {:pass,
@@ -722,7 +737,6 @@ defmodule PropertyDamage do
         mint_epoch: 0,
         concurrency: ctx.concurrency,
         compare: ctx.compare,
-        equivalence: ctx.equivalence,
         measure_latency: ctx.measure_latency,
         stutter_config: ctx.stutter_config,
         check_mode: ctx.check_mode
@@ -791,6 +805,7 @@ defmodule PropertyDamage do
       run_seed: run.run_seed,
       run_number: run.run_number,
       fires: fires,
+      compare_counts: outcome.compare_counts,
       failure: outcome.failure,
       result: Enum.at(outcome.results, outcome.failure.variant.index)
     }
@@ -823,6 +838,7 @@ defmodule PropertyDamage do
       run_seed: run.run_seed,
       run_number: run.run_number,
       fires: fires,
+      compare_counts: Comparison.zero_counts(ctx.model),
       failure: failure,
       result: result
     }
@@ -830,7 +846,7 @@ defmodule PropertyDamage do
 
   defp variant_of(target), do: %{index: target.index, name: target.name}
 
-  # Under `compare: :performance | :both`, each run at or after `warmup_runs`
+  # Under `latency: true`, each run at or after `warmup_runs`
   # contributes its per-target latencies and observations to the metrics.
   defp record_sample(%{samples: samples} = acc, ctx, run_number, outcome) do
     if ctx.measure_latency and run_number >= ctx.warmup_runs do
@@ -1256,7 +1272,6 @@ defmodule PropertyDamage do
             targets: ctx.targets,
             concurrency: ctx.concurrency,
             compare: ctx.compare,
-            equivalence: ctx.equivalence,
             check_mode: ctx.check_mode,
             config: ctx.shrinker_config,
             # Stutter failures are shrinkable (DR-029): the shrinker reproduces
@@ -1322,7 +1337,6 @@ defmodule PropertyDamage do
         mint_epoch: epoch,
         concurrency: ctx.concurrency,
         compare: ctx.compare,
-        equivalence: ctx.equivalence,
         stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
         check_mode: ctx.check_mode
       )
@@ -1431,10 +1445,11 @@ defmodule PropertyDamage do
       model: ctx.model,
       targets: ctx.target_entries,
       concurrency: ctx.concurrency,
-      equivalence: ctx.equivalence,
+      compare: ctx.compare,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
-      check_fires: found.fires
+      check_fires: found.fires,
+      compare_counts: found.compare_counts
     )
   end
 
@@ -1557,8 +1572,8 @@ defmodule PropertyDamage do
     `PropertyDamage.Target`
   - `:concurrency` - `:serial` or `:parallel`, as on `PropertyDamage.run/1`
     (default: the report's `concurrency`)
-  - `:equivalence` - `:exact`, `:structural` or a 2-arity function, as on
-    `PropertyDamage.run/1` (default: the report's `equivalence`)
+  - `:compare` - `[converge_within: ms]`, as on `PropertyDamage.run/1`
+    (default: the report's `compare`)
 
   The re-shrink also uses the report's `stutter` configuration: a stutter
   failure re-runs with stutter forced on, as the run's own shrink does.
@@ -1610,8 +1625,7 @@ defmodule PropertyDamage do
       # class of run-scoped values.
       run_nonce: report.trace && report.trace.run_nonce,
       concurrency: Keyword.get(opts, :concurrency, report.concurrency),
-      compare: :correctness,
-      equivalence: Keyword.get(opts, :equivalence, report.equivalence || :exact),
+      compare: shrink_further_compare(report, opts),
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
       check_mode: :halt
@@ -1644,7 +1658,6 @@ defmodule PropertyDamage do
         targets: targets,
         concurrency: ctx.concurrency,
         compare: ctx.compare,
-        equivalence: ctx.equivalence,
         # A stutter failure re-shrinks with stutter forced on (DR-029), as in
         # the run's own failure path.
         stutter_config: ctx.stutter_config,
@@ -1696,7 +1709,8 @@ defmodule PropertyDamage do
            model: report.model,
            targets: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
            concurrency: ctx.concurrency,
-           equivalence: ctx.equivalence,
+           compare: ctx.compare,
+           compare_counts: report.compare_counts,
            stutter: ctx.stutter,
            max_commands: report.max_commands,
            linearization: Map.get(result, :linearization),
@@ -1710,6 +1724,27 @@ defmodule PropertyDamage do
 
       :not_reproduced ->
         {:ok, report}
+    end
+  end
+
+  # The convergence bound of a re-shrink: the `compare:` option, validated as
+  # on `run/1`, else the report's.
+  defp shrink_further_compare(report, opts) do
+    if Keyword.has_key?(opts, :equivalence) do
+      raise ArgumentError,
+            "`equivalence:` was removed; targets are compared only through `@compare` " <>
+              "functions, each deciding agreement with its own `using:` predicate"
+    end
+
+    case Keyword.fetch(opts, :compare) do
+      {:ok, compare} ->
+        case Options.validate_compare(compare) do
+          {:ok, compare} -> compare
+          {:error, message} -> raise ArgumentError, message
+        end
+
+      :error ->
+        report.compare
     end
   end
 

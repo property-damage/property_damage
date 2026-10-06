@@ -249,9 +249,7 @@ defmodule PropertyDamage.VariantLifecycleTest do
           seed: 1,
           run_number: 0,
           run_nonce: 1,
-          concurrency: :serial,
-          compare: :correctness,
-          equivalence: :exact
+          concurrency: :serial
         )
 
       run
@@ -308,8 +306,7 @@ defmodule PropertyDamage.VariantLifecycleTest do
           run_number: 0,
           run_nonce: 1,
           concurrency: :serial,
-          compare: :correctness,
-          equivalence: :structural,
+          compare: [converge_within: 30],
           check_mode: check_mode
         )
 

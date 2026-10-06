@@ -1,6 +1,6 @@
 defmodule PropertyDamage.LatencyMetrics do
   @moduledoc false
-  # Per-target latency metrics for `compare: :performance | :both`.
+  # Per-target latency metrics for `latency: true`.
   #
   # Every measured run contributes one sample per target that was set up: the
   # wall-clock time of each command's `execute/3` and the target's observation

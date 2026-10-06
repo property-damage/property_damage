@@ -109,7 +109,7 @@ defmodule PropertyDamage.EventLog.Entry do
           span_id: String.t() | nil,
           branch_id: non_neg_integer() | nil,
           stutter_attempt: pos_integer() | nil,
-          stutter_comparison: :match | {:mismatch, map()} | nil,
+          stutter_comparison: :match | {:mismatch, Exception.t()} | nil,
           resource_poller_id: reference() | nil,
           fold_index: non_neg_integer() | nil
         }

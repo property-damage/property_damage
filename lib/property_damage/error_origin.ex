@@ -114,7 +114,9 @@ defmodule PropertyDamage.ErrorOrigin do
       %{
         origin: :test_code_error,
         details: %{
-          reason: "Check '#{check_name}' raised an unexpected exception",
+          reason:
+            "Check '#{PropertyDamage.FailureReport.format_name(check_name)}' raised an " <>
+              "unexpected exception",
           evidence: %{
             check_name: check_name,
             reason: format_reason(reason),
@@ -129,7 +131,7 @@ defmodule PropertyDamage.ErrorOrigin do
       %{
         origin: :sut_error,
         details: %{
-          reason: "Check '#{check_name}' failed",
+          reason: "Check '#{PropertyDamage.FailureReport.format_name(check_name)}' failed",
           evidence: %{check_name: check_name, reason: format_reason(reason)},
           confidence: :high
         }
@@ -164,7 +166,7 @@ defmodule PropertyDamage.ErrorOrigin do
         evidence: %{
           command: get_command_name(violation),
           attempts: Map.get(violation, :attempts),
-          comparison: Map.get(violation, :comparison_result)
+          mismatch: Map.get(violation, :mismatch)
         },
         confidence: :high
       }

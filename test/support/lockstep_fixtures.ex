@@ -276,6 +276,46 @@ defmodule PropertyDamage.Test.Lockstep do
     def apply(state, _other), do: state
   end
 
+  defmodule Answers do
+    @moduledoc false
+    # What every variant's adapter answered, compared across variants at every
+    # root boundary: each Stepped value with its mark, and each settled Probed
+    # value. It folds no ids, no injected events and no poller events, which
+    # differ per target by design.
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{stepped: [], probed: []}
+
+    @impl true
+    def apply(state, %Stepped{value: v, mark: mark}),
+      do: %{state | stepped: [{v, mark} | state.stepped]}
+
+    def apply(state, %Probed{value: v}), do: %{state | probed: [v | state.probed]}
+    def apply(state, _other), do: state
+
+    @compare every: 1
+    def answers(state, _root), do: state
+  end
+
+  defmodule RoutingCounts do
+    @moduledoc false
+    # How many values each variant created and used, compared across variants
+    # at every root boundary. The values themselves are minted per target.
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{created: 0, used: 0}
+
+    @impl true
+    def apply(state, %Created{}), do: %{state | created: state.created + 1}
+    def apply(state, %Used{}), do: %{state | used: state.used + 1}
+    def apply(state, _other), do: state
+
+    @compare every: 1
+    def counts(state, _root), do: state
+  end
+
   defmodule StepGuard do
     @moduledoc false
     # Fails on a Stepped event whose value is 13 or that is marked bad.
@@ -438,6 +478,9 @@ defmodule PropertyDamage.Test.Lockstep do
 
     @impl true
     def command_sequence_projection, do: Ledger
+
+    @impl true
+    def check_projections, do: [Answers]
   end
 
   defmodule GuardedStepModel do
@@ -451,7 +494,7 @@ defmodule PropertyDamage.Test.Lockstep do
     def command_sequence_projection, do: Ledger
 
     @impl true
-    def check_projections, do: [StepGuard]
+    def check_projections, do: [StepGuard, Answers]
   end
 
   defmodule StartupModel do
@@ -465,7 +508,7 @@ defmodule PropertyDamage.Test.Lockstep do
     def command_sequence_projection, do: Ledger
 
     @impl true
-    def check_projections, do: [StartupGuard]
+    def check_projections, do: [StartupGuard, Answers]
   end
 
   defmodule PolledModel do
@@ -479,7 +522,7 @@ defmodule PropertyDamage.Test.Lockstep do
     def command_sequence_projection, do: Ledger
 
     @impl true
-    def check_projections, do: [PolledProjection]
+    def check_projections, do: [PolledProjection, Answers]
   end
 
   defmodule ProbeModel do
@@ -491,6 +534,9 @@ defmodule PropertyDamage.Test.Lockstep do
 
     @impl true
     def command_sequence_projection, do: Ledger
+
+    @impl true
+    def check_projections, do: [Answers]
   end
 
   defmodule DrainModel do
@@ -546,6 +592,9 @@ defmodule PropertyDamage.Test.Lockstep do
 
     @impl true
     def command_sequence_projection, do: RoutingProjection
+
+    @impl true
+    def check_projections, do: [RoutingCounts]
 
     @impl true
     def simulator, do: __MODULE__

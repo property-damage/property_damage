@@ -1,6 +1,6 @@
 defmodule PropertyDamage.ReportReproductionTest do
   # A failure report carries what reproducing its run needs: a kind that agrees
-  # with its failure reason, and the run's `equivalence:`, `stutter:` and
+  # with its failure reason, and the run's `compare:`, `stutter:` and
   # `max_commands:`, which `reproduction_command/1` prints and
   # `shrink_further/2` reuses.
   use ExUnit.Case, async: true
@@ -53,6 +53,22 @@ defmodule PropertyDamage.ReportReproductionTest do
     def apply(state, _event), do: state
   end
 
+  # What the targets are compared on: the values their Flips answered, without
+  # the timestamps.
+  defmodule Answers do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: []
+
+    @impl true
+    def apply(values, %Flipped{value: value}), do: [value | values]
+    def apply(values, _event), do: values
+
+    @compare every: 1
+    def flips(values, _root), do: values
+  end
+
   defmodule Model do
     @behaviour PropertyDamage.Model
 
@@ -61,6 +77,9 @@ defmodule PropertyDamage.ReportReproductionTest do
 
     @impl true
     def command_sequence_projection, do: Tally
+
+    @impl true
+    def check_projections, do: [Answers]
   end
 
   # Config keys:
@@ -122,11 +141,7 @@ defmodule PropertyDamage.ReportReproductionTest do
   # ==========================================================================
 
   @max_commands 20
-
-  def ignore_ts(a, b), do: strip_ts(a) == strip_ts(b)
-
-  defp strip_ts({:ok, events}), do: {:ok, Enum.map(events, &Map.delete(Map.from_struct(&1), :ts))}
-  defp strip_ts(other), do: other
+  @converge_within 40
 
   defp run(targets, extra) do
     PropertyDamage.run(
@@ -136,6 +151,7 @@ defmodule PropertyDamage.ReportReproductionTest do
           targets: targets,
           max_runs: 1,
           max_commands: @max_commands,
+          compare: [converge_within: @converge_within],
           validate: false
         ],
         extra
@@ -204,7 +220,7 @@ defmodule PropertyDamage.ReportReproductionTest do
     end
   end
 
-  describe "a run with a non-default equivalence:" do
+  describe "a run with a non-default convergence bound" do
     defp skewed_targets do
       [
         {Adapter, name: "ref"},
@@ -215,17 +231,18 @@ defmodule PropertyDamage.ReportReproductionTest do
 
     test "is reproduced by the report's reproduction command and re-shrunk under it" do
       seed = armed_flip_seed()
-      equivalence = &__MODULE__.ignore_ts/2
 
-      assert {:error, report} = run(skewed_targets(), seed: seed, equivalence: equivalence)
+      # The observation folds Flip values, not timestamps: "ts" agrees with the
+      # reference and "val" diverges.
+      assert {:error, report} = run(skewed_targets(), seed: seed)
       assert_kind_agrees(report)
       assert report.kind == :diverged
       assert report.variant.index == 2
-      assert report.equivalence == equivalence
+      assert report.compare == [converge_within: @converge_within]
       assert report.max_commands == @max_commands
 
       command = FailureReport.reproduction_command(report)
-      assert command =~ "equivalence: &#{inspect(__MODULE__)}.ignore_ts/2"
+      assert command =~ "compare: [converge_within: #{@converge_within}]"
       assert command =~ "max_commands: #{@max_commands}"
 
       assert {:error, repro} = reproduce(report)
@@ -233,33 +250,61 @@ defmodule PropertyDamage.ReportReproductionTest do
       assert repro.kind == :diverged
       assert repro.variant.index == 2
 
-      assert {:error, unshrunk} =
-               run(skewed_targets(), seed: seed, equivalence: equivalence, shrink: false)
+      assert {:error, unshrunk} = run(skewed_targets(), seed: seed, shrink: false)
 
       assert {:ok, smaller} = PropertyDamage.shrink_further(unshrunk, strategy: :quick)
       assert_kind_agrees(smaller)
       assert smaller.variant.index == 2
-      assert smaller.equivalence == equivalence
+      assert smaller.compare == report.compare
       assert shrunk_modules(smaller) == [Arm, Flip]
     end
 
-    test "that is not a named function is printed as a placeholder to replace" do
+    test "is exported to JSON with the bound and the compare counts" do
       seed = armed_flip_seed()
 
-      assert {:error, report} =
-               run(skewed_targets(), seed: seed, equivalence: fn a, b -> ignore_ts(a, b) end)
+      assert {:error, report} = run(skewed_targets(), seed: seed)
 
-      assert FailureReport.reproduction_command(report) =~ "equivalence: <custom function>"
-      assert Jason.decode!(Persistence.export_json(report))["equivalence"] == "custom"
+      exported = Jason.decode!(Persistence.export_json(report))
+      assert exported["compare"] == %{"converge_within" => @converge_within}
 
-      structural = %{report | equivalence: :structural}
-      assert FailureReport.reproduction_command(structural) =~ "equivalence: :structural"
-      assert Jason.decode!(Persistence.export_json(structural))["equivalence"] == "structural"
+      assert %{"compared_at" => compared_at} =
+               exported["compare_counts"]["#{inspect(Answers)}.flips"]
+
+      assert compared_at > 0
+    end
+  end
+
+  describe "shrink_further/2 and the convergence bound" do
+    test "re-shrinks under compare: when given, and rejects the removed equivalence:" do
+      seed = armed_flip_seed()
+
+      assert {:error, unshrunk} =
+               run(
+                 [{Adapter, name: "ref"}, {Adapter, name: "val", config: %{flip: :armed}}],
+                 seed: seed,
+                 shrink: false
+               )
+
+      assert {:ok, smaller} =
+               PropertyDamage.shrink_further(unshrunk,
+                 strategy: :quick,
+                 compare: [converge_within: 25]
+               )
+
+      assert smaller.compare == [converge_within: 25]
+
+      error =
+        assert_raise ArgumentError, fn ->
+          PropertyDamage.shrink_further(unshrunk, equivalence: :structural)
+        end
+
+      assert error.message =~ "@compare"
+      assert error.message =~ "using:"
     end
   end
 
   describe "a stutter failure" do
-    @stutter [probability: 1.0, max_repeats: 1, commands: [Flip], comparison: :strict]
+    @stutter [probability: 1.0, max_repeats: 1, commands: [Flip]]
 
     defp counter_targets,
       do: [{Adapter, name: "ref"}, {Adapter, name: "cand", config: %{flip: :counter}}]

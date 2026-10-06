@@ -44,7 +44,9 @@ defmodule PropertyDamage.SeedLibrary do
   - `seed` - The random seed value
   - `model` - Model module name (descriptive)
   - `failure_type` - What kind of failure it last produced (descriptive)
-  - `check_name` - Which check last failed, if applicable (descriptive)
+  - `check_name` - Which check or boundary observation last failed, if
+    applicable (descriptive; an observation's key is kept as its
+    `Projection.function` label)
   - `tags` - User-provided categorization tags
   - `description` - Human-readable description
   - `discovered_at` - When the seed was added
@@ -123,7 +125,7 @@ defmodule PropertyDamage.SeedLibrary do
       seed: failure.seed,
       model: inspect(failure.model),
       failure_type: PropertyDamage.FailureReport.failure_type(failure),
-      check_name: PropertyDamage.FailureReport.check_name(failure),
+      check_name: descriptive_name(PropertyDamage.FailureReport.check_name(failure)),
       tags: Keyword.get(opts, :tags, []),
       description: Keyword.get(opts, :description),
       discovered_at: now_iso8601(),
@@ -154,7 +156,7 @@ defmodule PropertyDamage.SeedLibrary do
       seed: seed,
       model: Keyword.get(opts, :model, "unknown"),
       failure_type: Keyword.get(opts, :failure_type, :unknown),
-      check_name: Keyword.get(opts, :check_name),
+      check_name: descriptive_name(Keyword.get(opts, :check_name)),
       tags: Keyword.get(opts, :tags, []),
       description: Keyword.get(opts, :description),
       discovered_at: now_iso8601(),
@@ -229,7 +231,7 @@ defmodule PropertyDamage.SeedLibrary do
       entry
       | consecutive_passes: 0,
         failure_type: Keyword.get(opts, :failure_type, entry.failure_type),
-        check_name: Keyword.get(opts, :check_name, entry.check_name),
+        check_name: descriptive_name(Keyword.get(opts, :check_name, entry.check_name)),
         last_run: now
     }
   end
@@ -344,6 +346,15 @@ defmodule PropertyDamage.SeedLibrary do
   # ============================================================================
 
   defp now_iso8601, do: DateTime.to_iso8601(DateTime.utc_now())
+
+  # The descriptive check name as JSON can hold it: a boundary observation's
+  # `{projection, function}` key becomes the atom of its `Projection.function`
+  # label; any other name is kept.
+  defp descriptive_name({projection, function} = key)
+       when is_atom(projection) and is_atom(function),
+       do: key |> PropertyDamage.FailureReport.format_name() |> String.to_atom()
+
+  defp descriptive_name(name), do: name
 
   defp to_atom_safe(nil), do: nil
   defp to_atom_safe(atom) when is_atom(atom), do: atom

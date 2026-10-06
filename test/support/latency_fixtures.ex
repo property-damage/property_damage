@@ -37,6 +37,10 @@ defmodule PropertyDamage.Test.LatencyFixtures do
 
     @impl true
     def command_sequence_projection, do: SlowFold
+
+    # Two targets are compared through the answers they folded.
+    @impl true
+    def check_projections, do: [PropertyDamage.Test.Lockstep.Answers]
   end
 
   defmodule TimedStepAdapter do
