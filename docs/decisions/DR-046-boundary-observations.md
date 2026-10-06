@@ -147,11 +147,14 @@ comparable observation.
     run before the next root, and the other variants go on. The run stops when
     no non-reference variant remains. The report names a primary failure, the
     first in root order and then in target order, and lists the rest in
-    `other_failures`. After a retirement, a finalize-time failure of a remaining target (an
-    `@eventually` timeout or a `:teardown` check, the reference included) is
-    one of the run's failures: rooted ones sort at their root, and one with no
-    root sorts after every rooted failure, in target order. The primary
-    failure is the only shrink target; a
+    `other_failures`. Every run, with or without a retired variant, orders its failures by one
+    rule: root, then target, then when it happened within that root and target
+    (a check recorded under `check_mode: :record` while the root was stepped,
+    then the comparison failure at that root's boundary, then a failure found
+    while the target finalized). A failure with no root found at the end of the
+    run comes after every rooted failure, in target order. A finalize-time
+    repeat of a failure already found is listed once, and nothing is dropped.
+    The primary failure is the only shrink target; a
     candidate is judged by its primary failure alone. The choice among failures
     of one root depends on target order, since the first target is the
     reference and the others are compared in order.

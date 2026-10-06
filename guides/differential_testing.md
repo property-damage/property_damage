@@ -554,8 +554,9 @@ reruns the failure with the exact `targets:` entries (non-default `name:` and
 `config:`) and a non-default `concurrency:`, `compare: [converge_within: ms]`,
 `stutter:` or `max_commands:`.
 
-Under `check_mode: :record`, a check failure recorded at or before the failing
-root is reported instead.
+Under `check_mode: :record`, a check failure recorded at an earlier root, or at
+the same root in the same or an earlier target, becomes the primary failure. The
+divergence is not replaced: it is listed in `other_failures`.
 
 ### Failure kinds
 
@@ -586,11 +587,19 @@ With several targets the run keeps an **active set** of targets:
   root starts, and the other targets go on, compared among themselves.
 - The run stops when no target besides the reference remains.
 
-The report names a **primary failure**: the first by root, then by target order. After a retirement, a finalize-time failure of a remaining target (an `@eventually` timeout or a `:teardown` check, the reference included) is one of the run's failures: a failure with a root sorts at its root, and one with no root sorts after every rooted failure, in target order.
-It lists the rest in `report.other_failures` (each with the variant, the root
-and the failure). Only the primary failure is shrunk. Which failure is primary
-for two failures at one root depends on target order, because the first target
-is the reference and the others are compared in order.
+Every run, with or without a retired target, orders its failures by one rule:
+root, then target, then when it happened within that root and target (a check
+recorded under `check_mode: :record` while the root was stepped, then the
+comparison failure at that root's boundary, then a failure found while the target
+finalized). A failure with no root found at the end of the run (a `:teardown`
+check, a crash at finish) comes after every rooted failure, in target order.
+
+The first failure is the **primary failure** and the only shrink target. Every
+other one is in `report.other_failures` (each with the variant, the root and the
+failure). A finalize-time repeat of a failure already found is listed once, and
+nothing is dropped. Which failure is primary for two failures at one root depends
+on target order, because the first target is the reference and the others are
+compared in order.
 
 ### Latency metrics
 

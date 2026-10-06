@@ -584,7 +584,7 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 
 The scheduler SHALL keep an active set of variants. An adapter failure (`:execution_failed`) of a non-reference variant at a root SHALL retire that variant before the next root starts in any variant: its pollers SHALL be finalized, its `:teardown` checks SHALL run, and its adapter's `teardown/1` SHALL run, at once. A retired variant SHALL start no command, and its placeholder registry SHALL never be consulted again. The remaining variants SHALL be compared among themselves at that root and continue. A failure of the reference, a `:check_failed` failure and a failure before the first root SHALL end the run, as before. The run SHALL end when no non-reference variant remains in the active set.
 
-The run SHALL report one primary failure: the first failure in root order and then in target order. After a retirement, a finalize-time failure of a remaining target (an `@eventually` timeout or a `:teardown` check, the reference included) SHALL be one of the run's failures: one with a root sorts at its root, and one with no root sorts after every rooted failure, in target order. It SHALL carry every other failure of the run in `other_failures`, and `other_failures` SHALL NOT take part in shrinking. The choice among failures of one root depends on target order, because the first target is the reference and the others are compared in order.
+The run SHALL report one primary failure: the first failure in root order and then in target order. In every run, with or without a retired variant, failures SHALL be ordered by root, then target, then by when they happened within that root and target (a check recorded under `check_mode: :record` while the root was stepped, then the comparison failure at that root's boundary, then a failure found while the target finalized). A failure with no root found at the end of the run SHALL come after every rooted failure, in target order. The first SHALL be the primary failure and every other one SHALL be in `other_failures`. A finalize-time repeat of a failure already found SHALL be listed once, and no failure SHALL be dropped. It SHALL carry every other failure of the run in `other_failures`, and `other_failures` SHALL NOT take part in shrinking. The choice among failures of one root depends on target order, because the first target is the reference and the others are compared in order.
 
 #### Scenario: Early teardown of a retired variant
 - **GIVEN** three targets, where the third fails at root 1
@@ -595,8 +595,8 @@ The run SHALL report one primary failure: the first failure in root order and th
 - **WHEN** a variant has been retired
 - **THEN** root 2 SHALL be compared over the remaining variants only
 
-#### Scenario: A survivor's finalize-time failure joins after a retirement
-- **GIVEN** a run in which one variant was retired and the reference's `:teardown` check fails at the end
+#### Scenario: A finalize-time failure joins the run's failures
+- **GIVEN** a run, with or without a retired variant, in which the reference's `:teardown` check fails at the end
 - **THEN** that failure SHALL be in the report, after every rooted failure
 
 #### Scenario: Primary failure order

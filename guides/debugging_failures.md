@@ -577,7 +577,7 @@ rejected. This ensures the minimal sequence demonstrates the original bug, not a
 different one. For a divergence between targets (or a failure to converge), the name is the
 `@compare` key `{Projection, function}`: a candidate that diverges on another
 observation, or in another target, is a different failure and is rejected too.
-When a run has several failures, only the primary one (the first by root, then by
+When a run has several failures (in every run, retirement or not), only the primary one (the first by root, then by
 target order) is shrunk, and `report.other_failures` lists the rest.
 
 ### Shrinking and References

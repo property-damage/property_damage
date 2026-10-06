@@ -1,6 +1,6 @@
 # DR-045: One Runner for One or More Targets
 
-**Status:** Accepted. Amended by DR-046: `Failure.Divergence` holds the `@compare` key, the two values and the mismatch instead of `reference_result` and `divergent_result`; `:execution_failed` is final, and `:did_not_converge` is now produced; `equivalence:` and `compare: :correctness | :performance | :both` are removed; persistence is version 10.
+**Status:** Accepted. Amended by DR-046: `Failure.Divergence` holds the `@compare` key, the two values and the mismatch instead of `reference_result` and `divergent_result`; `:execution_failed` is final, and `:did_not_converge` is now produced; `equivalence:` and `compare: :correctness | :performance | :both` are removed; persistence is version 10. Under `check_mode: :record`, a check failure at an earlier root, or at the same root in the same or an earlier target, is the primary failure and the divergence is listed in `other_failures`; it no longer replaces the divergence.
 **Date:** 2026-10-06
 
 ## Context

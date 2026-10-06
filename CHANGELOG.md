@@ -46,10 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Boundary comparison fixes (DR-046).** A function carries one `@compare`,
   written above its first clause; a second on another clause is a compile error.
   Under `check_mode: :record`, a variant whose check failed on a final re-read
-  keeps re-reading with the others. After a retirement, a finalize-time failure
-  of a remaining target (an `@eventually` timeout or a `:teardown` check, the
-  reference included) is one of the run's failures, sorted at its root or, with
-  no root, after every rooted failure in target order. New public type
+  keeps re-reading with the others. Every run, with or without a retired
+  variant, orders its failures by root, then target, then when it happened within
+  that root and target (a check recorded under `check_mode: :record`, then the
+  comparison failure at that root's boundary, then a failure found while the
+  target finalized); a failure with no root found at the end of the run (an
+  `@eventually` timeout, a `:teardown` check, the reference included) comes after
+  every rooted failure, in target order. The first is the primary failure and
+  every other one is in `other_failures`; a recorded check at the same root in
+  the same or an earlier target becomes primary and the divergence is listed
+  there; a finalize-time repeat is listed once and nothing is dropped. New public type
   `t:PropertyDamage.Scheduler.compare_counts/0`.
 - **Stutter `using:` (DR-046).** `stutter: [using: fn original_events,
   retry_events -> ... end]`, default `&==/2`, decides whether a retry agrees.
