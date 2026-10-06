@@ -586,7 +586,7 @@ With several targets the run keeps an **active set** of targets:
   root starts, and the other targets go on, compared among themselves.
 - The run stops when no target besides the reference remains.
 
-The report names a **primary failure**: the first by root, then by target order.
+The report names a **primary failure**: the first by root, then by target order. After a retirement, a finalize-time failure of a remaining target (an `@eventually` timeout or a `:teardown` check, the reference included) is one of the run's failures: a failure with a root sorts at its root, and one with no root sorts after every rooted failure, in target order.
 It lists the rest in `report.other_failures` (each with the variant, the root
 and the failure). Only the primary failure is shrunk. Which failure is primary
 for two failures at one root depends on target order, because the first target

@@ -43,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stops when no non-reference variant remains. The report names the primary
   failure (first by root, then by target order) and lists the rest in
   `other_failures`; only the primary failure is shrunk.
+- **Boundary comparison fixes (DR-046).** A function carries one `@compare`,
+  written above its first clause; a second on another clause is a compile error.
+  Under `check_mode: :record`, a variant whose check failed on a final re-read
+  keeps re-reading with the others. After a retirement, a finalize-time failure
+  of a remaining target (an `@eventually` timeout or a `:teardown` check, the
+  reference included) is one of the run's failures, sorted at its root or, with
+  no root, after every rooted failure in target order. New public type
+  `PropertyDamage.Scheduler.compare_counts/0`.
 - **Stutter `using:` (DR-046).** `stutter: [using: fn original_events,
   retry_events -> ... end]`, default `&==/2`, decides whether a retry agrees.
   `Stutter.Violation` carries `mismatch` (an exception) in place of

@@ -35,7 +35,8 @@ comparable observation.
    key `{projection, name}` names every failure it causes. `equivalence:`,
    `compare: :correctness | :performance | :both` and `compare: [settle:]`
    are removed.
-2. **`@compare` options.** `every:` is the schedule, with the vocabulary of
+2. **`@compare` options.** A function carries one `@compare`, written above its
+    first clause; a second on another clause is a compile error. `every:` is the schedule, with the vocabulary of
    `@check`: `1` (default), `N`, `{N, Module}`, `Module`, `[Modules]` and
    `:end` (alone or in a list). A key is compared at most once per boundary,
    and `:end` names the final boundary, which is compared after every variant
@@ -90,7 +91,8 @@ comparable observation.
    because a later event can still bring them into agreement.
 8. **Cadence.** The loop evaluates again at most 50 ms after the last
    evaluation, and sooner when a drain delivered an event. A probe root is
-   re-read no more than once per 50 ms, starting at once.
+   re-read no more than once per 50 ms, starting at once. Under `check_mode: :record` a variant whose check failed on
+    a final re-read keeps re-reading with the others.
 9. **`@eventually` has precedence.** A window that expires inside the loop is
    a check failure at once, at the command that opened it. A polling
    `@eventually` that has not expired does not block agreement.
@@ -145,7 +147,11 @@ comparable observation.
     run before the next root, and the other variants go on. The run stops when
     no non-reference variant remains. The report names a primary failure, the
     first in root order and then in target order, and lists the rest in
-    `other_failures`. The primary failure is the only shrink target; a
+    `other_failures`. After a retirement, a finalize-time failure of a remaining target (an
+    `@eventually` timeout or a `:teardown` check, the reference included) is
+    one of the run's failures: rooted ones sort at their root, and one with no
+    root sorts after every rooted failure, in target order. The primary
+    failure is the only shrink target; a
     candidate is judged by its primary failure alone. The choice among failures
     of one root depends on target order, since the first target is the
     reference and the others are compared in order.

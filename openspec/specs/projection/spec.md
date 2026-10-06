@@ -167,7 +167,7 @@ Projections SHALL support synchronous checks whose timing is a lifecycle phase b
 
 Projections SHALL support boundary observations: public functions `def name(state, root)` decorated with `@compare`. A run with two or more targets compares its targets only through these functions. Each target evaluates the function on its own projection state with the root command as the second argument, and the value of every non-reference target is judged against the reference's. The observation's key is `{projection, name}`.
 
-`@compare` takes two options. `every:` is the schedule: `1` (default, every boundary), `N` (every Nth boundary), `{N, Module}` (every Nth root of that module), `Module` or `[Modules]` (after those roots) and `:end` or `[Modules, :end]` (the final boundary, compared after every target finalized its run). A key SHALL be compared at most once per boundary. `using:` is a 2-arity predicate called `using.(reference_value, variant_value)` that returns `:match`, `{:mismatch, exception}` or a boolean; it defaults to `&==/2` and MAY be any expression that evaluates to a 2-arity function.
+`@compare` takes two options. `every:` is the schedule: `1` (default, every boundary), `N` (every Nth boundary), `{N, Module}` (every Nth root of that module), `Module` or `[Modules]` (after those roots) and `:end` or `[Modules, :end]` (the final boundary, compared after every target finalized its run). A key SHALL be compared at most once per boundary. `using:` is a 2-arity predicate called `using.(reference_value, variant_value)` that returns `:match`, `{:mismatch, exception}` or a boolean; it defaults to `&==/2` and MAY be any expression that evaluates to a 2-arity function. A function SHALL carry one `@compare`, written above its first clause.
 
 A boundary observation MAY return `{:pending, reason}` when its target will reach a comparable value with no further command, through asynchronous catch-up only. A pending side SHALL NOT be a disagreement.
 
@@ -186,6 +186,10 @@ A boundary observation MAY return `{:pending, reason}` when its target will reac
 - **WHEN** one target's observation returns `{:pending, reason}` and the other returns a value
 - **THEN** the boundary is not in agreement yet
 - **AND** the result is neither a divergence nor a failure until the convergence bound expires
+
+#### Scenario: A second @compare on another clause is a compile error
+- **WHEN** `@compare` precedes a later clause of a function that already carries one
+- **THEN** compilation fails with a message naming the function
 
 #### Scenario: A misplaced @compare is a compile error
 - **WHEN** `@compare` precedes a private function, a function of another arity, `init/0` or `apply/2`, is combined with `@check` or `@eventually`, is repeated on one function, or has no function after it

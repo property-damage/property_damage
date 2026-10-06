@@ -177,7 +177,7 @@ end
 ### @compare Syntax
 
 A boundary observation compares the targets of a run with two or more `targets:`.
-It is a public `def name(state, root)` in a projection, and a run with two or
+It is a public `def name(state, root)` in a projection (one `@compare`, above the first clause), and a run with two or
 more targets and no `@compare` is an error at run start.
 
 | Syntax | Meaning |

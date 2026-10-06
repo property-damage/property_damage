@@ -112,6 +112,10 @@ Vocabulary: *settle* is one system catching up with itself per adapter call (the
 - **THEN** the loop SHALL report after that re-read ends, not earlier and not after a further iteration
 - **AND** the time waited in the report SHALL include the overshoot
 
+#### Scenario: A check failure recorded on a final re-read does not stop the re-reads
+- **GIVEN** `check_mode: :record` and a variant whose check fails on a final re-read
+- **THEN** that variant SHALL keep re-reading with the others
+
 #### Scenario: Convergence bound validation
 
 - **WHEN** `converge_within:` is not a positive integer
@@ -301,7 +305,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 
 A failure SHALL name the variant `%{index, name}` that failed and the root where one exists. The scheduler's failure SHALL be `%{kind, variant, run, root, reason}`, where `run` is the 0-based run, `root` is the 0-based command index or `nil` when the failure belongs to no command, and `reason` is always a `%PropertyDamage.Failure{}`. `kind` SHALL be one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed`. The failure report SHALL carry the same `kind` and `variant`, with `failed_at_index` as the root. The `kind` SHALL be derived from the failure reason by `FailureReport.kind_of/1`, so a failure found while the run finalizes is `:execution_failed` when its reason is of the execution class. A failure SHALL end the run at that boundary and the campaign. A failure of kind `:check_failed`, `:setup_failed` or `:execution_failed` SHALL NOT be compared.
 
-An adapter that raises or answers `{:error, _}` at a root SHALL be an `:execution_failed` failure in every mode and SHALL NOT be an observation. A failure of the reference SHALL stop the run. A failure of a non-reference variant at a root SHALL retire that variant at once: the framework SHALL finalize its pollers and run its `:teardown` checks and `Adapter.teardown/1` before the next root starts anywhere, and the other variants SHALL continue and be compared among themselves. The run SHALL stop when no non-reference variant remains. The report SHALL carry as the primary failure the first failure in root order and then target order, and SHALL list the other failures found in the run in `other_failures` (each with the variant, the root and the failure). The primary failure SHALL be the only shrink target.
+An adapter that raises or answers `{:error, _}` at a root SHALL be an `:execution_failed` failure in every mode and SHALL NOT be an observation. A failure of the reference SHALL stop the run. A failure of a non-reference variant at a root SHALL retire that variant at once: the framework SHALL finalize its pollers and run its `:teardown` checks and `Adapter.teardown/1` before the next root starts anywhere, and the other variants SHALL continue and be compared among themselves. The run SHALL stop when no non-reference variant remains. The report SHALL carry as the primary failure the first failure in root order and then target order, and SHALL list the other failures found in the run in `other_failures` (each with the variant, the root and the failure). The primary failure SHALL be the only shrink target. After a retirement, a finalize-time failure of a remaining target (an `@eventually` timeout or a `:teardown` check, the reference included) is one of the run's failures: a failure with a root sorts at its root, and one with no root sorts after every rooted failure, in target order.
 
 #### Scenario: Check failure
 

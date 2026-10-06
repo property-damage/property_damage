@@ -263,7 +263,9 @@ end
 `{:mismatch, exception}` or a boolean. A function may return
 `{:pending, reason}` while its target is still catching up. A raise in a
 `@compare` function or a `using:` predicate is a check failure naming the
-observation. A `@compare` function cannot also carry `@check` or `@eventually`.
+observation. A `@compare` function cannot also carry `@check` or `@eventually`, and carries
+one `@compare`, written above its first clause: a second one on another clause
+is a compile error.
 
 The [Differential Testing](differential_testing.md) guide covers the schedule,
 the predicate helpers, `{:pending, reason}` and the convergence loop in full.
