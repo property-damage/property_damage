@@ -68,7 +68,11 @@ defmodule PropertyDamage.ReplayArtifact do
   Where a value no artifact can hold sits: the target, the root's position in
   the recorded roots, the leaf's position in the commands the target ran
   there, and the path from the command's fields to the value (a list index as
-  an integer, a map key as the key). A setup command is named by `root:
+  an integer, a map key as the key). A map key that is itself such a value,
+  or holds one, is marked `{:key, text}`, with the key as `inspect/2` shows
+  it: `[:payload, {:key, "#PID<0.105.0>"}]` names a pid used as a key of the
+  `payload` map. A `MapSet` is walked through the map it keeps, so its
+  elements are keys under `:map`. A setup command is named by `root:
   :setup` and its position as `leaf`; a root command by `leaf: nil`.
   """
   @type refusal :: %{
@@ -187,10 +191,15 @@ defmodule PropertyDamage.ReplayArtifact do
 
   defp unprintable(%_{} = struct, path), do: unprintable(Map.from_struct(struct), path)
 
+  # A map's keys are walked as its values are: a key no literal can hold, or
+  # one holding such a value, is marked `{:key, text}` in the path, the text
+  # being the key as `inspect/2` shows it.
   defp unprintable(map, path) when is_map(map) do
     map
     |> Enum.sort()
-    |> Enum.find_value(fn {key, value} -> unprintable(value, [key | path]) end)
+    |> Enum.find_value(fn {key, value} ->
+      key_refusal(key, path) || unprintable(value, [key | path])
+    end)
   end
 
   defp unprintable(list, path) when is_list(list) do
@@ -205,6 +214,13 @@ defmodule PropertyDamage.ReplayArtifact do
 
   defp unprintable(tuple, path) when is_tuple(tuple), do: unprintable(Tuple.to_list(tuple), path)
   defp unprintable(_value, _path), do: nil
+
+  defp key_refusal(key, path) do
+    case unprintable(key, []) do
+      nil -> nil
+      inside -> Enum.reverse(path, [{:key, inspect(key, limit: 8)} | inside])
+    end
+  end
 
   defp proper_list?([]), do: true
   defp proper_list?([_ | rest]), do: proper_list?(rest)
@@ -224,12 +240,13 @@ defmodule PropertyDamage.ReplayArtifact do
     "#{where}, field #{field_text(field)}"
   end
 
-  # `[:payload, 0, :f]` as `payload[0].f`.
+  # `[:payload, 0, :f]` as `payload[0].f`, and a marked key as `[key text]`.
   defp field_text(field) do
     field
     |> Enum.map_join(fn
       key when is_integer(key) -> "[#{key}]"
       key when is_atom(key) -> ".#{key}"
+      {:key, text} when is_binary(text) -> "[key #{text}]"
       key -> "[#{inspect(key)}]"
     end)
     |> String.trim_leading(".")
@@ -584,16 +601,41 @@ defmodule PropertyDamage.ReplayArtifact do
   @spec sequence(t()) :: Sequence.t()
   def sequence(term) do
     roots = Enum.map(term.roots, & &1.command)
-    sequence = %{Sequence.linear(roots) | setup: term.prefix, registry: registry(term)}
+    registry = registry(term.model, term.prefix, term.roots)
+    sequence = %{Sequence.linear(roots) | setup: term.prefix, registry: registry}
     Generator.teardown_commands(term.model, sequence, term.seed)
   end
 
-  defp registry(%{model: model} = term) do
+  @doc false
+  # The placeholder ids that `commands` hold and that the registry an
+  # artifact recording `prefix` and `roots` (`[%{root_id:, command:}]`) would
+  # rebuild does not register, in the order the commands hold them. An id a
+  # leaf mints is left out: a re-execution simulates the leaves again where
+  # they ran, so it mints that id again. A shrink candidate with an id here
+  # would fail on replay where it failed in the shrink, so the shrinker never
+  # runs it.
+  @spec unregistered(module(), [struct()], [map()], [struct()]) :: [term()]
+  def unregistered(model, prefix, roots, commands) do
+    registry = registry(model, prefix, roots)
+
+    commands
+    |> PlaceholderRegistry.collect_placeholder_ids()
+    |> Enum.reject(fn id ->
+      match?({%Position{section: {:leaf, _}}, _event, _path}, id) or
+        PlaceholderRegistry.get(registry, id) != nil
+    end)
+  end
+
+  # The registry the recorded commands resolve against: the setup commands
+  # and the roots simulated again from the projection's initial state, each
+  # root at the position of its root id, then moved to the roots' positions
+  # in the recorded order.
+  defp registry(model, prefix, roots) do
     projection = model.command_sequence_projection()
 
     steps =
-      Enum.with_index(term.prefix, fn command, offset -> {command, Position.setup(offset)} end) ++
-        Enum.map(term.roots, fn %{command: command, root_id: id} ->
+      Enum.with_index(prefix, fn command, offset -> {command, Position.setup(offset)} end) ++
+        Enum.map(roots, fn %{command: command, root_id: id} ->
           {command, Position.prefix(id)}
         end)
 
@@ -607,7 +649,7 @@ defmodule PropertyDamage.ReplayArtifact do
       end)
 
     moved =
-      term.roots
+      roots
       |> Enum.with_index()
       |> Map.new(fn {%{root_id: id}, index} -> {Position.prefix(id), Position.prefix(index)} end)
 
@@ -625,7 +667,11 @@ defmodule PropertyDamage.ReplayArtifact do
     if Expansion.defines?(term.model) do
       Expansion.recorded(term.model, sequence, term.seed, recorded, owners(term))
     else
-      Expansion.identity(sequence, Enum.map(Map.keys(recorded), &%{name: &1}))
+      Expansion.identity(
+        sequence,
+        Enum.map(Map.keys(recorded), &%{name: &1}),
+        Enum.map(term.roots, & &1.root_id)
+      )
     end
   end
 

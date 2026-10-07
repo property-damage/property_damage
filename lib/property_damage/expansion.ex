@@ -1251,17 +1251,22 @@ defmodule PropertyDamage.Expansion do
 
   @doc false
   # The expansion of a run of a model without expansions, or of a branching
-  # run: every target runs the roots of `sequence`.
-  @spec identity(Sequence.t(), [PropertyDamage.Target.t()]) :: t()
-  def identity(%Sequence{} = sequence, targets) do
+  # run: every target runs the roots of `sequence`. `root_ids` holds the
+  # generation id of each root (default: its index), as for a shrunk
+  # sequence, whose roots keep the ids they were generated with.
+  @spec identity(Sequence.t(), [PropertyDamage.Target.t()], [non_neg_integer()] | nil) :: t()
+  def identity(%Sequence{} = sequence, targets, root_ids \\ nil) do
+    roots = Sequence.to_list(sequence)
+    ids = root_ids || Enum.to_list(0..(length(roots) - 1)//1)
+
     choices =
-      sequence
-      |> Sequence.to_list()
+      roots
+      |> Enum.zip(ids)
       |> Enum.with_index()
-      |> Enum.map(fn {root, index} ->
+      |> Enum.map(fn {{root, root_id}, index} ->
         %{
           root: index,
-          root_id: index,
+          root_id: root_id,
           module: root.__struct__,
           entry: nil,
           index: nil,

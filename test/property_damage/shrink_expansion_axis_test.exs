@@ -79,6 +79,26 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
     assert %{entry: "Add[1]", leaves?: true} = ran(report, "second", 0)
   end
 
+  test "the reference collapses alone after the second target copied its entry at that root" do
+    # At seed 8 the reference's identity at root 0 is invalid in the first
+    # cycle (its Take at root 1 needs a Part before it), so the second
+    # target first copies the reference's Add[1] there. Once the Take is
+    # gone, the reference reaches the identity while the second target keeps
+    # Add[1], whose second Part has the bug.
+    opts = [seed: 8, max_commands: 6, seed_library: false]
+    {:error, unshrunk} = run(A.StateModel, parts_bug(), [shrink: false] ++ opts)
+    {:error, report} = run(A.StateModel, parts_bug(), opts)
+    F.drain()
+
+    assert {report.kind, Failure.name(report.failure_reason), report.variant.name} ==
+             {unshrunk.kind, Failure.name(unshrunk.failure_reason), "second"}
+
+    assert length(roots(report)) == 1
+    assert report.failed_at_index == 0
+    assert %{entry: "Add[0]", leaves?: false} = ran(report, "ref", 0)
+    assert %{entry: "Add[1]", leaves?: true} = ran(report, "second", 0)
+  end
+
   test "a divergence every entry shows collapses the second target onto the reference's choice" do
     targets = [A.target("ref"), A.target("second", :random, %{bug: :every})]
     report = failing!(A.PartsModel, targets, max_commands: 8)
