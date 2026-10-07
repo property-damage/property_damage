@@ -54,7 +54,7 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
 
-  @version 13
+  @version 14
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -458,6 +458,11 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V14 format: a report records the campaign `run` it failed in, its replay
+  # artifact term (`replay`, or the refusal naming the value no file can hold),
+  # the artifact's `replay_path` and its `replay_status`, and an expansion
+  # entry may be `:identity` (an identity reached by shrinking). A v14 report
+  # without a `replay` field is refused: every re-execution path reads it.
   # V13 format: a report records the `expansions` each target ran at each root
   # it executed and the `expansion_counts` per target and root module; its
   # trace keeps every target's concrete commands per root (`expansion`), and an
@@ -493,12 +498,14 @@ defmodule PropertyDamage.Persistence do
           {:ok, payload.trace, metadata_warnings ++ check_trace_drift(payload.trace)}
 
         _ ->
-          {:ok, payload.report, metadata_warnings ++ check_struct_drift(payload.report)}
+          report_payload(payload.report, metadata_warnings)
       end
     end)
   end
 
-  # Pre-v13 files (format versions 1-12) are refused (DR-041, following DR-039/DR-040).
+  # Pre-v14 files (format versions 1-13) are refused (DR-041, following DR-039/DR-040).
+  # A v13 report records neither the `run`, nor the replay artifact
+  # (`replay`, `replay_path`, `replay_status`) every re-execution path reads.
   # A v12 report records neither `expansions` nor `expansion_counts`, and its
   # trace no target's concrete commands.
   # A v11 report records neither the `latency` option nor the `metrics`.
@@ -523,6 +530,13 @@ defmodule PropertyDamage.Persistence do
   end
 
   defp decode(_), do: {:error, :invalid_format}
+
+  # A report must carry the replay artifact term (nil when it has none): the
+  # paths that re-execute a loaded report read it.
+  defp report_payload(report, _warnings) when is_map(report) and not is_map_key(report, :replay),
+    do: {:error, {:missing_field, :replay}}
+
+  defp report_payload(report, warnings), do: {:ok, report, warnings ++ check_struct_drift(report)}
 
   # Shared decode envelope: verify checksum + size bound, then hand the safely
   # decoded payload to `fun`. Post-checksum ArgumentError means unknown/unloadable

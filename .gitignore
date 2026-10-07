@@ -31,3 +31,6 @@ property_damage-*.tar
 *.swp
 *.swo
 *~
+
+# Replay artifacts written by failing runs (`replay_dir:`).
+/property_damage_replays/

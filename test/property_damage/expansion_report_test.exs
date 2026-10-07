@@ -131,12 +131,12 @@ defmodule PropertyDamage.ExpansionReportTest do
     end
 
     @tag :tmp_dir
-    test "survives a persistence round trip at format version 13", %{tmp_dir: dir} do
+    test "survives a persistence round trip at format version 14", %{tmp_dir: dir} do
       {report, _entries} = diverged_report()
       assert expansions(report, "beta") != []
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert <<"PD", 13::8, _rest::binary>> = File.read!(path)
+      assert <<"PD", 14::8, _rest::binary>> = File.read!(path)
       assert {:ok, loaded} = Persistence.load(path)
       assert Map.fetch!(loaded, :expansions) == Map.fetch!(report, :expansions)
       assert Map.fetch!(loaded, :expansion_counts) == Map.fetch!(report, :expansion_counts)
@@ -150,7 +150,7 @@ defmodule PropertyDamage.ExpansionReportTest do
       path = Path.join(dir, "v12-legacy.pd")
       File.write!(path, <<"PD", 12::8, checksum::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 12, 13}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 12, 14}} = Persistence.load(path)
     end
   end
 

@@ -99,6 +99,23 @@ defmodule PropertyDamage.FailureReport do
   in a `:latency_exceeded` report, the runs measured up to the failure in a
   report of another kind, and `nil` when `latency:` is off.
 
+  ## Replay artifact
+
+  `run` is the campaign run the failure happened in, counting from 1 (run 3
+  of a `max_runs: 10` campaign); `seed` is the seed that run generated from,
+  so the failing run is run 1 of `seed`.
+
+  A failing run writes a replay artifact after shrinking (see the
+  `replay_dir:` run option): one Elixir file holding, as literal data, the
+  setup commands, the roots and the commands every target ran at each root.
+  `replay` holds its term (or `{:refused, where}` when a command field holds
+  a function, pid, reference or port, which no file can hold), `replay_path`
+  the file, and `replay_status` what became of it (see `t:replay_status/0`).
+  The printed report ends with three calls: `reproduction_command/1` (the
+  seed, before shrinking), `expansion_command/1` (the failing target's
+  sequence, regenerated) and, last, `replay_command/1`, which runs the
+  artifact with `only: [replay: path]`.
+
   `compare_counts` holds, per boundary observation `{projection, function}`,
   how many boundaries the failing run compared it at, how many it waited at,
   and the total time it waited (`%{compared_at:, waited_at:, waited_ms:}`),
@@ -138,6 +155,32 @@ defmodule PropertyDamage.FailureReport do
           root: non_neg_integer() | nil,
           failure: Failure.t()
         }
+
+  @typedoc """
+  What became of a report's replay artifact:
+
+    * `:written` - written to `replay_path`
+    * `:disabled` - not written: the run was given `replay_dir: false`
+    * `{:write_failed, reason}` - not written: the directory or the file
+      could not be written
+    * `:refused` - not built: a command field holds a value no file can hold
+      (`replay` names where)
+    * `:unavailable` - no artifact can describe the run: a latency budget
+      judged over the whole campaign, or a branching sequence
+    * `:reproduced` - the run replayed the artifact at `replay_path` and
+      failed as it records
+    * `:not_reproduced` - the run replayed the artifact at `replay_path` and
+      failed another way
+  """
+  @type replay_status ::
+          :written
+          | :disabled
+          | {:write_failed, term()}
+          | :refused
+          | :unavailable
+          | :reproduced
+          | :not_reproduced
+          | nil
 
   @typedoc "A `targets:` entry in its normalized form: the adapter module and its options."
   @type target_entry :: {module(), keyword()}
@@ -225,15 +268,31 @@ defmodule PropertyDamage.FailureReport do
           # `root` is the root's index in the reported sequence.
           expansions: %{
             String.t() => [
-              %{root: non_neg_integer(), entry: String.t() | nil | :forced, leaves: [module()]}
+              %{
+                root: non_neg_integer(),
+                entry: String.t() | nil | :forced | :identity,
+                leaves: [module()]
+              }
             ]
           },
 
           # Per target name and root module: how many times each entry was
           # realized, and `:forced` roots, over the runs up to the failure.
           expansion_counts: %{
-            String.t() => %{module() => %{(String.t() | :forced) => pos_integer()}}
+            String.t() => %{module() => %{(String.t() | :forced | :identity) => pos_integer()}}
           },
+
+          # The campaign run the failure happened in, counting from 1
+          # (`run_number + 1`).
+          run: pos_integer() | nil,
+
+          # The replay artifact (see "Replay artifact"): its term, or
+          # `{:refused, refusal}` when a command field holds a value no file
+          # can hold, or nil when the report has none; the path it was written
+          # to, or nil; and what became of it.
+          replay: map() | {:refused, map()} | nil,
+          replay_path: String.t() | nil,
+          replay_status: replay_status(),
 
           # Human-readable command labels (DR-028 amendment, P7): keyed by the
           # flattened command index (the 0..n-1 index of `Sequence.to_list/1`,
@@ -280,7 +339,11 @@ defmodule PropertyDamage.FailureReport do
             compare_counts: %{},
             expansions: %{},
             expansion_counts: %{},
-            command_labels: %{}
+            command_labels: %{},
+            run: nil,
+            replay: nil,
+            replay_path: nil,
+            replay_status: nil
 
   @doc """
   Create a new failure report from execution results.
@@ -667,8 +730,8 @@ defmodule PropertyDamage.FailureReport do
 
   @doc """
   The report's `targets:` list as Elixir source, each entry with only the keys
-  that differ from their defaults, so a reproduction runs against the same
-  configuration.
+  that differ from their defaults (an `expansion:` other than `:random`
+  included), so a reproduction runs against the same configuration.
   """
   @spec targets_source(t()) :: String.t()
   def targets_source(%__MODULE__{targets: targets}) do
@@ -680,7 +743,8 @@ defmodule PropertyDamage.FailureReport do
       name: PropertyDamage.Target.default_name(adapter),
       config: %{},
       injectors: [],
-      mocks: []
+      mocks: [],
+      expansion: :random
     ]
 
     keys =
@@ -888,6 +952,60 @@ defmodule PropertyDamage.FailureReport do
       |> Enum.filter(&is_binary/1)
 
     "PropertyDamage.run(#{Enum.join(options, ", ")})"
+  end
+
+  @doc """
+  The call that replays the report's artifact: `PropertyDamage.run/1` with the
+  report's model and `targets:` and `only: [replay: path]`. It runs the
+  setup commands, the roots and every target's recorded commands, so it
+  reproduces the shrunk failure without generating anything. Returns nil when
+  the report has no artifact file (`replay_status` says why).
+  """
+  @spec replay_command(t()) :: String.t() | nil
+  def replay_command(%__MODULE__{replay_path: nil}), do: nil
+
+  def replay_command(%__MODULE__{model: model, replay_path: path} = report) do
+    "PropertyDamage.run(model: #{inspect(model)}, targets: #{targets_source(report)}, " <>
+      "only: [replay: #{inspect(path)}])"
+  end
+
+  @doc """
+  The call that regenerates the sequence the failing target ran before
+  shrinking: `PropertyDamage.Expansion.for/5` at the report's `seed`, run 1.
+  It names `targets:` when the failing target does not run `:random` or the
+  reference does not (the sequence then depends on another target's mode),
+  and `max_commands:` when the run did not use the default.
+  """
+  @spec expansion_command(t()) :: String.t()
+  def expansion_command(%__MODULE__{model: model, seed: seed} = report) do
+    name = (report.variant || reference_variant(report.targets) || %{})[:name]
+
+    options =
+      [
+        names_targets?(report, name) && "targets: #{targets_source(report)}",
+        report.max_commands not in [nil, @default_max_commands] &&
+          "max_commands: #{report.max_commands}"
+      ]
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map_join(&(", " <> &1))
+
+    "PropertyDamage.Expansion.for(#{inspect(model)}, #{seed}, 1, #{inspect(name)}#{options})"
+  end
+
+  defp names_targets?(%__MODULE__{targets: targets}, name) do
+    modes =
+      Map.new(targets, fn {adapter, entry} ->
+        {Keyword.get(entry, :name) || PropertyDamage.Target.default_name(adapter),
+         Keyword.get(entry, :expansion, :random)}
+      end)
+
+    reference_mode =
+      case targets do
+        [{_adapter, entry} | _] -> Keyword.get(entry, :expansion, :random)
+        [] -> :random
+      end
+
+    Map.get(modes, name, :random) != :random or reference_mode != :random
   end
 
   defp converge_within(%__MODULE__{compare: compare}) when is_list(compare),

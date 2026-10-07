@@ -55,10 +55,11 @@ defmodule PropertyDamage.FailureReport.Formatter do
       terminal_shrunk_sequence(report, opts),
       if(show_state, do: terminal_state_transition(report, color), else: nil),
       if(show_event_log, do: terminal_event_log(report, max_events, color), else: nil),
-      terminal_reproduction(report, color),
       terminal_compare_counts(report, color),
       terminal_shrinking_stats(report, color),
-      if(show_original, do: terminal_original_sequence(report, opts), else: nil)
+      if(show_original, do: terminal_original_sequence(report, opts), else: nil),
+      # Last, so the report ends with the paste-ready replay call.
+      terminal_reproduction(report, color)
     ]
 
     sections
@@ -231,6 +232,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     case entry do
       nil -> "#{names} (not expanded)"
       :forced -> "#{names} (identity, forced)"
+      :identity -> "#{names} (identity, by shrinking)"
       key -> "#{key} = [#{names}]"
     end
   end
@@ -748,14 +750,60 @@ defmodule PropertyDamage.FailureReport.Formatter do
     end
   end
 
+  # The seed reproduction, the call that regenerates the failing target's
+  # sequence, and last the call that replays the artifact (or why there is
+  # none), so the report's last line is a call to paste.
   defp terminal_reproduction(report, color) do
     cmd = FailureReport.reproduction_command(report)
+    {label, replay} = replay_lines(report)
 
     """
     #{section_header("Reproduction", color)}
     #{green(color)}#{cmd}#{reset(color)}
+
+    Regenerate the failing variant:
+    #{FailureReport.expansion_command(report)}
+
+    #{label}
+    #{replay}
     """
   end
+
+  defp replay_lines(%FailureReport{replay_status: :reproduced} = report),
+    do: {"The artifact reproduced the failure. Replay it again:", replay_call(report)}
+
+  defp replay_lines(%FailureReport{replay_status: :not_reproduced} = report),
+    do:
+      {"The artifact did not reproduce the recorded failure (this run failed another way). " <>
+         "Replay it again:", replay_call(report)}
+
+  defp replay_lines(%FailureReport{} = report), do: {replay_label(report), replay_call(report)}
+
+  # An artifact no shrink attempt changed (shrinking was off) holds the
+  # failing run as it was found.
+  defp replay_label(%FailureReport{shrink_iterations: 0, replay: %{}}),
+    do: "Replay the unshrunk failure:"
+
+  defp replay_label(_report), do: "Replay the shrunk failure:"
+
+  defp replay_call(%FailureReport{replay_path: path} = report) when is_binary(path),
+    do: FailureReport.replay_command(report)
+
+  defp replay_call(%FailureReport{replay_status: :disabled}),
+    do: "(no artifact: the run was given replay_dir: false)"
+
+  defp replay_call(%FailureReport{replay_status: {:write_failed, reason}}),
+    do: "(no artifact: writing it failed: #{inspect(reason)})"
+
+  defp replay_call(%FailureReport{replay: {:refused, refusal}}),
+    do:
+      "(artifact refused: #{PropertyDamage.ReplayArtifact.describe_refusal(refusal)} holds a " <>
+        "function, pid, reference or port, which no file can hold)"
+
+  defp replay_call(%FailureReport{replay_status: :unavailable}),
+    do: "(no artifact: this failure is replayed from its seed only)"
+
+  defp replay_call(_report), do: "(no artifact recorded for this report)"
 
   # ============================================================================
   # Markdown Format

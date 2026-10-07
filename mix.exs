@@ -122,6 +122,7 @@ defmodule PropertyDamage.MixProject do
           PropertyDamage.FailureReport,
           PropertyDamage.Analysis,
           PropertyDamage.Replay,
+          PropertyDamage.Expansion,
           PropertyDamage.Coverage,
           PropertyDamage.Diagram,
           PropertyDamage.RunTrace,

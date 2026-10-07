@@ -147,6 +147,7 @@ defmodule PropertyDamage do
     Progress.Reporter,
     Progress.RunResult,
     Progress.RunUpdate,
+    ReplayArtifact,
     RunTrace,
     Scheduler,
     SeedLibrary,
@@ -419,10 +420,16 @@ defmodule PropertyDamage do
     latency_given = Keyword.get(opts, :latency, false)
 
     # Validate options with NimbleOptions - applies defaults and provides helpful errors
+    raw_opts = opts
     opts = Options.validate_run!(opts)
 
+    # `only:` picks one run, or the run a replay artifact records, and the
+    # targets of `targets:` that run (see `running_targets/2`).
+    {opts, replay} = only_options(opts, raw_opts)
+
     model = opts[:model]
-    targets = opts[:targets]
+    all_targets = opts[:targets]
+    targets = running_targets(all_targets, opts[:only])
 
     # Two or more targets are compared only through @compare observations:
     # refuse a model without any before anything runs, `validate:` or not.
@@ -454,7 +461,8 @@ defmodule PropertyDamage do
 
     # Seed-library replay working set (DR-023). `nil` when disabled; otherwise a
     # small config map driving the pre-exploration replay phase.
-    seed_library = build_seed_library_config(opts, verbose)
+    # An `only:` run runs the one run it names, never the library's seeds.
+    seed_library = if opts[:only], do: nil, else: build_seed_library_config(opts, verbose)
     seed_library_path = seed_library && seed_library.path
 
     # Unified progress projection (DR-022): one reporter fans out to the verbose
@@ -470,11 +478,17 @@ defmodule PropertyDamage do
 
     ctx = %{
       model: model,
-      targets: targets,
+      targets: executed_targets(targets),
+      # Every target of `targets:`: each one's choices are computed on the
+      # full list, so a target keeps them whichever targets `only:` runs.
+      all_targets: all_targets,
       target_entries: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
       target: reference,
       max_commands: max_commands,
       max_runs: max_runs,
+      first_run: first_run(opts[:only]),
+      replay: replay,
+      replay_dir: opts[:replay_dir],
       seed: seed,
       run_nonce: run_nonce,
       shrink: opts[:shrink],
@@ -608,11 +622,131 @@ defmodule PropertyDamage do
           last_run: nil
         }
 
-        run_loop(ctx, 0, acc)
+        run_loop(ctx, ctx.first_run, acc)
     end
   end
 
-  defp run_loop(ctx, run_number, acc) when run_number >= ctx.max_runs do
+  # `only:` options: `only: [run: n]` runs run n alone; `only: [replay:
+  # path]` runs the run the artifact at `path` records, on the targets it
+  # records (in its order, with its modes), from its seed, shrinking only
+  # when the caller asked. Returns the options and the replay (nil without
+  # `replay:`): the artifact term, its path, and the sequence and choices it
+  # records, computed here so a broken artifact fails before any setup.
+  defp only_options(opts, raw_opts) do
+    case opts[:only] do
+      nil ->
+        {opts, nil}
+
+      only ->
+        opts = Keyword.put(opts, :max_runs, 1)
+
+        case Keyword.fetch(only, :replay) do
+          {:ok, path} ->
+            replay = load_replay!(path, opts[:model], opts[:targets])
+
+            {opts
+             |> Keyword.put(:seed, replay.term.seed)
+             |> Keyword.put(:targets, replay.targets)
+             |> Keyword.put(:shrink, Keyword.get(raw_opts, :shrink, false)), replay}
+
+          :error ->
+            {opts, nil}
+        end
+    end
+  end
+
+  defp load_replay!(path, model, targets) do
+    term =
+      case ReplayArtifact.read(path) do
+        {:ok, term} ->
+          term
+
+        {:error, reason} ->
+          raise ArgumentError, "`only: [replay: #{inspect(path)}]`: " <> reason
+      end
+
+    if term.model != model do
+      raise ArgumentError,
+            "`only: [replay: #{inspect(path)}]` records a run of #{inspect(term.model)}, " <>
+              "not of `model:` #{inspect(model)}"
+    end
+
+    recorded = Enum.map(term.targets, & &1.name)
+    given = Enum.map(targets, & &1.name)
+
+    case {recorded -- given, given -- recorded} do
+      {[], []} ->
+        :ok
+
+      {missing, extra} ->
+        raise ArgumentError,
+              "`only: [replay: #{inspect(path)}]` replays exactly the targets the artifact " <>
+                "records (#{Enum.map_join(recorded, ", ", &inspect/1)}), so `targets:` must " <>
+                "name them all and no other: " <>
+                Enum.join(
+                  Enum.reject(
+                    [
+                      missing != [] && "missing #{Enum.map_join(missing, ", ", &inspect/1)}",
+                      extra != [] && "not recorded #{Enum.map_join(extra, ", ", &inspect/1)}"
+                    ],
+                    &(&1 == false)
+                  ),
+                  "; "
+                )
+    end
+
+    # The artifact's order and modes win: its first target is the reference,
+    # and every target runs what it recorded.
+    replayed =
+      term.targets
+      |> Enum.with_index()
+      |> Enum.map(fn {%{name: name, expansion: mode}, index} ->
+        %{Enum.find(targets, &(&1.name == name)) | index: index, expansion: mode}
+      end)
+
+    sequence = ReplayArtifact.sequence(term)
+
+    %{
+      term: term,
+      path: path,
+      targets: replayed,
+      sequence: sequence,
+      expansion: ReplayArtifact.expansion(term, sequence)
+    }
+  end
+
+  # The targets that run: every target, or under `only: [variants: names]`
+  # the named ones and, unless `with_reference: false`, the reference, in
+  # `targets:` order and indexed from 0.
+  defp running_targets(targets, only) do
+    case only && only[:variants] do
+      nil ->
+        targets
+
+      names ->
+        keep = if only[:with_reference], do: [hd(targets).name | names], else: names
+
+        targets
+        |> Enum.filter(&(&1.name in keep))
+        |> Enum.with_index()
+        |> Enum.map(fn {target, index} -> %{target | index: index} end)
+    end
+  end
+
+  # A `:reference` target that runs without the reference (`only:` with
+  # `with_reference: false`) has no first target to copy: it runs the
+  # choices computed for it on the full `targets:`, which every later
+  # realization carries, as a `:random` target carries its own.
+  defp executed_targets([%{expansion: :reference} = alone | rest]),
+    do: [%{alone | expansion: :random} | rest]
+
+  defp executed_targets(targets), do: targets
+
+  # The run number (0-based) `only:` starts at.
+  defp first_run(nil), do: 0
+  defp first_run(only), do: Keyword.get(only, :run, 1) - 1
+
+  defp run_loop(ctx, run_number, acc) when run_number >= ctx.first_run + ctx.max_runs do
     metrics = campaign_metrics(ctx, acc.samples)
 
     case judge_latency(ctx, metrics) do
@@ -647,6 +781,7 @@ defmodule PropertyDamage do
       |> Map.put(:compare_counts, acc.compare_counts)
       |> Map.put(:expansion_counts, acc.expansion_counts)
       |> put_metrics(metrics)
+      |> put_replay(ctx)
 
     Reporter.emit(ctx.reporter, fn ->
       %RunResult{
@@ -708,7 +843,7 @@ defmodule PropertyDamage do
     # Run 0 uses the base seed itself so a reported seed reproduces exactly
     # with max_runs: 1.
     run_seed = Generator.run_seed(ctx.seed, run_number)
-    sequence = generate_one(ctx, run_seed)
+    {sequence, expansion} = planned(ctx, run_seed)
     command_count = Sequence.command_count(sequence)
 
     # Per-run heartbeat (DR-022). run_number is reported 1-based for consumers.
@@ -733,7 +868,7 @@ defmodule PropertyDamage do
 
     run = %{
       sequence: sequence,
-      expansion: expand(ctx, sequence, run_seed),
+      expansion: expansion,
       seed: ctx.seed,
       run_seed: run_seed,
       run_number: run_number,
@@ -963,8 +1098,28 @@ defmodule PropertyDamage do
   defp campaign_metrics(%{measure_latency: false}, _samples), do: nil
   defp campaign_metrics(ctx, samples), do: LatencyMetrics.calculate(ctx.targets, samples)
 
+  # A replay that passed did not reproduce its artifact.
+  defp put_replay(stats, %{replay: nil}), do: stats
+  defp put_replay(stats, _ctx), do: Map.put(stats, :replay, :not_reproduced)
+
   defp put_metrics(stats, nil), do: stats
   defp put_metrics(stats, metrics), do: Map.put(stats, :metrics, metrics)
+
+  # The run's sequence and every running target's choices: generated from
+  # the run seed, or under `only: [replay:]` the ones the artifact records.
+  defp planned(%{replay: %{} = replay} = ctx, _run_seed),
+    do: {replay.sequence, running(replay.expansion, ctx)}
+
+  defp planned(ctx, run_seed) do
+    sequence = generate_one(ctx, run_seed)
+    {sequence, expand(ctx, sequence, run_seed)}
+  end
+
+  # The choices of the targets that run.
+  defp running(expansion, ctx) do
+    names = Enum.map(ctx.targets, & &1.name)
+    %{expansion | variants: Map.take(expansion.variants, names)}
+  end
 
   # The run's sequence: its setup commands and roots from the run seed, then
   # its teardown commands drawn against the state the roots leave.
@@ -979,9 +1134,13 @@ defmodule PropertyDamage do
   defp expand(%{branching: branching}, _sequence, _run_seed) when branching != nil, do: nil
 
   defp expand(ctx, sequence, run_seed) do
-    if Expansion.defines?(ctx.model),
-      do: Expansion.expand(ctx.model, sequence, ctx.targets, run_seed),
-      else: Expansion.identity(sequence, ctx.targets)
+    if Expansion.defines?(ctx.model) do
+      ctx.model
+      |> Expansion.expand(sequence, ctx.all_targets, run_seed)
+      |> running(ctx)
+    else
+      Expansion.identity(sequence, ctx.targets)
+    end
   end
 
   # ============================================================================
@@ -1631,6 +1790,8 @@ defmodule PropertyDamage do
 
   # Announces a failure report and returns it as the run's result.
   defp report_failure(ctx, failure_report) do
+    failure_report = with_replay(ctx, failure_report)
+
     # Terminal failure notification (DR-022): the verbose consumer renders this
     # as the failure summary. The authoritative result is the returned report.
     Reporter.emit(ctx.reporter, fn ->
@@ -1670,6 +1831,52 @@ defmodule PropertyDamage do
 
     {:error, failure_report}
   end
+
+  # The report's campaign run and its replay artifact: built from what the
+  # report describes, refused when a command field holds a value no file can
+  # hold, and written into `replay_dir:` unless the option is `false`. A run
+  # that replayed an artifact writes none of its own unless shrinking found a
+  # smaller failure; it records whether the artifact reproduced.
+  defp with_replay(ctx, report) do
+    report = %{report | run: report.run_number && report.run_number + 1}
+
+    case ReplayArtifact.build(report) do
+      nil ->
+        %{report | replay_status: :unavailable}
+
+      term ->
+        case ReplayArtifact.check(term) do
+          {:refused, _refusal} = refused -> %{report | replay: refused, replay_status: :refused}
+          :ok -> place_replay(ctx, %{report | replay: term}, term)
+        end
+    end
+  end
+
+  defp place_replay(%{replay: %{} = replay} = ctx, report, term) do
+    if smaller?(report, term, replay.term) do
+      write_replay(ctx, report, term)
+    else
+      status =
+        if ReplayArtifact.reproduced?(replay.term, report), do: :reproduced, else: :not_reproduced
+
+      %{report | replay_path: replay.path, replay_status: status}
+    end
+  end
+
+  defp place_replay(ctx, report, term), do: write_replay(ctx, report, term)
+
+  defp write_replay(%{replay_dir: false}, report, _term), do: %{report | replay_status: :disabled}
+
+  defp write_replay(ctx, report, term) do
+    case ReplayArtifact.write(term, ctx.replay_dir) do
+      {:ok, path} -> %{report | replay_path: path, replay_status: :written}
+      {:error, reason} -> %{report | replay_status: {:write_failed, reason}}
+    end
+  end
+
+  # A replay run's shrink found a failure with fewer roots than the artifact.
+  defp smaller?(report, term, replayed),
+    do: report.trace.plan_source == :shrunk and length(term.roots) < length(replayed.roots)
 
   # Check if a failure reason is stutter-related (idempotency violation or execution failure)
   defp stutter_failure?(%Failure{} = failure),

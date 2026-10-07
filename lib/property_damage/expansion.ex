@@ -1,5 +1,24 @@
 defmodule PropertyDamage.Expansion do
-  @moduledoc false
+  @moduledoc """
+  Regenerates the concrete sequence one target of a run executes.
+
+  A model that defines `expansions/0` lets each target run a root either as
+  itself or as the leaves of one of the entries the root's function returns.
+  `for/5` answers "what did target `name` run in run `run` of a campaign
+  seeded with `seed`?" without running any target: it generates the run's
+  sequence exactly as `PropertyDamage.run/1` does and realizes the named
+  target's entries the way the run realized them.
+
+      {:ok, result} = PropertyDamage.Expansion.for(MyModel, 42, 1, "second", targets: targets)
+      result.sequence
+      #=> the setup commands, then every root's commands, in order
+
+  A failure report prints the call for its failing target
+  (`PropertyDamage.FailureReport.expansion_command/1`).
+
+  The rest of this module is internal to `PropertyDamage`.
+  """
+
   # Each target of a run runs its own concrete sequence: per root, either the
   # root itself or the leaves of one of the expansions the model's
   # `expansions/0` lists for it. This module checks `expansions/0` when a
@@ -24,7 +43,10 @@ defmodule PropertyDamage.Expansion do
   # A realized entry is pure in its inputs: the root, the state at the root,
   # the entry, and the seed key its leaves draw their values from. A caller
   # that already knows the entry passes it with `:carry` (see `expand/5`), and
-  # the leaves are realized again without a draw.
+  # the leaves are realized again without a draw. A caller that knows the
+  # commands a target ran (a replay artifact) passes them with
+  # `recorded/4`, and the walk simulates them again at their positions without
+  # calling the expansion function or any generator.
 
   alias PropertyDamage.{
     Comparison,
@@ -46,7 +68,8 @@ defmodule PropertyDamage.Expansion do
     * `module` - the root's command module
     * `entry` - the entry key (`"Root[i]"`), `nil` when no expansion applied
       (the root is not listed, the model has no `expansions/0`, or the target
-      runs `:identity`), or `:forced` when no listed entry could be realized
+      runs `:identity`), `:forced` when no listed entry could be realized, or
+      `:identity` when shrinking replaced a listed entry by the root itself
     * `index` - the entry's index in the list the function returned, or nil
     * `commands` - the commands executed for the root, in order
     * `leaves?` - true when `commands` are leaves at leaf positions; false when
@@ -60,7 +83,7 @@ defmodule PropertyDamage.Expansion do
           required(:root) => non_neg_integer(),
           required(:root_id) => non_neg_integer(),
           required(:module) => module(),
-          required(:entry) => String.t() | nil | :forced,
+          required(:entry) => String.t() | nil | :forced | :identity,
           required(:index) => non_neg_integer() | nil,
           required(:commands) => [struct()],
           required(:leaves?) => boolean(),
@@ -69,15 +92,31 @@ defmodule PropertyDamage.Expansion do
           optional(:offered) => [{String.t(), [module()]}]
         }
 
-  @typedoc """
-  Every target's concrete sequence for one run, keyed by target name: its
-  choices in root order and the placeholder registry its commands resolve
-  against. `warnings` lists the `when:` and `weight:` options found on leaves,
-  which a run ignores.
-  """
+  @typedoc false
+  # Every target's concrete sequence for one run, keyed by target name: its
+  # choices in root order and the placeholder registry its commands resolve
+  # against. `warnings` lists the `when:` and `weight:` options found on
+  # leaves, which a run ignores.
   @type t :: %{
           variants: %{String.t() => %{choices: [choice()], registry: PlaceholderRegistry.t()}},
           warnings: [String.t()]
+        }
+
+  @typedoc """
+  What `for/5` returns for one target:
+
+    * `prefix` - the setup commands, with their generated arguments
+    * `roots` - the root commands, as generated
+    * `choices` - the target's choice at each root, in root order
+    * `sequence` - the commands the target executes: `prefix`, then the
+      `commands` of every choice in order (the teardown commands, generated
+      after the roots, are not part of it)
+  """
+  @type for_result :: %{
+          prefix: [struct()],
+          roots: [struct()],
+          choices: [choice()],
+          sequence: [struct()]
         }
 
   # ==========================================================================
@@ -236,6 +275,162 @@ defmodule PropertyDamage.Expansion do
     %{variants: variants, warnings: Enum.uniq(warnings)}
   end
 
+  @doc """
+  The concrete sequence target `name` executes in run `run` of a campaign
+  seeded with `seed`, without setting up any target.
+
+  `run` counts from 1: run n of a `max_runs: n` campaign generates its
+  sequence from `PropertyDamage.Generator.run_seed(seed, n - 1)`. A failure
+  report's `seed` is the seed its failing run generated from, so
+  `for(model, report.seed, 1, name)` regenerates the failing run as it ran
+  before shrinking.
+
+  The sequence is generated as `PropertyDamage.run/1` generates it, and the
+  target's entries are realized as the run realized them: `result.sequence`
+  equals what the target executed, without the teardown commands generated
+  after the roots.
+
+  ## Options
+
+    * `:targets` - the run's `targets:`, as `PropertyDamage.run/1` takes
+      them. The named target's `expansion:` mode comes from it: `:identity`
+      runs every root as itself, and `:reference` runs what the first target
+      (the reference) runs. Without `:targets`, `name` is one `:random`
+      target; its draw depends only on the seed, the name and the root, so
+      the result equals what a `:random` target of that name runs beside any
+      other targets.
+    * `:max_commands` - the run's `max_commands:` (default 50).
+
+  Returns `{:error, reason}`, a message naming the module, the run, the name
+  or the option at fault, when `model` is not a model, `run` is not a
+  positive integer, an option is unknown or invalid, `name` is not in
+  `targets:`, or realizing an entry fails.
+  """
+  @spec for(module(), integer(), pos_integer(), String.t(), keyword()) ::
+          {:ok, for_result()} | {:error, String.t()}
+  def for(model, seed, run, name, opts \\ []) do
+    with :ok <- check_for_model(model),
+         :ok <- check_for_coordinates(seed, run),
+         {:ok, targets, max_commands} <- for_options(name, opts),
+         :ok <- check_for_name(name, targets) do
+      regenerate(model, Generator.run_seed(seed, run - 1), name, targets, max_commands)
+    end
+  end
+
+  defp check_for_model(model) do
+    if is_atom(model) and Code.ensure_loaded?(model) and
+         function_exported?(model, :commands, 0) and
+         function_exported?(model, :command_sequence_projection, 0) do
+      check_model!(model)
+    else
+      {:error, "#{inspect(model)} is not a model: it defines no commands/0"}
+    end
+  rescue
+    e in ArgumentError -> {:error, Exception.message(e)}
+  end
+
+  defp check_for_coordinates(seed, _run) when not is_integer(seed),
+    do: {:error, "the seed must be an integer, got: #{inspect(seed)}"}
+
+  defp check_for_coordinates(_seed, run) when is_integer(run) and run >= 1, do: :ok
+
+  defp check_for_coordinates(_seed, run),
+    do: {:error, "the run must be a positive integer (run 1 is the first), got: #{inspect(run)}"}
+
+  @for_options [:targets, :max_commands]
+
+  defp for_options(name, opts) do
+    with true <- Keyword.keyword?(opts) || {:error, "expected a keyword list of options"},
+         [] <- Keyword.keys(opts) -- @for_options,
+         {:ok, targets} <- for_targets(name, Keyword.get(opts, :targets)),
+         {:ok, max_commands} <- for_max_commands(Keyword.get(opts, :max_commands, 50)) do
+      {:ok, targets, max_commands}
+    else
+      [_ | _] = unknown ->
+        {:error,
+         "unknown option(s) #{Enum.map_join(unknown, ", ", &"`#{&1}:`")}; the options are " <>
+           "`targets:` and `max_commands:`"}
+
+      {:error, message} ->
+        {:error, message}
+    end
+  end
+
+  defp for_targets(name, nil),
+    do: {:ok, [%PropertyDamage.Target{name: name, index: 0, expansion: :random}]}
+
+  defp for_targets(_name, entries) do
+    case PropertyDamage.Options.validate_targets(entries) do
+      {:ok, targets} -> {:ok, targets}
+      {:error, message} -> {:error, "invalid `targets:`: " <> message}
+    end
+  end
+
+  defp for_max_commands(n) when is_integer(n) and n > 0, do: {:ok, n}
+
+  defp for_max_commands(other),
+    do: {:error, "`max_commands:` must be a positive integer, got: #{inspect(other)}"}
+
+  defp check_for_name(name, targets) do
+    if Enum.any?(targets, &(&1.name == name)),
+      do: :ok,
+      else:
+        {:error,
+         "no target named #{inspect(name)} in `targets:` " <>
+           "(#{Enum.map_join(targets, ", ", &inspect(&1.name))})"}
+  end
+
+  # The run's sequence and the named target's choices, as a run generates and
+  # realizes them.
+  defp regenerate(model, run_seed, name, targets, max_commands) do
+    sequence =
+      model
+      |> Generator.generate_sequence(max_commands: max_commands)
+      |> Generator.generate_value(run_seed)
+
+    expansion =
+      if defines?(model),
+        do: expand(model, sequence, targets, run_seed),
+        else: identity(sequence, targets)
+
+    %{choices: choices} = Map.fetch!(expansion.variants, name)
+
+    {:ok,
+     %{
+       prefix: sequence.setup,
+       roots: Sequence.to_list(sequence),
+       choices: choices,
+       sequence: sequence.setup ++ Enum.flat_map(choices, & &1.commands)
+     }}
+  rescue
+    e in ArgumentError -> {:error, Exception.message(e)}
+  end
+
+  @doc false
+  # Every target's concrete sequence for `sequence`, from the commands each
+  # target ran at each root (`recorded`, `%{name => [recorded choice]}`, one
+  # per root in order, each with `:root_id`, `:entry`, `:commands`), as a
+  # replay artifact records them. Nothing is generated: a root a target ran as
+  # itself is simulated as itself, and the leaves it ran are simulated again
+  # at their leaf positions, which mints their placeholders and links the
+  # root's placeholders to them. `owners` maps each name to the name its
+  # seed keys carry (the reference's name for a target that copied it), so a
+  # later shrink realizes the same entries again.
+  @spec recorded(module(), Sequence.t(), integer(), %{String.t() => [map()]}, %{
+          String.t() => String.t()
+        }) :: t()
+  def recorded(model, %Sequence{} = sequence, run_seed, recorded, owners) do
+    variants =
+      Map.new(recorded, fn {name, choices} ->
+        walk = walk_state(model, sequence, Enum.map(choices, & &1.root_id), run_seed)
+        carry = Map.new(choices, &{&1.root_id, {:recorded, &1}})
+        {variant, _warnings} = walk(walk, Map.get(owners, name, name), :random, carry)
+        {name, variant}
+      end)
+
+    %{variants: variants, warnings: []}
+  end
+
   @doc false
   # What one target ran for `sequence`, realized again without a draw from the
   # choices it made there (`choices`, one per root in order, as a report's
@@ -369,6 +564,9 @@ defmodule PropertyDamage.Expansion do
   # Returns `{choice, state, minted, aliases, warnings}`: the choice, the
   # state after the root, the leaves' placeholders, and the
   # `{root_placeholder, leaf_placeholder}` pairs to alias.
+  defp choose(walk, name, _mode, _fun, base, {:recorded, recorded}),
+    do: replay_recorded(walk, name, base, recorded)
+
   defp choose(walk, _name, mode, fun, base, _carried) when mode == :identity or fun == nil,
     do: as_itself(walk, base, nil, nil)
 
@@ -437,6 +635,59 @@ defmodule PropertyDamage.Expansion do
 
     {choice, state, [], [], []}
   end
+
+  # A recorded choice: the root as itself, or the recorded leaves simulated
+  # again at their leaf positions. No expansion function or generator runs.
+  defp replay_recorded(walk, name, base, %{entry: entry, commands: commands}) do
+    index = entry_index(entry)
+
+    # A root run as itself records the root alone (a listed identity keeps
+    # its key, as `realize/4` keeps it).
+    if commands == [base.root_command],
+      do: as_itself(walk, base, entry, index),
+      else: replay_leaves(walk, name, base, entry, index, commands)
+  end
+
+  defp replay_leaves(walk, name, base, entry, index, commands) do
+    {done, state, minted} =
+      commands
+      |> Enum.with_index()
+      |> Enum.reduce({[], base.state, []}, fn {command, leaf}, {done, state, minted} ->
+        position = Position.leaf(base.root_id, leaf)
+
+        {command, events, state, new_minted} =
+          Generator.simulate_step(walk.model, command, position, state)
+
+        {done ++ [%{command: command, events: events}], state, minted ++ new_minted}
+      end)
+
+    aliases = aliases!(walk, base, entry, done, minted)
+
+    choice = %{
+      root: base.root,
+      root_id: base.root_id,
+      module: base.root_command.__struct__,
+      entry: entry,
+      index: index,
+      commands: Enum.map(done, & &1.command),
+      leaves?: true,
+      seed_key: seed_key(walk.run_seed, name, base.root_id),
+      aliases: Map.new(aliases, fn {root, leaf} -> {root.id, leaf.id} end)
+    }
+
+    {choice, state, minted, aliases, []}
+  end
+
+  # The index an entry key names (`"Root[i]"` is entry i), nil for any other
+  # entry value.
+  defp entry_index(key) when is_binary(key) do
+    case Regex.run(~r/\[(\d+)\]$/, key) do
+      [_, index] -> String.to_integer(index)
+      nil -> nil
+    end
+  end
+
+  defp entry_index(_entry), do: nil
 
   # ==========================================================================
   # The draw
