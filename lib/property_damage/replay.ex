@@ -42,10 +42,11 @@ defmodule PropertyDamage.Replay do
 
   For a model with `c:PropertyDamage.Model.expansions/0`, the replayed target
   runs each root as it ran in the reported run: the root itself, or the
-  leaves of the expansion it chose there, realized again from the choices the
-  report's trace records, without a new draw. Each leaf is a step of its own.
-  A replay on a target whose choices the report does not record raises
-  `ArgumentError`.
+  leaves it ran there, read from the report's `replay` term (the term its
+  replay artifact holds), or from the choices its trace records when it has
+  no term, without a new draw. Any target the report records can be
+  replayed, and each leaf is a step of its own. A replay on a target the
+  report does not record raises `ArgumentError`.
 
   ## Step Information
 
@@ -84,7 +85,16 @@ defmodule PropertyDamage.Replay do
     definitions, which are reachable from the persisted model.)
   """
 
-  alias PropertyDamage.{EventQueue, Expansion, Failure, FailureReport, Options, Sequence}
+  alias PropertyDamage.{
+    EventQueue,
+    Expansion,
+    Failure,
+    FailureReport,
+    Options,
+    ReplayArtifact,
+    Sequence
+  }
+
   alias PropertyDamage.Executor.{Phases, Stepping}
 
   defstruct [
@@ -246,8 +256,7 @@ defmodule PropertyDamage.Replay do
   end
 
   defp do_start(failure, model, %{adapter: adapter, config: config} = target, opts) do
-    sequence = FailureReport.shrunk_sequence(failure)
-    {commands, plan, registry} = replayed(failure, model, sequence, target)
+    {commands, plan, registry} = replayed(failure, target)
 
     {:ok, event_queue} = EventQueue.start_link()
 
@@ -593,23 +602,15 @@ defmodule PropertyDamage.Replay do
   # What the replayed target executes: the commands in order, each with its
   # root index and leaf position (nil for a root that runs as itself), and the
   # registry they resolve against. For a model with expansions the target's
-  # choices come from the report's trace.
-  defp replayed(failure, model, sequence, target) do
-    traced =
-      Expansion.traced!(
-        model,
-        failure.trace && failure.trace.expansion,
-        [target.name],
-        "PropertyDamage.Replay"
-      )
-
-    case traced do
-      nil ->
+  # commands come from the report's replay term, else from its trace.
+  defp replayed(failure, target) do
+    case ReplayArtifact.reexecution(failure, [target.name], "PropertyDamage.Replay") do
+      {sequence, nil} ->
         roots = Sequence.to_list(sequence)
         {roots, Enum.map(Enum.with_index(roots), &{elem(&1, 1), nil}), sequence.registry}
 
-      %{} ->
-        variant = Expansion.carried(model, sequence, Map.fetch!(traced, target.name))
+      {_sequence, variants} ->
+        variant = Map.fetch!(variants, target.name)
 
         steps =
           for {root_steps, root} <- Enum.with_index(Expansion.steps(variant.choices)),

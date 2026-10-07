@@ -1937,6 +1937,16 @@ defmodule PropertyDamage do
   not reproduce comes back unchanged. A `:setup_failed` report implicates no
   command and comes back unchanged.
 
+  For a model with `expansions/0`, the re-shrink starts from what every
+  target ran, read from the report's `replay` term (the term its replay
+  artifact holds), or from the choices its trace records when it has no
+  term; it works for every target the report records. It raises
+  `ArgumentError`, naming `replay_dir:`, only when the report holds neither a
+  `replay` term nor `expansions`. The new report's `expansions` and
+  `expansion_counts` describe the further-shrunk run, and its `replay` term
+  holds it: when the report came with an artifact file, the new artifact
+  replaces that file.
+
   ## Options
 
   - `:strategy` - Shrinking strategy (default: `:thorough`). Each strategy sets a
@@ -2015,8 +2025,20 @@ defmodule PropertyDamage do
       check_mode: :halt
     }
 
+    # Each target re-runs the roots as the report's run ran them: the
+    # sequence and every target's choices come from the report's replay term
+    # (else from its trace), never from a new draw.
+    {sequence, variants} =
+      ReplayArtifact.reexecution(
+        report,
+        Enum.map(targets, & &1.name),
+        "PropertyDamage.shrink_further/2"
+      )
+
+    traced = variants && Map.new(variants, fn {name, variant} -> {name, variant.choices} end)
+
     found = %{
-      sequence: FailureReport.shrunk_sequence(report),
+      sequence: sequence,
       run_seed: report.seed,
       run_number: report.run_number,
       failure: %{
@@ -2027,16 +2049,6 @@ defmodule PropertyDamage do
         stacktrace: report.stacktrace
       }
     }
-
-    # Each target re-runs the roots as the report's run ran them: its choices
-    # come from the report's trace, never from a new draw.
-    traced =
-      Expansion.traced!(
-        report.model,
-        report.trace && report.trace.expansion,
-        Enum.map(targets, & &1.name),
-        "PropertyDamage.shrink_further/2"
-      )
 
     # A shared epoch counter keeps every SUT execution in this re-shrink
     # distinct (DR-034).
@@ -2079,42 +2091,44 @@ defmodule PropertyDamage do
       {:reproduced, failure, result, other_failures} ->
         elapsed = System.monotonic_time(:millisecond) - start_time
 
-        {:ok,
-         FailureReport.new(
-           seed: report.seed,
-           run_number: report.run_number,
-           original_sequence: report.original_sequence,
-           shrunk_sequence: shrink_result.sequence,
-           failed_at_index: failure.root,
-           failure_reason: failure.reason,
-           kind: failure.kind,
-           variant: failure.variant,
-           shrink_iterations: report.shrink_iterations + shrink_result.iterations,
-           shrink_time_ms: report.shrink_time_ms + elapsed,
-           event_log: Map.get(result, :event_log, []),
-           executed: Map.get(result, :executed, %{}),
-           # A further-shrunk report only reaches here on a genuine
-           # reproduction, so its plan is a shrinker product (DR-033).
-           plan_source: :shrunk,
-           source_revision: RunTrace.source_revision(),
-           run_nonce: ctx.run_nonce,
-           mint_epoch: fresh_epoch,
-           projections: Map.get(result, :projections, %{}),
-           projections_before: Map.get(result, :projections_before),
-           command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-           model: report.model,
-           targets: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
-           concurrency: ctx.concurrency,
-           compare: ctx.compare,
-           compare_counts: report.compare_counts,
-           other_failures: Enum.map(other_failures, &other_failure/1),
-           stutter: ctx.stutter,
-           max_commands: report.max_commands,
-           linearization: Map.get(result, :linearization),
-           stacktrace: failure.stacktrace,
-           expansion: shrink_result.expansion,
-           expansion_counts: report.expansion_counts
-         )}
+        further =
+          FailureReport.new(
+            seed: report.seed,
+            run_number: report.run_number,
+            original_sequence: report.original_sequence,
+            shrunk_sequence: shrink_result.sequence,
+            failed_at_index: failure.root,
+            failure_reason: failure.reason,
+            kind: failure.kind,
+            variant: failure.variant,
+            shrink_iterations: report.shrink_iterations + shrink_result.iterations,
+            shrink_time_ms: report.shrink_time_ms + elapsed,
+            event_log: Map.get(result, :event_log, []),
+            executed: Map.get(result, :executed, %{}),
+            # A further-shrunk report only reaches here on a genuine
+            # reproduction, so its plan is a shrinker product (DR-033).
+            plan_source: :shrunk,
+            source_revision: RunTrace.source_revision(),
+            run_nonce: ctx.run_nonce,
+            mint_epoch: fresh_epoch,
+            projections: Map.get(result, :projections, %{}),
+            projections_before: Map.get(result, :projections_before),
+            command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+            model: report.model,
+            targets: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
+            concurrency: ctx.concurrency,
+            compare: ctx.compare,
+            compare_counts: report.compare_counts,
+            other_failures: Enum.map(other_failures, &other_failure/1),
+            stutter: ctx.stutter,
+            max_commands: report.max_commands,
+            linearization: Map.get(result, :linearization),
+            stacktrace: failure.stacktrace,
+            expansion: shrink_result.expansion,
+            expansion_counts: recount(report, shrink_result.expansion, failure.root)
+          )
+
+        {:ok, further_replay(report, further)}
 
       # A re-execution whose adapter setup fails cannot confirm a further
       # shrink; surface the setup failure.
@@ -2123,6 +2137,49 @@ defmodule PropertyDamage do
 
       :not_reproduced ->
         {:ok, report}
+    end
+  end
+
+  # The report's expansion counts with the failing run's share replaced by
+  # the further-shrunk run's; the counts of the runs that passed before it
+  # stay.
+  defp recount(report, expansion, failed_at) do
+    recorded = %{
+      variants: Map.new(recorded_choices(report), &{elem(&1, 0), %{choices: elem(&1, 1)}})
+    }
+
+    (report.expansion_counts || %{})
+    |> Expansion.subtract_counts(Expansion.counts(recorded, report.failed_at_index))
+    |> Expansion.merge_counts(Expansion.counts(expansion, failed_at))
+  end
+
+  # What every target of the report's run ran, by name: the replay term's
+  # choices (each given its root's module), else the trace's.
+  defp recorded_choices(%FailureReport{replay: %{roots: roots, choices: choices}}) do
+    modules = Map.new(roots, &{&1.root_id, &1.command.__struct__})
+
+    Map.new(choices, fn {name, ran} ->
+      {name, Enum.map(ran, &Map.put(&1, :module, Map.fetch!(modules, &1.root_id)))}
+    end)
+  end
+
+  defp recorded_choices(%FailureReport{trace: %RunTrace{expansion: %{} = traced}}), do: traced
+  defp recorded_choices(_report), do: %{}
+
+  # The further-shrunk report's replay term and artifact. The artifact goes
+  # beside the one the report came with, replacing it (the same seed names
+  # the same file); a report with no artifact file gets none, and keeps the
+  # reason it had none.
+  defp further_replay(%FailureReport{replay_path: path}, further) when is_binary(path),
+    do: with_replay(%{replay_dir: Path.dirname(path), replay: nil}, further)
+
+  defp further_replay(report, further) do
+    case with_replay(%{replay_dir: false, replay: nil}, further) do
+      %{replay_status: :disabled} = replayed ->
+        %{replayed | replay_status: report.replay_status || :disabled}
+
+      replayed ->
+        replayed
     end
   end
 

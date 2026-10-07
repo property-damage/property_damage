@@ -641,6 +641,66 @@ defmodule PropertyDamage.ReplayArtifact do
   end
 
   @doc false
+  # What the targets named `names` ran in the run `report` describes, for a
+  # path that re-executes it (`path` names that path in an error):
+  # `{sequence, variants}`, with `variants` mapping each name to its choices
+  # and the registry its commands resolve against, or nil for a model without
+  # `expansions/0`, whose targets run the roots as themselves. The report's
+  # `replay` term is read first: the sequence and every target's commands are
+  # rebuilt from it with no draw. A report without one (an artifact refused
+  # for a value no file can hold, say) falls back to the choices its trace
+  # records. Raises `ArgumentError` naming `path` when the report records
+  # neither a `replay` term nor `expansions`, or does not record what one of
+  # `names` ran.
+  @spec reexecution(FailureReport.t(), [String.t()], String.t()) ::
+          {Sequence.t(), %{String.t() => map()} | nil}
+  def reexecution(%FailureReport{model: model} = report, names, path) do
+    cond do
+      not Expansion.defines?(model) ->
+        {FailureReport.shrunk_sequence(report), nil}
+
+      is_map(report.replay) ->
+        from_term(report.replay, names, path)
+
+      is_nil(report.replay) and is_nil(report.expansions) ->
+        raise ArgumentError,
+              "#{path} rebuilds what each target ran from the report's `replay` term or its " <>
+                "`expansions`, and this report holds neither, while #{inspect(model)} defines " <>
+                "expansions/0. A failing run records both, and writes the same term into its " <>
+                "`replay_dir:` (`only: [replay: path]` replays that file); run the failing " <>
+                "seed again to get a report that records them"
+
+      true ->
+        from_trace(report, names, path)
+    end
+  end
+
+  defp from_term(term, names, path) do
+    case names -- Map.keys(term.choices) do
+      [] ->
+        sequence = sequence(term)
+        {sequence, expansion(term, sequence, names).variants}
+
+      missing ->
+        raise ArgumentError,
+              "#{path} re-executes the failure from the report's replay term, which records " <>
+                "what #{Enum.map_join(Map.keys(term.choices), ", ", &inspect/1)} ran, not " <>
+                "#{Enum.map_join(missing, ", ", &inspect/1)}; re-execute it on the targets " <>
+                "the report records"
+    end
+  end
+
+  defp from_trace(report, names, path) do
+    traced = Expansion.traced!(report.model, report.trace && report.trace.expansion, names, path)
+    sequence = FailureReport.shrunk_sequence(report)
+
+    {sequence,
+     Map.new(names, fn name ->
+       {name, Expansion.carried(report.model, sequence, Map.fetch!(traced, name))}
+     end)}
+  end
+
+  @doc false
   # Whether `report` fails as the artifact `term` records: the same kind, the
   # same failure name, the same failing target (by name) and the same root.
   @spec reproduced?(t(), FailureReport.t()) :: boolean()

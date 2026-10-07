@@ -307,7 +307,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
         field = R.poison_field(@poison)
 
         assert R.field(report, :replay) ==
-                 {:refused, %{target: "ref", root: 0, leaf: 0, field: field}}
+                 {:refused, %{target: "second", root: 0, leaf: 0, field: field}}
 
         assert R.field(report, :replay_path) == nil
         assert R.files(dir) == []

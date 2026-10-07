@@ -17,10 +17,11 @@ defmodule CachexBench.ExpansionsTest do
   alias CachexBench.Commands.{GetKey, Incr, PutKey}
   alias PropertyDamage.{FailureReport, Sequence, Shrinker}
 
-  # Found by running seeds 1, 2, ... with the second target's `incr_bug:` on:
-  # the first seed whose first divergence is at a root where "second" ran the
-  # two-step rewrite (an identity Incr of 1 or 2 also trips the bug).
-  @bug_seed 2
+  # A seed whose run, with the second target's `incr_bug:` on, diverges at a
+  # root where "second" ran the two-step rewrite, and whose shrink keeps
+  # "second" on that rewrite. Every `Incr` root adds at least 3, so only a
+  # rewrite's smaller increments reach the bug.
+  @bug_seed 3
 
   # A seed whose one sampled root sequence offers the rewrite and realizes
   # it in neither target (found by sampling seeds 1, 2, ... with
@@ -65,7 +66,7 @@ defmodule CachexBench.ExpansionsTest do
 
   describe "a bug only the two-step path exposes" do
     # The second target's adapter adds one too much for an Incr below 3, which
-    # a split of `n` in 2..5 always sends.
+    # a split of `n` in 3..5 always sends and no root sends.
     test "is reported as a divergence at the root that chose the rewrite, and shrinks" do
       assert {:error, %FailureReport{} = report} =
                run(targets: targets(%{incr_bug: true}), max_runs: 1, seed: @bug_seed)
@@ -179,11 +180,14 @@ defmodule CachexBench.ExpansionsTest do
     end
   end
 
-  # Root 2 ran as itself in both targets; root 28, the failing root, ran as
-  # the rewrite in both. No other root of this run is an Incr.
+  # Roots 0 and 1 ran as themselves in both targets; root 12, the failing
+  # root, ran as the rewrite in both. No other root of this run is an Incr.
   defp golden do
     ran =
-      List.duplicate(nil, 29) |> List.replace_at(2, "Incr[0]") |> List.replace_at(28, "Incr[1]")
+      List.duplicate(nil, 13)
+      |> List.replace_at(0, "Incr[0]")
+      |> List.replace_at(1, "Incr[0]")
+      |> List.replace_at(12, "Incr[1]")
 
     %{"cachex" => ran, "second" => ran}
   end

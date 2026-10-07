@@ -1,9 +1,8 @@
 defmodule PropertyDamage.ExpansionPathsTest do
   # The paths that execute a report's sequence again run each root as the
-  # report's run ran it, from the choices the report's trace records, and
-  # never draw an expansion again. A path that cannot run a target's leaves,
-  # or that is asked to run a target whose choices the report does not
-  # record, raises instead of running the roots as themselves.
+  # report's run ran it, from the choices the report records, and never draw
+  # an expansion again. A path asked to run a target the report does not
+  # record raises instead of running the roots as themselves.
   use ExUnit.Case, async: true
 
   import PropertyDamage.Test.VariantSupport
@@ -83,12 +82,24 @@ defmodule PropertyDamage.ExpansionPathsTest do
       assert %{entry: "Refund[1]", leaves: [Credit, Credit]} =
                further.expansions |> Map.fetch!("beta") |> Enum.at(further.failed_at_index)
 
+      roots = Map.new(Sequence.to_list(report.original_sequence), &{&1.tag, &1})
+      alpha = recorder |> recorded() |> X.segments("alpha") |> hd() |> X.by_root() |> Map.new()
+
+      # Each root runs what the variant first ran there, the root itself (the
+      # reference collapsing), or what the reference first ran there (another
+      # variant collapsing onto it): never a new pick.
       for name <- ["alpha", "beta"] do
         [explored | later] = recorder |> recorded() |> X.segments(name)
         original = Map.new(X.by_root(explored))
 
         for segment <- later, {tag, commands} <- X.by_root(segment) do
-          assert X.modules(commands) == X.modules(original[tag])
+          allowed = [
+            X.modules(original[tag]),
+            [roots[tag].__struct__],
+            X.modules(alpha[tag])
+          ]
+
+          assert X.modules(commands) in allowed
         end
       end
     end
@@ -121,14 +132,11 @@ defmodule PropertyDamage.ExpansionPathsTest do
   end
 
   describe "PropertyDamage.Analysis.isolate_trigger/2" do
-    test "raises when the target ran roots as expansions" do
+    test "varies the leaf the reference failed on when it ran roots as expansions" do
       report = leaf_failure!()
 
-      error =
-        assert_raise ArgumentError, fn -> PropertyDamage.Analysis.isolate_trigger(report) end
-
-      assert error.message =~ "isolate_trigger"
-      assert error.message =~ "expansion"
+      assert {:ok, result} = PropertyDamage.Analysis.isolate_trigger(report)
+      assert %Credit{part: 1} = result.trigger_command
     end
   end
 

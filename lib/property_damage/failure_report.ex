@@ -116,6 +116,12 @@ defmodule PropertyDamage.FailureReport do
   sequence, regenerated) and, last, `replay_command/1`, which runs the
   artifact with `only: [replay: path]`.
 
+  Every path that executes the failure again reads what each target ran
+  from `replay` (or, when the report has no term, from the choices its trace
+  records): `PropertyDamage.shrink_further/2`, `PropertyDamage.Replay`,
+  `PropertyDamage.Analysis.isolate_trigger/2` and the exports. They work for
+  every target the report records, leaves included.
+
   `compare_counts` holds, per boundary observation `{projection, function}`,
   how many boundaries the failing run compared it at, how many it waited at,
   and the total time it waited (`%{compared_at:, waited_at:, waited_ms:}`),
@@ -263,8 +269,10 @@ defmodule PropertyDamage.FailureReport do
           },
 
           # What each target ran at each root it executed, by target name: the
-          # entry key (`"Root[i]"`), nil when no expansion applied, or
-          # `:forced`, and the modules of the commands it executed for the root.
+          # entry key (`"Root[i]"`), nil when no expansion applied, `:forced`,
+          # or `:identity` for a root shrinking ran as itself in place of an
+          # entry ("identity, by shrinking"), and the modules of the commands
+          # it executed for the root.
           # `root` is the root's index in the reported sequence.
           expansions: %{
             String.t() => [
@@ -277,7 +285,8 @@ defmodule PropertyDamage.FailureReport do
           },
 
           # Per target name and root module: how many times each entry was
-          # realized, and `:forced` roots, over the runs up to the failure.
+          # realized, `:forced` and `:identity` roots, over the runs that
+          # passed before the failure and the reported (shrunk) failing run.
           expansion_counts: %{
             String.t() => %{module() => %{(String.t() | :forced | :identity) => pos_integer()}}
           },
