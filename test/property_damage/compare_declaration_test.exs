@@ -47,7 +47,12 @@ defmodule PropertyDamage.CompareDeclarationTest do
                  end
                  """)
 
-        assert message =~ "conflicting @/1 import"
+        # Elixir 1.17 reports the clash as "imported from both ... call is
+        # ambiguous"; later versions as "conflicting @/1 import". Both name
+        # the two modules.
+        assert message =~ "@/1"
+        assert message =~ inspect(UserAttribute)
+        assert message =~ "PropertyDamage.Model.Projection.CompareAttribute"
       end
     end
 
