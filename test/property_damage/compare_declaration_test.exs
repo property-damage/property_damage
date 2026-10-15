@@ -6,6 +6,19 @@ defmodule PropertyDamage.CompareDeclarationTest do
 
   alias PropertyDamage.Test.Compare
 
+  defmodule UserAttribute do
+    @moduledoc false
+    # A user's own `@/1`: handles `@tagged` and passes every other attribute to
+    # `Kernel.@/1`, so `@compare` through it is a plain module attribute.
+    defmacro @{:tagged, _meta, [value]} do
+      quote do: Module.put_attribute(__MODULE__, :user_tagged, unquote(value))
+    end
+
+    defmacro @expression do
+      quote do: Kernel.@(unquote(expression))
+    end
+  end
+
   defp compile(body) do
     name = "Declared#{System.unique_integer([:positive])}"
 
@@ -16,6 +29,48 @@ defmodule PropertyDamage.CompareDeclarationTest do
     #{body}
     end
     """)
+  end
+
+  describe "beside a user's own @ macro" do
+    test "importing it next to the projection's @ is a compile error naming the conflict" do
+      for imports <- [
+            "use PropertyDamage.Model.Projection\n  import #{inspect(UserAttribute)}",
+            "import Kernel, except: [@: 1]\n  import #{inspect(UserAttribute)}\n  use PropertyDamage.Model.Projection"
+          ] do
+        assert {:error, message} =
+                 Compare.compile("""
+                 defmodule #{inspect(__MODULE__)}.Imported#{System.unique_integer([:positive])} do
+                   #{imports}
+
+                   @compare every: 1
+                   def observed(s, _root), do: s
+                 end
+                 """)
+
+        assert message =~ "conflicting @/1 import"
+      end
+    end
+
+    test "a @compare that reaches Kernel.@ through it is a compile error, never a dropped observation" do
+      name = "#{inspect(__MODULE__)}.Uncaptured#{System.unique_integer([:positive])}"
+
+      assert {:error, message} =
+               Compare.compile("""
+               defmodule #{name} do
+                 use PropertyDamage.Model.Projection
+                 import PropertyDamage.Model.Projection.CompareAttribute, only: []
+                 import #{inspect(UserAttribute)}
+
+                 @tagged :x
+                 @compare every: 1
+                 def observed(s, _root), do: s
+               end
+               """)
+
+      assert message =~ name
+      assert message =~ "@compare"
+      assert message =~ "PropertyDamage.Model.Projection"
+    end
   end
 
   test "a @compare with no function after it is a compile error" do

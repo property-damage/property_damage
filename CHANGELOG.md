@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every observation that disagrees at the convergence bound is reported.**
+  The first disagreeing `@compare` key in declaration order still names the
+  `:diverged` or `:did_not_converge` failure; every further key that differed or
+  was pending at that boundary is listed, in the same order, in the failure
+  detail's new `other_keys` field (`Failure.Divergence` and
+  `Failure.Convergence`), and the printed report shows each one.
 - **Boundary observations: `@compare` (DR-046).** A public projection function
   `def name(state, root)` marked `@compare every: ..., using: ...` is the only
   cross-target oracle. `every:` takes the `@check` schedule vocabulary (`1`, `N`,
@@ -813,6 +819,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`observations` in the result of `PropertyDamage.Scheduler.run/1`.** Nothing
+  read it; boundary observations reach a run through `@compare` alone.
 - **BREAKING (DR-042)**: Removed Differential baseline comparison: the `baseline:`
   and `export_to:` options, `PropertyDamage.Differential.Baseline` and its JSON
   file format, and the `:baseline` field of `PropertyDamage.Differential.Result`.
@@ -882,6 +890,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A check recorded under `check_mode: :record` no longer skips the final
+  boundary.** A target that recorded a failing check at an earlier root kept the
+  final boundary from being compared, so a divergence there went unreported; it
+  is now compared and listed among the run's failures.
+- **A retired target's recorded check is listed.** Under `check_mode: :record`,
+  the first check a target recorded before it left the run (an adapter failure
+  at a later root) was missing from the report; it is now listed at its root,
+  as a finished target's is.
+- **`Scheduler.run/1` refuses targets with nothing to compare.** Called directly
+  with two or more targets and a model that declares no `@compare`, it ran
+  them; it now raises the same `ArgumentError` as `PropertyDamage.run/1`, before
+  any target is set up.
+- **A `@compare` that another `@` macro handles is a compile error.** A
+  projection module that unimported the projection's own `@` and imported
+  another one compiled with its `@compare` observation dropped; it now fails to
+  compile with an error naming the module and `@compare`.
 - **A branching run whose model has a simulator runs its `@check at:` checks.**
   Verifying an ordering passed the lifecycle-boundary checks to the step
   trigger and raised `CaseClauseError`; they now run only at their boundary.

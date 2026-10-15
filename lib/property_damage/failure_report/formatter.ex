@@ -377,15 +377,16 @@ defmodule PropertyDamage.FailureReport.Formatter do
     observation = FailureReport.format_name(divergence.key)
     {reference, variant} = {reference_name(report), variant_name(report)}
 
-    reason = """
-    #{label("Type", color)}          Divergence
-    #{label("Observation", color)}   #{cyan(color)}#{observation}#{reset(color)}
-    #{label("Root", color)}          #{divergence.root} #{dim(color)}#{inspect(divergence.command, limit: 5)}#{reset(color)}
-    #{label("Reference", color)}     #{inspect(reference)}: #{inspect(divergence.reference_value, limit: 10)}
-    #{label("Variant", color)}       #{inspect(variant)}: #{inspect(divergence.variant_value, limit: 10)}
-    #{label("Mismatch", color)}
-    #{indent_text(mismatch_text(divergence.mismatch), "    ")}
-    """
+    reason =
+      """
+      #{label("Type", color)}          Divergence
+      #{label("Observation", color)}   #{cyan(color)}#{observation}#{reset(color)}
+      #{label("Root", color)}          #{divergence.root} #{dim(color)}#{inspect(divergence.command, limit: 5)}#{reset(color)}
+      #{label("Reference", color)}     #{inspect(reference)}: #{inspect(divergence.reference_value, limit: 10)}
+      #{label("Variant", color)}       #{inspect(variant)}: #{inspect(divergence.variant_value, limit: 10)}
+      #{label("Mismatch", color)}
+      #{indent_text(mismatch_text(divergence.mismatch), "    ")}
+      """ <> terminal_other_keys(divergence, color)
 
     why = """
     #{yellow(color)}Why it failed:#{reset(color)} #{observation} in variant #{inspect(variant)} still differed
@@ -401,13 +402,14 @@ defmodule PropertyDamage.FailureReport.Formatter do
     observation = FailureReport.format_name(convergence.key)
     variant = variant_name(report)
 
-    reason = """
-    #{label("Type", color)}          Did Not Converge
-    #{label("Observation", color)}   #{cyan(color)}#{observation}#{reset(color)}
-    #{label("Root", color)}          #{convergence.root} #{dim(color)}#{inspect(convergence.command, limit: 5)}#{reset(color)}
-    #{label("Pending", color)}       #{inspect(convergence.reason, limit: 10)}
-    #{label("Waited", color)}        #{convergence.waited_ms} ms
-    """
+    reason =
+      """
+      #{label("Type", color)}          Did Not Converge
+      #{label("Observation", color)}   #{cyan(color)}#{observation}#{reset(color)}
+      #{label("Root", color)}          #{convergence.root} #{dim(color)}#{inspect(convergence.command, limit: 5)}#{reset(color)}
+      #{label("Pending", color)}       #{inspect(convergence.reason, limit: 10)}
+      #{label("Waited", color)}        #{convergence.waited_ms} ms
+      """ <> terminal_other_keys(convergence, color)
 
     why = """
     #{yellow(color)}Why it failed:#{reset(color)} #{observation} did not converge within #{convergence.within_ms} ms at root #{convergence.root} in variant #{inspect(variant)}:
@@ -436,6 +438,15 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
     {reason, why}
   end
+
+  # Every further observation that still disagreed at the same boundary, one
+  # line each, in key order.
+  defp terminal_other_keys(%{other_keys: [_ | _] = others}, color) do
+    lines = Enum.map_join(others, "\n", &"    #{other_failure_line(&1)}")
+    "#{label("Also disagreed", color)} at this boundary, in key order:\n#{lines}\n"
+  end
+
+  defp terminal_other_keys(_failure, _color), do: ""
 
   defp variant_name(%{variant: %{name: name}}), do: name
   defp variant_name(_report), do: nil

@@ -241,8 +241,10 @@ defmodule PropertyDamage.LockstepRunTest do
       divergence = Failure.detail(report.failure_reason)
 
       assert divergence |> Map.keys() |> Enum.sort() ==
-               [:command, :key, :mismatch, :reference_value, :root, :variant_value]
+               [:command, :key, :mismatch, :other_keys, :reference_value, :root, :variant_value]
 
+      # The model compares one observation, so no further key is listed.
+      assert divergence.other_keys == []
       assert divergence.key == {PropertyDamage.Test.Lockstep.Answers, :answers}
 
       assert %Step{value: value} =

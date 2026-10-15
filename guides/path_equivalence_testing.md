@@ -425,13 +425,18 @@ def total(state, _root), do: state.total
 - A function returns `{:pending, reason}` when its target is still catching up
   and will reach a comparable value without a further command (a webhook not
   yet delivered). A pending side is never a disagreement.
+- `use PropertyDamage.Model.Projection` imports its own `@` to read `@compare`,
+  so a projection module cannot also import another `@` macro: the compiler
+  reports the conflict, and a `@compare` read by another `@` is a compile error.
 
 At each scheduled boundary the framework runs the **convergence loop**: it folds
 each target's waiting events, evaluates again, and repeats until the sides
 agree or the **convergence bound** expires. The bound is
 `compare: [converge_within: ms]`, an integer of milliseconds, default 5000. A
 side still pending at the bound fails the run as `:did_not_converge`; ready
-sides that differ fail it as `:diverged`. A divergence waits the full bound
+sides that differ fail it as `:diverged`. When several observations disagree
+at the bound, the first in declaration order names the failure, and the others
+are listed in its detail's `other_keys` and in the printed report. A divergence waits the full bound
 before it is reported, which is why the quickstart sets a short one for a
 counter that answers at once. The convergence bound is not the per-command
 `settle:` wait, which is one system catching up with itself after one adapter

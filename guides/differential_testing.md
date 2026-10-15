@@ -579,7 +579,9 @@ reruns the failure with the exact `targets:` entries (non-default `name:` and
 
 Under `check_mode: :record`, a check failure recorded at an earlier root, or at
 the same root in the same or an earlier target, becomes the primary failure. The
-divergence is not replaced: it is listed in `other_failures`.
+divergence is not replaced: it is listed in `other_failures`. A recorded check
+never keeps the final boundary from being compared, so a divergence there is
+listed too.
 
 ### Failure kinds
 
@@ -609,6 +611,8 @@ With several targets the run keeps an **active set** of targets:
   are finalized, its `:teardown` checks and `teardown/1` run before the next
   root starts, and the other targets go on, compared among themselves.
 - The run stops when no target besides the reference remains.
+- The first check a retired target recorded under `check_mode: :record` is one
+  of the run's failures, at its root, as a finished target's is.
 
 Every run, with or without a retired target, orders its failures by one rule:
 root, then target, then when it happened within that root and target (a check

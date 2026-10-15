@@ -38,8 +38,38 @@ defmodule PropertyDamage.FailureListOrderTest do
     defp poison?(by, n), do: by == "b" and n == 2
   end
 
+  defmodule Early do
+    @moduledoc false
+    # Targets "b" and "c" book a poisoned command 0: the check fails while
+    # root 0 is stepped, and the observation, compared only at the final
+    # boundary, differs from the reference's there.
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{poisoned: false}
+
+    @impl true
+    def apply(state, %Booked{n: n, by: by}),
+      do: %{state | poisoned: state.poisoned or poison?(by, n)}
+
+    def apply(state, _event), do: state
+
+    @compare every: :end
+    def poisoned(state, _root), do: state.poisoned
+
+    @check every: Booked
+    def assert_no_early_poison(_state, %Booked{n: n, by: by}) do
+      if poison?(by, n), do: PropertyDamage.fail!("poisoned booking", n: n)
+      :ok
+    end
+
+    defp poison?(by, n), do: by in ["b", "c"] and n == 0
+  end
+
   setup_all do
-    {:ok, model: ActiveSet.define_model!(Module.concat(__MODULE__, PoisonModel), [Poisoned])}
+    {:ok,
+     model: ActiveSet.define_model!(Module.concat(__MODULE__, PoisonModel), [Poisoned]),
+     early_model: ActiveSet.define_model!(Module.concat(__MODULE__, EarlyModel), [Early])}
   end
 
   setup do
@@ -100,6 +130,29 @@ defmodule PropertyDamage.FailureListOrderTest do
 
       assert summary(run.failure) == {"c", 0, :execution_failed, nil}
       assert others(run) == [@check_b, @diverged_b]
+    end
+  end
+
+  describe "a check recorded at an earlier root" do
+    @check_b0 {"b", 0, :check_failed, :no_early_poison}
+
+    test "does not skip the comparison at the final boundary", ctx do
+      run = schedule(ctx, [{"a", %{}}, {"b", %{}}], check_mode: :record, model: ctx.early_model)
+
+      assert summary(run.failure) == @check_b0
+      assert others(run) == [{"b", 4, :diverged, {Early, :poisoned}}]
+    end
+
+    test "in a target retired later is listed with that target's retirement", ctx do
+      configs = [{"a", %{}}, {"b", %{}}, {"c", %{fail: %{2 => :error}}}]
+      run = schedule(ctx, configs, check_mode: :record, model: ctx.early_model)
+
+      assert summary(run.failure) == @check_b0
+
+      assert Enum.filter(others(run), &(elem(&1, 0) == "c")) == [
+               {"c", 0, :check_failed, :no_early_poison},
+               {"c", 2, :execution_failed, nil}
+             ]
     end
   end
 

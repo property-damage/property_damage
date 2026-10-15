@@ -191,6 +191,10 @@ A boundary observation MAY return `{:pending, reason}` when its target will reac
 - **WHEN** `@compare` precedes a later clause of a function that already carries one
 - **THEN** compilation fails with a message naming the function
 
+#### Scenario: A @compare that another @ macro handles is a compile error
+- **WHEN** a projection module imports another `@/1` macro than the one `use PropertyDamage.Model.Projection` imports, or sets `@compare` through another `@/1`
+- **THEN** compilation SHALL fail: the compiler reports the conflicting import, and a `@compare` set as a plain module attribute fails with an error naming the module and `@compare`, so an observation is never dropped silently
+
 #### Scenario: A misplaced @compare is a compile error
 - **WHEN** `@compare` precedes a private function, a function of another arity, `init/0` or `apply/2`, is combined with `@check` or `@eventually`, is repeated on one function, or has no function after it
 - **THEN** compilation fails with a message naming the problem

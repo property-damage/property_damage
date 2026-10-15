@@ -228,6 +228,11 @@ defmodule PropertyDamage.Model.Projection do
   boundary whichever clause answers. A second `@compare` on a later clause is
   a compile error.
 
+  `use PropertyDamage.Model.Projection` imports its own `@/1` to read
+  `@compare`, so a projection module cannot import another `@/1` macro (the
+  compiler reports the conflict), and a `@compare` that another `@/1` handles
+  is a compile error rather than a dropped observation.
+
   ## Simplified Usage (No State)
 
   For checks that only inspect commands/events, skip `init/0` and `apply/2`:
@@ -338,6 +343,21 @@ defmodule PropertyDamage.Model.Projection do
         file: env.file,
         line: env.line,
         description: "dangling @check/@eventually with no following 2-arity check function."
+    end
+
+    # A plain `@compare` attribute means `Kernel.@/1` handled it, not this
+    # module's capture (another `@/1` was in scope), so no observation was
+    # registered.
+    if Module.has_attribute?(env.module, :compare) do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "#{inspect(env.module)} sets @compare as a plain module attribute, so it " <>
+            "registers no boundary observation: an @/1 other than the one " <>
+            "`use PropertyDamage.Model.Projection` imports handled it. Keep that @/1 " <>
+            "in scope in a projection module, and call your own attribute macro by " <>
+            "its module name instead of importing it."
     end
 
     if Module.get_attribute(env.module, :__pd_pending_compare__) do

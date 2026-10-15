@@ -238,37 +238,47 @@ defmodule PropertyDamage.Comparison do
 
   # At the bound: the first key (in declaration order) that does not agree
   # names the failure; a pending side wins over a difference in that key.
+  # Every further key that does not agree is listed in the failure's
+  # `other_keys`, in the same order, so the report shows all of them.
   defp bound_expired(loop, verdicts) do
     waited_ms = now() - loop.arrived_at
 
-    {key, verdict} = Enum.find(verdicts, fn {_key, verdict} -> verdict != :agree end)
-
-    {target, reason} =
-      case verdict do
-        {:pending, target, pending_reason} ->
-          {target,
-           Failure.did_not_converge(%{
-             key: key,
-             root: loop.root,
-             command: loop.command,
-             reason: pending_reason,
-             waited_ms: waited_ms,
-             within_ms: loop.within
-           })}
-
-        {:differ, target, reference_value, variant_value, mismatch} ->
-          {target,
-           Failure.diverged(%{
-             key: key,
-             root: loop.root,
-             command: loop.command,
-             reference_value: reference_value,
-             variant_value: variant_value,
-             mismatch: mismatch
-           })}
+    [{target, first} | others] =
+      for {key, verdict} <- verdicts, verdict != :agree do
+        expired_key(loop, key, verdict, waited_ms)
       end
 
+    other_keys =
+      Enum.map(others, fn {target, failure} ->
+        %{variant: %{index: target.index, name: target.name}, root: loop.root, failure: failure}
+      end)
+
+    reason = %{first | type: %{first.type | other_keys: other_keys}}
     {:failed, target, loop.root, reason, counts(loop)}
+  end
+
+  defp expired_key(loop, key, {:pending, target, pending_reason}, waited_ms) do
+    {target,
+     Failure.did_not_converge(%{
+       key: key,
+       root: loop.root,
+       command: loop.command,
+       reason: pending_reason,
+       waited_ms: waited_ms,
+       within_ms: loop.within
+     })}
+  end
+
+  defp expired_key(loop, key, {:differ, target, reference_value, variant_value, mismatch}, _ms) do
+    {target,
+     Failure.diverged(%{
+       key: key,
+       root: loop.root,
+       command: loop.command,
+       reference_value: reference_value,
+       variant_value: variant_value,
+       mismatch: mismatch
+     })}
   end
 
   # ==========================================================================
