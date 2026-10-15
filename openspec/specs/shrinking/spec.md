@@ -41,7 +41,7 @@ A shrunk sequence SHALL only be accepted if it reproduces the same failure as th
 
 ### Requirement: Two-Phase Shrinking
 
-The system SHALL shrink in two phases: Phase 1 removes unnecessary commands from the sequence, and Phase 2 simplifies argument values in the remaining commands.
+The system SHALL shrink in two phases: Phase 1 removes unnecessary commands from the sequence, and Phase 2 simplifies argument values in the remaining commands. For a model with `expansions/0` the shrinker also collapses each target's expansion choices between the two, and it runs these steps as a cycle that repeats until a whole cycle accepts no candidate or the budget is spent, as the requirement "Expansions Under Shrinking" states (DR-050). For a model without `expansions/0` the collapse steps accept nothing.
 
 #### Scenario: Phase 1 then Phase 2
 - **WHEN** shrinking begins on a failing sequence
@@ -50,7 +50,7 @@ The system SHALL shrink in two phases: Phase 1 removes unnecessary commands from
 
 #### Scenario: Phase 2 optional
 - **WHEN** shrinking configuration disables argument shrinking
-- **THEN** only Phase 1 (sequence shrinking) SHALL be performed
+- **THEN** only Phase 1 (sequence shrinking) SHALL be performed, together with the expansion collapse of a model with `expansions/0` (DR-050)
 
 ### Requirement: Phase 1 Sequence Shrinking Steps
 
@@ -168,20 +168,20 @@ The shrinker SHALL support configuration of: `granularity_threshold` (default 8)
 
 ### Requirement: Re-shrinking with a Larger Budget
 
-The system SHALL support re-running the shrinker over an already-shrunk failure with a fresh budget, to recover reductions the original run missed. `PropertyDamage.shrink_further/2` SHALL accept a `:strategy` (`:quick` | `:thorough` | `:exhaustive`, default `:thorough`) that derives the iteration and time budgets (overridable via `:max_iterations` and `:max_time_ms`), re-shrink the report's `shrunk_sequence`, and return an updated report whose `original_sequence` is preserved and whose `shrink_iterations`/`shrink_time_ms` accumulate onto the prior values. It SHALL return `{:error, :missing_model_or_adapter}` when the report records no model or adapter.
+The system SHALL support re-running the shrinker over an already-shrunk failure with a fresh budget, to recover reductions the original run missed. `PropertyDamage.shrink_further/2` SHALL accept a `:strategy` (`:quick` | `:thorough` | `:exhaustive`, default `:thorough`) that derives the iteration and time budgets (overridable via `:max_iterations` and `:max_time_ms`), re-shrink the report's `shrunk_sequence`, and return an updated report whose `original_sequence` is preserved and whose `shrink_iterations`/`shrink_time_ms` accumulate onto the prior values. It SHALL return `{:error, :missing_model_or_adapter}` when the report records no model or no target, and the report unchanged when its kind is `:setup_failed` or `:latency_exceeded`, which are never shrunk (DR-047, DR-048).
 
 #### Scenario: Re-shrink reduces a non-minimal sequence
 - **WHEN** `shrink_further/2` is run on a report whose shrunk sequence is not yet minimal
 - **THEN** it SHALL return `{:ok, report}` with a smaller (or equal) shrunk sequence that still reproduces the same failure
 - **AND** the returned report SHALL preserve `original_sequence` and accumulate the shrink effort onto the prior `shrink_iterations`/`shrink_time_ms`
 
-#### Scenario: Re-shrink requires a model and adapter
-- **WHEN** `shrink_further/2` is run on a report that records no model or adapter
+#### Scenario: Re-shrink requires a model and a target
+- **WHEN** `shrink_further/2` is run on a report that records no model or no target
 - **THEN** it SHALL return `{:error, :missing_model_or_adapter}` rather than crashing
 
 #### Scenario: CLI re-shrink with a larger budget
 - **WHEN** `mix pd.reshrink <failure-file>` is run on a saved `.pd` file
-- **THEN** the system SHALL load the failure (reading its recorded model and adapter from the file), re-shrink the sequence with the selected strategy/budget, and print the before/after command counts
+- **THEN** the system SHALL load the failure (reading its recorded model and targets from the file), re-shrink the sequence with the selected strategy/budget, and print the before/after command counts
 - **AND** the task SHALL write nothing by default, write the smaller report to `--output PATH`, or replace the input file with `--overwrite`
 - **AND** the task SHALL exit zero on any successful re-shrink (whether or not the sequence got smaller) and non-zero only on a real error (load failure, missing model/adapter, or a requested write failure), since re-shrink is not a pass/fail regression gate
 
@@ -217,7 +217,7 @@ The failure signature SHALL be a tuple `{kind, name, variant_index}`, returned b
 
 ### Requirement: Variant-Aware Shrinking (DR-045)
 
-The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run the model's setup commands, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The reference target's sequence SHALL be the shrink target, because every target runs the same roots. A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:` (`[converge_within: ms]`) and `check_mode:`. A candidate SHALL be judged by the primary failure of its run alone: `other_failures` SHALL NOT take part in the signature.
+The shrinker SHALL shrink a failure of a run against one or more targets. Every shrink attempt SHALL run the model's setup commands, then the candidate through `PropertyDamage.Scheduler.run/1` with every target, each target set up and torn down for that attempt, with the run's effective seed, `run_number: 0` and a fresh mint epoch. The roots SHALL be the shrink target, because every target runs the same roots; for a model with `expansions/0` the shrinker also shrinks along the expansion axis (DR-050). A candidate SHALL be accepted only with the same failure signature (`{kind, name, variant_index}`) at the same or an earlier root, by truncation at the failing root. The shrunk sequence SHALL be reproduced once; if it does not reproduce, the report SHALL fall back to the original run. `Shrinker.shrink/2` SHALL take the options `targets:`, `variant_index:`, `concurrency:`, `compare:` (`[converge_within: ms]`) and `check_mode:`. A candidate SHALL be judged by the primary failure of its run alone: `other_failures` SHALL NOT take part in the signature.
 
 #### Scenario: Divergence is shrunk
 - **WHEN** a run fails with kind `:diverged`
