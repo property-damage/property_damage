@@ -8,6 +8,10 @@
 > plan a structurally stable function of the seed at the framework level; this
 > decision makes the *user-facing* half of that contract executable and
 > documents the deterministic patterns that keep it true.
+>
+> **Note (2026-10-15):** a seed also fixes the order in which a command's fields
+> are drawn; see the "Field draw order" seam in
+> `guides/deterministic_generation.md`.
 
 ## Decision
 

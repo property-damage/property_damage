@@ -12,7 +12,8 @@ defmodule PropertyDamage.Export.ExUnit do
   - `:module_name` - Module name for the test (optional, auto-generated)
   - `:model` - Model module to use (falls back to report.model)
   - `:targets` - Validated single-entry target list the generated test runs
-    against (falls back to the report's reference target)
+    against (falls back to the report's reference target; a report with a
+    replay artifact replays it on all the report's targets)
   - `:test_name` - Custom test name (optional)
   - `:expect_fixed` - If true, expect the test to pass (default: false)
   """
@@ -30,7 +31,7 @@ defmodule PropertyDamage.Export.ExUnit do
     [
       generate_moduledoc(metadata),
       generate_module_header(module_name, model, adapter),
-      generate_test(report, test_name, model, target, expect_fixed),
+      generate_test(report, test_name, {target, Keyword.has_key?(opts, :targets)}, expect_fixed),
       generate_module_footer()
     ]
     |> Enum.join("\n")
@@ -80,10 +81,10 @@ defmodule PropertyDamage.Export.ExUnit do
     """
   end
 
-  defp generate_test(report, test_name, model, target, expect_fixed) do
+  defp generate_test(report, test_name, target, expect_fixed) do
     seed = report.seed
     commands_code = generate_commands_code(report)
-    run_opts = generate_run_opts(model, target, seed)
+    {run_comment, run_opts} = generate_run_opts(report, target)
 
     assertion =
       if expect_fixed do
@@ -99,7 +100,7 @@ defmodule PropertyDamage.Export.ExUnit do
         # Shrunk command sequence that triggers the failure
     #{commands_code}
 
-        # Run with the exact seed for deterministic reproduction
+        # #{run_comment}
         result = PropertyDamage.run(#{run_opts})
 
     #{assertion}
@@ -127,11 +128,11 @@ defmodule PropertyDamage.Export.ExUnit do
       end)
 
     # Bound with a leading underscore: the regression test reproduces the
-    # failure by re-running with the exact seed (max_runs: 1), so this list is
-    # documentation of the shrunk sequence, not executed. Naming it `commands`
-    # made every generated test fail `--warnings-as-errors` (unused variable).
-    # The seed draws the setup commands again too; they are listed as a
-    # comment for the reader.
+    # failure by replaying the report's artifact, or by re-running with the
+    # exact seed (max_runs: 1), so this list is documentation of the shrunk
+    # sequence, not executed. Naming it `commands` made every generated test
+    # fail `--warnings-as-errors` (unused variable). The setup commands are
+    # listed as a comment for the reader.
     """
     #{setup_comment(report.setup_commands)}    _commands = [
     #{command_strs}
@@ -212,15 +213,32 @@ defmodule PropertyDamage.Export.ExUnit do
   # Run Options
   # ============================================================================
 
-  defp generate_run_opts(_model, target, seed) do
+  # A report with a replay artifact replays it, on the report's targets (or
+  # the `:targets` given), so the test names the file it reads; any other
+  # report re-runs its seed on one target.
+  defp generate_run_opts(%FailureReport{replay_path: path} = report, {target, given?})
+       when is_binary(path) do
+    targets =
+      if given?,
+        do: "[#{target_entry_source(target)}]",
+        else: FailureReport.targets_source(report)
+
+    {"Replay the artifact the failing run wrote",
+     Enum.join(
+       ["model: Model", "targets: #{targets}", "only: [replay: #{inspect(path)}]"],
+       ",\n          "
+     )}
+  end
+
+  defp generate_run_opts(report, {target, _given?}) do
     opts = [
       "model: Model",
       "targets: [#{target_entry_source(target)}]",
-      "seed: #{seed}",
+      "seed: #{report.seed}",
       "max_runs: 1"
     ]
 
-    Enum.join(opts, ",\n          ")
+    {"Run with the exact seed for deterministic reproduction", Enum.join(opts, ",\n          ")}
   end
 
   # The target entry as source: the aliased module alone, or a tuple carrying

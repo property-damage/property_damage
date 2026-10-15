@@ -93,21 +93,101 @@ end
 
 ## Step 1: Reproduce the Failure
 
-Use the seed to reproduce exactly:
+Every failure writes a replay artifact: a file named
+`<model>_seed<seed>.replay.exs` in the `replay_dir:` directory (default
+`property_damage_replays`; `replay_dir: false` writes nothing). The report ends
+with a paste-ready call that runs the shrunk failure again without generating
+anything:
+
+```elixir
+# Replay the shrunk failure:
+PropertyDamage.run(model: MyModel, targets: [MyAdapter], only: [replay: "property_damage_replays/MyModel_seed3.replay.exs"])
+```
+
+Every target executes the commands the file records, so the replay needs the
+same `targets:` the report printed. `shrink:` defaults to false under
+`only: [replay: path]`. A replay that does not fail the way the file records
+returns stats with `:replay` set to `:not_reproduced`.
+
+The artifact is one Elixir literal term, so you can read it and edit an
+argument before you run it again. This is the start of a real one:
+
+```elixir
+# PropertyDamage replay artifact, format 1
+# model: CachexBench.Model
+# seed: 3
+# run: 1 (the run this seed generates)
+# target "cachex" (reference), expansion: :random
+# target "second", expansion: :random
+%{
+  choices: %{
+    "cachex" => [
+      # root 0: Incr[0] = [Incr]
+      %{
+        aliases: %{},
+        commands: [%CachexBench.Commands.Incr{amount: 3, key: :alpha}],
+        entry: "Incr[0]",
+        root_id: 12
+      }
+    ],
+    ...
+```
+
+The loader evaluates no code: it accepts literals and struct literals only, and
+it refuses a call, a function or a second term, naming the line. It also
+refuses a file whose first line names another format. The file never holds the
+failure's exception, the teardown commands or a timestamp.
+
+If a command field holds a function, pid, reference, port, improper list or
+non-binary bitstring, no artifact is written. The report's footer then names the
+target, root, leaf and field path, and the failure still reproduces from its
+seed.
+
+To run the same failure from its seed instead, use the seed:
 
 ```elixir
 # Run with the same seed
 result = PropertyDamage.run(
   model: MyModel,
   targets: [MyAdapter],
-  seed: failure.seed
+  seed: failure.seed,
+  max_runs: 1
 )
 ```
 
 > **If the seed does not reproduce**, generation is probably not a pure function
-> of the seed — an impure generator, `when:`/`overrides:`, or projection. Confirm and
+> of the seed: an impure generator, `when:`/`overrides:`, or projection. Confirm and
 > localize it with `mix pd.audit MyModel`; see the
 > [deterministic generation guide](deterministic_generation.md).
+
+### Reproducing one variant
+
+With several targets, each target may run its own expansion of a root. To see
+the sequence one target ran before shrinking, regenerate it. Nothing runs, and
+no adapter is touched:
+
+```elixir
+# run is 1-based; failure.seed is the seed the failing run generated from.
+{:ok, %{sequence: sequence}} =
+  PropertyDamage.Expansion.for(MyModel, failure.seed, 1, "second")
+```
+
+Pass `targets:` when a target does not run `:random`, because the pick then
+depends on the reference. To run part of a campaign, use `only:`:
+
+```elixir
+# Run 1 of the seed, the reference and the target named "second".
+PropertyDamage.run(model: MyModel, targets: [MyAdapter, {OtherAdapter, name: "second"}],
+  seed: failure.seed, only: [run: 1, variants: ["second"]])
+
+# Run "second" alone, with the model's checks and no @compare.
+PropertyDamage.run(model: MyModel, targets: [MyAdapter, {OtherAdapter, name: "second"}],
+  seed: failure.seed, only: [run: 1, variants: ["second"], with_reference: false])
+```
+
+`with_reference: false` is legal only with exactly one non-reference name.
+`only:` takes `max_runs: 1` at most, no `branching:`, and `seed:` is not allowed
+beside `replay:`.
 
 ## Step 2: Understand the Shrunk Sequence
 

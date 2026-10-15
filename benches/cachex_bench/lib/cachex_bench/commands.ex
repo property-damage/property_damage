@@ -99,7 +99,7 @@ defmodule CachexBench.Commands.Incr do
   def generator(overrides \\ %{}) do
     %{
       key: StreamData.member_of(CachexBench.keys()),
-      amount: StreamData.integer(1..10)
+      amount: StreamData.integer(3..10)
     }
     |> merge_overrides(overrides)
     |> StreamData.fixed_map()

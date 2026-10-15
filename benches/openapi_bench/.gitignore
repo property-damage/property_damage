@@ -7,3 +7,4 @@ erl_crash.dump
 *.ez
 *.beam
 /.elixir_ls/
+/property_damage_replays/

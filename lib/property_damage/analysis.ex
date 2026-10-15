@@ -27,11 +27,14 @@ defmodule PropertyDamage.Analysis do
 
   alias PropertyDamage.{
     Executor,
+    Expansion,
     FailureReport,
     Options,
     Placeholder,
     PlaceholderRegistry,
+    ReplayArtifact,
     RunTrace,
+    Scheduler,
     Sequence
   }
 
@@ -312,6 +315,14 @@ defmodule PropertyDamage.Analysis do
   It tries variations of the failing command to find the smallest change that
   makes the failure disappear.
 
+  For a model with `c:PropertyDamage.Model.expansions/0` whose reference ran
+  roots of the report as an expansion's leaves, the analysis works on the
+  reference's concrete sequence, leaves included: it reads what the
+  reference ran from the report's `replay` term (or its trace), varies the
+  one concrete command where the failure was found, and re-runs the
+  reference alone with the other commands as they ran. A target other than
+  the reference that ran leaves is refused with `ArgumentError`.
+
   ## Options
 
   - `:targets` - Single-entry target list overriding the system to re-execute
@@ -343,11 +354,9 @@ defmodule PropertyDamage.Analysis do
     sequence = FailureReport.shrunk_sequence(report)
     commands = Sequence.to_list(sequence)
     # `commands` is the flattened list the modified sequence is re-run against,
-    # so the trigger must be addressed by its flattened index (not the executor
-    # failed_at_index, which diverges for branch failures).
+    # so the trigger is addressed by its step's flattened index (not the
+    # executor failed_at_index, which diverges for branch failures).
     step = FailureReport.failure_step(report)
-    failed_at = step && step.flattened_index
-    trigger_cmd = step && step.command
     model = report.model
     reference = FailureReport.reference_target(report)
 
@@ -365,51 +374,102 @@ defmodule PropertyDamage.Analysis do
         target =
           Options.override_target!(opts, reference, "PropertyDamage.Analysis.isolate_trigger/2")
 
-        refuse_expansions!(report, model, target)
+        case reference_leaves(report, model, target) do
+          nil -> isolate_in_roots(report, model, target, {sequence, commands, step})
+          leaves -> isolate_in_leaves(report, model, target, leaves)
+        end
+    end
+  end
 
-        # Try variations of the trigger command
-        # Every variation runs with the report's setup and teardown commands
-        # and the sequence's registry, so the roots resolve the externals the
-        # setup commands produce.
+  # The trigger among the roots, each run as itself on the linear engine.
+  defp isolate_in_roots(report, model, target, {sequence, commands, step}) do
+    failed_at = step.flattened_index
+    trigger_cmd = step.command
+
+    # Try variations of the trigger command
+    # Every variation runs with the report's setup and teardown commands
+    # and the sequence's registry, so the roots resolve the externals the
+    # setup commands produce.
+    run = %{
+      model: model,
+      target: target,
+      registry: sequence.registry,
+      setup_commands: report.setup_commands,
+      teardown_commands: report.teardown_commands
+    }
+
+    changes = find_eliminating_changes(trigger_cmd, commands, failed_at, run)
+    trigger_result(report, trigger_cmd, commands, failed_at, changes)
+  end
+
+  # The trigger among the reference's concrete commands: the command where
+  # the failure was found, a leaf when the reference ran the failing root as
+  # leaves. Each variation runs the reference alone with every other command
+  # as it ran.
+  defp isolate_in_leaves(report, model, target, {sequence, variant}) do
+    executed = (report.trace && report.trace.executed) || %{}
+
+    steps =
+      RunTrace.build_steps(sequence, [], %{}, report.failed_at_index,
+        executed: executed,
+        choices: variant.choices
+      )
+
+    case Enum.find(steps, & &1.failed?) do
+      nil ->
+        {:error, :failure_not_localized}
+
+      step ->
+        commands = Enum.flat_map(variant.choices, & &1.commands)
+
         run = %{
           model: model,
           target: target,
-          registry: sequence.registry,
+          leaves: {sequence, variant},
+          seed: report.seed,
           setup_commands: report.setup_commands,
           teardown_commands: report.teardown_commands
         }
 
-        changes = find_eliminating_changes(trigger_cmd, commands, failed_at, run)
-
-        likely_cause = infer_cause(changes, trigger_cmd, commands, report)
-
-        {:ok,
-         %{
-           trigger_command: trigger_cmd,
-           trigger_index: failed_at,
-           changes: changes,
-           likely_cause: likely_cause
-         }}
+        changes = find_eliminating_changes(step.command, commands, step.flattened_index, run)
+        trigger_result(report, step.command, commands, step.flattened_index, changes)
     end
   end
 
-  # Each variation re-runs the sequence's roots through the linear engine, which
-  # runs every root as itself. A target that ran a root as an expansion's
-  # leaves would run something else, so the analysis refuses it.
-  defp refuse_expansions!(report, model, target) do
+  defp trigger_result(report, trigger_cmd, commands, failed_at, changes) do
+    {:ok,
+     %{
+       trigger_command: trigger_cmd,
+       trigger_index: failed_at,
+       changes: changes,
+       likely_cause: infer_cause(changes, trigger_cmd, commands, report)
+     }}
+  end
+
+  # What `target` ran when the reference ran roots as an expansion's leaves:
+  # `{sequence, variant}` from the report's replay term (or its trace); nil
+  # when the target ran every root as itself, which the linear engine
+  # re-runs. A target other than the reference that ran leaves is refused:
+  # only the reference's concrete sequence is varied.
+  defp reference_leaves(report, model, target) do
     path = "PropertyDamage.Analysis.isolate_trigger/2"
-    traced = report.trace && report.trace.expansion
+    {sequence, variants} = ReplayArtifact.reexecution(report, [target.name], path)
+    variant = variants && Map.fetch!(variants, target.name)
 
-    with %{} = choices <- PropertyDamage.Expansion.traced!(model, traced, [target.name], path),
-         true <- Enum.any?(Map.fetch!(choices, target.name), & &1.leaves?) do
-      raise ArgumentError,
-            "#{path} varies one command and re-runs the roots as themselves, but target " <>
-              "#{inspect(target.name)} ran roots of this report as an expansion's leaves " <>
-              "(#{inspect(model)} defines expansions/0); it cannot vary or re-run that " <>
-              "expanded sequence yet"
+    cond do
+      is_nil(variant) or not Enum.any?(variant.choices, & &1.leaves?) ->
+        nil
+
+      target.name == FailureReport.reference_target(report).name ->
+        {sequence, variant}
+
+      true ->
+        raise ArgumentError,
+              "#{path} varies one command and re-runs the roots as themselves, but target " <>
+                "#{inspect(target.name)} ran roots of this report as an expansion's leaves " <>
+                "(#{inspect(model)} defines expansions/0); only the reference's expanded " <>
+                "sequence can be varied"
     end
-
-    :ok
   end
 
   defp find_eliminating_changes(trigger_cmd, commands, failed_at, run) do
@@ -432,41 +492,65 @@ defmodule PropertyDamage.Analysis do
         modified_cmd = Map.put(trigger_cmd, field, variation)
         modified_commands = List.replace_at(commands, failed_at, modified_cmd)
 
-        # Check if modification is valid (from the state the setup commands
-        # leave) and eliminates failure
-        if Validator.valid_sequence?(modified_commands, run.model, run.setup_commands) do
-          # Regenerate idempotency keys
-          modified_commands = regenerate_keys(modified_commands)
-
-          sequence = Sequence.with_registry(Sequence.linear(modified_commands), run.registry)
-
-          case Executor.run(sequence, run.model, run.target.adapter,
-                 config: run.target.config,
-                 setup_commands: run.setup_commands,
-                 teardown_commands: run.teardown_commands
-               ) do
-            {:ok, result} ->
-              if result.success do
-                [
-                  %{
-                    field: field,
-                    original: original,
-                    fixed: variation,
-                    description:
-                      "Changing #{field} from #{inspect(original)} to #{inspect(variation)} eliminates failure"
-                  }
-                ]
-              else
-                []
-              end
-
-            {:error, _} ->
-              []
-          end
+        if eliminates?(modified_commands, run) do
+          [
+            %{
+              field: field,
+              original: original,
+              fixed: variation,
+              description:
+                "Changing #{field} from #{inspect(original)} to #{inspect(variation)} eliminates failure"
+            }
+          ]
         else
           []
         end
       end)
+    end
+  end
+
+  # Whether the commands, one of them varied, run without the failure: the
+  # reference's concrete commands at their positions, or the roots on the
+  # linear engine when they are valid from the state the setup commands
+  # leave.
+  defp eliminates?(commands, %{leaves: {sequence, variant}} = run) do
+    {choices, []} =
+      Enum.map_reduce(variant.choices, regenerate_keys(commands), fn choice, rest ->
+        {ran, rest} = Enum.split(rest, length(choice.commands))
+        {%{choice | commands: ran}, rest}
+      end)
+
+    {:ok, outcome} =
+      Scheduler.run(
+        model: run.model,
+        targets: [%{run.target | index: 0}],
+        commands: Sequence.to_list(sequence),
+        variants: [%{roots: Expansion.steps(choices), registry: variant.registry}],
+        setup_commands: run.setup_commands,
+        teardown_commands: run.teardown_commands,
+        placeholder_registry: sequence.registry,
+        seed: run.seed,
+        run_number: 0,
+        concurrency: :serial
+      )
+
+    is_nil(outcome.failure)
+  end
+
+  defp eliminates?(commands, run) do
+    if Validator.valid_sequence?(commands, run.model, run.setup_commands) do
+      sequence = Sequence.with_registry(Sequence.linear(regenerate_keys(commands)), run.registry)
+
+      case Executor.run(sequence, run.model, run.target.adapter,
+             config: run.target.config,
+             setup_commands: run.setup_commands,
+             teardown_commands: run.teardown_commands
+           ) do
+        {:ok, result} -> result.success
+        {:error, _} -> false
+      end
+    else
+      false
     end
   end
 

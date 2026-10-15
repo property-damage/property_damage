@@ -4,6 +4,8 @@
 
 Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes with seed variations, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
 
+Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact)
+
 ## Requirements
 
 ### Requirement: Structured Failure Reason
@@ -251,6 +253,93 @@ The system SHALL produce structured failure reports containing location (run num
 - **AND** `FailureReport.failure_step/1` (a failure-specific locator retained on the report, not on `RunTrace`) SHALL return that step, or `nil` for a non-localized failure (teardown / whole-run / linearization, where `failed_at_index` is `nil`)
 - **AND** `FailureReport.event_entries_at/2` SHALL delegate to `RunTrace.event_entries_at/2`, returning the log entries for a command addressed by either its flattened index or its `%Sequence.Position{}`
 - **AND** `steps/1` / `failure_step/1` SHALL be the ONLY structural accessors for the failing command and its entries: the report SHALL NOT carry materialized `command_at_failure` / `events_at_failure` fields (removed), and every renderer, exporter, and forensic analyzer SHALL obtain the failing command/events via the step interface (which resolves them branch-aware) rather than by re-walking `shrunk_sequence` / `event_log` / `failed_at_index`; in particular the event timeline's per-command provenance view (source badges + branch) SHALL be served from `steps/1` `entries` rather than a private `event_log` walk
+
+### Requirement: Failure Report Replay Fields and Footer (DR-050)
+
+`FailureReport` SHALL carry `run` (the campaign run the failure happened in, counted from 1), `replay` (the replay artifact term, `{:refused, where}` or `nil`), `replay_path` (the file or `nil`) and `replay_status` (`:written`, `:disabled`, `{:write_failed, reason}`, `:refused`, `:unavailable`, `:reproduced`, `:not_reproduced` or `nil`). The printed report SHALL end with, in this order: the reproduction command (`reproduction_command/1`, the seed path, unchanged); "Regenerate the failing variant:" and the `PropertyDamage.Expansion.for/5` call for the failing target (`expansion_command/1`); and "Replay the shrunk failure:" ("Replay the unshrunk failure:" when no shrink step ran) and the `only: [replay: path]` call (`replay_command/1`). That call SHALL be the last code line of the report. When there is no file, the last lines SHALL say why: `replay_dir: false`, a refusal naming the target, the root, the leaf and the field path, or the write error. `targets_source/1` SHALL print each target's `expansion:` when it is not `:random`, so that a pasted call runs the targets as the failing run did.
+
+#### Scenario: The footer ends with the replay call
+- **WHEN** a failing run writes an artifact
+- **THEN** the report's last code line SHALL be `PropertyDamage.run(model: M, targets: ..., only: [replay: "<path>"])`
+- **AND** the regenerate call SHALL come before the replay label
+
+#### Scenario: A pasted call keeps each target's expansion mode
+- **GIVEN** a failing run with a target on `expansion: :reference`
+- **WHEN** the report prints a call that holds `targets:`
+- **THEN** the `targets:` source SHALL include `expansion: :reference` for that target
+
+#### Scenario: No artifact says why
+- **WHEN** a run fails with `replay_dir: false`
+- **THEN** the report SHALL say that no artifact was written because of `replay_dir: false`, in place of the replay call
+
+### Requirement: Regenerating a Target's Sequence (DR-050)
+
+`PropertyDamage.Expansion.for(model, seed, run, name, opts \\ [])` SHALL return `{:ok, %{prefix: [struct], roots: [struct], choices: [choice], sequence: [struct]}}` for the target `name`, or `{:error, message}` naming the model, the run, the name or the option at fault. It SHALL run no target and no adapter. `run` SHALL count from 1, and run n SHALL generate from `PropertyDamage.Generator.run_seed(seed, n - 1)`, so `for(model, report.seed, 1, name)` regenerates a failing run as it ran before shrinking. `sequence` SHALL equal the commands the named target executed (the setup prefix, then every root's commands in order, without the teardown), and the result SHALL be the same in every OS process. `opts` SHALL accept `:targets` (the run's `targets:`, from which the name's `expansion:` mode and the reference are read; without it, the name is a `:random` target) and `:max_commands`.
+
+#### Scenario: The result equals what the target ran
+- **GIVEN** a run recorded with a recording adapter
+- **WHEN** `Expansion.for(M, seed, 1, name)` runs
+- **THEN** its `sequence` SHALL equal the commands the adapter of target `name` executed
+
+#### Scenario: A reference target
+- **GIVEN** `targets:` in which `name` is on `expansion: :reference`
+- **WHEN** `Expansion.for/5` runs with that `targets:`
+- **THEN** it SHALL return the reference's concrete sequence
+
+#### Scenario: An unknown name
+- **WHEN** `name` is not in `targets:`
+- **THEN** it SHALL return `{:error, message}` that names the name
+
+### Requirement: Replay Artifact Generation (DR-050)
+
+A failing run SHALL write one replay artifact after shrinking, in the format the persistence requirement "Replay Artifact File (DR-050)" specifies, into `replay_dir:`. With `shrink: false` it SHALL hold the unshrunk run and the footer SHALL say so. The run SHALL refuse to build the artifact when a command field (inside lists, tuples and maps, map keys included) holds a function, pid, reference, port, improper list or non-binary bitstring. A refusal SHALL set `replay` to `{:refused, where}` and `replay_status` to `:refused`, SHALL name the target, the root, the leaf and the field path (a refused map key marked `{:key, text}`), and SHALL leave the failure reported and reproducible from its seed. A latency budget failure and a branching sequence SHALL have no artifact (`replay_status: :unavailable`).
+
+#### Scenario: A function in a command is refused
+- **GIVEN** a command whose field holds an anonymous function
+- **WHEN** the run fails
+- **THEN** `report.replay` SHALL be `{:refused, where}` naming the target, the root, the leaf and the field
+- **AND** the footer SHALL say that the artifact was refused and why
+
+#### Scenario: A pid used as a map key is refused
+- **GIVEN** a command whose map field has a pid as a key
+- **WHEN** the run fails
+- **THEN** the refusal path SHALL end in `{:key, text}` with the key's printed form
+
+#### Scenario: A refusal does not hide the failure
+- **WHEN** the artifact is refused
+- **THEN** `run/1` SHALL still return the failure report
+
+### Requirement: Re-execution Paths Read the Recorded Data (DR-050)
+
+Every path that executes a failure again SHALL take each target's concrete commands from the report's `replay` term, or from the choices the report's trace records when the report has no term, and SHALL NOT raise for a target that ran leaves. A report loaded from a version-14 `.pd` file SHALL behave the same. `PropertyDamage.shrink_further/2` SHALL work for every recorded target, SHALL recompute `expansions` and `expansion_counts` for the further-shrunk run, and SHALL write its smaller artifact over the incoming report's file; it SHALL raise, naming `replay_dir:`, only when the report holds neither a term nor choices. `PropertyDamage.Replay.run/2` and `start/2` SHALL replay any recorded target, each leaf as a step. `PropertyDamage.Analysis.isolate_trigger/2` on a reference that ran leaves SHALL vary one concrete command of the reference's sequence and re-run the reference alone, and SHALL raise `ArgumentError` for a non-reference target that ran leaves. Export SHALL emit the reference's concrete leaves; the ExUnit export SHALL emit `only: [replay: path]` when the report has a file and the seed path otherwise. The seed-library replay and `RunTrace.capture/1` SHALL recompute from the seed. `RunComparison` SHALL align two runs at root level.
+
+#### Scenario: Replay of a leaf-running target
+- **GIVEN** a report whose second target ran a root as two leaves
+- **WHEN** `Replay.run/2` replays that target
+- **THEN** each leaf SHALL be one step and no error SHALL be raised
+
+#### Scenario: shrink_further writes over the same seed's file
+- **GIVEN** a report whose artifact is at `dir/Model_seed3.replay.exs`
+- **WHEN** `shrink_further/2` finds a smaller failing run
+- **THEN** it SHALL write the smaller artifact to the same path
+- **AND** the returned report's `replay_path` SHALL name that path
+
+#### Scenario: shrink_further without recorded data
+- **WHEN** `shrink_further/2` receives a report with no `replay` term and no recorded choices
+- **THEN** it SHALL raise an error that names `replay_dir:`
+
+#### Scenario: isolate_trigger on the reference's leaves
+- **GIVEN** a report whose reference ran a root as leaves
+- **WHEN** `Analysis.isolate_trigger/2` runs
+- **THEN** it SHALL name the concrete command whose variation stops the failure, re-running the reference alone
+
+#### Scenario: isolate_trigger refuses another target
+- **WHEN** `Analysis.isolate_trigger/2` receives a report whose failing target is not the reference and ran leaves
+- **THEN** it SHALL raise `ArgumentError`
+
+#### Scenario: The ExUnit export names the file
+- **WHEN** a report with a replay file is exported as an ExUnit test
+- **THEN** the test SHALL call `PropertyDamage.run/1` with `only: [replay: path]`
 
 ### Requirement: Run Trace as the Execution Record (DR-033)
 

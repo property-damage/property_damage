@@ -77,6 +77,10 @@ defmodule PropertyDamage.Export do
   @doc """
   Generates an ExUnit regression test from a failure report.
 
+  When the report has a replay artifact (`replay_path`), the test replays it
+  with `only: [replay: path]` on the report's targets, so it names the file
+  it reads; otherwise it re-runs the report's seed with `max_runs: 1`.
+
   ## Options
 
   - `:model` - Model module (defaults to report.model)

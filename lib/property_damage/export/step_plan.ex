@@ -27,8 +27,9 @@ defmodule PropertyDamage.Export.StepPlan do
   # a script performs the fixture (a login, say) before it acts and cleans up
   # after. The roots are what the reference target ran: for a model with
   # `expansions/0`, each root as itself or as the leaves of the expansion the
-  # reference chose there (one step per leaf), so a script runs what the
-  # reference ran. Each step carries a `title` for its heading ("Step 3" for a root,
+  # reference chose there (one step per leaf), read from the report's replay
+  # term (else from its trace), so a script runs what the reference ran.
+  # Each step carries a `title` for its heading ("Step 3" for a root,
   # "Setup step 1 (setup position 0)" for a setup command) and a `key` that
   # names its response variable without colliding across phases ("3",
   # "_setup_1", "_teardown_1"). A setup or teardown step has no
@@ -44,7 +45,7 @@ defmodule PropertyDamage.Export.StepPlan do
   # `aliases`), so those values are bound after that leaf's step.
 
   alias PropertyDamage.Export.HTTPSpec
-  alias PropertyDamage.{FailureReport, Placeholder, RunTrace}
+  alias PropertyDamage.{FailureReport, Placeholder, ReplayArtifact, RunTrace}
   alias PropertyDamage.Sequence.Position
 
   defmodule Var do
@@ -174,32 +175,50 @@ defmodule PropertyDamage.Export.StepPlan do
     }
   end
 
-  # What the reference target ran at each root, as the report's trace records
-  # it; nil when the trace records no choices.
+  # What the reference target ran at each root, read from the report's replay
+  # term, else from the choices its trace records; nil when the report
+  # records neither (or the model has no expansions).
   defp reference_choices(%FailureReport{} = report) do
-    reference = FailureReport.reference_target(report)
-    traced = report.trace && report.trace.expansion
-    if reference && is_map(traced), do: Map.get(traced, reference.name)
+    with %{name: name} <- FailureReport.reference_target(report),
+         {_sequence, %{} = variants} <-
+           ReplayArtifact.reexecution(report, [name], "PropertyDamage.Export") do
+      Map.fetch!(variants, name).choices
+    else
+      _none -> nil
+    end
+  rescue
+    ArgumentError -> nil
   end
 
-  # The steps of the reference target: the report's own steps when the
-  # reference is the target the report traces (or no root ran as an
-  # expansion), else the plan laid out with the reference's choices.
-  defp reference_steps(%FailureReport{} = report, choices) do
-    # Choices are recorded only when the report names a reference target.
-    if choices != nil and report.variant != nil and
-         report.variant.name != FailureReport.reference_target(report).name do
+  # The steps of the reference target: the plan laid out with the reference's
+  # choices, with the report's events and failure when the reference is the
+  # target the report traces; the report's own steps when no root ran as an
+  # expansion.
+  defp reference_steps(%FailureReport{} = report, nil), do: FailureReport.steps(report)
+
+  defp reference_steps(
+         %FailureReport{trace: %RunTrace{plan: %PropertyDamage.Sequence{}} = trace} = report,
+         choices
+       ) do
+    if report.variant == nil or
+         report.variant.name == FailureReport.reference_target(report).name do
       RunTrace.build_steps(
-        report.trace.plan,
-        [],
-        report.trace.command_labels,
+        trace.plan,
+        trace.event_log,
+        trace.command_labels,
         report.failed_at_index,
+        branch_id: report.branch_id,
+        executed: trace.executed,
         choices: choices
       )
     else
-      FailureReport.steps(report)
+      RunTrace.build_steps(trace.plan, [], trace.command_labels, report.failed_at_index,
+        choices: choices
+      )
     end
   end
+
+  defp reference_steps(%FailureReport{} = report, _choices), do: FailureReport.steps(report)
 
   # A setup failure at a setup command marks that command's step.
   defp failed_setup_step?(report, offset) do

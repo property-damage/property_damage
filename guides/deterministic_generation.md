@@ -3,7 +3,7 @@
 PropertyDamage generates a command sequence as a **pure function of the seed**.
 Reproducing a failure with `mix test ... seed: N`, and comparing two runs of the
 same plan, both depend on that purity. This guide states the contract, shows the
-three blessed ways to model nondeterministic needs without breaking it, and
+four blessed ways to model nondeterministic needs without breaking it, and
 points at the audit that enforces it.
 
 ## The determinism contract
@@ -84,10 +84,11 @@ runtime counterpart is `PropertyDamage.FailureReport.verify_projections/1`, whic
 re-derives the failing step's state and compares it to the run's snapshot (see
 the [debugging failures guide](debugging_failures.md)).
 
-## The three seams
+## The four seams
 
 Real systems need time, per-run uniqueness, and server-assigned ids. Each has a
-deterministic pattern. Pick by **who produces the value**.
+deterministic pattern. Pick by **who produces the value**. The fourth seam,
+field draw order, applies to every command with more than one field.
 
 ### 1. Time-dependent SUTs: a seeded relative offset, reified in the adapter
 
@@ -180,6 +181,37 @@ audit.
 > relative-offset pattern for time and `mint_per_run/1` for client-minted
 > uniqueness.
 
+### 4. Field draw order: build generator maps through `merge_overrides/2`
+
+`StreamData.fixed_map/1` draws a command's fields one after another, in the
+order it iterates them, and each field takes the next slice of the seed. A
+map's iteration order is not stable across VMs: for a small map with atom keys
+it can follow the order in which the VM created those atoms. Handed a map,
+`fixed_map/1` can therefore draw different field values for the same seed in
+another VM, and `seed: N` stops reproducing there.
+
+Build the generator map through `PropertyDamage.Generator.merge_overrides/2`,
+which returns the field generators sorted by field, so every VM draws the
+fields in the same order:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+defmodule Transfer do
+  use PropertyDamage.Command
+
+  defstruct [:amount, :memo]
+
+  @impl true
+  def generator(overrides \\ %{}) do
+    %{amount: StreamData.integer(1..1_000), memo: StreamData.integer(1..1_000_000)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
+  end
+end
+```
+
+Never pass a map literal of generators straight to `StreamData.fixed_map/1`.
+
 ## Choosing a seam
 
 | Need | Seam | Where the value is produced |
@@ -187,6 +219,7 @@ audit.
 | Time (JWT `exp`, TTL) | Seeded relative offset in the plan; adapter reifies at execution | Client, at execution |
 | Client-minted uniqueness (request id, idempotency key) | `mint_per_run/1` | Client, minted from recorded run inputs |
 | Server-assigned output (ids the SUT returns) | `external/0` | Server, captured from the SUT |
+| Several fields in one command | `merge_overrides/2` before `StreamData.fixed_map/1` | Generator, in field order |
 
 ## Related: detecting cross-version drift
 

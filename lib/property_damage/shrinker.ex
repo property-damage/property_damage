@@ -59,16 +59,13 @@ defmodule PropertyDamage.Shrinker do
   failure, and the attempt counts against the budget.
 
   A further property also holds: the failure occurs at the **same or an earlier
-  command index** (the failing root) than in the original. This one is guaranteed *structurally*
-  rather than asserted by the signature comparison, and it holds on both the
-  linear and the branching path for the same underlying reason: every shrink
-  candidate is a subset or simplification of a fixed base sequence, so a
-  candidate can only reproduce the failure at the same position or earlier,
-  never later.
-
-  On the linear path this is most visible in Phase 1, which first truncates the
-  sequence at the failure point (`Enum.take(commands, failed_at_index + 1)`), so
-  every subsequent candidate is a subset of that prefix.
+  command index** (the failing root) than in the original. On the linear path
+  the shrinker checks it: a candidate whose failure happens at a root
+  generated after the current failing root is not adopted, whatever its
+  signature. It also holds structurally there, because the shrinker first
+  truncates the sequence at the failure point
+  (`Enum.take(commands, failed_at_index + 1)`), so every later candidate is a
+  subset of that prefix.
 
   On the branching path the index is likewise not asserted. The original
   `failed_at_index` is a branch-relative coordinate (`branch_start_index +
@@ -77,9 +74,9 @@ defmodule PropertyDamage.Shrinker do
   `try_convert_to_linear` decides a race is not required, it takes the failure
   index from its own linear re-run of the flattened sequence (which is
   self-consistent with that sequence) and hands *that* to `shrink_linear`, so
-  Phase-1 truncation targets the real failure point. The truncation stays
-  `still_fails?`-guarded regardless, so even a stale or nil index can only fall
-  back to leaving the full flattened sequence, never accept a later-failing
+  the truncation targets the real failure point. The truncation is verified by
+  an attempt regardless, so even a stale or nil index can only fall back to
+  leaving the full flattened sequence, never accept a later-failing
   candidate. Combined with the subset/simplification property of every branching
   strategy (branch removal, branch-content shrinking, prefix/suffix shrinking,
   and argument shrinking), the same-or-earlier-index guarantee holds structurally
@@ -111,24 +108,27 @@ defmodule PropertyDamage.Shrinker do
   - Convert to linear (if race not required for failure)
   - Reduce branch count
 
-  ## Two-Phase Shrinking
+  ## Shrink Cycle
 
-  ### Phase 1: Sequence Shrinking
+  A linear sequence is first truncated after the failing root. Then the
+  shrinker runs four phases in order, each on what the previous phase left,
+  and repeats the cycle until a whole cycle adopts no candidate or the budget
+  (`PropertyDamage.Shrinker.Config`) is spent:
 
-  Removes unnecessary commands while preserving the failure:
+  1. **Drop roots**: remove roots grouped by dependency depth (hierarchical
+     shrink), then each remaining root on its own (linear shrink)
+  2. **Collapse the reference's expansions** toward the root itself (see
+     `shrink/2`, "Expansions")
+  3. **Collapse the other targets' expansions** onto the reference's
+  4. **Simplify arguments** (`shrink_arguments`, on by default): the roots'
+     arguments, then the fields of every leaf that its generator gave
 
-  1. **Drop unexecuted**: Remove commands after the failure point
-  2. **Hierarchical shrink**: Remove commands grouped by dependency depth
-  3. **Linear shrink**: Try removing each remaining command individually
-
-  ### Phase 2: Argument Shrinking (optional)
-
-  Simplifies values in remaining commands:
+  Argument simplification:
 
   - Integers shrink toward 0
   - Strings shrink toward empty
   - Lists shrink toward empty
-  - Refs are never shrunk (would break dependencies)
+  - Placeholders are never shrunk (would break dependencies)
 
   ## Configuration
 
@@ -158,10 +158,12 @@ defmodule PropertyDamage.Shrinker do
 
   alias PropertyDamage.{
     Executor,
+    Expansion,
     Failure,
     Generator,
     Placeholder,
     PlaceholderRegistry,
+    ReplayArtifact,
     Scheduler,
     Sequence,
     Settle,
@@ -208,7 +210,8 @@ defmodule PropertyDamage.Shrinker do
           sequence: Sequence.t(),
           expansion: map() | nil,
           iterations: non_neg_integer(),
-          time_ms: non_neg_integer()
+          time_ms: non_neg_integer(),
+          cycles: non_neg_integer()
         }
 
   @doc """
@@ -283,21 +286,56 @@ defmodule PropertyDamage.Shrinker do
 
   ## Expansions
 
-  For a model with `c:PropertyDamage.Model.expansions/0`, a candidate is still
-  a list of roots: the shrinker deletes roots and simplifies root arguments,
-  and never deletes, reorders or simplifies a leaf on its own. Each target
-  runs a candidate as it ran the failing run, root for root, without drawing
-  its expansions again: `:expansion` carries every target's choices, keyed by
-  the stable id of each root (`:root_ids`), and every attempt realizes each
-  surviving root's carried entry again, without a new pick,
-  against the candidate's simulated state, with the leaf seed the failing run
-  drew. A root whose arguments were simplified realizes its leaves from the
-  simplified root through the same entry and leaf seed. When a leaf of the
-  carried entry no longer meets its precondition in a candidate, the root runs
-  as itself in that target, counted as "identity, forced". A `:reference`
-  target copies what the first target runs in the candidate. A candidate
-  whose expansion cannot be realized (an `overrides:` that raises on a
-  simplified root, for example) is invalid and never runs.
+  For a model with `c:PropertyDamage.Model.expansions/0`, a candidate is a
+  list of roots plus what each target runs at each of them. `:expansion`
+  carries every target's choices, keyed by the stable id of each root
+  (`:root_ids`). No attempt draws an expansion again: each attempt realizes
+  the entry each target carries at each surviving root against the
+  candidate's simulated state, from the seed that target's leaves came
+  from. A root whose arguments were simplified realizes its leaves from the
+  simplified root through the same entry. The shrinker never deletes or
+  reorders a leaf on its own.
+
+  Two phases of every cycle, between dropping roots and simplifying
+  arguments, change what the targets run, root by root, in order:
+
+    * The reference (the first target, when it runs `expansion: :random`)
+      collapses toward the root itself. The shrinker tries the identity
+      first: the root alone, under its entry key when the function lists the
+      root alone, else recorded as `:identity` ("identity, by shrinking").
+      Then it tries each earlier entry of the root's list, in order, with its
+      leaves generated from the reference's own seed for that root. It keeps the
+      first that still fails. A `:reference` target copies the reference in
+      every candidate, so it moves with it. A `:random` target that copied
+      the reference's choice at that root keeps, in these candidates, the
+      entry and the commands it runs there now, so the reference can reach
+      the identity alone when the failure is in that copy.
+    * Each other `expansion: :random` target collapses onto the reference's
+      choice: the same entry and the reference's commands, copied in every
+      later candidate, so a later simplification of the reference's leaves
+      is copied too. The shrinker keeps the copy when the failure survives.
+
+  The order decides what a shrunk failure says. When a bug is in one path,
+  the target with the bug keeps the entry that exposes it, and the reference
+  runs the simplest entry the failure allows. When every entry fails, the
+  other target ends on the reference's choice: both targets run the same
+  commands, so the bug is in the implementation, not in a path.
+
+  Argument simplification also simplifies the fields of each leaf that the
+  leaf's generator drew. A field the entry's `overrides:` sets, and a field
+  holding a placeholder, is never touched. The simplified values travel
+  with the target's carried choice, so every later candidate realizes the
+  leaf with them while its `overrides:` are evaluated again.
+
+  A candidate whose expansions cannot be realized is invalid and never runs:
+  an entry the function no longer returns for the candidate's simulated
+  state, or an `overrides:` that raises on a simplified root. When a leaf of
+  the entry a target runs no longer meets its precondition in a candidate,
+  the root runs as itself in that target, counted as "identity, forced".
+  The setup commands and their arguments are never shrunk, and the teardown
+  commands are generated again for every candidate. The result records, per
+  target and root, the entry the target ran: its key, `:identity` or
+  `:forced`.
 
   ## Parameters
 
@@ -328,7 +366,11 @@ defmodule PropertyDamage.Shrinker do
 
   ## Returns
 
-  A shrink_result map containing the minimal failing sequence.
+  A shrink_result map: the minimal failing sequence, what every target runs
+  for it (`expansion`, nil for a branching sequence), the number of
+  candidates tried (`iterations`), the time spent, and the number of shrink
+  cycles run (`cycles`; the last one adopted nothing unless the budget ran
+  out).
   """
   @spec shrink(Sequence.t() | [struct()], keyword()) :: shrink_result()
   def shrink(sequence_or_commands, opts)
@@ -368,8 +410,13 @@ defmodule PropertyDamage.Shrinker do
         positions: original_positions(commands),
         registry: sequence.registry,
         setup_commands: sequence.setup,
-        root_ids: Keyword.get(opts, :root_ids) || Enum.to_list(0..(length(commands) - 1)//1)
+        root_ids: Keyword.get(opts, :root_ids) || Enum.to_list(0..(length(commands) - 1)//1),
+        # The generation position of the failing root: a candidate that fails
+        # at a later root is not adopted.
+        failing_offset: if(is_integer(failed_at_index), do: failed_at_index)
       })
+
+    shrink_state = %{shrink_state | replay_basis: replay_basis(shrink_state)}
 
     # Truncating at the failure point is an optimization, not an assumption
     # we may act on blindly: the index can be nil (poll timeouts, record
@@ -383,23 +430,12 @@ defmodule PropertyDamage.Shrinker do
         truncated_positions = Enum.take(shrink_state.positions, failed_at_index + 1)
         shrink_state = increment_iterations(shrink_state)
 
-        if still_fails?(truncated, truncated_positions, shrink_state),
-          do: %{shrink_state | commands: truncated, positions: truncated_positions},
-          else: shrink_state
+        adopt(truncated, truncated_positions, shrink_state) || shrink_state
       else
         shrink_state
       end
 
-    # Phase 1: Sequence shrinking
-    shrink_state = shrink_sequence(shrink_state)
-
-    # Phase 2: Argument shrinking (if enabled)
-    shrink_state =
-      if shrink_state.config.shrink_arguments do
-        shrink_arguments(shrink_state)
-      else
-        shrink_state
-      end
+    shrink_state = cycle(shrink_state)
 
     end_time = System.monotonic_time(:millisecond)
 
@@ -415,8 +451,27 @@ defmodule PropertyDamage.Shrinker do
       sequence: shrunk,
       expansion: carried_expansion(shrunk, shrink_state.positions, shrink_state),
       iterations: shrink_state.iterations,
-      time_ms: end_time - shrink_state.start_time
+      time_ms: end_time - shrink_state.start_time,
+      cycles: shrink_state.cycles
     }
+  end
+
+  # One shrink cycle: the four phases in order, each on what the previous
+  # one left. The cycle repeats while it adopts a candidate and the budget
+  # lasts.
+  defp cycle(state) do
+    adopted = state.adopted
+
+    state =
+      state
+      |> shrink_sequence()
+      |> collapse_reference()
+      |> collapse_variants()
+      |> shrink_arguments()
+
+    state = %{state | cycles: state.cycles + 1}
+
+    if state.adopted > adopted and not exceeded_limits?(state), do: cycle(state), else: state
   end
 
   # The state every shrink starts from: the run to re-execute, the failure to
@@ -438,6 +493,13 @@ defmodule PropertyDamage.Shrinker do
       check_mode: Keyword.get(opts, :check_mode, :halt),
       config: Keyword.get(opts, :config, Config.new()),
       iterations: 0,
+      # Candidates adopted so far, and the shrink cycles run.
+      adopted: 0,
+      cycles: 0,
+      failing_offset: nil,
+      # Placeholder ids the replay artifact of the starting sequence cannot
+      # resolve either (see replayable?/4).
+      replay_basis: MapSet.new(),
       start_time: System.monotonic_time(:millisecond),
       original_signature: original_signature,
       # Stutter reproduction (DR-029): when the original failure is a stutter
@@ -458,12 +520,18 @@ defmodule PropertyDamage.Shrinker do
         Keyword.get(opts, :mint_epoch_counter) || :atomics.new(1, signed: false),
       # Every target's choices in the failing run, by target name and root id;
       # nil when no root runs as an expansion.
-      carry: carry(Keyword.fetch!(opts, :model), Keyword.get(opts, :expansion))
+      carry: carry(Keyword.fetch!(opts, :model), Keyword.get(opts, :expansion)),
+      # Whether the run recorded every target running the roots as
+      # themselves (a model without expansions): the shrunk run then records
+      # the same, under the shrunk roots' generation ids.
+      identity?:
+        is_map(Keyword.get(opts, :expansion)) and
+          not Expansion.defines?(Keyword.fetch!(opts, :model))
     }
   end
 
   defp carry(model, expansion) when is_map(expansion) do
-    if PropertyDamage.Expansion.defines?(model), do: PropertyDamage.Expansion.carry(expansion)
+    if Expansion.defines?(model), do: Expansion.carry(expansion)
   end
 
   defp carry(_model, _expansion), do: nil
@@ -479,7 +547,7 @@ defmodule PropertyDamage.Shrinker do
     root_ids = Enum.map(positions, &Enum.at(state.root_ids, &1.offset))
 
     {:ok,
-     PropertyDamage.Expansion.expand(state.model, candidate, state.targets, state.rng_seed,
+     Expansion.expand(state.model, candidate, state.targets, state.rng_seed,
        root_ids: root_ids,
        carry: state.carry
      )}
@@ -487,12 +555,245 @@ defmodule PropertyDamage.Shrinker do
     ArgumentError -> :invalid
   end
 
+  # A model without expansions: every target runs the shrunk roots, each
+  # under the id it was generated with.
+  defp carried_expansion(shrunk, positions, %{carry: nil, identity?: true} = state)
+       when is_list(positions),
+       do: Expansion.identity(shrunk, state.targets, artifact_root_ids(shrunk, positions, state))
+
   defp carried_expansion(shrunk, positions, state) do
     case candidate_expansion(shrunk, positions, state) do
       {:ok, expansion} -> expansion
       :invalid -> nil
     end
   end
+
+  # ==========================================================================
+  # The expansion axis: what each target runs at each surviving root
+  # ==========================================================================
+
+  # Phase 2: at each root in order, the reference's entry collapses toward
+  # the root itself: first the identity (under its key when the function
+  # lists the root alone), then each earlier entry of the root's list, in
+  # order, keeping the first that still fails. A `:reference` target copies
+  # the reference in every candidate, so it moves with it.
+  defp collapse_reference(%{carry: nil} = state), do: state
+
+  defp collapse_reference(state) do
+    case hd(state.targets) do
+      %{expansion: :random, name: name} ->
+        Enum.reduce(surviving_root_ids(state), state, &collapse_root(&2, name, &1))
+
+      _not_drawing ->
+        state
+    end
+  end
+
+  defp collapse_root(state, name, root_id) do
+    with false <- exceeded_limits?(state),
+         {:ok, current} <- current_expansion(state),
+         %{leaves?: true, index: index} = choice when is_integer(index) <-
+           choice_at(current, name, root_id) do
+      kept = followers(state, current, root_id)
+
+      case try_carry(state, name, root_id, :to_identity, [choice], kept) do
+        {:adopted, state} ->
+          state
+
+        {:tried, state, tried} ->
+          listed = Enum.find_value(tried, &(&1.leaves? == false && &1.index))
+          earlier = Enum.reject(0..(index - 1)//1, &(&1 == listed))
+          collapse_earlier(state, {name, root_id, choice, kept}, earlier, tried)
+      end
+    else
+      _nothing_to_collapse -> state
+    end
+  end
+
+  # Each earlier entry, its leaves realized from the target's own seed key,
+  # so the substitution is the same in every candidate and every process.
+  defp collapse_earlier(state, _at, [], _tried), do: state
+
+  defp collapse_earlier(state, {name, root_id, choice, kept} = at, [index | rest], tried) do
+    if exceeded_limits?(state) do
+      state
+    else
+      entry = %{
+        entry: Expansion.entry_key(choice.module, index),
+        index: index,
+        seed_key: Expansion.seed_key(state.rng_seed, name, root_id),
+        leaves?: true
+      }
+
+      case try_carry(state, name, root_id, entry, tried, kept) do
+        {:adopted, state} -> state
+        {:tried, state, tried} -> collapse_earlier(state, at, rest, tried)
+      end
+    end
+  end
+
+  # The `:random` targets that copy the reference's choice at `root_id`
+  # (phase 3), each with what it runs there now. A phase-2 candidate keeps
+  # them on that entry and those commands, a literal copy, so the reference
+  # can collapse alone when the failure is in the copy. A later phase 3 may
+  # copy the reference's new choice again.
+  defp followers(state, current, root_id) do
+    for %{expansion: :random, name: name} <- tl(state.targets),
+        get_in(state.carry, [name, root_id]) == :follow,
+        into: %{},
+        do: {name, choice_at(current, name, root_id)}
+  end
+
+  # Phase 3: at each root in order, each other `:random` target takes the
+  # reference's choice there: the same entry and the same commands, copied
+  # again in every later candidate.
+  defp collapse_variants(%{carry: nil} = state), do: state
+
+  defp collapse_variants(state) do
+    [reference | others] = state.targets
+
+    for %{expansion: :random, name: name} <- others,
+        root_id <- surviving_root_ids(state),
+        reduce: state do
+      state -> follow_root(state, reference.name, name, root_id)
+    end
+  end
+
+  defp follow_root(state, reference, name, root_id) do
+    with false <- exceeded_limits?(state),
+         {:ok, current} <- current_expansion(state),
+         %{} = ours <- choice_at(current, name, root_id),
+         false <- same_choice?(ours, choice_at(current, reference, root_id)) do
+      case try_carry(state, name, root_id, :follow, [ours]) do
+        {:adopted, state} -> state
+        {:tried, state, _tried} -> state
+      end
+    else
+      _same_or_none -> state
+    end
+  end
+
+  # Phase 4, leaves: each field a leaf's generator drew, in each leaf a
+  # `:random` target realizes from a carried entry, is simplified as a root
+  # argument is. A field an `overrides:` sets, or a field holding a
+  # placeholder, is never touched. The simplified values ride the target's
+  # carried choice (`fields`), so every later candidate realizes the leaf
+  # with them.
+  defp shrink_leaf_arguments(%{carry: nil} = state), do: state
+
+  defp shrink_leaf_arguments(state) do
+    for %{expansion: :random, name: name} <- state.targets,
+        root_id <- surviving_root_ids(state),
+        reduce: state do
+      state -> shrink_leaves(state, name, root_id, 0)
+    end
+  end
+
+  defp shrink_leaves(state, name, root_id, leaf) do
+    with false <- exceeded_limits?(state),
+         %{} = carried <- get_in(state.carry, [name, root_id]),
+         {:ok, current} <- current_expansion(state),
+         %{leaves?: true, commands: commands, generated: generated} = choice <-
+           choice_at(current, name, root_id),
+         %_{} = command <- Enum.at(commands, leaf) do
+      simplified = simplified_fields(command, Enum.at(generated, leaf))
+
+      if simplified == %{} do
+        shrink_leaves(state, name, root_id, leaf + 1)
+      else
+        fields = Map.get(carried, :fields, %{})
+        fields = Map.update(fields, leaf, simplified, &Map.merge(&1, simplified))
+
+        case try_carry(state, name, root_id, Map.put(carried, :fields, fields), [choice]) do
+          {:adopted, state} -> shrink_leaves(state, name, root_id, leaf)
+          {:tried, state, _tried} -> shrink_leaves(state, name, root_id, leaf + 1)
+        end
+      end
+    else
+      _nothing_to_simplify -> state
+    end
+  end
+
+  defp simplified_fields(command, generated) do
+    for field <- generated || [],
+        value = Map.get(command, field),
+        not holds_placeholder?(value),
+        simplified = shrink_value(value),
+        simplified != value,
+        into: %{},
+        do: {field, simplified}
+  end
+
+  defp holds_placeholder?(%Placeholder{}), do: true
+  defp holds_placeholder?(%_{} = struct), do: struct |> Map.from_struct() |> holds_placeholder?()
+  defp holds_placeholder?(map) when is_map(map), do: Enum.any?(map, &holds_placeholder?/1)
+  defp holds_placeholder?(list) when is_list(list), do: Enum.any?(list, &holds_placeholder?/1)
+
+  defp holds_placeholder?(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> holds_placeholder?()
+
+  defp holds_placeholder?(_value), do: false
+
+  # Runs the current roots with target `name` carrying `carried` at
+  # `root_id`, and each target of `kept` carrying its choice there. Returns
+  # `{:adopted, state}` when the candidate fails as the original did, else
+  # `{:tried, state, tried}`, where `tried` adds what the target ran at
+  # `root_id` in this candidate to the choices already tried there. A
+  # candidate that runs one of the `tried` choices again is not run; one
+  # whose expansions cannot be realized (an entry the function no longer
+  # returns for the candidate's state) is invalid and never runs.
+  defp try_carry(state, name, root_id, carried, tried, kept \\ %{}) do
+    carry =
+      kept
+      |> Map.put(name, carried)
+      |> Enum.reduce(state.carry, fn {target, value}, carry ->
+        Map.update(carry, target, %{root_id => value}, &Map.put(&1, root_id, value))
+      end)
+
+    trial = %{state | carry: carry}
+
+    case current_expansion(trial) do
+      :invalid ->
+        {:tried, increment_iterations(state), tried}
+
+      {:ok, expansion} ->
+        realized = choice_at(expansion, name, root_id)
+
+        if Enum.any?(tried, &same_choice?(&1, realized)) do
+          {:tried, state, tried}
+        else
+          trial = increment_iterations(trial)
+
+          case adopt(state.commands, state.positions, trial) do
+            nil -> {:tried, %{state | iterations: trial.iterations}, [realized | tried]}
+            adopted -> {:adopted, adopted}
+          end
+        end
+    end
+  end
+
+  # What every target runs for the current roots under the carried choices.
+  defp current_expansion(state) do
+    registry = remap_registry(state.registry, state.positions)
+
+    candidate_expansion(
+      candidate(Sequence.linear(state.commands), registry, state),
+      state.positions,
+      state
+    )
+  end
+
+  defp surviving_root_ids(state),
+    do: Enum.map(state.positions, &Enum.at(state.root_ids, &1.offset))
+
+  defp choice_at(%{variants: variants}, name, root_id) do
+    variants |> Map.fetch!(name) |> Map.fetch!(:choices) |> Enum.find(&(&1.root_id == root_id))
+  end
+
+  # Two choices that run the same commands at a root are the same execution
+  # there, whatever entry each names.
+  defp same_choice?(%{commands: commands}, %{commands: commands}), do: true
+  defp same_choice?(_left, _right), do: false
 
   # The original structured positions of a flat (linear) command list.
   defp original_positions(commands) do
@@ -580,7 +881,9 @@ defmodule PropertyDamage.Shrinker do
         |> with_teardown(shrink_state),
       expansion: nil,
       iterations: shrink_state.iterations,
-      time_ms: end_time - shrink_state.start_time
+      time_ms: end_time - shrink_state.start_time,
+      # The branching strategies run once each.
+      cycles: 0
     }
   end
 
@@ -966,12 +1269,12 @@ defmodule PropertyDamage.Shrinker do
 
         state = increment_iterations(state)
 
-        if valid_candidate?(candidate, state) and
-             still_fails?(candidate, candidate_positions, state) do
-          new_state = %{state | commands: candidate, positions: candidate_positions}
-          try_remove_levels(new_state, original, orig_positions, graph, rest, expanded)
-        else
-          try_remove_levels(state, original, orig_positions, graph, rest, kept)
+        case valid_candidate?(candidate, state) && adopt(candidate, candidate_positions, state) do
+          %{} = adopted ->
+            try_remove_levels(adopted, original, orig_positions, graph, rest, expanded)
+
+          _rejected ->
+            try_remove_levels(state, original, orig_positions, graph, rest, kept)
         end
       end
     end
@@ -1053,22 +1356,24 @@ defmodule PropertyDamage.Shrinker do
 
         state = increment_iterations(state)
 
-        if valid_candidate?(candidate, state) and
-             still_fails?(candidate, candidate_positions, state) do
-          # Command was removed, recompute priorities for remaining commands
-          new_state = %{state | commands: candidate, positions: candidate_positions}
-          new_prioritized = sort_indices_by_shrink_priority(candidate)
-          do_linear_shrink(new_state, new_prioritized)
-        else
-          do_linear_shrink(state, rest_indices)
+        case valid_candidate?(candidate, state) && adopt(candidate, candidate_positions, state) do
+          %{} = adopted ->
+            # Command was removed, recompute priorities for remaining commands
+            do_linear_shrink(adopted, sort_indices_by_shrink_priority(candidate))
+
+          _rejected ->
+            do_linear_shrink(state, rest_indices)
         end
       end
     end
   end
 
-  defp shrink_arguments(state) do
-    do_shrink_arguments(state, 0)
-  end
+  # Phase 4, when `shrink_arguments` is on: the roots' arguments, then the
+  # fields its generator gave in every leaf a target realizes from an entry.
+  defp shrink_arguments(%{config: %{shrink_arguments: true}} = state),
+    do: state |> do_shrink_arguments(0) |> shrink_leaf_arguments()
+
+  defp shrink_arguments(state), do: state
 
   defp do_shrink_arguments(state, index) do
     if exceeded_limits?(state) or index >= length(state.commands) do
@@ -1082,11 +1387,9 @@ defmodule PropertyDamage.Shrinker do
         state = increment_iterations(state)
 
         # Argument shrinking replaces in place, so positions are unchanged.
-        if valid_candidate?(candidate, state) and still_fails?(candidate, state.positions, state) do
-          new_state = %{state | commands: candidate}
-          do_shrink_arguments(new_state, index)
-        else
-          do_shrink_arguments(state, index + 1)
+        case valid_candidate?(candidate, state) && adopt(candidate, state.positions, state) do
+          %{} = adopted -> do_shrink_arguments(adopted, index)
+          _rejected -> do_shrink_arguments(state, index + 1)
         end
       else
         do_shrink_arguments(state, index + 1)
@@ -1161,26 +1464,48 @@ defmodule PropertyDamage.Shrinker do
   # re-execution sends distinct client-minted values on a non-resettable SUT.
   defp next_mint_epoch(state), do: :atomics.add_get(state.mint_epoch_counter, 1, 1)
 
-  defp still_fails?(commands, positions, state) do
+  # Runs the candidate `commands` (each at the original position in
+  # `positions`) under the carried choices of `state`. Returns `state` with the
+  # candidate adopted when it fails with the original failure, in the same
+  # target, at the same or an earlier root; else nil.
+  defp adopt(commands, positions, state) do
     # Regenerate idempotency keys to ensure fresh SUT state
-    commands = regenerate_idempotency_keys(commands)
+    keyed = regenerate_idempotency_keys(commands)
 
     # The candidate's registry has its producer_link remapped to the candidate's
     # positions (DR-021), so externals resolve against the shrunk sequence's own
     # indices.
-    case run_linear_attempt(
-           commands,
-           positions,
-           remap_registry(state.registry, positions),
-           state
-         ) do
-      {:failed, reason, variant_index, _root} ->
-        check_failure_equivalence(reason, variant_index, state.original_signature)
-
-      _passed_or_not_run ->
-        false
+    with {:failed, reason, variant_index, root} <-
+           run_linear_attempt(keyed, positions, remap_registry(state.registry, positions), state),
+         true <- check_failure_equivalence(reason, variant_index, state.original_signature),
+         offset = generation_offset(positions, root),
+         false <- later?(offset, state.failing_offset) do
+      %{
+        state
+        | commands: commands,
+          positions: positions,
+          failing_offset: offset || state.failing_offset,
+          adopted: state.adopted + 1
+      }
+    else
+      _other -> nil
     end
   end
+
+  # The generation position of the candidate's root `root`.
+  defp generation_offset(positions, root) when is_integer(root) and is_list(positions) do
+    case Enum.at(positions, root) do
+      %{offset: offset} -> offset
+      nil -> nil
+    end
+  end
+
+  defp generation_offset(_positions, _root), do: nil
+
+  defp later?(offset, failing) when is_integer(offset) and is_integer(failing),
+    do: offset > failing
+
+  defp later?(_offset, _failing), do: false
 
   # Like still_fails_branch?/3, but also surfaces the LINEAR failure index from
   # the re-run so the caller can hand shrink_linear a truncation coordinate that
@@ -1217,11 +1542,75 @@ defmodule PropertyDamage.Shrinker do
     # nothing, as on the linear engine.
     candidate = candidate(Sequence.linear(commands), registry, state)
 
-    case candidate_expansion(candidate, positions, state) do
-      {:ok, expansion} -> run_candidate(commands, candidate, expansion, state)
-      :invalid -> :invalid
+    with {:ok, expansion} <- candidate_expansion(candidate, positions, state),
+         true <- positions == nil or replayable?(commands, positions, expansion, state) do
+      run_candidate(commands, candidate, expansion, state)
+    else
+      _invalid -> :invalid
     end
   end
+
+  # Whether the replay artifact of a candidate would re-execute it: every
+  # placeholder its commands hold, the leaves every target runs included,
+  # is registered by the registry the artifact's re-execution rebuilds by
+  # simulating the setup commands and the roots again
+  # (`PropertyDamage.ReplayArtifact.unregistered/4`). A simulator whose
+  # events depend on the state may mint nothing for a root once an earlier
+  # root is gone, while the candidate still holds what the original run
+  # minted there. Such a candidate is invalid: a shrunk failure it led to
+  # could not be replayed from its own artifact. A simulator that raises on
+  # the candidate makes it invalid too. A placeholder the rebuild misses for
+  # the sequence the shrink started from (one minted in a parallel branch,
+  # say) does not count: the shrink cannot lose what that sequence never had.
+  defp replayable?(commands, positions, expansion, state) do
+    commands
+    |> unreplayable(positions, expansion, state)
+    |> Enum.all?(&MapSet.member?(state.replay_basis, &1))
+  rescue
+    _ -> false
+  end
+
+  # The placeholder ids the commands of a candidate hold that the registry
+  # its artifact rebuilds does not register.
+  defp unreplayable(commands, positions, expansion, state) do
+    roots =
+      Enum.zip_with(artifact_root_ids(commands, positions, state), commands, fn id, command ->
+        %{root_id: id, command: command}
+      end)
+
+    leaves =
+      for {_name, %{choices: choices}} <- (expansion && expansion.variants) || %{},
+          %{leaves?: true, commands: leaves} <- choices,
+          leaf <- leaves,
+          do: leaf
+
+    held = state.setup_commands ++ commands ++ leaves
+    ReplayArtifact.unregistered(state.model, state.setup_commands, roots, held)
+  end
+
+  # The placeholder ids the registry rebuilt for the sequence the shrink
+  # starts from already misses.
+  defp replay_basis(state) do
+    expansion =
+      case current_expansion(state) do
+        {:ok, expansion} -> expansion
+        :invalid -> nil
+      end
+
+    MapSet.new(unreplayable(state.commands, state.positions, expansion, state))
+  rescue
+    _ -> MapSet.new()
+  end
+
+  # The root ids the artifact of a candidate records: the id each root was
+  # generated with (its index when no position is known).
+  defp artifact_root_ids(_commands, positions, state) when is_list(positions),
+    do: Enum.map(positions, &Enum.at(state.root_ids, &1.offset))
+
+  defp artifact_root_ids(%Sequence{} = sequence, nil, state),
+    do: artifact_root_ids(Sequence.to_list(sequence), nil, state)
+
+  defp artifact_root_ids(commands, nil, _state), do: Enum.to_list(0..(length(commands) - 1)//1)
 
   defp run_candidate(commands, candidate, expansion, state) do
     {:ok, run} =

@@ -1,9 +1,10 @@
 defmodule PropertyDamage.ExpansionShrinkTest do
-  # The shrinker works on roots: it deletes roots and simplifies root
-  # arguments, and never draws a surviving root's expansion again. Each
+  # The shrinker never draws a surviving root's expansion again. Each
   # candidate re-realizes every variant's leaves from the entry the root ran
-  # before; a leaf whose precondition no longer holds makes that root run as
-  # itself in that candidate ("identity, forced"). The reproduction and
+  # before, from the root itself (the reference collapsing), or from the
+  # reference's choice (another variant collapsing onto it); a leaf whose
+  # precondition no longer holds makes that root run as itself in that
+  # candidate ("identity, forced"). The reproduction and
   # `PropertyDamage.Replay` re-execute the concrete leaves of the report.
   use ExUnit.Case, async: true
 
@@ -111,7 +112,11 @@ defmodule PropertyDamage.ExpansionShrinkTest do
                report |> expansions("beta") |> Enum.at(report.failed_at_index)
     end
 
-    test "never draws a surviving root's expansion again", %{entries: entries} do
+    test "never draws a surviving root's expansion again",
+         %{report: report, entries: entries} do
+      roots = Map.new(Sequence.to_list(report.original_sequence), &{&1.tag, &1})
+      alpha = entries |> X.segments("alpha") |> hd() |> ran()
+
       for name <- ["alpha", "beta"] do
         [explored | later] = X.segments(entries, name)
         original = ran(explored)
@@ -122,13 +127,26 @@ defmodule PropertyDamage.ExpansionShrinkTest do
         for segment <- later, {tag, commands} <- X.by_root(segment) do
           assert Map.has_key?(original, tag)
 
-          assert X.modules(commands) == X.modules(original[tag]),
+          # What the variant first ran there, the root itself, or (for
+          # "beta") what the reference first ran there.
+          allowed =
+            Enum.uniq([
+              X.modules(original[tag]),
+              [roots[tag].__struct__],
+              X.modules(alpha[tag])
+            ])
+
+          assert X.modules(commands) in allowed,
                  "#{name} ran #{inspect(X.modules(commands))} where it first ran " <>
                    inspect(X.modules(original[tag]))
 
-          # A leaf keeps the value its own draw gave it.
-          if match?([%Credit{} | _], commands) do
-            assert Enum.map(commands, & &1.memo) == Enum.map(original[tag], & &1.memo)
+          # A leaf keeps the value a first draw gave it, or a simplification
+          # of that value: never a value drawn again.
+          drawn = for %Credit{memo: memo} <- original[tag] ++ alpha[tag], do: memo
+
+          for %Credit{memo: memo} <- commands do
+            assert Enum.any?(drawn, &(memo in halvings(&1))),
+                   "#{name} ran a Credit memo #{memo} no first draw gave"
           end
         end
       end
@@ -157,6 +175,10 @@ defmodule PropertyDamage.ExpansionShrinkTest do
              end)
     end
   end
+
+  # `n` and every value halving it reaches, down to 0.
+  defp halvings(n),
+    do: n |> Stream.iterate(&div(&1, 2)) |> Enum.take_while(&(&1 > 0)) |> Kernel.++([0])
 
   describe "a candidate whose carried entry fails a leaf precondition" do
     test "runs that root as itself, forced, and is tried" do
@@ -213,11 +235,13 @@ defmodule PropertyDamage.ExpansionShrinkTest do
   end
 
   describe "the reproduction and Replay" do
-    test "re-execute the reference's concrete leaves from the report" do
+    # The reference collapses to the root itself, so the leaves are the
+    # failing variant's: "beta" keeps the rewrite that exposes its bug.
+    test "re-execute the failing variant's concrete leaves from the report" do
       model = model!(Replay, expansions: [{Refund, &X.refund_rewrite/2}])
       {report, recorder} = failing_run!(model)
 
-      [explored | _] = segments = recorder |> recorded() |> X.segments("alpha")
+      [explored | _] = segments = recorder |> recorded() |> X.segments("beta")
       reproduction = List.last(segments)
       original = ran(explored)
 
@@ -226,17 +250,18 @@ defmodule PropertyDamage.ExpansionShrinkTest do
       for {tag, commands} <- X.by_root(reproduction) do
         assert X.modules(commands) == X.modules(original[tag])
 
-        if match?([%Credit{} | _], commands) do
-          assert Enum.map(commands, & &1.memo) == Enum.map(original[tag], & &1.memo)
+        for {credit, first} <- Enum.zip(commands, original[tag]), match?(%Credit{}, credit) do
+          assert credit.memo in halvings(first.memo)
         end
       end
 
-      reported = report |> expansions("alpha") |> Enum.flat_map(& &1.leaves)
+      reported = report |> expansions("beta") |> Enum.flat_map(& &1.leaves)
       assert reported == Enum.map(reproduction, & &1.__struct__)
 
-      assert {:ok, _steps} = PropertyDamage.Replay.run(report)
+      beta = X.target("beta", recorder, %{bug: :credit})
+      assert {:ok, _steps} = PropertyDamage.Replay.run(report, targets: [beta])
 
-      replayed = recorder |> recorded() |> X.segments("alpha") |> List.last()
+      replayed = recorder |> recorded() |> X.segments("beta") |> List.last()
       assert replayed == reproduction
     end
   end

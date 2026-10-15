@@ -250,18 +250,23 @@ defmodule PropertyDamage.Generator do
 
   ## Returns
 
-  A map suitable for passing to `StreamData.fixed_map/1`.
+  A list of `{field, generator}` pairs sorted by field (a keyword list when
+  the fields are atoms), for passing to `StreamData.fixed_map/1`. It is
+  sorted because a map's iteration order depends on the VM, so drawing fields
+  in map order would give one seed different field values in another VM.
 
   ## Examples
 
-      iex> base = %{amount: StreamData.positive_integer(), currency: StreamData.constant("USD")}
+      iex> base = %{currency: StreamData.constant("USD"), amount: StreamData.positive_integer()}
       iex> result = PropertyDamage.Generator.merge_overrides(base, %{currency: "EUR"})
-      iex> is_map(result)
-      true
+      iex> Keyword.keys(result)
+      [:amount, :currency]
   """
-  @spec merge_overrides(map(), map()) :: map()
+  @spec merge_overrides(map(), map()) :: [{term(), StreamData.t(term())}]
   def merge_overrides(base, overrides) do
-    Map.merge(base, lift_values(overrides))
+    base
+    |> Map.merge(lift_values(overrides))
+    |> Enum.sort_by(fn {field, _generator} -> field end)
   end
 
   @doc """

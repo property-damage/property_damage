@@ -8,7 +8,7 @@ defmodule PropertyDamage.Command do
 
   A `generator/1` MUST be a pure function of the seed: no clock, `:rand`,
   `System.unique_integer/1`, or `UUID.uuid4/0`. Model time, client-minted ids,
-  and server-assigned ids with the three seams in the
+  and server-assigned ids with the seams in the
   [deterministic generation guide](deterministic_generation.md), and enforce
   purity with `PropertyDamage.audit/2` (`mix pd.audit`).
 

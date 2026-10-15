@@ -9,7 +9,7 @@ Commands follow a pure generator pattern - they are decoupled from state shape a
 > **Generators must be a pure function of the seed.** A generator that reads the
 > clock, `:rand`, `System.unique_integer/1`, or `UUID.uuid4/0` breaks `seed: N`
 > reproduction and run comparison. Model time, client-minted ids, and
-> server-assigned ids with the three seams in the
+> server-assigned ids with the seams in the
 > [deterministic generation guide](deterministic_generation.md), and enforce it
 > with `mix pd.audit`.
 

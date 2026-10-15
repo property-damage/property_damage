@@ -371,7 +371,47 @@ defmodule PropertyDamage.Options do
     shrink: [
       type: :boolean,
       default: true,
-      doc: "Shrink failing sequences to minimal reproduction."
+      doc:
+        "Shrink failing sequences to minimal reproduction. Under `only: [replay: path]` " <>
+          "the default is `false`."
+    ],
+    only: [
+      type: {:custom, __MODULE__, :validate_only, []},
+      doc: """
+      Run part of a campaign, in one of two shapes:
+
+        * `[run: n, variants: names, with_reference: boolean]` runs run `n`
+          (default 1) of the seed and nothing else: the run a `max_runs: n`
+          campaign runs last. `variants:` (default: every target) names the
+          targets that run, and the reference runs beside them unless
+          `with_reference: false`, which needs exactly one named target other
+          than the reference: it then runs alone, with the model's checks and
+          no `@compare` function. Every target still runs the sequence
+          `PropertyDamage.Expansion.for/5` regenerates for its name.
+        * `[replay: path]`, optionally with `variants:` and `with_reference:`,
+          runs the replay artifact at `path` (see `:replay_dir`): every target
+          executes the recorded setup commands and the commands it ran at each
+          recorded root, with no new draw, so each target's `expansion:` is
+          ignored. `targets:` must name exactly the targets the artifact
+          records. The artifact carries the seed, so `seed:` is an error here.
+          A replay that fails the same way returns the report, whose printed
+          form says the artifact reproduced; one that passes returns stats
+          whose `:replay` is `:not_reproduced`.
+
+      `max_runs:` other than 1 and `branching:` are errors beside either
+      shape.
+      """
+    ],
+    replay_dir: [
+      type: {:custom, __MODULE__, :validate_replay_dir, []},
+      default: "property_damage_replays",
+      doc: """
+      The directory a failing run writes its replay artifact into, created
+      when missing: `<model last name segment>_seed<seed>.replay.exs`, replaced
+      by a later failure of the same seed. `false` writes no artifact. The
+      report's printed form ends with the `only: [replay: path]` call that
+      runs it.
+      """
     ],
     coverage: [
       type: :boolean,
@@ -678,6 +718,7 @@ defmodule PropertyDamage.Options do
     reject_retired_regression_keys!(opts)
     reject_retired_stutter_keys!(opts)
 
+    reject_only_option_conflicts!(opts)
     validated = NimbleOptions.validate!(opts, @run_schema)
 
     case Keyword.get(validated, :regression) do
@@ -686,10 +727,188 @@ defmodule PropertyDamage.Options do
     end
 
     validated
+    |> reject_only_variants!()
     |> reject_multi_target_branching!()
     |> reject_timed_parallel!()
     |> reject_single_target_ratio!()
     |> validate_branching_bounds!()
+  end
+
+  @doc false
+  # `only:` option type: `[run: n, variants: names, with_reference: bool]` or
+  # `[replay: path, variants: names, with_reference: bool]`, returned with the
+  # defaults filled in (`run: 1` for the first shape, `variants: nil` for
+  # every target, `with_reference: true`).
+  def validate_only(only) when is_list(only) and only != [] do
+    with true <- Keyword.keyword?(only) || only_error("must be a keyword list"),
+         :ok <- check_only_keys(only),
+         {:ok, shape} <- only_shape(only),
+         {:ok, variants} <- only_variants(Keyword.get(only, :variants)),
+         {:ok, with_reference} <- only_with_reference(Keyword.get(only, :with_reference, true)) do
+      {:ok, shape ++ [variants: variants, with_reference: with_reference]}
+    end
+  end
+
+  def validate_only([]), do: {:ok, [run: 1, variants: nil, with_reference: true]}
+  def validate_only(other), do: only_error("must be a keyword list, got: #{inspect(other)}")
+
+  @only_keys [:run, :replay, :variants, :with_reference]
+
+  defp check_only_keys(only) do
+    case Keyword.keys(only) -- @only_keys do
+      [] ->
+        :ok
+
+      unknown ->
+        only_error(
+          "unknown key(s) #{Enum.map_join(unknown, ", ", &"`#{&1}:`")}; `only:` takes " <>
+            "`[run: n, variants: names, with_reference: bool]` or `[replay: path]`"
+        )
+    end
+  end
+
+  defp only_shape(only) do
+    case {Keyword.fetch(only, :run), Keyword.fetch(only, :replay)} do
+      {{:ok, _run}, {:ok, _replay}} ->
+        only_error(
+          "takes `run:` or `replay:`, not both: `run:` picks a run of the seed and " <>
+            "`replay:` runs an artifact, which records its own run"
+        )
+
+      {_run, {:ok, path}} when is_binary(path) ->
+        {:ok, [replay: path]}
+
+      {_run, {:ok, path}} ->
+        only_error("`replay:` must be a path (a string), got: #{inspect(path)}")
+
+      {{:ok, run}, :error} when is_integer(run) and run > 0 ->
+        {:ok, [run: run]}
+
+      {{:ok, run}, :error} ->
+        only_error("`run:` must be a positive integer (run 1 is the first), got: #{inspect(run)}")
+
+      {:error, :error} ->
+        {:ok, [run: 1]}
+    end
+  end
+
+  defp only_variants(nil), do: {:ok, nil}
+
+  defp only_variants(names) when is_list(names) do
+    if Enum.all?(names, &is_binary/1),
+      do: {:ok, names},
+      else: only_error("`variants:` must be a list of target names, got: #{inspect(names)}")
+  end
+
+  defp only_variants(other),
+    do: only_error("`variants:` must be a list of target names, got: #{inspect(other)}")
+
+  defp only_with_reference(value) when is_boolean(value), do: {:ok, value}
+
+  defp only_with_reference(other),
+    do: only_error("`with_reference:` must be true or false, got: #{inspect(other)}")
+
+  defp only_error(message), do: {:error, "`only:` " <> message}
+
+  @doc false
+  # `replay_dir:` option type: a directory path, or `false`.
+  def validate_replay_dir(false), do: {:ok, false}
+  def validate_replay_dir(dir) when is_binary(dir) and dir != "", do: {:ok, dir}
+
+  def validate_replay_dir(other),
+    do: {:error, "expected a directory path (a string) or false, got: #{inspect(other)}"}
+
+  # `only:` runs one run, so the options that pick other runs or another
+  # engine are errors beside it. The check reads the options as the caller
+  # wrote them (`max_runs:` has a default), before the schema validates them,
+  # and one error names every conflict.
+  defp reject_only_option_conflicts!(raw) do
+    with true <- Keyword.keyword?(raw),
+         only when is_list(only) <- Keyword.get(raw, :only),
+         true <- Keyword.keyword?(only),
+         [_ | _] = conflicts <- only_conflicts(only, raw) do
+      raise NimbleOptions.ValidationError,
+        key: :only,
+        value: only,
+        message: Enum.join(conflicts, "; ")
+    end
+
+    :ok
+  end
+
+  # `variants:` must name targets of `targets:`, and `with_reference: false`
+  # exactly one of them other than the reference.
+  defp reject_only_variants!(validated) do
+    case Keyword.get(validated, :only) do
+      nil ->
+        validated
+
+      only ->
+        case variants_conflicts(only, validated[:targets]) do
+          [] ->
+            validated
+
+          conflicts ->
+            raise NimbleOptions.ValidationError,
+              key: :only,
+              value: only,
+              message: Enum.join(conflicts, "; ")
+        end
+    end
+  end
+
+  defp only_conflicts(only, raw) do
+    shape = if Keyword.has_key?(only, :replay), do: "`only: [replay: ...]`", else: "`only:`"
+
+    [
+      Keyword.get(raw, :max_runs, 1) != 1 &&
+        "`max_runs:` #{inspect(Keyword.get(raw, :max_runs))} cannot be used with #{shape}, " <>
+          "which runs one run: drop `max_runs:` or pass `max_runs: 1`",
+      Keyword.get(raw, :branching) != nil &&
+        "`branching:` cannot be used with #{shape}: a branching sequence runs on one target " <>
+          "and is not regenerated or replayed per target",
+      (Keyword.has_key?(only, :replay) and not Keyword.has_key?(only, :run) and
+         Keyword.has_key?(raw, :seed)) &&
+        "`seed:` cannot be used with `only: [replay: ...]`: the replay artifact records " <>
+          "the seed it was generated from"
+    ]
+    |> Enum.filter(&is_binary/1)
+  end
+
+  defp variants_conflicts(only, targets) do
+    names = Enum.map(targets, & &1.name)
+    reference = hd(names)
+    variants = Keyword.get(only, :variants)
+
+    unknown =
+      case (variants || []) -- names do
+        [] ->
+          []
+
+        missing ->
+          [
+            "`only: [variants: ...]` names #{Enum.map_join(missing, ", ", &inspect/1)}, " <>
+              "not in `targets:` (#{Enum.map_join(names, ", ", &inspect/1)})"
+          ]
+      end
+
+    alone =
+      case {Keyword.get(only, :with_reference), variants} do
+        {false, [name]} when name != reference ->
+          []
+
+        {false, _variants} ->
+          [
+            "`only: [with_reference: false]` runs one target alone, so `variants:` must name " <>
+              "exactly one target other than the reference #{inspect(reference)}, got: " <>
+              inspect(variants || names)
+          ]
+
+        _ ->
+          []
+      end
+
+    unknown ++ alone
   end
 
   # Branching sequences run their branches in parallel inside one system; the

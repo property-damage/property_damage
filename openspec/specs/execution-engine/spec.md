@@ -4,7 +4,7 @@
 
 Defines the two-phase execution model, adapter lifecycle, external field markers and placeholder resolution, event injection, and mock service support that together form the core runtime of the PropertyDamage SPBT framework.
 
-Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands)
+Reference DRs: DR-011 (External Field Markers), DR-021 (Placeholder Resolution Identity), DR-015 (Adapter Separation), DR-016 (Injector Pattern), DR-018 (Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-029 (Executor Internal Stage Architecture), DR-030 (Command-Correlated Injector Events), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-043 (Targets Carry Every Per-Target Resource), DR-044 (Variants and the Lockstep Scheduler). DR-010 (Symbolic References) is superseded., DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-047 (Latency Is a Measurement with a Campaign-End Budget), DR-048 (Setup and Teardown Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-049 (Expansions, Roots That Run as Several Commands)
 
 ## Requirements
 
@@ -535,7 +535,7 @@ Symbolic identity SHALL be deterministic so that two generations of the same pla
 
 ### Requirement: Generation Determinism Audit (DR-037)
 
-Generation SHALL be a pure function of `(seed, model, generation options)`, including user code: command generators, `when:`/`overrides:` predicates, the `command_sequence_projection`, and the simulator. All nondeterminism — the wall clock, `:rand`, `System.unique_integer/1`, client-minted identifiers, and environment — SHALL be reified at execution (adapter reification of a seeded relative offset, or `mint_per_run/1`, DR-034), never during generation. The framework SHALL provide an audit (`PropertyDamage.audit/2`, wrapped by `mix pd.audit`) that, for a deterministically chosen set of seeds, realizes a model's generated sequence twice at the same seed through the seeded path and asserts the two are structurally equal per the Deterministic Symbolic Identity requirement (DR-036); the audit SHALL be generation-only and SHALL NOT resolve mint markers or placeholders. On divergence the audit SHALL localize the first differing command position and its differing fields with actionable guidance, and `mix pd.audit` SHALL exit non-zero so CI gates on it. An impure model that fails this audit is exactly a model whose captured runs the run-comparison comparability guard (DR-035) will refuse.
+Generation SHALL be a pure function of `(seed, model, generation options)`, including user code: command generators, `when:`/`overrides:` predicates, the `command_sequence_projection`, and the simulator. All nondeterminism — the wall clock, `:rand`, `System.unique_integer/1`, client-minted identifiers, and environment — SHALL be reified at execution (adapter reification of a seeded relative offset, or `mint_per_run/1`, DR-034), never during generation. The framework SHALL provide an audit (`PropertyDamage.audit/2`, wrapped by `mix pd.audit`) that, for a deterministically chosen set of seeds, realizes a model's generated sequence twice at the same seed through the seeded path and asserts the two are structurally equal per the Deterministic Symbolic Identity requirement (DR-036); the audit SHALL be generation-only and SHALL NOT resolve mint markers or placeholders. On divergence the audit SHALL localize the first differing command position and its differing fields with actionable guidance, and `mix pd.audit` SHALL exit non-zero so CI gates on it. An impure model that fails this audit is exactly a model whose captured runs the run-comparison comparability guard (DR-035) will refuse. A command's fields SHALL be generated in an order that does not depend on the VM: `Generator.merge_overrides/2` SHALL return the field generators sorted by field, so one seed draws the same field values in every VM.
 
 #### Scenario: A pure model passes the audit
 
@@ -830,9 +830,9 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 - **WHEN** a sampled entry carries `when:` on a leaf
 - **THEN** the output SHALL warn "ignored in a sequence" with the root, the entry index and the key
 
-### Requirement: Reports and Re-execution Paths Carry the Choices (DR-049)
+### Requirement: Reports and Re-execution Paths Carry the Choices (DR-049, DR-050)
 
-`FailureReport.expansions` SHALL map each target name to one element per executed root, up to and including the failing root: `%{root: index, entry: "Root[i]" | nil | :forced, leaves: [modules]}`. The reporter SHALL print, beside a failure at root `r`, the entry each target ran at `r`, with the reference marked. `failed_at_index` SHALL stay the root index. Every path that executes a failure again SHALL carry each target's choices and SHALL NOT pick again: the shrinker, `shrink_further/2`, `PropertyDamage.Replay`, the seed-library replay (which recomputes the choices from the seed) and export. `RunTrace.capture/1` SHALL recompute the choices from the seed, execute them through the scheduler with its one target, and record them in the trace. `PropertyDamage.Analysis.isolate_trigger/2` SHALL raise an `ArgumentError` for a target that ran any root as leaves. `shrink_further/2` and `Replay` SHALL raise an error that names the target when its choices are not recorded. Export SHALL emit the reference target's concrete leaves as the steps, SHALL say so in the header, and SHALL bind a root placeholder from the step of the leaf it was aliased to. The exported ExUnit test and `reproduction_command/1` SHALL be unchanged.
+`FailureReport.expansions` SHALL map each target name to one element per executed root, up to and including the failing root: `%{root: index, entry: "Root[i]" | nil | :forced | :identity, leaves: [modules]}`. The reporter SHALL print, beside a failure at root `r`, the entry each target ran at `r`, with the reference marked, and SHALL print `:identity` as "identity, by shrinking". `failed_at_index` SHALL stay the root index. `expansions` and `expansion_counts` SHALL describe the shrunk run. Every path that executes a failure again SHALL read what each target ran from the report's `replay` term (or, when the report has none, from the choices its trace records) and SHALL NOT pick again; the paths and their behavior are specified by the failure-analysis requirement "Re-execution Paths Read the Recorded Data (DR-050)". `RunTrace.capture/1` and the seed-library replay SHALL recompute the choices from the seed, execute them through the scheduler, and record them in the trace. Export SHALL emit the reference target's concrete leaves as the steps, SHALL say so in the header, and SHALL bind a root placeholder from the step of the leaf it was aliased to. `reproduction_command/1` SHALL be unchanged.
 
 #### Scenario: The report names each target's entry
 - **WHEN** a run fails at root 5 with target "second" on `Incr[1]` and the reference on `Incr[0]`
@@ -842,10 +842,6 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 #### Scenario: A report reproduces from its seed
 - **WHEN** `PropertyDamage.run/1` runs again with `seed: report.seed, max_runs: 1` and the same target names
 - **THEN** the new report's `expansions` SHALL equal the original's for the unshrunk run
-
-#### Scenario: isolate_trigger refuses a target that ran leaves
-- **WHEN** `Analysis.isolate_trigger/2` receives a report whose target ran a root as leaves
-- **THEN** it SHALL raise `ArgumentError`
 
 #### Scenario: An exported script runs what the reference ran
 - **WHEN** a report from a model with expansions is exported as a script
@@ -857,7 +853,59 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 - **WHEN** the report is exported as a curl script
 - **THEN** the script SHALL extract the id in the `Confirm` step
 
-#### Scenario: A stored report without choices cannot be replayed
-- **WHEN** `Replay` runs a report that records no choices for the replayed target of a model with expansions
-- **THEN** it SHALL raise an error that names the target
+### Requirement: The only and replay_dir Run Options (DR-050)
 
+`PropertyDamage.run/1` SHALL accept `only:` in exactly one of two shapes. `only: [run: n, variants: names, with_reference: boolean]` SHALL run run `n` (default 1, counted from 1) of the seed and nothing else, on the targets `variants:` names (default: every target) plus the reference unless `with_reference: false`. `with_reference: false` SHALL be legal only for exactly one named target other than the reference; that target SHALL run alone with the model's checks and no `@compare` function, and its sequence SHALL be the one `PropertyDamage.Expansion.for/5` regenerates for its name. `only: [replay: path]`, optionally with `variants:` and `with_reference:` under the same rules, SHALL load the replay artifact at `path` and execute the recorded setup commands and the commands each target ran at each recorded root, with no draw, ignoring each target's `expansion:`. Its `targets:` SHALL name exactly the targets the artifact records. Its `shrink:` SHALL default to `false`.
+
+`only:` SHALL be an option error naming the rule when: it holds both `run:` and `replay:` or an unknown key; `max_runs:` other than 1 or `branching:` is given beside it; `seed:` is given beside `replay:` (the artifact records its seed); `variants:` names a target that `targets:` lacks; `with_reference: false` names anything other than one non-reference target; or `replay:` is not a string. An `only:` run SHALL NOT replay the seed library.
+
+`replay_dir:` SHALL be a non-empty string (default `"property_damage_replays"`) or `false`. A failing run SHALL write its replay artifact into that directory, creating it when missing, and `false` SHALL write none.
+
+#### Scenario: One run of the seed
+- **WHEN** `PropertyDamage.run(model: M, seed: S, only: [run: 1])` runs
+- **THEN** it SHALL run run 1 of seed `S` once and SHALL NOT run a second run
+
+#### Scenario: A subset of targets
+- **GIVEN** targets "cachex", "second" and "third"
+- **WHEN** `only: [variants: ["second"]]` runs
+- **THEN** "cachex" (the reference) and "second" SHALL run and "third" SHALL NOT
+
+#### Scenario: One target alone
+- **WHEN** `only: [variants: ["second"], with_reference: false]` runs
+- **THEN** "second" SHALL run alone with the model's checks
+- **AND** no `@compare` function SHALL run
+
+#### Scenario: with_reference false names the rule
+- **WHEN** `only: [with_reference: false]` names two targets, or the reference
+- **THEN** `run/1` SHALL raise an option error that says it needs exactly one named target other than the reference
+
+#### Scenario: An unknown variant is an option error
+- **WHEN** `only: [variants: ["nope"]]` names a target `targets:` lacks
+- **THEN** `run/1` SHALL raise an option error that names "nope"
+
+#### Scenario: only beside max_runs or branching
+- **WHEN** `only:` is given with `max_runs: 3` or with `branching:`
+- **THEN** `run/1` SHALL raise an option error that names both options
+
+#### Scenario: A replay that reproduces
+- **GIVEN** an artifact written by a failing run
+- **WHEN** `only: [replay: path]` runs on the same targets
+- **THEN** it SHALL return `{:error, report}` with the same kind, name and variant at the same root
+- **AND** the report's `replay_status` SHALL be `:reproduced`
+
+#### Scenario: A replay that passes
+- **GIVEN** an artifact that the current code no longer fails
+- **WHEN** `only: [replay: path]` runs
+- **THEN** it SHALL return `{:ok, stats}` and `stats.replay` SHALL be `:not_reproduced`
+
+#### Scenario: A replay with other targets
+- **WHEN** `only: [replay: path]` runs with `targets:` that lack a name the artifact records, or hold an extra one
+- **THEN** `run/1` SHALL raise an `ArgumentError` that names the missing and the extra names
+
+#### Scenario: A replay of another model
+- **WHEN** `only: [replay: path]` runs with a `model:` other than the model the artifact records
+- **THEN** `run/1` SHALL raise an `ArgumentError` that names both models
+
+#### Scenario: replay_dir false
+- **WHEN** a run fails with `replay_dir: false`
+- **THEN** no file SHALL be written and the report's `replay_status` SHALL be `:disabled`
