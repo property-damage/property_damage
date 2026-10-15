@@ -41,7 +41,9 @@ defmodule PropertyDamage.Model.Projection do
 
   ## Check Types
 
-  There are two types of checks:
+  Two kinds of check look at one target's state, `@check` and `@eventually`.
+  A third kind, `@compare`, compares targets (see "Boundary Observations"
+  below).
 
   ### Synchronous Checks (`@check`)
 
