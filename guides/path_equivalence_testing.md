@@ -610,7 +610,9 @@ mix pd.validate Counter.Model --targets '[{Counter.Adapter, name: "left", config
 
   It prints each entry key with how often it was realized over the sampled
   seeds, and names an entry no seed realized. `--seed S --seeds 1` samples
-  exactly what `seed: S, max_runs: 1` runs.
+  exactly what `seed: S, max_runs: 1` runs. On the quickstart's model it also
+  warns that `Counter.Add` declares no `:observables` and that the model has
+  one command; both are expected for a model this small.
 
 Two known limits:
 
