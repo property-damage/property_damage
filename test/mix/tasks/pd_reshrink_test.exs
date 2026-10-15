@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
 
   alias Mix.Tasks.Pd.Reshrink
   alias PropertyDamage.{Executor, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.Test.TmpPath
 
   # The decision logic is exercised through `exec/1`, the halt-free seam: `run/1`
   # only translates `exec/1`'s `:error` status into `System.halt/1` at the
@@ -77,7 +78,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
   end
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "pd_reshrink_test_#{System.unique_integer([:positive])}")
+    dir = TmpPath.unique("pd_reshrink_test")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
     {:ok, dir: dir}

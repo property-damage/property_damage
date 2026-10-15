@@ -22,7 +22,7 @@ defmodule PropertyDamage.IntegrationTest do
   import ExUnit.CaptureIO
 
   alias PropertyDamage.Integration
-  alias PropertyDamage.Test.{ExecutorModel, FailingModel, SimpleAdapter}
+  alias PropertyDamage.Test.{ExecutorModel, FailingModel, SimpleAdapter, TmpPath}
 
   # Budgets chosen so the SUT outcome is deterministic regardless of seed.
   @pass_runs 3
@@ -290,9 +290,10 @@ defmodule PropertyDamage.IntegrationTest do
     end
   end
 
-  # Derives a temp-file base path from a static prefix (no Date/random), so it is
-  # stable per format and cleaned up via on_exit/1.
+  # Derives a temp-file base path from a static prefix and the OS pid (no
+  # Date/random), so it is stable per format within one run, distinct across
+  # concurrent runs, and cleaned up via on_exit/1.
   defp report_path(suffix) do
-    Path.join(System.tmp_dir!(), "pd_integration_test_#{suffix}")
+    TmpPath.scoped("pd_integration_test_#{suffix}")
   end
 end

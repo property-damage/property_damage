@@ -370,7 +370,9 @@ defmodule PropertyDamage.StatePollerTest do
           predicate: predicate,
           projection: TestProjection,
           interval_ms: 10,
-          timeout_ms: 500,
+          # The poller returns on the first true predicate; the long timeout
+          # only keeps a loaded machine from timing out before the third poll.
+          timeout_ms: 5_000,
           triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )
@@ -415,7 +417,9 @@ defmodule PropertyDamage.StatePollerTest do
           predicate: predicate,
           projection: TestProjection,
           interval_ms: 10,
-          timeout_ms: 500,
+          # The poller returns on the first true predicate; the long timeout
+          # only keeps a loaded machine from timing out before the third poll.
+          timeout_ms: 5_000,
           triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
           get_state_fn: fn _proj -> %{} end
         )

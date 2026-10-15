@@ -4,6 +4,8 @@ defmodule PropertyDamage.CompareReportingTest do
   # name handles that key, and shows it as `Projection.function`.
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.Test.TmpPath
+
   alias PropertyDamage.{
     Analysis,
     Error,
@@ -102,7 +104,7 @@ defmodule PropertyDamage.CompareReportingTest do
 
   test "a seed library stores a key-named failure as the observation's label" do
     path =
-      Path.join(System.tmp_dir!(), "pd_compare_seeds_#{System.unique_integer([:positive])}.json")
+      TmpPath.unique("pd_compare_seeds") <> ".json"
 
     on_exit(fn -> File.rm(path) end)
 

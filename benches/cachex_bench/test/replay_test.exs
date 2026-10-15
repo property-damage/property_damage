@@ -46,7 +46,12 @@ defmodule CachexBench.ReplayTest do
   end
 
   defp tmp_dir! do
-    dir = Path.join(System.tmp_dir!(), "cachex_replay_#{System.unique_integer([:positive])}")
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "cachex_replay_#{System.pid()}_#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
     dir

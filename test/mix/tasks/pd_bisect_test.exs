@@ -6,6 +6,7 @@ defmodule Mix.Tasks.Pd.BisectTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Pd.Bisect
+  alias PropertyDamage.Test.TmpPath
 
   # The git orchestration is proven against a throwaway repo: a tracked
   # `behavior.txt` flips from "good" to "bad" at a KNOWN commit, and the per-commit
@@ -45,7 +46,7 @@ defmodule Mix.Tasks.Pd.BisectTest do
   end
 
   defp build_repo do
-    repo = Path.join(System.tmp_dir!(), "pd_bisect_repo_#{System.unique_integer([:positive])}")
+    repo = TmpPath.unique("pd_bisect_repo")
     File.mkdir_p!(repo)
     git!(repo, ["init", "--quiet"])
     git!(repo, ["config", "user.email", "test@example.com"])
@@ -179,7 +180,7 @@ defmodule Mix.Tasks.Pd.BisectTest do
       assert File.exists?(dest)
       assert Path.basename(dest) == "failure.pd"
       # Lives under the system temp dir, outside the (repo) working tree.
-      assert String.starts_with?(dest, System.tmp_dir!())
+      assert String.starts_with?(dest, TmpPath.root())
       refute String.starts_with?(dest, repo)
       assert File.read!(dest) == "saved failure contents"
 

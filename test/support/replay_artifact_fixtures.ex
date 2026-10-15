@@ -39,6 +39,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
   alias PropertyDamage.{FailureReport, Generator, Sequence}
   alias PropertyDamage.FailureReport.Formatter
   alias PropertyDamage.Test.ExpansionFor
+  alias PropertyDamage.Test.TmpPath
 
   # ==========================================================================
   # Events
@@ -405,8 +406,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
   @doc false
   # A fresh directory under the system tmp dir, removed when the test exits.
   def tmp_dir! do
-    dir =
-      Path.join(System.tmp_dir!(), "pd_replay_#{System.unique_integer([:positive])}")
+    dir = TmpPath.unique("pd_replay")
 
     File.mkdir_p!(dir)
     ExUnit.Callbacks.on_exit(fn -> File.rm_rf!(dir) end)

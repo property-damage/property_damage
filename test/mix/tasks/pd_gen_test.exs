@@ -9,6 +9,7 @@ defmodule Mix.Tasks.PdGenTest do
   alias Mix.Tasks.Pd.Gen.Command, as: GenCommand
   alias Mix.Tasks.Pd.Gen.Model, as: GenModel
   alias Mix.Tasks.Pd.Gen.Projection, as: GenProjection
+  alias PropertyDamage.Test.TmpPath
 
   # Each test gets its own unique temp dir (uniqueness derived from the test
   # name, not Date/random). We cd into it so the generators, which write
@@ -19,7 +20,7 @@ defmodule Mix.Tasks.PdGenTest do
       |> Atom.to_string()
       |> String.replace(~r/[^a-zA-Z0-9]+/, "_")
 
-    tmp = Path.join(System.tmp_dir!(), "pd_gen_test_#{slug}")
+    tmp = TmpPath.scoped("pd_gen_test_#{slug}")
     File.rm_rf!(tmp)
     File.mkdir_p!(tmp)
 

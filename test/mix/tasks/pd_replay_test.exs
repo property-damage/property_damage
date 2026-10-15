@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
   alias Mix.Tasks.Pd.Replay
   alias PropertyDamage.{Executor, Failure, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.Test.TmpPath
 
   # Success paths and decision logic are exercised through `exec/1`, the
   # halt-free seam: `run/1` only translates `exec/1`'s status into a
@@ -106,7 +107,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
   end
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "pd_replay_test_#{System.unique_integer([:positive])}")
+    dir = TmpPath.unique("pd_replay_test")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
     {:ok, dir: dir}
