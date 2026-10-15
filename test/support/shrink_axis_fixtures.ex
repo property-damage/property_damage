@@ -283,6 +283,164 @@ defmodule PropertyDamage.Test.ShrinkAxis do
     def expansions, do: [{A.Add, &A.add_or_parts/2}, {A.Take, &A.take_entries/2}]
   end
 
+  defmodule Guard do
+    @moduledoc false
+    # A Fork root runs as itself (`Fork[0]`) or as one Branch leaf
+    # (`Fork[1]`, far heavier). A Probe runs as one Peek leaf, which fails
+    # the check once a Branch ran. The function for a Probe raises once a
+    # Fork ran as itself, so every candidate whose Fork runs as itself is
+    # invalid; each raise is counted in the ETS table `table/0` when the test
+    # created it.
+    alias PropertyDamage.Test.ShrinkAxis.Guard, as: G
+
+    def table, do: :shrink_axis_guard_raises
+
+    defmodule Forked do
+      @moduledoc false
+      defstruct []
+    end
+
+    defmodule Branched do
+      @moduledoc false
+      defstruct [:size]
+    end
+
+    defmodule Probed do
+      @moduledoc false
+      defstruct []
+    end
+
+    defmodule Fork do
+      @moduledoc false
+      use PropertyDamage.Command
+      defstruct []
+
+      @impl true
+      def generator(overrides \\ %{}) do
+        %{} |> Generator.merge_overrides(overrides) |> StreamData.fixed_map()
+      end
+    end
+
+    defmodule Probe do
+      @moduledoc false
+      use PropertyDamage.Command
+      defstruct []
+
+      @impl true
+      def generator(overrides \\ %{}) do
+        %{} |> Generator.merge_overrides(overrides) |> StreamData.fixed_map()
+      end
+    end
+
+    defmodule Peek do
+      @moduledoc false
+      use PropertyDamage.Command
+      defstruct []
+
+      @impl true
+      def generator(overrides \\ %{}) do
+        %{} |> Generator.merge_overrides(overrides) |> StreamData.fixed_map()
+      end
+    end
+
+    defmodule Branch do
+      @moduledoc false
+      # A leaf whose generator gives every field: `flag` is always false,
+      # `note` always nil, `size` 4 to 8.
+      use PropertyDamage.Command
+      defstruct [:flag, :note, :size]
+
+      @impl true
+      def generator(overrides \\ %{}) do
+        %{
+          flag: StreamData.constant(false),
+          note: StreamData.constant(nil),
+          size: StreamData.integer(4..8)
+        }
+        |> Generator.merge_overrides(overrides)
+        |> StreamData.fixed_map()
+      end
+    end
+
+    defmodule World do
+      @moduledoc false
+      @behaviour PropertyDamage.Model.Projection
+
+      @impl true
+      def init, do: %{alone: false, branched: false}
+
+      @impl true
+      def apply(state, %G.Forked{}), do: %{state | alone: true}
+      def apply(state, %G.Branched{}), do: %{state | branched: true}
+      def apply(state, _event), do: state
+    end
+
+    defmodule NoProbeAfterBranch do
+      @moduledoc false
+      use PropertyDamage.Model.Projection
+
+      @impl true
+      def init, do: %{branched: false}
+
+      @impl true
+      def apply(state, %G.Branched{}), do: %{state | branched: true}
+      def apply(state, _event), do: state
+
+      @check every: G.Probed
+      def assert_probe_before_branch(state, _event) do
+        if state.branched, do: PropertyDamage.fail!("probe after a branch")
+      end
+    end
+
+    defmodule Model do
+      @moduledoc false
+      @behaviour PropertyDamage.Model
+
+      @impl true
+      def commands, do: [G.Fork, G.Probe]
+      @impl true
+      def command_sequence_projection, do: G.World
+      @impl true
+      def check_projections, do: [G.NoProbeAfterBranch]
+      @impl true
+      def simulator, do: G
+      @impl true
+      def expansions, do: [{G.Fork, &G.fork/2}, {G.Probe, &G.probe/2}]
+    end
+
+    defmodule Adapter do
+      @moduledoc false
+      use PropertyDamage.Adapter
+
+      @impl true
+      def setup(config), do: {:ok, config}
+
+      @impl true
+      def teardown(_ctx), do: :ok
+
+      @impl true
+      def execute(command, _ctx, _runtime), do: {:ok, G.simulate(command, %{})}
+    end
+
+    def fork(%Fork{} = fork, _state), do: [[fork], {[Branch], weight: 1_000_000}]
+
+    def probe(%Probe{}, state) do
+      if state.alone do
+        if :ets.whereis(table()) != :undefined,
+          do: :ets.update_counter(table(), :raised, 1, {:raised, 0})
+
+        raise ArgumentError, "a Probe cannot follow a Fork run as itself"
+      end
+
+      [[Peek]]
+    end
+
+    def simulate(%Fork{}, _state), do: [%Forked{}]
+    def simulate(%Branch{size: size}, _state), do: [%Branched{size: size}]
+    def simulate(%Peek{}, _state), do: [%Probed{}]
+    def simulate(_command, _state), do: []
+  end
+
   @doc false
   # A `targets:` entry for the `Adder` adapter that reports to the calling
   # process.

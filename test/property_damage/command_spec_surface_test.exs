@@ -1,14 +1,14 @@
 defmodule PropertyDamage.CommandSpecSurfaceTest do
   @moduledoc """
-  DR-028 (served/servant clean break, P6): `command_spec/1` is the single static
+  DR-028 (served/servant clean break): `command_spec/1` is the single static
   metadata surface. Every servant read of static command metadata routes through
   the resolved spec map, not through scattered `function_exported?/3` probes of
   per-callback functions (`semantics/0`, `settle_config/0`, `idempotent?/0`, ...).
 
   These are failing-first behaviour-preservation tests: each declares a fact ONLY
   via `command_spec/1` (never the legacy callback) and asserts the framework
-  honours it. Before P6 the reads still probed the deleted callbacks, so each test
-  is RED on HEAD.
+  honours it. Before the single surface, the reads still probed the deleted callbacks, so
+  each test failed.
   """
   use ExUnit.Case, async: false
 

@@ -10,6 +10,8 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
   import ExUnit.CaptureLog
   import PropertyDamage.Test.VariantSupport
 
+  alias PropertyDamage.Test.TmpPath
+
   alias PropertyDamage.{
     Analysis,
     Executor,
@@ -453,7 +455,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
       seed = failing_branching_seed(model)
 
       path =
-        Path.join(System.tmp_dir!(), "pd_setup_replay_#{System.unique_integer([:positive])}.json")
+        TmpPath.unique("pd_setup_replay") <> ".json"
 
       on_exit(fn -> File.rm(path) end)
       {:ok, library} = SeedLibrary.add_seed(SeedLibrary.new(), seed, model: "M")

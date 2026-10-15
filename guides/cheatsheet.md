@@ -470,7 +470,7 @@ Run 2
 ├── ...
 [On failure] Shrinking
 ├── Shrink 1                 same order, with a shorter sequence of roots
-│                            (setup commands re-run; teardown commands re-drawn)
+│                            (setup commands re-run; teardown commands regenerated)
 └── ...
 ```
 

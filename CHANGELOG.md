@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every observation that disagrees at the convergence bound is reported.**
+  The first disagreeing `@compare` key in declaration order still names the
+  `:diverged` or `:did_not_converge` failure; every further key that differed or
+  was pending at that boundary is listed, in the same order, in the failure
+  detail's new `other_keys` field (`Failure.Divergence` and
+  `Failure.Convergence`), and the printed report shows each one, also under
+  such a failure listed among the run's other failures.
 - **Boundary observations: `@compare` (DR-046).** A public projection function
   `def name(state, root)` marked `@compare every: ..., using: ...` is the only
   cross-target oracle. `every:` takes the `@check` schedule vocabulary (`1`, `N`,
@@ -136,7 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `kind in [:poll_timeout, :settle_timeout]` "possibly tuning, not a bug"
   triage note (documented in `guides/debugging_failures.md`).
 
-- **Per-step projection-state timeline + projection-purity check (P8, DR-040).**
+- **Per-step projection-state timeline + projection-purity check (DR-040).**
   Projection state at any command is now *derived* from the run (no snapshot is
   captured). `PropertyDamage.RunTrace.state_at/2`, `state_before/2`, and
   `state_timeline/1` re-fold the recorded fold order to give the faithful state
@@ -389,6 +396,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `only: [replay: path]` call is the last line.
 
 ### Changed
+
+- **BREAKING: persistence format version 14 becomes 15.** A report records the
+  run's `check_mode`, the `campaign` a latency budget was judged over
+  (`%{seed:, max_runs:}`, `nil` for every other kind),
+  `original_failed_at_index` and `run_check_fires` (the check firings of the
+  run the report describes). A `.pd` or `.pdtrace` file of version 14 or older
+  is refused with `{:unsupported_format_version, version, 15}`, and a version-15
+  report lacking `run`, `replay`, `replay_path` or `check_mode` is refused with
+  `{:missing_field, field}` instead of loading with a drift warning.
+- **BREAKING: `shrink_further/2` and `Analysis.isolate_trigger/2` return
+  `{:error, :missing_model_or_target}`** (was `:missing_model_or_adapter`) for a
+  report that records no model or no target, and `mix pd.reshrink` says the file
+  "does not record a model and a target".
+- **BREAKING: the replay artifact loader trusts nothing in the file.** It parses
+  with `existing_atoms_only: true` and creates no atom: an artifact naming an atom
+  the running system does not know is refused, naming it. It loads struct values
+  whose modules are already loaded and never loads a module: a command's fields
+  may hold any struct of a loaded module (a `%Date{}`, for example), while a
+  command itself must be a loaded command module (or a placeholder or
+  position). Any other struct is refused before any run starts with
+  `{:error, {:unknown_struct_module, module}}` from the loader, an
+  `ArgumentError` naming the module from `only: [replay: path]`. A replay loads the model and the commands it lists
+  first; a leaf module no listed command names must be loaded by the caller.
+- **`Analysis.isolate_trigger/2` returns `{:error, :not_applicable}` for a
+  `:diverged` or `:did_not_converge` report.** Every variation runs one target
+  alone, so none could show a comparison failing; the analysis was vacuous.
+- **A replay artifact never replaces another failure's file.** When
+  `<Model>_seed<n>.replay.exs` holds another failure or other targets, the run
+  writes `<Model>_seed<n>_2.replay.exs` (the smallest free suffix from 2) and the
+  report's `replay_path` and footer name it. A re-shrink of the same failure
+  still replaces its own file.
+- **BREAKING: `shrink_further/2` refuses `targets:` that moved the failing
+  target.** When the `targets:` option does not hold the target the report
+  failed in at the index it failed at (renamed, dropped or reordered), it
+  returns `{:error, {:variant_not_in_targets, name}}` and runs nothing, where it
+  returned the report unchanged. An unchanged report now means only that no
+  smaller sequence reproduced the failure.
+- **A shrunk report's counts describe its reproduction.** `compare_counts` are
+  the counts of the reproduction of the shrunk sequence, from `run/1` and from
+  `shrink_further/2`, not the failing run's. From `run/1`, `check_fires` count
+  the runs before the failing one plus the reproduction, and the new
+  `run_check_fires` field holds the reproduction's share; `shrink_further/2`
+  replaces the incoming `run_check_fires` share of `check_fires` with its own
+  reproduction's, where it dropped `check_fires`.
+- **An entry whose one leaf equals its root runs the root itself.** A run
+  records it as `:identity` (no leaves, no alias, at the root's own position),
+  as a replay of the artifact runs it; `expansion_counts` count it under
+  `:identity`, and `mix pd.validate --seeds` prints it as identity, not under
+  the entry's key.
+- **Shrinking budget and candidate validity.** `max_iterations: 0` tries no
+  candidate and reports 0 iterations (the check of the sequence cut after the
+  failing root counted 1). A branching candidate the model rejects is never
+  run, as on the linear path. A candidate whose expansions cannot be realized
+  is realized and counted once, not again under the listed entry it equals.
 
 - **BREAKING (DR-047): `latency:` takes its options inside the keyword list, and
   the metrics are renamed, with no compatibility layer.**
@@ -783,6 +844,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`observations` in the result of `PropertyDamage.Scheduler.run/1`.** Nothing
+  read it; boundary observations reach a run through `@compare` alone.
 - **BREAKING (DR-042)**: Removed Differential baseline comparison: the `baseline:`
   and `export_to:` options, `PropertyDamage.Differential.Baseline` and its JSON
   file format, and the `:baseline` field of `PropertyDamage.Differential.Result`.
@@ -851,6 +914,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fault state (the original "per-instance handle" plan is superseded by removal).
 
 ### Fixed
+
+- **A check recorded under `check_mode: :record` no longer skips the final
+  boundary.** A target that recorded a failing check at an earlier root kept the
+  final boundary from being compared, so a divergence there went unreported; it
+  is now compared and listed among the run's failures.
+- **A retired or halted target's recorded check is listed.** Under
+  `check_mode: :record`, the first check a target recorded before it left the
+  run (an adapter failure at a later root), or before the reference's own
+  failure ended the run, was missing from the report, and a retired target
+  with two recorded checks listed its last one; its first is now listed at its
+  root, as a finished target's is.
+- **`Scheduler.run/1` refuses targets with nothing to compare.** Called directly
+  with two or more targets and a model that declares no `@compare`, it ran
+  them; it now raises the same `ArgumentError` as `PropertyDamage.run/1`, before
+  any target is set up.
+- **A `@compare` that another `@` macro handles is a compile error.** A
+  projection module that unimported the projection's own `@` and imported
+  another one compiled with its `@compare` observation dropped; it now fails to
+  compile with an error naming the module and `@compare`.
+- **A branching run whose model has a simulator runs its `@check at:` checks.**
+  Verifying an ordering passed the lifecycle-boundary checks to the step
+  trigger and raised `CaseClauseError`; they now run only at their boundary.
+- **A raise during finalization still runs the teardown commands.** A raise,
+  throw or exit while `Executor.run/4` finalized a run skipped the teardown
+  commands; they now run, then `Adapter.teardown/1`, and the raise propagates.
+- **`Replay.stop/1` stops a session once.** A second call ran the teardown
+  commands and `Adapter.teardown/1` again; it now returns `:ok` and runs nothing.
+- **A mock event pushed between commands is folded.** An event a mock received
+  after its command's own flush was lost at the end of the run and missing from
+  a boundary's state; `Stepping.drain/2` and finalization now flush the mock
+  registry and attribute the event to the command that ran last.
+- **A timed-out attempt leaves no dead resource poller in the state.** The
+  pollers an adapter started in an attempt that hit `timeout/1` stayed listed in
+  `active_resource_pollers` after they died with the attempt.
+- **A placeholder resolution failure's detail is its message.** The detail of a
+  `:placeholder_resolution` failure held the framework's stacktrace beside the
+  message, so two targets' equal failures could differ by a stack frame.
+- **`@eventually` checks emit check telemetry.** `[:property_damage, :check,
+  :start]` fires when the triggering event opens the window and `[:property_damage,
+  :check, :stop]` when the condition holds or the window times out, with the
+  metadata keys of a synchronous check.
+- **A projection listed in both `command_sequence_projection/0` and
+  `check_projections/0` is checked once per step.** Every consumer of a model's
+  projections now reads `Model.projection_modules/1`, so the engine, the
+  ordering check, the load-test worker, forensics, the trace and the audit
+  initialize, check and poll such a projection once.
+- **`PropertyDamage.run/1` warns about targets that share state.** Under
+  `validate: true` it logs the warning `mix pd.validate` prints for two targets
+  with the same adapter and an identical `config:`.
+- **A missing `external()` is reported on the setup command that should have
+  produced it.** When a later setup command consumed it, the run failed with
+  cause `:command` on the consumer; it now fails with cause
+  `:unresolved_placeholder` on the producer, as the completion rule reports it.
+- **An injected event of another module never resolves a command's
+  `external()`.** An event injected through `runtime.inject` before a command
+  answered could be read as that command's own event and give the external a
+  wrong value; capture now reads only events of the external's event module.
+- **A throw or an exit in an expansion is the generation error a raise is.** A
+  throw or an exit from an expansion function, a leaf's `overrides:` function or
+  a leaf's generator escaped `PropertyDamage.run/1` and lost the report during
+  shrinking; it is now the same `ArgumentError`, naming `{:throw, value}` or
+  `{:exit, reason}`, and a shrink candidate that hits it is dropped.
+- **A `check_mode: :record` failure is reproduced under `:record`.** The report
+  records the run's `check_mode`; `reproduction_command/1` and `replay_command/1`
+  print it when it is not `:halt`, `shrink_further/2` and `mix pd.reshrink`
+  re-shrink under it, and `PropertyDamage.Replay` replays under it (a failing
+  check is the step's result and stepping goes on).
+- **A latency budget's reproduction runs the whole campaign.**
+  `reproduction_command/1` of a `:latency_exceeded` report names the campaign's
+  seed and `max_runs:` (and `latency:` as given, `warmup:` included); every other
+  kind still reproduces one run with `max_runs: 1`.
+- **A report of a run without shrinking names its plan `:generated`.** With
+  `shrink: false` the trace's `plan_source` was `:shrunk`.
+- **The failing index of the run that found the failure is kept.**
+  `failed_at_index` describes the sequence the report carries; when the
+  reproduction failed at another command, `original_failed_at_index` keeps the
+  index in `original_sequence`.
+- **A failed `:startup` check lists and counts no root.** The report's
+  `expansions` and `expansion_counts` listed and counted every root although none
+  ran.
+- **`replay_command/1` names a non-default `compare: [converge_within: ms]`**, as
+  `reproduction_command/1` does, so a pasted replay waits as long as the run did.
+- **Every export names a divergence by its observation.** The curl, Python and
+  Elixir scripts, the ExUnit test and the Livebook notebook raised
+  `Protocol.UndefinedError` on a `{projection, function}` failure name; they now
+  print `Projection.function`, as the report does.
+- **A shrunk export of a model without `expansions/0` binds a value after the
+  step that produces it.** After shrinking dropped an earlier root, a script bound
+  an `external()` value after the step at the producer's old position.
+
+- **A module that is compiled but not loaded yet keeps its callbacks.** A command
+  module lost its `:probe`, `settle:` and `idempotent:` declarations, and an
+  injector was skipped by `RunTrace.capture/1`, when nothing had loaded the module
+  before the run named it. Every reflection on a model, command, projection,
+  adapter or injector module now loads the module first.
+
+- **The reproduction of a found failure emits the found run's `run_number`.**
+  A linear reproduction used to emit `run_number: 0` in its command and check
+  telemetry while a branching one emitted the found run's number. Both now emit
+  the found run's number; shrink attempts keep `0`. The telemetry docs also
+  state that a root command's `index` counts across the whole run.
 
 - **A flaky failure that does not reproduce no longer reports a blank "Unknown
   Failure".** After finding a failing run, `PropertyDamage.run/1` re-executes the
@@ -929,8 +1093,8 @@ end, and trimmed the documented surface to what has been validated.
   with no changes. Identity is per projection: ids are unique within a
   projection and `validates:` resolves locally, checked at compile time
   (duplicate id and dangling `validates:` are `CompileError`s; an invariant with
-  no check warns as statically vacuous). `PropertyDamage.Model.assertion_catalog/1`
-  returns the model-wide catalog keyed `{projection, id}` with each invariant's
+  no check warns as statically vacuous). `Model.assertion_catalog/1` (since renamed
+  `check_catalog/1`) returns the model-wide catalog keyed `{projection, id}` with each invariant's
   checks and per-check kind (`:synchronous` / `:lifecycle` / `:polling`). The
   engine records **per-assertion firing** across the whole run at every
   evaluation site (synchronous `every:`, lifecycle `at:`, async observations,

@@ -35,7 +35,7 @@ defmodule PropertyDamage.Shrinker.Graph do
   - `producers` - Optional producer map `%{{:placeholder, reference()} =>
     non_neg_integer()}` mapping each dependency identity to its producing node
     index. When `nil` (the default), producers are derived from the positions
-    embedded in each command's `%Placeholder{}` structs. That derivation is only
+    embedded in each command's `%Placeholder{}` structs. That default is only
     valid when those embedded positions are current, which holds for the
     original (unshrunk) command list the shrinker feeds this. It does NOT hold
     for a shrunk command list: the shrinker leaves embedded positions at their

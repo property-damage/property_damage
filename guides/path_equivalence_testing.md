@@ -270,7 +270,7 @@ Regenerate the failing variant:
 PropertyDamage.Expansion.for(Counter.Model, 42, 1, "right", max_commands: 10)
 
 Replay the shrunk failure:
-PropertyDamage.run(model: Counter.Model, targets: [...], only: [replay: "property_damage_replays/Model_seed42.replay.exs"])
+PropertyDamage.run(model: Counter.Model, targets: [...], compare: [converge_within: 100], only: [replay: "property_damage_replays/Model_seed42.replay.exs"])
 ```
 
 Read it from the top: the observation `Counter.Projection.total` diverged; the
@@ -315,9 +315,9 @@ replayed: {:diverged, %{index: 1, name: "right"}, :reproduced}
 ```
 
 The replay generates nothing: each target runs the commands the artifact
-records. The call above is the report's last line plus `compare:`. The printed
-call leaves out the run's convergence bound, so pasted as printed it waits the
-default 5 seconds at the failing root before it reports.
+records. The call above is the report's last line. It names the run's
+convergence bound (`compare: [converge_within: 100]`), as the reproduction line
+does, so the replay waits as long as the run did at the failing root.
 
 That is the whole loop: a model that lists equivalent paths, two targets that
 pick independently, one observation, a shrunk divergence that names the path,
@@ -425,13 +425,18 @@ def total(state, _root), do: state.total
 - A function returns `{:pending, reason}` when its target is still catching up
   and will reach a comparable value without a further command (a webhook not
   yet delivered). A pending side is never a disagreement.
+- `use PropertyDamage.Model.Projection` imports its own `@` to read `@compare`,
+  so a projection module cannot also import another `@` macro: the compiler
+  reports the conflict, and a `@compare` read by another `@` is a compile error.
 
 At each scheduled boundary the framework runs the **convergence loop**: it folds
 each target's waiting events, evaluates again, and repeats until the sides
 agree or the **convergence bound** expires. The bound is
 `compare: [converge_within: ms]`, an integer of milliseconds, default 5000. A
 side still pending at the bound fails the run as `:did_not_converge`; ready
-sides that differ fail it as `:diverged`. A divergence waits the full bound
+sides that differ fail it as `:diverged`. When several observations disagree
+at the bound, the first in declaration order names the failure, and the others
+are listed in its detail's `other_keys` and in the printed report. A divergence waits the full bound
 before it is reported, which is why the quickstart sets a short one for a
 counter that answers at once. The convergence bound is not the per-command
 `settle:` wait, which is one system catching up with itself after one adapter
@@ -481,9 +486,11 @@ shrunk report this way:
   The fault is in the implementation or in the observation.
 
 `report.expansion_counts` counts, per target and root module, how often each
-entry ran up to the failure. An entry recorded as `:identity` is a root the
-shrinker moved to run as itself when the model does not list the identity; the
-report prints it as "identity, by shrinking". A run that passes never has one.
+entry ran up to the failure. An entry recorded as `:identity` is a root that
+ran as itself in place of an entry: the shrinker moved it there when the model
+does not list the identity, or the entry realized was one leaf equal to the
+root. The report prints it as "identity, by shrinking". A run that passes has
+one only for an entry realized as one leaf equal to its root.
 
 ## Reproducing a Failure
 
@@ -501,8 +508,14 @@ The report ends with three calls you can paste:
 {:ok, regenerated} =
   PropertyDamage.Expansion.for(Counter.Model, 42, 1, "right", max_commands: 10)
 
-Enum.map(regenerated.choices, & &1.entry)
-#=> ["Add[1]", "Add[1]", "Add[1]", "Add[0]", ...]
+regenerated.choices
+|> Enum.map(& &1.entry)
+|> IO.inspect(label: "entries")
+```
+
+```text
+entries: ["Add[1]", "Add[1]", "Add[1]", "Add[0]", "Add[0]", "Add[0]", "Add[0]", "Add[0]",
+ "Add[1]", "Add[0]"]
 ```
 
    The arguments are the model, the report's `seed`, the run number (1-based)
@@ -522,7 +535,10 @@ It holds the shrunk roots and, per target, the entry and the concrete commands
 it ran at each root. The loader reads it as data and evaluates no code. A
 failing run writes it to `replay_dir:` (default `"property_damage_replays"`)
 as `<model last segment>_seed<seed>.replay.exs`; `replay_dir: false` writes
-none. A command that holds a value no file can hold (a function, a pid) gets
+none. A later failure of the same seed under other `targets:` (or another
+failure) never replaces that file: it is written as
+`<model last segment>_seed<seed>_2.replay.exs` (then `_3`, and so on), and its
+report prints the path it wrote. A command that holds a value no file can hold (a function, a pid) gets
 no artifact, and the report says which field refused.
 
 **Running part of a campaign.** `only: [run: n, variants: names,
@@ -575,8 +591,11 @@ again on `:random`:
     replay_dir: false
   )
 
-report.variant
-#=> %{index: 2, name: "port"}
+IO.inspect(report.variant, label: "variant")
+```
+
+```text
+variant: %{index: 2, name: "port"}
 ```
 
 `legacy` and `port_same_path` run the same commands on two implementations;

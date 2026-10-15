@@ -1,6 +1,6 @@
-defmodule PropertyDamage.Wave1IntegrationTest do
+defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
   @moduledoc """
-  Integration coverage for the "wave-1" executor surface: nemesis fault
+  Integration coverage for the executor surface: nemesis fault
   injection, stutter (idempotency retries), resource pollers (@eventually
   eventual consistency), and mid-execution event injection ("mocks") all in a
   SINGLE Executor.run sequence sharing one event log, projection set, and run
@@ -177,7 +177,7 @@ defmodule PropertyDamage.Wave1IntegrationTest do
       end
 
     assert result.success,
-           "combined wave-1 run failed: #{inspect(result.failure_reason)}"
+           "combined run failed: #{inspect(result.failure_reason)}"
 
     proj = result.projections[Projection]
 

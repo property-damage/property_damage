@@ -93,6 +93,33 @@ defmodule PropertyDamage.LatencyBudgetTest do
     defp notify(_config, _message), do: :ok
   end
 
+  defmodule SlowFixtureAdapter do
+    @moduledoc false
+    # The setup-commands fixture adapter, except that the setup command and
+    # the teardown command each take `@pause_ms` before they answer.
+    use PropertyDamage.Adapter
+
+    alias PropertyDamage.Test.SetupCommands.{Cleanup, CreateUser, FixtureAdapter}
+
+    @pause_ms 400
+
+    def pause_ms, do: @pause_ms
+
+    @impl true
+    defdelegate setup(config), to: FixtureAdapter
+
+    @impl true
+    defdelegate teardown(ctx), to: FixtureAdapter
+
+    @impl true
+    def execute(%module{} = command, ctx, runtime) when module in [CreateUser, Cleanup] do
+      Process.sleep(@pause_ms)
+      FixtureAdapter.execute(command, ctx, runtime)
+    end
+
+    def execute(command, ctx, runtime), do: FixtureAdapter.execute(command, ctx, runtime)
+  end
+
   defp timed(name, config \\ %{}),
     do: {TimedAdapter, name: name, config: Map.merge(%{name: name, test_pid: self()}, config)}
 
@@ -291,8 +318,10 @@ defmodule PropertyDamage.LatencyBudgetTest do
     end
 
     test "max is listed before max_ratio for one statistic" do
-      targets = [timed("ref", %{sleep_ms: 1}), timed("slow", %{sleep_ms: 20})]
-      report = breach!(targets, p50: [max_ratio: @tiny, max: {10, :milliseconds}])
+      # The reference stays far under the absolute bound even on a loaded
+      # machine; only the variant, 3x over it, breaches.
+      targets = [timed("ref", %{sleep_ms: 1}), timed("slow", %{sleep_ms: 150})]
+      report = breach!(targets, p50: [max_ratio: @tiny, max: {50, :milliseconds}])
 
       assert report.variant.index == 1
       assert Failure.detail(report.failure_reason).bound == :max
@@ -342,12 +371,12 @@ defmodule PropertyDamage.LatencyBudgetTest do
   describe "report" do
     @describetag :tmp_dir
 
-    test "a latency report persists at format version 14 and a version-11 file is refused",
+    test "a latency report persists at format version 15 and a version-11 file is refused",
          %{tmp_dir: dir} do
       report = breach!(slow_pair(), p95: [max_ratio: @tiny])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 14::8, _rest::binary>> = binary} = File.read(path)
+      assert {:ok, <<"PD", 15::8, _rest::binary>> = binary} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.kind == :latency_exceeded
@@ -358,7 +387,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
       <<"PD", _version::8, rest::binary>> = binary
       old = Path.join(dir, "old.pd")
       File.write!(old, <<"PD", 11::8, rest::binary>>)
-      assert {:error, {:unsupported_format_version, 11, 14}} = Persistence.load(old)
+      assert {:error, {:unsupported_format_version, 11, 15}} = Persistence.load(old)
     end
   end
 
@@ -487,6 +516,44 @@ defmodule PropertyDamage.LatencyBudgetTest do
 
         assert metrics.by_command |> Map.values() |> Enum.map(& &1.commands) |> Enum.sum() ==
                  stats.total_commands
+      end
+    end
+
+    test "a slow setup or teardown command adds no latency sample" do
+      model =
+        SetupCommands.define_model!(Module.concat(__MODULE__, SlowSetupTeardownModel),
+          commands: [Other, Tick],
+          setup: [{CreateUser, overrides: %{name: "fixture"}}],
+          teardown: [{Cleanup, overrides: %{thing_id: "x"}}]
+        )
+
+      recorder = VariantSupport.start_recorder()
+
+      slow = fn name ->
+        {SlowFixtureAdapter, name: name, config: %{name: name, recorder: recorder}}
+      end
+
+      assert {:ok, stats} =
+               PropertyDamage.run(
+                 model: model,
+                 targets: [slow.("a"), slow.("b")],
+                 compare: [converge_within: 30],
+                 latency: true,
+                 max_runs: 1,
+                 max_commands: 2,
+                 seed: @seed,
+                 shrink: false
+               )
+
+      assert stats.setup_commands == 1
+      assert stats.teardown_commands == 1
+
+      # The roots answer at once, the setup and teardown commands take
+      # `pause_ms` each: a sample from either would put the slowest above it.
+      for name <- ["a", "b"] do
+        metrics = stats.metrics[name]
+        assert metrics.commands == stats.total_commands
+        assert metrics.max < SlowFixtureAdapter.pause_ms() * 1_000
       end
     end
   end

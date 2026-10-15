@@ -118,7 +118,7 @@ defmodule Mix.Tasks.Pd.Audit do
       :error
   end
 
-  # P8 / DR-040: after generation purity, check that projection apply/2 is a pure
+  # DR-040: after generation purity, check that projection apply/2 is a pure
   # function of its inputs (folds each plan twice and compares). Returns :ok /
   # :error so the task's exit status gates CI on either failure.
   defp audit_projection_purity(model, audit_opts) do

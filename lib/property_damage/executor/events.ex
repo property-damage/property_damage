@@ -55,7 +55,7 @@ defmodule PropertyDamage.Executor.Events do
 
   # Process events from command execution.
   #
-  # `fold_counter` is the next per-run fold ordinal (P8 / DR-040): each event
+  # `fold_counter` is the next per-run fold ordinal (DR-040): each event
   # folded here stamps its entry's `fold_index` with the current counter and
   # advances it, so the faithful per-step timeline can replay the exact fold
   # order. Returns `{projections, event_log, fold_counter}`.

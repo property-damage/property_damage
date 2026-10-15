@@ -51,8 +51,10 @@ defmodule Mix.Tasks.Pd.Validate do
   sequences and realizes every target's expansions on each, as a run does
   (without `--targets`, one `expansion: :random` target named after the
   adapter). It prints the seeds it used, every entry key with how often the
-  sample realized it or that it was never realized, the roots forced to
-  identity at every sampled root, and the leaf modules realized. The counts are
+  sample realized it or that it was never realized, how often a root ran as
+  itself because the entry realized was one leaf equal to the root (counted
+  as identity, not under the entry's key), the roots forced to identity at
+  every sampled root, and the leaf modules realized. The counts are
   summed over the targets that pick expansions (`expansion: :random`), and a
   line names them; a `:reference` target copies the first target's choices and
   is not counted again. When no target picks (every target is `:identity` or
@@ -315,6 +317,10 @@ defmodule Mix.Tasks.Pd.Validate do
       end
     end
 
+    for {module, n} <- Enum.sort(sample.identity) do
+      IO.puts("  #{short_module(module)}: identity #{n}, an entry whose one leaf is the root")
+    end
+
     for module <- sample.forced do
       IO.puts("  #{short_module(module)}: forced to identity in every sampled state")
     end
@@ -365,7 +371,7 @@ defmodule Mix.Tasks.Pd.Validate do
 
   defp missing_required_callbacks(model) do
     for callback <- [:commands, :command_sequence_projection],
-        not function_exported?(model, callback, 0) do
+        not PropertyDamage.ModuleCheck.exports?(model, callback, 0) do
       "Model missing required callback #{callback}/0"
     end
   end
@@ -391,7 +397,7 @@ defmodule Mix.Tasks.Pd.Validate do
     errors =
       for {_weight, cmd, _spec} <- commands,
           Code.ensure_loaded?(cmd),
-          not function_exported?(cmd, :generator, 1),
+          not PropertyDamage.ModuleCheck.exports?(cmd, :generator, 1),
           reduce: errors do
         acc -> ["Command #{inspect(cmd)} missing generator/1" | acc]
       end
@@ -407,7 +413,7 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -503,7 +509,7 @@ defmodule Mix.Tasks.Pd.Validate do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -538,7 +544,7 @@ defmodule Mix.Tasks.Pd.Validate do
     state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []

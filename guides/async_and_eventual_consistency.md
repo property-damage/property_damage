@@ -578,6 +578,7 @@ end
 - Injected events update projections **immediately** when injected
 - Injected events are recorded with source `:injected` in the event log
 - For events with `external()` fields, values are captured from the **first** injected event
+  of the external's event module; an injected event of another module never resolves it
 - Events returned from `execute/3` are processed **after** injected events
 - Adapters that ignore the `runtime` handle continue to work unchanged
 

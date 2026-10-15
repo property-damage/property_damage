@@ -1,10 +1,11 @@
 defmodule PropertyDamage.ReplayArtifactLoaderTest do
   # The replay artifact loader reads a file as data: it parses the source and
   # accepts literals only (atoms, booleans, nil, numbers, strings, charlists,
-  # lists, tuples, maps, keyword lists and struct literals of loaded struct
-  # modules). Anything that would run code, and any header or format it does
-  # not know, is refused with a reason naming the node and its line. Nothing
-  # in the file is ever evaluated.
+  # lists, tuples, maps, keyword lists and struct literals of loaded command
+  # modules and of the framework's placeholders). Anything that would run
+  # code, and any header or format it does not know, is refused with a reason
+  # naming the node (and, for a node, its line). Nothing in the file is ever
+  # evaluated.
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Placeholder
@@ -220,7 +221,19 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
           {"a pipe", "[1, 2] |> Enum.reverse()", "|>"},
           {"a sigil", "~w(a b)", "~w"},
           {"a module attribute", "@secret_attribute", "@secret_attribute"},
-          {"a variable", "secret_variable", "secret_variable"},
+          {"a variable", "secret_variable", "secret_variable"}
+        ] do
+      @source source
+      @fragment fragment
+      test "#{name}, naming it and its line" do
+        assert_names(refused(artifact(@source)), [@fragment, "line #{payload_line()}"])
+      end
+    end
+
+    # A struct module the artifact may not name is refused naming the module;
+    # one whose name is no atom at all is refused as an unknown name, with
+    # its line.
+    for {name, source, fragment} <- [
           {"a struct literal of a module that is not loaded",
            "%PropertyDamage.Test.ReplayFixtures.NoSuchModule{n: 1}",
            "PropertyDamage.Test.ReplayFixtures.NoSuchModule"},
@@ -229,8 +242,8 @@ defmodule PropertyDamage.ReplayArtifactLoaderTest do
         ] do
       @source source
       @fragment fragment
-      test "#{name}, naming it and its line" do
-        assert_names(refused(artifact(@source)), [@fragment, "line #{payload_line()}"])
+      test "#{name}, naming it" do
+        assert_names(refused(artifact(@source)), [@fragment])
       end
     end
   end

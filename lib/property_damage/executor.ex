@@ -387,13 +387,21 @@ defmodule PropertyDamage.Executor do
         {:failed, failure, failed_state} -> {{:failed, nil, failure, failed_state}, nil}
       end
 
-    result =
-      ended
-      |> Finalization.finalize_result(linearization)
-      |> Phases.attribute(env.setup_commands)
-
+    result = finalize_or_tear_down(ended, linearization, env, ctx)
     {_state, entries} = Phases.run_teardown(env.teardown_commands, ended_state(ended), ctx)
     %{result | event_log: result.event_log ++ entries}
+  end
+
+  # A raise, throw or exit during finalization still runs the teardown
+  # commands before it propagates, as `teardown/1` runs on that path too.
+  defp finalize_or_tear_down(ended, linearization, env, ctx) do
+    ended
+    |> Finalization.finalize_result(linearization)
+    |> Phases.attribute(env.setup_commands)
+  catch
+    kind, reason ->
+      Phases.run_teardown(env.teardown_commands, ended_state(ended), ctx)
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   defp ended_state({:failed, _index, _reason, state}), do: state
@@ -514,18 +522,7 @@ defmodule PropertyDamage.Executor do
 
   # Initialize all projection states
   defp init_projections(model) do
-    cmd_seq_projection = model.command_sequence_projection()
-
-    check_projections =
-      if function_exported?(model, :check_projections, 0) do
-        model.check_projections()
-      else
-        []
-      end
-
-    all_projections = [cmd_seq_projection | check_projections]
-
-    for projection <- all_projections, into: %{} do
+    for projection <- PropertyDamage.Model.projection_modules(model), into: %{} do
       {projection, projection.init()}
     end
   end
@@ -636,7 +633,7 @@ defmodule PropertyDamage.Executor do
         event_queue
       ) do
     # Only a command that reaches the adapter's execute/3 records a time.
-    state = %{state | last_execute_us: nil}
+    state = %{state | last_execute_us: nil, last_command_index: index}
 
     # The engine attributes a setup command by `{:setup, offset}` (see
     # PropertyDamage.EventLog.Entry, "Phase"); telemetry reports it as the
@@ -723,7 +720,7 @@ defmodule PropertyDamage.Executor do
           command_index: index,
           branch_id: state.branch_id,
           command: command,
-          # P8 / DR-040: seed the fold counter so injected events folded during
+          # DR-040: seed the fold counter so injected events folded during
           # adapter execution take real fold ordinals ahead of the command fold.
           fold_counter: state.fold_counter
         }
@@ -802,6 +799,8 @@ defmodule PropertyDamage.Executor do
         {{result, execute_us}, final_injection_ctx, started_resource_pollers} =
           Runtime.InjectionWindow.run(initial_ctx, build_runtime, execute_fn)
 
+        started_resource_pollers = drop_timed_out_pollers(result, started_resource_pollers)
+
         state = %{state | last_execute_us: execute_us}
 
         # Use injection context state as base (already has injected events applied)
@@ -849,7 +848,7 @@ defmodule PropertyDamage.Executor do
           check_mode: check_mode,
           check_failures: check_failures,
           started_resource_pollers: started_resource_pollers,
-          # P8 / DR-040: the fold counter after any injected events folded during
+          # DR-040: the fold counter after any injected events folded during
           # adapter execution; the command fold continues from here.
           base_fold_counter: final_injection_ctx.fold_counter
         }
@@ -906,6 +905,17 @@ defmodule PropertyDamage.Executor do
   # `events`, and attach that answer as the outcome. A projection that signals a
   # transition-invariant violation by raising is reported as a failure carrying
   # the pre-command state, rather than crashing the run.
+  # A timed-out attempt's Task is shut down, and the resource pollers started
+  # inside it die with it through their link. They leave the active list here,
+  # each stopped first so that none outlives the list. The command has failed,
+  # so the pollers of its earlier settle attempts go too.
+  defp drop_timed_out_pollers({:error, %PropertyDamage.CommandTimeoutError{}}, pollers) do
+    Enum.each(pollers, &ResourcePoller.stop/1)
+    []
+  end
+
+  defp drop_timed_out_pollers(_result, pollers), do: pollers
+
   defp fold_command_events(events, event_ctx) do
     case handle_command_events(events, event_ctx) do
       {:ok, new_state} -> {:ok, new_state, {:ok, events}}
@@ -955,7 +965,7 @@ defmodule PropertyDamage.Executor do
       )
 
     # 5. Update projections with command. Record the command's own fold ordinal
-    #    (P8 / DR-040) keyed by its position, then advance the run counter. Any
+    #    (DR-040) keyed by its position, then advance the run counter. Any
     #    injected events (`runtime.inject.(event)`) already folded during adapter
     #    execution took earlier ordinals, so `base_fold_counter` is the ordinal
     #    of the command fold itself.
@@ -1043,7 +1053,7 @@ defmodule PropertyDamage.Executor do
               ),
             step_count: state.step_count + 1,
             active_resource_pollers: state.active_resource_pollers ++ started_resource_pollers,
-            # P8 / DR-040: persist the advanced fold counter and this command's
+            # DR-040: persist the advanced fold counter and this command's
             # recorded fold ordinal on every outcome path.
             fold_counter: fold_counter,
             command_fold_ordinals: command_fold_ordinals
@@ -1200,7 +1210,7 @@ defmodule PropertyDamage.Executor do
         projections = Events.update_projections(ctx.projections, event)
 
         # 2. Create entry with source :injected, stamping its fold ordinal
-        #    (P8 / DR-040) from the sink's threaded counter.
+        #    (DR-040) from the sink's threaded counter.
         entry =
           Entry.from_injected(event, ctx.command_index, branch_id: ctx.branch_id)
           |> Map.put(:fold_index, ctx.fold_counter)
@@ -1267,16 +1277,7 @@ defmodule PropertyDamage.Executor do
     require Logger
 
     # Get all projections that may have checks
-    cmd_seq_projection = model.command_sequence_projection()
-
-    check_projections =
-      if function_exported?(model, :check_projections, 0) do
-        model.check_projections()
-      else
-        []
-      end
-
-    all_projections = [cmd_seq_projection | check_projections]
+    all_projections = PropertyDamage.Model.projection_modules(model)
 
     result =
       Enum.reduce_while(
@@ -1287,7 +1288,7 @@ defmodule PropertyDamage.Executor do
 
           # Only projections that use PropertyDamage.Model.Projection have __checks__/0
           checks =
-            if function_exported?(projection, :__checks__, 0) do
+            if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
               projection.__checks__()
             else
               []
@@ -1513,7 +1514,7 @@ defmodule PropertyDamage.Executor do
   # The @check at: <phase> checks declared on a projection. Lifecycle
   # checks stay type: :synchronous; the at: phase lives in the trigger spec.
   defp phase_checks(projection, phase) do
-    if function_exported?(projection, :__checks__, 0) do
+    if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
       Enum.filter(projection.__checks__(), fn check ->
         check.type == :synchronous and
           match?(%{type: :at, phase: ^phase}, Map.get(check, :trigger))
@@ -1523,19 +1524,7 @@ defmodule PropertyDamage.Executor do
     end
   end
 
-  # The full projection list a model exposes: the command-sequence projection
-  # plus any check projections.
-  defp projection_modules(model) do
-    check_projections =
-      if function_exported?(model, :check_projections, 0) do
-        model.check_projections()
-      else
-        []
-      end
-
-    [model.command_sequence_projection() | check_projections]
-    |> Enum.uniq()
-  end
+  defp projection_modules(model), do: PropertyDamage.Model.projection_modules(model)
 
   # Legacy wrapper for backward compatibility
   # Maps old check_ctx format to new step_ctx format
@@ -1811,17 +1800,7 @@ defmodule PropertyDamage.Executor do
     if check_mode == :disabled do
       state
     else
-      # Get all projections
-      cmd_seq_projection = model.command_sequence_projection()
-
-      check_projections =
-        if function_exported?(model, :check_projections, 0) do
-          model.check_projections()
-        else
-          []
-        end
-
-      all_projections = [cmd_seq_projection | check_projections]
+      all_projections = PropertyDamage.Model.projection_modules(model)
 
       # For each event, check if any @eventually checks should be spawned.
       # Each spawned poller is paired with its (projection, check name) so
@@ -1832,7 +1811,7 @@ defmodule PropertyDamage.Executor do
         for event <- events,
             event_module = event.__struct__,
             projection <- all_projections,
-            function_exported?(projection, :__checks__, 0),
+            PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0),
             check <- projection.__checks__(),
             check.type == :polling,
             Projection.event_matches_poll_trigger?(check.eventually, event_module) do
@@ -1863,7 +1842,8 @@ defmodule PropertyDamage.Executor do
                 check_name: check.name,
                 command_index: command_index
               },
-              get_state_fn: get_state_fn
+              get_state_fn: get_state_fn,
+              telemetry: state.telemetry
             )
 
           {projection, check.name, poller}
@@ -2083,9 +2063,10 @@ defmodule PropertyDamage.Executor do
     resolved = deep_resolve_placeholders(command, ctx)
     {:ok, resolved}
   rescue
-    e in ArgumentError ->
-      stacktrace = __STACKTRACE__
-      {:error, {e.message, stacktrace}}
+    # The message alone is the reason: the stacktrace is the framework's own
+    # resolution frames, and a failure compared across targets must not
+    # differ by them.
+    e in ArgumentError -> {:error, e.message}
   end
 
   defp deep_resolve_placeholders(%Placeholder{} = p, {registry, _nonce, _epoch}) do

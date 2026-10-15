@@ -84,12 +84,11 @@ of `run/1`. `PropertyDamage.LoadTest` exposes `start/1` (returns
 `{:ok, runner}`), `await/2`, `status/1`, `get_metrics/1`, and `stop/1` over the
 `Runner` process shown in the Quick Start; `run/1` is exactly `start/1` followed
 by `await/2`. `format/2`, `summary/1`, and `save/3` render a report and delegate
-to `PropertyDamage.LoadTest.Report`.
+to the load report module.
 
-`run/1` validates its options against a NimbleOptions schema
-(`PropertyDamage.Options.load_test_schema/0`, the authority for what is
-accepted). The required options are `model`, `targets`, `arrival_rate`, and
-`duration`; everything in [Configuration Options](#configuration-options) below
+`run/1` validates its options against a NimbleOptions schema, the authority
+for what is accepted. The required options are `model`, `targets`,
+`arrival_rate`, and `duration`; everything in [Configuration Options](#configuration-options) below
 is optional.
 
 ## Server-Generated Values (`external()`)

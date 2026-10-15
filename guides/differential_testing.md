@@ -579,7 +579,9 @@ reruns the failure with the exact `targets:` entries (non-default `name:` and
 
 Under `check_mode: :record`, a check failure recorded at an earlier root, or at
 the same root in the same or an earlier target, becomes the primary failure. The
-divergence is not replaced: it is listed in `other_failures`.
+divergence is not replaced: it is listed in `other_failures`. A recorded check
+never keeps the final boundary from being compared, so a divergence there is
+listed too.
 
 ### Failure kinds
 
@@ -609,6 +611,8 @@ With several targets the run keeps an **active set** of targets:
   are finalized, its `:teardown` checks and `teardown/1` run before the next
   root starts, and the other targets go on, compared among themselves.
 - The run stops when no target besides the reference remains.
+- The first check a retired target recorded under `check_mode: :record` is one
+  of the run's failures, at its root, as a finished target's is.
 
 Every run, with or without a retired target, orders its failures by one rule:
 root, then target, then when it happened within that root and target (a check
@@ -703,7 +707,9 @@ in another target breaches `max_ratio:` as infinity; two zeros do not breach.
 Branching sequences run against one target: `branching:` with two or more
 targets is an option error. `PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
 the report's reference target (with its name and config), and
-`PropertyDamage.replay/2` replays any recorded target.
+`PropertyDamage.replay/2` replays any recorded target. `isolate_trigger/2`
+returns `{:error, :not_applicable}` for a divergence or a failure to converge:
+it re-runs one target alone, so no variation can show a comparison failing.
 `PropertyDamage.shrink_further/2` re-shrinks with the report's `targets`,
 `concurrency`, `compare` and `stutter` by default; pass `targets:` (one or
 more entries), `concurrency:` or `compare:` to override. `equivalence:` is
@@ -799,7 +805,8 @@ targets: [
 
 The `mix pd.validate --targets "<list>"` command warns when two targets share the
 same adapter module *and* an identical `config:`, since that usually signals a
-configuration mistake. Fix it by giving each target its own config.
+configuration mistake. `PropertyDamage.run/1` logs the same warning when it runs
+with `validate: true` (the default). Fix it by giving each target its own config.
 
 ### Optional Options
 
@@ -827,7 +834,7 @@ The engine also emits `[:property_damage, :command, :start | :stop]` and
 `[:property_damage, :check, :start | :stop]` telemetry events with
 `variant: %{index, name}` and `run_number`, and
 `[:property_damage, :sequence, :stop]` carries the `variant` the run failed in
-(`nil` when it passed). Shrink attempts and the reproduction use `run_number: 0`.
+(`nil` when it passed). Shrink attempts use `run_number: 0`; the reproduction uses the `run_number` of the run that found the failure.
 Nothing is emitted unless a handler is attached.
 
 ```elixir

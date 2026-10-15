@@ -97,7 +97,7 @@ defmodule PropertyDamage.Variant do
   projections, and checks. Two runs of one seed draw the same values there; two
   variants of one run draw different ones. It does not cover the adapter's
   `execute/3`, which the engine runs in a new Task per command attempt: that
-  Task draws its own entropy, so a value drawn there is not reproduced by the
+  Task draws its own entropy, so a value generated there is not reproduced by the
   seed. Stutter
   decisions use their own generator derived from the run seed (DR-029), passed
   as the executor's `rng_seed`.
@@ -177,6 +177,10 @@ defmodule PropertyDamage.Variant do
     * `:placeholder_registry` (required) - this variant's copy of the registry
       built once per run from `:commands` (and from its leaves)
     * `:seed`, `:run_number` (required) - the campaign seed and the 0-based run
+    * `:run_seed` - the run's effective seed, when `:seed` and `:run_number` do
+      not derive it: a reproduction re-executes a found run under that run's
+      number and its recorded effective seed. Default: derived from `:seed`
+      and `:run_number`.
     * `:run_nonce` - the run nonce for client-minted values (DR-034)
     * `:mint_epoch` - the mint epoch for client-minted values (DR-034); default
       `0`, the exploration run's epoch. A re-execution of the same sequence
@@ -370,7 +374,7 @@ defmodule PropertyDamage.Variant do
     %Target{} = target = Keyword.fetch!(opts, :target)
     seed = Keyword.fetch!(opts, :seed)
     run_number = Keyword.fetch!(opts, :run_number)
-    run_seed = Generator.run_seed(seed, run_number)
+    run_seed = Keyword.get(opts, :run_seed) || Generator.run_seed(seed, run_number)
 
     # Seed before anything can draw: setup/1 is the first adapter call.
     :rand.seed(:exsss, :erlang.phash2({run_seed, target.index}, 4_294_967_296))

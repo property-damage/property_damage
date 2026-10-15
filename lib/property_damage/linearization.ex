@@ -52,7 +52,7 @@ defmodule PropertyDamage.Linearization do
   flagged even though Put-then-Get is a perfectly legal serialization. The fix:
   the executor disables those unsound per-branch checks, and check
   checking moves HERE, where it is evaluated against observed events and the
-  model prediction drawn from one consistent ordering. `check/5` therefore
+  model prediction taken from one consistent ordering. `check/5` therefore
   refutes an execution only when every ordering fails, and its refutation
   carries the specific check (when one is the cause) so the report is as
   precise as the old per-branch path was, without its false positives.
@@ -233,7 +233,7 @@ defmodule PropertyDamage.Linearization do
   def verify_candidate(linearization, observed, initial_projections, model, counters) do
     sim = simulator(model)
     sequence_projection = model.command_sequence_projection()
-    all_projections = [sequence_projection | model_check_projections(model)]
+    all_projections = PropertyDamage.Model.projection_modules(model)
 
     linearization
     |> Enum.reduce_while({initial_projections, counters, 0}, fn {branch_id, position, command},
@@ -276,14 +276,6 @@ defmodule PropertyDamage.Linearization do
     |> case do
       {:refuted, _depth, _refutation} = refuted -> refuted
       {_projections, _counters, _depth} -> :ok
-    end
-  end
-
-  defp model_check_projections(model) do
-    if Code.ensure_loaded?(model) and function_exported?(model, :check_projections, 0) do
-      model.check_projections()
-    else
-      []
     end
   end
 
@@ -333,9 +325,11 @@ defmodule PropertyDamage.Linearization do
     Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       state = Map.get(projections, projection)
 
+      # A lifecycle-boundary check (`@check at:`) fires only at a phase
+      # boundary, never at a step, so it has no place in an ordering's steps.
       checks =
         if Code.ensure_loaded?(projection) and function_exported?(projection, :__checks__, 0) do
-          Enum.filter(projection.__checks__(), &(&1.type == :synchronous))
+          Enum.filter(projection.__checks__(), &step_check?/1)
         else
           []
         end
@@ -346,6 +340,9 @@ defmodule PropertyDamage.Linearization do
       end
     end)
   end
+
+  defp step_check?(check),
+    do: check.type == :synchronous and not match?(%{type: :at}, check.trigger)
 
   defp run_projection_sync_checks(projection, state, checks, ctx, counters) do
     alias PropertyDamage.Model.Projection

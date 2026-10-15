@@ -365,7 +365,7 @@ defmodule PropertyDamage.ExecutorTest do
                result.failure_reason
     end
 
-    test "merged fold ordinals are collision-free and the suffix counts past every branch (P8 / DR-040)" do
+    test "merged fold ordinals are collision-free and the suffix counts past every branch (DR-040)" do
       # Each branch forks from the same prefix fold counter, so without a
       # collision-free merge two branch commands are recorded at the SAME fold
       # ordinal and the merged counter takes max() instead of the sum, letting

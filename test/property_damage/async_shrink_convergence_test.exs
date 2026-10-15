@@ -8,7 +8,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
 
   These are written failing-first against the pre-DR-025 engine: today the
   asynchronous event paths fold events into projection state but never evaluate
-  `@check` checks (the P2 finding), so the overshoot below is undetected and
+  `@check` checks (the original defect), so the overshoot below is undetected and
   the run wrongly succeeds.
   """
   use ExUnit.Case, async: false

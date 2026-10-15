@@ -258,7 +258,7 @@ defmodule PropertyDamage do
 
   A model's fixtures are commands: `c:PropertyDamage.Model.setup_each/0` lists
   the setup commands and `c:PropertyDamage.Model.teardown_each/0` the teardown
-  commands, drawn with each run's sequence. Every target executes them through
+  commands, generated with each run's sequence. Every target executes them through
   the engine, in this order per run: its adapter's `setup/1`, the `@check at:
   :startup` checks, the setup commands, the roots, the final boundary, the
   `@check at: :teardown` checks, the teardown commands, and its adapter's
@@ -449,7 +449,7 @@ defmodule PropertyDamage do
     seed = opts[:seed] || env_int("PD_SEED") || :rand.uniform(1_000_000_000)
 
     # The run nonce seeds ONLY client-minted run-scoped values (mint_per_run).
-    # Its random default is drawn from crypto entropy, NEVER the process RNG:
+    # Its random default comes from crypto entropy, NEVER the process RNG:
     # ExUnit pins :rand under `--seed N`, which would re-mint colliding values.
     # Every target of a run shares it, so all of them receive byte-identical
     # client-minted requests.
@@ -516,6 +516,12 @@ defmodule PropertyDamage do
         if verbose do
           Validation.print_summary(model, target.adapter, warnings)
         end
+      end
+
+      # Targets that share an adapter and a config share the system's state.
+      for warning <- Validation.target_warnings(targets) do
+        require Logger
+        Logger.warning(warning)
       end
     end
 
@@ -656,10 +662,23 @@ defmodule PropertyDamage do
   end
 
   defp load_replay!(path, model, targets) do
+    # The loader builds structs of loaded modules only and never loads one, so
+    # the modules `model:` names are loaded first: the model and the commands
+    # it lists. A leaf module no other command names must be loaded by the
+    # caller.
+    load_model_modules(model)
+
     term =
       case ReplayArtifact.read(path) do
         {:ok, term} ->
           term
+
+        {:error, {:unknown_struct_module, module}} ->
+          raise ArgumentError,
+                "`only: [replay: #{inspect(path)}]`: the replay artifact holds a struct of " <>
+                  "#{inspect(module)}, which is not a loaded command module; an artifact " <>
+                  "holds only the structs of command modules that are already loaded and " <>
+                  "the framework's own placeholders"
 
         {:error, reason} ->
           raise ArgumentError, "`only: [replay: #{inspect(path)}]`: " <> reason
@@ -713,6 +732,17 @@ defmodule PropertyDamage do
       sequence: sequence,
       expansion: ReplayArtifact.expansion(term, sequence)
     }
+  end
+
+  defp load_model_modules(model) do
+    for callback <- [:commands, :setup_each, :teardown_each],
+        PropertyDamage.ModuleCheck.exports?(model, callback, 0),
+        entry <- apply(model, callback, []),
+        module = PropertyDamage.Model.entry_module(entry),
+        not is_nil(module),
+        do: Code.ensure_loaded(module)
+
+    :ok
   end
 
   # The targets that run: every target, or under `only: [variants: names]`
@@ -830,6 +860,8 @@ defmodule PropertyDamage do
         for({other, other_failure} <- rest) do
           %{variant: variant_of(other), root: nil, failure: other_failure}
         end,
+      check_mode: ctx.check_mode,
+      campaign: %{seed: ctx.seed, max_runs: ctx.max_runs},
       latency: ctx.latency,
       metrics: metrics
     )
@@ -895,7 +927,11 @@ defmodule PropertyDamage do
     })
 
     # Coverage and check firings come from the reference target's run (DR-026):
-    # what it executed per root, leaves included.
+    # what it executed per root, leaves included. A shrunk report replaces
+    # this run's firings with its reproduction's, so the firings before it
+    # are kept apart.
+    fires_before = acc.fires
+
     acc =
       case outcome.results do
         [%{} = reference | _] ->
@@ -931,7 +967,13 @@ defmodule PropertyDamage do
         # the entry counts of the runs before it (the report adds the counts
         # of the run it describes, up to that run's failing root).
         ctx = Map.put(ctx, :measured_metrics, campaign_metrics(ctx, acc.samples))
-        handle_failure(ctx, lockstep_found(run, outcome, acc.fires, counts_before))
+
+        handle_failure(
+          ctx,
+          run
+          |> lockstep_found(outcome, acc.fires, counts_before)
+          |> Map.put(:fires_before, fires_before)
+        )
     end
   end
 
@@ -965,6 +1007,8 @@ defmodule PropertyDamage do
 
   # A branching sequence runs on the one target through the linear engine.
   defp run_branching(ctx, run, acc) do
+    fires_before = acc.fires
+
     case execute_branching(ctx, run) do
       {:ok, result} = run_result ->
         Telemetry.sequence_stop(run.start, %{
@@ -985,7 +1029,8 @@ defmodule PropertyDamage do
                teardown_commands: acc.teardown_commands + length(run.sequence.teardown)
            }}
         else
-          handle_failure(ctx, branching_found(ctx, run, run_result, acc.fires))
+          found = branching_found(ctx, run, run_result, acc.fires)
+          handle_failure(ctx, Map.put(found, :fires_before, fires_before))
         end
 
       # Executor.run returns {:error, reason} when the adapter's setup/1
@@ -1122,7 +1167,7 @@ defmodule PropertyDamage do
   end
 
   # The run's sequence: its setup commands and roots from the run seed, then
-  # its teardown commands drawn against the state the roots leave.
+  # its teardown commands generated against the state the roots leave.
   defp generate_one(ctx, run_seed) do
     sequence = Generator.generate_value(ctx.generator, run_seed)
     Generator.teardown_commands(ctx.model, sequence, run_seed)
@@ -1184,6 +1229,19 @@ defmodule PropertyDamage do
     for {{:fired, projection, name}, count} <- counters, into: %{} do
       {{projection, name}, count}
     end
+  end
+
+  # The firings the run a found failure describes fired: its reproduction's,
+  # else the whole-run firings less those of the runs before it.
+  defp run_fires(%{run_fires: fires}), do: fires
+  defp run_fires(found), do: subtract_fires(found.fires, Map.get(found, :fires_before, %{}))
+
+  defp subtract_fires(fires, taken) do
+    for {key, count} <- fires,
+        left = count - Map.get(taken, key, 0),
+        left > 0,
+        into: %{},
+        do: {key, left}
   end
 
   defp merge_fires(acc, new) do
@@ -1588,14 +1646,20 @@ defmodule PropertyDamage do
 
     report =
       case reproduce(ctx, shrunk_sequence, found, fresh_epoch, expansion) do
-        {:reproduced, failure, result, other_failures} ->
-          reproduced = %{
-            found
-            | failure: failure,
+        {:reproduced, failure, result, other_failures, counts} ->
+          # The report describes the reproduction: its compare counts, and
+          # its firings in place of the failing run's.
+          reproduced =
+            Map.merge(found, %{
+              failure: failure,
               result: result,
               other_failures: other_failures,
-              expansion: expansion
-          }
+              expansion: expansion,
+              original_root: found.failure.root,
+              fires: merge_fires(Map.get(found, :fires_before, %{}), counts.fires),
+              run_fires: counts.fires,
+              compare_counts: counts.compare_counts
+            })
 
           failure_report(ctx, reproduced, {:shrunk, shrunk_sequence, fresh_epoch, shrink})
 
@@ -1612,10 +1676,12 @@ defmodule PropertyDamage do
   # the scheduler, a branching one on the one target through the linear engine,
   # each with its own services. For a stutter failure, stutter is forced on
   # with the run's seed so the fresh state carries the reproduced violation
-  # (DR-029). Returns `{:reproduced, failure, result, other_failures}` when its
-  # primary failure has the found failure's signature (kind, name, target),
-  # whatever its other failures, `{:setup_failed, reason}`
-  # when a target's setup failed, else `:not_reproduced`.
+  # (DR-029). Returns `{:reproduced, failure, result, other_failures, counts}`
+  # when its primary failure has the found failure's signature (kind, name,
+  # target), whatever its other failures, where `counts` holds the
+  # reproduction's `compare_counts` and the check `fires` of its reference
+  # target; `{:setup_failed, reason}` when a target's setup failed, else
+  # `:not_reproduced`.
   defp reproduce(ctx, sequence, found, epoch, expansion)
 
   defp reproduce(ctx, %Sequence{branches: nil} = sequence, found, epoch, expansion) do
@@ -1629,7 +1695,8 @@ defmodule PropertyDamage do
         teardown_commands: sequence.teardown,
         placeholder_registry: sequence.registry,
         seed: found.run_seed,
-        run_number: 0,
+        run_number: found.run_number,
+        run_seed: found.run_seed,
         run_nonce: ctx.run_nonce,
         mint_epoch: epoch,
         concurrency: ctx.concurrency,
@@ -1649,7 +1716,7 @@ defmodule PropertyDamage do
         if same_failure?(failure, found.failure),
           do:
             {:reproduced, failure, Enum.at(outcome.results, failure.variant.index),
-             outcome.other_failures},
+             outcome.other_failures, reproduction_counts(outcome)},
           else: :not_reproduced
     end
   end
@@ -1685,8 +1752,13 @@ defmodule PropertyDamage do
             stacktrace: result.stacktrace
         }
 
+        counts = %{
+          compare_counts: Comparison.zero_counts(ctx.model),
+          fires: project_fires(Map.get(result, :check_counters, %{}))
+        }
+
         if same_failure?(failure, found.failure),
-          do: {:reproduced, failure, result, []},
+          do: {:reproduced, failure, result, [], counts},
           else: :not_reproduced
 
       {:error, reason} ->
@@ -1695,6 +1767,18 @@ defmodule PropertyDamage do
       _passed ->
         :not_reproduced
     end
+  end
+
+  # The compare counts of a lockstep reproduction and the check firings of
+  # its reference target (DR-026: firings count what the reference ran).
+  defp reproduction_counts(outcome) do
+    fires =
+      case outcome.results do
+        [%{} = reference | _] -> project_fires(Map.get(reference, :check_counters, %{}))
+        _no_reference -> %{}
+      end
+
+    %{compare_counts: outcome.compare_counts, fires: fires}
   end
 
   # What every target runs when the shrunk sequence is reproduced: the
@@ -1722,11 +1806,13 @@ defmodule PropertyDamage do
       case how do
         :found -> {found.sequence, :generated, 0, %{iterations: 0, time_ms: 0}}
         {:fallback, shrink} -> {found.sequence, :generated, 0, shrink}
-        {:shrunk, sequence, epoch, shrink} -> {sequence, :shrunk, epoch, shrink}
+        # Without shrinking the reproduced sequence is the generated one.
+        {:shrunk, sequence, epoch, shrink} -> {sequence, plan_source(ctx), epoch, shrink}
       end
 
     result = found.result || %{}
     failure = found.failure
+    last_root = last_root(failure, result)
 
     FailureReport.new(
       seed: found.run_seed,
@@ -1745,6 +1831,8 @@ defmodule PropertyDamage do
       mint_epoch: mint_epoch,
       executed: Map.get(result, :executed, %{}),
       failed_at_index: failure.root,
+      original_failed_at_index: Map.get(found, :original_root, failure.root),
+      last_root: last_root,
       failure_reason: failure.reason,
       kind: failure.kind,
       variant: failure.variant,
@@ -1762,23 +1850,34 @@ defmodule PropertyDamage do
       compare: ctx.compare,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
+      check_mode: ctx.check_mode,
       check_fires: found.fires,
+      run_check_fires: run_fires(found),
       other_failures: Enum.map(found.other_failures, &other_failure/1),
       compare_counts: found.compare_counts,
       expansion: report_expansion(ctx, found, shrunk_sequence),
       expansion_counts:
         Expansion.merge_counts(
           found.expansion_counts,
-          Expansion.counts(found.expansion, counted_root(failure))
+          Expansion.counts(found.expansion, last_root)
         ),
       latency: Map.get(ctx, :latency, false),
       metrics: Map.get(ctx, :measured_metrics)
     )
   end
 
-  # The last root the failing run executed: none when a setup command failed.
-  defp counted_root(%{kind: :setup_failed}), do: -1
-  defp counted_root(failure), do: failure.root
+  defp plan_source(%{shrink: false}), do: :generated
+  defp plan_source(_ctx), do: :shrunk
+
+  # The last root the failing run executed: none when a setup command failed,
+  # the failing root, or for a failure at no root (a `:startup` check, the end
+  # of the run) every root when any root executed, else none.
+  defp last_root(%{kind: :setup_failed}, _result), do: -1
+  defp last_root(%{root: nil}, result), do: if(ran_a_root?(result), do: nil, else: -1)
+  defp last_root(failure, _result), do: failure.root
+
+  defp ran_a_root?(result),
+    do: result |> Map.get(:executed, %{}) |> Map.keys() |> Enum.any?(&Sequence.Position.root?/1)
 
   # The concrete sequences of the run the report describes; a branching run
   # ran its one target's roots as generated.
@@ -1975,9 +2074,16 @@ defmodule PropertyDamage do
   ## Returns
 
   - `{:ok, new_failure_report}` - Shrinking succeeded, possibly smaller sequence
-  - `{:error, reason}` - Shrinking failed: `:missing_model_or_adapter` when the
-    report records no model or no target, or the setup `%PropertyDamage.Failure{}`
-    when a target's adapter `setup/1` fails on the re-execution
+  - `{:error, reason}` - Shrinking failed: `:missing_model_or_target` when the
+    report records no model or no target; `{:variant_not_in_targets, name}`
+    when the `targets:` option does not hold the target the report failed in
+    (`name`) at the index it failed at, because it renamed, dropped or moved
+    that target; or the setup `%PropertyDamage.Failure{}` when a target's
+    adapter `setup/1` fails on the re-execution
+
+  An `{:ok, report}` holding the incoming report unchanged means no smaller
+  sequence reproduced the failure (or the report is a `:setup_failed` or
+  `:latency_exceeded` one, which re-shrinking leaves as it is).
 
   ## Example
 
@@ -1996,7 +2102,7 @@ defmodule PropertyDamage do
   def shrink_further(%FailureReport{} = report, opts \\ []) do
     cond do
       is_nil(report.model) or is_nil(FailureReport.reference_target(report)) ->
-        {:error, :missing_model_or_adapter}
+        {:error, :missing_model_or_target}
 
       report.kind in [:setup_failed, :latency_exceeded] ->
         {:ok, report}
@@ -2004,11 +2110,32 @@ defmodule PropertyDamage do
       true ->
         targets = Options.override_targets!(opts, report.targets)
 
-        do_shrink_further(report, targets, opts)
+        # Each target re-runs the roots as the report's run ran them: the
+        # sequence and every target's choices come from the report's replay
+        # term (else from its trace), never from a new draw. A target whose
+        # choices the report does not record raises here.
+        reexecution =
+          ReplayArtifact.reexecution(
+            report,
+            Enum.map(targets, & &1.name),
+            "PropertyDamage.shrink_further/2"
+          )
+
+        if names_failing_target?(targets, report.variant),
+          do: do_shrink_further(report, targets, reexecution, opts),
+          else: {:error, {:variant_not_in_targets, report.variant.name}}
     end
   end
 
-  defp do_shrink_further(report, targets, opts) do
+  # Whether `targets` hold the target the report failed in at the index it
+  # failed at. A candidate counts only when it fails in that target, so
+  # targets that renamed, dropped or moved it could never reproduce it.
+  defp names_failing_target?(_targets, nil), do: true
+
+  defp names_failing_target?(targets, %{index: index, name: name}),
+    do: match?(%{name: ^name}, Enum.at(targets, index))
+
+  defp do_shrink_further(report, targets, {sequence, variants}, opts) do
     strategy = Keyword.get(opts, :strategy, :thorough)
 
     ctx = %{
@@ -2022,18 +2149,9 @@ defmodule PropertyDamage do
       compare: shrink_further_compare(report, opts),
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
-      check_mode: :halt
+      # A `:record` failure re-shrinks under `:record`, as the run found it.
+      check_mode: report.check_mode || :halt
     }
-
-    # Each target re-runs the roots as the report's run ran them: the
-    # sequence and every target's choices come from the report's replay term
-    # (else from its trace), never from a new draw.
-    {sequence, variants} =
-      ReplayArtifact.reexecution(
-        report,
-        Enum.map(targets, & &1.name),
-        "PropertyDamage.shrink_further/2"
-      )
 
     traced = variants && Map.new(variants, fn {name, variant} -> {name, variant.choices} end)
 
@@ -2067,6 +2185,7 @@ defmodule PropertyDamage do
         # A stutter failure re-shrinks with stutter forced on (DR-029), as in
         # the run's own failure path.
         stutter_config: ctx.stutter_config,
+        check_mode: ctx.check_mode,
         config:
           ShrinkerConfig.new(
             max_iterations: strategy_iterations(strategy, opts),
@@ -2088,7 +2207,7 @@ defmodule PropertyDamage do
     # genuine reproduction. A re-execution that passes or fails differently
     # confirms nothing, so the incoming report comes back unchanged.
     case reproduce(ctx, shrink_result.sequence, found, fresh_epoch, shrink_result.expansion) do
-      {:reproduced, failure, result, other_failures} ->
+      {:reproduced, failure, result, other_failures, counts} ->
         elapsed = System.monotonic_time(:millisecond) - start_time
 
         further =
@@ -2098,6 +2217,7 @@ defmodule PropertyDamage do
             original_sequence: report.original_sequence,
             shrunk_sequence: shrink_result.sequence,
             failed_at_index: failure.root,
+            original_failed_at_index: report.original_failed_at_index,
             failure_reason: failure.reason,
             kind: failure.kind,
             variant: failure.variant,
@@ -2118,10 +2238,18 @@ defmodule PropertyDamage do
             targets: Enum.map(targets, &PropertyDamage.Target.to_entry/1),
             concurrency: ctx.concurrency,
             compare: ctx.compare,
-            compare_counts: report.compare_counts,
+            # The compare counts are the reproduction's, and its firings
+            # replace the share the report's own run fired.
+            compare_counts: counts.compare_counts,
+            check_fires:
+              (report.check_fires || %{})
+              |> subtract_fires(Map.get(report, :run_check_fires) || %{})
+              |> merge_fires(counts.fires),
+            run_check_fires: counts.fires,
             other_failures: Enum.map(other_failures, &other_failure/1),
             stutter: ctx.stutter,
             max_commands: report.max_commands,
+            check_mode: ctx.check_mode,
             linearization: Map.get(result, :linearization),
             stacktrace: failure.stacktrace,
             expansion: shrink_result.expansion,
@@ -2820,7 +2948,7 @@ defmodule PropertyDamage do
 
   @doc """
   Audit that a model's projection `apply/2` is a pure function of its inputs
-  (P8 / DR-040).
+  (DR-040).
 
   Companion to `audit/2`: folds each seed's generated plan through every
   projection twice (using the model's simulator to predict events) and names any

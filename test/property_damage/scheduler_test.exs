@@ -56,6 +56,31 @@ defmodule PropertyDamage.SchedulerTest do
     for {:enter, ^name, index} <- recorded(recorder), do: index
   end
 
+  defmodule UnobservedModel do
+    @moduledoc false
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: [Step]
+
+    @impl true
+    def command_sequence_projection, do: Ledger
+  end
+
+  describe "run start" do
+    test "refuses two targets of a model without a boundary observation, before any setup" do
+      recorder = start_recorder()
+      targets = step_targets(["a", "b"], %{recorder: recorder})
+      commands = [%Step{value: 1}]
+
+      assert_raise ArgumentError, ~r/declares no @compare function/, fn ->
+        run_scheduler(run_opts(UnobservedModel, targets, commands, []))
+      end
+
+      assert recorded(recorder) == []
+    end
+  end
+
   describe "concurrency: :serial" do
     test "advances one variant at a time, in target order, boundary by boundary" do
       recorder = start_recorder()

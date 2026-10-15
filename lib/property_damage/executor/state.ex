@@ -63,7 +63,7 @@ defmodule PropertyDamage.Executor.State do
       `Command.awaits/2`. Persists for the rest of the run (a matcher outlives
       the command that declared it) so late injector events still correlate.
       First-registered wins when several match one event.
-    * `:fold_counter` - the next per-run fold ordinal (P8 / DR-040). Every event
+    * `:fold_counter` - the next per-run fold ordinal (DR-040). Every event
       folded into projections stamps its `EventLog.Entry.fold_index` with the
       current value and advances it; every command fold records the current value
       in `:command_fold_ordinals` before advancing. Monotonic across the whole
@@ -78,6 +78,9 @@ defmodule PropertyDamage.Executor.State do
       (a nemesis command, an unresolved placeholder). Written on every command:
       two monotonic clock reads, so a run that ignores it pays nothing
       measurable. `PropertyDamage.Variant` reads it for latency comparison.
+    * `:last_command_index` - the index of the most recent command (`{:setup,
+      offset}` for a setup command); a mock event flushed between commands is
+      attributed to it. `nil` before the first command.
     * `:on_resource_poller_start` - `nil` or a 1-arity function the engine
       calls with each resource poller's pid as soon as `runtime.start_poller`
       started it, before control returns to the adapter. A resource poller is
@@ -99,6 +102,9 @@ defmodule PropertyDamage.Executor.State do
     :command_specs,
     :placeholder_registry
   ]
+  # The state is the whole record of a run in progress, so it holds more
+  # fields than the struct-size check allows.
+  # credo:disable-for-next-line Credo.Check.Warning.StructFieldAmount
   defstruct [
     :model,
     :event_queue,
@@ -129,6 +135,7 @@ defmodule PropertyDamage.Executor.State do
     fold_counter: 0,
     command_fold_ordinals: %{},
     last_execute_us: nil,
+    last_command_index: nil,
     on_resource_poller_start: nil,
     telemetry: nil
   ]
@@ -163,6 +170,7 @@ defmodule PropertyDamage.Executor.State do
           fold_counter: non_neg_integer(),
           command_fold_ordinals: %{term() => non_neg_integer()},
           last_execute_us: non_neg_integer() | nil,
+          last_command_index: non_neg_integer() | {:setup, non_neg_integer()} | nil,
           on_resource_poller_start: (pid() -> term()) | nil,
           telemetry: map() | nil
         }

@@ -1,6 +1,6 @@
 defmodule PropertyDamage.ProjectionPurityTest do
   @moduledoc """
-  P8 / DR-040: the derived per-step state timeline and the projection-purity
+  DR-040: the derived per-step state timeline and the projection-purity
   check, end-to-end through a real `Executor.run` + `FailureReport`.
 
   Done-gates exercised here:

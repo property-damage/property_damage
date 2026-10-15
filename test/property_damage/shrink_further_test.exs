@@ -69,6 +69,37 @@ defmodule PropertyDamage.ShrinkFurtherTest do
     def command_sequence_projection, do: Counter
   end
 
+  # Two targets must have an observation to compare: the count after every
+  # root.
+  defmodule Observed do
+    @moduledoc false
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{count: 0}
+
+    @impl true
+    def apply(state, %Counted{amount: n}), do: %{state | count: state.count + n}
+    def apply(state, _), do: state
+
+    @compare every: 1
+    def count(state, _root), do: state.count
+  end
+
+  defmodule ComparedModel do
+    @moduledoc false
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: [Bump]
+
+    @impl true
+    def command_sequence_projection, do: Counter
+
+    @impl true
+    def check_projections, do: [Observed]
+  end
+
   # Like FailingAdapter, but its setup/1 fails when asked to, so the report's
   # re-execution path in shrink_further exercises the Executor.run error branch.
   defmodule SetupGuardAdapter do
@@ -145,14 +176,38 @@ defmodule PropertyDamage.ShrinkFurtherTest do
     assert length(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(smaller))) == 3
   end
 
-  test "returns {:error, :missing_model_or_adapter} when the model is nil" do
+  test "returns {:error, :missing_model_or_target} when the model is nil" do
     report = report_of_length(8, model: nil)
-    assert {:error, :missing_model_or_adapter} = PropertyDamage.shrink_further(report)
+    assert {:error, :missing_model_or_target} = PropertyDamage.shrink_further(report)
   end
 
-  test "returns {:error, :missing_model_or_adapter} when the report records no target" do
+  test "returns {:error, :missing_model_or_target} when the report records no target" do
     report = report_of_length(8, targets: [])
-    assert {:error, :missing_model_or_adapter} = PropertyDamage.shrink_further(report)
+    assert {:error, :missing_model_or_target} = PropertyDamage.shrink_further(report)
+  end
+
+  describe "targets: that no longer name the failing target at its index" do
+    defp two_target_report do
+      report_of_length(8,
+        model: ComparedModel,
+        targets: [{FailingAdapter, name: "a"}, {FailingAdapter, name: "b"}],
+        variant: %{index: 1, name: "b"}
+      )
+    end
+
+    test "a renamed target is an error naming the failing target" do
+      assert {:error, {:variant_not_in_targets, "b"}} =
+               PropertyDamage.shrink_further(two_target_report(),
+                 targets: [{FailingAdapter, name: "a"}, {FailingAdapter, name: "c"}]
+               )
+    end
+
+    test "reordered targets are an error naming the failing target" do
+      assert {:error, {:variant_not_in_targets, "b"}} =
+               PropertyDamage.shrink_further(two_target_report(),
+                 targets: [{FailingAdapter, name: "b"}, {FailingAdapter, name: "a"}]
+               )
+    end
   end
 
   test "re-execution adapter setup failure surfaces as an error, not a MatchError (A4)" do

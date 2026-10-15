@@ -179,6 +179,12 @@ execution.
 The shrinker respects placeholder dependencies: if command A produces a value consumed by
 command B, command A cannot be removed while B remains in the sequence.
 
+This holds only for references the shrinker can see. Model a reference from one
+command to something another command created as a placeholder with `external()`,
+or guard it with a projection whose `apply/2` raises on an unknown reference. A
+reference held as a plain value survives the removal of the command that created
+it. See [Shrinking and References](debugging_failures.md#shrinking-and-references).
+
 ## Model-Level Wiring
 
 All state-dependent configuration lives in the Model:
@@ -562,8 +568,8 @@ verdict.
 - **Isolation between targets** is the target's `config:`. When two targets share
   one system, the generated values (fixtures included) are shared too, so give
   each target a tenant, an account or a path prefix in its `config:`.
-  `mix pd.validate` warns about two targets that use the same adapter with an
-  identical `config:`.
+  `mix pd.validate`, and `PropertyDamage.run/1` under `validate: true`, warn
+  about two targets that use the same adapter with an identical `config:`.
 - **Once per campaign** has no callback. A once-per-campaign fixture is deferred
   until a model has one too slow to run per run. Until then, make `Adapter.setup/1`
   idempotent, or wrap `PropertyDamage.run/1` in your own function.
@@ -807,8 +813,10 @@ The run stops before any `Adapter.setup/1` when:
   command is not a root), lists a module twice, or lists a root with
   `execution: :probe`;
 - the run passes `branching:` for a model with `expansions/0`;
-- an expansion function has the wrong arity, or raises (the error names the
-  root);
+- an expansion function has the wrong arity, or raises, throws or exits (the
+  error names the root, and a throw or an exit as `{:throw, value}` or
+  `{:exit, reason}`); a leaf's `overrides:` function or generator that raises,
+  throws or exits fails the same way;
 - a leaf module lacks the command callbacks (the error names the root, the entry
   and the leaf), or an `overrides:` map names a key the leaf's struct lacks.
 
@@ -823,8 +831,14 @@ schedules, `max_commands` and `total_commands` count, and the comparison at root
 `r` waits until every target has stepped every leaf of `r`. `terminate_early?/3`
 is consulted after roots only.
 
+An entry that realizes as one leaf equal to its root (a rewrite that changes
+nothing, such as `[{Open, overrides: %{label: label}}]` for an `Open` with only
+a label) runs the root itself, at the root's position, and counts as
+`:identity` rather than under its key; `mix pd.validate --seeds` prints it as
+identity.
+
 The run result and the failure report carry `expansion_counts` (per target and
-root module, the count per entry and `:forced`). A failure report also carries
+root module, the count per entry, `:forced` and `:identity`). A failure report also carries
 `expansions`: per target, one element per root up to the failing root, with the
 entry and the leaf modules. A failure's `failed_at_index` stays the root index.
 
@@ -834,8 +848,9 @@ The shrinker deletes roots and simplifies root arguments, and keeps each
 target's entry for every surviving root. It never deletes or simplifies a leaf
 on its own, and it does not yet replace one entry with another, so a
 reproduction can be larger than the smallest rewrite that fails. A candidate
-whose expansion function raises, or stops offering the carried entry for a
-simplified root, is dropped. `shrink_further/2`, `Replay` and export run what
+whose expansion function (or a leaf's `overrides:` function or generator)
+raises, throws or exits, or stops offering the carried entry for a simplified
+root, is dropped. `shrink_further/2`, `Replay` and export run what
 each target ran, never a new pick. `Analysis.isolate_trigger/2` raises for a
 target that ran leaves.
 

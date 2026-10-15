@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
 
   alias Mix.Tasks.Pd.Reshrink
   alias PropertyDamage.{Executor, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.Test.TmpPath
 
   # The decision logic is exercised through `exec/1`, the halt-free seam: `run/1`
   # only translates `exec/1`'s `:error` status into `System.halt/1` at the
@@ -77,7 +78,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
   end
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "pd_reshrink_test_#{System.unique_integer([:positive])}")
+    dir = TmpPath.unique("pd_reshrink_test")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
     {:ok, dir: dir}
@@ -187,13 +188,13 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
   end
 
   describe "errors" do
-    test "missing model/adapter returns :error with a clean message", %{dir: dir} do
+    test "a missing model or target returns :error with a clean message", %{dir: dir} do
       path = save_failure(dir, 8, model: nil)
 
       {status, output} = with_output(fn -> Reshrink.exec([path]) end)
 
       assert status == :error
-      assert output =~ "does not record a model and adapter"
+      assert output =~ "does not record a model and a target"
     end
 
     test "missing file returns :error with a clean message" do

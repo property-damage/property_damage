@@ -6,12 +6,37 @@ defmodule PropertyDamage.EngineTelemetryTest do
   # filtered out by this module's target names.
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.Test.Lockstep.{GuardedStepModel, StepAdapter, StepModel}
+  alias PropertyDamage.Test.Lockstep.{
+    GuardedStepModel,
+    Ledger,
+    PolledModel,
+    Step,
+    StepAdapter,
+    StepGuard,
+    StepModel
+  }
 
   defmodule Forward do
     def handle_event(event, measurements, metadata, %{pid: pid}) do
       send(pid, {:telemetry, event, measurements, metadata})
     end
+  end
+
+  # Draws the failing value 13 often enough for a campaign to find its first
+  # failure after run 0.
+  defmodule LateFailureModel do
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands do
+      [{Step, overrides: fn _state -> %{value: StreamData.member_of([1, 1, 1, 13])} end}]
+    end
+
+    @impl true
+    def command_sequence_projection, do: Ledger
+
+    @impl true
+    def check_projections, do: [StepGuard]
   end
 
   setup do
@@ -115,6 +140,73 @@ defmodule PropertyDamage.EngineTelemetryTest do
     assert Enum.all?(stops, fn {_m, meta} -> meta.variant == %{index: 0, name: "tel_branch"} end)
   end
 
+  # A command's `index` counts across the whole run: a branching sequence
+  # numbers its prefix, then each branch from the end of the prefix, then the
+  # suffix after every branch command.
+  describe "command index" do
+    alias PropertyDamage.{Executor, Sequence}
+    alias PropertyDamage.Test.Lockstep.Step
+
+    defp indices(sequence, name) do
+      context = PropertyDamage.Telemetry.engine_context(%{index: 0, name: name}, 0)
+
+      assert {:ok, %{success: true}} =
+               Executor.run(sequence, StepModel, StepAdapter,
+                 config: %{name: name},
+                 telemetry: context
+               )
+
+      [:property_damage, :command, :stop]
+      |> collect([name])
+      |> Enum.map(fn {_measurements, meta} -> {meta.phase, meta.index, meta.root_index} end)
+      |> Enum.sort()
+    end
+
+    defp steps(count), do: for(value <- 1..count//1, do: %Step{value: value})
+
+    test "is cumulative across prefix, branches and suffix" do
+      sequence = Sequence.branching(steps(2), [steps(2), steps(1)], steps(2))
+
+      # Both branches start at the index after the prefix; the suffix starts
+      # after all three branch commands.
+      assert indices(sequence, "idx_branch") == [
+               {:root, 0, 0},
+               {:root, 1, 1},
+               {:root, 2, 2},
+               {:root, 2, 2},
+               {:root, 3, 3},
+               {:root, 5, 5},
+               {:root, 6, 6}
+             ]
+    end
+
+    test "is the position in the sequence on the linear path" do
+      assert indices(Sequence.linear(steps(3)), "idx_linear") ==
+               [{:root, 0, 0}, {:root, 1, 1}, {:root, 2, 2}]
+    end
+  end
+
+  test "the reproduction of a failure emits the run number that found it" do
+    assert {:error, report} =
+             run(LateFailureModel, [target("tel_repro")],
+               max_runs: 20,
+               max_commands: 2,
+               seed: 10,
+               replay_dir: false
+             )
+
+    # The failure is first found after run 0; the reproduction is the last
+    # execution of the campaign.
+    assert report.run_number > 0
+
+    run_numbers =
+      [:property_damage, :command, :stop]
+      |> collect(["tel_repro"])
+      |> Enum.map(fn {_measurements, meta} -> meta.run_number end)
+
+    assert List.last(run_numbers) == report.run_number
+  end
+
   test "check stop names the target and the check" do
     assert {:ok, _stats} = run(GuardedStepModel, [target("tel_ca"), target("tel_cb")])
 
@@ -139,6 +231,51 @@ defmodule PropertyDamage.EngineTelemetryTest do
 
     stops = collect([:property_damage, :check, :stop], ["tel_fail"])
     assert Enum.any?(stops, fn {_m, meta} -> meta.passed == false and is_binary(meta.message) end)
+  end
+
+  # Every check event received so far for an `@eventually` check named
+  # `:stepped_is_polled` whose variant is `name`, as `{event, measurements, metadata}`.
+  defp polled_check_events(name, acc \\ []) do
+    receive do
+      {:telemetry, [:property_damage, :check, _] = event, measurements,
+       %{check_name: :stepped_is_polled, variant: %{name: ^name}} = metadata} ->
+        polled_check_events(name, [{event, measurements, metadata} | acc])
+
+      {:telemetry, _event, _measurements, _metadata} ->
+        polled_check_events(name, acc)
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  test "an @eventually check emits check start and stop with the synchronous check's keys" do
+    assert {:ok, _stats} = run(PolledModel, [target("tel_ev", %{poll: :deliver})])
+
+    events = polled_check_events("tel_ev")
+    starts = for {[_, _, :start], _m, meta} <- events, do: meta
+    stops = for {[_, _, :stop], m, meta} <- events, do: {m, meta}
+
+    assert [start_meta | _] = starts
+    assert Enum.sort(Map.keys(start_meta)) == [:check_name, :projection, :run_number, :variant]
+    assert start_meta.projection == PropertyDamage.Test.Lockstep.PolledProjection
+    assert length(stops) == length(starts)
+
+    for {measurements, meta} <- stops do
+      assert is_integer(measurements.duration)
+
+      assert Enum.sort(Map.keys(meta)) ==
+               [:check_name, :message, :passed, :projection, :run_number, :variant]
+
+      assert meta.passed == true
+    end
+
+    assert {:error, _report} =
+             run(PolledModel, [target("tel_ev_never", %{poll: :never})], shrink: false)
+
+    assert Enum.any?(polled_check_events("tel_ev_never"), fn
+             {[_, _, :stop], _m, meta} -> meta.passed == false and is_binary(meta.message)
+             _start -> false
+           end)
   end
 
   test "sequence stop names the failing target, nil for a passing run" do

@@ -256,7 +256,7 @@ defmodule PropertyDamage.Shrinker do
   # Forcing probability 1.0 (keeping the original command filter, comparison, and
   # max_repeats) makes every eligible command stutter on every reproduction, so
   # the violation reproduces regardless of position. Non-stutter failures return
-  # nil so the shrinker re-runs without stutter, exactly as before P4.
+  # nil so the shrinker re-runs without stutter, exactly as it did before stutter was shrinkable.
   defp stutter_repro_config({kind, _name, _variant_index}, %Stutter.Config{} = config)
        when kind in [:idempotency_violation, :stutter_execution_failed] do
     %{config | probability: 1.0, enabled: true}
@@ -277,8 +277,8 @@ defmodule PropertyDamage.Shrinker do
 
   The setup commands are never part of a candidate: no strategy removes,
   reorders or simplifies one, and every attempt executes the sequence's setup
-  commands, with the arguments they were drawn with, before the candidate's
-  roots. The teardown commands are drawn again for every candidate
+  commands, with the arguments they were generated with, before the candidate's
+  roots. The teardown commands are generated again for every candidate
   (`PropertyDamage.Generator.teardown_commands/4`, with `:rng_seed` as the run
   seed), so a teardown command whose `overrides:` names something a root
   created names what this candidate's roots create. The shrunk sequence
@@ -422,10 +422,11 @@ defmodule PropertyDamage.Shrinker do
     # we may act on blindly: the index can be nil (poll timeouts, record
     # mode) or branch-relative (converted branching sequences), so the
     # truncated base must be VERIFIED to still fail before it replaces the
-    # full sequence. The verification is an attempt like any other and counts
-    # whether it reproduces or not.
+    # full sequence. The verification is an attempt like any other: it counts
+    # whether it reproduces or not, and it runs only while the budget lasts.
     shrink_state =
-      if is_integer(failed_at_index) and failed_at_index + 1 < length(commands) do
+      if is_integer(failed_at_index) and failed_at_index + 1 < length(commands) and
+           not exceeded_limits?(shrink_state) do
         truncated = Enum.take(commands, failed_at_index + 1)
         truncated_positions = Enum.take(shrink_state.positions, failed_at_index + 1)
         shrink_state = increment_iterations(shrink_state)
@@ -440,7 +441,7 @@ defmodule PropertyDamage.Shrinker do
     end_time = System.monotonic_time(:millisecond)
 
     # Carry the remapped registry so the shrunk sequence (reported and
-    # replayed) still resolves its externals, and the teardown commands drawn
+    # replayed) still resolves its externals, and the teardown commands generated
     # for its own roots.
     shrunk =
       %{sequence | prefix: shrink_state.commands, branches: nil, suffix: []}
@@ -714,14 +715,18 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
+  # A field whose value is false or nil is a value like any other here:
+  # `shrink_value/1` leaves it as it is, so it is never listed.
   defp simplified_fields(command, generated) do
     for field <- generated || [],
-        value = Map.get(command, field),
-        not holds_placeholder?(value),
-        simplified = shrink_value(value),
+        {value, simplified} <- [simplified_value(Map.get(command, field))],
         simplified != value,
         into: %{},
         do: {field, simplified}
+  end
+
+  defp simplified_value(value) do
+    if holds_placeholder?(value), do: {value, value}, else: {value, shrink_value(value)}
   end
 
   defp holds_placeholder?(%Placeholder{}), do: true
@@ -741,7 +746,11 @@ defmodule PropertyDamage.Shrinker do
   # `root_id` in this candidate to the choices already tried there. A
   # candidate that runs one of the `tried` choices again is not run; one
   # whose expansions cannot be realized (an entry the function no longer
-  # returns for the candidate's state) is invalid and never runs.
+  # returns for the candidate's state) is invalid and never runs. An invalid
+  # candidate still adds what the target runs at `root_id` to `tried` when
+  # the roots up to that one can be realized, so a later entry that runs
+  # the same commands there, the same invalid candidate, is not realized and
+  # counted again.
   defp try_carry(state, name, root_id, carried, tried, kept \\ %{}) do
     carry =
       kept
@@ -754,7 +763,15 @@ defmodule PropertyDamage.Shrinker do
 
     case current_expansion(trial) do
       :invalid ->
-        {:tried, increment_iterations(state), tried}
+        case realized_up_to(trial, name, root_id) do
+          nil ->
+            {:tried, increment_iterations(state), tried}
+
+          realized ->
+            if Enum.any?(tried, &same_choice?(&1, realized)),
+              do: {:tried, state, tried},
+              else: {:tried, increment_iterations(state), [realized | tried]}
+        end
 
       {:ok, expansion} ->
         realized = choice_at(expansion, name, root_id)
@@ -781,6 +798,25 @@ defmodule PropertyDamage.Shrinker do
       state.positions,
       state
     )
+  end
+
+  # What target `name` runs at `root_id` when only the roots up to that one
+  # are realized; nil when even those cannot be. Realizing a root depends on
+  # the roots before it only, so the choice is the one the whole candidate
+  # would run there.
+  defp realized_up_to(state, name, root_id) do
+    count = Enum.find_index(surviving_root_ids(state), &(&1 == root_id)) + 1
+
+    prefix = %{
+      state
+      | commands: Enum.take(state.commands, count),
+        positions: Enum.take(state.positions, count)
+    }
+
+    case current_expansion(prefix) do
+      {:ok, expansion} -> choice_at(expansion, name, root_id)
+      :invalid -> nil
+    end
   end
 
   defp surviving_root_ids(state),
@@ -959,7 +995,9 @@ defmodule PropertyDamage.Shrinker do
               concurrency: state.concurrency,
               compare: state.compare,
               check_mode: state.check_mode,
-              config: state.config,
+              # The converted shrink spends what is left of this shrink's
+              # budget, so the two together stay within it.
+              config: remaining_budget(state),
               failure_reason: reconstruct_failure_reason(state.original_signature),
               variant_index: signature_variant(state.original_signature),
               # Carry stutter reproduction into the converted-linear shrink. The
@@ -1159,18 +1197,24 @@ defmodule PropertyDamage.Shrinker do
     all_commands = Sequence.to_list(state.sequence)
     shrunk_commands = Enum.map(all_commands, &shrink_command_args/1)
 
-    # Rebuild sequence with shrunk commands
-    # This is a simplification - proper implementation would track positions
-    candidate = rebuild_sequence_with_commands(state.sequence, shrunk_commands)
-
-    state = increment_iterations(state)
-
-    # Argument shrinking replaces commands in place, so the structure (and thus
-    # the position tracker) is unchanged.
-    if still_fails_branch?(candidate, state.positions, state) do
-      %{state | sequence: candidate}
-    else
+    # A candidate equal to the sequence is not an attempt, and no attempt
+    # runs once the budget is spent.
+    if shrunk_commands == all_commands or exceeded_limits?(state) do
       state
+    else
+      # Rebuild sequence with shrunk commands
+      # This is a simplification - proper implementation would track positions
+      candidate = rebuild_sequence_with_commands(state.sequence, shrunk_commands)
+
+      state = increment_iterations(state)
+
+      # Argument shrinking replaces commands in place, so the structure (and thus
+      # the position tracker) is unchanged.
+      if still_fails_branch?(candidate, state.positions, state) do
+        %{state | sequence: candidate}
+      else
+        state
+      end
     end
   end
 
@@ -1318,7 +1362,7 @@ defmodule PropertyDamage.Shrinker do
   defp shrink_priority_for_command(_cmd), do: 1
 
   defp resolved_shrink_spec(module) do
-    if function_exported?(module, :command_spec, 1) do
+    if PropertyDamage.ModuleCheck.exports?(module, :command_spec, 1) do
       module.command_spec([])
     else
       PropertyDamage.Command.framework_defaults()
@@ -1447,7 +1491,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   # A candidate as it runs: the sequence's setup commands, the candidate's
-  # roots and registry, and teardown commands drawn for those roots.
+  # roots and registry, and teardown commands generated for those roots.
   defp candidate(%Sequence{} = roots, registry, state) do
     roots
     |> Sequence.with_registry(registry || PlaceholderRegistry.new())
@@ -1455,7 +1499,7 @@ defmodule PropertyDamage.Shrinker do
     |> with_teardown(state)
   end
 
-  # The teardown commands drawn against `sequence`'s roots, with the run seed.
+  # The teardown commands generated against `sequence`'s roots, with the run seed.
   defp with_teardown(%Sequence{} = sequence, state),
     do: Generator.teardown_commands(state.model, sequence, state.rng_seed)
 
@@ -1531,7 +1575,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   # One linear shrink attempt: the candidate, with the sequence's setup
-  # commands and teardown commands drawn for it, on every target through the
+  # commands and teardown commands generated for it, on every target through the
   # scheduler, which sets each target up and tears it down. Returns
   # `{:failed, reason, variant_index, root}`, `:setup_failed` when any target's
   # setup failed (never a reproduction), `:invalid` when the candidate's
@@ -1645,7 +1689,15 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
+  # A branching candidate the model rejects (see "Invalid Candidates" in the
+  # moduledoc) never runs, as on the linear path: its commands, in reading
+  # order, go through the same validation.
   defp still_fails_branch?(sequence, positions, state) do
+    valid_candidate?(Sequence.to_list(sequence), state) and
+      runs_failing_branch?(sequence, positions, state)
+  end
+
+  defp runs_failing_branch?(sequence, positions, state) do
     # Regenerate idempotency keys to ensure fresh SUT state
     sequence = regenerate_sequence_idempotency_keys(sequence)
 
@@ -1736,6 +1788,17 @@ defmodule PropertyDamage.Shrinker do
 
     state.iterations >= state.config.max_iterations or
       elapsed >= state.config.max_time_ms
+  end
+
+  # The config with what is left of the state's iteration and time budget.
+  defp remaining_budget(state) do
+    elapsed = System.monotonic_time(:millisecond) - state.start_time
+
+    %{
+      state.config
+      | max_iterations: max(state.config.max_iterations - state.iterations, 0),
+        max_time_ms: max(state.config.max_time_ms - elapsed, 0)
+    }
   end
 
   defp increment_iterations(state) do

@@ -15,6 +15,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
   alias PropertyDamage.Progress
   alias PropertyDamage.Progress.{ReplayUpdate, RunUpdate}
   alias PropertyDamage.SeedLibrary
+  alias PropertyDamage.Test.TmpPath
 
   @switch {__MODULE__.Switchable, :mode}
 
@@ -142,10 +143,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
 
   defp tmp_path(name) do
     path =
-      Path.join(
-        System.tmp_dir!(),
-        "pd_replay_#{name}_#{System.unique_integer([:positive])}.json"
-      )
+      TmpPath.unique("pd_replay_#{name}") <> ".json"
 
     on_exit(fn -> File.rm(path) end)
     path

@@ -51,7 +51,7 @@ Projections SHALL receive both commands and events through their `apply/2` callb
 
 Projections SHALL support synchronous checks decorated with the `@check` module attribute. Triggered checks run immediately when their condition is met. Check functions take two arguments: the current projection state and the command or event that triggered the check.
 
-A `@check every:` check fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously — a resource-poller or injector-adapter event, a mock-service event, or a nemesis event — is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for checks that should fire only after commands.
+A `@check every:` check fires on **every observed event** regardless of how the event reached the run, not only on a command's own returned events (DR-025). An event observed asynchronously (a resource-poller or injector-adapter event, a mock-service event, or a nemesis event) is matched by `every:` exactly as a command's own event is, on its `step_type` (`:event`) and module. The `every: :command` form is the opt-out for checks that should fire only after commands.
 
 #### Scenario: Trigger every step
 - **WHEN** a check is decorated with `@check every: 1`
@@ -191,6 +191,10 @@ A boundary observation MAY return `{:pending, reason}` when its target will reac
 - **WHEN** `@compare` precedes a later clause of a function that already carries one
 - **THEN** compilation fails with a message naming the function
 
+#### Scenario: A @compare that another @ macro handles is a compile error
+- **WHEN** a projection module imports another `@/1` macro than the one `use PropertyDamage.Model.Projection` imports, or sets `@compare` through another `@/1`
+- **THEN** compilation SHALL fail: the compiler reports the conflicting import, and a `@compare` set as a plain module attribute fails with an error naming the module and `@compare`, so an observation is never dropped silently
+
 #### Scenario: A misplaced @compare is a compile error
 - **WHEN** `@compare` precedes a private function, a function of another arity, `init/0` or `apply/2`, is combined with `@check` or `@eventually`, is repeated on one function, or has no function after it
 - **THEN** compilation fails with a message naming the problem
@@ -280,7 +284,7 @@ The framework SHALL detect checks at compile time using an `@on_definition` hook
 
 ### Requirement: Invariant Declaration and Linking via @invariant and validates: (DR-026)
 
-A check validates a named **invariant** — a first-class entity with a stable `id`, a human-readable `name` defaulting to `id`, and an optional `description`, represented by `%PropertyDamage.Invariants.Invariant{}` and built by `Invariant.new!/1`. A projection MAY declare invariants centrally with an accumulating `@invariant` module attribute whose value is the `new!/1` keyword list, and a check links to one with `validates: :id` on `@check`/`@eventually` or declares one inline with `id:` (plus optional `description:`). Invariant identity is scoped per projection: `id`s SHALL be unique within a projection and `validates:` SHALL resolve within the same projection. Invariant metadata SHALL be accessible via `__invariants__/0` returning a map of `id` to `%Invariant{}`. There is no `:kind` field on the struct; safety-versus-liveness is a property of a check, surfaced in the catalog.
+A check validates a named **invariant**: a first-class entity with a stable `id`, a human-readable `name` defaulting to `id`, and an optional `description`, represented by `%PropertyDamage.Invariants.Invariant{}` and built by `Invariant.new!/1`. A projection MAY declare invariants centrally with an accumulating `@invariant` module attribute whose value is the `new!/1` keyword list, and a check links to one with `validates: :id` on `@check`/`@eventually` or declares one inline with `id:` (plus optional `description:`). Invariant identity is scoped per projection: `id`s SHALL be unique within a projection and `validates:` SHALL resolve within the same projection. Invariant metadata SHALL be accessible via `__invariants__/0` returning a map of `id` to `%Invariant{}`. There is no `:kind` field on the struct; safety-versus-liveness is a property of a check, surfaced in the catalog.
 
 #### Scenario: Central declaration
 - **WHEN** a projection declares `@invariant id: :balance_nonneg, description: "Balance never drops below zero"`

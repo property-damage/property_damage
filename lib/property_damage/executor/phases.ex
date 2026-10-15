@@ -22,6 +22,7 @@ defmodule PropertyDamage.Executor.Phases do
 
   alias PropertyDamage.Executor.Stepping
   alias PropertyDamage.Failure
+  alias PropertyDamage.Placeholder
   alias PropertyDamage.PlaceholderRegistry
   alias PropertyDamage.Sequence.Position
 
@@ -124,6 +125,17 @@ defmodule PropertyDamage.Executor.Phases do
       {{:setup, attributed}, _outcome} ->
         check_failure(commands, attributed, failure)
 
+      # A placeholder that an earlier setup command should have produced and
+      # did not: the failure belongs to that producer, not to this consumer.
+      {_index, :not_called} ->
+        case unresolved_producer(command, failed.placeholder_registry) do
+          nil ->
+            Failure.setup_failed(:command, command: command, setup_index: offset, detail: failure)
+
+          placeholder ->
+            unresolved_failure(commands, placeholder)
+        end
+
       {:unset, {:raised, exception}} ->
         Failure.setup_failed(:command, command: command, setup_index: offset, detail: exception)
 
@@ -174,19 +186,52 @@ defmodule PropertyDamage.Executor.Phases do
         {:ok, state}
 
       [placeholder | _] ->
-        offset = placeholder.position.offset
-
-        reason =
-          Failure.setup_failed(:unresolved_placeholder,
-            command: command_at(commands, offset),
-            setup_index: offset,
-            field: placeholder.path,
-            detail: placeholder
-          )
-
-        failed(reason, state)
+        failed(unresolved_failure(commands, placeholder), state)
     end
   end
+
+  defp unresolved_failure(
+         commands,
+         %Placeholder{position: %Position{offset: offset}} = placeholder
+       ) do
+    Failure.setup_failed(:unresolved_placeholder,
+      command: command_at(commands, offset),
+      setup_index: offset,
+      field: placeholder.path,
+      detail: placeholder
+    )
+  end
+
+  # The first placeholder `command` holds that a setup command produces and
+  # that is still unresolved, in setup order.
+  defp unresolved_producer(_command, nil), do: nil
+
+  defp unresolved_producer(command, registry) do
+    command
+    |> placeholder_ids()
+    |> Enum.map(&PlaceholderRegistry.get(registry, &1))
+    |> Enum.filter(fn
+      %Placeholder{position: %Position{section: :setup}} = p -> not Placeholder.resolved?(p)
+      _other -> false
+    end)
+    |> Enum.sort_by(&{&1.position.offset, &1.event_index, &1.path})
+    |> List.first()
+  end
+
+  defp placeholder_ids(%Placeholder{id: id}), do: [id]
+
+  defp placeholder_ids(%{__struct__: _} = struct),
+    do: struct |> Map.from_struct() |> placeholder_ids()
+
+  defp placeholder_ids(map) when is_map(map),
+    do: map |> Enum.sort() |> Enum.flat_map(fn {_key, value} -> placeholder_ids(value) end)
+
+  defp placeholder_ids(list) when is_list(list), do: Enum.flat_map(list, &placeholder_ids/1)
+
+  defp placeholder_ids(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> placeholder_ids()
+
+  defp placeholder_ids(_value), do: []
 
   defp failed(reason, state), do: {:failed, reason, %{state | async_failed_index: :unset}}
 

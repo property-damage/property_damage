@@ -165,7 +165,7 @@ defmodule PropertyDamage.Suggestions.Analyzer do
     |> Enum.flat_map(fn projection ->
       Code.ensure_loaded?(projection)
 
-      if function_exported?(projection, :__checks__, 0) do
+      if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
         projection.__checks__()
         |> Enum.map(fn check ->
           Map.put(check, :projection, projection)

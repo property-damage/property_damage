@@ -17,7 +17,7 @@ The system SHALL save and load failure reports to `.pd` files using Erlang term 
 - **WHEN** a failure report is saved to a directory
 - **THEN** the system SHALL write a `.pd` file containing a version header, the Erlang term-encoded `FailureReport` struct, and a checksum for integrity verification
 - **AND** the filename SHALL follow the pattern `{timestamp}-{failure_type}-{check_name}-seed{seed}.pd`
-- **AND** the version header SHALL record the current format version (`14`, since the report carries `run`, `replay`, `replay_path` and `replay_status`, and an expansion entry may be `:identity` (DR-050); version `13` added `expansions`, `expansion_counts` and the trace's `expansion` (DR-049); version `12` added `latency` and `metrics` (DR-047); version `11` added `setup_commands` and `teardown_commands` and the sequence's setup and teardown sections (DR-048); version `10` added `compare`, `compare_counts` and `other_failures` in place of `equivalence` and a divergence holds the `@compare` key, the two values and the mismatch — DR-046; the report carries `kind`, `variant`, `targets` and `concurrency` in place of `adapter` — DR-045; the persisted vocabulary is the check vocabulary: `%Failure.Check{}` and `check_fires` — DR-042; a report's `failure_reason` is a nested `%PropertyDamage.Failure{}` and the six denormalized failure fields are gone — DR-041; event-log entries carry a `fold_index` and the trace carries `command_fold_ordinals` + verified `linearization` for the derived per-step state timeline — DR-040; positions are `%Sequence.Position{}` structs — DR-039; the report composes a `RunTrace` — DR-033), which tracks the `FailureReport` struct shape
+- **AND** the version header SHALL record the current format version (`15`, since the report carries `check_mode`, `campaign`, `original_failed_at_index` and `run_check_fires` (the check firings of the run the report describes), and a report lacking `run`, `replay`, `replay_path` or `check_mode` is refused; version `14` added `run`, `replay`, `replay_path` and `replay_status`, and an expansion entry may be `:identity` (DR-050); version `13` added `expansions`, `expansion_counts` and the trace's `expansion` (DR-049); version `12` added `latency` and `metrics` (DR-047); version `11` added `setup_commands` and `teardown_commands` and the sequence's setup and teardown sections (DR-048); version `10` added `compare`, `compare_counts` and `other_failures` in place of `equivalence` and a divergence holds the `@compare` key, the two values and the mismatch, DR-046; the report carries `kind`, `variant`, `targets` and `concurrency` in place of `adapter`, DR-045; the persisted vocabulary is the check vocabulary: `%Failure.Check{}` and `check_fires`, DR-042; a report's `failure_reason` is a nested `%PropertyDamage.Failure{}` and the six denormalized failure fields are gone, DR-041; event-log entries carry a `fold_index` and the trace carries `command_fold_ordinals` + verified `linearization` for the derived per-step state timeline, DR-040; positions are `%Sequence.Position{}` structs, DR-039; the report composes a `RunTrace`, DR-033), which tracks the `FailureReport` struct shape
 
 #### Scenario: Save with custom filename
 
@@ -63,24 +63,30 @@ The system SHALL include version metadata in persisted files and warn when loadi
 - **WHEN** a `.pd` file references a dependency not present in the current environment
 - **THEN** the system SHALL return a `{:dependency_missing, dep, saved_version}` warning
 
-#### Scenario: Pre-v14 format versions are refused
+#### Scenario: Pre-v15 format versions are refused
 
-- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1` through `13`) is loaded
-- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 14}}` without attempting to decode the payload
-- **AND** the system SHALL NOT synthesize the missing data: a v13 file stores neither the report's `run` nor its replay artifact (`replay`, `replay_path`, `replay_status`), which every re-execution path reads (DR-050); a v12 file stores neither the report's `expansions` and `expansion_counts` nor the trace's `expansion`, the concrete leaves each target ran (DR-049); a v11 file stores neither the run's `latency:` option nor the latency `metrics` (DR-047); a v10 file has no `setup_commands` or `teardown_commands`, which v11 adds so a report reproduces without re-drawing them (DR-048); a v9 file stores the report's `equivalence` and a `Failure.Divergence` holding `reference_result` and `divergent_result`, which v10 replaced with `compare`, `compare_counts`, `other_failures` and a divergence holding the `@compare` key, the two values and the mismatch (DR-046); older files predate the `kind`, `variant` and `targets` fields (DR-045), the `%Failure.Check{}` and `check_fires` names (DR-042) and the nested `%Failure{}` shape (DR-041). There is no honest in-place upgrade, so the user re-captures the failure under the current version (the framework is unpublished and such files exist only as regenerable test fixtures)
+- **WHEN** a `.pd` (or `.pdtrace`) file written under an earlier format version (`1` through `14`) is loaded
+- **THEN** the system SHALL return `{:error, {:unsupported_format_version, version, 15}}` without attempting to decode the payload
+- **AND** the system SHALL NOT synthesize the missing data: a v14 file stores neither the run's `check_mode` a reproduction reuses, nor the `campaign` a latency budget was judged over, nor the `original_failed_at_index`; a v13 file stores neither the report's `run` nor its replay artifact (`replay`, `replay_path`, `replay_status`), which every re-execution path reads (DR-050); a v12 file stores neither the report's `expansions` and `expansion_counts` nor the trace's `expansion`, the concrete leaves each target ran (DR-049); a v11 file stores neither the run's `latency:` option nor the latency `metrics` (DR-047); a v10 file has no `setup_commands` or `teardown_commands`, which v11 adds so a report reproduces without re-drawing them (DR-048); a v9 file stores the report's `equivalence` and a `Failure.Divergence` holding `reference_result` and `divergent_result`, which v10 replaced with `compare`, `compare_counts`, `other_failures` and a divergence holding the `@compare` key, the two values and the mismatch (DR-046); older files predate the `kind`, `variant` and `targets` fields (DR-045), the `%Failure.Check{}` and `check_fires` names (DR-042) and the nested `%Failure{}` shape (DR-041). There is no honest in-place upgrade, so the user re-captures the failure under the current version (the framework is unpublished and such files exist only as regenerable test fixtures)
 
 #### Scenario: A report carries the concrete leaves each target ran (DR-049)
 
-- **WHEN** a failure report from a run of a model with `expansions/0` is saved at version 14
+- **WHEN** a failure report from a run of a model with `expansions/0` is saved at version 15
 - **THEN** the file SHALL carry `expansions` (per target name, one element per executed root: the root index, the entry key and the leaf modules), `expansion_counts` (per target name and root module, the count per entry key and `:forced`) and the trace's `expansion` (per target name, the choice at every root with its leaves and aliases)
 - **AND** a loaded report SHALL let `Replay`, `shrink_further/2` and export run what each target ran without picking again
 
 #### Scenario: A report carries its replay artifact (DR-050)
 
-- **WHEN** a failure report is saved at version 14
+- **WHEN** a failure report is saved at version 15
 - **THEN** the file SHALL carry `run`, `replay` (the artifact term, `{:refused, where}` or `nil`), `replay_path` and `replay_status`
 - **AND** a loaded report SHALL let `shrink_further/2`, `Replay`, `Analysis.isolate_trigger/2` and export run what each target ran without a draw
 - **AND** the `.pdtrace` format SHALL share the version number
+
+#### Scenario: A report carries its run options and the original failing index
+
+- **WHEN** a failure report is saved at version 15
+- **THEN** the file SHALL carry `check_mode` (the run's `check_mode:`), `campaign` (`%{seed:, max_runs:}` for a `:latency_exceeded` report, `nil` otherwise) and `original_failed_at_index`
+- **AND** a version-15 file whose report lacks `run`, `replay`, `replay_path` or `check_mode` SHALL be refused with `{:error, {:missing_field, field}}`, never loaded with a drift warning
 
 #### Scenario: A report carries the comparison record and the latency record
 
@@ -95,13 +101,13 @@ The system SHALL include version metadata in persisted files and warn when loadi
 - **THEN** it SHALL write `kind`, `variant`, `targets`, `compare`, `compare_counts` and `other_failures`
 - **AND** it SHALL NOT write `adapter` or `equivalence`
 
-> This supersedes the version `13` requirement of DR-049: version `14` (DR-050) is now current and versions `1`-`13` are refused. The step from `13` adds the report's `run`, `replay`, `replay_path` and `replay_status`, and the entry value `:identity`. It also carries forward the earlier supersessions of the tolerant-loading / trace-synthesis rules.
+> Version `15` is now current and versions `1`-`14` are refused. The step from `14` adds the report's `check_mode`, `campaign`, `original_failed_at_index` and `run_check_fires`, and refuses a report lacking `run`, `replay`, `replay_path` or `check_mode`. It supersedes the version `14` requirement of DR-050, whose step from `13` added the report's `run`, `replay`, `replay_path` and `replay_status`, and the entry value `:identity`. It also carries forward the earlier supersessions of the tolerant-loading / trace-synthesis rules.
 
 ### Requirement: Replay Artifact File (DR-050)
 
-A failing run SHALL write a replay artifact as a second persisted format, beside the `.pd` file's binary encoding. The artifact SHALL be one Elixir source file, named `<model last name segment>_seed<seed>.replay.exs`, holding one literal term after the header line `# PropertyDamage replay artifact, format 1`. The term SHALL hold `format`, `model`, `seed`, `run`, `targets` (names in order with their `expansion:`, the reference first), `failure` (the kind, name, variant index and root index as data), `prefix`, `roots` (with their ids) and `choices` (per target name, per root: `root_id`, `entry`, `commands`, `aliases`). The artifact SHALL NOT hold the failure's exception or mismatch, the teardown commands or a timestamp, and two writes of the same failure SHALL produce the same bytes. The file's format number is independent of the `.pd` version.
+A failing run SHALL write a replay artifact as a second persisted format, beside the `.pd` file's binary encoding. The artifact SHALL be one Elixir source file, named `<model last name segment>_seed<seed>.replay.exs`, holding one literal term after the header line `# PropertyDamage replay artifact, format 1`. The term SHALL hold `format`, `model`, `seed`, `run`, `targets` (names in order with their `expansion:`, the reference first), `failure` (the kind, name, variant index and root index as data), `prefix`, `roots` (with their ids) and `choices` (per target name, per root: `root_id`, `entry`, `commands`, `aliases`). The artifact SHALL NOT hold the failure's exception or mismatch, the teardown commands or a timestamp, and two writes of the same failure SHALL produce the same bytes. A write SHALL replace the file only when it records the same failure (kind, name and failing target) under the same targets, or does not read as an artifact; when the file records another failure or other targets, the run SHALL write `<model last name segment>_seed<seed>_<k>.replay.exs` with the smallest `k` from 2 whose file is free, records the same failure or does not read as an artifact, and the report's `replay_path` and footer SHALL name the file written. The file's format number is independent of the `.pd` version.
 
-The loader SHALL read the file as data: it SHALL parse the source with `Code.string_to_quoted/2` and accept only literals (atoms, booleans, `nil`, numbers, strings, charlists, lists, tuples, maps and `%Module{}` literals whose module is loaded and is a struct). It SHALL NOT evaluate the source and SHALL NOT decode an Erlang binary. It SHALL refuse a call, capture, function, pipe, sigil, module attribute, variable or second term, naming the node and its line, and it SHALL refuse a missing header, a header for another format, and a term whose `format` disagrees with the header, naming both.
+The loader SHALL read the file as data: it SHALL parse the source with `Code.string_to_quoted/2` with `existing_atoms_only: true` and accept only literals (atoms, booleans, `nil`, numbers, strings, charlists, lists, tuples, maps and `%Module{}` literals). It SHALL create no atom: an atom (or a module name) the running system does not know SHALL be refused, naming it. It SHALL load no module: a `%Module{}` literal in a command's own place (an element of `prefix`, a root's `command`, an element of a choice's `commands`) SHALL be accepted only when `Module` was loaded before the loader ran and is a command module (it exports `generator/1`) or `PropertyDamage.Placeholder` or `PropertyDamage.Sequence.Position`; a `%Module{}` literal anywhere else, at any depth of a command's fields, SHALL be accepted when `Module` was loaded before the loader ran and defines a struct; any other SHALL be refused with `{:error, {:unknown_struct_module, Module}}`, and `only: [replay: path]` SHALL raise `ArgumentError` naming the module before any target is set up. It SHALL NOT evaluate the source and SHALL NOT decode an Erlang binary. It SHALL refuse a call, capture, function, pipe, sigil, module attribute, variable or second term, naming the node and its line, and it SHALL refuse a missing header, a header for another format, and a term whose `format` disagrees with the header, naming both.
 
 #### Scenario: The same failure writes the same file
 
@@ -114,6 +120,24 @@ The loader SHALL read the file as data: it SHALL parse the source with `Code.str
 - **GIVEN** an artifact whose term holds a function call
 - **WHEN** `only: [replay: path]` loads it
 - **THEN** the loader SHALL refuse it naming the call and its line, and no code SHALL run
+
+#### Scenario: A failure of the same seed under other targets keeps the first file
+
+- **GIVEN** an artifact a failure of seed S wrote at `dir/Model_seedS.replay.exs`
+- **WHEN** another failure of seed S under other `targets:` writes into `dir`
+- **THEN** it SHALL write `dir/Model_seedS_2.replay.exs`, leave the first file's bytes unchanged, and its report SHALL name the second path
+
+#### Scenario: The loader creates no atom and loads no module
+
+- **GIVEN** an artifact naming an atom the running system does not know, or a struct literal of a module on the code path that is not loaded (as a command or inside a command's field), or of a loaded module that is not a command (such as `%URI{}`) as a command
+- **WHEN** it is loaded
+- **THEN** the loader SHALL refuse it naming the atom or the module, no atom SHALL be created and the module SHALL stay unloaded
+
+#### Scenario: A command field holds a struct of a loaded module
+
+- **GIVEN** an artifact whose command has a field holding a `%Date{}`, directly or inside a list or map
+- **WHEN** it is loaded
+- **THEN** the loader SHALL return the command with the `Date` in that field
 
 #### Scenario: A header for another format is refused
 

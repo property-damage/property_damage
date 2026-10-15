@@ -111,7 +111,7 @@ defmodule PropertyDamage.Export.StepPlan do
       report.setup_commands ++ Enum.map(root_steps, & &1.command) ++ report.teardown_commands
 
     var_map = placeholder_var_map(commands)
-    extractions = producer_extractions(commands, aliases(choices))
+    extractions = producer_extractions(commands, producers(report, choices))
     root_ids = Map.new(choices || [], &{&1.root, &1.root_id})
     resolve = &resolved(&1, adapter, var_map, extractions, root_ids)
 
@@ -253,7 +253,7 @@ defmodule PropertyDamage.Export.StepPlan do
   defp get_http_spec(_command, nil), do: nil
 
   defp get_http_spec(command, adapter) do
-    if function_exported?(adapter, :http_spec, 2) do
+    if PropertyDamage.ModuleCheck.exports?(adapter, :http_spec, 2) do
       adapter.http_spec(command, %{})
     else
       nil
@@ -310,11 +310,24 @@ defmodule PropertyDamage.Export.StepPlan do
 
   defp generated_position(%Step{position: position}, _root_ids), do: position
 
-  # Every root placeholder the reference aliased to a leaf placeholder.
-  defp aliases(nil), do: %{}
+  # Where each placeholder is produced when that is not its own position, by
+  # id: for a model with expansions, every root placeholder the reference
+  # aliased to a leaf placeholder (as `{:alias, leaf_id}`); for a model
+  # without, the position its producer holds in the reported sequence, which
+  # a shrunk sequence moves (as `{:at, position}`).
+  defp producers(_report, [_ | _] = choices) do
+    for choice <- choices, {id, leaf_id} <- choice.aliases, into: %{}, do: {id, {:alias, leaf_id}}
+  end
 
-  defp aliases(choices),
-    do: Enum.reduce(choices, %{}, fn choice, acc -> Map.merge(acc, choice.aliases) end)
+  defp producers(report, _no_choices) do
+    case FailureReport.shrunk_sequence(report) do
+      %PropertyDamage.Sequence{registry: %{producer_link: link}} ->
+        for {position, ids} <- link, id <- ids, into: %{}, do: {id, {:at, position}}
+
+      _none ->
+        %{}
+    end
+  end
 
   # ============================================================================
   # Placeholder Wiring (DR-021)
@@ -345,23 +358,25 @@ defmodule PropertyDamage.Export.StepPlan do
     |> Map.new(fn {ph, name} -> {ph.id, name} end)
   end
 
-  # Map from a producing command's generated position to the
-  # `[{placeholder, var_name}]` it must extract from its response. A root
-  # placeholder in `aliases` is produced by the leaf its alias names.
+  # Map from a producing command's position to the `[{placeholder,
+  # var_name}]` it must extract from its response. A root placeholder in
+  # `producers` is produced by the leaf its alias names, or by the command at
+  # the position the reported sequence moved its producer to.
   #
   # Linear (`:prefix`) roots, leaves, and setup and teardown commands are
   # wired. Branch/suffix producers are omitted (standalone scripts are
   # best-effort linear).
-  @spec producer_extractions([struct()], %{Placeholder.id() => Placeholder.id()}) :: %{
-          Position.t() => [{Placeholder.t(), String.t()}]
-        }
-  defp producer_extractions(commands, aliases) do
+  @spec producer_extractions([struct()], %{
+          Placeholder.id() => {:alias, Placeholder.id()} | {:at, Position.t()}
+        }) :: %{Position.t() => [{Placeholder.t(), String.t()}]}
+  defp producer_extractions(commands, producers) do
     commands
     |> placeholder_bindings()
     |> Enum.flat_map(fn {ph, _name} = binding ->
       position =
-        case Map.fetch(aliases, ph.id) do
-          {:ok, leaf_id} -> Placeholder.id_position(leaf_id)
+        case Map.fetch(producers, ph.id) do
+          {:ok, {:alias, leaf_id}} -> Placeholder.id_position(leaf_id)
+          {:ok, {:at, position}} -> position
           :error -> ph.position
         end
 

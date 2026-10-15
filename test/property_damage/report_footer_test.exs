@@ -53,9 +53,12 @@ defmodule PropertyDamage.ReportFooterTest do
       report = failing(two(), max_commands: @max_commands)
       path = R.replay_path!(report)
 
+      # The run's convergence bound (`converge_within: 1`, see `R.run/3`) is
+      # not the default, so the call names it.
       assert replay_command(report) ==
                "PropertyDamage.run(model: PropertyDamage.Test.ExpansionFor.Model, " <>
                  "targets: #{FailureReport.targets_source(report)}, " <>
+                 "compare: [converge_within: 1], " <>
                  "only: [replay: #{inspect(path)}])"
     end
 

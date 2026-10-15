@@ -143,7 +143,7 @@ defmodule PropertyDamage.Expansion do
   @spec defines?(module()) :: boolean()
   def defines?(model) do
     Code.ensure_loaded(model)
-    function_exported?(model, :expansions, 0)
+    PropertyDamage.ModuleCheck.exports?(model, :expansions, 0)
   end
 
   @doc false
@@ -358,8 +358,8 @@ defmodule PropertyDamage.Expansion do
 
   defp check_for_model(model) do
     if is_atom(model) and Code.ensure_loaded?(model) and
-         function_exported?(model, :commands, 0) and
-         function_exported?(model, :command_sequence_projection, 0) do
+         PropertyDamage.ModuleCheck.exports?(model, :commands, 0) and
+         PropertyDamage.ModuleCheck.exports?(model, :command_sequence_projection, 0) do
       check_model!(model)
     else
       {:error, "#{inspect(model)} is not a model: it defines no commands/0"}
@@ -889,7 +889,19 @@ defmodule PropertyDamage.Expansion do
                     Exception.message(e)
               ],
               __STACKTRACE__
+  catch
+    kind, value when kind in [:throw, :exit] ->
+      reraise ArgumentError,
+              [
+                message:
+                  "expansions/0: the function for #{inspect(base.root_command.__struct__)} " <>
+                    "(root #{base.root}) " <> escaped(kind, value)
+              ],
+              __STACKTRACE__
   end
+
+  # A throw or an exit from user code, named by its kind for a generation error.
+  defp escaped(kind, value), do: "escaped with " <> inspect({kind, value})
 
   defp entry!(_walk, _base, sequence, index) when is_list(sequence), do: {sequence, 1, index}
 
@@ -946,6 +958,14 @@ defmodule PropertyDamage.Expansion do
     |> case do
       :withdrawn ->
         :withdrawn
+
+      # One leaf equal to the root runs the root itself: the root at its own
+      # position, as a replay of the recorded choice runs it, counted as
+      # identity rather than under the entry's key.
+      {:ok, _state, [%{command: command}], _minted, warnings, _generated}
+      when command == base.root_command ->
+        {choice, state, minted, aliases, _none} = as_itself(walk, base, :identity, nil)
+        {:ok, {choice, state, minted, aliases, warnings}}
 
       {:ok, state, done, minted, warnings, generated} ->
         aliases = aliases!(walk, base, key, done, minted)
@@ -1052,6 +1072,15 @@ defmodule PropertyDamage.Expansion do
                     "its `overrides:` raised: " <> Exception.message(e)
               ],
               __STACKTRACE__
+  catch
+    kind, value when kind in [:throw, :exit] ->
+      reraise ArgumentError,
+              [
+                message:
+                  "expansions/0: #{key} (root #{base.root}), leaf #{leaf} #{inspect(module)}: " <>
+                    "its `overrides:` " <> escaped(kind, value)
+              ],
+              __STACKTRACE__
   end
 
   defp generate_leaf!(base, key, module, leaf, overrides, state, seed_key) do
@@ -1063,6 +1092,15 @@ defmodule PropertyDamage.Expansion do
   rescue
     e ->
       reraise ArgumentError, [message: leaf_error(base, key, module, leaf, e)], __STACKTRACE__
+  catch
+    kind, value when kind in [:throw, :exit] ->
+      reraise ArgumentError,
+              [
+                message:
+                  "expansions/0: #{key} (root #{base.root}), leaf #{leaf} #{inspect(module)}: " <>
+                    "cannot generate the leaf: its generator " <> escaped(kind, value)
+              ],
+              __STACKTRACE__
   end
 
   defp leaf_error(base, key, module, leaf, e) do
@@ -1180,6 +1218,8 @@ defmodule PropertyDamage.Expansion do
   #
   #   pickers     the names of the targets that pick, in target order
   #   realized    %{key => {leaf modules, count}}, counts summed over pickers
+  #   identity    %{root module => count}: the roots that ran as themselves
+  #               because the entry realized was one leaf equal to the root
   #   offered     %{key => leaf modules}: every entry a function returned
   #   forced      the root modules forced to identity at every root a target
   #               chose at
@@ -1215,6 +1255,10 @@ defmodule PropertyDamage.Expansion do
     %{
       pickers: pickers,
       realized: realized,
+      identity:
+        for(%{entry: :identity, module: module} <- chosen, reduce: %{}) do
+          acc -> Map.update(acc, module, 1, &(&1 + 1))
+        end,
       offered: chosen |> Enum.flat_map(& &1.offered) |> Map.new(),
       forced:
         chosen
@@ -1313,8 +1357,9 @@ defmodule PropertyDamage.Expansion do
   @doc false
   # Per target name, per listed root module: how many times each entry was
   # realized, `:forced` for a root that ran as itself because no entry could
-  # be, and `:identity` for a root a shrink ran as itself in place of an
-  # entry. Roots no expansion applied to are not counted. A failing run
+  # be, and `:identity` for a root that ran as itself in place of an entry: a
+  # shrink collapsed it, or the entry realized was one leaf equal to the
+  # root. Roots no expansion applied to are not counted. A failing run
   # executed its roots up to the failing root (`failed_at`) only, so only
   # those are counted; `failed_at` nil counts every root.
   @spec counts(t() | nil, non_neg_integer() | nil) :: %{

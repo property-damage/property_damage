@@ -2,12 +2,10 @@ defmodule PropertyDamage.SeedLibraryTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.SeedLibrary
+  alias PropertyDamage.Test.TmpPath
 
   defp tmp_path(name) do
-    Path.join(
-      System.tmp_dir!(),
-      "pd_seeds_#{name}_#{System.unique_integer([:positive])}.json"
-    )
+    TmpPath.unique("pd_seeds_#{name}") <> ".json"
   end
 
   describe "load/1" do
@@ -15,7 +13,7 @@ defmodule PropertyDamage.SeedLibraryTest do
       # An explicit path that does not exist almost always means a typo.
       # Returning an empty library would silently mask it.
       assert {:error, :enoent} =
-               SeedLibrary.load(Path.join(System.tmp_dir!(), "pd_seeds_typo_does_not_exist.json"))
+               SeedLibrary.load(TmpPath.scoped("pd_seeds_typo_does_not_exist") <> ".json")
     end
 
     test "round-trips a saved library" do

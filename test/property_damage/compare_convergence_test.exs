@@ -62,6 +62,45 @@ defmodule PropertyDamage.CompareConvergenceTest do
         :ok
       end
     end
+    """,
+    # Three keys at every root: settled values (differ when a payment never
+    # settles), a constant (always agrees), and pending totals.
+    keyed: """
+    defmodule #{@ns}.Keyed do
+    #{@header}
+      @compare every: 1
+      def settled(s, _root), do: %{settled: s.settled}
+
+      @compare every: 1
+      def steady(_s, _root), do: :steady
+
+      @compare every: 1
+      def totals(s, _root) do
+        if s.unsettled == %{}, do: :settled, else: {:pending, Map.keys(s.unsettled)}
+      end
+    end
+    """,
+    # The same three keys, and a check that fails on the first payment.
+    keyed_checked: """
+    defmodule #{@ns}.KeyedChecked do
+    #{@header}
+      @check every: Paid
+      def assert_not_first(_s, %Paid{n: n}) do
+        if n == 0, do: PropertyDamage.fail!("first payment", n: n)
+        :ok
+      end
+
+      @compare every: 1
+      def settled(s, _root), do: %{settled: s.settled}
+
+      @compare every: 1
+      def steady(_s, _root), do: :steady
+
+      @compare every: 1
+      def totals(s, _root) do
+        if s.unsettled == %{}, do: :settled, else: {:pending, Map.keys(s.unsettled)}
+      end
+    end
     """
   }
 
@@ -69,7 +108,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
     compiled = Compare.compile_all(@sources)
 
     models =
-      for name <- [:ledger, :stale, :guarded], into: %{} do
+      for name <- [:ledger, :stale, :guarded, :keyed, :keyed_checked], into: %{} do
         projection = Module.concat(__MODULE__, Macro.camelize(Atom.to_string(name)))
         module = Module.concat([__MODULE__, "Model", Macro.camelize(Atom.to_string(name))])
         {name, Compare.define_model!(module, [projection])}
@@ -238,6 +277,55 @@ defmodule PropertyDamage.CompareConvergenceTest do
 
       assert report.kind == :diverged
       assert Failure.name(report.failure_reason) == key(ctx, :stale, :totals)
+    end
+
+    test "every further key that disagrees or is pending at the bound is listed, in key order",
+         ctx do
+      targets = [Compare.target("a"), Compare.target("b", %{at: %{1 => :never}})]
+
+      assert {:error, report} =
+               Compare.run(model!(ctx, :keyed), targets, compare: [converge_within: 100])
+
+      # The first disagreeing key in key order names the failure.
+      assert report.kind == :diverged
+      assert Failure.name(report.failure_reason) == key(ctx, :keyed, :settled)
+
+      # The agreeing key is not listed; the pending one is, with its target.
+      assert [%{variant: %{index: 1, name: "b"}, root: 1, failure: pending}] =
+               Map.fetch!(report.failure_reason.type, :other_keys)
+
+      assert Failure.kind(pending) == :did_not_converge
+      assert Failure.name(pending) == key(ctx, :keyed, :totals)
+      assert Map.fetch!(pending.type, :reason) == [1]
+
+      text = inspect(report, pretty: true)
+      assert text =~ "#{inspect(key(ctx, :keyed, :totals) |> elem(0))}.totals"
+      assert text =~ "did not converge within 100 ms at root 1"
+    end
+
+    test "the further keys of a comparison failure that is not the primary failure are printed too",
+         ctx do
+      targets = [Compare.target("a"), Compare.target("b", %{at: %{1 => :never}})]
+
+      assert {:error, report} =
+               Compare.run(model!(ctx, :keyed_checked), targets,
+                 compare: [converge_within: 100],
+                 check_mode: :record
+               )
+
+      # The check recorded at root 0 is primary; the divergence at root 1 is
+      # listed among the others and carries the pending key.
+      assert report.kind == :check_failed
+
+      [diverged] = Enum.filter(report.other_failures, &(Failure.kind(&1.failure) == :diverged))
+      assert [%{failure: pending}] = Map.fetch!(diverged.failure.type, :other_keys)
+      assert Failure.name(pending) == key(ctx, :keyed_checked, :totals)
+
+      [_before, other_failures] =
+        String.split(inspect(report, pretty: true), "Other Failures In This Run")
+
+      assert other_failures =~ "Also disagreed"
+      assert other_failures =~ "did_not_converge"
     end
   end
 

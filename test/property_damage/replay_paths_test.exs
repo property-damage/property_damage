@@ -15,7 +15,7 @@ defmodule PropertyDamage.ReplayPathsTest do
   @model F.Model
   @seed 2
   @max_commands 8
-  @version 14
+  @version 15
 
   @base_url "http://localhost:4000"
 
@@ -146,8 +146,8 @@ defmodule PropertyDamage.ReplayPathsTest do
 
   describe "Analysis.isolate_trigger/2" do
     test "varies the reference's concrete commands when the reference ran leaves" do
-      report = failing(ref_bug())
-      at_failure = leaves_at(report, "ref", report.failed_at_index)
+      report = check_failing()
+      at_failure = leaves_at(report, "solo", report.failed_at_index)
       assert %{entry: "Refund[1]"} = at_failure
 
       assert {:ok, result} = Analysis.isolate_trigger(report)
@@ -238,7 +238,7 @@ defmodule PropertyDamage.ReplayPathsTest do
       assert Persistence.load(path) == {:error, {:unsupported_format_version, 13, @version}}
     end
 
-    test "a version-14 file whose report lacks the replay field is refused" do
+    test "a current-version file whose report lacks the replay field is refused" do
       report = failing(second_bug())
       {:ok, path} = Persistence.save(report, R.tmp_dir!())
 

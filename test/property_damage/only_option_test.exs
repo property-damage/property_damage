@@ -8,6 +8,7 @@ defmodule PropertyDamage.OnlyOptionTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Test.ExpansionFor, as: F
+  alias PropertyDamage.Test.TmpPath
 
   @model F.Model
 
@@ -70,7 +71,7 @@ defmodule PropertyDamage.OnlyOptionTest do
   end
 
   defp missing_artifact do
-    Path.join(System.tmp_dir!(), "missing_#{System.unique_integer([:positive])}.replay.exs")
+    TmpPath.unique("missing") <> ".replay.exs"
   end
 
   describe "only: [run: n]" do

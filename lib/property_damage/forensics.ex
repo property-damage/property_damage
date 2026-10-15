@@ -151,22 +151,16 @@ defmodule PropertyDamage.Forensics do
     mapping = Keyword.get(opts, :event_mapping)
     stop_early = Keyword.get(opts, :stop_on_first_failure, true)
 
-    # Initialize projections
-    command_sequence_projection = model.command_sequence_projection()
-
-    check_projections =
-      Keyword.get_lazy(opts, :projections, fn ->
-        if function_exported?(model, :check_projections, 0) do
-          model.check_projections()
-        else
-          []
-        end
-      end)
-
-    all_projections = [command_sequence_projection | check_projections]
+    # Initialize projections: the model's, or the command-sequence projection
+    # with the check projections the `:projections` option names.
+    projection_modules =
+      case Keyword.fetch(opts, :projections) do
+        {:ok, checks} -> Enum.uniq([model.command_sequence_projection() | checks])
+        :error -> PropertyDamage.Model.projection_modules(model)
+      end
 
     initial_projections =
-      for projection <- all_projections, into: %{} do
+      for projection <- projection_modules, into: %{} do
         {projection, projection.init()}
       end
 
@@ -198,7 +192,7 @@ defmodule PropertyDamage.Forensics do
               history,
               violations,
               model,
-              check_projections,
+              projection_modules,
               stop_early
             )
           end
@@ -215,7 +209,7 @@ defmodule PropertyDamage.Forensics do
          history,
          violations,
          model,
-         check_projections,
+         projection_modules,
          stop_early
        ) do
     # Apply event to all projections
@@ -239,7 +233,7 @@ defmodule PropertyDamage.Forensics do
       branch_id: nil
     }
 
-    case run_checks(model, check_projections, new_projections, check_ctx) do
+    case run_checks(model, projection_modules, new_projections, check_ctx) do
       :ok ->
         {:cont, {:ok, new_state, [event | history], violations}}
 
@@ -274,7 +268,7 @@ defmodule PropertyDamage.Forensics do
   defp finalize_result({:ok, state, _history, violations}) do
     command_sequence_projection_key =
       Enum.find(Map.keys(state.projections), fn mod ->
-        not function_exported?(mod, :__checks__, 0)
+        not PropertyDamage.ModuleCheck.exports?(mod, :__checks__, 0)
       end)
 
     {:ok,
@@ -300,19 +294,17 @@ defmodule PropertyDamage.Forensics do
     end)
   end
 
-  defp run_step_checks(model, check_projections, projections, step_ctx) do
+  defp run_step_checks(_model, all_projections, projections, step_ctx) do
     alias PropertyDamage.Model.Projection
 
     # Run checks on all projections (state + extra)
-    command_sequence_projection = model.command_sequence_projection()
-    all_projections = [command_sequence_projection | check_projections]
 
     Enum.reduce_while(all_projections, :ok, fn projection, :ok ->
       projection_state = Map.get(projections, projection)
 
       # Get checks for this projection (only if it has __checks__/0)
       checks =
-        if function_exported?(projection, :__checks__, 0) do
+        if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
           projection.__checks__()
         else
           []
@@ -349,7 +341,7 @@ defmodule PropertyDamage.Forensics do
   end
 
   # Legacy wrapper for backward compatibility
-  defp run_checks(model, check_projections, projections, check_ctx) do
+  defp run_checks(model, projection_modules, projections, check_ctx) do
     # Convert old check_ctx to new step_ctx format
     {event_module, event} =
       case check_ctx.events do
@@ -364,7 +356,7 @@ defmodule PropertyDamage.Forensics do
       command_or_event: event
     }
 
-    run_step_checks(model, check_projections, projections, step_ctx)
+    run_step_checks(model, projection_modules, projections, step_ctx)
   end
 
   defp get_module(%{__struct__: mod}), do: mod

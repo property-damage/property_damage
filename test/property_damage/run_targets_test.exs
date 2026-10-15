@@ -46,6 +46,24 @@ defmodule PropertyDamage.RunTargetsTest do
     )
   end
 
+  test "validate: true logs a warning for two targets with the same adapter and config" do
+    shared = %{name: "shared_cfg_warn"}
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        run(
+          [
+            {StepAdapter, name: "same_cfg_a", config: shared},
+            {StepAdapter, name: "same_cfg_b", config: shared}
+          ],
+          validate: true
+        )
+      end)
+
+    assert log =~ ~s|targets "same_cfg_a" (index 0) and "same_cfg_b" (index 1)|
+    assert log =~ "identical `config:`"
+  end
+
   defp generated(model, seed, run_number, max_commands) do
     model
     |> Generator.generate_sequence(max_commands: max_commands)
@@ -302,7 +320,7 @@ defmodule PropertyDamage.RunTargetsTest do
       {:error, report} = run([step("a"), step("b", %{behavior: :shift})])
 
       assert {:ok, path} = Persistence.save(report, dir)
-      assert {:ok, <<"PD", 14::8, _rest::binary>>} = File.read(path)
+      assert {:ok, <<"PD", 15::8, _rest::binary>>} = File.read(path)
       assert {:ok, loaded} = Persistence.load(path)
 
       assert loaded.kind == :diverged
@@ -317,7 +335,7 @@ defmodule PropertyDamage.RunTargetsTest do
       path = Path.join(dir, "v9.pd")
       File.write!(path, <<"PD", 9::8, :erlang.crc32(term_binary)::32, term_binary::binary>>)
 
-      assert {:error, {:unsupported_format_version, 9, 14}} = Persistence.load(path)
+      assert {:error, {:unsupported_format_version, 9, 15}} = Persistence.load(path)
     end
   end
 

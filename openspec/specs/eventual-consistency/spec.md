@@ -123,7 +123,7 @@ The system SHALL support `@eventually` temporal checks that spawn a background p
 
 #### Scenario: Liveness over a correlated set (DR-030)
 - **WHEN** a command correlates an injector event via `awaits/2` and a `@eventually` predicate asserts that the command's correlated set becomes non-empty
-- **THEN** the predicate observes the awaited event once it is folded and attributed, and the framework's existing `@eventually` finalize drain (which already awaits the internal event queue) supplies the wait — no separate await loop exists
+- **THEN** the predicate observes the awaited event once it is folded and attributed, and the framework's existing `@eventually` finalize drain (which already awaits the internal event queue) supplies the wait; no separate await loop exists
 
 #### Scenario: Configurable polling parameters
 - **WHEN** a `@eventually` check specifies timeout and interval

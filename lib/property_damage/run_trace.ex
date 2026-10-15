@@ -36,10 +36,10 @@ defmodule PropertyDamage.RunTrace do
   - `executed` — the concrete commands actually sent, post placeholder/mint
     resolution, keyed branch-aware by `%Sequence.Position{}`.
   - `event_log` — the complete `EventLog.Entry` list with per-entry provenance.
-    Each entry's `fold_index` records the run's real fold order (P8 / DR-040).
+    Each entry's `fold_index` records the run's real fold order (DR-040).
   - `command_labels` — flattened index → label (as the report computes it).
   - `command_fold_ordinals` — `%{Sequence.Position => fold ordinal}`: the ordinal
-    at which each command was itself folded into projections (P8 / DR-040). With
+    at which each command was itself folded into projections (DR-040). With
     the entries' `fold_index` this is enough to replay the run's true fold order,
     which is what the faithful per-step state timeline (`state_at/2`,
     `state_timeline/1`) does.
@@ -47,7 +47,7 @@ defmodule PropertyDamage.RunTrace do
     `[{branch_id, offset, command}]` list) when one was found, else `nil`
     (linear runs, or a branching run with no verified order). Recorded so the
     per-step timeline can fold merged-branch state in the same order the executor
-    did (P8 / DR-040).
+    did (DR-040).
   - `expansion` — when the run's targets ran roots as expansions
     (`c:PropertyDamage.Model.expansions/0`): per target name, what it ran at
     each root (the entry, the concrete commands, and the seed key and aliases
@@ -57,7 +57,8 @@ defmodule PropertyDamage.RunTrace do
   """
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{EventQueue, Executor, Expansion, Generator, Options, Scheduler}
+  alias PropertyDamage.{Executor, Expansion, Generator, Options, Scheduler}
+  alias PropertyDamage.Runtime.RunServices
   alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence
 
@@ -168,7 +169,7 @@ defmodule PropertyDamage.RunTrace do
   loop it never shrinks and never stops early on failure: it captures the whole
   execution record of a single run. `plan_source` is always `:generated` (the
   plan is a pure function of the effective seed). The plan carries the setup
-  and teardown commands drawn as `PropertyDamage.run/1` draws them, and the
+  and teardown commands generated as `PropertyDamage.run/1` generates them, and the
   target runs them before and after the roots.
 
   ## Options
@@ -218,8 +219,8 @@ defmodule PropertyDamage.RunTrace do
 
     run_seed = Generator.run_seed(seed, run_number)
 
-    # The plan as `PropertyDamage.run/1` draws it: the setup commands and the
-    # roots, then the teardown commands drawn against them.
+    # The plan as `PropertyDamage.run/1` generates it: the setup commands and
+    # the roots, then the teardown commands generated against them.
     plan =
       model
       |> Generator.generate_sequence(gen_opts)
@@ -246,14 +247,13 @@ defmodule PropertyDamage.RunTrace do
   end
 
   defp capture_engine(opts, model, target, plan, run) do
-    %{adapter: adapter, config: config, injectors: injectors} = target
+    %{adapter: adapter, config: config} = target
     %{seed: seed, run_number: run_number, run_seed: run_seed} = run
     %{run_nonce: run_nonce, mint_epoch: mint_epoch} = run
 
-    {:ok, event_queue} = EventQueue.start_link()
-    setup_injectors(injectors, event_queue)
-
-    try do
+    # The target's injectors are set up against the run's event queue, as on
+    # every other path that executes a run. `mocks:` is rejected above.
+    RunServices.with_services(target, fn event_queue, _mock_registry ->
       {:ok, result} =
         Executor.run(plan, model, adapter,
           config: config,
@@ -282,10 +282,7 @@ defmodule PropertyDamage.RunTrace do
         linearization: linearization_of(result),
         outcome: outcome_of(result)
       )
-    after
-      teardown_injectors(injectors)
-      EventQueue.stop(event_queue)
-    end
+    end)
   end
 
   # A model with expansions: the target's concrete sequence, as a run draws it
@@ -330,20 +327,6 @@ defmodule PropertyDamage.RunTrace do
       expansion: %{target.name => expansion.variants[target.name].choices},
       outcome: outcome_of(result)
     )
-  end
-
-  # Injector-adapter lifecycle for capture (mirrors the exploration run loop):
-  # setup receives the event queue so injected events land in the run's log.
-  defp setup_injectors(injectors, event_queue) do
-    for adapter <- injectors, function_exported?(adapter, :setup, 1) do
-      adapter.setup(%{event_queue: event_queue})
-    end
-  end
-
-  defp teardown_injectors(injectors) do
-    for adapter <- injectors, function_exported?(adapter, :teardown, 1) do
-      adapter.teardown(%{})
-    end
   end
 
   defp outcome_of(%{success: true}), do: :pass
@@ -546,7 +529,7 @@ defmodule PropertyDamage.RunTrace do
   end
 
   # ============================================================================
-  # Per-step state timeline (P8 / DR-040)
+  # Per-step state timeline (DR-040)
   # ============================================================================
   #
   # Projection state per step is DERIVED from the recorded fold order, never
@@ -566,7 +549,7 @@ defmodule PropertyDamage.RunTrace do
   #     states, so state divergence in a comparison never reduces to timing skew.
 
   @doc """
-  Faithful projection state immediately AFTER the step at `position` (P8).
+  Faithful projection state immediately AFTER the step at `position`.
 
   Folds every recorded item (command folds + folded event-log entries) up to and
   including this step's own folds, in true fold order. `position` may be a
@@ -578,7 +561,7 @@ defmodule PropertyDamage.RunTrace do
     do: faithful_state(trace, resolve_position(trace, position), :at)
 
   @doc """
-  Faithful projection state immediately BEFORE the step at `position` (P8).
+  Faithful projection state immediately BEFORE the step at `position`.
 
   The pre-step state: folds every recorded item with a fold ordinal strictly
   below this step's first fold. Equal to the runtime `state_before_failure`
@@ -603,7 +586,7 @@ defmodule PropertyDamage.RunTrace do
   end
 
   @doc """
-  The canonical (timing-immune) post-step state for every command (P8).
+  The canonical (timing-immune) post-step state for every command.
 
   Folds each step's executed command then its attributed, folded events, in
   flattened order — never using async fold timing. This is the mode
@@ -636,11 +619,11 @@ defmodule PropertyDamage.RunTrace do
 
   @doc """
   Verify the faithful-derived state at a step equals an authoritative snapshot
-  (the projection-purity check, P8 / DR-040).
+  (the projection-purity check, DR-040).
 
   Pure projections re-derive to the same state, so a mismatch means a projection
   read something outside its `(state, event)` inputs (a clock, a counter, the
-  environment) in `apply/2`. Because faithful derivation replays the *real* fold
+  environment) in `apply/2`. Because the faithful fold replays the *real* fold
   order, a pure-but-async projection re-derives correctly and does NOT
   false-positive.
 
@@ -677,7 +660,7 @@ defmodule PropertyDamage.RunTrace do
     if mismatched == [], do: :ok, else: {:non_pure_projections, mismatched}
   end
 
-  # ---- Faithful derivation internals ----------------------------------------
+  # ---- Faithful fold internals ----------------------------------------------
 
   defp faithful_state(%__MODULE__{model: nil}, _position, _boundary), do: %{}
   defp faithful_state(%__MODULE__{plan: nil}, _position, _boundary), do: %{}
@@ -758,7 +741,7 @@ defmodule PropertyDamage.RunTrace do
   end
 
   # The branch replay order as `%Sequence.Position{}` values: the verified
-  # linearization when the trace recorded one (P8), otherwise plain branch order
+  # linearization when the trace recorded one, otherwise plain branch order
   # (branch 0 then branch 1 ..., each in offset order), which is itself a valid
   # interleaving for independent branches.
   defp linearization_order(%__MODULE__{linearization: [_ | _] = tagged}) do
@@ -873,18 +856,11 @@ defmodule PropertyDamage.RunTrace do
   # Rebuild the run's projection set from the model, exactly as the executor
   # does. Degrades to `%{}` for a model that declares no
   # `command_sequence_projection/0` (e.g. a hand-built or synthetic trace), so
-  # derivation on such a trace is a no-op rather than a crash.
+  # the faithful fold on such a trace is a no-op rather than a crash.
   defp init_projections(model) do
     if is_atom(model) and model != nil and Code.ensure_loaded?(model) and
-         function_exported?(model, :command_sequence_projection, 0) do
-      command_projection = model.command_sequence_projection()
-
-      check_projections =
-        if function_exported?(model, :check_projections, 0),
-          do: model.check_projections(),
-          else: []
-
-      Map.new([command_projection | check_projections], &{&1, &1.init()})
+         PropertyDamage.ModuleCheck.exports?(model, :command_sequence_projection, 0) do
+      Map.new(PropertyDamage.Model.projection_modules(model), &{&1, &1.init()})
     else
       %{}
     end

@@ -106,7 +106,7 @@ defmodule PropertyDamage.Invariants.Invariant do
     projection = Map.fetch!(ctx, :projection)
 
     invariants =
-      if function_exported?(projection, :__invariants__, 0) do
+      if PropertyDamage.ModuleCheck.exports?(projection, :__invariants__, 0) do
         projection.__invariants__()
       else
         %{}

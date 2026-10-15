@@ -83,7 +83,7 @@ defmodule PropertyDamage.Progress do
     [:property_damage, operation, kind]
   end
 
-  # The single discriminator-derivation site. New operations add a clause here.
+  # The single site that derives the discriminator. New operations add a clause here.
   @spec classify(payload()) :: {operation(), kind()}
   defp classify(%RunUpdate{}), do: {:test_run, :progress}
   defp classify(%ReplayUpdate{}), do: {:test_run, :progress}

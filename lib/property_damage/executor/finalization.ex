@@ -41,7 +41,9 @@ defmodule PropertyDamage.Executor.Finalization do
     resource_pollers = Map.get(state, :active_resource_pollers, [])
     Enum.each(resource_pollers, &ResourcePoller.stop/1)
 
-    check_failures = Map.get(state, :check_failures, [])
+    # The state accumulates :record failures newest first; every result
+    # lists them in chronological order, like the event log.
+    check_failures = state |> Map.get(:check_failures, []) |> Enum.reverse()
 
     # Extract stacktrace from failure reason if embedded
     {normalized_reason, stacktrace} = extract_stacktrace(reason)
@@ -343,16 +345,6 @@ defmodule PropertyDamage.Executor.Finalization do
     {%{f | type: %{t | detail: exception}}, stacktrace}
   end
 
-  def extract_stacktrace(
-        %Failure{
-          type:
-            %Failure.Framework{kind: :placeholder_resolution, detail: {message, stacktrace}} = t
-        } = f
-      )
-      when is_binary(message) and is_list(stacktrace) do
-    {%{f | type: %{t | detail: message}}, stacktrace}
-  end
-
   # No embedded stacktrace
   def extract_stacktrace(reason), do: {reason, nil}
 
@@ -384,6 +376,17 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :branch_id),
         Map.get(state, :fold_counter, 0),
         Map.get(state, :await_matchers, [])
+      )
+
+    # A mock event pushed after the last command's own flush belongs to it.
+    {projections, event_log, fold_counter} =
+      Executor.Events.process_mock_events(
+        Map.get(state, :mock_registry),
+        Map.get(state, :last_command_index),
+        event_log,
+        projections,
+        Map.get(state, :branch_id),
+        fold_counter
       )
 
     state = %{state | projections: projections, event_log: event_log, fold_counter: fold_counter}

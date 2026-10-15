@@ -28,7 +28,8 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 - **WHEN** a command is executed against the SUT
 - **THEN** the system SHALL emit `[:property_damage, :command, :start]` with command module, index, run_number and `variant` (`%{index, name}`)
 - **AND** when the command completes, it SHALL emit `[:property_damage, :command, :stop]` with duration, success flag, events_count and `variant`
-- **AND** shrink attempts and the reproduction run SHALL use `run_number: 0` (DR-045)
+- **AND** shrink attempts SHALL use `run_number: 0` and the reproduction run SHALL use the `run_number` of the run that found the failure (DR-045)
+- **AND** a root command's `index` SHALL count across the whole run: a branching sequence numbers its prefix, then each branch from the index after the prefix, then its suffix from the index after every branch command
 
 #### Scenario: Check execution events
 
@@ -92,7 +93,7 @@ The system SHALL track and report coverage metrics for property-based test execu
 - **THEN** the heavier coverage dimensions (command, transition, and state coverage) SHALL be accumulated across all generated sequences of the run
 - **AND** an invariant or command exercised only in an earlier sequence (not the representative one) SHALL still be reported as covered
 
-#### Scenario: Anti-vacuity — uncovered invariants (DR-026)
+#### Scenario: Anti-vacuity: uncovered invariants (DR-026)
 
 - **WHEN** an invariant declared in the model's catalog is never exercised by any of its checks during a run (zero firings)
 - **THEN** the system SHALL report that invariant as uncovered (dynamic vacuity)
@@ -243,7 +244,7 @@ Run telemetry metadata SHALL carry `targets: [%{index, name, adapter}]` instead 
 
 ### Requirement: Coverage and Counts for Expansions (DR-049)
 
-For a model with `expansions/0`, the command universe of a run SHALL be derived from generation: `commands/0`, plus every leaf module that an expansion produced, plus the setup and teardown modules (which stay under `setup`). Coverage SHALL start from `commands/0` and add each leaf module when a run produces it, so an executed command is never outside the universe. Coverage SHALL count the commands the reference target executed, each leaf under its own module. Coverage SHALL also count each expanded root module by the entry the reference chose (`"Root[i]"`) and by `:forced` for a root that ran as itself because no listed entry could be realized, separately from the executed modules. `stats.expansion_counts` and a failure report's `expansion_counts` SHALL give, per target name and root module, the count per entry key and `:forced`. An `:identity` target SHALL count nothing, and a `:reference` target SHALL count the entries it copied. A failure report's counts SHALL stop at the failing root, so the counts and the `expansions` field describe the same executed roots. Latency samples SHALL be per leaf, `by_command` SHALL be keyed by the leaf module, and setup and teardown commands SHALL stay out of the samples.
+For a model with `expansions/0`, the command universe of a run SHALL be derived from generation: `commands/0`, plus every leaf module that an expansion produced, plus the setup and teardown modules (which stay under `setup`). Coverage SHALL start from `commands/0` and add each leaf module when a run produces it, so an executed command is never outside the universe. Coverage SHALL count the commands the reference target executed, each leaf under its own module. Coverage SHALL also count each expanded root module by the entry the reference chose (`"Root[i]"`) and by `:forced` for a root that ran as itself because no listed entry could be realized, separately from the executed modules. `stats.expansion_counts` and a failure report's `expansion_counts` SHALL give, per target name and root module, the count per entry key, `:forced`, and `:identity` for a root that ran as itself in place of an entry (an entry realized as one leaf equal to its root, or a root shrinking collapsed). `mix pd.validate --seeds` SHALL count an entry realized as one leaf equal to its root as identity, not under the entry's key. An `:identity` target SHALL count nothing, and a `:reference` target SHALL count the entries it copied. A failure report's counts SHALL stop at the failing root, so the counts and the `expansions` field describe the same executed roots. Latency samples SHALL be per leaf, `by_command` SHALL be keyed by the leaf module, and setup and teardown commands SHALL stay out of the samples.
 
 #### Scenario: A leaf module joins the universe
 - **GIVEN** a model whose `commands/0` lists `Pay` and whose `expansions/0` rewrites `Pay` as `[Authorize, Capture]`

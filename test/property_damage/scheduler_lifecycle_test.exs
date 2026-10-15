@@ -9,7 +9,14 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
 
   alias PropertyDamage.{Failure, FailureReport, Generator, Scheduler, Sequence, Variant}
   alias PropertyDamage.Progress.Printer
-  alias PropertyDamage.Test.LatencyFixtures.{RefusingMintAdapter, SlowFoldModel, TimedStepAdapter}
+
+  alias PropertyDamage.Test.LatencyFixtures.{
+    RefusingMintAdapter,
+    SlowFold,
+    SlowFoldModel,
+    TimedStepAdapter
+  }
+
   alias PropertyDamage.Test.LazyInjector
 
   alias PropertyDamage.Test.Lockstep.{
@@ -281,6 +288,8 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
       stats
     end
 
+    defp fold_us, do: SlowFold.sleep_ms() * 1_000
+
     test "times the adapter's execute/3, not the projection folds after it" do
       result =
         timed_run([{TimedStepAdapter, name: "a"}, {TimedStepAdapter, name: "b"}])
@@ -288,8 +297,11 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
       for name <- ["a", "b"] do
         metrics = result.metrics[name]
         assert metrics.commands > 0
-        # Each step folds through a projection that sleeps 40 ms per event.
-        assert metrics.max < 20_000
+        # Each step folds through a projection that sleeps at least
+        # `fold_us` per event, so a timer that included the fold would put
+        # even the fastest step above it. A loaded machine can slow one
+        # step, never every step below that floor.
+        assert metrics.min < fold_us()
       end
     end
 
@@ -301,7 +313,7 @@ defmodule PropertyDamage.SchedulerLifecycleTest do
         ])
 
       assert result.metrics["b"].min >= 30_000
-      assert result.metrics["a"].max < 20_000
+      assert result.metrics["a"].min < fold_us()
     end
   end
 end

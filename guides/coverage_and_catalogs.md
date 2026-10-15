@@ -234,9 +234,10 @@ teardown modules (those stay under `setup`).
   own module, beside the roots that ran as themselves.
 - Coverage counts what the **reference** target (the first) executed.
 - `expansion_counts` is separate from the executed modules. It counts each
-  expanded root module by the entry the reference chose (`"Root[i]"`), and by
+  expanded root module by the entry the reference chose (`"Root[i]"`), by
   `:forced` for a root that ran as itself because no listed entry could be
-  realized.
+  realized, and by `:identity` for a root that ran as itself because the entry
+  realized was one leaf equal to the root.
 
 The next fence adds a model on the bank above. A deposit of `n` may run as two
 deposits that add up to `n`, and the new projection compares the balance

@@ -1,15 +1,14 @@
 #!/usr/bin/env elixir
-# Documentation-verification gate (Wave 9).
+# Documentation-verification gate.
 #
 # Executes the runnable examples in PropertyDamage's user-facing documentation
-# against an honest "stranger" consumer environment, so the manual shakedown
-# (campaign W1-W8) never has to be repeated by hand.
+# against a "stranger" consumer environment (a fresh Mix project that depends on
+# this library), so no one has to re-run the documented examples by hand.
 #
 # Corpus: README.md, guides/*.md, benches/*/README.md, shipped agent skills
 # (.claude/skills/pd-*/**/*.md, SKILL.md plus references), and the Livebook notebook
 # notebooks/property_damage_demo.livemd. A fence is executable only when the line
-# immediately above it is exactly `<!-- pd-doc-verify: runnable -->`. See
-# Decisions 1-3 in wave_9_doc_verification_gate.md.
+# immediately above it is exactly `<!-- pd-doc-verify: runnable -->`.
 #
 # Usage (from the repo root):
 #     elixir scripts/docs_verify.exs                 # full corpus + notebook

@@ -147,6 +147,15 @@ defmodule PropertyDamage.EventualConsistencyTest do
     assert Map.has_key?(result, :projections_before)
   end
 
+  test "a projection listed as the sequence projection and as a check projection spawns one poller per @eventually" do
+    # PaymentModel lists PaymentProjection in both command_sequence_projection/0
+    # and check_projections/0. Every spawned poller counts one firing of its
+    # check, so the firing count is the number of pollers spawned.
+    {:ok, result} = run_executor(SilentAdapter)
+
+    assert result.check_counters[{:fired, PaymentProjection, :payment_eventually_confirmed}] == 1
+  end
+
   # A probe command declared purely via `use ... execution: :probe` (no
   # legacy semantics/0). It must actually settle/retry; before the fix it
   # ran once as :sync.

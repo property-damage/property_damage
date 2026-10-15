@@ -73,6 +73,10 @@ defmodule PropertyDamage.Failure.Divergence do
   that command. `reference_value` and `variant_value` are the two values the
   predicate was last called with, and `mismatch` the exception describing the
   difference (by default a `PropertyDamage.ComparisonMismatch`).
+
+  `other_keys` lists every further observation compared at the same boundary
+  that still differed or was still pending when the bound expired, in key
+  order (see `t:PropertyDamage.Failure.other_key/0`); `key` is the first.
   """
 
   @type key :: {module(), atom()}
@@ -83,10 +87,11 @@ defmodule PropertyDamage.Failure.Divergence do
           command: struct() | nil,
           reference_value: term(),
           variant_value: term(),
-          mismatch: Exception.t() | nil
+          mismatch: Exception.t() | nil,
+          other_keys: [PropertyDamage.Failure.other_key()]
         }
 
-  defstruct [:key, :root, :command, :reference_value, :variant_value, :mismatch]
+  defstruct [:key, :root, :command, :reference_value, :variant_value, :mismatch, other_keys: []]
 end
 
 defmodule PropertyDamage.Failure.Convergence do
@@ -100,6 +105,10 @@ defmodule PropertyDamage.Failure.Convergence do
   that command. `reason` is the term the observation returned in
   `{:pending, reason}`, `waited_ms` how long the comparison waited at the
   boundary, and `within_ms` the convergence bound it waited against.
+
+  `other_keys` lists every further observation compared at the same boundary
+  that still differed or was still pending when the bound expired, in key
+  order (see `t:PropertyDamage.Failure.other_key/0`); `key` is the first.
   """
 
   @type t :: %__MODULE__{
@@ -108,10 +117,11 @@ defmodule PropertyDamage.Failure.Convergence do
           command: struct() | nil,
           reason: term(),
           waited_ms: non_neg_integer() | nil,
-          within_ms: pos_integer() | nil
+          within_ms: pos_integer() | nil,
+          other_keys: [PropertyDamage.Failure.other_key()]
         }
 
-  defstruct [:key, :root, :command, :reason, :waited_ms, :within_ms]
+  defstruct [:key, :root, :command, :reason, :waited_ms, :within_ms, other_keys: []]
 end
 
 defmodule PropertyDamage.Failure.Setup do
@@ -256,13 +266,13 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:diverged` | the observation's `{projection, function}` key | `%{key:, root:, command:, reference_value:, variant_value:, mismatch:}` |
+  | `:diverged` | the observation's `{projection, function}` key | `%{key:, root:, command:, reference_value:, variant_value:, mismatch:, other_keys:}` |
 
   ### `Failure.Convergence` - a boundary observation stayed pending
 
   | kind | name | detail |
   |------|------|--------|
-  | `:did_not_converge` | the observation's `{projection, function}` key | `%{key:, root:, command:, reason:, waited_ms:, within_ms:}` |
+  | `:did_not_converge` | the observation's `{projection, function}` key | `%{key:, root:, command:, reason:, waited_ms:, within_ms:, other_keys:}` |
 
   ### `Failure.Setup` - a target could not be brought up
 
@@ -302,6 +312,17 @@ defmodule PropertyDamage.Failure do
 
   @typedoc "A failure's name: a check name, a projection, or a `{projection, function}` key."
   @type name :: atom() | {module(), atom()} | nil
+
+  @typedoc """
+  A further observation that disagreed at the boundary where a `:diverged` or
+  `:did_not_converge` failure was found: the target it first disagreed in,
+  the root, and its own `:diverged` or `:did_not_converge` failure.
+  """
+  @type other_key :: %{
+          variant: %{index: non_neg_integer(), name: String.t()},
+          root: non_neg_integer(),
+          failure: t()
+        }
 
   @type kind ::
           :check_failed
@@ -511,8 +532,8 @@ defmodule PropertyDamage.Failure do
   @doc """
   A variant's boundary observation differed from the reference's at the
   convergence bound. `fields` holds `:key`, `:root`, `:command`,
-  `:reference_value`, `:variant_value` and `:mismatch` (see
-  `PropertyDamage.Failure.Divergence`).
+  `:reference_value`, `:variant_value` and `:mismatch`, and optionally
+  `:other_keys` (see `PropertyDamage.Failure.Divergence`).
   """
   @spec diverged(map()) :: t()
   def diverged(fields) do
@@ -522,7 +543,8 @@ defmodule PropertyDamage.Failure do
   @doc """
   A variant's boundary observation was still pending at the convergence bound.
   `fields` holds `:key`, `:root`, `:command`, `:reason`, `:waited_ms` and
-  `:within_ms` (see `PropertyDamage.Failure.Convergence`).
+  `:within_ms`, and optionally `:other_keys` (see
+  `PropertyDamage.Failure.Convergence`).
   """
   @spec did_not_converge(map()) :: t()
   def did_not_converge(fields) do

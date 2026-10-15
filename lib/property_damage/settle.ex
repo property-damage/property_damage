@@ -110,7 +110,7 @@ defmodule PropertyDamage.Settle do
   # framework defaults for spec-less command modules (DR-028: command_spec is the
   # single static-metadata surface; there is no per-callback fallback).
   defp resolve_spec(command_module) do
-    if function_exported?(command_module, :command_spec, 1) do
+    if PropertyDamage.ModuleCheck.exports?(command_module, :command_spec, 1) do
       command_module.command_spec([])
     else
       PropertyDamage.Command.framework_defaults()

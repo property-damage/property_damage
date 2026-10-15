@@ -152,6 +152,9 @@ Three questions follow.
      `Code.string_to_quoted/2` and a walker accepts literals only: atoms,
      booleans, `nil`, numbers, strings, charlists, lists, tuples, maps and
      `%Module{}` struct literals whose module is loaded and is a struct.
+     The loader never loads a module. A struct in a command's own place must
+     also be a command module (or a placeholder or position); a struct inside
+     a command's fields may be of any loaded module.
      Calls, captures, anonymous functions, pipes, sigils, module attributes,
      variables and a second term are refused, naming the node and its line.
      Loading a file from a bug report therefore cannot run anything.
@@ -220,8 +223,9 @@ Three questions follow.
 - The replay artifact of a failure first found on the branching engine and
   converted to linear cannot re-execute placeholders minted in a parallel
   branch.
-- `Analysis.isolate_trigger/2` on a divergence re-runs the reference alone, so
-  it cannot isolate a trigger that needs the comparison.
+- `Analysis.isolate_trigger/2` re-runs one target alone, so it cannot isolate
+  a trigger that needs the comparison: on a `:diverged` or `:did_not_converge`
+  report it returns `{:error, :not_applicable}`.
 
 ## Consequences
 

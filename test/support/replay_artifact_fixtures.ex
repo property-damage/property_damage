@@ -39,6 +39,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
   alias PropertyDamage.{FailureReport, Generator, Sequence}
   alias PropertyDamage.FailureReport.Formatter
   alias PropertyDamage.Test.ExpansionFor
+  alias PropertyDamage.Test.TmpPath
 
   # ==========================================================================
   # Events
@@ -328,6 +329,34 @@ defmodule PropertyDamage.Test.ReplayFixtures do
     end
   end
 
+  defmodule LeafRootModel do
+    @moduledoc false
+    # An Open (whose event carries an external() id) rewrites to one Open
+    # with the same label: an entry whose one leaf is the root itself.
+    @behaviour PropertyDamage.Model
+
+    alias PropertyDamage.Test.ReplayFixtures, as: R
+
+    @impl true
+    def commands, do: [R.Open]
+
+    @impl true
+    def command_sequence_projection, do: R.World
+
+    @impl true
+    def check_projections, do: [R.Tally]
+
+    @impl true
+    def simulator, do: R
+
+    @impl true
+    def expansions, do: [{R.Open, &R.same_open/2}]
+  end
+
+  @doc false
+  # Open: one entry, `Open[0]`, one Open leaf with the root's label.
+  def same_open(%Open{label: label}, _state), do: [[{Open, overrides: %{label: label}}]]
+
   @doc false
   # Refund: `Refund[0]` is the identity; `Refund[1]` credits the amount in two
   # parts on the same account.
@@ -405,8 +434,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
   @doc false
   # A fresh directory under the system tmp dir, removed when the test exits.
   def tmp_dir! do
-    dir =
-      Path.join(System.tmp_dir!(), "pd_replay_#{System.unique_integer([:positive])}")
+    dir = TmpPath.unique("pd_replay")
 
     File.mkdir_p!(dir)
     ExUnit.Callbacks.on_exit(fn -> File.rm_rf!(dir) end)

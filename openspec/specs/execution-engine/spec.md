@@ -159,6 +159,10 @@ The system SHALL support `external()` markers in event struct definitions to ide
 - **THEN** the framework SHALL recognize that field as server-generated
 - **AND** the concrete value SHALL be captured from the adapter's returned (or injected) event
 
+#### Scenario: An injected event of another module
+- **WHEN** a command (a setup command included) injects an event of another module through `runtime.inject` before it answers with the event that carries its `external()`
+- **THEN** the external SHALL be captured from the event of its own event module, never from the injected event
+
 #### Scenario: Multiple and nested external fields
 - **WHEN** an event struct defines multiple external fields or external fields nested in maps
 - **THEN** all external field paths SHALL be tracked (e.g., `[:ids, :transaction]`)
@@ -220,9 +224,13 @@ The system SHALL support mock service adapters that stand in for third-party ser
 - **WHEN** the SUT calls the mock and events are pushed into the registry
 - **THEN** after the command the framework SHALL flush those events, fold them into projection state (recording them with `source: :mock`), and notify each mock via `on_event/2`
 
+#### Scenario: Mock events pushed between commands
+- **WHEN** events are pushed into the registry after a command's own flush (after the command returned, before the next command or the end of the run)
+- **THEN** the boundary drain (`Stepping.drain/2`) and the finalization SHALL flush and fold them, attributed to the command that ran last
+
 ### Requirement: Checks on Asynchronously-Observed Events
 
-The executor SHALL evaluate `@check every:` checks on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, mock-service events, and nemesis events, as well as events folded during the finalize-time drains (the `@eventually` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-check dispatch **incrementally** — one event at a time, on the state produced by folding that event — with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Check mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.
+The executor SHALL evaluate `@check every:` checks on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, mock-service events, and nemesis events, as well as events folded during the finalize-time drains (the `@eventually` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-check dispatch **incrementally**: one event at a time, on the state produced by folding that event, with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Check mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.
 
 #### Scenario: Check fires on a poller-observed event
 - **WHEN** a resource poller injects an event that matches an `@check every:` check
@@ -342,7 +350,7 @@ The system SHALL reject the run-level options `adapter:`, `adapter_config:`, `in
 
 ### Requirement: Isolation Warning for Targets That Share State (DR-043)
 
-Two targets that run against one system isolate their slices of state through `config:` (for example a tenant, an account or a path prefix). The framework SHALL document this and SHALL NOT provide the isolation itself. `mix pd.validate --targets` SHALL warn for each pair of targets that use the same adapter with an equal `config:`.
+Two targets that run against one system isolate their slices of state through `config:` (for example a tenant, an account or a path prefix). The framework SHALL document this and SHALL NOT provide the isolation itself. `mix pd.validate --targets` SHALL warn for each pair of targets that use the same adapter with an equal `config:`, and `PropertyDamage.run/1` under `validate: true` SHALL log the same warning through `Logger`.
 
 #### Scenario: Same adapter and identical config
 - **WHEN** `mix pd.validate MyModel --targets "[{MyAdapter, name: \"a\"}, {MyAdapter, name: \"b\"}]"` is run
@@ -426,13 +434,13 @@ Two targets that run against one system isolate their slices of state through `c
 
 ### Requirement: Lockstep Scheduler (DR-044)
 
-`PropertyDamage.Scheduler.run/1` SHALL run one command sequence against every target as variants in lockstep and return `{:ok, run}` where `run` is a map with the keys `failure`, `other_failures`, `results`, `observations`, `latencies` and `compare_counts`. `run.failure` SHALL be `nil` or `%{kind, variant, run, root, reason}`, with `kind` one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed` and `reason` always a `%PropertyDamage.Failure{}`. The scheduler SHALL accept the options `mint_epoch:` and `placeholder_registry:`. Variants SHALL be set up one after another in target order. The scheduler SHALL advance the variants to each boundary under `concurrency: :serial` (one at a time in target order) or `concurrency: :parallel` (all at once), run the comparison through the convergence loop (DR-046), and only then advance to the next boundary. At the end of the run, whether it ended in a pass or a failure, every variant that was set up SHALL be finalized and stopped.
+`PropertyDamage.Scheduler.run/1` SHALL run one command sequence against every target as variants in lockstep and return `{:ok, run}` where `run` is a map with the keys `failure`, `other_failures`, `results`, `latencies` and `compare_counts`. Called with two or more targets and a model that declares no `@compare` function, it SHALL raise the same `ArgumentError` as `PropertyDamage.run/1` before any target is set up. `run.failure` SHALL be `nil` or `%{kind, variant, run, root, reason}`, with `kind` one of `:check_failed`, `:diverged`, `:did_not_converge`, `:setup_failed` and `:execution_failed` and `reason` always a `%PropertyDamage.Failure{}`. The scheduler SHALL accept the options `mint_epoch:` and `placeholder_registry:`. Variants SHALL be set up one after another in target order. The scheduler SHALL advance the variants to each boundary under `concurrency: :serial` (one at a time in target order) or `concurrency: :parallel` (all at once), run the comparison through the convergence loop (DR-046), and only then advance to the next boundary. At the end of the run, whether it ended in a pass or a failure, every variant that was set up SHALL be finalized and stopped.
 
 #### Scenario: Setup failure ends the run before command 0
 
 - **WHEN** the setup of a target fails
 - **THEN** `run.failure` SHALL have the kind `:setup_failed` and name that target
-- **AND** `run.results`, `run.observations` and `run.latencies` SHALL be empty
+- **AND** `run.results` and `run.latencies` SHALL be empty
 
 #### Scenario: Finalize-time failure becomes the run's failure
 
@@ -446,7 +454,7 @@ When the `seed_library:` option is enabled and the library is non-empty, the sys
 #### Scenario: Replay precedes exploration
 - **WHEN** the seed library is enabled and non-empty
 - **THEN** the system SHALL replay each stored seed once (most-recently-discovered first) before generating any random sequence
-- **AND** each replayed seed SHALL be regenerated by run-0 derivation (the stored seed reproduces its original sequence while generators are byte-stable)
+- **AND** each replayed seed SHALL be regenerated by the run-0 seed (the stored seed reproduces its original sequence while generators are byte-stable)
 
 #### Scenario: Replays do not consume the exploration budget
 - **WHEN** seeds are replayed
@@ -482,7 +490,7 @@ Each `adapter.execute/3` call SHALL be subject to a configurable per-command wal
 
 ### Requirement: Reproducible Run Inputs (DR-034)
 
-Every run SHALL be identified by a base `seed`, a `run_number`, and a `run_nonce`; every SUT execution within a logical run additionally carries a `mint_epoch`. The base seed and run number SHALL determine the generated plan: the effective seed is `Generator.run_seed(seed, run_number)`, and the plan is a pure function of that effective seed. The `run_nonce` SHALL be a 64-bit integer that is independent of plan generation and SHALL seed only the resolution of run-scoped minted values (DR-034, command domain). Each of `seed` and `run_nonce` SHALL be resolved as `explicit option || environment variable || random default`, reading `PD_SEED` and `PD_RUN_NONCE` respectively, mirroring how ExUnit selects and prints a random seed. The nonce's random default SHALL be drawn from entropy independent of the process RNG (e.g. `:crypto.strong_rand_bytes/1`), NEVER from `:rand`: ExUnit seeds each test process's `:rand` from the suite seed, so a process-RNG default would be silently pinned whenever a user reruns with `mix test --seed N`, re-minting colliding values against a non-resettable SUT — the exact failure the random default exists to prevent. The `mint_epoch` distinguishes SUT executions within one logical run: epoch 0 is the recorded exploration run; the shrinker SHALL assign a fresh epoch per shrink attempt; the report's reproduction execution and replays SHALL default to fresh epochs with an option to pin, so repeated executions do not re-send identical minted values to a non-resettable SUT. The chosen `seed`, `run_number`, `run_nonce`, and `mint_epoch` SHALL be recorded on the run's trace and report so the exact execution is reproducible. `mix test` SHALL NOT be required to forward a custom flag: ad-hoc reproduction SHALL be available through the environment variables, and programmatic reproduction through the persisted artifact.
+Every run SHALL be identified by a base `seed`, a `run_number`, and a `run_nonce`; every SUT execution within a logical run additionally carries a `mint_epoch`. The base seed and run number SHALL determine the generated plan: the effective seed is `Generator.run_seed(seed, run_number)`, and the plan is a pure function of that effective seed. The `run_nonce` SHALL be a 64-bit integer that is independent of plan generation and SHALL seed only the resolution of run-scoped minted values (DR-034, command domain). Each of `seed` and `run_nonce` SHALL be resolved as `explicit option || environment variable || random default`, reading `PD_SEED` and `PD_RUN_NONCE` respectively, mirroring how ExUnit selects and prints a random seed. The nonce's random default SHALL come from entropy independent of the process RNG (e.g. `:crypto.strong_rand_bytes/1`), NEVER from `:rand`: ExUnit seeds each test process's `:rand` from the suite seed, so a process-RNG default would be silently pinned whenever a user reruns with `mix test --seed N`, re-minting colliding values against a non-resettable SUT: the exact failure the random default exists to prevent. The `mint_epoch` distinguishes SUT executions within one logical run: epoch 0 is the recorded exploration run; the shrinker SHALL assign a fresh epoch per shrink attempt; the report's reproduction execution and replays SHALL default to fresh epochs with an option to pin, so repeated executions do not re-send identical minted values to a non-resettable SUT. The chosen `seed`, `run_number`, `run_nonce`, and `mint_epoch` SHALL be recorded on the run's trace and report so the exact execution is reproducible. `mix test` SHALL NOT be required to forward a custom flag: ad-hoc reproduction SHALL be available through the environment variables, and programmatic reproduction through the persisted artifact.
 
 #### Scenario: Random nonce by default, recorded, independent of the process RNG
 
@@ -535,7 +543,7 @@ Symbolic identity SHALL be deterministic so that two generations of the same pla
 
 ### Requirement: Generation Determinism Audit (DR-037)
 
-Generation SHALL be a pure function of `(seed, model, generation options)`, including user code: command generators, `when:`/`overrides:` predicates, the `command_sequence_projection`, and the simulator. All nondeterminism — the wall clock, `:rand`, `System.unique_integer/1`, client-minted identifiers, and environment — SHALL be reified at execution (adapter reification of a seeded relative offset, or `mint_per_run/1`, DR-034), never during generation. The framework SHALL provide an audit (`PropertyDamage.audit/2`, wrapped by `mix pd.audit`) that, for a deterministically chosen set of seeds, realizes a model's generated sequence twice at the same seed through the seeded path and asserts the two are structurally equal per the Deterministic Symbolic Identity requirement (DR-036); the audit SHALL be generation-only and SHALL NOT resolve mint markers or placeholders. On divergence the audit SHALL localize the first differing command position and its differing fields with actionable guidance, and `mix pd.audit` SHALL exit non-zero so CI gates on it. An impure model that fails this audit is exactly a model whose captured runs the run-comparison comparability guard (DR-035) will refuse. A command's fields SHALL be generated in an order that does not depend on the VM: `Generator.merge_overrides/2` SHALL return the field generators sorted by field, so one seed draws the same field values in every VM.
+Generation SHALL be a pure function of `(seed, model, generation options)`, including user code: command generators, `when:`/`overrides:` predicates, the `command_sequence_projection`, and the simulator. All nondeterminism (the wall clock, `:rand`, `System.unique_integer/1`, client-minted identifiers, and environment) SHALL be reified at execution (adapter reification of a seeded relative offset, or `mint_per_run/1`, DR-034), never during generation. The framework SHALL provide an audit (`PropertyDamage.audit/2`, wrapped by `mix pd.audit`) that, for a deterministically chosen set of seeds, realizes a model's generated sequence twice at the same seed through the seeded path and asserts the two are structurally equal per the Deterministic Symbolic Identity requirement (DR-036); the audit SHALL be generation-only and SHALL NOT resolve mint markers or placeholders. On divergence the audit SHALL localize the first differing command position and its differing fields with actionable guidance, and `mix pd.audit` SHALL exit non-zero so CI gates on it. An impure model that fails this audit is exactly a model whose captured runs the run-comparison comparability guard (DR-035) will refuse. A command's fields SHALL be generated in an order that does not depend on the VM: `Generator.merge_overrides/2` SHALL return the field generators sorted by field, so one seed draws the same field values in every VM.
 
 #### Scenario: A pure model passes the audit
 
@@ -584,7 +592,7 @@ Generation SHALL be a pure function of `(seed, model, generation options)`, incl
 
 The scheduler SHALL keep an active set of variants. An adapter failure (`:execution_failed`) of a non-reference variant at a root SHALL retire that variant before the next root starts in any variant: its pollers SHALL be finalized, its `:teardown` checks SHALL run, and its adapter's `teardown/1` SHALL run, at once. A retired variant SHALL start no command, and its placeholder registry SHALL never be consulted again. The remaining variants SHALL be compared among themselves at that root and continue. A failure of the reference, a `:check_failed` failure and a failure before the first root SHALL end the run, as before. The run SHALL end when no non-reference variant remains in the active set.
 
-The run SHALL report one primary failure: the first failure in root order and then in target order. In every run, with or without a retired variant, failures SHALL be ordered by root, then target, then by when they happened within that root and target (a check recorded under `check_mode: :record` while the root was stepped, then the comparison failure at that root's boundary, then a failure found while the target finalized). A failure with no root found at the end of the run SHALL come after every rooted failure, in target order. The first SHALL be the primary failure and every other one SHALL be in `other_failures`. A finalize-time repeat of a failure already found SHALL be listed once, and no failure SHALL be dropped. `other_failures` SHALL NOT take part in shrinking. The choice among failures of one root depends on target order, because the first target is the reference and the others are compared in order.
+The run SHALL report one primary failure: the first failure in root order and then in target order. In every run, with or without a retired variant, failures SHALL be ordered by root, then target, then by when they happened within that root and target (a check recorded under `check_mode: :record` while the root was stepped, then the comparison failure at that root's boundary, then a failure found while the target finalized). A failure with no root found at the end of the run SHALL come after every rooted failure, in target order. The first SHALL be the primary failure and every other one SHALL be in `other_failures`. A finalize-time repeat of a failure already found SHALL be listed once, and no failure SHALL be dropped. A variant that is retired, and the reference when its failure ends the run, SHALL have the first check it recorded under `check_mode: :record` listed at that check's root, as a finished variant's is. `other_failures` SHALL NOT take part in shrinking. The choice among failures of one root depends on target order, because the first target is the reference and the others are compared in order.
 
 #### Scenario: Early teardown of a retired variant
 - **GIVEN** three targets, where the third fails at root 1
@@ -656,6 +664,11 @@ When a variant's last setup command has stepped, drained and settled, every `ext
 - **WHEN** the adapter answers with an event that omits it
 - **THEN** the run SHALL fail with kind `:setup_failed`, cause `:unresolved_placeholder`, and the command, the field and the target named
 
+#### Scenario: A later setup command consumes the missing external
+- **GIVEN** a setup command whose `external()` never arrives and a later setup command that consumes it
+- **WHEN** the consuming command cannot resolve the placeholder
+- **THEN** the run SHALL fail with cause `:unresolved_placeholder` naming the producing command, its `setup_index` and the field, not with cause `:command` on the consumer
+
 ### Requirement: Setup Failure (DR-048)
 
 A setup failure SHALL have kind `:setup_failed` and carry a `PropertyDamage.Failure.Setup` with `cause`, `command`, `setup_index`, `field` and `detail`. Its causes SHALL be: the adapter's `setup/1` returning `{:error, _}` or raising (`:adapter_setup`); a setup command answering `{:error, _}` or raising (`:command`); a check failing on a setup command's event (`:check`); and the completion rule (`:unresolved_placeholder`). The report's `failed_at_index` SHALL be `nil`. A check failure whose triggering event belongs to a setup command SHALL be a setup failure wherever it is detected, including an `@eventually` window that a setup command's event opened and that times out after the first root started.
@@ -713,6 +726,10 @@ The engine SHALL run a variant's teardown commands after every execution of that
 - **WHEN** a target's `Adapter.setup/1` returned `{:error, _}`
 - **THEN** its teardown commands SHALL NOT run
 
+#### Scenario: Teardown after a raise during finalization
+- **WHEN** finalization raises, throws or exits (for example a projection rejects an event drained after the last root)
+- **THEN** the teardown commands SHALL run, then `Adapter.teardown/1`, and the raise SHALL propagate
+
 ### Requirement: Setup and Teardown Commands in Reports and Replay (DR-048)
 
 `FailureReport.setup_commands` and `teardown_commands` SHALL hold the reported sequence's commands, and `stats` and the report SHALL count them separately from `total_commands`, which counts roots. `PropertyDamage.replay/2` and `PropertyDamage.Analysis.isolate_trigger/2` SHALL execute the report's setup commands before the sequence and its teardown commands after it, against one target; `PropertyDamage.RunTrace.capture/1` SHALL draw them from its seed as a run does and execute them in the same order. A branching run SHALL execute the setup commands before its own prefix segment and the teardown commands after its suffix segment. Exported scripts SHALL list the setup steps before the roots. The verbose printer and the formatter SHALL name a setup failure's cause and command. Telemetry `[:property_damage, :command, :start | :stop]` metadata SHALL carry `phase: :setup | :root | :teardown`.
@@ -720,6 +737,10 @@ The engine SHALL run a variant's teardown commands after every execution of that
 #### Scenario: A report reproduces without re-drawing
 - **WHEN** `PropertyDamage.replay/2` runs a report
 - **THEN** it SHALL execute the report's own setup commands, then its sequence, then its teardown commands, and SHALL NOT draw them again
+
+#### Scenario: A replay session stops once
+- **WHEN** `PropertyDamage.Replay.stop/1` is called twice on one session
+- **THEN** the teardown commands and `Adapter.teardown/1` SHALL run once, and the second call SHALL return `:ok` and run nothing
 
 #### Scenario: Counts stay separate
 - **GIVEN** a model with two setup commands, one teardown command and a three-root sequence
@@ -733,7 +754,7 @@ The engine SHALL run a variant's teardown commands after every execution of that
 
 Before any target executes a command and after the shared root sequence is generated, the engine SHALL generate each target's concrete sequence by walking the roots in order, with the target's own simulated state starting from the state the setup commands leave. The walk SHALL fold, root after root, either the root or the realized leaves of the chosen entry into the target's simulated state, so an expansion function and a leaf's `overrides:` see what that target ran before. A `:random` target SHALL pick at each root by weight among the entries the function returned. An `:identity` target SHALL take the root as generated. A `:reference` target SHALL take the first target's concrete sequence, leaf for leaf. A leaf SHALL be generated from its module's generator with its `overrides:` evaluated against the target's simulated state so far, and SHALL be simulated before the next leaf is generated. Every generation error SHALL be raised before any `Adapter.setup/1`.
 
-A leaf whose module has a `commands/0` entry with a `when:` that is false at the leaf's position SHALL withdraw its entry, and the pick SHALL be made again among the remaining entries. When no entry remains, or the function returns `[]`, the root SHALL run as itself and the engine SHALL count it as `:forced` for that target.
+A leaf whose module has a `commands/0` entry with a `when:` that is false at the leaf's position SHALL withdraw its entry, and the pick SHALL be made again among the remaining entries. When no entry remains, or the function returns `[]`, the root SHALL run as itself and the engine SHALL count it as `:forced` for that target. An entry realized as one leaf equal to its root SHALL run the root itself: the target SHALL record it as `:identity`, with no leaves and no alias, at the root's own position, and a replay of the recorded choice SHALL run it the same way.
 
 #### Scenario: A target walks its own state
 - **GIVEN** two `:random` targets that ran different entries at root 2
@@ -800,6 +821,7 @@ The engine SHALL validate a leaf module the first time a process realizes it, wi
 - the leaf modules realized;
 - every entry key seen, with its realization count;
 - every entry never realized, as "`Root[i]` not realized in N seeds";
+- per root module, how often an entry was realized as one leaf equal to the root, counted as identity and not under the entry's key;
 - the root modules forced to the identity in every sampled state.
 
 The counts SHALL sum over the targets that pick (`expansion: :random`), and a line SHALL name them. A `:reference` target SHALL NOT be counted again. When no target picks, the task SHALL say so and print no entry counts. The task SHALL warn "ignored in a sequence" for a `when:` or `weight:` on a leaf, naming the root, the entry index and the key. It SHALL warn about the orphan events and the missing downstream observables of reached leaves, and SHALL say that an unreached leaf was not reached by the sample. A generation error SHALL fail the task.

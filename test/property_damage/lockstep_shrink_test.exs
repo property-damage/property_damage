@@ -8,6 +8,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
   alias PropertyDamage.{Failure, FailureReport, Generator, Options, Scheduler, SeedLibrary}
   alias PropertyDamage.{Sequence, Shrinker}
+  alias PropertyDamage.Test.TmpPath
 
   @probe :pd_lockstep_shrink_probe
 
@@ -596,11 +597,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
       # Exploration would pass: its sequence never diverges.
       exploration = find_seed(DivergeModel, &is_nil(divergent_root(&1)))
 
-      path =
-        Path.join(
-          System.tmp_dir!(),
-          "pd_lockstep_replay_#{System.unique_integer([:positive])}.json"
-        )
+      path = TmpPath.unique("pd_lockstep_replay") <> ".json"
 
       on_exit(fn -> File.rm(path) end)
 

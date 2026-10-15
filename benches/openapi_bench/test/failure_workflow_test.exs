@@ -26,7 +26,12 @@ defmodule OpenapiBench.FailureWorkflowTest do
   @moduletag timeout: 120_000
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "openapi_bench_wf_#{System.unique_integer([:positive])}")
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "openapi_bench_wf_#{System.pid()}_#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
     %{dir: dir}

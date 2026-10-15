@@ -104,7 +104,7 @@ defmodule PropertyDamage.Audit do
 
   @doc """
   Audit that a model's projection `apply/2` is a pure function of its inputs
-  (P8 / DR-040).
+  (DR-040).
 
   Generation-only companion to `run/2`: for each seed it generates the plan and
   folds it through **every** projection (the `command_sequence_projection` plus
@@ -174,14 +174,7 @@ defmodule PropertyDamage.Audit do
   end
 
   defp projection_states(model) do
-    command_projection = model.command_sequence_projection()
-
-    check_projections =
-      if function_exported?(model, :check_projections, 0),
-        do: model.check_projections(),
-        else: []
-
-    Map.new([command_projection | check_projections], &{&1, &1.init()})
+    Map.new(PropertyDamage.Model.projection_modules(model), &{&1, &1.init()})
   end
 
   defp normalize_seeds(count) when is_integer(count) and count > 0,

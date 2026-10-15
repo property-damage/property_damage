@@ -452,6 +452,17 @@ defmodule PropertyDamage.Executor.Stepping do
         state.await_matchers
       )
 
+    # A mock event pushed after the last step's own flush belongs to that step.
+    {projections, event_log, fold_counter} =
+      Events.process_mock_events(
+        state.mock_registry,
+        state.last_command_index,
+        event_log,
+        projections,
+        state.branch_id,
+        fold_counter
+      )
+
     if state.mock_registry do
       MockServiceRegistry.update_projections(state.mock_registry, projections)
     end

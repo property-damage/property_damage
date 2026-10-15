@@ -165,7 +165,7 @@ defmodule PropertyDamage.Model do
   simulates them, so the roots' `when:` and `overrides:` see the fixture state
   and an `external()` a setup command produces can flow into a root. Adding a
   setup command therefore changes which roots a seed draws; a seed is stable
-  for a fixed model. The teardown commands are drawn after the roots, against
+  for a fixed model. The teardown commands are generated after the roots, against
   the state the last root left.
 
   For every run, shrink attempt and target, the order is:
@@ -644,7 +644,7 @@ defmodule PropertyDamage.Model do
   """
   @spec resolve_spec(module(), keyword()) :: map()
   def resolve_spec(module, opts) do
-    if function_exported?(module, :command_spec, 1) do
+    if PropertyDamage.ModuleCheck.exports?(module, :command_spec, 1) do
       module.command_spec(opts)
     else
       PropertyDamage.Command.build_spec(module, [], opts)
@@ -696,14 +696,14 @@ defmodule PropertyDamage.Model do
     Code.ensure_loaded(model)
 
     case Enum.filter(@removed_hooks, fn {name, arity} ->
-           function_exported?(model, name, arity)
+           PropertyDamage.ModuleCheck.exports?(model, name, arity)
          end) do
       [] -> :ok
       hooks -> raise ArgumentError, removed_hooks_message(model, hooks)
     end
 
     for callback <- [:setup_each, :teardown_each],
-        function_exported?(model, callback, 0),
+        PropertyDamage.ModuleCheck.exports?(model, callback, 0),
         module <- Enum.map(apply(model, callback, []), &entry_module/1),
         is_atom(module) and PropertyDamage.Nemesis.nemesis_module?(module) do
       raise ArgumentError,
@@ -751,7 +751,7 @@ defmodule PropertyDamage.Model do
   @spec projection_modules(module()) :: [module()]
   def projection_modules(model) do
     check_projections =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -785,7 +785,7 @@ defmodule PropertyDamage.Model do
         ]
   def check_catalog(model) do
     for projection <- projection_modules(model),
-        function_exported?(projection, :__invariants__, 0),
+        PropertyDamage.ModuleCheck.exports?(projection, :__invariants__, 0),
         {id, invariant} <- projection.__invariants__() do
       checks =
         projection.__checks__()

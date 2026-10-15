@@ -59,8 +59,8 @@ defmodule PropertyDamage.CompareCountersTest do
 
   # Root 1 settles 60 ms late in "b"; with `diverge_at`, "b" also settles that
   # root with one more.
-  defp targets(diverge_at \\ nil) do
-    at = %{1 => {:after_ms, 60}}
+  defp targets(diverge_at, late_ms \\ 60) do
+    at = %{1 => {:after_ms, late_ms}}
     at = if diverge_at, do: Map.put(at, diverge_at, {:sync, 1}), else: at
     [Compare.target("a"), Compare.target("b", %{at: at})]
   end
@@ -79,8 +79,10 @@ defmodule PropertyDamage.CompareCountersTest do
   test "each key counts its boundaries, waits and time waited on the stats", ctx do
     {totals, paid, never} = keys(ctx)
 
+    # 500 ms late: the comparison reaches root 1 well before "b"
+    # settles it, even on a loaded machine, so it must wait.
     assert {:ok, stats} =
-             Compare.run(model!(ctx), targets(),
+             Compare.run(model!(ctx), targets(nil, 500),
                max_commands: 4,
                compare: [converge_within: 3_000]
              )
@@ -89,8 +91,11 @@ defmodule PropertyDamage.CompareCountersTest do
     assert counts |> Map.keys() |> Enum.sort() == Enum.sort([totals, paid, never])
 
     assert %{compared_at: 4, waited_at: 1, waited_ms: waited_ms} = counts[totals]
-    assert waited_ms >= 30
-    assert waited_ms < 1_500
+    # The 500 ms delay starts when "b" executes the root, before the
+    # comparison starts waiting, so the time waited has no tight lower
+    # bound: it is positive and below the convergence window.
+    assert waited_ms > 0
+    assert waited_ms < 3_000
 
     # Two observations of one projection are two keys with their own counts.
     assert counts[paid] == %{compared_at: 2, waited_at: 0, waited_ms: 0}

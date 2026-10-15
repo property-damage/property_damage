@@ -1094,10 +1094,10 @@ defmodule Mix.Tasks.Pd.Scaffold do
         mod = cmd.__struct__
 
         path_params =
-          if function_exported?(mod, :__path_params__, 0), do: mod.__path_params__(), else: []
+          if PropertyDamage.ModuleCheck.exports?(mod, :__path_params__, 0), do: mod.__path_params__(), else: []
 
         query_params =
-          if function_exported?(mod, :__query_params__, 0), do: mod.__query_params__(), else: []
+          if PropertyDamage.ModuleCheck.exports?(mod, :__query_params__, 0), do: mod.__query_params__(), else: []
 
         fields = Map.from_struct(cmd)
 
@@ -1125,7 +1125,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       defp build_url(base_url, path, cmd) do
         # Replace path parameters
         path =
-          if function_exported?(cmd.__struct__, :__path_params__, 0) do
+          if PropertyDamage.ModuleCheck.exports?(cmd.__struct__, :__path_params__, 0) do
             Enum.reduce(cmd.__struct__.__path_params__(), path, fn param, acc ->
               value = Map.get(cmd, param)
               String.replace(acc, "{" <> to_string(param) <> "}", to_string(value))
@@ -1138,7 +1138,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       end
 
       defp build_query(cmd) do
-        if function_exported?(cmd.__struct__, :__query_params__, 0) do
+        if PropertyDamage.ModuleCheck.exports?(cmd.__struct__, :__query_params__, 0) do
           cmd.__struct__.__query_params__()
           |> Enum.map(fn param -> {param, Map.get(cmd, param)} end)
           |> Enum.reject(fn {_, v} -> is_nil(v) end)
@@ -1151,12 +1151,12 @@ defmodule Mix.Tasks.Pd.Scaffold do
       defp build_body(cmd) do
         # Get body fields (exclude path and query params)
         path_params =
-          if function_exported?(cmd.__struct__, :__path_params__, 0),
+          if PropertyDamage.ModuleCheck.exports?(cmd.__struct__, :__path_params__, 0),
             do: cmd.__struct__.__path_params__(),
             else: []
 
         query_params =
-          if function_exported?(cmd.__struct__, :__query_params__, 0),
+          if PropertyDamage.ModuleCheck.exports?(cmd.__struct__, :__query_params__, 0),
             do: cmd.__struct__.__query_params__(),
             else: []
 

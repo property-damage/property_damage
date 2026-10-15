@@ -35,6 +35,14 @@ defmodule PropertyDamage.Export.Common do
   end
 
   @doc """
+  A failure's name as every export prints it, the way the report prints it: a
+  `{projection, function}` key of a divergence as `Projection.function`, a
+  check name as is (see `PropertyDamage.FailureReport.format_name/1`).
+  """
+  @spec check_label(PropertyDamage.Failure.name()) :: String.t()
+  def check_label(name), do: FailureReport.format_name(name)
+
+  @doc """
   The line a script header carries about which commands its steps are, or nil
   for a model without `expansions/0`, whose steps are the roots.
   """
