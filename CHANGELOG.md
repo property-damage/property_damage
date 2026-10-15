@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:diverged` or `:did_not_converge` failure; every further key that differed or
   was pending at that boundary is listed, in the same order, in the failure
   detail's new `other_keys` field (`Failure.Divergence` and
-  `Failure.Convergence`), and the printed report shows each one.
+  `Failure.Convergence`), and the printed report shows each one, also under
+  such a failure listed among the run's other failures.
 - **Boundary observations: `@compare` (DR-046).** A public projection function
   `def name(state, root)` marked `@compare every: ..., using: ...` is the only
   cross-target oracle. `every:` takes the `@check` schedule vocabulary (`1`, `N`,
@@ -918,10 +919,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundary.** A target that recorded a failing check at an earlier root kept the
   final boundary from being compared, so a divergence there went unreported; it
   is now compared and listed among the run's failures.
-- **A retired target's recorded check is listed.** Under `check_mode: :record`,
-  the first check a target recorded before it left the run (an adapter failure
-  at a later root) was missing from the report; it is now listed at its root,
-  as a finished target's is.
+- **A retired or halted target's recorded check is listed.** Under
+  `check_mode: :record`, the first check a target recorded before it left the
+  run (an adapter failure at a later root), or before the reference's own
+  failure ended the run, was missing from the report, and a retired target
+  with two recorded checks listed its last one; its first is now listed at its
+  root, as a finished target's is.
 - **`Scheduler.run/1` refuses targets with nothing to compare.** Called directly
   with two or more targets and a model that declares no `@compare`, it ran
   them; it now raises the same `ArgumentError` as `PropertyDamage.run/1`, before

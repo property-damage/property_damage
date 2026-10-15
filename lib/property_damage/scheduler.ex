@@ -129,7 +129,9 @@ defmodule PropertyDamage.Scheduler do
       is one of the run's failures, at its root, as a finished target's is.
 
   A failure in the reference ends the run at that root: no target starts the
-  next root, every target is torn down, and that root is not compared.
+  next root, every target is torn down, and that root is not compared. The
+  first check the reference recorded under `check_mode: :record` before it
+  failed is still one of the run's failures, at its root.
 
   A run can therefore collect several failures. The first in root order, then
   in target order, is the run's `failure` (the primary failure; it is the one
@@ -771,10 +773,9 @@ defmodule PropertyDamage.Scheduler do
 
     {at_root, at_end} =
       finished
-      |> Enum.map(fn {variant, {_result, _latency, outcome}} ->
-        end_failure(config, variant.target, outcome)
+      |> Enum.flat_map(fn {variant, {_result, _latency, outcome}} ->
+        end_failures(config, variant.target, outcome)
       end)
-      |> Enum.reject(&is_nil/1)
       |> Enum.map(fn {failure, found_when} ->
         {with_failure_reason(failure, results), true, found_when}
       end)
@@ -791,20 +792,33 @@ defmodule PropertyDamage.Scheduler do
   defp identity(failure),
     do: {failure.variant.index, failure.root, failure.kind, Failure.name(failure.reason)}
 
-  # A variant's finalize-time failure and when it happened: a check that
+  # A variant's finalize-time failures and when each happened: a check that
   # `check_mode: :record` recorded failed while its root was stepped
   # (`:stepped`), before that root's boundary was compared; any other one
   # was found while the variant finalized its run (`:finalized`), after
-  # every comparison.
-  defp end_failure(config, target, {:finished, result}) do
+  # every comparison. A variant that halted after it recorded a check
+  # reports the first check it recorded beside its halt, as a retired
+  # variant does (see `recorded_before/3`).
+  defp end_failures(config, target, {:finished, result}) do
     case finalize_failure(config, target, result) do
-      nil -> nil
-      failure -> {failure, if(recorded?(result), do: :stepped, else: :finalized)}
+      nil ->
+        []
+
+      failure ->
+        recorded_beside_halt(config, target, result) ++
+          [{failure, if(recorded?(result), do: :stepped, else: :finalized)}]
     end
   end
 
-  defp end_failure(_config, _target, {:crashed, crash}), do: {crash, :finalized}
-  defp end_failure(_config, _target, _retired_or_gone), do: nil
+  defp end_failures(_config, _target, {:crashed, crash}), do: [{crash, :finalized}]
+  defp end_failures(_config, _target, _retired_or_gone), do: []
+
+  defp recorded_beside_halt(config, target, %{failure_reason: reason} = result)
+       when not is_nil(reason) do
+    for {failure, _primary?} <- recorded_before(config, target, result), do: {failure, :stepped}
+  end
+
+  defp recorded_beside_halt(_config, _target, _result), do: []
 
   # The primary failure is the first in root order, then in target order (a
   # failure before command 0 first); the others follow in that order, and

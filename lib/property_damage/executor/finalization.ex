@@ -41,7 +41,9 @@ defmodule PropertyDamage.Executor.Finalization do
     resource_pollers = Map.get(state, :active_resource_pollers, [])
     Enum.each(resource_pollers, &ResourcePoller.stop/1)
 
-    check_failures = Map.get(state, :check_failures, [])
+    # The state accumulates :record failures newest first; every result
+    # lists them in chronological order, like the event log.
+    check_failures = state |> Map.get(:check_failures, []) |> Enum.reverse()
 
     # Extract stacktrace from failure reason if embedded
     {normalized_reason, stacktrace} = extract_stacktrace(reason)

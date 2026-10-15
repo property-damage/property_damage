@@ -441,12 +441,14 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   # Every further observation that still disagreed at the same boundary, one
   # line each, in key order.
-  defp terminal_other_keys(%{other_keys: [_ | _] = others}, color) do
-    lines = Enum.map_join(others, "\n", &"    #{other_failure_line(&1)}")
-    "#{label("Also disagreed", color)} at this boundary, in key order:\n#{lines}\n"
+  defp terminal_other_keys(failure, color, indent \\ "")
+
+  defp terminal_other_keys(%{other_keys: [_ | _] = others}, color, indent) do
+    lines = Enum.map_join(others, "\n", &"#{indent}    #{other_failure_line(&1)}")
+    "#{indent}#{label("Also disagreed", color)} at this boundary, in key order:\n#{lines}\n"
   end
 
-  defp terminal_other_keys(_failure, _color), do: ""
+  defp terminal_other_keys(_failure, _color, _indent), do: ""
 
   defp variant_name(%{variant: %{name: name}}), do: name
   defp variant_name(_report), do: nil
@@ -483,7 +485,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp terminal_other_failures(%{other_failures: [_ | _] = others}, color) do
     lines =
       Enum.map_join(others, "\n", fn other ->
-        "  #{cyan(color)}#{other_failure_line(other)}#{reset(color)}"
+        "  #{cyan(color)}#{other_failure_line(other)}#{reset(color)}" <>
+          listed_other_keys(other.failure, color)
       end)
 
     """
@@ -493,6 +496,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
   end
 
   defp terminal_other_failures(_report, _color), do: nil
+
+  # A listed comparison failure's further disagreeing observations, under
+  # its line, as the primary failure's are printed in its own section.
+  defp listed_other_keys(%Failure{type: %{other_keys: [_ | _]} = type}, color),
+    do: "\n" <> String.trim_trailing(terminal_other_keys(type, color, "    "))
+
+  defp listed_other_keys(_failure, _color), do: ""
 
   defp other_failure_line(%{variant: variant, root: root, failure: failure}) do
     name = Failure.name(failure)

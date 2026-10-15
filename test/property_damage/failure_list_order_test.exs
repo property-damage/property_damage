@@ -66,10 +66,40 @@ defmodule PropertyDamage.FailureListOrderTest do
     defp poison?(by, n), do: by in ["b", "c"] and n == 0
   end
 
+  defmodule Twice do
+    @moduledoc false
+    # The reference "a" books a poisoned command 0 and target "b" books
+    # poisoned commands 1 and 3: each check fails while that root is
+    # stepped, and the observation is compared only at the final boundary.
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{poisoned: []}
+
+    @impl true
+    def apply(state, %Booked{n: n, by: by}) do
+      if poison?(by, n), do: %{state | poisoned: state.poisoned ++ [n]}, else: state
+    end
+
+    def apply(state, _event), do: state
+
+    @compare every: :end
+    def poisoned(state, _root), do: state.poisoned
+
+    @check every: Booked
+    def assert_no_twice_poison(_state, %Booked{n: n, by: by}) do
+      if poison?(by, n), do: PropertyDamage.fail!("poisoned booking", n: n)
+      :ok
+    end
+
+    defp poison?(by, n), do: {by, n} in [{"a", 0}, {"b", 1}, {"b", 3}]
+  end
+
   setup_all do
     {:ok,
      model: ActiveSet.define_model!(Module.concat(__MODULE__, PoisonModel), [Poisoned]),
-     early_model: ActiveSet.define_model!(Module.concat(__MODULE__, EarlyModel), [Early])}
+     early_model: ActiveSet.define_model!(Module.concat(__MODULE__, EarlyModel), [Early]),
+     twice_model: ActiveSet.define_model!(Module.concat(__MODULE__, TwiceModel), [Twice])}
   end
 
   setup do
@@ -152,6 +182,33 @@ defmodule PropertyDamage.FailureListOrderTest do
       assert Enum.filter(others(run), &(elem(&1, 0) == "c")) == [
                {"c", 0, :check_failed, :no_early_poison},
                {"c", 2, :execution_failed, nil}
+             ]
+    end
+  end
+
+  describe "a target that halts after recording checks" do
+    defp all(run), do: Enum.map([run.failure | run.other_failures], &summary/1)
+
+    test "when retired lists the first check it recorded, once", ctx do
+      configs = [{"a", %{}}, {"b", %{fail: %{4 => :error}}}]
+      run = schedule(ctx, configs, check_mode: :record, model: ctx.twice_model)
+
+      assert Enum.filter(all(run), &match?({"b", _, :check_failed, _}, &1)) == [
+               {"b", 1, :check_failed, :no_twice_poison}
+             ]
+
+      assert {"b", 4, :execution_failed, nil} in all(run)
+      assert Enum.uniq(all(run)) == all(run)
+    end
+
+    test "when it is the reference keeps the check it recorded beside its halt", ctx do
+      configs = [{"a", %{fail: %{3 => :error}}}, {"b", %{}}]
+      run = schedule(ctx, configs, check_mode: :record, model: ctx.twice_model)
+
+      assert all(run) == [
+               {"a", 0, :check_failed, :no_twice_poison},
+               {"b", 1, :check_failed, :no_twice_poison},
+               {"a", 3, :execution_failed, nil}
              ]
     end
   end
