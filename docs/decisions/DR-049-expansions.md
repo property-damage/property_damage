@@ -1,6 +1,6 @@
 # DR-049: Expansions, Roots That Run as Several Commands
 
-**Status:** Accepted
+**Status:** Accepted. Amended by DR-050: the shrinker now substitutes expansion entries (the interim rule of decision 11 and its "not yet" are superseded), and the paths that run a failure again read the recorded data instead of raising (decision 12); persistence is version 14.
 **Date:** 2026-10-07
 
 ## Context

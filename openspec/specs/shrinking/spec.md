@@ -4,7 +4,7 @@
 
 Defines the two-phase shrinking algorithm that reduces failing command sequences to minimal reproductions while preserving failure equivalence, including dependency-aware removal, probe command prioritization, argument simplification, and branching sequence support.
 
-Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands)
+Reference DRs: DR-017 (Hierarchical Delta Debugging), DR-025 (Continuous Async-Observation Checking), DR-045 (One Runner for One or More Targets), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact)
 
 ## Requirements
 
@@ -290,14 +290,25 @@ The shrinker SHALL NOT treat a setup or teardown command as a candidate: it SHAL
 - **THEN** the shrinker SHALL reject the candidate even if the original failure was also a setup failure
 - **AND** the attempt SHALL count against `max_shrink_attempts`
 
-### Requirement: Expansions Under Shrinking (DR-049)
+### Requirement: Expansions Under Shrinking (DR-049, DR-050)
 
-For a model with `expansions/0`, a shrink candidate SHALL be a list of roots. The shrinker SHALL delete roots and SHALL simplify root arguments, and SHALL NOT delete, reorder or simplify a leaf on its own, and SHALL NOT replace the entry a target ran at a root. A failing run SHALL carry, per target name, the choice at every root: the entry key, the leaf sequence, the aliases and the leaf pick seed. Roots SHALL carry a stable id, their index at generation. Every candidate SHALL realize each target's choices again for the surviving roots, against the candidate's simulated state, without picking again: the surviving root keeps its entry and leaf seed, `overrides:` functions of arity 1 and 2 are evaluated again, and the aliases are rebuilt. A simplified root SHALL go through the same entry and leaf seed. A `:reference` target SHALL copy the reference's candidate sequence. The failure signature SHALL stay `{kind, name, variant_index}` with the root index as the index.
+For a model with `expansions/0`, a shrink candidate SHALL be a list of roots plus, per target name, the choice at each root. A failing run SHALL carry, per target name, the choice at every root: the entry key, the leaf sequence, the aliases and the leaf pick seed. Roots SHALL carry a stable id, their index at generation. Every candidate SHALL realize each target's choices again for the surviving roots, against the candidate's simulated state, without picking again: a surviving root keeps its entry and leaf seed unless a phase below substitutes it, `overrides:` functions of arity 1 and 2 are evaluated again, and the aliases are rebuilt. A `:reference` target SHALL copy the reference's candidate sequence. The setup commands SHALL NOT be shrunk, and the teardown commands SHALL be generated again per candidate from the candidate's end state.
 
-A candidate in which a leaf of a carried entry fails its precondition SHALL run that root as itself in that target and SHALL count it as "identity, forced". A candidate whose expansion function raises, or no longer returns the carried entry for a simplified root, SHALL be invalid: the shrinker SHALL NOT run it and SHALL NOT accept it.
+The shrinker SHALL run four phases per cycle, in this order, each on the candidate the previous phase left, and SHALL repeat the cycle until a whole cycle makes no progress or the shrink budget is spent:
+
+1. drop root subtrees; a root's choices go with it, in every target;
+2. collapse the reference target's expansion toward the identity: at each surviving root in order, try the identity first (listed or not), then each earlier entry of the root's list in order, and keep the first substitution that still fails with an equivalent failure; every `:reference` target moves with the reference, and a `:random` target that copied the reference's choice at that root keeps what it ran there;
+3. collapse each `:random` target onto the reference's choice at each root: substitute the reference's entry, copy the reference's leaves, and keep the substitution when the failure survives;
+4. simplify arguments, the roots' and then the leaves': in a leaf, only fields the leaf's generator chose SHALL change; an `overrides:` value and a placeholder SHALL NOT.
+
+A substituted entry in phase 2 SHALL be realized with the leaf seed keyed on the run seed, the target's name and the root id, so that `PropertyDamage.Expansion.for/5` can regenerate it. A shrunk root that runs as itself without being listed SHALL be recorded as `:identity` and printed "identity, by shrinking"; the report's `expansion_counts` SHALL count it per target and root module, and a passing run's counts SHALL NOT hold one.
+
+The failure signature SHALL stay `{kind, name, variant_index}`, and a candidate SHALL be accepted only when it fails with that signature at the same or an earlier root. A candidate that changes the failing target or the kind SHALL be rejected, whichever phase produced it.
+
+A candidate in which a leaf of a carried entry fails its precondition SHALL run that root as itself in that target and SHALL count it as "identity, forced". A candidate SHALL be invalid, and the shrinker SHALL NOT run or accept it, when: an expansion function raises; the function no longer returns a carried or substituted entry for the candidate's simulated state; or the candidate's replay artifact could not run it again, because a placeholder its commands hold is not one that simulating the shrunk roots mints.
 
 #### Scenario: A surviving root keeps its entry
-- **GIVEN** a failing run in which target "second" ran `Pay[1] = [Authorize, Capture]` at root 3
+- **GIVEN** a failing run in which target "second" ran `Pay[1] = [Authorize, Capture]` at root 3, and the failure needs that entry
 - **WHEN** the shrinker deletes root 0
 - **THEN** the candidate SHALL run the same entry for that root in "second", with the same leaf seed, at the root's new index
 - **AND** the reproduction's report SHALL name `Pay[1]` for "second" at the failing root
@@ -306,10 +317,39 @@ A candidate in which a leaf of a carried entry fails its precondition SHALL run 
 - **WHEN** the shrinker runs a candidate
 - **THEN** the framework SHALL NOT pick an entry for any root of any target
 
+#### Scenario: The reference collapses to the identity
+- **GIVEN** a failing run in which the reference ran `Incr[0]` at the failing root and the failure survives with the reference running `Incr k 3` as itself
+- **WHEN** the shrinker finishes
+- **THEN** the report's `expansions` for the reference at that root SHALL hold `:identity` when the model lists no identity entry
+- **AND** the printed report SHALL say "identity, by shrinking"
+
+#### Scenario: A path bug keeps its rewrite
+- **GIVEN** two targets where only the rewrite `Incr[1]` triggers the failure
+- **WHEN** the shrinker runs phases 2 and 3
+- **THEN** the reference SHALL end on the identity or a listed entry and "second" SHALL end on `Incr[1]`, at one root
+
+#### Scenario: An implementation bug leaves both targets on one entry
+- **GIVEN** a failure that every entry of a root triggers
+- **WHEN** phase 3 collapses "second" onto the reference's choice
+- **THEN** both targets SHALL end on the same entry at that root
+
+#### Scenario: A candidate that changes the failing target is rejected
+- **WHEN** a substitution makes the failure appear in another target or with another kind
+- **THEN** the shrinker SHALL NOT accept it
+
+#### Scenario: A fixed point costs one cycle
+- **WHEN** `shrink_further/2` shrinks a report the previous shrink left at a fixed point
+- **THEN** the shrinker SHALL run one cycle and accept no candidate
+
 #### Scenario: Argument simplification re-realizes the leaves
 - **GIVEN** a root `Incr k 5` that ran as `Incr[1]`
 - **WHEN** the shrinker simplifies the amount to 3
 - **THEN** the leaves SHALL come from `Incr k 3` through entry index 1 and the same leaf seed
+
+#### Scenario: Leaf simplification leaves overrides and placeholders alone
+- **GIVEN** a leaf with a field fixed by `overrides:` and a field holding a placeholder
+- **WHEN** phase 4 simplifies the leaf
+- **THEN** both fields SHALL be unchanged in every candidate
 
 #### Scenario: A failing leaf precondition forces the identity
 - **WHEN** a candidate state makes a leaf's `when:` false in a carried entry
@@ -325,8 +365,12 @@ A candidate in which a leaf of a carried entry fails its precondition SHALL run 
 - **WHEN** an expansion function raises for a simplified root during shrinking
 - **THEN** the candidate SHALL be invalid, the shrink SHALL go on, and `PropertyDamage.run/1` SHALL return the failure report
 
+#### Scenario: A candidate its artifact could not run never runs
+- **GIVEN** a root that mints a placeholder and a later command that holds it
+- **WHEN** a candidate drops the root that minted the placeholder and keeps the later command
+- **THEN** the candidate SHALL be invalid and SHALL NOT run
+
 #### Scenario: Re-shrinking carries the recorded choices
 - **WHEN** `shrink_further/2` re-shrinks a saved report
-- **THEN** it SHALL carry the choices the report recorded for every target
-- **AND** it SHALL raise an error that names the target when the report records no choices for it
-
+- **THEN** it SHALL carry the choices the report recorded for every target, including a target that ran leaves
+- **AND** it SHALL raise an error that names `replay_dir:` only when the report holds neither a replay term nor recorded choices
