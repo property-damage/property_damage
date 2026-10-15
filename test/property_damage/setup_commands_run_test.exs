@@ -416,6 +416,28 @@ defmodule PropertyDamage.SetupCommandsRunTest do
       end
     end
 
+    for {label, config} <- [missing_field: %{drop_id: true}, no_event: %{no_event: true}] do
+      test "an external() that never arrives and a later setup command consumes fails on its producer (#{label})" do
+        recorder = start_recorder()
+        model = standard_model(Module.concat(UnresolvedConsumed, unquote(label)))
+
+        assert {:error, %FailureReport{} = report} =
+                 run(model, [
+                   SetupCommands.target("a", recorder),
+                   SetupCommands.target("b", recorder, unquote(Macro.escape(config)))
+                 ])
+
+        assert %Failure{
+                 type: %Failure.Setup{
+                   cause: :unresolved_placeholder,
+                   field: [:id],
+                   setup_index: 0,
+                   command: %CreateUser{}
+                 }
+               } = report.failure_reason
+      end
+    end
+
     test "latency: true times the roots only" do
       recorder = start_recorder()
       model = standard_model(Latency, teardown: [{Cleanup, overrides: %{thing_id: "x"}}])

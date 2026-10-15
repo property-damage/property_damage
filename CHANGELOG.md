@@ -881,6 +881,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A branching run whose model has a simulator runs its `@check at:` checks.**
+  Verifying an ordering passed the lifecycle-boundary checks to the step
+  trigger and raised `CaseClauseError`; they now run only at their boundary.
+- **A raise during finalization still runs the teardown commands.** A raise,
+  throw or exit while `Executor.run/4` finalized a run skipped the teardown
+  commands; they now run, then `Adapter.teardown/1`, and the raise propagates.
+- **`Replay.stop/1` stops a session once.** A second call ran the teardown
+  commands and `Adapter.teardown/1` again; it now returns `:ok` and runs nothing.
+- **A mock event pushed between commands is folded.** An event a mock received
+  after its command's own flush was lost at the end of the run and missing from
+  a boundary's state; `Stepping.drain/2` and finalization now flush the mock
+  registry and attribute the event to the command that ran last.
+- **A timed-out attempt leaves no dead resource poller in the state.** The
+  pollers an adapter started in an attempt that hit `timeout/1` stayed listed in
+  `active_resource_pollers` after they died with the attempt.
+- **A placeholder resolution failure's detail is its message.** The detail of a
+  `:placeholder_resolution` failure held the framework's stacktrace beside the
+  message, so two targets' equal failures could differ by a stack frame.
+- **`@eventually` checks emit check telemetry.** `[:property_damage, :check,
+  :start]` fires when the triggering event opens the window and `[:property_damage,
+  :check, :stop]` when the condition holds or the window times out, with the
+  metadata keys of a synchronous check.
+- **A projection listed in both `command_sequence_projection/0` and
+  `check_projections/0` is checked once per step.** Every consumer of a model's
+  projections now reads `Model.projection_modules/1`, so the engine, the
+  ordering check, the load-test worker, forensics, the trace and the audit
+  initialize, check and poll such a projection once.
+- **`PropertyDamage.run/1` warns about targets that share state.** Under
+  `validate: true` it logs the warning `mix pd.validate` prints for two targets
+  with the same adapter and an identical `config:`.
+- **A missing `external()` is reported on the setup command that should have
+  produced it.** When a later setup command consumed it, the run failed with
+  cause `:command` on the consumer; it now fails with cause
+  `:unresolved_placeholder` on the producer, as the completion rule reports it.
+- **An injected event of another module never resolves a command's
+  `external()`.** An event injected through `runtime.inject` before a command
+  answered could be read as that command's own event and give the external a
+  wrong value; capture now reads only events of the external's event module.
+- **A throw or an exit in an expansion is the generation error a raise is.** A
+  throw or an exit from an expansion function, a leaf's `overrides:` function or
+  a leaf's generator escaped `PropertyDamage.run/1` and lost the report during
+  shrinking; it is now the same `ArgumentError`, naming `{:throw, value}` or
+  `{:exit, reason}`, and a shrink candidate that hits it is dropped.
 - **A `check_mode: :record` failure is reproduced under `:record`.** The report
   records the run's `check_mode`; `reproduction_command/1` and `replay_command/1`
   print it when it is not `:halt`, `shrink_further/2` and `mix pd.reshrink`

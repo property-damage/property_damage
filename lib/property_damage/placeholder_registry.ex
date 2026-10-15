@@ -141,7 +141,8 @@ defmodule PropertyDamage.PlaceholderRegistry do
 
   For each placeholder the producer at `position` mints (looked up via
   `ids_at_position/2`), reads the value at its recorded `path`/`event_index` in
-  the command's real (adapter-returned) `events` and resolves it by id. This is
+  the command's real `events` (injected, then returned) and resolves it by id;
+  only an event of the placeholder's own event module resolves it. This is
   position-driven, so it is correct under branching (distinct branch positions)
   and shrinking (the position is rebuilt per run, never a stale generation key).
 
@@ -155,19 +156,34 @@ defmodule PropertyDamage.PlaceholderRegistry do
     |> ids_at_position(position)
     |> Enum.reduce(reg, fn id, acc ->
       case get(acc, id) do
-        %Placeholder{path: path, event_index: event_index} ->
-          case Enum.at(events, event_index) do
-            event when is_struct(event) ->
-              resolve(acc, id, External.get_at_path(event, path))
-
-            _ ->
-              acc
+        %Placeholder{path: path, event_index: event_index, event_module: module} ->
+          case producing_event(events, event_index, module) do
+            nil -> acc
+            event -> resolve(acc, id, External.get_at_path(event, path))
           end
 
         _ ->
           acc
       end
     end)
+  end
+
+  # The event a placeholder is read from: the event at its index when that
+  # event is of the placeholder's module. An event injected ahead of the
+  # command's answer shifts the index, so otherwise it is the first event of
+  # that module; an event of another module never resolves it.
+  defp producing_event(events, index, nil) do
+    case Enum.at(events, index) do
+      event when is_struct(event) -> event
+      _other -> nil
+    end
+  end
+
+  defp producing_event(events, index, module) do
+    case Enum.at(events, index) do
+      %{__struct__: ^module} = event -> event
+      _other -> Enum.find(events, &match?(%{__struct__: ^module}, &1))
+    end
   end
 
   @doc """

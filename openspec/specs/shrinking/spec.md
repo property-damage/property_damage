@@ -305,7 +305,7 @@ A substituted entry in phase 2 SHALL be realized with the leaf seed keyed on the
 
 The failure signature SHALL stay `{kind, name, variant_index}`, and a candidate SHALL be accepted only when it fails with that signature at the same or an earlier root. A candidate that changes the failing target or the kind SHALL be rejected, whichever phase produced it.
 
-A candidate in which a leaf of a carried entry fails its precondition SHALL run that root as itself in that target and SHALL count it as "identity, forced". A candidate SHALL be invalid, and the shrinker SHALL NOT run or accept it, when: an expansion function raises; the function no longer returns a carried or substituted entry for the candidate's simulated state; or the candidate's replay artifact could not run it again, because a placeholder its commands hold is not one that simulating the shrunk roots mints.
+A candidate in which a leaf of a carried entry fails its precondition SHALL run that root as itself in that target and SHALL count it as "identity, forced". A candidate SHALL be invalid, and the shrinker SHALL NOT run or accept it, when: an expansion function raises, throws or exits; the function no longer returns a carried or substituted entry for the candidate's simulated state; or the candidate's replay artifact could not run it again, because a placeholder its commands hold is not one that simulating the shrunk roots mints.
 
 #### Scenario: A surviving root keeps its entry
 - **GIVEN** a failing run in which target "second" ran `Pay[1] = [Authorize, Capture]` at root 3, and the failure needs that entry
@@ -362,7 +362,7 @@ A candidate in which a leaf of a carried entry fails its precondition SHALL run 
 - **THEN** the candidate SHALL be invalid and SHALL NOT run
 
 #### Scenario: A raise invalidates the candidate
-- **WHEN** an expansion function raises for a simplified root during shrinking
+- **WHEN** an expansion function raises, throws or exits for a simplified root during shrinking
 - **THEN** the candidate SHALL be invalid, the shrink SHALL go on, and `PropertyDamage.run/1` SHALL return the failure report
 
 #### Scenario: A candidate its artifact could not run never runs

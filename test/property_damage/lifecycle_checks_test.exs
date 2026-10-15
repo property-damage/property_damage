@@ -444,6 +444,33 @@ defmodule PropertyDamage.LifecycleChecksTest do
              result.failure_reason
   end
 
+  defmodule BumpSimulator do
+    @behaviour PropertyDamage.Model.Simulator
+    @impl true
+    def simulate(%Bump{}, _state), do: [%Bumped{}]
+  end
+
+  defmodule SimulatedMaxCountModel do
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Bump]
+    @impl true
+    def command_sequence_projection, do: MaxCountProjection
+    @impl true
+    def simulator, do: BumpSimulator
+  end
+
+  test "a branching run with a simulator skips at: checks while it verifies orderings" do
+    # The ordering check runs the synchronous checks at each branch position;
+    # a lifecycle-boundary check has no step trigger and must not reach it.
+    seq = %Sequence{prefix: [], branches: [[%Bump{}], [%Bump{}]], suffix: []}
+
+    {:ok, result} = run_seq(seq, SimulatedMaxCountModel, SingleBumpAdapter)
+
+    assert %Failure{type: %Failure.Check{kind: :check_failed, name: :count_at_most_one}} =
+             result.failure_reason
+  end
+
   # ===========================================================================
   # Cluster 6 — check_mode for at: checks
   # ===========================================================================

@@ -73,6 +73,65 @@ defmodule PropertyDamage.AdapterTimeoutTest do
     def execute(_cmd, _user_context, _runtime), do: {:ok, [%Ev{type: :done}]}
   end
 
+  defmodule PollingSlowAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(_config), do: {:ok, %{}}
+
+    @impl true
+    def teardown(_user_context), do: :ok
+
+    @impl true
+    def timeout(_command), do: {50, :milliseconds}
+
+    # Starts a resource poller, then hangs past the budget: the poller is
+    # linked to the attempt that is shut down.
+    @impl true
+    def execute(_cmd, _user_context, runtime) do
+      runtime.start_poller.(
+        poll_fn: fn -> :pending end,
+        handler: fn _ -> :continue end,
+        interval_ms: 10,
+        timeout_ms: 5_000
+      )
+
+      Process.sleep(2_000)
+      {:ok, []}
+    end
+  end
+
+  test "a timed-out attempt leaves no dead resource poller in the active list" do
+    alias PropertyDamage.Executor.Stepping
+
+    {:ok, queue} = PropertyDamage.EventQueue.start_link()
+    state = Stepping.init_state(Model, event_queue: queue)
+
+    ctx = %Stepping.Context{
+      model: Model,
+      adapter: PollingSlowAdapter,
+      adapter_context: %{},
+      event_queue: queue
+    }
+
+    assert {:error, _failure, failed, {:error, %CommandTimeoutError{}}} =
+             Stepping.step(%Cmd{value: 1}, 0, state, ctx)
+
+    # Give each listed poller time to receive the exit of its attempt.
+    for %{pid: pid} <- failed.active_resource_pollers do
+      ref = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _} -> :ok
+      after
+        200 -> Process.demonitor(ref, [:flush])
+      end
+    end
+
+    assert Enum.filter(failed.active_resource_pollers, &(not Process.alive?(&1.pid))) == []
+    Stepping.stop_pollers(failed)
+  end
+
   test "a wedged execute/3 produces a CommandTimeoutError instead of hanging" do
     seq = Sequence.linear([%Cmd{value: 1}])
 

@@ -87,8 +87,12 @@ defmodule PropertyDamage.Telemetry do
   ### Check Execution
 
   The engine emits these around every evaluation of a `@check` (per command,
-  per event, and at the `:startup` and `:teardown` phases). `@eventually`
-  checks are polled in their own processes and emit nothing.
+  per event, and at the `:startup` and `:teardown` phases) and around every
+  `@eventually` window: the start event when the triggering event spawns the
+  window's poller, the stop event from the poller's own process when the
+  condition holds (`passed: true`) or the window times out (`passed: false`,
+  with a message). A window cut short by the end of a failed run emits no
+  stop event.
 
   - `[:property_damage, :check, :start]` - Check evaluation started
     - Measurements: `%{system_time: integer()}`

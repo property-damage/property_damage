@@ -801,7 +801,8 @@ targets: [
 
 The `mix pd.validate --targets "<list>"` command warns when two targets share the
 same adapter module *and* an identical `config:`, since that usually signals a
-configuration mistake. Fix it by giving each target its own config.
+configuration mistake. `PropertyDamage.run/1` logs the same warning when it runs
+with `validate: true` (the default). Fix it by giving each target its own config.
 
 ### Optional Options
 

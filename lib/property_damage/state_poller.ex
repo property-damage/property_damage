@@ -16,6 +16,9 @@ defmodule PropertyDamage.StatePoller do
   Optional:
   - `:predicate_source` - String representation of the predicate for debugging
   - `:get_state_fn` - Function to get current projection state (for testing)
+  - `:telemetry` - the engine's telemetry context (`nil` emits nothing); when
+    set, the poller emits `[:property_damage, :check, :start]` as it starts and
+    `[:property_damage, :check, :stop]` when the predicate holds or times out
   """
   @type start_opts :: [
           predicate: (any() -> boolean()),
@@ -24,7 +27,8 @@ defmodule PropertyDamage.StatePoller do
           interval_ms: pos_integer(),
           timeout_ms: pos_integer(),
           triggered_by: %{event: struct(), check_name: atom()},
-          get_state_fn: (module() -> any()) | nil
+          get_state_fn: (module() -> any()) | nil,
+          telemetry: map() | nil
         ]
 
   @typedoc """
@@ -114,6 +118,7 @@ defmodule PropertyDamage.StatePoller do
 
     caller = self()
     started_at = System.monotonic_time(:millisecond)
+    span = start_span(Keyword.get(opts, :telemetry), projection, triggered_by.check_name)
 
     init_state = %{
       id: id,
@@ -128,7 +133,8 @@ defmodule PropertyDamage.StatePoller do
       get_state_fn: get_state_fn,
       poll_count: 0,
       last_state: nil,
-      last_predicate_error: nil
+      last_predicate_error: nil,
+      span: span
     }
 
     {:ok, pid} = GenServer.start_link(__MODULE__, init_state)
@@ -310,6 +316,7 @@ defmodule PropertyDamage.StatePoller do
         last_predicate_error: state.last_predicate_error
       }
 
+      stop_span(state.span, false, "did not hold within #{state.timeout_ms} ms")
       send(state.caller, {:poller_result, state.id, {:timeout, state.id, timeout_info}})
       {:stop, :normal, state}
     else
@@ -320,6 +327,7 @@ defmodule PropertyDamage.StatePoller do
       try do
         if state.predicate.(current_state) do
           # Success!
+          stop_span(state.span, true, nil)
           send(state.caller, {:poller_result, state.id, {:success, state.id}})
           {:stop, :normal, state}
         else
@@ -381,6 +389,32 @@ defmodule PropertyDamage.StatePoller do
   # ============================================================================
   # Private Helpers
   # ============================================================================
+
+  # The check telemetry of one `@eventually` window: the start event fires in
+  # the process that spawns the poller, the stop event in the poller when the
+  # window resolves. Both carry the synchronous check's metadata keys.
+  defp start_span(nil, _projection, _check_name), do: nil
+
+  defp start_span(context, projection, check_name) do
+    metadata = %{
+      check_name: check_name,
+      projection: projection,
+      variant: context.variant,
+      run_number: context.run_number
+    }
+
+    PropertyDamage.Telemetry.check_start(metadata)
+    {System.system_time(), metadata}
+  end
+
+  defp stop_span(nil, _passed, _message), do: :ok
+
+  defp stop_span({start_time, metadata}, passed, message) do
+    PropertyDamage.Telemetry.check_stop(
+      start_time,
+      Map.merge(metadata, %{passed: passed, message: message})
+    )
+  end
 
   defp get_projection_state(%{get_state_fn: nil, projection: projection}) do
     # Default: try to get state from projection's init

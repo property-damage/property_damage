@@ -455,10 +455,23 @@ defmodule PropertyDamage.Replay do
 
   Runs the report's teardown commands (`teardown_commands`), then stops any
   pollers spawned during stepping and the event queue, and tears the adapter
-  down. Safe to call more than once; every call runs the teardown commands.
+  down. Safe to call more than once: the first call tears the session down,
+  and a later call on the same session returns `:ok` and runs nothing.
   """
   @spec stop(t()) :: :ok
   def stop(%__MODULE__{} = session) do
+    # The session's event queue lives until the first stop/1 stops it, so a
+    # stopped queue marks a stopped session.
+    if running?(session), do: tear_down(session)
+    :ok
+  end
+
+  def stop(_), do: :ok
+
+  defp running?(%__MODULE__{event_queue: queue}),
+    do: is_pid(queue) and Process.alive?(queue)
+
+  defp tear_down(session) do
     if session.exec_state && session.adapter_context do
       Phases.run_teardown(
         session.failure.teardown_commands,
@@ -469,9 +482,7 @@ defmodule PropertyDamage.Replay do
 
     if session.exec_state, do: Stepping.stop_pollers(session.exec_state)
 
-    if is_pid(session.event_queue) and Process.alive?(session.event_queue) do
-      EventQueue.stop(session.event_queue)
-    end
+    EventQueue.stop(session.event_queue)
 
     if session.adapter && session.adapter_context do
       try do
@@ -480,11 +491,7 @@ defmodule PropertyDamage.Replay do
         _ -> :ok
       end
     end
-
-    :ok
   end
-
-  def stop(_), do: :ok
 
   @doc """
   Format a step for display.

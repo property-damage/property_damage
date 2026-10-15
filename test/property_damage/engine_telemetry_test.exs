@@ -9,6 +9,7 @@ defmodule PropertyDamage.EngineTelemetryTest do
   alias PropertyDamage.Test.Lockstep.{
     GuardedStepModel,
     Ledger,
+    PolledModel,
     Step,
     StepAdapter,
     StepGuard,
@@ -230,6 +231,51 @@ defmodule PropertyDamage.EngineTelemetryTest do
 
     stops = collect([:property_damage, :check, :stop], ["tel_fail"])
     assert Enum.any?(stops, fn {_m, meta} -> meta.passed == false and is_binary(meta.message) end)
+  end
+
+  # Every check event received so far for an `@eventually` check named
+  # `:stepped_is_polled` whose variant is `name`, as `{event, measurements, metadata}`.
+  defp polled_check_events(name, acc \\ []) do
+    receive do
+      {:telemetry, [:property_damage, :check, _] = event, measurements,
+       %{check_name: :stepped_is_polled, variant: %{name: ^name}} = metadata} ->
+        polled_check_events(name, [{event, measurements, metadata} | acc])
+
+      {:telemetry, _event, _measurements, _metadata} ->
+        polled_check_events(name, acc)
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  test "an @eventually check emits check start and stop with the synchronous check's keys" do
+    assert {:ok, _stats} = run(PolledModel, [target("tel_ev", %{poll: :deliver})])
+
+    events = polled_check_events("tel_ev")
+    starts = for {[_, _, :start], _m, meta} <- events, do: meta
+    stops = for {[_, _, :stop], m, meta} <- events, do: {m, meta}
+
+    assert [start_meta | _] = starts
+    assert Enum.sort(Map.keys(start_meta)) == [:check_name, :projection, :run_number, :variant]
+    assert start_meta.projection == PropertyDamage.Test.Lockstep.PolledProjection
+    assert length(stops) == length(starts)
+
+    for {measurements, meta} <- stops do
+      assert is_integer(measurements.duration)
+
+      assert Enum.sort(Map.keys(meta)) ==
+               [:check_name, :message, :passed, :projection, :run_number, :variant]
+
+      assert meta.passed == true
+    end
+
+    assert {:error, _report} =
+             run(PolledModel, [target("tel_ev_never", %{poll: :never})], shrink: false)
+
+    assert Enum.any?(polled_check_events("tel_ev_never"), fn
+             {[_, _, :stop], _m, meta} -> meta.passed == false and is_binary(meta.message)
+             _start -> false
+           end)
   end
 
   test "sequence stop names the failing target, nil for a passing run" do

@@ -889,7 +889,19 @@ defmodule PropertyDamage.Expansion do
                     Exception.message(e)
               ],
               __STACKTRACE__
+  catch
+    kind, value when kind in [:throw, :exit] ->
+      reraise ArgumentError,
+              [
+                message:
+                  "expansions/0: the function for #{inspect(base.root_command.__struct__)} " <>
+                    "(root #{base.root}) " <> escaped(kind, value)
+              ],
+              __STACKTRACE__
   end
+
+  # A throw or an exit from user code, named by its kind for a generation error.
+  defp escaped(kind, value), do: "escaped with " <> inspect({kind, value})
 
   defp entry!(_walk, _base, sequence, index) when is_list(sequence), do: {sequence, 1, index}
 
@@ -1052,6 +1064,15 @@ defmodule PropertyDamage.Expansion do
                     "its `overrides:` raised: " <> Exception.message(e)
               ],
               __STACKTRACE__
+  catch
+    kind, value when kind in [:throw, :exit] ->
+      reraise ArgumentError,
+              [
+                message:
+                  "expansions/0: #{key} (root #{base.root}), leaf #{leaf} #{inspect(module)}: " <>
+                    "its `overrides:` " <> escaped(kind, value)
+              ],
+              __STACKTRACE__
   end
 
   defp generate_leaf!(base, key, module, leaf, overrides, state, seed_key) do
@@ -1063,6 +1084,15 @@ defmodule PropertyDamage.Expansion do
   rescue
     e ->
       reraise ArgumentError, [message: leaf_error(base, key, module, leaf, e)], __STACKTRACE__
+  catch
+    kind, value when kind in [:throw, :exit] ->
+      reraise ArgumentError,
+              [
+                message:
+                  "expansions/0: #{key} (root #{base.root}), leaf #{leaf} #{inspect(module)}: " <>
+                    "cannot generate the leaf: its generator " <> escaped(kind, value)
+              ],
+              __STACKTRACE__
   end
 
   defp leaf_error(base, key, module, leaf, e) do

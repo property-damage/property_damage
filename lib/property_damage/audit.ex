@@ -174,14 +174,7 @@ defmodule PropertyDamage.Audit do
   end
 
   defp projection_states(model) do
-    command_projection = model.command_sequence_projection()
-
-    check_projections =
-      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0),
-        do: model.check_projections(),
-        else: []
-
-    Map.new([command_projection | check_projections], &{&1, &1.init()})
+    Map.new(PropertyDamage.Model.projection_modules(model), &{&1, &1.init()})
   end
 
   defp normalize_seeds(count) when is_integer(count) and count > 0,

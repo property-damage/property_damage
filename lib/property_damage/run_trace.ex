@@ -57,7 +57,8 @@ defmodule PropertyDamage.RunTrace do
   """
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{EventQueue, Executor, Expansion, Generator, Options, Scheduler}
+  alias PropertyDamage.{Executor, Expansion, Generator, Options, Scheduler}
+  alias PropertyDamage.Runtime.RunServices
   alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence
 
@@ -246,14 +247,13 @@ defmodule PropertyDamage.RunTrace do
   end
 
   defp capture_engine(opts, model, target, plan, run) do
-    %{adapter: adapter, config: config, injectors: injectors} = target
+    %{adapter: adapter, config: config} = target
     %{seed: seed, run_number: run_number, run_seed: run_seed} = run
     %{run_nonce: run_nonce, mint_epoch: mint_epoch} = run
 
-    {:ok, event_queue} = EventQueue.start_link()
-    setup_injectors(injectors, event_queue)
-
-    try do
+    # The target's injectors are set up against the run's event queue, as on
+    # every other path that executes a run. `mocks:` is rejected above.
+    RunServices.with_services(target, fn event_queue, _mock_registry ->
       {:ok, result} =
         Executor.run(plan, model, adapter,
           config: config,
@@ -282,10 +282,7 @@ defmodule PropertyDamage.RunTrace do
         linearization: linearization_of(result),
         outcome: outcome_of(result)
       )
-    after
-      teardown_injectors(injectors)
-      EventQueue.stop(event_queue)
-    end
+    end)
   end
 
   # A model with expansions: the target's concrete sequence, as a run draws it
@@ -330,20 +327,6 @@ defmodule PropertyDamage.RunTrace do
       expansion: %{target.name => expansion.variants[target.name].choices},
       outcome: outcome_of(result)
     )
-  end
-
-  # Injector-adapter lifecycle for capture (mirrors the exploration run loop):
-  # setup receives the event queue so injected events land in the run's log.
-  defp setup_injectors(injectors, event_queue) do
-    for adapter <- injectors, PropertyDamage.ModuleCheck.exports?(adapter, :setup, 1) do
-      adapter.setup(%{event_queue: event_queue})
-    end
-  end
-
-  defp teardown_injectors(injectors) do
-    for adapter <- injectors, PropertyDamage.ModuleCheck.exports?(adapter, :teardown, 1) do
-      adapter.teardown(%{})
-    end
   end
 
   defp outcome_of(%{success: true}), do: :pass
@@ -877,14 +860,7 @@ defmodule PropertyDamage.RunTrace do
   defp init_projections(model) do
     if is_atom(model) and model != nil and Code.ensure_loaded?(model) and
          PropertyDamage.ModuleCheck.exports?(model, :command_sequence_projection, 0) do
-      command_projection = model.command_sequence_projection()
-
-      check_projections =
-        if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0),
-          do: model.check_projections(),
-          else: []
-
-      Map.new([command_projection | check_projections], &{&1, &1.init()})
+      Map.new(PropertyDamage.Model.projection_modules(model), &{&1, &1.init()})
     else
       %{}
     end

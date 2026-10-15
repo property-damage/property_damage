@@ -381,5 +381,26 @@ defmodule PropertyDamage.ReplayTest do
                {:lifecycle, :teardown, %{test_pid: ^pid}}
              ] = lifecycle_messages()
     end
+
+    test "a second stop/1 runs no teardown command and no teardown/1" do
+      pid = self()
+
+      {:ok, session} =
+        Replay.start(recorded_lifecycle_failure(),
+          targets: [{LifecycleCounterAdapter, config: %{test_pid: pid}}]
+        )
+
+      _setup = lifecycle_messages()
+
+      assert :ok = Replay.stop(session)
+
+      assert [
+               {:lifecycle, :execute, %Release{}},
+               {:lifecycle, :teardown, %{test_pid: ^pid}}
+             ] = lifecycle_messages()
+
+      assert :ok = Replay.stop(session)
+      assert [] = lifecycle_messages()
+    end
   end
 end

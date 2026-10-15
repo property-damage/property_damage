@@ -517,6 +517,12 @@ defmodule PropertyDamage do
           Validation.print_summary(model, target.adapter, warnings)
         end
       end
+
+      # Targets that share an adapter and a config share the system's state.
+      for warning <- Validation.target_warnings(targets) do
+        require Logger
+        Logger.warning(warning)
+      end
     end
 
     # Print runtime warnings when verbose

@@ -159,6 +159,10 @@ The system SHALL support `external()` markers in event struct definitions to ide
 - **THEN** the framework SHALL recognize that field as server-generated
 - **AND** the concrete value SHALL be captured from the adapter's returned (or injected) event
 
+#### Scenario: An injected event of another module
+- **WHEN** a command (a setup command included) injects an event of another module through `runtime.inject` before it answers with the event that carries its `external()`
+- **THEN** the external SHALL be captured from the event of its own event module, never from the injected event
+
 #### Scenario: Multiple and nested external fields
 - **WHEN** an event struct defines multiple external fields or external fields nested in maps
 - **THEN** all external field paths SHALL be tracked (e.g., `[:ids, :transaction]`)
@@ -219,6 +223,10 @@ The system SHALL support mock service adapters that stand in for third-party ser
 #### Scenario: Mock injects events
 - **WHEN** the SUT calls the mock and events are pushed into the registry
 - **THEN** after the command the framework SHALL flush those events, fold them into projection state (recording them with `source: :mock`), and notify each mock via `on_event/2`
+
+#### Scenario: Mock events pushed between commands
+- **WHEN** events are pushed into the registry after a command's own flush (after the command returned, before the next command or the end of the run)
+- **THEN** the boundary drain (`Stepping.drain/2`) and the finalization SHALL flush and fold them, attributed to the command that ran last
 
 ### Requirement: Checks on Asynchronously-Observed Events
 
@@ -342,7 +350,7 @@ The system SHALL reject the run-level options `adapter:`, `adapter_config:`, `in
 
 ### Requirement: Isolation Warning for Targets That Share State (DR-043)
 
-Two targets that run against one system isolate their slices of state through `config:` (for example a tenant, an account or a path prefix). The framework SHALL document this and SHALL NOT provide the isolation itself. `mix pd.validate --targets` SHALL warn for each pair of targets that use the same adapter with an equal `config:`.
+Two targets that run against one system isolate their slices of state through `config:` (for example a tenant, an account or a path prefix). The framework SHALL document this and SHALL NOT provide the isolation itself. `mix pd.validate --targets` SHALL warn for each pair of targets that use the same adapter with an equal `config:`, and `PropertyDamage.run/1` under `validate: true` SHALL log the same warning through `Logger`.
 
 #### Scenario: Same adapter and identical config
 - **WHEN** `mix pd.validate MyModel --targets "[{MyAdapter, name: \"a\"}, {MyAdapter, name: \"b\"}]"` is run
@@ -656,6 +664,11 @@ When a variant's last setup command has stepped, drained and settled, every `ext
 - **WHEN** the adapter answers with an event that omits it
 - **THEN** the run SHALL fail with kind `:setup_failed`, cause `:unresolved_placeholder`, and the command, the field and the target named
 
+#### Scenario: A later setup command consumes the missing external
+- **GIVEN** a setup command whose `external()` never arrives and a later setup command that consumes it
+- **WHEN** the consuming command cannot resolve the placeholder
+- **THEN** the run SHALL fail with cause `:unresolved_placeholder` naming the producing command, its `setup_index` and the field, not with cause `:command` on the consumer
+
 ### Requirement: Setup Failure (DR-048)
 
 A setup failure SHALL have kind `:setup_failed` and carry a `PropertyDamage.Failure.Setup` with `cause`, `command`, `setup_index`, `field` and `detail`. Its causes SHALL be: the adapter's `setup/1` returning `{:error, _}` or raising (`:adapter_setup`); a setup command answering `{:error, _}` or raising (`:command`); a check failing on a setup command's event (`:check`); and the completion rule (`:unresolved_placeholder`). The report's `failed_at_index` SHALL be `nil`. A check failure whose triggering event belongs to a setup command SHALL be a setup failure wherever it is detected, including an `@eventually` window that a setup command's event opened and that times out after the first root started.
@@ -713,6 +726,10 @@ The engine SHALL run a variant's teardown commands after every execution of that
 - **WHEN** a target's `Adapter.setup/1` returned `{:error, _}`
 - **THEN** its teardown commands SHALL NOT run
 
+#### Scenario: Teardown after a raise during finalization
+- **WHEN** finalization raises, throws or exits (for example a projection rejects an event drained after the last root)
+- **THEN** the teardown commands SHALL run, then `Adapter.teardown/1`, and the raise SHALL propagate
+
 ### Requirement: Setup and Teardown Commands in Reports and Replay (DR-048)
 
 `FailureReport.setup_commands` and `teardown_commands` SHALL hold the reported sequence's commands, and `stats` and the report SHALL count them separately from `total_commands`, which counts roots. `PropertyDamage.replay/2` and `PropertyDamage.Analysis.isolate_trigger/2` SHALL execute the report's setup commands before the sequence and its teardown commands after it, against one target; `PropertyDamage.RunTrace.capture/1` SHALL draw them from its seed as a run does and execute them in the same order. A branching run SHALL execute the setup commands before its own prefix segment and the teardown commands after its suffix segment. Exported scripts SHALL list the setup steps before the roots. The verbose printer and the formatter SHALL name a setup failure's cause and command. Telemetry `[:property_damage, :command, :start | :stop]` metadata SHALL carry `phase: :setup | :root | :teardown`.
@@ -720,6 +737,10 @@ The engine SHALL run a variant's teardown commands after every execution of that
 #### Scenario: A report reproduces without re-drawing
 - **WHEN** `PropertyDamage.replay/2` runs a report
 - **THEN** it SHALL execute the report's own setup commands, then its sequence, then its teardown commands, and SHALL NOT draw them again
+
+#### Scenario: A replay session stops once
+- **WHEN** `PropertyDamage.Replay.stop/1` is called twice on one session
+- **THEN** the teardown commands and `Adapter.teardown/1` SHALL run once, and the second call SHALL return `:ok` and run nothing
 
 #### Scenario: Counts stay separate
 - **GIVEN** a model with two setup commands, one teardown command and a three-root sequence

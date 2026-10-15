@@ -204,6 +204,7 @@ defmodule PropertyDamage.Adapter do
   - Injected events update projections immediately
   - Injected events are recorded in the event log with source `:injected`
   - For events with `external()` fields, values are captured from the first injected event
+    of the external's event module; an injected event of another module never resolves it
   - Adapters that don't use `inject` continue to work unchanged
 
   This is particularly useful when your model needs to track intermediate states,

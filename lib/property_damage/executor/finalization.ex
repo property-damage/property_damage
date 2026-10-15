@@ -343,16 +343,6 @@ defmodule PropertyDamage.Executor.Finalization do
     {%{f | type: %{t | detail: exception}}, stacktrace}
   end
 
-  def extract_stacktrace(
-        %Failure{
-          type:
-            %Failure.Framework{kind: :placeholder_resolution, detail: {message, stacktrace}} = t
-        } = f
-      )
-      when is_binary(message) and is_list(stacktrace) do
-    {%{f | type: %{t | detail: message}}, stacktrace}
-  end
-
   # No embedded stacktrace
   def extract_stacktrace(reason), do: {reason, nil}
 
@@ -384,6 +374,17 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :branch_id),
         Map.get(state, :fold_counter, 0),
         Map.get(state, :await_matchers, [])
+      )
+
+    # A mock event pushed after the last command's own flush belongs to it.
+    {projections, event_log, fold_counter} =
+      Executor.Events.process_mock_events(
+        Map.get(state, :mock_registry),
+        Map.get(state, :last_command_index),
+        event_log,
+        projections,
+        Map.get(state, :branch_id),
+        fold_counter
       )
 
     state = %{state | projections: projections, event_log: event_log, fold_counter: fold_counter}

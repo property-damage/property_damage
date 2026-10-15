@@ -46,6 +46,24 @@ defmodule PropertyDamage.RunTargetsTest do
     )
   end
 
+  test "validate: true logs a warning for two targets with the same adapter and config" do
+    shared = %{name: "shared_cfg_warn"}
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        run(
+          [
+            {StepAdapter, name: "same_cfg_a", config: shared},
+            {StepAdapter, name: "same_cfg_b", config: shared}
+          ],
+          validate: true
+        )
+      end)
+
+    assert log =~ ~s|targets "same_cfg_a" (index 0) and "same_cfg_b" (index 1)|
+    assert log =~ "identical `config:`"
+  end
+
   defp generated(model, seed, run_number, max_commands) do
     model
     |> Generator.generate_sequence(max_commands: max_commands)

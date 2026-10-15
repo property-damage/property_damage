@@ -137,6 +137,16 @@ defmodule PropertyDamage.Executor.SteppingTest do
 
       refute_received {:executed, _, _, _}
     end
+
+    test "an unresolved placeholder's failure detail is the message, with no stacktrace" do
+      ctx = context(StepModel, StepAdapter, %{test_pid: self()})
+      state = Stepping.init_state(StepModel)
+      command = %Step{value: %Placeholder{id: :never_produced, path: [:id]}}
+
+      {:error, failure, _failed_state, :not_called} = Stepping.step(command, 0, state, ctx)
+
+      assert "Unknown placeholder: " <> _ = Failure.detail(failure)
+    end
   end
 
   describe "drain/2" do
