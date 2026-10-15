@@ -754,7 +754,7 @@ The engine SHALL run a variant's teardown commands after every execution of that
 
 Before any target executes a command and after the shared root sequence is generated, the engine SHALL generate each target's concrete sequence by walking the roots in order, with the target's own simulated state starting from the state the setup commands leave. The walk SHALL fold, root after root, either the root or the realized leaves of the chosen entry into the target's simulated state, so an expansion function and a leaf's `overrides:` see what that target ran before. A `:random` target SHALL pick at each root by weight among the entries the function returned. An `:identity` target SHALL take the root as generated. A `:reference` target SHALL take the first target's concrete sequence, leaf for leaf. A leaf SHALL be generated from its module's generator with its `overrides:` evaluated against the target's simulated state so far, and SHALL be simulated before the next leaf is generated. Every generation error SHALL be raised before any `Adapter.setup/1`.
 
-A leaf whose module has a `commands/0` entry with a `when:` that is false at the leaf's position SHALL withdraw its entry, and the pick SHALL be made again among the remaining entries. When no entry remains, or the function returns `[]`, the root SHALL run as itself and the engine SHALL count it as `:forced` for that target.
+A leaf whose module has a `commands/0` entry with a `when:` that is false at the leaf's position SHALL withdraw its entry, and the pick SHALL be made again among the remaining entries. When no entry remains, or the function returns `[]`, the root SHALL run as itself and the engine SHALL count it as `:forced` for that target. An entry realized as one leaf equal to its root SHALL run the root itself: the target SHALL record it as `:identity`, with no leaves and no alias, at the root's own position, and a replay of the recorded choice SHALL run it the same way.
 
 #### Scenario: A target walks its own state
 - **GIVEN** two `:random` targets that ran different entries at root 2
@@ -821,6 +821,7 @@ The engine SHALL validate a leaf module the first time a process realizes it, wi
 - the leaf modules realized;
 - every entry key seen, with its realization count;
 - every entry never realized, as "`Root[i]` not realized in N seeds";
+- per root module, how often an entry was realized as one leaf equal to the root, counted as identity and not under the entry's key;
 - the root modules forced to the identity in every sampled state.
 
 The counts SHALL sum over the targets that pick (`expansion: :random`), and a line SHALL name them. A `:reference` target SHALL NOT be counted again. When no target picks, the task SHALL say so and print no entry counts. The task SHALL warn "ignored in a sequence" for a `when:` or `weight:` on a leaf, naming the root, the entry index and the key. It SHALL warn about the orphan events and the missing downstream observables of reached leaves, and SHALL say that an unreached leaf was not reached by the sample. A generation error SHALL fail the task.

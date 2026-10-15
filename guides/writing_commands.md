@@ -831,8 +831,14 @@ schedules, `max_commands` and `total_commands` count, and the comparison at root
 `r` waits until every target has stepped every leaf of `r`. `terminate_early?/3`
 is consulted after roots only.
 
+An entry that realizes as one leaf equal to its root (a rewrite that changes
+nothing, such as `[{Open, overrides: %{label: label}}]` for an `Open` with only
+a label) runs the root itself, at the root's position, and counts as
+`:identity` rather than under its key; `mix pd.validate --seeds` prints it as
+identity.
+
 The run result and the failure report carry `expansion_counts` (per target and
-root module, the count per entry and `:forced`). A failure report also carries
+root module, the count per entry, `:forced` and `:identity`). A failure report also carries
 `expansions`: per target, one element per root up to the failing root, with the
 entry and the leaf modules. A failure's `failed_at_index` stays the root index.
 

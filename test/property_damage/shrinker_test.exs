@@ -533,6 +533,28 @@ defmodule PropertyDamage.ShrinkerTest do
       assert result.iterations <= 5
     end
 
+    test "max_iterations: 0 tries no candidate, the truncation after the failing root included" do
+      commands = [
+        %CreateItem{name: "A", quantity: 60},
+        %CreateItem{name: "B", quantity: 60},
+        %CreateItem{name: "C", quantity: 1},
+        %CreateItem{name: "D", quantity: 1}
+      ]
+
+      result =
+        Shrinker.shrink(commands,
+          failed_at_index: 1,
+          model: FailingModel,
+          targets: [
+            %PropertyDamage.Target{adapter: SimpleAdapter, config: %{}, name: "a", index: 0}
+          ],
+          config: Config.new(max_iterations: 0)
+        )
+
+      assert result.iterations == 0
+      assert Sequence.to_list(result.sequence) == commands
+    end
+
     test "respects max_time_ms" do
       commands = [%CreateItem{name: "Failing", quantity: 101}]
 
@@ -1291,6 +1313,137 @@ defmodule PropertyDamage.ShrinkerTest do
 
       # Halving 5..9 reaches 1; the next halving, 0, makes the projection raise.
       assert shrunk == [%Divide{by: 1}]
+    end
+  end
+
+  # ============================================================================
+  # A branching candidate the model says cannot run
+  # ============================================================================
+
+  # A Gate opens with a width; a Pass needs an open gate (width above 0). A
+  # Pass without its Gate, or after a Gate whose width was halved to 0, is a
+  # candidate the model rejects. Every Pass fails the check, so such a
+  # candidate would reproduce the failure if it ran.
+  defmodule Gate do
+    use PropertyDamage.Command
+    defstruct [:width]
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{width: StreamData.integer(1..3)}
+      |> PropertyDamage.Generator.merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+
+  defmodule Pass do
+    use PropertyDamage.Command
+    defstruct []
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{}
+      |> PropertyDamage.Generator.merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+
+  defmodule Gated, do: defstruct([:width])
+  defmodule Passed, do: defstruct([])
+
+  defmodule GateState do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{width: 0}
+
+    @impl true
+    def apply(state, %Gated{width: width}), do: %{state | width: width}
+    def apply(state, _), do: state
+  end
+
+  defmodule NoPasses do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{}
+
+    @impl true
+    def apply(state, _), do: state
+
+    @check every: Passed
+    def assert_no_pass(_state, _event), do: PropertyDamage.fail!("passed")
+  end
+
+  defmodule GateSimulator do
+    def simulate(%Gate{width: width}, _state), do: [%Gated{width: width}]
+    def simulate(%Pass{}, _state), do: [%Passed{}]
+  end
+
+  defmodule GateModel do
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands, do: [Gate, {Pass, when: &(&1.width > 0)}]
+
+    @impl true
+    def command_sequence_projection, do: GateState
+
+    @impl true
+    def check_projections, do: [NoPasses]
+
+    @impl true
+    def simulator, do: GateSimulator
+  end
+
+  # Tells the test process every command it executes.
+  defmodule GateAdapter do
+    use PropertyDamage.Adapter
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    @impl true
+    def execute(command, ctx, _runtime) do
+      send(ctx.pid, {:executed, command})
+      {:ok, GateSimulator.simulate(command, %{})}
+    end
+  end
+
+  describe "a branching candidate the model rejects" do
+    test "never runs, so the shrunk sequence keeps the Gate a Pass needs" do
+      sequence =
+        Sequence.branching([%Gate{width: 1}], [[%Pass{}], [%Pass{}]], [])
+
+      result =
+        Shrinker.shrink(sequence,
+          failed_at_index: 1,
+          model: GateModel,
+          targets: [
+            %PropertyDamage.Target{
+              adapter: GateAdapter,
+              config: %{pid: self()},
+              name: "gate",
+              index: 0
+            }
+          ]
+        )
+
+      executed = collect_executed([])
+
+      assert Sequence.to_list(result.sequence) == [%Gate{width: 1}, %Pass{}]
+      refute %Gate{width: 0} in executed
+    end
+  end
+
+  defp collect_executed(acc) do
+    receive do
+      {:executed, command} -> collect_executed([command | acc])
+    after
+      0 -> acc
     end
   end
 end

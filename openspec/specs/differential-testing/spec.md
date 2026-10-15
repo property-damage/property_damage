@@ -129,7 +129,7 @@ Vocabulary: *settle* is one system catching up with itself per adapter call (the
 
 ### Requirement: Boundary Counters (DR-046)
 
-For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the reporter SHALL print them.
+For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the reporter SHALL print them. A shrunk failure report SHALL carry the counts of the reproduction of its shrunk sequence, from `run/1` and from `shrink_further/2`.
 
 #### Scenario: Counters of a passing run
 

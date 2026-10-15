@@ -136,7 +136,10 @@ defmodule PropertyDamage.FailureReport do
   `compare_counts` holds, per boundary observation `{projection, function}`,
   how many boundaries the failing run compared it at, how many it waited at,
   and the total time it waited (`%{compared_at:, waited_at:, waited_ms:}`),
-  beside `check_fires`. Convenience accessors
+  beside `check_fires`. `check_fires` counts each check's firings over the
+  campaign's runs before the failing one plus the run the report describes;
+  `run_check_fires` holds that run's own share, so a further shrink can
+  replace it with its reproduction's. Convenience accessors
   derive the common views: `failure_type/1` (the kind), `check_name/1`,
   `failure_message/1`, `idempotency_violation/1`, and `poll_timeout_info/1`.
   """
@@ -273,6 +276,8 @@ defmodule PropertyDamage.FailureReport do
           # description is resolved once at construction.
           invariant_description: String.t() | nil,
           check_fires: %{{module(), atom()} => non_neg_integer()},
+          # The share of `check_fires` the run the report describes fired.
+          run_check_fires: %{{module(), atom()} => non_neg_integer()},
           other_failures: [other_failure()],
           compare_counts: %{
             {module(), atom()} => %{
@@ -284,9 +289,10 @@ defmodule PropertyDamage.FailureReport do
 
           # What each target ran at each root it executed, by target name: the
           # entry key (`"Root[i]"`), nil when no expansion applied, `:forced`,
-          # or `:identity` for a root shrinking ran as itself in place of an
-          # entry ("identity, by shrinking"), and the modules of the commands
-          # it executed for the root.
+          # or `:identity` for a root that ran as itself in place of an entry
+          # (shrinking collapsed it, or the entry realized was one leaf equal
+          # to the root), and the modules of the commands it executed for the
+          # root.
           # `root` is the root's index in the reported sequence.
           expansions: %{
             String.t() => [
@@ -361,6 +367,7 @@ defmodule PropertyDamage.FailureReport do
             stacktrace: nil,
             invariant_description: nil,
             check_fires: %{},
+            run_check_fires: %{},
             other_failures: [],
             compare_counts: %{},
             expansions: %{},
@@ -401,6 +408,8 @@ defmodule PropertyDamage.FailureReport do
   - `:compare` - The run's `compare:` (default `[converge_within: 5_000]`)
   - `:compare_counts` - The failing run's per-observation compare counts
     (default `%{}`)
+  - `:run_check_fires` - The check firings of the run the report describes,
+    the share of `:check_fires` that run fired (default `%{}`)
   - `:other_failures` - The run's other failures, `[%{variant:, root:,
     failure:}]` (default `[]`)
   - `:stutter` - The run's normalized `stutter:` option (default `nil`, stutter
@@ -526,6 +535,7 @@ defmodule PropertyDamage.FailureReport do
       stacktrace: stacktrace,
       invariant_description: invariant_description,
       check_fires: Keyword.get(opts, :check_fires, %{}),
+      run_check_fires: Keyword.get(opts, :run_check_fires, %{}),
       other_failures: Keyword.get(opts, :other_failures, []),
       compare_counts: Keyword.get(opts, :compare_counts, %{}),
       expansions:

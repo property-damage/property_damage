@@ -266,4 +266,55 @@ defmodule PropertyDamage.ShrinkExpansionAxisTest do
     text = FailureReport.Formatter.format(report, :terminal, color: false)
     assert text =~ "identity, by shrinking"
   end
+
+  describe "a candidate whose expansions cannot be realized" do
+    alias PropertyDamage.Test.ShrinkAxis.Guard, as: G
+
+    setup do
+      # The table dies with the test process that owns it.
+      :ets.new(G.table(), [:named_table, :public])
+      :ok
+    end
+
+    defp guard_shrink(config) do
+      {:ok, targets} = Options.validate_targets([{G.Adapter, name: "ref", config: %{}}])
+      sequence = Sequence.linear([%G.Fork{}, %G.Probe{}])
+      expansion = Expansion.expand(G.Model, sequence, targets, 1)
+
+      assert %{entry: "Fork[1]", leaves?: true} =
+               expansion.variants["ref"].choices |> hd() |> Map.take([:entry, :leaves?])
+
+      result =
+        Shrinker.shrink(sequence,
+          failed_at_index: 1,
+          failure_reason: Failure.check_failed(:probe_before_branch, ""),
+          model: G.Model,
+          targets: targets,
+          rng_seed: 1,
+          expansion: expansion,
+          config: config
+        )
+
+      {result, :ets.lookup_element(G.table(), :raised, 2, 0)}
+    end
+
+    test "is realized and counted once when the listed identity is the identity already tried" do
+      {result, raised} = guard_shrink(Config.new(shrink_arguments: false))
+
+      # The Fork's identity, tried first, is invalid. The listed entry
+      # Fork[0] is that same identity, so it is not realized again. The
+      # candidates: each root dropped (2), the Fork's identity (1), the
+      # Probe's identity (1).
+      assert raised == 1
+      assert result.iterations == 4
+      assert %{entry: "Fork[1]"} = hd(result.expansion.variants["ref"].choices)
+    end
+
+    test "leaves a leaf's false and nil fields as its generator gave them" do
+      {result, _raised} = guard_shrink(Config.new())
+
+      assert %{commands: [%G.Branch{flag: false, note: nil, size: 0}]} =
+               hd(result.expansion.variants["ref"].choices)
+    end
+  end
 end

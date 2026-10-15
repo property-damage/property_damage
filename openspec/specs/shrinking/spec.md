@@ -162,13 +162,18 @@ The shrinker SHALL support configuration of: `granularity_threshold` (default 8)
 - **WHEN** the shrinker reaches the maximum number of iterations
 - **THEN** shrinking SHALL stop and return the best result found so far
 
+#### Scenario: A budget of no iterations
+- **WHEN** the shrinker runs with `max_iterations: 0`
+- **THEN** it SHALL try no candidate, the run that checks the sequence cut after the failing root included
+- **AND** it SHALL return the sequence it was given and report 0 iterations
+
 #### Scenario: Time budget exceeded
 - **WHEN** the elapsed shrinking time exceeds `max_time_ms`
 - **THEN** shrinking SHALL stop and return the best result found so far
 
 ### Requirement: Re-shrinking with a Larger Budget
 
-The system SHALL support re-running the shrinker over an already-shrunk failure with a fresh budget, to recover reductions the original run missed. `PropertyDamage.shrink_further/2` SHALL accept a `:strategy` (`:quick` | `:thorough` | `:exhaustive`, default `:thorough`) that derives the iteration and time budgets (overridable via `:max_iterations` and `:max_time_ms`), re-shrink the report's `shrunk_sequence`, and return an updated report whose `original_sequence` is preserved and whose `shrink_iterations`/`shrink_time_ms` accumulate onto the prior values. It SHALL return `{:error, :missing_model_or_target}` when the report records no model or no target, and the report unchanged when its kind is `:setup_failed` or `:latency_exceeded`, which are never shrunk (DR-047, DR-048).
+The system SHALL support re-running the shrinker over an already-shrunk failure with a fresh budget, to recover reductions the original run missed. `PropertyDamage.shrink_further/2` SHALL accept a `:strategy` (`:quick` | `:thorough` | `:exhaustive`, default `:thorough`) that derives the iteration and time budgets (overridable via `:max_iterations` and `:max_time_ms`), re-shrink the report's `shrunk_sequence`, and return an updated report whose `original_sequence` is preserved and whose `shrink_iterations`/`shrink_time_ms` accumulate onto the prior values. It SHALL return `{:error, :missing_model_or_target}` when the report records no model or no target, `{:error, {:variant_not_in_targets, name}}` when its `targets:` option does not hold the target the report failed in (`name`) at the index it failed at, and the report unchanged when its kind is `:setup_failed` or `:latency_exceeded`, which are never shrunk (DR-047, DR-048), or when no smaller sequence reproduces the failure. The returned report's `compare_counts` SHALL be the reproduction's; its `check_fires` SHALL be the incoming report's `check_fires` less the incoming `run_check_fires`, plus the reproduction's firings, which become its `run_check_fires`.
 
 #### Scenario: Re-shrink reduces a non-minimal sequence
 - **WHEN** `shrink_further/2` is run on a report whose shrunk sequence is not yet minimal
@@ -178,6 +183,11 @@ The system SHALL support re-running the shrinker over an already-shrunk failure 
 #### Scenario: Re-shrink requires a model and a target
 - **WHEN** `shrink_further/2` is run on a report that records no model or no target
 - **THEN** it SHALL return `{:error, :missing_model_or_target}` rather than crashing
+
+#### Scenario: Re-shrink with targets that moved the failing target
+- **GIVEN** a report that failed in target "b" at index 1
+- **WHEN** `shrink_further/2` is run with `targets:` that rename "b", drop it or put it at another index
+- **THEN** it SHALL return `{:error, {:variant_not_in_targets, "b"}}` and run nothing
 
 #### Scenario: CLI re-shrink with a larger budget
 - **WHEN** `mix pd.reshrink <failure-file>` is run on a saved `.pd` file
@@ -257,7 +267,7 @@ The shrinker SHALL shrink a failure of a run against one or more targets. Every 
 
 ### Requirement: Invalid Candidates Are Not Counterexamples (DR-045)
 
-Before running a shrink candidate, the shrinker SHALL validate it against the model: fold it through the model's command-sequence projection and simulator and check each command's `when:` predicate. A candidate whose validation returns false or raises SHALL be invalid and SHALL NOT be run or accepted. Shrinking builds sequences the generator never would (an argument halved to 0, a command whose referenced entity's creating command was removed); model code that raises on such a sequence says the model cannot simulate it, not that the system under test is wrong.
+Before running a shrink candidate, linear or branching, the shrinker SHALL validate it against the model (a branching candidate with its commands in reading order): fold it through the model's command-sequence projection and simulator and check each command's `when:` predicate. A candidate whose validation returns false or raises SHALL be invalid and SHALL NOT be run or accepted. Shrinking builds sequences the generator never would (an argument halved to 0, a command whose referenced entity's creating command was removed); model code that raises on such a sequence says the model cannot simulate it, not that the system under test is wrong.
 
 #### Scenario: A candidate the model cannot simulate is not a counterexample
 - **GIVEN** a model whose projection raises when it folds an event that references an entity the state does not hold
@@ -301,7 +311,7 @@ The shrinker SHALL run four phases per cycle, in this order, each on the candida
 3. collapse each `:random` target onto the reference's choice at each root: substitute the reference's entry, copy the reference's leaves, and keep the substitution when the failure survives;
 4. simplify arguments, the roots' and then the leaves': in a leaf, only fields the leaf's generator chose SHALL change; an `overrides:` value and a placeholder SHALL NOT.
 
-A substituted entry in phase 2 SHALL be realized with the leaf seed keyed on the run seed, the target's name and the root id, so that `PropertyDamage.Expansion.for/5` can regenerate it. A shrunk root that runs as itself without being listed SHALL be recorded as `:identity` and printed "identity, by shrinking"; the report's `expansion_counts` SHALL count it per target and root module, and a passing run's counts SHALL NOT hold one.
+A substituted entry in phase 2 SHALL be realized with the leaf seed keyed on the run seed, the target's name and the root id, so that `PropertyDamage.Expansion.for/5` can regenerate it. A shrunk root that runs as itself without being listed SHALL be recorded as `:identity` and printed "identity, by shrinking"; the report's `expansion_counts` SHALL count it per target and root module. A passing run's counts SHALL hold `:identity` only for an entry realized as one leaf equal to its root, which runs the root itself (see the execution engine). In phase 2 a candidate whose expansions cannot be realized SHALL add what the target runs at the root to the choices tried there, when the roots up to that one can be realized, so a later entry that runs the same commands there is neither realized nor counted again.
 
 The failure signature SHALL stay `{kind, name, variant_index}`, and a candidate SHALL be accepted only when it fails with that signature at the same or an earlier root. A candidate that changes the failing target or the kind SHALL be rejected, whichever phase produced it.
 

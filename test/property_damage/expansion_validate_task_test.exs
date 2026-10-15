@@ -119,6 +119,18 @@ defmodule PropertyDamage.ExpansionValidateTaskTest do
     end
   end
 
+  describe "an entry whose one leaf is the root" do
+    test "counts as identity, not under the entry's key" do
+      model = inspect(PropertyDamage.Test.ReplayFixtures.LeafRootModel)
+      adapter = inspect(PropertyDamage.Test.ReplayFixtures.Recorder)
+      {status, output} = exec([model, adapter, "--seed", "3", "--seeds", "1"])
+
+      assert status == :ok
+      assert output =~ ~r/Open\[0\][^\n]*not realized in 1 seeds?/
+      assert output =~ ~r/Open: identity \d+, an entry whose one leaf is the root/
+    end
+  end
+
   describe "--seeds N without --seed" do
     test "prints the N seeds it used", %{model: model} do
       {status, output} = exec([model, @adapter, "--seeds", "3"])

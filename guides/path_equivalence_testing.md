@@ -486,9 +486,11 @@ shrunk report this way:
   The fault is in the implementation or in the observation.
 
 `report.expansion_counts` counts, per target and root module, how often each
-entry ran up to the failure. An entry recorded as `:identity` is a root the
-shrinker moved to run as itself when the model does not list the identity; the
-report prints it as "identity, by shrinking". A run that passes never has one.
+entry ran up to the failure. An entry recorded as `:identity` is a root that
+ran as itself in place of an entry: the shrinker moved it there when the model
+does not list the identity, or the entry realized was one leaf equal to the
+root. The report prints it as "identity, by shrinking". A run that passes has
+one only for an entry realized as one leaf equal to its root.
 
 ## Reproducing a Failure
 

@@ -51,8 +51,10 @@ defmodule Mix.Tasks.Pd.Validate do
   sequences and realizes every target's expansions on each, as a run does
   (without `--targets`, one `expansion: :random` target named after the
   adapter). It prints the seeds it used, every entry key with how often the
-  sample realized it or that it was never realized, the roots forced to
-  identity at every sampled root, and the leaf modules realized. The counts are
+  sample realized it or that it was never realized, how often a root ran as
+  itself because the entry realized was one leaf equal to the root (counted
+  as identity, not under the entry's key), the roots forced to identity at
+  every sampled root, and the leaf modules realized. The counts are
   summed over the targets that pick expansions (`expansion: :random`), and a
   line names them; a `:reference` target copies the first target's choices and
   is not counted again. When no target picks (every target is `:identity` or
@@ -313,6 +315,10 @@ defmodule Mix.Tasks.Pd.Validate do
         {:ok, {_modules, n}} -> IO.puts("  #{key} = [#{leaves}]  realized #{n}")
         :error -> IO.puts("  #{key} = [#{leaves}]  not realized in #{count} seeds")
       end
+    end
+
+    for {module, n} <- Enum.sort(sample.identity) do
+      IO.puts("  #{short_module(module)}: identity #{n}, an entry whose one leaf is the root")
     end
 
     for module <- sample.forced do

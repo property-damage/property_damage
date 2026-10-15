@@ -422,10 +422,11 @@ defmodule PropertyDamage.Shrinker do
     # we may act on blindly: the index can be nil (poll timeouts, record
     # mode) or branch-relative (converted branching sequences), so the
     # truncated base must be VERIFIED to still fail before it replaces the
-    # full sequence. The verification is an attempt like any other and counts
-    # whether it reproduces or not.
+    # full sequence. The verification is an attempt like any other: it counts
+    # whether it reproduces or not, and it runs only while the budget lasts.
     shrink_state =
-      if is_integer(failed_at_index) and failed_at_index + 1 < length(commands) do
+      if is_integer(failed_at_index) and failed_at_index + 1 < length(commands) and
+           not exceeded_limits?(shrink_state) do
         truncated = Enum.take(commands, failed_at_index + 1)
         truncated_positions = Enum.take(shrink_state.positions, failed_at_index + 1)
         shrink_state = increment_iterations(shrink_state)
@@ -714,14 +715,18 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
+  # A field whose value is false or nil is a value like any other here:
+  # `shrink_value/1` leaves it as it is, so it is never listed.
   defp simplified_fields(command, generated) do
     for field <- generated || [],
-        value = Map.get(command, field),
-        not holds_placeholder?(value),
-        simplified = shrink_value(value),
+        {value, simplified} <- [simplified_value(Map.get(command, field))],
         simplified != value,
         into: %{},
         do: {field, simplified}
+  end
+
+  defp simplified_value(value) do
+    if holds_placeholder?(value), do: {value, value}, else: {value, shrink_value(value)}
   end
 
   defp holds_placeholder?(%Placeholder{}), do: true
@@ -741,7 +746,11 @@ defmodule PropertyDamage.Shrinker do
   # `root_id` in this candidate to the choices already tried there. A
   # candidate that runs one of the `tried` choices again is not run; one
   # whose expansions cannot be realized (an entry the function no longer
-  # returns for the candidate's state) is invalid and never runs.
+  # returns for the candidate's state) is invalid and never runs. An invalid
+  # candidate still adds what the target runs at `root_id` to `tried` when
+  # the roots up to that one can be realized, so a later entry that runs
+  # the same commands there, the same invalid candidate, is not realized and
+  # counted again.
   defp try_carry(state, name, root_id, carried, tried, kept \\ %{}) do
     carry =
       kept
@@ -754,7 +763,15 @@ defmodule PropertyDamage.Shrinker do
 
     case current_expansion(trial) do
       :invalid ->
-        {:tried, increment_iterations(state), tried}
+        case realized_up_to(trial, name, root_id) do
+          nil ->
+            {:tried, increment_iterations(state), tried}
+
+          realized ->
+            if Enum.any?(tried, &same_choice?(&1, realized)),
+              do: {:tried, state, tried},
+              else: {:tried, increment_iterations(state), [realized | tried]}
+        end
 
       {:ok, expansion} ->
         realized = choice_at(expansion, name, root_id)
@@ -781,6 +798,25 @@ defmodule PropertyDamage.Shrinker do
       state.positions,
       state
     )
+  end
+
+  # What target `name` runs at `root_id` when only the roots up to that one
+  # are realized; nil when even those cannot be. Realizing a root depends on
+  # the roots before it only, so the choice is the one the whole candidate
+  # would run there.
+  defp realized_up_to(state, name, root_id) do
+    count = Enum.find_index(surviving_root_ids(state), &(&1 == root_id)) + 1
+
+    prefix = %{
+      state
+      | commands: Enum.take(state.commands, count),
+        positions: Enum.take(state.positions, count)
+    }
+
+    case current_expansion(prefix) do
+      {:ok, expansion} -> choice_at(expansion, name, root_id)
+      :invalid -> nil
+    end
   end
 
   defp surviving_root_ids(state),
@@ -1645,7 +1681,15 @@ defmodule PropertyDamage.Shrinker do
     end
   end
 
+  # A branching candidate the model rejects (see "Invalid Candidates" in the
+  # moduledoc) never runs, as on the linear path: its commands, in reading
+  # order, go through the same validation.
   defp still_fails_branch?(sequence, positions, state) do
+    valid_candidate?(Sequence.to_list(sequence), state) and
+      runs_failing_branch?(sequence, positions, state)
+  end
+
+  defp runs_failing_branch?(sequence, positions, state) do
     # Regenerate idempotency keys to ensure fresh SUT state
     sequence = regenerate_sequence_idempotency_keys(sequence)
 

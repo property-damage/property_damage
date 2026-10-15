@@ -329,6 +329,34 @@ defmodule PropertyDamage.Test.ReplayFixtures do
     end
   end
 
+  defmodule LeafRootModel do
+    @moduledoc false
+    # An Open (whose event carries an external() id) rewrites to one Open
+    # with the same label: an entry whose one leaf is the root itself.
+    @behaviour PropertyDamage.Model
+
+    alias PropertyDamage.Test.ReplayFixtures, as: R
+
+    @impl true
+    def commands, do: [R.Open]
+
+    @impl true
+    def command_sequence_projection, do: R.World
+
+    @impl true
+    def check_projections, do: [R.Tally]
+
+    @impl true
+    def simulator, do: R
+
+    @impl true
+    def expansions, do: [{R.Open, &R.same_open/2}]
+  end
+
+  @doc false
+  # Open: one entry, `Open[0]`, one Open leaf with the root's label.
+  def same_open(%Open{label: label}, _state), do: [[{Open, overrides: %{label: label}}]]
+
   @doc false
   # Refund: `Refund[0]` is the identity; `Refund[1]` credits the amount in two
   # parts on the same account.

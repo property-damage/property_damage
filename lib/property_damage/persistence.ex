@@ -460,9 +460,10 @@ defmodule PropertyDamage.Persistence do
 
   # V15 format: a report records the run's `check_mode`, the `campaign` a
   # latency budget was judged over (`%{seed:, max_runs:}`, nil for every other
-  # kind) and the `original_failed_at_index` of the run that found the
-  # failure. A v15 report lacking `run`, `replay`, `replay_path` or
-  # `check_mode` is refused: the paths that execute a loaded report read them.
+  # kind), the `original_failed_at_index` of the run that found the
+  # failure and the `run_check_fires` of the run the report describes. A v15
+  # report lacking `run`, `replay`, `replay_path` or `check_mode` is refused:
+  # the paths that execute a loaded report read them.
   # V14 format: a report records the campaign `run` it failed in, its replay
   # artifact term (`replay`, or the refusal naming the value no file can hold),
   # the artifact's `replay_path` and its `replay_status`, and an expansion

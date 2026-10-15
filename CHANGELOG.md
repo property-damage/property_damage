@@ -398,8 +398,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING: persistence format version 14 becomes 15.** A report records the
   run's `check_mode`, the `campaign` a latency budget was judged over
-  (`%{seed:, max_runs:}`, `nil` for every other kind) and
-  `original_failed_at_index`. A `.pd` or `.pdtrace` file of version 14 or older
+  (`%{seed:, max_runs:}`, `nil` for every other kind),
+  `original_failed_at_index` and `run_check_fires` (the check firings of the
+  run the report describes). A `.pd` or `.pdtrace` file of version 14 or older
   is refused with `{:unsupported_format_version, version, 15}`, and a version-15
   report lacking `run`, `replay`, `replay_path` or `check_mode` is refused with
   `{:missing_field, field}` instead of loading with a drift warning.
@@ -425,6 +426,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes `<Model>_seed<n>_2.replay.exs` (the smallest free suffix from 2) and the
   report's `replay_path` and footer name it. A re-shrink of the same failure
   still replaces its own file.
+- **BREAKING: `shrink_further/2` refuses `targets:` that moved the failing
+  target.** When the `targets:` option does not hold the target the report
+  failed in at the index it failed at (renamed, dropped or reordered), it
+  returns `{:error, {:variant_not_in_targets, name}}` and runs nothing, where it
+  returned the report unchanged. An unchanged report now means only that no
+  smaller sequence reproduced the failure.
+- **A shrunk report's counts describe its reproduction.** `compare_counts` are
+  the counts of the reproduction of the shrunk sequence, from `run/1` and from
+  `shrink_further/2`, not the failing run's. From `run/1`, `check_fires` count
+  the runs before the failing one plus the reproduction, and the new
+  `run_check_fires` field holds the reproduction's share; `shrink_further/2`
+  replaces the incoming `run_check_fires` share of `check_fires` with its own
+  reproduction's, where it dropped `check_fires`.
+- **An entry whose one leaf equals its root runs the root itself.** A run
+  records it as `:identity` (no leaves, no alias, at the root's own position),
+  as a replay of the artifact runs it; `expansion_counts` count it under
+  `:identity`, and `mix pd.validate --seeds` prints it as identity, not under
+  the entry's key.
+- **Shrinking budget and candidate validity.** `max_iterations: 0` tries no
+  candidate and reports 0 iterations (the check of the sequence cut after the
+  failing root counted 1). A branching candidate the model rejects is never
+  run, as on the linear path. A candidate whose expansions cannot be realized
+  is realized and counted once, not again under the listed entry it equals.
 
 - **BREAKING (DR-047): `latency:` takes its options inside the keyword list, and
   the metrics are renamed, with no compatibility layer.**
