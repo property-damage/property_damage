@@ -107,7 +107,7 @@ The system SHALL include version metadata in persisted files and warn when loadi
 
 A failing run SHALL write a replay artifact as a second persisted format, beside the `.pd` file's binary encoding. The artifact SHALL be one Elixir source file, named `<model last name segment>_seed<seed>.replay.exs`, holding one literal term after the header line `# PropertyDamage replay artifact, format 1`. The term SHALL hold `format`, `model`, `seed`, `run`, `targets` (names in order with their `expansion:`, the reference first), `failure` (the kind, name, variant index and root index as data), `prefix`, `roots` (with their ids) and `choices` (per target name, per root: `root_id`, `entry`, `commands`, `aliases`). The artifact SHALL NOT hold the failure's exception or mismatch, the teardown commands or a timestamp, and two writes of the same failure SHALL produce the same bytes. A write SHALL replace the file only when it records the same failure (kind, name and failing target) under the same targets, or does not read as an artifact; when the file records another failure or other targets, the run SHALL write `<model last name segment>_seed<seed>_<k>.replay.exs` with the smallest `k` from 2 whose file is free, records the same failure or does not read as an artifact, and the report's `replay_path` and footer SHALL name the file written. The file's format number is independent of the `.pd` version.
 
-The loader SHALL read the file as data: it SHALL parse the source with `Code.string_to_quoted/2` with `existing_atoms_only: true` and accept only literals (atoms, booleans, `nil`, numbers, strings, charlists, lists, tuples, maps and `%Module{}` literals). It SHALL create no atom: an atom (or a module name) the running system does not know SHALL be refused, naming it. It SHALL load no module: a `%Module{}` literal SHALL be accepted only when `Module` was loaded before the loader ran and is a command module (it exports `generator/1`) or `PropertyDamage.Placeholder` or `PropertyDamage.Sequence.Position`; any other SHALL be refused with `{:error, {:unknown_struct_module, Module}}`, and `only: [replay: path]` SHALL raise `ArgumentError` naming the module before any target is set up. It SHALL NOT evaluate the source and SHALL NOT decode an Erlang binary. It SHALL refuse a call, capture, function, pipe, sigil, module attribute, variable or second term, naming the node and its line, and it SHALL refuse a missing header, a header for another format, and a term whose `format` disagrees with the header, naming both.
+The loader SHALL read the file as data: it SHALL parse the source with `Code.string_to_quoted/2` with `existing_atoms_only: true` and accept only literals (atoms, booleans, `nil`, numbers, strings, charlists, lists, tuples, maps and `%Module{}` literals). It SHALL create no atom: an atom (or a module name) the running system does not know SHALL be refused, naming it. It SHALL load no module: a `%Module{}` literal in a command's own place (an element of `prefix`, a root's `command`, an element of a choice's `commands`) SHALL be accepted only when `Module` was loaded before the loader ran and is a command module (it exports `generator/1`) or `PropertyDamage.Placeholder` or `PropertyDamage.Sequence.Position`; a `%Module{}` literal anywhere else, at any depth of a command's fields, SHALL be accepted when `Module` was loaded before the loader ran and defines a struct; any other SHALL be refused with `{:error, {:unknown_struct_module, Module}}`, and `only: [replay: path]` SHALL raise `ArgumentError` naming the module before any target is set up. It SHALL NOT evaluate the source and SHALL NOT decode an Erlang binary. It SHALL refuse a call, capture, function, pipe, sigil, module attribute, variable or second term, naming the node and its line, and it SHALL refuse a missing header, a header for another format, and a term whose `format` disagrees with the header, naming both.
 
 #### Scenario: The same failure writes the same file
 
@@ -129,9 +129,15 @@ The loader SHALL read the file as data: it SHALL parse the source with `Code.str
 
 #### Scenario: The loader creates no atom and loads no module
 
-- **GIVEN** an artifact naming an atom the running system does not know, or a struct literal of a module on the code path that is not loaded, or of a loaded module that is not a command (such as `%URI{}`)
+- **GIVEN** an artifact naming an atom the running system does not know, or a struct literal of a module on the code path that is not loaded (as a command or inside a command's field), or of a loaded module that is not a command (such as `%URI{}`) as a command
 - **WHEN** it is loaded
 - **THEN** the loader SHALL refuse it naming the atom or the module, no atom SHALL be created and the module SHALL stay unloaded
+
+#### Scenario: A command field holds a struct of a loaded module
+
+- **GIVEN** an artifact whose command has a field holding a `%Date{}`, directly or inside a list or map
+- **WHEN** it is loaded
+- **THEN** the loader SHALL return the command with the `Date` in that field
 
 #### Scenario: A header for another format is refused
 

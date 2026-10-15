@@ -1,8 +1,9 @@
 defmodule PropertyDamage.ReplayArtifactTrustTest do
   # A replay artifact is read from a file nobody vouches for. The loader
-  # creates no atom the file names, loads no module the file names, and builds
-  # only the structs of loaded command modules and of the framework's own
-  # artifact structs. A failing run never overwrites the artifact of another
+  # creates no atom the file names and loads no module the file names. As a
+  # command it builds only a loaded command module or one of the framework's
+  # own artifact structs; inside a command's fields it builds a struct of any
+  # loaded module. A failing run never overwrites the artifact of another
   # failure of the same seed.
   use ExUnit.Case, async: false
 
@@ -107,9 +108,22 @@ defmodule PropertyDamage.ReplayArtifactTrustTest do
       refute_received :hooked
     end
 
-    test "a struct of a loaded module that is not a command is refused" do
+    test "a struct of a loaded module that is not a command is refused in command position" do
       assert {:error, {:unknown_struct_module, URI}} =
                R.parse_artifact(artifact(~s|%URI{host: "x"}|))
+    end
+
+    test "a struct of a module that is not loaded is refused in a command field and stays unloaded",
+         %{module: module} do
+      assert :code.is_loaded(module) == false
+
+      payload =
+        "%PropertyDamage.Test.ExpansionFor.Noise{n: [%{amount: %#{inspect(module)}{n: 1}}]}"
+
+      assert {:error, {:unknown_struct_module, ^module}} = R.parse_artifact(artifact(payload))
+
+      assert :code.is_loaded(module) == false
+      refute_received :hooked
     end
 
     test "a replay of an artifact whose root is not a command fails before any target is set up" do
@@ -138,6 +152,27 @@ defmodule PropertyDamage.ReplayArtifactTrustTest do
 
       assert Exception.message(error) =~ "URI"
       assert F.drain() == []
+    end
+  end
+
+  describe "struct values in command fields" do
+    @date "%Date{year: 2026, month: 10, day: 15, calendar: Calendar.ISO}"
+
+    setup do
+      {:module, Date} = Code.ensure_loaded(Date)
+      :ok
+    end
+
+    test "a field holding a struct of a loaded module loads" do
+      assert {:ok, %{prefix: [%F.Noise{n: ~D[2026-10-15]}]}} =
+               R.parse_artifact(artifact("%PropertyDamage.Test.ExpansionFor.Noise{n: #{@date}}"))
+    end
+
+    test "a struct of a loaded module nested in a field's list and map loads" do
+      payload = "%PropertyDamage.Test.ExpansionFor.Noise{n: [%{amount: #{@date}}]}"
+
+      assert {:ok, %{prefix: [%F.Noise{n: [%{amount: ~D[2026-10-15]}]}]}} =
+               R.parse_artifact(artifact(payload))
     end
   end
 

@@ -403,12 +403,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "does not record a model and a target".
 - **BREAKING: the replay artifact loader trusts nothing in the file.** It parses
   with `existing_atoms_only: true` and creates no atom: an artifact naming an atom
-  the running system does not know is refused, naming it. A struct literal is
-  accepted only for a module that is already loaded (the loader never loads one)
-  and is a command module or a placeholder or position; any other struct is
-  refused before any run starts with `{:error, {:unknown_struct_module, module}}`
-  from the loader, an `ArgumentError` naming the module from
-  `only: [replay: path]`. A replay loads the model and the commands it lists
+  the running system does not know is refused, naming it. It loads struct values
+  whose modules are already loaded and never loads a module: a command's fields
+  may hold any struct of a loaded module (a `%Date{}`, for example), while a
+  command itself must be a loaded command module (or a placeholder or
+  position). Any other struct is refused before any run starts with
+  `{:error, {:unknown_struct_module, module}}` from the loader, an
+  `ArgumentError` naming the module from `only: [replay: path]`. A replay loads the model and the commands it lists
   first; a leaf module no listed command names must be loaded by the caller.
 - **`Analysis.isolate_trigger/2` returns `{:error, :not_applicable}` for a
   `:diverged` or `:did_not_converge` report.** Every variation runs one target

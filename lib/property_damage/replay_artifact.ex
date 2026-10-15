@@ -11,9 +11,13 @@ defmodule PropertyDamage.ReplayArtifact do
   # data: the source is parsed with `Code.string_to_quoted/2` and a walker
   # accepts literals only. Nothing in the file is ever evaluated, and reading
   # it neither creates an atom nor loads a module: an atom the running system
-  # does not know is refused, and a struct literal is accepted only for a
-  # module already loaded that is a command module or one of the structs the
-  # format itself holds (`@format_structs`).
+  # does not know is refused. A struct literal in a command's own place (an
+  # element of `prefix`, a root's `command`, an element of a choice's
+  # `commands`) loads only when its module is already loaded and is a command
+  # module or one of the structs the format itself holds (`@format_structs`).
+  # Anywhere else, at any depth of a command's fields, a struct literal loads
+  # when its module is already loaded; any other struct is refused naming its
+  # module.
   #
   # The term:
   #
@@ -441,7 +445,8 @@ defmodule PropertyDamage.ReplayArtifact do
   @doc false
   # The term the artifact at `path` holds, read as data. A refusal is a
   # message, or `{:unknown_struct_module, module}` for a struct literal whose
-  # module is not loaded, or is neither a command module nor a format struct.
+  # module is not loaded, or, in a command's own place, is neither a command
+  # module nor a format struct.
   @spec read(Path.t()) ::
           {:ok, t()} | {:error, String.t() | {:unknown_struct_module, module()}}
   def read(path) do
@@ -461,6 +466,7 @@ defmodule PropertyDamage.ReplayArtifact do
     with :ok <- check_header(text),
          {:ok, quoted} <- quote_text(text),
          {:ok, term} <- walk(quoted, text),
+         :ok <- check_commands(term),
          :ok <- check_format(term) do
       check_shape(term)
     end
@@ -509,6 +515,28 @@ defmodule PropertyDamage.ReplayArtifact do
            "#{inspect(message)} #{inspect(token)}"}
     end
   end
+
+  # Every struct in a command's own place must be a command or a format
+  # struct; the walker already built it, so its module is loaded.
+  defp check_commands(term) do
+    Enum.find_value(commands(term), :ok, fn
+      %module{} -> if not command_struct?(module), do: {:error, {:unknown_struct_module, module}}
+      _other -> nil
+    end)
+  end
+
+  defp commands(term) when is_map(term) do
+    roots = for %{command: command} <- items(Map.get(term, :roots)), do: command
+    choices = Map.get(term, :choices)
+    entries = if is_map(choices), do: Enum.flat_map(Map.values(choices), &items/1), else: []
+    leaves = for %{commands: commands} <- entries, command <- items(commands), do: command
+    items(Map.get(term, :prefix)) ++ roots ++ leaves
+  end
+
+  defp commands(_term), do: []
+
+  defp items(list) when is_list(list), do: list
+  defp items(_other), do: []
 
   defp check_format(%{format: @format}), do: :ok
 
@@ -703,12 +731,14 @@ defmodule PropertyDamage.ReplayArtifact do
   end
 
   # A struct module an artifact may name: one loaded before the artifact is
-  # read (the loader never loads a module) that is a command module or one of
+  # read (the loader never loads a module) that defines a struct.
+  defp artifact_struct?(module),
+    do: :code.is_loaded(module) != false and function_exported?(module, :__struct__, 1)
+
+  # A struct module a command's own place may name: a command module or one of
   # the format's own structs.
-  defp artifact_struct?(module) do
-    :code.is_loaded(module) != false and function_exported?(module, :__struct__, 1) and
-      (module in @format_structs or function_exported?(module, :generator, 1))
-  end
+  defp command_struct?(module),
+    do: module in @format_structs or function_exported?(module, :generator, 1)
 
   defp refuse!(node), do: throw({:refuse, node, "not a literal"})
 
