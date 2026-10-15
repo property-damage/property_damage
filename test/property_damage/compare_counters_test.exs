@@ -59,7 +59,7 @@ defmodule PropertyDamage.CompareCountersTest do
 
   # Root 1 settles 60 ms late in "b"; with `diverge_at`, "b" also settles that
   # root with one more.
-  defp targets(diverge_at \\ nil, late_ms \\ 60) do
+  defp targets(diverge_at, late_ms \\ 60) do
     at = %{1 => {:after_ms, late_ms}}
     at = if diverge_at, do: Map.put(at, diverge_at, {:sync, 1}), else: at
     [Compare.target("a"), Compare.target("b", %{at: at})]

@@ -59,13 +59,14 @@ defmodule PropertyDamage.Executor.FinalizationRaiseTest do
       :ok
     end
 
-    # The poller delivers `Late` well after the step has drained its events,
-    # so the settle drain of finalization folds it.
+    # The poller delivers `Late` well after the step has drained its events
+    # (finalization awaits every resource poller), so the settle drain of
+    # finalization folds it, even when a loaded machine slows the step.
     @impl true
     def execute(%Start{}, _context, runtime) do
       runtime.start_poller.(
         poll_fn: fn ->
-          Process.sleep(30)
+          Process.sleep(200)
           :tick
         end,
         handler: fn _ -> {:done, [%Late{}]} end,
