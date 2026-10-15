@@ -2771,10 +2771,12 @@ defmodule PropertyDamage do
   Test you cannot reset between runs:
 
       def generator(overrides) do
-        StreamData.fixed_map(%{
+        %{
           request_id: StreamData.constant(PropertyDamage.mint_per_run(:uuid)),
           amount: StreamData.integer(1..100)
-        })
+        }
+        |> PropertyDamage.Generator.merge_overrides(overrides)
+        |> StreamData.fixed_map()
       end
 
   The field holds a marker during generation (so the plan stays a pure function

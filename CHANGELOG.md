@@ -773,6 +773,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commands instead. `shrink_further/2` writes its smaller artifact over the
   incoming report's file and raises, naming `replay_dir:`, only when the report
   holds neither a term nor choices.
+- **BREAKING: `Generator.merge_overrides/2` returns `{field, generator}` pairs
+  sorted by field instead of a map.** A map's iteration order depends on the VM,
+  so `StreamData.fixed_map/1` on a map could draw other field values for the same
+  seed in another VM; it now draws the fields in field order in every VM. A
+  command with more than one field draws different values for a given seed than
+  before. Code that used the result as a map (`Map.put/3`, `Map.merge/2`, a `%{}`
+  pattern) must change; piping it into `StreamData.fixed_map/1` works as before.
 
 ### Removed
 

@@ -26,8 +26,8 @@ defmodule PropertyDamage.ExpansionForTest do
   @golden_run1_second [
     %Fund{amount: 382_810},
     %Noise{n: 661_646},
-    %Credit{amount: 435, part: 0, memo: 841_281_343},
-    %Credit{amount: 435, part: 1, memo: 886_457_375},
+    %Credit{amount: 435, part: 0, memo: 79_780_156},
+    %Credit{amount: 435, part: 1, memo: 432_977_189},
     %Refund{amount: 824},
     %Noise{n: 256_369},
     %Refund{amount: 22},

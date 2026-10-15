@@ -170,8 +170,10 @@ defmodule IncrementCounter do
   defstruct [:counter_id]
 
   @impl true
-  def generator(_overrides) do
-    StreamData.fixed_map(%{counter_id: StreamData.string(:alphanumeric, length: 8)})
+  def generator(overrides \\ %{}) do
+    %{counter_id: StreamData.string(:alphanumeric, length: 8)}
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
 end
 ```
@@ -193,11 +195,13 @@ defmodule CreateOrder do
   def idempotency_key(%__MODULE__{idempotency_key: key}), do: key
 
   @impl true
-  def generator(_overrides) do
-    StreamData.fixed_map(%{
+  def generator(overrides \\ %{}) do
+    %{
       amount: StreamData.integer(1..10_000),
       idempotency_key: StreamData.string(:alphanumeric, length: 16)
-    })
+    }
+    |> PropertyDamage.Generator.merge_overrides(overrides)
+    |> StreamData.fixed_map()
   end
 end
 ```
