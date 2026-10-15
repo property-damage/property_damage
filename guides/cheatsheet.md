@@ -157,6 +157,8 @@ end
 | Counts | leaves are commands; `@compare`, `max_commands` and `total_commands` count roots |
 | Retired | `{Module, 3}` is an error: write `{Module, weight: 3}` |
 
+Full guide: [Path Equivalence Testing](path_equivalence_testing.md).
+
 Check which entries a seed range reaches with
 `mix pd.validate MyApp.Model --targets "[MyApp.Adapter]" --seeds 100`, and
 sample a failing seed with `--seed S --seeds 1`, which samples exactly what
@@ -197,6 +199,17 @@ defmodule MyApp.Projections.BalanceInvariant do
   # end
 end
 ```
+
+### The Three Kinds of Check
+
+| Kind | Options | Fails when |
+|------|---------|------------|
+| `@check` | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`), never both | the function raises |
+| `@eventually` | `after:` (module or list), `timeout:`, `interval:` (all required; bare integer = seconds) | the predicate is still false at `timeout:` |
+| `@compare` | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), `using:` (2-arity, default `&==/2`); a return of `{:pending, reason}` waits | ready sides differ (`:diverged`), or a side is pending at `converge_within:` (`:did_not_converge`) |
+
+A function carries one kind. Details: [Writing Invariants](writing_invariants.md#the-three-kinds-of-check)
+and [Differential Testing](differential_testing.md#boundary-observations).
 
 ### @check Syntax
 
@@ -382,6 +395,31 @@ PropertyDamage.run(
 ```
 
 ## Reference Tables
+
+### `targets:` Entry Keys
+
+An entry is `Adapter` or `{Adapter, keyword}`. The first entry is the reference.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `name:` | last segment of the adapter module | Label in reports; must be unique in the list |
+| `config:` | `%{}` | Map passed to `Adapter.setup/1` unchanged; use it to isolate two targets on one system |
+| `injectors:` | `[]` | Injector adapter modules for this target |
+| `mocks:` | `[]` | Mock services: `Mod` or `{Mod, config}` |
+| `expansion:` | `:random` | `:random`, `:identity` or `:reference` (copy the first target; an error on the first entry) |
+
+The kind of run is inferred, never set: one target is a property-based run; two
+or more targets that copy the reference (`expansion: :reference`, or a model
+without `expansions/0`) are a differential run; a target that picks its own
+expansions is a path-equivalence run.
+
+### Several-Target Run Options
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `concurrency:` | `:serial` | `:serial` steps targets one at a time; `:parallel` steps all at once |
+| `compare:` | `[converge_within: 5_000]` | Integer milliseconds a boundary waits for agreement; `settle:` here is an error |
+| `latency:` | `false` | `true` measures; `[warmup: n, p95: [max_ratio: r]]` adds a budget; needs `:serial` |
 
 ### Execution Semantics
 

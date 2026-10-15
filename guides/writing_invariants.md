@@ -184,6 +184,32 @@ def assert_expiry_after_creation(state, _cmd_or_event) do
 end
 ```
 
+## The Three Kinds of Check
+
+A projection can carry three kinds of check. Each is a function with a
+decorating attribute, and each answers a different question.
+
+| Kind | Question | Looks at | Schedule | Fails when |
+|------|----------|----------|----------|------------|
+| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`) | the function raises |
+| `@eventually` | Does this become true in time? | One target's state, polled | `after:` (event module or list), polled every `interval:` for up to `timeout:` | the predicate is still false at the `timeout:` |
+| `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), agreement predicate `using:` | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
+
+When to pick which:
+
+- Use `@check` for a property that must hold right after a command or event: a
+  balance never goes negative, ids are unique. Use `at: :teardown` for a safety
+  property over asynchronous effects, checked once on the final state.
+- Use `@eventually` for a property that holds only after the system catches up:
+  a payment confirms, a webhook arrives. The poller starts when an `after:`
+  event arrives and stops when the predicate first returns true.
+- Use `@compare` when the question needs two or more targets. A `@check` in one
+  target cannot see another target, so `@compare` is the whole cross-target
+  oracle.
+
+A function carries exactly one of the three. The sections below teach `@check`
+first, then `@eventually`, then `@compare`.
+
 ## Check Triggers
 
 Control when checks are run using the `@check` attribute. The trigger
@@ -237,6 +263,29 @@ maximum, a sticky flag) rather than snapshot, or a self-healed transient slips
 past. See the [Async and Eventual Consistency](async_and_eventual_consistency.md)
 guide for the safety/liveness pairing and the accumulator contract.
 
+## Eventual Checks with `@eventually`
+
+A `@eventually` function takes the projection state and the event that opened
+the window, and returns a predicate over the projection state. The framework
+polls the predicate until it returns true or the `timeout:` passes. All three
+options are required, and a bare integer means seconds; use `{n, unit}` with
+`:millisecond(s)`, `:second(s)` or `:minute(s)` for anything else:
+
+```elixir
+@eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+def payment_confirmed(_state, %PaymentInitiated{id: id}) do
+  fn state -> state.payments[id] == :confirmed end
+end
+```
+
+A predicate that has not become true by the `timeout:` fails the run with a
+`:poll_timeout` failure. Such a failure can mean the system is slow, not wrong,
+so raise the `timeout:` before you suspect a bug. A predicate cannot express
+"never too many", because it stops at the first true value: pair it with a
+`@check at: :teardown` for that. See
+[Async and Eventual Consistency](async_and_eventual_consistency.md) for the
+pairing and for the other two waits (`settle:` and `converge_within:`).
+
 ## Comparing Targets with `@compare`
 
 A check looks at one run of one target. When a run has two or more `targets:`,
@@ -261,7 +310,8 @@ end
 `{N, Module}`, `Module`, `[Modules]`) plus `:end` for the final boundary.
 `using:` is a 2-arity predicate (default `&==/2`) returning `:match`,
 `{:mismatch, exception}` or a boolean. A function may return
-`{:pending, reason}` while its target is still catching up. A raise in a
+`{:pending, reason}` while its target is still catching up; the comparison
+waits for it up to the run's `compare: [converge_within: ms]` (default 5000). A raise in a
 `@compare` function or a `using:` predicate is a check failure naming the
 observation. A `@compare` function cannot also carry `@check` or `@eventually`, and carries
 one `@compare`, written above its first clause: a second one on another clause
@@ -477,5 +527,6 @@ The authoritative report is still the `{:ok, report}` return value;
 
 - [Debugging Failures](debugging_failures.md) - What to do when invariants catch bugs
 - [Differential Testing](differential_testing.md) - Comparing targets through `@compare`
+- [Path Equivalence Testing](path_equivalence_testing.md) - The same `@compare` observations across equivalent command sequences
 - [Chaos Engineering](chaos_engineering.md) - Testing resilience with nemesis
 - See `PropertyDamage.Suggestions` for invariant recommendations

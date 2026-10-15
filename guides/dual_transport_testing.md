@@ -49,6 +49,13 @@ PropertyDamage.run(
 )
 ```
 
+Two targets whose model lists no `expansions/0` run the same commands, so this
+is a differential run. (The `targets:` list decides the kind of run: see
+[How the Mode Is Inferred](differential_testing.md#how-the-mode-is-inferred). If
+the model lists equivalent command sequences for a root and a target picks its
+own, the run is a path-equivalence run, covered in
+[Path Equivalence Testing](path_equivalence_testing.md).)
+
 The first target in the `targets:` list is the oracle: a divergence is reported
 as "the UI did something the API didn't." The call returns `{:error, report}` with
 `kind: :diverged`. `report.variant` names the target that differed
@@ -127,6 +134,27 @@ Both observations are keyed by repo and label names the client chose, so neither
 holds a server id and plain `==` is the right predicate. A model that names no
 observation cannot run with two targets: the run fails at start, before any
 adapter is set up.
+
+`every:` decides how often the transports are compared. `every: 1` compares
+after every root command, and `every: CreateLabel` compares after each root of that
+module. An observation may also use `using:` to say what "agree" means (see
+[Differential Testing](differential_testing.md#using-the-agreement-predicate)),
+for example to ignore a field one transport cannot report.
+
+### When one transport lags
+
+A transport can answer before its effect is visible, for instance a UI that
+refreshes a list a moment after the click. If the observation reads state that
+is still catching up, return `{:pending, reason}` from the `@compare` function
+instead of the half-updated value. A pending side is never a disagreement: the
+comparison waits for up to `compare: [converge_within: ms]` (integer
+milliseconds, default 5000) while it drains each target's events and evaluates
+again. A side still pending at the bound is a `:did_not_converge` failure, and
+ready sides that still differ are `:diverged`. Raise the bound for a slow transport. The loop is described in
+[The Convergence Loop](differential_testing.md#the-convergence-loop). It is a
+different wait from the per-command `settle:` of a `:probe` command, which is
+one transport catching up with itself (see
+[Async and Eventual Consistency](async_and_eventual_consistency.md#settle-convergence-and-eventually)).
 
 ## Three decisions that make the oracle honest
 
@@ -230,8 +258,10 @@ assert {:ok, _stats} = result, inspect(result, pretty: true)
 ```
 
 The two forges are separate instances, so the default `concurrency: :serial` is
-the right choice. If both targets shared one forge, `concurrency: :parallel`
-would need a distinct user namespace per target through `config:`.
+the right choice. If both targets shared one forge, they would need a distinct
+user namespace each, set through `config:` (and `concurrency: :parallel` is only
+safe with that isolation). A target's `config:` map reaches `setup/1` unchanged,
+and the targets need distinct `name:` values when they use one adapter module.
 
 If setup or a command fails, `run/1` returns `{:error, report}` and the report
 names the variant and the kind, for example `report.kind == :setup_failed` and
@@ -302,4 +332,5 @@ test the transports separately.
   `PropertyDamage.run/1` API, `@compare` observations, the convergence loop and `concurrency:`
 - [Writing Commands](writing_commands.md) — `when:`/`overrides:` wiring and `external()`
 - [Integration Testing](integration_testing.md) — driving live services
-- `benches/gitea_bench/` — the complete, runnable example this guide is drawn from
+- [Path Equivalence Testing](path_equivalence_testing.md): the same oracle when one transport has several equivalent command sequences for a root
+- `benches/gitea_bench/`: the complete, runnable example this guide describes
