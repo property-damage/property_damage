@@ -258,7 +258,7 @@ defmodule PropertyDamage do
 
   A model's fixtures are commands: `c:PropertyDamage.Model.setup_each/0` lists
   the setup commands and `c:PropertyDamage.Model.teardown_each/0` the teardown
-  commands, drawn with each run's sequence. Every target executes them through
+  commands, generated with each run's sequence. Every target executes them through
   the engine, in this order per run: its adapter's `setup/1`, the `@check at:
   :startup` checks, the setup commands, the roots, the final boundary, the
   `@check at: :teardown` checks, the teardown commands, and its adapter's
@@ -449,7 +449,7 @@ defmodule PropertyDamage do
     seed = opts[:seed] || env_int("PD_SEED") || :rand.uniform(1_000_000_000)
 
     # The run nonce seeds ONLY client-minted run-scoped values (mint_per_run).
-    # Its random default is drawn from crypto entropy, NEVER the process RNG:
+    # Its random default comes from crypto entropy, NEVER the process RNG:
     # ExUnit pins :rand under `--seed N`, which would re-mint colliding values.
     # Every target of a run shares it, so all of them receive byte-identical
     # client-minted requests.
@@ -1122,7 +1122,7 @@ defmodule PropertyDamage do
   end
 
   # The run's sequence: its setup commands and roots from the run seed, then
-  # its teardown commands drawn against the state the roots leave.
+  # its teardown commands generated against the state the roots leave.
   defp generate_one(ctx, run_seed) do
     sequence = Generator.generate_value(ctx.generator, run_seed)
     Generator.teardown_commands(ctx.model, sequence, run_seed)

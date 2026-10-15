@@ -1167,7 +1167,7 @@ defmodule PropertyDamage.FailureReport do
   something outside its `(state, event)` inputs in `apply/2` (a clock, a
   counter, the environment).
 
-  Because the derivation replays the run's *real* fold order, a pure-but-async
+  Because the faithful fold replays the run's *real* fold order, a pure-but-async
   projection (late-settling events) re-derives correctly and does NOT
   false-positive — that is the load-bearing property of this check.
 

@@ -97,7 +97,7 @@ defmodule PropertyDamage.Variant do
   projections, and checks. Two runs of one seed draw the same values there; two
   variants of one run draw different ones. It does not cover the adapter's
   `execute/3`, which the engine runs in a new Task per command attempt: that
-  Task draws its own entropy, so a value drawn there is not reproduced by the
+  Task draws its own entropy, so a value generated there is not reproduced by the
   seed. Stutter
   decisions use their own generator derived from the run seed (DR-029), passed
   as the executor's `rng_seed`.

@@ -168,7 +168,7 @@ defmodule PropertyDamage.RunTrace do
   loop it never shrinks and never stops early on failure: it captures the whole
   execution record of a single run. `plan_source` is always `:generated` (the
   plan is a pure function of the effective seed). The plan carries the setup
-  and teardown commands drawn as `PropertyDamage.run/1` draws them, and the
+  and teardown commands generated as `PropertyDamage.run/1` generates them, and the
   target runs them before and after the roots.
 
   ## Options
@@ -218,8 +218,8 @@ defmodule PropertyDamage.RunTrace do
 
     run_seed = Generator.run_seed(seed, run_number)
 
-    # The plan as `PropertyDamage.run/1` draws it: the setup commands and the
-    # roots, then the teardown commands drawn against them.
+    # The plan as `PropertyDamage.run/1` generates it: the setup commands and
+    # the roots, then the teardown commands generated against them.
     plan =
       model
       |> Generator.generate_sequence(gen_opts)
@@ -640,7 +640,7 @@ defmodule PropertyDamage.RunTrace do
 
   Pure projections re-derive to the same state, so a mismatch means a projection
   read something outside its `(state, event)` inputs (a clock, a counter, the
-  environment) in `apply/2`. Because faithful derivation replays the *real* fold
+  environment) in `apply/2`. Because the faithful fold replays the *real* fold
   order, a pure-but-async projection re-derives correctly and does NOT
   false-positive.
 
@@ -677,7 +677,7 @@ defmodule PropertyDamage.RunTrace do
     if mismatched == [], do: :ok, else: {:non_pure_projections, mismatched}
   end
 
-  # ---- Faithful derivation internals ----------------------------------------
+  # ---- Faithful fold internals ----------------------------------------------
 
   defp faithful_state(%__MODULE__{model: nil}, _position, _boundary), do: %{}
   defp faithful_state(%__MODULE__{plan: nil}, _position, _boundary), do: %{}
@@ -873,7 +873,7 @@ defmodule PropertyDamage.RunTrace do
   # Rebuild the run's projection set from the model, exactly as the executor
   # does. Degrades to `%{}` for a model that declares no
   # `command_sequence_projection/0` (e.g. a hand-built or synthetic trace), so
-  # derivation on such a trace is a no-op rather than a crash.
+  # the faithful fold on such a trace is a no-op rather than a crash.
   defp init_projections(model) do
     if is_atom(model) and model != nil and Code.ensure_loaded?(model) and
          function_exported?(model, :command_sequence_projection, 0) do

@@ -201,7 +201,7 @@ defmodule PropertyDamage.Executor.Branching do
         # model that never recorded it). Branch correctness is decided AFTER
         # all branches run, by the check-aware Linearization.check below,
         # which evaluates checks against observed events and the model
-        # prediction drawn from one consistent ordering. Real execution errors
+        # prediction taken from one consistent ordering. Real execution errors
         # (adapter errors, ref-resolution failures, raised transition
         # invariants) are unaffected: those still halt the branch here.
         branch_state = %{

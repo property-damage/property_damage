@@ -214,7 +214,7 @@ defmodule PropertyDamage.Stutter do
   @doc """
   Get the number of retry attempts for a stuttered command.
 
-  Returns `{count, rng'}` where count is between 1 and max_repeats, drawn from
+  Returns `{count, rng'}` where count is between 1 and max_repeats, generated from
   the explicit `rng`.
   """
   @spec retry_count(Config.t(), rng()) :: {pos_integer(), rng()}
@@ -226,7 +226,7 @@ defmodule PropertyDamage.Stutter do
   @doc """
   Get the delay in milliseconds before a retry attempt.
 
-  Returns `{delay, rng'}`, drawn from the explicit `rng`.
+  Returns `{delay, rng'}`, generated from the explicit `rng`.
   """
   @spec retry_delay_ms(Config.t(), rng()) :: {non_neg_integer(), rng()}
   def retry_delay_ms(%Config{delay_ms: {a, b}}, rng) do

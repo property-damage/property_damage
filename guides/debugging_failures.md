@@ -414,7 +414,7 @@ even within the passing group and are down-ranked automatically.
 
 For flakiness, use `RunComparison.investigate/1`, which captures the traces for
 you. Its capture options are nested under a `capture:` sub-keyword; a fresh
-`run_nonce` is drawn per capture so client-minted values never collide on a
+`run_nonce` is generated per capture so client-minted values never collide on a
 shared SUT:
 
 ```elixir

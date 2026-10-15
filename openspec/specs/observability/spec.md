@@ -93,7 +93,7 @@ The system SHALL track and report coverage metrics for property-based test execu
 - **THEN** the heavier coverage dimensions (command, transition, and state coverage) SHALL be accumulated across all generated sequences of the run
 - **AND** an invariant or command exercised only in an earlier sequence (not the representative one) SHALL still be reported as covered
 
-#### Scenario: Anti-vacuity — uncovered invariants (DR-026)
+#### Scenario: Anti-vacuity: uncovered invariants (DR-026)
 
 - **WHEN** an invariant declared in the model's catalog is never exercised by any of its checks during a run (zero firings)
 - **THEN** the system SHALL report that invariant as uncovered (dynamic vacuity)

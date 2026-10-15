@@ -164,8 +164,8 @@ The generator SHALL draw setup commands from the run seed before the roots, and 
 
 #### Scenario: A seed is stable for a fixed model
 - **WHEN** a model adds a setup command
-- **THEN** the roots drawn for a given seed MAY differ from the roots drawn before
-- **AND** a model without setup commands draws exactly the roots it drew before
+- **THEN** the roots generated for a given seed MAY differ from the roots generated before
+- **AND** a model without setup commands generates exactly the roots it generated before
 
 ### Requirement: Setup Commands Are Not Roots
 
@@ -174,7 +174,7 @@ A setup or teardown command SHALL NOT be a comparison boundary, SHALL NOT be exp
 #### Scenario: A module in both lists
 - **WHEN** `Login` appears in `setup_each/0` and in `commands/0`
 - **THEN** the setup instance is never compared or shrunk
-- **AND** a root instance is drawn, compared and shrunk as any root
+- **AND** a root instance is generated, compared and shrunk as any root
 
 ### Requirement: Removed Lifecycle Hooks Are Rejected
 
@@ -339,7 +339,7 @@ Models MAY implement `check_projections/0` returning a list of invariant-checkin
 
 ### Requirement: Invariant Catalog Enumeration (DR-026)
 
-The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.check_catalog(model)` SHALL walk the model's projections — the command-sequence projection plus any check projections, deduplicated — union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
+The framework SHALL enumerate the catalog of invariants a model verifies. `PropertyDamage.check_catalog(model)` SHALL walk the model's projections (the command-sequence projection plus any check projections, deduplicated), union their declared invariants, and return one catalog keyed by `{projection, id}`, each entry carrying the invariant and the checks (with their kinds) that validate it.
 
 #### Scenario: Catalog unions across projections
 - **WHEN** `check_catalog/1` is called on a model whose projections declare invariants

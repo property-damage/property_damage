@@ -49,7 +49,7 @@ defmodule PropertyDamage.Sequence do
 
   `setup` holds the model's setup commands (`c:PropertyDamage.Model.setup_each/0`)
   and `teardown` its teardown commands (`c:PropertyDamage.Model.teardown_each/0`),
-  as drawn for this sequence. They run before and after the roots and are not
+  as generated for this sequence. They run before and after the roots and are not
   roots themselves: every function here that reads commands (`to_list/1`,
   `command_count/1`, `indexed/1`, `position_at/3`, `map/2`, `filter/2`, ...)
   reads the roots only and carries the two lists through unchanged. Read them

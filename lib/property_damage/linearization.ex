@@ -52,7 +52,7 @@ defmodule PropertyDamage.Linearization do
   flagged even though Put-then-Get is a perfectly legal serialization. The fix:
   the executor disables those unsound per-branch checks, and check
   checking moves HERE, where it is evaluated against observed events and the
-  model prediction drawn from one consistent ordering. `check/5` therefore
+  model prediction taken from one consistent ordering. `check/5` therefore
   refutes an execution only when every ordering fails, and its refutation
   carries the specific check (when one is the cause) so the report is as
   precise as the old per-branch path was, without its false positives.

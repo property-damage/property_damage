@@ -165,7 +165,7 @@ defmodule PropertyDamage.Model do
   simulates them, so the roots' `when:` and `overrides:` see the fixture state
   and an `external()` a setup command produces can flow into a root. Adding a
   setup command therefore changes which roots a seed draws; a seed is stable
-  for a fixed model. The teardown commands are drawn after the roots, against
+  for a fixed model. The teardown commands are generated after the roots, against
   the state the last root left.
 
   For every run, shrink attempt and target, the order is:

@@ -282,7 +282,7 @@ defmodule PropertyDamage.Analysis do
   # mapping (branching-aware). Positions absent from the plan (dropped
   # producers) contribute nothing. Returns nil when there is no registry (an
   # unshrunk report, or a model without placeholders), so `Graph.build/2` falls
-  # back to the embedded-position derivation, which is correct in that case.
+  # back to the embedded-position fallback, which is correct in that case.
   defp plan_producers(
          %Sequence{registry: %PlaceholderRegistry{producer_link: producer_link}} = plan
        ) do

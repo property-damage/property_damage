@@ -277,8 +277,8 @@ defmodule PropertyDamage.Shrinker do
 
   The setup commands are never part of a candidate: no strategy removes,
   reorders or simplifies one, and every attempt executes the sequence's setup
-  commands, with the arguments they were drawn with, before the candidate's
-  roots. The teardown commands are drawn again for every candidate
+  commands, with the arguments they were generated with, before the candidate's
+  roots. The teardown commands are generated again for every candidate
   (`PropertyDamage.Generator.teardown_commands/4`, with `:rng_seed` as the run
   seed), so a teardown command whose `overrides:` names something a root
   created names what this candidate's roots create. The shrunk sequence
@@ -440,7 +440,7 @@ defmodule PropertyDamage.Shrinker do
     end_time = System.monotonic_time(:millisecond)
 
     # Carry the remapped registry so the shrunk sequence (reported and
-    # replayed) still resolves its externals, and the teardown commands drawn
+    # replayed) still resolves its externals, and the teardown commands generated
     # for its own roots.
     shrunk =
       %{sequence | prefix: shrink_state.commands, branches: nil, suffix: []}
@@ -1447,7 +1447,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   # A candidate as it runs: the sequence's setup commands, the candidate's
-  # roots and registry, and teardown commands drawn for those roots.
+  # roots and registry, and teardown commands generated for those roots.
   defp candidate(%Sequence{} = roots, registry, state) do
     roots
     |> Sequence.with_registry(registry || PlaceholderRegistry.new())
@@ -1455,7 +1455,7 @@ defmodule PropertyDamage.Shrinker do
     |> with_teardown(state)
   end
 
-  # The teardown commands drawn against `sequence`'s roots, with the run seed.
+  # The teardown commands generated against `sequence`'s roots, with the run seed.
   defp with_teardown(%Sequence{} = sequence, state),
     do: Generator.teardown_commands(state.model, sequence, state.rng_seed)
 
@@ -1531,7 +1531,7 @@ defmodule PropertyDamage.Shrinker do
   end
 
   # One linear shrink attempt: the candidate, with the sequence's setup
-  # commands and teardown commands drawn for it, on every target through the
+  # commands and teardown commands generated for it, on every target through the
   # scheduler, which sets each target up and tears it down. Returns
   # `{:failed, reason, variant_index, root}`, `:setup_failed` when any target's
   # setup failed (never a reproduction), `:invalid` when the candidate's
