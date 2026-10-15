@@ -1,5 +1,7 @@
 defmodule PropertyDamage.Progress.ReporterTest do
-  use ExUnit.Case, async: true
+  # Not async: these tests make a consumer raise on purpose, and the warning
+  # it logs would land in the captured log of any test running beside them.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 

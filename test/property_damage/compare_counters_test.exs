@@ -89,8 +89,11 @@ defmodule PropertyDamage.CompareCountersTest do
     assert counts |> Map.keys() |> Enum.sort() == Enum.sort([totals, paid, never])
 
     assert %{compared_at: 4, waited_at: 1, waited_ms: waited_ms} = counts[totals]
-    assert waited_ms >= 30
-    assert waited_ms < 1_500
+    # The 60 ms delay starts when "b" executes the root, before the
+    # comparison starts waiting, so the time waited has no tight lower
+    # bound: it is positive and below the convergence window.
+    assert waited_ms > 0
+    assert waited_ms < 3_000
 
     # Two observations of one projection are two keys with their own counts.
     assert counts[paid] == %{compared_at: 2, waited_at: 0, waited_ms: 0}

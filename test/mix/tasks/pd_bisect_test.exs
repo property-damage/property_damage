@@ -36,6 +36,14 @@ defmodule Mix.Tasks.Pd.BisectTest do
     git!(repo, ["rev-parse", "HEAD"])
   end
 
+  # A failed cleanup of a temp directory must not fail the test that ran.
+  defp remove_repo(repo) do
+    case File.rm_rf(repo) do
+      {:ok, _} -> :ok
+      {:error, reason, path} -> IO.warn("could not remove #{path}: #{inspect(reason)}")
+    end
+  end
+
   defp build_repo do
     repo = Path.join(System.tmp_dir!(), "pd_bisect_repo_#{System.unique_integer([:positive])}")
     File.mkdir_p!(repo)
@@ -43,6 +51,11 @@ defmodule Mix.Tasks.Pd.BisectTest do
     git!(repo, ["config", "user.email", "test@example.com"])
     git!(repo, ["config", "user.name", "Test"])
     git!(repo, ["config", "commit.gpgsign", "false"])
+    # `git commit` can start `git gc --auto` or background maintenance, which
+    # keeps writing into the repo after the command returns and races the
+    # cleanup. Both are off so no git process outlives a call.
+    git!(repo, ["config", "gc.auto", "0"])
+    git!(repo, ["config", "maintenance.auto", "false"])
 
     c1 = commit!(repo, "good", "c1")
     branch = git!(repo, ["rev-parse", "--abbrev-ref", "HEAD"])
@@ -57,7 +70,7 @@ defmodule Mix.Tasks.Pd.BisectTest do
 
   setup do
     %{repo: repo} = ctx = build_repo()
-    on_exit(fn -> File.rm_rf!(repo) end)
+    on_exit(fn -> remove_repo(repo) end)
     {:ok, ctx}
   end
 

@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly run on the default branch: a toolchain or runner image change
+  # then fails here before it fails a pull request.
+  schedule:
+    - cron: "17 5 * * 1"
 
 permissions:
   contents: read
@@ -159,7 +163,7 @@ jobs:
       # Determinism audit (feature 3): generation-only, needs no Postgres.
       - name: Audit generation determinism
         run: |
-          for model in ObanBench.Model ObanBench.Retry.Model ObanBench.Uniqueness.Model; do
+          for model in ObanBench.Model ObanBench.Retry.Model ObanBench.Uniqueness.Model ObanBench.Compare.Model ObanBench.Compare.ReadModel; do
             mix pd.audit "$model"
           done
 
