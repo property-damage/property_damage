@@ -183,7 +183,7 @@ The system SHALL define a run's **settled state** as the projection state after 
 Probe commands SHALL represent read-only queries with settle semantics. During shrinking, probe commands SHALL be prioritized for removal since they do not affect system state.
 
 #### Scenario: Probe commands use settle logic
-- **WHEN** a command declares its semantics as `:probe`
+- **WHEN** a command's spec declares `execution: :probe` (DR-028)
 - **THEN** execution SHALL use settle retry logic with the command's settle configuration
 
 #### Scenario: Probes prioritized during shrinking

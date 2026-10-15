@@ -8,6 +8,12 @@ eventual consistency, including:
 - **Mid-execution injection** - Emit events as they happen during polling
 - **Adapter.Injector** - Handle webhook/callback events
 
+Three different waits appear in this guide, with three different bounds. They
+are told apart in [Settle, Convergence and `@eventually`](#settle-convergence-and-eventually):
+**settle** (one system catching up with itself for one adapter call),
+**convergence** (two or more targets agreeing at a boundary) and `@eventually`
+(a condition that must become true within a timeout).
+
 ## Overview
 
 Many real-world APIs involve asynchronous operations:
@@ -233,6 +239,24 @@ Commands declare their behavior via the `:execution` key of `command_spec/1`:
 | `:sync` | Standard operations (default) | Yes | Execute once |
 | `:probe` | Query and wait for consistency | No | Retry until success |
 | `:async` | Create and wait for completion | Yes | Retry until complete |
+
+### The `settle:` map
+
+The per-command `settle:` map tunes the settle loop of a `:probe` or `:async`
+command. Every key is optional and a missing key takes its default:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `timeout_ms` | `2_000` | Longest the loop waits for the adapter call to stop answering `{:retry, reason}` |
+| `interval_ms` | `300` | Pause between attempts |
+| `backoff` | `:linear` | `:linear` keeps the interval constant; `:exponential` doubles it after each retry, capped by the time left |
+
+The loop calls `adapter.execute/3` at least once. It stops on `{:ok, events}` or
+`{:error, reason}`, and keeps going on `{:retry, reason}` until `timeout_ms`
+passes. A timeout fails the run with a `:settle_timeout` failure holding the last
+retry reason. A `:sync` command that returns `{:retry, reason}` fails with
+`:retry_from_sync_command`, because only `:probe` and `:async` commands have a
+settle loop.
 
 ## Probe Commands
 
@@ -1006,10 +1030,18 @@ its own `timeout:`. A window that expires while the convergence loop waits is a
 check failure at once; a polling window that has not expired does not block
 agreement.
 
-The loop ends by convergence, by divergence, or by the bound expiring with a side still pending; only the third is did not converge.
+The convergence loop ends by convergence, by divergence, or by the bound
+expiring with a side still pending; only the third is did not converge.
 
-A report names the bound that expired, so "did not converge" is never mistaken
-for a settle timeout.
+| Wait | Scope | Declared on | Bound | Failure kind when it expires |
+|------|-------|-------------|-------|------------------------------|
+| settle | one adapter call of a `:probe` or `:async` command | the command's `settle:` map | `timeout_ms` (default 2000) | `:settle_timeout` |
+| convergence | one boundary across two or more targets | the run's `compare:` option | `converge_within:` (default 5000 ms) | `:did_not_converge` |
+| `@eventually` | one target's state after an event | the `@eventually` attribute | `timeout:` | `:poll_timeout` |
+
+A report names the failure kind, so "did not converge" is never mistaken for a
+settle timeout. A `:poll_timeout` or `:settle_timeout` can mean the system is
+slow and not wrong: raise the matching bound before you hunt for a bug.
 
 ## Summary
 

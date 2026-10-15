@@ -69,6 +69,7 @@ defmodule PropertyDamage.MixProject do
         "guides/contract_testing_with_shared_libraries.md",
         "guides/differential_testing.md",
         "guides/dual_transport_testing.md",
+        "guides/path_equivalence_testing.md",
         "guides/integration_testing.md",
         "guides/reusable_components.md",
         "guides/static_regression_tests.md",

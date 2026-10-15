@@ -323,7 +323,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 #### Scenario: A divergence is shrunk and reproduced
 
 - **WHEN** a divergence or a failure to converge is found in a run
-- **THEN** the framework SHALL shrink the sequence with the reference's sequence as the shrink target, running every attempt through every target
+- **THEN** the framework SHALL shrink the sequence, running every attempt through every target, and, for a model with `expansions/0`, shrink along the expansion axis as the shrinking specification states (DR-050)
 - **AND** SHALL accept a candidate only if it fails with the same kind, in the same variant, on the same `@compare` key, at the same or an earlier root
 - **AND** `FailureReport.shrunk_sequence/1` SHALL return the shrunk sequence
 - **AND** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries and `compare: [converge_within: ms]` when the bound is not the default
@@ -585,14 +585,21 @@ Two entries of one `targets:` list that resolve to the same name, whether derive
 
 ### Requirement: Mutation Testing Execution
 
-The mutation testing subsystem SHALL inject faults into adapter responses by wrapping the real adapter with mutation operators, then run full command sequences to determine if tests detect the mutations.
+The mutation testing subsystem SHALL inject faults into adapter responses by wrapping the real adapter with mutation operators (DR-043: a mutation run takes exactly one target, and an `injectors:` or `mocks:` key on it SHALL raise), then run full command sequences to determine if tests detect the mutations.
 
 #### Scenario: Running mutation testing
 
-- **WHEN** `PropertyDamage.Mutation.run/1` is called with model, adapter, and configuration
+- **WHEN** `PropertyDamage.Mutation.run/1` is called with a model, a `targets:` list of exactly one entry (DR-043) and configuration
 - **THEN** the framework SHALL generate mutations using the configured operators
 - **AND** SHALL execute full command sequences against each mutated adapter
 - **AND** SHALL classify each mutation as killed (detected) or survived (undetected)
+
+#### Scenario: Mutating a model with expansions (DR-049)
+
+- **GIVEN** a model that defines `expansions/0`
+- **WHEN** mutations are generated
+- **THEN** the mutation targets SHALL be the command modules of `commands/0`, not the leaf modules an expansion produces
+- **AND** a mutation of a root that every run executes as an expansion SHALL never be applied and SHALL be reported as survived
 
 #### Scenario: Mutation score calculation
 

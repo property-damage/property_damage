@@ -69,7 +69,7 @@ Models SHALL support three wiring options for commands: `:weight` for relative s
 - **AND** returns a map of overrides passed to the command's generator
 - **AND** this enables state-dependent parameterization (e.g., selecting existing refs)
 
-#### Scenario: With defaults to empty map
+#### Scenario: Overrides default to an empty map
 - **WHEN** a command does not specify an `overrides:` option
 - **THEN** an empty map is passed as overrides to the command's generator
 

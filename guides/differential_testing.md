@@ -36,6 +36,20 @@ run start, before any adapter is set up: nothing would ever be compared, and
 the run would pass without testing anything. With one target the `@compare`
 functions are not called.
 
+## How the Mode Is Inferred
+
+No option sets the kind of run. The `targets:` list decides it:
+
+| Targets | Kind of run |
+|---------|-------------|
+| One | A property-based run: the checks run, nothing is compared. |
+| Two or more, and every target after the first copies the reference's commands (`expansion: :reference`, or a model without `expansions/0`) | A differential run, which this guide covers. |
+| Two or more, and any target picks its own expansions (`expansion: :random`, the default, on a model with `expansions/0`) | A path-equivalence run. |
+
+Both multi-target kinds compare through the same `@compare` observations. For a
+model whose roots can run as several equivalent command sequences, see
+[Path Equivalence Testing](path_equivalence_testing.md).
+
 ## Use Cases
 
 | Use Case | Description |
@@ -168,7 +182,12 @@ true = stats.compare_counts[{Bank.Projections.Ledger, :balance}].compared_at > 0
 ```
 
 The first target in the `targets:` list is the reference: its values are
-treated as "correct", and a divergence names the other target. The call returns
+treated as "correct", and a divergence names the other target. A target's
+`config:` map reaches `Adapter.setup/1` unchanged, and a target without `name:`
+takes the last segment of its adapter module as its name. Two targets on one
+adapter need distinct names, and two targets on one system need distinct
+`config:` values so they do not share state (see
+[Isolating Targets on the Same System](#isolating-targets-on-the-same-system)). The call returns
 `{:ok, stats}` when no run failed, or `{:error, report}` when a target diverged
 or failed (see [Understanding Results](#understanding-results)). The framework
 shrinks the failing sequence before it reports it.
@@ -288,7 +307,7 @@ the target where it ran, naming the key. It is never a divergence.
 
 An observation returns `{:pending, reason}` when its target will reach a
 comparable value with no further command, through asynchronous catch-up only (a
-settlement still outstanding, a webhook not yet delivered). A pending side is
+payout still outstanding, a webhook not yet delivered). A pending side is
 never a disagreement: the comparison waits for it. State that depends on a
 *later command* in the sequence is a value, not a pending: both targets return
 the same "not yet" value and agree.
@@ -695,7 +714,8 @@ removed.
 A model can list, for a root command, other command sequences that mean the same
 once the root is done (see [Expansions](writing_commands.md#expansions-one-root-several-commands)).
 The `expansion:` option of each target then says which sequence the target
-runs at each root:
+runs at each root. [Path Equivalence Testing](path_equivalence_testing.md) owns
+this topic; this section shows only how it meets a differential run:
 
 | Value | The target runs |
 |-------|-----------------|
@@ -703,9 +723,10 @@ runs at each root:
 | `:identity` | the roots themselves |
 | `:reference` | what the first target ran, leaf for leaf |
 
-A differential run is a path-equivalence run whose non-reference targets copy the
-reference. Put `expansion: :reference` on every target after the first, and every
-target executes the same concrete commands, so a divergence points at the
+A differential run is the case where every target after the first copies the
+reference (see [How the Mode Is Inferred](#how-the-mode-is-inferred)). Put
+`expansion: :reference` on every target after the first, and every target
+executes the same concrete commands, so a divergence points at the
 implementation:
 
 ```elixir
@@ -953,7 +974,8 @@ PropertyDamage.run(
 
 ## Next Steps
 
-- [Writing Commands](writing_commands.md#expansions-one-root-several-commands) for `expansions/0`, the callback that lets targets run different commands
+- [Path Equivalence Testing](path_equivalence_testing.md) for `expansions/0`, the `expansion:` option and reproducing a divergence
+- [Writing Commands](writing_commands.md#expansions-one-root-several-commands) for how to write an expansion
 - See the `PropertyDamage.run/1` docs for the full API, and `PropertyDamage.FailureReport` for the report
 - [Writing Invariants](writing_invariants.md#comparing-targets-with-compare) for `@compare` and the `==` traps
 - [Async and Eventual Consistency](async_and_eventual_consistency.md) for settle, convergence and `@eventually`
