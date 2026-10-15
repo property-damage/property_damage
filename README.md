@@ -28,6 +28,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **OpenAPI Scaffolding**: Generate command modules from API specifications
 - **Fault Injection (Nemesis)**: Built-in operations for network, resource, time, and process faults
 - **Differential Testing**: Run one sequence against several targets and compare the `@compare` observations of your projections; a divergence is shrunk like any failure
+- **Path Equivalence Testing**: List command sequences that mean the same as a command (`expansions/0`); each target picks its own path and the targets' `@compare` observations must agree, and a divergence shrinks to the one path that matters and replays from a file
 
 ## Installation
 
