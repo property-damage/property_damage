@@ -852,6 +852,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A module that is compiled but not loaded yet keeps its callbacks.** A command
+  module lost its `:probe`, `settle:` and `idempotent:` declarations, and an
+  injector was skipped by `RunTrace.capture/1`, when nothing had loaded the module
+  before the run named it. Every reflection on a model, command, projection,
+  adapter or injector module now loads the module first.
+
 - **The reproduction of a found failure emits the found run's `run_number`.**
   A linear reproduction used to emit `run_number: 0` in its command and check
   telemetry while a branching one emitted the found run's number. Both now emit

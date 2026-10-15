@@ -102,7 +102,7 @@ defmodule PropertyDamage.IEx do
     state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -136,7 +136,7 @@ defmodule PropertyDamage.IEx do
 
     implemented =
       Enum.filter(callbacks, fn {name, arity, _desc} ->
-        function_exported?(model, name, arity)
+        PropertyDamage.ModuleCheck.exports?(model, name, arity)
       end)
 
     if implemented != [] do
@@ -181,7 +181,7 @@ defmodule PropertyDamage.IEx do
       end)
 
     hints =
-      if has_destructive and not function_exported?(model, :terminate_early?, 3) do
+      if has_destructive and not PropertyDamage.ModuleCheck.exports?(model, :terminate_early?, 3) do
         ["Consider implementing terminate_early?/3 for destructive commands" | hints]
       else
         hints

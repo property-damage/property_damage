@@ -177,7 +177,7 @@ defmodule PropertyDamage.Audit do
     command_projection = model.command_sequence_projection()
 
     check_projections =
-      if function_exported?(model, :check_projections, 0),
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0),
         do: model.check_projections(),
         else: []
 

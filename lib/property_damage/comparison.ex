@@ -49,7 +49,7 @@ defmodule PropertyDamage.Comparison do
 
     for projection <- Model.projection_modules(model),
         Code.ensure_loaded?(projection),
-        function_exported?(projection, :__compares__, 0),
+        PropertyDamage.ModuleCheck.exports?(projection, :__compares__, 0),
         %{name: name, schedule: schedule} <- projection.__compares__() do
       %{key: {projection, name}, schedule: schedule}
     end

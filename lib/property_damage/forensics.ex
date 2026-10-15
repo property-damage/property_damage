@@ -156,7 +156,7 @@ defmodule PropertyDamage.Forensics do
 
     check_projections =
       Keyword.get_lazy(opts, :projections, fn ->
-        if function_exported?(model, :check_projections, 0) do
+        if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
           model.check_projections()
         else
           []
@@ -274,7 +274,7 @@ defmodule PropertyDamage.Forensics do
   defp finalize_result({:ok, state, _history, violations}) do
     command_sequence_projection_key =
       Enum.find(Map.keys(state.projections), fn mod ->
-        not function_exported?(mod, :__checks__, 0)
+        not PropertyDamage.ModuleCheck.exports?(mod, :__checks__, 0)
       end)
 
     {:ok,
@@ -312,7 +312,7 @@ defmodule PropertyDamage.Forensics do
 
       # Get checks for this projection (only if it has __checks__/0)
       checks =
-        if function_exported?(projection, :__checks__, 0) do
+        if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
           projection.__checks__()
         else
           []

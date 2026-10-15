@@ -517,7 +517,7 @@ defmodule PropertyDamage.Executor do
     cmd_seq_projection = model.command_sequence_projection()
 
     check_projections =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -1270,7 +1270,7 @@ defmodule PropertyDamage.Executor do
     cmd_seq_projection = model.command_sequence_projection()
 
     check_projections =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -1287,7 +1287,7 @@ defmodule PropertyDamage.Executor do
 
           # Only projections that use PropertyDamage.Model.Projection have __checks__/0
           checks =
-            if function_exported?(projection, :__checks__, 0) do
+            if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
               projection.__checks__()
             else
               []
@@ -1513,7 +1513,7 @@ defmodule PropertyDamage.Executor do
   # The @check at: <phase> checks declared on a projection. Lifecycle
   # checks stay type: :synchronous; the at: phase lives in the trigger spec.
   defp phase_checks(projection, phase) do
-    if function_exported?(projection, :__checks__, 0) do
+    if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
       Enum.filter(projection.__checks__(), fn check ->
         check.type == :synchronous and
           match?(%{type: :at, phase: ^phase}, Map.get(check, :trigger))
@@ -1527,7 +1527,7 @@ defmodule PropertyDamage.Executor do
   # plus any check projections.
   defp projection_modules(model) do
     check_projections =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -1815,7 +1815,7 @@ defmodule PropertyDamage.Executor do
       cmd_seq_projection = model.command_sequence_projection()
 
       check_projections =
-        if function_exported?(model, :check_projections, 0) do
+        if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
           model.check_projections()
         else
           []
@@ -1832,7 +1832,7 @@ defmodule PropertyDamage.Executor do
         for event <- events,
             event_module = event.__struct__,
             projection <- all_projections,
-            function_exported?(projection, :__checks__, 0),
+            PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0),
             check <- projection.__checks__(),
             check.type == :polling,
             Projection.event_matches_poll_trigger?(check.eventually, event_module) do

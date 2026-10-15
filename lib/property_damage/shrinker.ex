@@ -1318,7 +1318,7 @@ defmodule PropertyDamage.Shrinker do
   defp shrink_priority_for_command(_cmd), do: 1
 
   defp resolved_shrink_spec(module) do
-    if function_exported?(module, :command_spec, 1) do
+    if PropertyDamage.ModuleCheck.exports?(module, :command_spec, 1) do
       module.command_spec([])
     else
       PropertyDamage.Command.framework_defaults()

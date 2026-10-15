@@ -365,7 +365,7 @@ defmodule Mix.Tasks.Pd.Validate do
 
   defp missing_required_callbacks(model) do
     for callback <- [:commands, :command_sequence_projection],
-        not function_exported?(model, callback, 0) do
+        not PropertyDamage.ModuleCheck.exports?(model, callback, 0) do
       "Model missing required callback #{callback}/0"
     end
   end
@@ -391,7 +391,7 @@ defmodule Mix.Tasks.Pd.Validate do
     errors =
       for {_weight, cmd, _spec} <- commands,
           Code.ensure_loaded?(cmd),
-          not function_exported?(cmd, :generator, 1),
+          not PropertyDamage.ModuleCheck.exports?(cmd, :generator, 1),
           reduce: errors do
         acc -> ["Command #{inspect(cmd)} missing generator/1" | acc]
       end
@@ -407,7 +407,7 @@ defmodule Mix.Tasks.Pd.Validate do
       end
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -503,7 +503,7 @@ defmodule Mix.Tasks.Pd.Validate do
     commands = model.commands() |> PropertyDamage.Model.normalize_commands()
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -538,7 +538,7 @@ defmodule Mix.Tasks.Pd.Validate do
     state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []

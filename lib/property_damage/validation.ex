@@ -97,7 +97,7 @@ defmodule PropertyDamage.Validation do
   @spec sequence_warnings(module()) :: [String.t()]
   def sequence_warnings(model) do
     for callback <- [:setup_each, :teardown_each],
-        function_exported?(model, callback, 0),
+        PropertyDamage.ModuleCheck.exports?(model, callback, 0),
         {module, opts} when is_atom(module) <- Enum.map(apply(model, callback, []), &entry_opts/1),
         key <- [:when, :weight],
         Keyword.has_key?(opts, key) do
@@ -116,7 +116,7 @@ defmodule PropertyDamage.Validation do
   # shape, its module, its callbacks and the keys of a map `overrides:`.
   defp validate_sequences(model) do
     for callback <- [:setup_each, :teardown_each],
-        function_exported?(model, callback, 0),
+        PropertyDamage.ModuleCheck.exports?(model, callback, 0),
         entry <- apply(model, callback, []),
         reduce: [] do
       acc ->
@@ -156,7 +156,7 @@ defmodule PropertyDamage.Validation do
     {_module, opts} = entry_opts(entry)
 
     with %{} = overrides when map_size(overrides) > 0 <- Keyword.get(opts, :overrides),
-         true <- function_exported?(module, :__struct__, 0),
+         true <- PropertyDamage.ModuleCheck.exports?(module, :__struct__, 0),
          fields = module.__struct__() |> Map.from_struct() |> Map.keys(),
          [_ | _] = unknown <- Map.keys(overrides) -- fields do
       unknown
@@ -256,7 +256,7 @@ defmodule PropertyDamage.Validation do
   def validate_command_callbacks!(cmd) do
     # generator/1 for regular commands, new!/2 for nemesis modules (DR-031).
     for {callback, arity} <- required_command_callbacks(cmd) do
-      unless function_exported?(cmd, callback, arity) do
+      unless PropertyDamage.ModuleCheck.exports?(cmd, callback, arity) do
         raise ArgumentError,
               Error.format_config_error(:command_missing_callback, {cmd, callback, arity})
       end
@@ -304,7 +304,7 @@ defmodule PropertyDamage.Validation do
     state_proj = model.command_sequence_projection()
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -315,7 +315,7 @@ defmodule PropertyDamage.Validation do
 
     for proj <- extra_projs do
       checks =
-        if function_exported?(proj, :__checks__, 0) do
+        if PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0) do
           proj.__checks__()
         else
           []
@@ -424,7 +424,9 @@ defmodule PropertyDamage.Validation do
     # check_projections is optional
     required_callbacks = [:commands, :command_sequence_projection]
 
-    for callback <- required_callbacks, not function_exported?(model, callback, 0), reduce: [] do
+    for callback <- required_callbacks,
+        not PropertyDamage.ModuleCheck.exports?(model, callback, 0),
+        reduce: [] do
       acc -> ["Model #{inspect(model)} missing required callback #{callback}/0" | acc]
     end
   end
@@ -441,7 +443,7 @@ defmodule PropertyDamage.Validation do
     required_callbacks = [{:setup, 1}, {:teardown, 1}, {:execute, 3}]
 
     for {callback, arity} <- required_callbacks,
-        not function_exported?(adapter, callback, arity),
+        not PropertyDamage.ModuleCheck.exports?(adapter, callback, arity),
         reduce: [] do
       acc -> ["Adapter #{inspect(adapter)} missing required callback #{callback}/#{arity}" | acc]
     end
@@ -476,7 +478,7 @@ defmodule PropertyDamage.Validation do
   # accumulates rather than raising, matching the validate!/3 error-collection.
   defp missing_command_callback(cmd) do
     Enum.find(required_command_callbacks(cmd), fn {callback, arity} ->
-      not function_exported?(cmd, callback, arity)
+      not PropertyDamage.ModuleCheck.exports?(cmd, callback, arity)
     end)
   end
 
@@ -503,7 +505,7 @@ defmodule PropertyDamage.Validation do
       end
 
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -515,7 +517,7 @@ defmodule PropertyDamage.Validation do
   end
 
   defp validate_injectable_events(model, injectors) do
-    if function_exported?(model, :injectable_events, 0) do
+    if PropertyDamage.ModuleCheck.exports?(model, :injectable_events, 0) do
       injectable = model.injectable_events()
       emitted = collect_emitted_events(injectors)
 
@@ -626,10 +628,12 @@ defmodule PropertyDamage.Validation do
   # Every event a check projection of `model` observes.
   defp handled_events(model) do
     projections =
-      if function_exported?(model, :check_projections, 0), do: model.check_projections(), else: []
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0),
+        do: model.check_projections(),
+        else: []
 
     for proj <- projections,
-        function_exported?(proj, :__checks__, 0),
+        PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0),
         check <- proj.__checks__(),
         mod <- check_handled_modules(check),
         uniq: true do
@@ -651,7 +655,7 @@ defmodule PropertyDamage.Validation do
 
     # Collect all events handled by extra projections
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -659,7 +663,7 @@ defmodule PropertyDamage.Validation do
 
     handled_events =
       for proj <- extra_projs,
-          function_exported?(proj, :__checks__, 0),
+          PropertyDamage.ModuleCheck.exports?(proj, :__checks__, 0),
           check <- proj.__checks__(),
           mod <- check_handled_modules(check) do
         mod
@@ -703,7 +707,7 @@ defmodule PropertyDamage.Validation do
 
   defp warn_no_check_projections(model) do
     extra_projs =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []

@@ -143,7 +143,7 @@ defmodule PropertyDamage.Expansion do
   @spec defines?(module()) :: boolean()
   def defines?(model) do
     Code.ensure_loaded(model)
-    function_exported?(model, :expansions, 0)
+    PropertyDamage.ModuleCheck.exports?(model, :expansions, 0)
   end
 
   @doc false
@@ -358,8 +358,8 @@ defmodule PropertyDamage.Expansion do
 
   defp check_for_model(model) do
     if is_atom(model) and Code.ensure_loaded?(model) and
-         function_exported?(model, :commands, 0) and
-         function_exported?(model, :command_sequence_projection, 0) do
+         PropertyDamage.ModuleCheck.exports?(model, :commands, 0) and
+         PropertyDamage.ModuleCheck.exports?(model, :command_sequence_projection, 0) do
       check_model!(model)
     else
       {:error, "#{inspect(model)} is not a model: it defines no commands/0"}

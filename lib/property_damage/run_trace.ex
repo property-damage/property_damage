@@ -335,13 +335,13 @@ defmodule PropertyDamage.RunTrace do
   # Injector-adapter lifecycle for capture (mirrors the exploration run loop):
   # setup receives the event queue so injected events land in the run's log.
   defp setup_injectors(injectors, event_queue) do
-    for adapter <- injectors, function_exported?(adapter, :setup, 1) do
+    for adapter <- injectors, PropertyDamage.ModuleCheck.exports?(adapter, :setup, 1) do
       adapter.setup(%{event_queue: event_queue})
     end
   end
 
   defp teardown_injectors(injectors) do
-    for adapter <- injectors, function_exported?(adapter, :teardown, 1) do
+    for adapter <- injectors, PropertyDamage.ModuleCheck.exports?(adapter, :teardown, 1) do
       adapter.teardown(%{})
     end
   end
@@ -876,11 +876,11 @@ defmodule PropertyDamage.RunTrace do
   # the faithful fold on such a trace is a no-op rather than a crash.
   defp init_projections(model) do
     if is_atom(model) and model != nil and Code.ensure_loaded?(model) and
-         function_exported?(model, :command_sequence_projection, 0) do
+         PropertyDamage.ModuleCheck.exports?(model, :command_sequence_projection, 0) do
       command_projection = model.command_sequence_projection()
 
       check_projections =
-        if function_exported?(model, :check_projections, 0),
+        if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0),
           do: model.check_projections(),
           else: []
 

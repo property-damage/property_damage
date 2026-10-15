@@ -413,7 +413,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     command_sequence_projection = model.command_sequence_projection()
 
     check_projections =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -509,7 +509,7 @@ defmodule PropertyDamage.LoadTest.Worker do
     command_sequence_projection = model.command_sequence_projection()
 
     check_projections =
-      if function_exported?(model, :check_projections, 0) do
+      if PropertyDamage.ModuleCheck.exports?(model, :check_projections, 0) do
         model.check_projections()
       else
         []
@@ -522,7 +522,7 @@ defmodule PropertyDamage.LoadTest.Worker do
         projection_state = Map.get(projections, projection)
 
         checks =
-          if function_exported?(projection, :__checks__, 0) do
+          if PropertyDamage.ModuleCheck.exports?(projection, :__checks__, 0) do
             projection.__checks__()
           else
             []

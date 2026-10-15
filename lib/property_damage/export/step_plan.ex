@@ -253,7 +253,7 @@ defmodule PropertyDamage.Export.StepPlan do
   defp get_http_spec(_command, nil), do: nil
 
   defp get_http_spec(command, adapter) do
-    if function_exported?(adapter, :http_spec, 2) do
+    if PropertyDamage.ModuleCheck.exports?(adapter, :http_spec, 2) do
       adapter.http_spec(command, %{})
     else
       nil

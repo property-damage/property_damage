@@ -249,7 +249,7 @@ defmodule PropertyDamage.Stutter do
   def get_idempotency_key(command) do
     command_module = command.__struct__
 
-    if function_exported?(command_module, :idempotency_key, 1) do
+    if PropertyDamage.ModuleCheck.exports?(command_module, :idempotency_key, 1) do
       command_module.idempotency_key(command)
     else
       nil
