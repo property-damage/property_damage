@@ -41,7 +41,8 @@ defmodule PropertyDamage.Telemetry do
   The engine emits these around every command a target executes, in the
   process that runs the target (each target of a run has its own). Shrink
   attempts and the reproduction of a failure execute commands too and emit
-  them as well, with the `run_number` of that re-execution (`0`).
+  them as well. A shrink attempt carries `run_number` `0`; the reproduction
+  carries the `run_number` of the run that found the failure.
 
   - `[:property_damage, :command, :start]` - Command execution started
     - Measurements: `%{system_time: integer()}`
@@ -56,9 +57,10 @@ defmodule PropertyDamage.Telemetry do
   sequence, and `:teardown` for a teardown command
   (`c:PropertyDamage.Model.teardown_each/0`). `index` is the command's offset
   within its phase: the position among the setup commands or the teardown
-  commands, and for a root its index in the sequence (for a branching
-  sequence, the engine's command index across its prefix, branches and
-  suffix). `success` is whether the command completed (its adapter call,
+  commands, and for a root its index across the whole run. A branching
+  sequence numbers its prefix first, then each branch from the index after the
+  prefix (so the first commands of two branches share an index), then its
+  suffix from the index after every branch command. `success` is whether the command completed (its adapter call,
   events and checks) without failing the run; a teardown command never fails
   the run, so its `success` is whether its adapter call answered `{:ok, _}`.
   `variant()` is `%{index: non_neg_integer(), name: String.t()}`, the target's

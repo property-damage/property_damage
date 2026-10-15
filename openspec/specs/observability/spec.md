@@ -28,7 +28,8 @@ The system SHALL emit `:telemetry` events at key execution points, all prefixed 
 - **WHEN** a command is executed against the SUT
 - **THEN** the system SHALL emit `[:property_damage, :command, :start]` with command module, index, run_number and `variant` (`%{index, name}`)
 - **AND** when the command completes, it SHALL emit `[:property_damage, :command, :stop]` with duration, success flag, events_count and `variant`
-- **AND** shrink attempts and the reproduction run SHALL use `run_number: 0` (DR-045)
+- **AND** shrink attempts SHALL use `run_number: 0` and the reproduction run SHALL use the `run_number` of the run that found the failure (DR-045)
+- **AND** a root command's `index` SHALL count across the whole run: a branching sequence numbers its prefix, then each branch from the index after the prefix, then its suffix from the index after every branch command
 
 #### Scenario: Check execution events
 

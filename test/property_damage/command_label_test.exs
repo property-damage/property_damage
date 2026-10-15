@@ -1,10 +1,10 @@
 defmodule PropertyDamage.CommandLabelTest do
   @moduledoc """
-  DR-028 amendment (served/servant clean break, P7): `Command.label/2` is wired
+  DR-028 amendment (served/servant clean break): `Command.label/2` is wired
   into failure reporting. It was a declared optional callback with ZERO consumers
-  in `lib/` (only the `@callback` + a direct unit-test call). P7 makes it render.
+  in `lib/` (only the `@callback` + a direct unit-test call). It now renders.
 
-  Design (locked):
+  Design:
 
     * Labels are computed lazily, only when a `FailureReport` is built (`new/1`),
       by folding the shrunk sequence through `command_sequence_projection` with the
@@ -14,8 +14,8 @@ defmodule PropertyDamage.CommandLabelTest do
       `Sequence.to_list/1`), which every formatter/exporter already iterates with.
     * A `nil` label (or a command without `label/2`) contributes nothing.
 
-  These are failing-first behaviour tests: on HEAD before P7 nothing renders a
-  label, so each check that the label text appears is RED.
+  These are failing-first behaviour tests: before the wiring nothing rendered a
+  label, so each check that the label text appears failed.
   """
   use ExUnit.Case, async: false
 

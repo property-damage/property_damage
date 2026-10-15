@@ -93,7 +93,7 @@ defmodule PropertyDamage.Executor.Nemesis do
     check_mode = Map.get(state, :check_mode, :halt)
     check_failures = Map.get(state, :check_failures, [])
 
-    # Record the nemesis command's own fold ordinal (P8 / DR-040), then fold
+    # Record the nemesis command's own fold ordinal (DR-040), then fold
     # it. A nemesis command has no injection window, so the counter starts at
     # the run counter carried on the state.
     command_fold_ordinal = state.fold_counter
@@ -331,7 +331,7 @@ defmodule PropertyDamage.Executor.Nemesis do
   end
 
   # Fold nemesis events (source: :nemesis) into projections and the event log,
-  # stamping each entry's fold ordinal (P8 / DR-040) from the threaded counter.
+  # stamping each entry's fold ordinal (DR-040) from the threaded counter.
   defp process_nemesis_events(
          events,
          nemesis_module,

@@ -1,11 +1,11 @@
 defmodule PropertyDamage.Nemesis.SilentDeceptionTest do
   @moduledoc """
-  Regression for the silent-deception guard (P2): the network nemeses, which
+  Regression for the silent-deception guard: the network nemeses, which
   can only inject a real fault when Toxiproxy is configured, must report
   `simulated: true` when it is not, so a no-op fault can never masquerade as a
   real one.
 
-  Note on what this test does and does not prove. The P2 fix *adds* an honest
+  Note on what this test does and does not prove. The fix *adds* an honest
   channel (the `:simulated` marker) where none existed, so any test that
   verifies it must reference the new field and therefore cannot run against the
   old code at all (it fails to compile, which is a structural artifact, not a

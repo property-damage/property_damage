@@ -1,15 +1,15 @@
 defmodule PropertyDamage.StutterShrinkTest do
   @moduledoc """
-  P4 (DR-029 "Explicit RNG"): stutter draws come from an explicit per-run RNG
+  DR-029 "Explicit RNG": stutter draws come from an explicit per-run RNG
   threaded through `%Executor.State{}` and reproduced by the shrinker.
 
   Two load-bearing properties:
 
     1. **Shrinkable stutter** (Scope B): a stutter-induced idempotency violation
-       shrinks to its minimal reproduction. Before P4 stutter failures were
+       shrinks to its minimal reproduction. Before the explicit RNG, stutter failures were
        excluded from shrinking entirely (the shrinker re-ran without stutter, so
        no candidate reproduced the violation), so the "shrunk" sequence was the
-       full original. After P4 the shrinker forces stutter during reproduction
+       full original. Now the shrinker forces stutter during reproduction
        and minimizes to the single offending command.
 
     2. **Self-consistent determinism**: the same seed reproduces the same stutter

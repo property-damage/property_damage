@@ -1,6 +1,6 @@
 defmodule PropertyDamage.AwaitsTest do
   @moduledoc """
-  P5 (DR-030, amended): `Command.awaits/2` is **pure correlation**. When an
+  DR-030 (amended): `Command.awaits/2` is **pure correlation**. When an
   injector event satisfies a command's `%Await{match}` predicate, the framework
   attributes that event to the declaring command's `command_index` (instead of
   the ambient `nil`), persistently for the rest of the run. Judgment over the
@@ -174,7 +174,7 @@ defmodule PropertyDamage.AwaitsTest do
       entry = Enum.find(result.event_log, &match?(%IssueClosedWebhook{}, &1.event))
       assert entry, "expected the webhook to be folded into the event log"
 
-      # RED before P5 wiring: injector events fold with command_index: nil.
+      # Without the wiring, injector events fold with command_index: nil.
       assert entry.command_index == 0,
              "expected the webhook attributed to CloseIssue (index 0), got #{inspect(entry.command_index)}"
     end
@@ -398,7 +398,7 @@ defmodule PropertyDamage.AwaitsTest do
 
       assert info.triggered_by.check_name == :webhook_eventually_arrives
 
-      # RED before P5: poll timeouts report failed_at_index: nil, losing the
+      # Without the wiring, poll timeouts report failed_at_index: nil, losing the
       # link to the command whose liveness window opened.
       assert result.failed_at_index == 0,
              "expected the poll-timeout attributed to CloseIssue (index 0), got #{inspect(result.failed_at_index)}"

@@ -1,6 +1,6 @@
 defmodule PropertyDamage.Nemesis.AutoRestoreTest do
   @moduledoc """
-  Regression for nemesis auto-restore (P1).
+  Regression for nemesis auto-restore.
 
   `restore/2` was promised by the behaviour and moduledoc but had zero call
   sites: faults were injected and tracked in `active_faults` but never lifted.

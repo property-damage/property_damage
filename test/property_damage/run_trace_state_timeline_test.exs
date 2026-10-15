@@ -1,6 +1,6 @@
 defmodule PropertyDamage.RunTraceStateTimelineTest do
   @moduledoc """
-  P8 / DR-040: unit-level contracts for the derived per-step state timeline,
+  DR-040: unit-level contracts for the derived per-step state timeline,
   driven by hand-built traces so the fold-order and branch-merge semantics are
   pinned precisely (independent of any live run).
   """

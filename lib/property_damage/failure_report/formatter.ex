@@ -577,7 +577,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     """
   end
 
-  # The step's human-readable `Command.label/2` (P7), rendered as a dim trailing
+  # The step's human-readable `Command.label/2`, rendered as a dim trailing
   # `# <label>` comment. Empty when the command produced no label.
   defp command_label_suffix(label, color) when is_binary(label),
     do: "  #{dim(color)}# #{label}#{reset(color)}"

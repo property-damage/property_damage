@@ -239,6 +239,8 @@ defmodule PropertyDamage.Scheduler do
     * `:targets` - `[%PropertyDamage.Target{}]`; the first is the reference
     * `:commands` - the concrete command list
     * `:seed`, `:run_number` - the campaign seed and the 0-based run
+    * `:run_seed` - the run's effective seed when `:seed` and `:run_number` do
+      not derive it, as in the reproduction of a found run (optional)
     * `:run_nonce` - the run nonce shared by every target
     * `:concurrency` - `:serial` or `:parallel` (see the module doc)
     * `:compare` - `[converge_within: ms]`, the convergence bound of each
@@ -290,6 +292,7 @@ defmodule PropertyDamage.Scheduler do
       teardown_commands: Keyword.get(opts, :teardown_commands, []),
       seed: Keyword.fetch!(opts, :seed),
       run_number: Keyword.fetch!(opts, :run_number),
+      run_seed: Keyword.get(opts, :run_seed),
       run_nonce: Keyword.get(opts, :run_nonce),
       concurrency: Keyword.fetch!(opts, :concurrency),
       compare?: length(targets) > 1,
@@ -375,6 +378,7 @@ defmodule PropertyDamage.Scheduler do
         teardown_commands: config.teardown_commands,
         seed: config.seed,
         run_number: config.run_number,
+        run_seed: config.run_seed,
         run_nonce: config.run_nonce,
         stutter_config: config.stutter_config,
         check_mode: config.check_mode,

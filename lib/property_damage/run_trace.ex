@@ -36,10 +36,10 @@ defmodule PropertyDamage.RunTrace do
   - `executed` — the concrete commands actually sent, post placeholder/mint
     resolution, keyed branch-aware by `%Sequence.Position{}`.
   - `event_log` — the complete `EventLog.Entry` list with per-entry provenance.
-    Each entry's `fold_index` records the run's real fold order (P8 / DR-040).
+    Each entry's `fold_index` records the run's real fold order (DR-040).
   - `command_labels` — flattened index → label (as the report computes it).
   - `command_fold_ordinals` — `%{Sequence.Position => fold ordinal}`: the ordinal
-    at which each command was itself folded into projections (P8 / DR-040). With
+    at which each command was itself folded into projections (DR-040). With
     the entries' `fold_index` this is enough to replay the run's true fold order,
     which is what the faithful per-step state timeline (`state_at/2`,
     `state_timeline/1`) does.
@@ -47,7 +47,7 @@ defmodule PropertyDamage.RunTrace do
     `[{branch_id, offset, command}]` list) when one was found, else `nil`
     (linear runs, or a branching run with no verified order). Recorded so the
     per-step timeline can fold merged-branch state in the same order the executor
-    did (P8 / DR-040).
+    did (DR-040).
   - `expansion` — when the run's targets ran roots as expansions
     (`c:PropertyDamage.Model.expansions/0`): per target name, what it ran at
     each root (the entry, the concrete commands, and the seed key and aliases
@@ -546,7 +546,7 @@ defmodule PropertyDamage.RunTrace do
   end
 
   # ============================================================================
-  # Per-step state timeline (P8 / DR-040)
+  # Per-step state timeline (DR-040)
   # ============================================================================
   #
   # Projection state per step is DERIVED from the recorded fold order, never
@@ -566,7 +566,7 @@ defmodule PropertyDamage.RunTrace do
   #     states, so state divergence in a comparison never reduces to timing skew.
 
   @doc """
-  Faithful projection state immediately AFTER the step at `position` (P8).
+  Faithful projection state immediately AFTER the step at `position`.
 
   Folds every recorded item (command folds + folded event-log entries) up to and
   including this step's own folds, in true fold order. `position` may be a
@@ -578,7 +578,7 @@ defmodule PropertyDamage.RunTrace do
     do: faithful_state(trace, resolve_position(trace, position), :at)
 
   @doc """
-  Faithful projection state immediately BEFORE the step at `position` (P8).
+  Faithful projection state immediately BEFORE the step at `position`.
 
   The pre-step state: folds every recorded item with a fold ordinal strictly
   below this step's first fold. Equal to the runtime `state_before_failure`
@@ -603,7 +603,7 @@ defmodule PropertyDamage.RunTrace do
   end
 
   @doc """
-  The canonical (timing-immune) post-step state for every command (P8).
+  The canonical (timing-immune) post-step state for every command.
 
   Folds each step's executed command then its attributed, folded events, in
   flattened order — never using async fold timing. This is the mode
@@ -636,7 +636,7 @@ defmodule PropertyDamage.RunTrace do
 
   @doc """
   Verify the faithful-derived state at a step equals an authoritative snapshot
-  (the projection-purity check, P8 / DR-040).
+  (the projection-purity check, DR-040).
 
   Pure projections re-derive to the same state, so a mismatch means a projection
   read something outside its `(state, event)` inputs (a clock, a counter, the
@@ -758,7 +758,7 @@ defmodule PropertyDamage.RunTrace do
   end
 
   # The branch replay order as `%Sequence.Position{}` values: the verified
-  # linearization when the trace recorded one (P8), otherwise plain branch order
+  # linearization when the trace recorded one, otherwise plain branch order
   # (branch 0 then branch 1 ..., each in offset order), which is itself a valid
   # interleaving for independent branches.
   defp linearization_order(%__MODULE__{linearization: [_ | _] = tagged}) do

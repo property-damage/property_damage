@@ -256,7 +256,7 @@ defmodule PropertyDamage.Shrinker do
   # Forcing probability 1.0 (keeping the original command filter, comparison, and
   # max_repeats) makes every eligible command stutter on every reproduction, so
   # the violation reproduces regardless of position. Non-stutter failures return
-  # nil so the shrinker re-runs without stutter, exactly as before P4.
+  # nil so the shrinker re-runs without stutter, exactly as it did before stutter was shrinkable.
   defp stutter_repro_config({kind, _name, _variant_index}, %Stutter.Config{} = config)
        when kind in [:idempotency_violation, :stutter_execution_failed] do
     %{config | probability: 1.0, enabled: true}

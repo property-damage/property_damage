@@ -303,7 +303,7 @@ defmodule PropertyDamage.FailureReport do
           replay_path: String.t() | nil,
           replay_status: replay_status(),
 
-          # Human-readable command labels (DR-028 amendment, P7): keyed by the
+          # Human-readable command labels (DR-028 amendment): keyed by the
           # flattened command index (the 0..n-1 index of `Sequence.to_list/1`,
           # which every formatter/exporter iterates with). Only commands whose
           # `label/2` returns a non-nil string appear.
@@ -430,7 +430,7 @@ defmodule PropertyDamage.FailureReport do
     {_invariant_name, invariant_description} =
       resolve_invariant(Keyword.get(opts, :model), check_name)
 
-    # Lazily reconstruct each command's human-readable label (P7). Only runs at
+    # Lazily reconstruct each command's human-readable label. Only runs at
     # report construction (i.e. on a failure), so passing/generation runs pay
     # nothing.
     command_labels = build_command_labels(shrunk_sequence, Keyword.get(opts, :model))
@@ -456,7 +456,7 @@ defmodule PropertyDamage.FailureReport do
         executed: Keyword.get(opts, :executed, %{}),
         event_log: event_log,
         command_labels: command_labels,
-        # P8 / DR-040: the fold-order record so the trace can derive the per-step
+        # DR-040: the fold-order record so the trace can derive the per-step
         # state timeline and the report can run the projection-purity check.
         command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
         linearization: Keyword.get(opts, :linearization),
@@ -1158,7 +1158,7 @@ defmodule PropertyDamage.FailureReport do
 
   @doc """
   Projection-purity check: does the faithful per-step state derived from the
-  trace match the authoritative runtime snapshots? (P8 / DR-040.)
+  trace match the authoritative runtime snapshots? (DR-040.)
 
   Re-derives the projection state at the failing step from the recorded fold
   order (`RunTrace.state_before/2` / `state_at/2`) and compares it to the

@@ -1629,7 +1629,8 @@ defmodule PropertyDamage do
         teardown_commands: sequence.teardown,
         placeholder_registry: sequence.registry,
         seed: found.run_seed,
-        run_number: 0,
+        run_number: found.run_number,
+        run_seed: found.run_seed,
         run_nonce: ctx.run_nonce,
         mint_epoch: epoch,
         concurrency: ctx.concurrency,
@@ -2820,7 +2821,7 @@ defmodule PropertyDamage do
 
   @doc """
   Audit that a model's projection `apply/2` is a pure function of its inputs
-  (P8 / DR-040).
+  (DR-040).
 
   Companion to `audit/2`: folds each seed's generated plan through every
   projection twice (using the model's simulator to predict events) and names any

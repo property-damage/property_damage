@@ -1,6 +1,6 @@
 defmodule PropertyDamage.RunComparisonStateTest do
   @moduledoc """
-  P8 / DR-040: projection-state divergence enters RunComparison's field-divergence
+  DR-040: projection-state divergence enters RunComparison's field-divergence
   ranking using CANONICAL (timing-immune) states.
   """
   use ExUnit.Case, async: true

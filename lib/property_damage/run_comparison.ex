@@ -30,7 +30,7 @@ defmodule PropertyDamage.RunComparison do
   on the event struct module. Entries with no command attribution (injector /
   telemetry) are excluded from comparison in this version.
 
-  Projection **state** also enters the ranking (P8 / DR-040): each projection's
+  Projection **state** also enters the ranking (DR-040): each projection's
   per-step CANONICAL state (`RunTrace.canonical_state_timeline/1`) is flattened
   into leaf-path fields (`{:state, position, projection, path}`) and classified
   like any other field. Canonical state is fold-order-independent, so an
@@ -392,7 +392,7 @@ defmodule PropertyDamage.RunComparison do
     [reference | _] = traces
 
     # Canonical (attribution-order) per-step state per trace, indexed by trace
-    # position (P8 / DR-040). Canonical is timing-immune, so an async fold-order
+    # position (DR-040). Canonical is timing-immune, so an async fold-order
     # difference between two runs can never manifest as a state divergence here:
     # state divergence in the ranking is always attributable, never timing skew.
     canonical_states =
@@ -557,7 +557,7 @@ defmodule PropertyDamage.RunComparison do
     _ -> []
   end
 
-  # ---- State fields (P8 / DR-040) -------------------------------------------
+  # ---- State fields (DR-040) -------------------------------------------
 
   # Max nesting depth we flatten projection state into distinct leaf paths;
   # deeper subtrees compare as a single opaque leaf. Bounds field count on deeply

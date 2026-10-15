@@ -827,7 +827,7 @@ The engine also emits `[:property_damage, :command, :start | :stop]` and
 `[:property_damage, :check, :start | :stop]` telemetry events with
 `variant: %{index, name}` and `run_number`, and
 `[:property_damage, :sequence, :stop]` carries the `variant` the run failed in
-(`nil` when it passed). Shrink attempts and the reproduction use `run_number: 0`.
+(`nil` when it passed). Shrink attempts use `run_number: 0`; the reproduction uses the `run_number` of the run that found the failure.
 Nothing is emitted unless a handler is attached.
 
 ```elixir

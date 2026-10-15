@@ -104,7 +104,7 @@ defmodule PropertyDamage.Audit do
 
   @doc """
   Audit that a model's projection `apply/2` is a pure function of its inputs
-  (P8 / DR-040).
+  (DR-040).
 
   Generation-only companion to `run/2`: for each seed it generates the plan and
   folds it through **every** projection (the `command_sequence_projection` plus

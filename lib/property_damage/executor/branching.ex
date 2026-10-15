@@ -334,7 +334,7 @@ defmodule PropertyDamage.Executor.Branching do
         Enum.reduce(events, projs, fn event, acc -> Events.update_projections(acc, event) end)
       end)
 
-    # Fold-ordinal re-basing (P8 / DR-040). Every branch forked from the prefix
+    # Fold-ordinal re-basing (DR-040). Every branch forked from the prefix
     # carrying the SAME `fold_counter`, so each branch numbered its own commands
     # and events starting from `base`. Left as-is those ranges overlap across
     # branches, which is not a total fold order. Re-base branch i onto the range
@@ -414,7 +414,7 @@ defmodule PropertyDamage.Executor.Branching do
         Map.merge(acc, state.executed)
       end)
 
-    # Merge the per-command fold ordinals (P8 / DR-040). Each branch's own
+    # Merge the per-command fold ordinals (DR-040). Each branch's own
     # positions (ordinal >= base; the shared prefix ordinals are < base and
     # already present) are re-based by that branch's offset so no two branches
     # share an ordinal.
@@ -479,7 +479,7 @@ defmodule PropertyDamage.Executor.Branching do
     Enum.sum(Enum.map(branches, &length/1))
   end
 
-  # Shift a folded entry's fold ordinal by `offset` (P8 / DR-040). Entries that
+  # Shift a folded entry's fold ordinal by `offset` (DR-040). Entries that
   # never folded (nil fold_index) are left untouched.
   defp shift_fold_index(%{fold_index: nil} = entry, _offset), do: entry
 

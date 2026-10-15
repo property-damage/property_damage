@@ -101,7 +101,7 @@ defmodule PropertyDamage.EventLog.Entry do
     (`c:PropertyDamage.Model.expansions/0`), the leaf that produced it; `nil`
     otherwise. `command_index` stays the root's index.
   - `fold_index` - Monotonic per-run ordinal stamped when this entry's event was
-    folded into the projections (P8 / DR-040). It records the *actual* fold order,
+    folded into the projections (DR-040). It records the *actual* fold order,
     which the faithful per-step state timeline (`PropertyDamage.RunTrace.state_at/2`)
     replays. `nil` for entries that are recorded but never folded into projections
     (`:stutter` retries, `:telemetry` spans), so a `nil` fold_index is itself the

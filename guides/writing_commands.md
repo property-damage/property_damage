@@ -179,6 +179,12 @@ execution.
 The shrinker respects placeholder dependencies: if command A produces a value consumed by
 command B, command A cannot be removed while B remains in the sequence.
 
+This holds only for references the shrinker can see. Model a reference from one
+command to something another command created as a placeholder with `external()`,
+or guard it with a projection whose `apply/2` raises on an unknown reference. A
+reference held as a plain value survives the removal of the command that created
+it. See [Shrinking and References](debugging_failures.md#shrinking-and-references).
+
 ## Model-Level Wiring
 
 All state-dependent configuration lives in the Model:

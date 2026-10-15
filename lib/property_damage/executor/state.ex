@@ -63,7 +63,7 @@ defmodule PropertyDamage.Executor.State do
       `Command.awaits/2`. Persists for the rest of the run (a matcher outlives
       the command that declared it) so late injector events still correlate.
       First-registered wins when several match one event.
-    * `:fold_counter` - the next per-run fold ordinal (P8 / DR-040). Every event
+    * `:fold_counter` - the next per-run fold ordinal (DR-040). Every event
       folded into projections stamps its `EventLog.Entry.fold_index` with the
       current value and advances it; every command fold records the current value
       in `:command_fold_ordinals` before advancing. Monotonic across the whole

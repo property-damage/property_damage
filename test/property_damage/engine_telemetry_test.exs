@@ -6,12 +6,36 @@ defmodule PropertyDamage.EngineTelemetryTest do
   # filtered out by this module's target names.
   use ExUnit.Case, async: false
 
-  alias PropertyDamage.Test.Lockstep.{GuardedStepModel, StepAdapter, StepModel}
+  alias PropertyDamage.Test.Lockstep.{
+    GuardedStepModel,
+    Ledger,
+    Step,
+    StepAdapter,
+    StepGuard,
+    StepModel
+  }
 
   defmodule Forward do
     def handle_event(event, measurements, metadata, %{pid: pid}) do
       send(pid, {:telemetry, event, measurements, metadata})
     end
+  end
+
+  # Draws the failing value 13 often enough for a campaign to find its first
+  # failure after run 0.
+  defmodule LateFailureModel do
+    @behaviour PropertyDamage.Model
+
+    @impl true
+    def commands do
+      [{Step, overrides: fn _state -> %{value: StreamData.member_of([1, 1, 1, 13])} end}]
+    end
+
+    @impl true
+    def command_sequence_projection, do: Ledger
+
+    @impl true
+    def check_projections, do: [StepGuard]
   end
 
   setup do
@@ -113,6 +137,73 @@ defmodule PropertyDamage.EngineTelemetryTest do
     stops = collect([:property_damage, :command, :stop], ["tel_branch"])
     assert stops != []
     assert Enum.all?(stops, fn {_m, meta} -> meta.variant == %{index: 0, name: "tel_branch"} end)
+  end
+
+  # A command's `index` counts across the whole run: a branching sequence
+  # numbers its prefix, then each branch from the end of the prefix, then the
+  # suffix after every branch command.
+  describe "command index" do
+    alias PropertyDamage.{Executor, Sequence}
+    alias PropertyDamage.Test.Lockstep.Step
+
+    defp indices(sequence, name) do
+      context = PropertyDamage.Telemetry.engine_context(%{index: 0, name: name}, 0)
+
+      assert {:ok, %{success: true}} =
+               Executor.run(sequence, StepModel, StepAdapter,
+                 config: %{name: name},
+                 telemetry: context
+               )
+
+      [:property_damage, :command, :stop]
+      |> collect([name])
+      |> Enum.map(fn {_measurements, meta} -> {meta.phase, meta.index, meta.root_index} end)
+      |> Enum.sort()
+    end
+
+    defp steps(count), do: for(value <- 1..count//1, do: %Step{value: value})
+
+    test "is cumulative across prefix, branches and suffix" do
+      sequence = Sequence.branching(steps(2), [steps(2), steps(1)], steps(2))
+
+      # Both branches start at the index after the prefix; the suffix starts
+      # after all three branch commands.
+      assert indices(sequence, "idx_branch") == [
+               {:root, 0, 0},
+               {:root, 1, 1},
+               {:root, 2, 2},
+               {:root, 2, 2},
+               {:root, 3, 3},
+               {:root, 5, 5},
+               {:root, 6, 6}
+             ]
+    end
+
+    test "is the position in the sequence on the linear path" do
+      assert indices(Sequence.linear(steps(3)), "idx_linear") ==
+               [{:root, 0, 0}, {:root, 1, 1}, {:root, 2, 2}]
+    end
+  end
+
+  test "the reproduction of a failure emits the run number that found it" do
+    assert {:error, report} =
+             run(LateFailureModel, [target("tel_repro")],
+               max_runs: 20,
+               max_commands: 2,
+               seed: 10,
+               replay_dir: false
+             )
+
+    # The failure is first found after run 0; the reproduction is the last
+    # execution of the campaign.
+    assert report.run_number > 0
+
+    run_numbers =
+      [:property_damage, :command, :stop]
+      |> collect(["tel_repro"])
+      |> Enum.map(fn {_measurements, meta} -> meta.run_number end)
+
+    assert List.last(run_numbers) == report.run_number
   end
 
   test "check stop names the target and the check" do

@@ -17,8 +17,8 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
   These tests pin that precedence (and the `command_index` carried by the two
   async cases) by constructing scenarios where two competing failures fire at
-  once and asserting which one wins. They exist so the P3 cohesive-module
-  strangler (extracting `Executor.Finalization`) cannot silently reorder the
+  once and asserting which one wins. They exist so a refactor of the finalization
+  code (`Executor.Finalization`) cannot silently reorder the
   chain: any swap of two adjacent decision points flips a winner and turns one
   of these red. They are expected GREEN on HEAD, where the behavior already
   exists; their job is to lock it.

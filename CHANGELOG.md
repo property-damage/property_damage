@@ -136,7 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `kind in [:poll_timeout, :settle_timeout]` "possibly tuning, not a bug"
   triage note (documented in `guides/debugging_failures.md`).
 
-- **Per-step projection-state timeline + projection-purity check (P8, DR-040).**
+- **Per-step projection-state timeline + projection-purity check (DR-040).**
   Projection state at any command is now *derived* from the run (no snapshot is
   captured). `PropertyDamage.RunTrace.state_at/2`, `state_before/2`, and
   `state_timeline/1` re-fold the recorded fold order to give the faithful state
@@ -852,6 +852,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The reproduction of a found failure emits the found run's `run_number`.**
+  A linear reproduction used to emit `run_number: 0` in its command and check
+  telemetry while a branching one emitted the found run's number. Both now emit
+  the found run's number; shrink attempts keep `0`. The telemetry docs also
+  state that a root command's `index` counts across the whole run.
+
 - **A flaky failure that does not reproduce no longer reports a blank "Unknown
   Failure".** After finding a failing run, `PropertyDamage.run/1` re-executes the
   (shrunk) sequence to gather fresh state for the report. For an intermittent
@@ -929,8 +935,8 @@ end, and trimmed the documented surface to what has been validated.
   with no changes. Identity is per projection: ids are unique within a
   projection and `validates:` resolves locally, checked at compile time
   (duplicate id and dangling `validates:` are `CompileError`s; an invariant with
-  no check warns as statically vacuous). `PropertyDamage.Model.assertion_catalog/1`
-  returns the model-wide catalog keyed `{projection, id}` with each invariant's
+  no check warns as statically vacuous). `Model.assertion_catalog/1` (since renamed
+  `check_catalog/1`) returns the model-wide catalog keyed `{projection, id}` with each invariant's
   checks and per-check kind (`:synchronous` / `:lifecycle` / `:polling`). The
   engine records **per-assertion firing** across the whole run at every
   evaluation site (synchronous `every:`, lifecycle `at:`, async observations,

@@ -501,8 +501,14 @@ The report ends with three calls you can paste:
 {:ok, regenerated} =
   PropertyDamage.Expansion.for(Counter.Model, 42, 1, "right", max_commands: 10)
 
-Enum.map(regenerated.choices, & &1.entry)
-#=> ["Add[1]", "Add[1]", "Add[1]", "Add[0]", ...]
+regenerated.choices
+|> Enum.map(& &1.entry)
+|> IO.inspect(label: "entries")
+```
+
+```text
+entries: ["Add[1]", "Add[1]", "Add[1]", "Add[0]", "Add[0]", "Add[0]", "Add[0]", "Add[0]",
+ "Add[1]", "Add[0]"]
 ```
 
    The arguments are the model, the report's `seed`, the run number (1-based)
@@ -575,8 +581,11 @@ again on `:random`:
     replay_dir: false
   )
 
-report.variant
-#=> %{index: 2, name: "port"}
+IO.inspect(report.variant, label: "variant")
+```
+
+```text
+variant: %{index: 2, name: "port"}
 ```
 
 `legacy` and `port_same_path` run the same commands on two implementations;
