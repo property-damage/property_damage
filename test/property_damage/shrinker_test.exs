@@ -555,6 +555,57 @@ defmodule PropertyDamage.ShrinkerTest do
       assert Sequence.to_list(result.sequence) == commands
     end
 
+    defp budget_branching do
+      Sequence.branching(
+        [%CreateItem{name: "Prefix", quantity: 400}],
+        [
+          [%CreateItem{name: "BranchA", quantity: 50}],
+          [%CreateItem{name: "BranchB", quantity: 60}]
+        ],
+        []
+      )
+    end
+
+    defp budget_shrink(extra) do
+      Shrinker.shrink(
+        budget_branching(),
+        [
+          failed_at_index: 0,
+          model: FailingModel,
+          targets: [
+            %PropertyDamage.Target{adapter: SimpleAdapter, config: %{}, name: "a", index: 0}
+          ]
+        ] ++ extra
+      )
+    end
+
+    test "max_iterations: 0 tries no candidate on a branching sequence" do
+      result = budget_shrink(config: Config.new(max_iterations: 0))
+
+      assert result.iterations == 0
+      assert Sequence.to_list(result.sequence) == Sequence.to_list(budget_branching())
+    end
+
+    test "a branching shrink that converts to linear stays within max_iterations" do
+      # The flattened run reproduces, so the conversion is adopted and the
+      # linear shrink after it gets what is left of the budget.
+      result = budget_shrink(config: Config.new(max_iterations: 1))
+
+      assert result.iterations <= 1
+    end
+
+    test "a branching shrink that keeps its branches stays within max_iterations" do
+      # No candidate reproduces a check this model never fails, so every
+      # branching strategy runs until the budget is spent.
+      result =
+        budget_shrink(
+          failure_reason: Failure.check_failed(:never_failing, "not this check"),
+          config: Config.new(max_iterations: 1)
+        )
+
+      assert result.iterations <= 1
+    end
+
     test "respects max_time_ms" do
       commands = [%CreateItem{name: "Failing", quantity: 101}]
 

@@ -995,7 +995,9 @@ defmodule PropertyDamage.Shrinker do
               concurrency: state.concurrency,
               compare: state.compare,
               check_mode: state.check_mode,
-              config: state.config,
+              # The converted shrink spends what is left of this shrink's
+              # budget, so the two together stay within it.
+              config: remaining_budget(state),
               failure_reason: reconstruct_failure_reason(state.original_signature),
               variant_index: signature_variant(state.original_signature),
               # Carry stutter reproduction into the converted-linear shrink. The
@@ -1195,18 +1197,24 @@ defmodule PropertyDamage.Shrinker do
     all_commands = Sequence.to_list(state.sequence)
     shrunk_commands = Enum.map(all_commands, &shrink_command_args/1)
 
-    # Rebuild sequence with shrunk commands
-    # This is a simplification - proper implementation would track positions
-    candidate = rebuild_sequence_with_commands(state.sequence, shrunk_commands)
-
-    state = increment_iterations(state)
-
-    # Argument shrinking replaces commands in place, so the structure (and thus
-    # the position tracker) is unchanged.
-    if still_fails_branch?(candidate, state.positions, state) do
-      %{state | sequence: candidate}
-    else
+    # A candidate equal to the sequence is not an attempt, and no attempt
+    # runs once the budget is spent.
+    if shrunk_commands == all_commands or exceeded_limits?(state) do
       state
+    else
+      # Rebuild sequence with shrunk commands
+      # This is a simplification - proper implementation would track positions
+      candidate = rebuild_sequence_with_commands(state.sequence, shrunk_commands)
+
+      state = increment_iterations(state)
+
+      # Argument shrinking replaces commands in place, so the structure (and thus
+      # the position tracker) is unchanged.
+      if still_fails_branch?(candidate, state.positions, state) do
+        %{state | sequence: candidate}
+      else
+        state
+      end
     end
   end
 
@@ -1780,6 +1788,17 @@ defmodule PropertyDamage.Shrinker do
 
     state.iterations >= state.config.max_iterations or
       elapsed >= state.config.max_time_ms
+  end
+
+  # The config with what is left of the state's iteration and time budget.
+  defp remaining_budget(state) do
+    elapsed = System.monotonic_time(:millisecond) - state.start_time
+
+    %{
+      state.config
+      | max_iterations: max(state.config.max_iterations - state.iterations, 0),
+        max_time_ms: max(state.config.max_time_ms - elapsed, 0)
+    }
   end
 
   defp increment_iterations(state) do
