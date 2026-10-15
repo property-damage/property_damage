@@ -355,6 +355,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metadata carries `root_index` and `leaf_index`, and
   `[:property_damage, :expansion, :leaf_validated]` reports each first
   validation of a leaf module.
+- **The shrinker shrinks along the expansion axis (DR-050).** When a run with
+  several targets fails, each shrink cycle runs four phases in order: drop root
+  subtrees; collapse the reference target's expansion toward the identity at each
+  surviving root; collapse each `:random` target onto the reference's choice;
+  simplify arguments (generator-chosen fields only, never an `overrides:` value
+  or a placeholder). A cycle that makes no progress ends the shrink. A shrunk
+  root that runs as itself without being listed is recorded as `:identity` and
+  printed "identity, by shrinking". Failure identity is `{kind, name, variant}`
+  at the same or an earlier root. A candidate is invalid and never runs when an
+  entry is no longer offered for its state, or when its replay artifact could not
+  run it again (a placeholder its commands hold that the shrunk roots do not
+  mint).
+- **`PropertyDamage.Expansion.for/5`.** `for(model, seed, run, name, opts)`
+  regenerates the concrete sequence a target ran, without running a target or an
+  adapter. `run` is 1-based, and `Expansion.for(Model, report.seed, 1, name)`
+  regenerates the failing run as it ran before shrinking.
+- **`only:` run option.** `only: [run: n, variants: names, with_reference: bool]`
+  runs one run and a subset of targets; `only: [replay: path]` runs a replay
+  artifact. Option errors name the rule that failed.
+- **`replay_dir:` run option.** Names the directory for replay artifacts
+  (default `"property_damage_replays"`); `false` writes nothing.
+- **Replay artifact.** Every failure writes
+  `<model last segment>_seed<seed>.replay.exs`: one human-readable Elixir literal
+  term with a version header. The loader parses it without evaluating code and
+  refuses calls, functions, sigils and a second term. Generation refuses a command
+  field that holds a function, pid, reference, port, improper list or non-binary
+  bitstring, map keys included; the report then says where.
+- **`FailureReport` fields and footer.** `run`, `replay_path`, `replay` (the term,
+  `{:refused, where}` or nil) and `replay_status`, plus `replay_command/1` and
+  `expansion_command/1`. The printed report ends with the reproduction command,
+  "Regenerate the failing variant:" and "Replay the shrunk failure:", whose
+  `only: [replay: path]` call is the last line.
 
 ### Changed
 
@@ -732,6 +764,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Persisted failure reports and traces are version 13 (the `expansions` and
     `expansion_counts` fields and the trace's concrete leaves); version 12 and
     older are refused.
+- **BREAKING: persistence format is version 14.** The report envelope gains the
+  replay term, its path and the run. Loaders refuse version 13 and older;
+  `.pdtrace` files share the version.
+- **Paths that run a failure again no longer raise for a target that ran
+  leaves.** `shrink_further/2`, `Replay.run/2`, `Replay.start/2`,
+  `Analysis.isolate_trigger/2` on the reference and export read the recorded
+  commands instead. `shrink_further/2` writes its smaller artifact over the
+  incoming report's file and raises, naming `replay_dir:`, only when the report
+  holds neither a term nor choices.
 
 ### Removed
 
@@ -825,6 +866,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   events. Previously a valid event could be rejected with a false "not covered by
   any InjectorAdapter `@emits`" error purely because the adapter module had not
   been loaded at reflection time.
+- **A pasted reproduction command keeps each target's non-default `expansion:`.**
+  `FailureReport.targets_source/1` left it out, so the pasted command re-ran a
+  `:reference` or `:identity` target as `:random`, which is a different sequence.
 
 ## [0.2.0] - 2026-06-25
 

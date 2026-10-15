@@ -544,8 +544,11 @@ The framework shrinks a divergence before it reports it. Every shrink attempt
 runs the candidate sequence on every target, each set up and torn down for that
 attempt. A candidate counts only if the same target fails with the same kind on
 the same `@compare` key, at the same or an earlier root; a candidate that
-diverges on another observation is a different failure. The reference's
-sequence is what shrinks, because all targets run the same commands. A failure
+diverges on another observation is a different failure. Without expansions, the
+reference's sequence is what shrinks, because all targets run the same commands.
+When targets run different expansions, the shrinker also collapses them toward
+the reference's choice (see
+[Reproducing a Failure](debugging_failures.md#step-1-reproduce-the-failure)). A failure
 to converge is shrunk the same way, and each attempt waits the bound once at the
 failing boundary.
 
@@ -679,9 +682,9 @@ in another target breaches `max_ratio:` as infinity; two zeros do not breach.
 ### What stays one-target
 
 Branching sequences run against one target: `branching:` with two or more
-targets is an option error. `PropertyDamage.replay/2`,
-`PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
-the report's reference target (with its name and config).
+targets is an option error. `PropertyDamage.Analysis.isolate_trigger/2` and `PropertyDamage.RunTrace` work on
+the report's reference target (with its name and config), and
+`PropertyDamage.replay/2` replays any recorded target.
 `PropertyDamage.shrink_further/2` re-shrinks with the report's `targets`,
 `concurrency`, `compare` and `stutter` by default; pass `targets:` (one or
 more entries), `concurrency:` or `compare:` to override. `equivalence:` is
