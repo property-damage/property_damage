@@ -270,7 +270,7 @@ Regenerate the failing variant:
 PropertyDamage.Expansion.for(Counter.Model, 42, 1, "right", max_commands: 10)
 
 Replay the shrunk failure:
-PropertyDamage.run(model: Counter.Model, targets: [...], only: [replay: "property_damage_replays/Model_seed42.replay.exs"])
+PropertyDamage.run(model: Counter.Model, targets: [...], compare: [converge_within: 100], only: [replay: "property_damage_replays/Model_seed42.replay.exs"])
 ```
 
 Read it from the top: the observation `Counter.Projection.total` diverged; the
@@ -315,9 +315,9 @@ replayed: {:diverged, %{index: 1, name: "right"}, :reproduced}
 ```
 
 The replay generates nothing: each target runs the commands the artifact
-records. The call above is the report's last line plus `compare:`. The printed
-call leaves out the run's convergence bound, so pasted as printed it waits the
-default 5 seconds at the failing root before it reports.
+records. The call above is the report's last line. It names the run's
+convergence bound (`compare: [converge_within: 100]`), as the reproduction line
+does, so the replay waits as long as the run did at the failing root.
 
 That is the whole loop: a model that lists equivalent paths, two targets that
 pick independently, one observation, a shrunk divergence that names the path,
@@ -528,7 +528,10 @@ It holds the shrunk roots and, per target, the entry and the concrete commands
 it ran at each root. The loader reads it as data and evaluates no code. A
 failing run writes it to `replay_dir:` (default `"property_damage_replays"`)
 as `<model last segment>_seed<seed>.replay.exs`; `replay_dir: false` writes
-none. A command that holds a value no file can hold (a function, a pid) gets
+none. A later failure of the same seed under other `targets:` (or another
+failure) never replaces that file: it is written as
+`<model last segment>_seed<seed>_2.replay.exs` (then `_3`, and so on), and its
+report prints the path it wrote. A command that holds a value no file can hold (a function, a pid) gets
 no artifact, and the report says which field refused.
 
 **Running part of a campaign.** `only: [run: n, variants: names,

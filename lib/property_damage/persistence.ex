@@ -54,7 +54,7 @@ defmodule PropertyDamage.Persistence do
 
   alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
 
-  @version 14
+  @version 15
   @extension ".pd"
   @trace_extension ".pdtrace"
 
@@ -458,6 +458,11 @@ defmodule PropertyDamage.Persistence do
     }
   end
 
+  # V15 format: a report records the run's `check_mode`, the `campaign` a
+  # latency budget was judged over (`%{seed:, max_runs:}`, nil for every other
+  # kind) and the `original_failed_at_index` of the run that found the
+  # failure. A v15 report lacking `run`, `replay`, `replay_path` or
+  # `check_mode` is refused: the paths that execute a loaded report read them.
   # V14 format: a report records the campaign `run` it failed in, its replay
   # artifact term (`replay`, or the refusal naming the value no file can hold),
   # the artifact's `replay_path` and its `replay_status`, and an expansion
@@ -503,7 +508,9 @@ defmodule PropertyDamage.Persistence do
     end)
   end
 
-  # Pre-v14 files (format versions 1-13) are refused (DR-041, following DR-039/DR-040).
+  # Pre-v15 files (format versions 1-14) are refused (DR-041, following DR-039/DR-040).
+  # A v14 report records neither the `check_mode` a reproduction reuses, nor
+  # the `campaign` of a latency budget, nor the `original_failed_at_index`.
   # A v13 report records neither the `run`, nor the replay artifact
   # (`replay`, `replay_path`, `replay_status`) every re-execution path reads.
   # A v12 report records neither `expansions` nor `expansion_counts`, and its
@@ -531,10 +538,18 @@ defmodule PropertyDamage.Persistence do
 
   defp decode(_), do: {:error, :invalid_format}
 
-  # A report must carry the replay artifact term (nil when it has none): the
-  # paths that re-execute a loaded report read it.
-  defp report_payload(report, _warnings) when is_map(report) and not is_map_key(report, :replay),
-    do: {:error, {:missing_field, :replay}}
+  # A report must carry the fields the paths that execute a loaded report
+  # read: the replay artifact term (nil when it has none), its path, the
+  # campaign run and the check mode. A report lacking one is refused, never
+  # loaded with a drift warning.
+  @required_fields [:replay, :run, :replay_path, :check_mode]
+
+  defp report_payload(report, warnings) when is_map(report) do
+    case Enum.find(@required_fields, &(not is_map_key(report, &1))) do
+      nil -> {:ok, report, warnings ++ check_struct_drift(report)}
+      field -> {:error, {:missing_field, field}}
+    end
+  end
 
   defp report_payload(report, warnings), do: {:ok, report, warnings ++ check_struct_drift(report)}
 

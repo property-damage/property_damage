@@ -48,6 +48,12 @@ defmodule PropertyDamage.Replay do
   replayed, and each leaf is a step of its own. A replay on a target the
   report does not record raises `ArgumentError`.
 
+  ## Check Mode
+
+  A replay runs under the report's `check_mode`. Under `:record` a failing
+  check does not stop the run: the step's `result` names the check, as under
+  `:halt`, and `step_to/2` goes on stepping, as the run did.
+
   ## Step Information
 
   Each step returns:
@@ -267,7 +273,9 @@ defmodule PropertyDamage.Replay do
             event_queue: event_queue,
             stutter_config: opts[:stutter_config],
             external_markers: opts[:external_markers] || [],
-            check_mode: :halt,
+            # The run's check mode: a `:record` failure replays under
+            # `:record`, recording a failing check and going on.
+            check_mode: replay_check_mode(failure),
             # Seed the placeholder registry from the failing sequence (DR-021),
             # so replaying a failure whose commands consume `external()` values
             # resolves them instead of raising "Unknown placeholder".
@@ -342,7 +350,7 @@ defmodule PropertyDamage.Replay do
           next_index,
           before_log_count,
           projections_before,
-          :ok,
+          recorded_result(before_state, new_exec_state),
           :in_progress,
           leaf
         )
@@ -547,8 +555,9 @@ defmodule PropertyDamage.Replay do
     case step(session) do
       {:ok, new_session, step} ->
         # Stop advancing once a command fails: there is nothing meaningful to
-        # step past a failure in a halt-mode replay.
-        if step.result == :ok do
+        # step past a failure in a halt-mode replay. A `:record` replay goes
+        # on, as the run did.
+        if step.result == :ok or new_session.exec_state.check_mode == :record do
           step_to_loop(new_session, target_index, [step | acc])
         else
           {:ok, new_session, Enum.reverse([step | acc])}
@@ -586,6 +595,24 @@ defmodule PropertyDamage.Replay do
   end
 
   defp normalize_result(reason), do: {:error, reason}
+
+  defp replay_check_mode(%FailureReport{check_mode: mode}) when mode in [:halt, :record], do: mode
+  defp replay_check_mode(_failure), do: :halt
+
+  # Under `:record` a failing check does not fail the step: the step's result
+  # names the first check the step recorded, `:ok` when it recorded none.
+  defp recorded_result(before_state, after_state) do
+    # The failures are kept newest first.
+    added = length(after_state.check_failures) - length(before_state.check_failures)
+
+    case Enum.take(after_state.check_failures, added) do
+      [] -> :ok
+      added -> recorded_check(List.last(added))
+    end
+  end
+
+  defp recorded_check(%{check_name: name, reason: reason}),
+    do: normalize_result(Failure.check_failed(name, reason))
 
   defp step_context(session) do
     %Stepping.Context{

@@ -9,7 +9,11 @@ defmodule PropertyDamage.ReplayArtifact do
   # The file is Elixir source holding one literal term after a header comment,
   # so a reader can follow it and an editor highlights it. It is read back as
   # data: the source is parsed with `Code.string_to_quoted/2` and a walker
-  # accepts literals only. Nothing in the file is ever evaluated.
+  # accepts literals only. Nothing in the file is ever evaluated, and reading
+  # it neither creates an atom nor loads a module: an atom the running system
+  # does not know is refused, and a struct literal is accepted only for a
+  # module already loaded that is a command module or one of the structs the
+  # format itself holds (`@format_structs`).
   #
   # The term:
   #
@@ -50,6 +54,14 @@ defmodule PropertyDamage.ReplayArtifact do
   @header "# PropertyDamage replay artifact, format #{@format}"
   @header_prefix "# PropertyDamage replay artifact, format "
   @keys [:choices, :failure, :format, :model, :prefix, :roots, :run, :seed, :targets]
+  # The framework's own structs an artifact holds: a placeholder minted for
+  # an `external()` field and the positions inside it and in `aliases`.
+  @format_structs [PropertyDamage.Placeholder, PropertyDamage.Sequence.Position]
+  # Every static atom of the source is parsed as `{@atom_tag, name}` and
+  # resolved to an existing atom afterwards; the source cannot write this
+  # pair itself, since its own atoms are parsed the same way.
+  @atom_tag :"$replay_artifact_atom"
+  @alias_tag :"$replay_artifact_alias"
   @choice_keys [:root_id, :entry, :commands, :aliases]
 
   @type t :: %{
@@ -263,12 +275,17 @@ defmodule PropertyDamage.ReplayArtifact do
     do: "#{model |> Module.split() |> List.last()}_seed#{seed}.replay.exs"
 
   @doc false
-  # Writes `term` into `dir` (created when missing), replacing the file a
-  # failure of the same seed wrote before. Returns `{:ok, path}` or
+  # Writes `term` into `dir` (created when missing). The file is
+  # `file_name(term)`, replaced when it holds the same failure (the same kind,
+  # name and failing target) under the same targets, as a re-shrink of that
+  # failure writes, or when it does not read as an artifact. A file holding
+  # another failure or other targets is never replaced: the term goes to
+  # `<Model>_seed<n>_<k>.replay.exs`, the smallest `k` from 2 whose file is
+  # free, holds the same failure or is no artifact. Returns `{:ok, path}` or
   # `{:error, reason}`.
   @spec write(t(), Path.t()) :: {:ok, Path.t()} | {:error, term()}
   def write(term, dir) do
-    path = Path.join(dir, file_name(term))
+    path = free_path(term, dir)
 
     with {:mkdir, :ok} <- {:mkdir, File.mkdir_p(dir)},
          {:write, :ok} <- {:write, File.write(path, encode(term))} do
@@ -277,6 +294,33 @@ defmodule PropertyDamage.ReplayArtifact do
       {:mkdir, {:error, reason}} -> {:error, {:mkdir_failed, dir, reason}}
       {:write, {:error, reason}} -> {:error, {:write_failed, path, reason}}
     end
+  end
+
+  defp free_path(term, dir) do
+    base = Path.rootname(file_name(term), ".replay.exs")
+
+    Stream.iterate(1, &(&1 + 1))
+    |> Stream.map(fn
+      1 -> Path.join(dir, base <> ".replay.exs")
+      k -> Path.join(dir, "#{base}_#{k}.replay.exs")
+    end)
+    |> Enum.find(&writable?(&1, term))
+  end
+
+  # A path the term may be written to: no file there, one recording the same
+  # failure under the same targets, or one that is no artifact at all (it
+  # records no failure to keep).
+  defp writable?(path, term) do
+    case read(path) do
+      {:ok, existing} -> same_failure?(existing, term)
+      {:error, _reason} -> true
+    end
+  end
+
+  defp same_failure?(existing, term) do
+    existing.targets == term.targets and
+      Map.take(existing.failure, [:kind, :name, :variant_index]) ==
+        Map.take(term.failure, [:kind, :name, :variant_index])
   end
 
   @doc false
@@ -395,8 +439,11 @@ defmodule PropertyDamage.ReplayArtifact do
   # ==========================================================================
 
   @doc false
-  # The term the artifact at `path` holds, read as data.
-  @spec read(Path.t()) :: {:ok, t()} | {:error, String.t()}
+  # The term the artifact at `path` holds, read as data. A refusal is a
+  # message, or `{:unknown_struct_module, module}` for a struct literal whose
+  # module is not loaded, or is neither a command module nor a format struct.
+  @spec read(Path.t()) ::
+          {:ok, t()} | {:error, String.t() | {:unknown_struct_module, module()}}
   def read(path) do
     case File.read(path) do
       {:ok, text} -> parse(text)
@@ -408,11 +455,12 @@ defmodule PropertyDamage.ReplayArtifact do
   # The term an artifact's text holds. The text must start with the header
   # line and hold one literal term whose `format` agrees with the header;
   # anything that is not a literal is refused naming the node and its line.
-  @spec parse(String.t()) :: {:ok, t()} | {:error, String.t()}
+  @spec parse(String.t()) ::
+          {:ok, t()} | {:error, String.t() | {:unknown_struct_module, module()}}
   def parse(text) when is_binary(text) do
     with :ok <- check_header(text),
          {:ok, quoted} <- quote_text(text),
-         {:ok, term} <- walk(quoted),
+         {:ok, term} <- walk(quoted, text),
          :ok <- check_format(term) do
       check_shape(term)
     end
@@ -434,16 +482,26 @@ defmodule PropertyDamage.ReplayArtifact do
   end
 
   defp quote_text(text) do
-    opts = [literal_encoder: &{:ok, {:__block__, &2, [&1]}}, emit_warnings: false]
+    opts = [
+      literal_encoder: &{:ok, {:__block__, &2, [&1]}},
+      existing_atoms_only: true,
+      static_atoms_encoder: fn name, _meta -> {:ok, {@atom_tag, name}} end,
+      emit_warnings: false
+    ]
 
     case Code.string_to_quoted(text, opts) do
       {:ok, {:__block__, _meta, [_first, second | _rest]}} ->
+        second = resolve_atoms(second)
+
         {:error,
-         "the replay artifact holds a second term, #{source(second)}, at line #{line(second)}: " <>
-           "an artifact holds one term"}
+         "the replay artifact holds a second term, #{source(second, text)}, at line " <>
+           "#{line(second)}: an artifact holds one term"}
 
       {:ok, quoted} ->
-        {:ok, quoted}
+        {:ok, resolve_atoms(quoted)}
+
+      {:error, {meta, "unsafe atom does not exist: " <> _, token}} ->
+        {:error, unknown_atom(token, Keyword.get(meta, :line, "?"))}
 
       {:error, {meta, message, token}} ->
         {:error,
@@ -498,11 +556,71 @@ defmodule PropertyDamage.ReplayArtifact do
 
   defp valid_choices?(_choices), do: false
 
-  defp walk(quoted) do
+  defp walk(quoted, text) do
     {:ok, literal!(quoted)}
   catch
-    {:refuse, node, why} -> {:error, "#{why}: #{source(node)} at line #{line(node)}"}
+    {:refuse, node, why} -> {:error, "#{why}: #{source(node, text)} at line #{line(node)}"}
+    {:unknown_atom, name, line} -> {:error, unknown_atom(name, line)}
+    {:unknown_struct_module, module} -> {:error, {:unknown_struct_module, module}}
   end
+
+  defp unknown_atom(name, line),
+    do:
+      "the replay artifact names #{name}, which this system does not know (no such atom), " <>
+        "at line #{line}"
+
+  # Every tagged atom the running system knows becomes that atom; an alias
+  # becomes its module when that module's name is an atom already. Anything
+  # else stays tagged, and the walker refuses it naming the source.
+  defp resolve_atoms(quoted) do
+    Macro.prewalk(quoted, fn
+      {:__aliases__, meta, parts} = node when is_list(parts) ->
+        case alias_names(parts) do
+          nil -> node
+          names -> {:__aliases__, meta, resolve_alias(names)}
+        end
+
+      {@atom_tag, name} = node when is_binary(name) ->
+        case existing_atom(name) do
+          {:ok, atom} -> atom
+          :error -> node
+        end
+
+      other ->
+        other
+    end)
+  end
+
+  defp alias_names(parts) do
+    if Enum.all?(parts, &match?({@atom_tag, name} when is_binary(name), &1)),
+      do: Enum.map(parts, &elem(&1, 1))
+  end
+
+  # The segments as atoms when every one is an atom already (so the source
+  # prints as written), else the module alone; `{@alias_tag, name}` when the
+  # module's name is no atom at all.
+  defp resolve_alias(names) do
+    with {:ok, _module} <- existing_atom("Elixir." <> Enum.join(names, ".")),
+         segments = Enum.map(names, &existing_atom/1),
+         true <- Enum.all?(segments, &match?({:ok, _}, &1)) do
+      Enum.map(segments, &elem(&1, 1))
+    else
+      :error -> [{@alias_tag, Enum.join(names, ".")}]
+      false -> [String.to_existing_atom("Elixir." <> Enum.join(names, "."))]
+    end
+  end
+
+  defp existing_atom(name) do
+    {:ok, String.to_existing_atom(name)}
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp literal!({:__block__, meta, [{@atom_tag, name}]}) when is_binary(name),
+    do: throw({:unknown_atom, ":" <> inspect(name), Keyword.get(meta, :line, "?")})
+
+  defp literal!({@atom_tag, name}) when is_binary(name),
+    do: throw({:unknown_atom, ":" <> inspect(name), "?"})
 
   defp literal!({:__block__, _meta, [value]}), do: literal!(value)
   defp literal!(value) when is_atom(value) or is_number(value) or is_binary(value), do: value
@@ -527,8 +645,16 @@ defmodule PropertyDamage.ReplayArtifact do
       else: refuse!(node)
   end
 
+  defp literal!({:__aliases__, meta, [{@alias_tag, name}]}),
+    do: throw({:unknown_atom, name, Keyword.get(meta, :line, "?")})
+
   defp literal!({:__aliases__, _meta, parts} = node) when is_list(parts) do
-    if Enum.all?(parts, &is_atom/1), do: Module.concat(parts), else: refuse!(node)
+    with true <- Enum.all?(parts, &is_atom/1),
+         {:ok, module} <- existing_atom(module_name(parts)) do
+      module
+    else
+      _not_a_module -> refuse!(node)
+    end
   end
 
   defp literal!({:%{}, _meta, pairs} = node) when is_list(pairs) do
@@ -541,20 +667,16 @@ defmodule PropertyDamage.ReplayArtifact do
 
   defp literal!({:%, _meta, [module_node, {:%{}, _, pairs}]} = node) when is_list(pairs) do
     module = literal!(module_node)
-    fields = Enum.map(pairs, &pair!(&1, node))
 
     cond do
       not is_atom(module) ->
         refuse!(node)
 
-      not Code.ensure_loaded?(module) ->
-        throw({:refuse, node, "the struct module #{inspect(module)} is not loaded"})
-
-      not function_exported?(module, :__struct__, 1) ->
-        throw({:refuse, node, "#{inspect(module)} is not a struct"})
+      not artifact_struct?(module) ->
+        throw({:unknown_struct_module, module})
 
       true ->
-        build_struct!(module, fields, node)
+        build_struct!(module, Enum.map(pairs, &pair!(&1, node)), node)
     end
   end
 
@@ -573,16 +695,57 @@ defmodule PropertyDamage.ReplayArtifact do
       )
   end
 
+  defp module_name(parts) do
+    case Enum.map_join(parts, ".", &Atom.to_string/1) do
+      "Elixir." <> _ = name -> name
+      name -> "Elixir." <> name
+    end
+  end
+
+  # A struct module an artifact may name: one loaded before the artifact is
+  # read (the loader never loads a module) that is a command module or one of
+  # the format's own structs.
+  defp artifact_struct?(module) do
+    :code.is_loaded(module) != false and function_exported?(module, :__struct__, 1) and
+      (module in @format_structs or function_exported?(module, :generator, 1))
+  end
+
   defp refuse!(node), do: throw({:refuse, node, "not a literal"})
 
-  # A node as source, without the literal wrappers the parser added.
-  defp source(node) do
-    node
-    |> Macro.prewalk(fn
-      {:__block__, _meta, [value]} -> value
-      other -> other
-    end)
-    |> Macro.to_string()
+  # A node as source, without the literal wrappers the parser added. A node
+  # naming an atom the system does not know cannot be printed as source; its
+  # line of the file stands for it.
+  defp source(node, text) do
+    unwrapped =
+      Macro.prewalk(node, fn
+        {:__block__, _meta, [value]} -> value
+        other -> other
+      end)
+
+    if tagged?(unwrapped), do: line_text(node, text), else: Macro.to_string(unwrapped)
+  end
+
+  defp tagged?(node) do
+    {_node, found?} =
+      Macro.prewalk(node, false, fn
+        {tag, name} = pair, _found when tag in [@atom_tag, @alias_tag] and is_binary(name) ->
+          {pair, true}
+
+        other, found ->
+          {other, found}
+      end)
+
+    found?
+  end
+
+  defp line_text(node, text) do
+    case line(node) do
+      line when is_integer(line) ->
+        text |> String.split("\n") |> Enum.at(line - 1, "") |> String.trim()
+
+      _unknown ->
+        "a node naming an unknown atom"
+    end
   end
 
   defp line({_name, meta, _args}) when is_list(meta), do: Keyword.get(meta, :line, "?")

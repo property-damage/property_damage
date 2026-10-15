@@ -53,7 +53,7 @@ defmodule PropertyDamage.Export.LiveBook do
     failure_desc =
       case metadata.check_name do
         nil -> to_string(metadata.failure_type)
-        check -> "#{check} check failed"
+        check -> "#{Common.check_label(check)} check failed"
       end
 
     timestamp =
@@ -373,7 +373,7 @@ defmodule PropertyDamage.Export.LiveBook do
   defp generate_title(metadata) do
     case metadata.check_name do
       nil -> "Failure Investigation: #{metadata.failure_type}"
-      check -> "Failure Investigation: #{check}"
+      check -> "Failure Investigation: #{Common.check_label(check)}"
     end
   end
 end

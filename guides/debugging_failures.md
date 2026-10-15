@@ -95,7 +95,10 @@ end
 
 Every failure writes a replay artifact: a file named
 `<model>_seed<seed>.replay.exs` in the `replay_dir:` directory (default
-`property_damage_replays`; `replay_dir: false` writes nothing). The report ends
+`property_damage_replays`; `replay_dir: false` writes nothing). A file another
+failure of the same seed wrote (under other `targets:`, say) is kept: the new
+one is named `<model>_seed<seed>_2.replay.exs`, and the report prints the path
+it wrote. The report ends
 with a paste-ready call that runs the shrunk failure again without generating
 anything:
 

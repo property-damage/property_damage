@@ -25,18 +25,15 @@ defmodule PropertyDamage.FailureReport do
         failure_reason: Failure.check_failed(:NonNegativeBalance, "...")
       )
 
-  ## Formatting Reports
+  ## Printing Reports
 
-  Use `FailureReport.Formatter` to render reports in different formats:
+  Inspecting a report prints it in full, as the guides show:
 
-      # Terminal output (default)
-      FailureReport.Formatter.format(report, :terminal)
+      IO.inspect(report, pretty: true)
 
-      # Markdown for documentation
-      FailureReport.Formatter.format(report, :markdown)
-
-      # JSON for CI integration
-      FailureReport.Formatter.format(report, :json)
+  A plain `inspect/1` prints a one-line summary. To turn a report into a test,
+  a script or a notebook, see `PropertyDamage.Export`; to save it, see
+  `PropertyDamage.save_failure/3`.
 
   ## Failure Reasons
 
@@ -73,8 +70,17 @@ defmodule PropertyDamage.FailureReport do
   `compare:`, `[converge_within: ms]`), `stutter` (the run's
   normalized `stutter:` option, or `nil` when stutter was off) and
   `max_commands` (the run's `max_commands:`, which decides the sequence the
-  seed generates). `reproduction_command/1` prints each one that differs from
-  its default, and `PropertyDamage.shrink_further/2` re-shrinks under them.
+  seed generates) and `check_mode` (the run's `check_mode:`).
+  `reproduction_command/1` prints each one that differs from its default, and
+  `PropertyDamage.shrink_further/2` re-shrinks under them; `PropertyDamage.Replay`
+  replays under the report's `check_mode` too.
+
+  `campaign` records the campaign a `:latency_exceeded` report judged its
+  budget over, `%{seed: seed, max_runs: n}` (the run's `seed:` and
+  `max_runs:`), and is `nil` for every other kind: a latency budget is
+  reproduced by running the whole campaign again, so its
+  `reproduction_command/1` names that seed and `max_runs:`, while every other
+  failure reproduces one run of its own `seed` with `max_runs: 1`.
 
   `setup_commands` and `teardown_commands` list the setup and teardown
   commands of the reported sequence (the shrunk one when it reproduced, else
@@ -84,7 +90,12 @@ defmodule PropertyDamage.FailureReport do
   position in `targets:` and its name; index 0 in a one-target run), and
   `targets` holds the run's `targets:` entries in order, the first being the
   reference. `failed_at_index` is the index of the command the failure belongs
-  to, and `nil` for a setup failure or a failed `:startup` check.
+  to in the sequence the report describes (`shrunk_sequence/1`), and `nil`
+  for a setup failure or a failed `:startup` check. `original_failed_at_index`
+  is the index the failure had in the run that found it, in
+  `original_sequence`: the two differ when the report describes a
+  reproduction that failed at another command, a shrunk one or an unshrunk
+  one alike.
 
   `other_failures` lists the run's other failures when several targets failed
   in one run (see `PropertyDamage.Scheduler`): the reported failure is the
@@ -196,6 +207,7 @@ defmodule PropertyDamage.FailureReport do
           seed: integer(),
           run_number: non_neg_integer(),
           failed_at_index: non_neg_integer() | nil,
+          original_failed_at_index: non_neg_integer() | nil,
 
           # What failed and where
           kind: kind() | nil,
@@ -207,6 +219,8 @@ defmodule PropertyDamage.FailureReport do
           compare: [converge_within: pos_integer()],
           stutter: keyword() | nil,
           max_commands: pos_integer() | nil,
+          check_mode: :halt | :record | :log | :disabled,
+          campaign: %{seed: integer(), max_runs: pos_integer()} | nil,
           latency: false | true | keyword(),
           metrics: %{String.t() => map()} | nil,
 
@@ -316,6 +330,7 @@ defmodule PropertyDamage.FailureReport do
   defstruct seed: nil,
             run_number: nil,
             failed_at_index: nil,
+            original_failed_at_index: nil,
             kind: nil,
             variant: nil,
             targets: [],
@@ -323,6 +338,8 @@ defmodule PropertyDamage.FailureReport do
             compare: [converge_within: 5_000],
             stutter: nil,
             max_commands: nil,
+            check_mode: :halt,
+            campaign: nil,
             latency: false,
             metrics: nil,
             trace: nil,
@@ -389,6 +406,11 @@ defmodule PropertyDamage.FailureReport do
   - `:stutter` - The run's normalized `stutter:` option (default `nil`, stutter
     off)
   - `:max_commands` - The run's `max_commands:` (default `nil`, not recorded)
+  - `:check_mode` - The run's `check_mode:` (default `:halt`)
+  - `:campaign` - The campaign of a latency budget, `%{seed:, max_runs:}`
+    (default `nil`)
+  - `:original_failed_at_index` - The failing index in the run that found the
+    failure (default: `:failed_at_index`)
   - `:latency` - The run's `latency:` option as given (default `false`)
   - `:metrics` - The latency metrics per target name measured so far (default
     `nil`, `latency:` off)
@@ -398,6 +420,9 @@ defmodule PropertyDamage.FailureReport do
     the failing root, and its trace keeps the concrete commands
   - `:expansion_counts` - The entry counts per target and root module
     (default `%{}`)
+  - `:last_root` - The last root the failing run executed, which bounds
+    `expansions`: `-1` for none, `nil` for every root (default: none for a
+    setup failure, else `:failed_at_index`)
   """
   @spec new(keyword()) :: t()
   def new(opts) do
@@ -470,6 +495,7 @@ defmodule PropertyDamage.FailureReport do
       seed: seed,
       run_number: run_number,
       failed_at_index: failed_at_index,
+      original_failed_at_index: Keyword.get(opts, :original_failed_at_index, failed_at_index),
       kind: kind,
       variant: Keyword.get_lazy(opts, :variant, fn -> reference_variant(targets) end),
       targets: targets,
@@ -477,6 +503,8 @@ defmodule PropertyDamage.FailureReport do
       compare: Keyword.get(opts, :compare, converge_within: @default_converge_within),
       stutter: Keyword.get(opts, :stutter),
       max_commands: Keyword.get(opts, :max_commands),
+      check_mode: Keyword.get(opts, :check_mode, :halt),
+      campaign: Keyword.get(opts, :campaign),
       latency: Keyword.get(opts, :latency, false),
       metrics: Keyword.get(opts, :metrics),
       trace: trace,
@@ -503,7 +531,7 @@ defmodule PropertyDamage.FailureReport do
       expansions:
         PropertyDamage.Expansion.report(
           Keyword.get(opts, :expansion),
-          executed_root(kind, failed_at_index)
+          Keyword.get_lazy(opts, :last_root, fn -> executed_root(kind, failed_at_index) end)
         ),
       expansion_counts: Keyword.get(opts, :expansion_counts, %{}),
       command_labels: command_labels
@@ -939,10 +967,16 @@ defmodule PropertyDamage.FailureReport do
   prints `max_commands:` when it differs from the default, `stutter:` when the
   run used stutter, `compare: [converge_within: ms]` when the run's
   convergence bound is not the default, and `latency:` exactly as the run was
-  given it when it was not `false`.
+  given it when it was not `false`, and `check_mode:` when it was not
+  `:halt`. A `:latency_exceeded` report names the campaign's seed and
+  `max_runs:` (see `campaign`), since a latency budget is judged over every
+  run of the campaign; every other report names its own seed and
+  `max_runs: 1`.
   """
   @spec reproduction_command(t()) :: String.t()
-  def reproduction_command(%__MODULE__{seed: seed, model: model, targets: targets} = report) do
+  def reproduction_command(%__MODULE__{model: model, targets: targets} = report) do
+    {seed, max_runs} = reproduced_runs(report)
+
     options =
       [
         model && "model: #{inspect(model)}",
@@ -955,27 +989,45 @@ defmodule PropertyDamage.FailureReport do
         report.stutter && "stutter: #{inspect(report.stutter)}",
         report.max_commands not in [nil, @default_max_commands] &&
           "max_commands: #{report.max_commands}",
+        report.check_mode not in [nil, :halt] && "check_mode: #{inspect(report.check_mode)}",
         "seed: #{seed}",
-        "max_runs: 1"
+        "max_runs: #{max_runs}"
       ]
       |> Enum.filter(&is_binary/1)
 
     "PropertyDamage.run(#{Enum.join(options, ", ")})"
   end
 
+  defp reproduced_runs(%__MODULE__{kind: :latency_exceeded, campaign: %{} = campaign}),
+    do: {campaign.seed, campaign.max_runs}
+
+  defp reproduced_runs(%__MODULE__{seed: seed}), do: {seed, 1}
+
   @doc """
   The call that replays the report's artifact: `PropertyDamage.run/1` with the
   report's model and `targets:` and `only: [replay: path]`. It runs the
   setup commands, the roots and every target's recorded commands, so it
-  reproduces the shrunk failure without generating anything. Returns nil when
-  the report has no artifact file (`replay_status` says why).
+  reproduces the shrunk failure without generating anything. It names
+  `compare: [converge_within: ms]` and `check_mode:` when the run's differ from
+  their defaults, as `reproduction_command/1` does. Returns nil when the
+  report has no artifact file (`replay_status` says why).
   """
   @spec replay_command(t()) :: String.t() | nil
   def replay_command(%__MODULE__{replay_path: nil}), do: nil
 
   def replay_command(%__MODULE__{model: model, replay_path: path} = report) do
-    "PropertyDamage.run(model: #{inspect(model)}, targets: #{targets_source(report)}, " <>
-      "only: [replay: #{inspect(path)}])"
+    options =
+      [
+        "model: #{inspect(model)}",
+        "targets: #{targets_source(report)}",
+        converge_within(report) != @default_converge_within &&
+          "compare: [converge_within: #{converge_within(report)}]",
+        report.check_mode not in [nil, :halt] && "check_mode: #{inspect(report.check_mode)}",
+        "only: [replay: #{inspect(path)}]"
+      ]
+      |> Enum.filter(&is_binary/1)
+
+    "PropertyDamage.run(#{Enum.join(options, ", ")})"
   end
 
   @doc """

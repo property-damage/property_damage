@@ -168,7 +168,7 @@ The shrinker SHALL support configuration of: `granularity_threshold` (default 8)
 
 ### Requirement: Re-shrinking with a Larger Budget
 
-The system SHALL support re-running the shrinker over an already-shrunk failure with a fresh budget, to recover reductions the original run missed. `PropertyDamage.shrink_further/2` SHALL accept a `:strategy` (`:quick` | `:thorough` | `:exhaustive`, default `:thorough`) that derives the iteration and time budgets (overridable via `:max_iterations` and `:max_time_ms`), re-shrink the report's `shrunk_sequence`, and return an updated report whose `original_sequence` is preserved and whose `shrink_iterations`/`shrink_time_ms` accumulate onto the prior values. It SHALL return `{:error, :missing_model_or_adapter}` when the report records no model or no target, and the report unchanged when its kind is `:setup_failed` or `:latency_exceeded`, which are never shrunk (DR-047, DR-048).
+The system SHALL support re-running the shrinker over an already-shrunk failure with a fresh budget, to recover reductions the original run missed. `PropertyDamage.shrink_further/2` SHALL accept a `:strategy` (`:quick` | `:thorough` | `:exhaustive`, default `:thorough`) that derives the iteration and time budgets (overridable via `:max_iterations` and `:max_time_ms`), re-shrink the report's `shrunk_sequence`, and return an updated report whose `original_sequence` is preserved and whose `shrink_iterations`/`shrink_time_ms` accumulate onto the prior values. It SHALL return `{:error, :missing_model_or_target}` when the report records no model or no target, and the report unchanged when its kind is `:setup_failed` or `:latency_exceeded`, which are never shrunk (DR-047, DR-048).
 
 #### Scenario: Re-shrink reduces a non-minimal sequence
 - **WHEN** `shrink_further/2` is run on a report whose shrunk sequence is not yet minimal
@@ -177,7 +177,7 @@ The system SHALL support re-running the shrinker over an already-shrunk failure 
 
 #### Scenario: Re-shrink requires a model and a target
 - **WHEN** `shrink_further/2` is run on a report that records no model or no target
-- **THEN** it SHALL return `{:error, :missing_model_or_adapter}` rather than crashing
+- **THEN** it SHALL return `{:error, :missing_model_or_target}` rather than crashing
 
 #### Scenario: CLI re-shrink with a larger budget
 - **WHEN** `mix pd.reshrink <failure-file>` is run on a saved `.pd` file

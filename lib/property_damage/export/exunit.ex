@@ -45,7 +45,7 @@ defmodule PropertyDamage.Export.ExUnit do
     failure_desc =
       case metadata.check_name do
         nil -> to_string(metadata.failure_type)
-        check -> "#{check} check failed"
+        check -> "#{Common.check_label(check)} check failed"
       end
 
     timestamp =
@@ -333,7 +333,7 @@ defmodule PropertyDamage.Export.ExUnit do
   defp generate_test_name(metadata) do
     case metadata.check_name do
       nil -> "reproduces #{metadata.failure_type} failure (seed #{metadata.seed})"
-      check -> "reproduces #{check} violation (seed #{metadata.seed})"
+      check -> "reproduces #{Common.check_label(check)} violation (seed #{metadata.seed})"
     end
   end
 end

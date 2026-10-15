@@ -42,7 +42,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
   The task exits **zero** on any successful re-shrink, whether or not the sequence
   got smaller: "no further reduction under this budget" is a normal outcome, not a
   failure. It exits **non-zero** only on a real error: the file failed to load,
-  the report does not record a model/adapter, or a requested write failed.
+  the report does not record a model and a target, or a requested write failed.
 
   ## Options
 
@@ -91,7 +91,7 @@ defmodule Mix.Tasks.Pd.Reshrink do
   # and translates an `:error` status into a non-zero `System.halt`, so the
   # decision logic can be exercised in-process without killing the test VM.
   #
-  # `:error` (non-zero) means a real failure (load, missing model/adapter, write).
+  # `:error` (non-zero) means a real failure (load, missing model or target, write).
   # `:ok` (zero) means the re-shrink ran, whether or not it reduced the sequence.
   @doc false
   @spec exec([String.t()]) :: :ok | :error
@@ -334,11 +334,11 @@ defmodule Mix.Tasks.Pd.Reshrink do
   end
 
   defp print_reshrink_error(reason) do
-    if reason == :missing_model_or_adapter do
-      print_color(:red, "ERROR: the failure file does not record a model and adapter\n")
+    if reason == :missing_model_or_target do
+      print_color(:red, "ERROR: the failure file does not record a model and a target\n")
 
       print_hint(
-        "Re-shrinking re-runs the engine, which needs the model and adapter that produced the failure; this file cannot be re-shrunk."
+        "Re-shrinking re-runs the engine, which needs the model and the targets that produced the failure; this file cannot be re-shrunk."
       )
     else
       print_color(:red, "ERROR: re-shrink could not run\n")

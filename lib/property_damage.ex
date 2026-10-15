@@ -656,10 +656,23 @@ defmodule PropertyDamage do
   end
 
   defp load_replay!(path, model, targets) do
+    # The loader builds structs of loaded modules only and never loads one, so
+    # the modules `model:` names are loaded first: the model and the commands
+    # it lists. A leaf module no other command names must be loaded by the
+    # caller.
+    load_model_modules(model)
+
     term =
       case ReplayArtifact.read(path) do
         {:ok, term} ->
           term
+
+        {:error, {:unknown_struct_module, module}} ->
+          raise ArgumentError,
+                "`only: [replay: #{inspect(path)}]`: the replay artifact holds a struct of " <>
+                  "#{inspect(module)}, which is not a loaded command module; an artifact " <>
+                  "holds only the structs of command modules that are already loaded and " <>
+                  "the framework's own placeholders"
 
         {:error, reason} ->
           raise ArgumentError, "`only: [replay: #{inspect(path)}]`: " <> reason
@@ -713,6 +726,17 @@ defmodule PropertyDamage do
       sequence: sequence,
       expansion: ReplayArtifact.expansion(term, sequence)
     }
+  end
+
+  defp load_model_modules(model) do
+    for callback <- [:commands, :setup_each, :teardown_each],
+        PropertyDamage.ModuleCheck.exports?(model, callback, 0),
+        entry <- apply(model, callback, []),
+        module = PropertyDamage.Model.entry_module(entry),
+        not is_nil(module),
+        do: Code.ensure_loaded(module)
+
+    :ok
   end
 
   # The targets that run: every target, or under `only: [variants: names]`
@@ -830,6 +854,8 @@ defmodule PropertyDamage do
         for({other, other_failure} <- rest) do
           %{variant: variant_of(other), root: nil, failure: other_failure}
         end,
+      check_mode: ctx.check_mode,
+      campaign: %{seed: ctx.seed, max_runs: ctx.max_runs},
       latency: ctx.latency,
       metrics: metrics
     )
@@ -1589,13 +1615,14 @@ defmodule PropertyDamage do
     report =
       case reproduce(ctx, shrunk_sequence, found, fresh_epoch, expansion) do
         {:reproduced, failure, result, other_failures} ->
-          reproduced = %{
-            found
-            | failure: failure,
+          reproduced =
+            Map.merge(found, %{
+              failure: failure,
               result: result,
               other_failures: other_failures,
-              expansion: expansion
-          }
+              expansion: expansion,
+              original_root: found.failure.root
+            })
 
           failure_report(ctx, reproduced, {:shrunk, shrunk_sequence, fresh_epoch, shrink})
 
@@ -1723,11 +1750,13 @@ defmodule PropertyDamage do
       case how do
         :found -> {found.sequence, :generated, 0, %{iterations: 0, time_ms: 0}}
         {:fallback, shrink} -> {found.sequence, :generated, 0, shrink}
-        {:shrunk, sequence, epoch, shrink} -> {sequence, :shrunk, epoch, shrink}
+        # Without shrinking the reproduced sequence is the generated one.
+        {:shrunk, sequence, epoch, shrink} -> {sequence, plan_source(ctx), epoch, shrink}
       end
 
     result = found.result || %{}
     failure = found.failure
+    last_root = last_root(failure, result)
 
     FailureReport.new(
       seed: found.run_seed,
@@ -1746,6 +1775,8 @@ defmodule PropertyDamage do
       mint_epoch: mint_epoch,
       executed: Map.get(result, :executed, %{}),
       failed_at_index: failure.root,
+      original_failed_at_index: Map.get(found, :original_root, failure.root),
+      last_root: last_root,
       failure_reason: failure.reason,
       kind: failure.kind,
       variant: failure.variant,
@@ -1763,6 +1794,7 @@ defmodule PropertyDamage do
       compare: ctx.compare,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
+      check_mode: ctx.check_mode,
       check_fires: found.fires,
       other_failures: Enum.map(found.other_failures, &other_failure/1),
       compare_counts: found.compare_counts,
@@ -1770,16 +1802,25 @@ defmodule PropertyDamage do
       expansion_counts:
         Expansion.merge_counts(
           found.expansion_counts,
-          Expansion.counts(found.expansion, counted_root(failure))
+          Expansion.counts(found.expansion, last_root)
         ),
       latency: Map.get(ctx, :latency, false),
       metrics: Map.get(ctx, :measured_metrics)
     )
   end
 
-  # The last root the failing run executed: none when a setup command failed.
-  defp counted_root(%{kind: :setup_failed}), do: -1
-  defp counted_root(failure), do: failure.root
+  defp plan_source(%{shrink: false}), do: :generated
+  defp plan_source(_ctx), do: :shrunk
+
+  # The last root the failing run executed: none when a setup command failed,
+  # the failing root, or for a failure at no root (a `:startup` check, the end
+  # of the run) every root when any root executed, else none.
+  defp last_root(%{kind: :setup_failed}, _result), do: -1
+  defp last_root(%{root: nil}, result), do: if(ran_a_root?(result), do: nil, else: -1)
+  defp last_root(failure, _result), do: failure.root
+
+  defp ran_a_root?(result),
+    do: result |> Map.get(:executed, %{}) |> Map.keys() |> Enum.any?(&Sequence.Position.root?/1)
 
   # The concrete sequences of the run the report describes; a branching run
   # ran its one target's roots as generated.
@@ -1976,7 +2017,7 @@ defmodule PropertyDamage do
   ## Returns
 
   - `{:ok, new_failure_report}` - Shrinking succeeded, possibly smaller sequence
-  - `{:error, reason}` - Shrinking failed: `:missing_model_or_adapter` when the
+  - `{:error, reason}` - Shrinking failed: `:missing_model_or_target` when the
     report records no model or no target, or the setup `%PropertyDamage.Failure{}`
     when a target's adapter `setup/1` fails on the re-execution
 
@@ -1997,7 +2038,7 @@ defmodule PropertyDamage do
   def shrink_further(%FailureReport{} = report, opts \\ []) do
     cond do
       is_nil(report.model) or is_nil(FailureReport.reference_target(report)) ->
-        {:error, :missing_model_or_adapter}
+        {:error, :missing_model_or_target}
 
       report.kind in [:setup_failed, :latency_exceeded] ->
         {:ok, report}
@@ -2023,7 +2064,8 @@ defmodule PropertyDamage do
       compare: shrink_further_compare(report, opts),
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
-      check_mode: :halt
+      # A `:record` failure re-shrinks under `:record`, as the run found it.
+      check_mode: report.check_mode || :halt
     }
 
     # Each target re-runs the roots as the report's run ran them: the
@@ -2068,6 +2110,7 @@ defmodule PropertyDamage do
         # A stutter failure re-shrinks with stutter forced on (DR-029), as in
         # the run's own failure path.
         stutter_config: ctx.stutter_config,
+        check_mode: ctx.check_mode,
         config:
           ShrinkerConfig.new(
             max_iterations: strategy_iterations(strategy, opts),
@@ -2099,6 +2142,7 @@ defmodule PropertyDamage do
             original_sequence: report.original_sequence,
             shrunk_sequence: shrink_result.sequence,
             failed_at_index: failure.root,
+            original_failed_at_index: report.original_failed_at_index,
             failure_reason: failure.reason,
             kind: failure.kind,
             variant: failure.variant,
@@ -2123,6 +2167,7 @@ defmodule PropertyDamage do
             other_failures: Enum.map(other_failures, &other_failure/1),
             stutter: ctx.stutter,
             max_commands: report.max_commands,
+            check_mode: ctx.check_mode,
             linearization: Map.get(result, :linearization),
             stacktrace: failure.stacktrace,
             expansion: shrink_result.expansion,

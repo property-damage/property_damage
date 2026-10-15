@@ -220,8 +220,9 @@ Three questions follow.
 - The replay artifact of a failure first found on the branching engine and
   converted to linear cannot re-execute placeholders minted in a parallel
   branch.
-- `Analysis.isolate_trigger/2` on a divergence re-runs the reference alone, so
-  it cannot isolate a trigger that needs the comparison.
+- `Analysis.isolate_trigger/2` re-runs one target alone, so it cannot isolate
+  a trigger that needs the comparison: on a `:diverged` or `:did_not_converge`
+  report it returns `{:error, :not_applicable}`.
 
 ## Consequences
 

@@ -188,13 +188,13 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
   end
 
   describe "errors" do
-    test "missing model/adapter returns :error with a clean message", %{dir: dir} do
+    test "a missing model or target returns :error with a clean message", %{dir: dir} do
       path = save_failure(dir, 8, model: nil)
 
       {status, output} = with_output(fn -> Reshrink.exec([path]) end)
 
       assert status == :error
-      assert output =~ "does not record a model and adapter"
+      assert output =~ "does not record a model and a target"
     end
 
     test "missing file returns :error with a clean message" do

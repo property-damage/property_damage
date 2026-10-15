@@ -145,14 +145,14 @@ defmodule PropertyDamage.ShrinkFurtherTest do
     assert length(Sequence.to_list(PropertyDamage.FailureReport.shrunk_sequence(smaller))) == 3
   end
 
-  test "returns {:error, :missing_model_or_adapter} when the model is nil" do
+  test "returns {:error, :missing_model_or_target} when the model is nil" do
     report = report_of_length(8, model: nil)
-    assert {:error, :missing_model_or_adapter} = PropertyDamage.shrink_further(report)
+    assert {:error, :missing_model_or_target} = PropertyDamage.shrink_further(report)
   end
 
-  test "returns {:error, :missing_model_or_adapter} when the report records no target" do
+  test "returns {:error, :missing_model_or_target} when the report records no target" do
     report = report_of_length(8, targets: [])
-    assert {:error, :missing_model_or_adapter} = PropertyDamage.shrink_further(report)
+    assert {:error, :missing_model_or_target} = PropertyDamage.shrink_further(report)
   end
 
   test "re-execution adapter setup failure surfaces as an error, not a MatchError (A4)" do

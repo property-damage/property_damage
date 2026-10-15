@@ -214,6 +214,7 @@ The budget SHALL be judged once, at campaign end, on the aggregates of the measu
 
 - **WHEN** a budget is breached
 - **THEN** the framework SHALL NOT shrink or re-execute, the report SHALL have `failed_at_index` `nil` and no replay artifact, and `on_failure` SHALL be called once
+- **AND** the report SHALL record the campaign as `campaign: %{seed:, max_runs:}`, and `FailureReport.reproduction_command/1` SHALL print that seed and `max_runs:` (with `latency:` as given); a report of any other kind SHALL record `campaign: nil` and print its own seed with `max_runs: 1`
 
 ### Requirement: Lockstep Concurrency (DR-044)
 
@@ -420,9 +421,10 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 - **THEN** `FailureReport.reproduction_command/1` SHALL print the exact `targets:` entries (non-default `name:` and `config:`) and the non-default `concurrency:`
 
 #### Scenario: Reproduction names the run options that decide the outcome
-- **WHEN** a failure report comes from a run with a non-default convergence bound, `max_commands:` or with `stutter:`
-- **THEN** the report SHALL record `compare`, `stutter` and `max_commands`
-- **AND** `FailureReport.reproduction_command/1` SHALL print `compare: [converge_within: ms]`, `stutter:` and `max_commands:`
+- **WHEN** a failure report comes from a run with a non-default convergence bound, `max_commands:`, `check_mode:` or with `stutter:`
+- **THEN** the report SHALL record `compare`, `stutter`, `max_commands` and `check_mode`
+- **AND** `FailureReport.reproduction_command/1` SHALL print `compare: [converge_within: ms]`, `stutter:`, `max_commands:` and a `check_mode:` other than `:halt`
+- **AND** `shrink_further/2`, `mix pd.reshrink` and `PropertyDamage.Replay` SHALL run the failure again under the report's `check_mode`
 
 #### Scenario: Other failures are listed
 

@@ -46,7 +46,7 @@ defmodule PropertyDamage.Export.Script.Curl do
     failure_desc =
       case metadata.check_name do
         nil -> to_string(metadata.failure_type)
-        check -> "#{check} check failed"
+        check -> "#{Common.check_label(check)} check failed"
       end
 
     timestamp =

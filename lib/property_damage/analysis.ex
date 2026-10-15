@@ -323,6 +323,11 @@ defmodule PropertyDamage.Analysis do
   reference alone with the other commands as they ran. A target other than
   the reference that ran leaves is refused with `ArgumentError`.
 
+  Every variation runs one target alone, in leaf mode and root mode alike, so
+  no variation can show a divergence or a failure to converge, which take two
+  targets: a `:diverged` or `:did_not_converge` report returns
+  `{:error, :not_applicable}`.
+
   ## Options
 
   - `:targets` - Single-entry target list overriding the system to re-execute
@@ -332,7 +337,10 @@ defmodule PropertyDamage.Analysis do
 
   ## Returns
 
-  A map containing:
+  `{:ok, map}`, or `{:error, reason}`: `:not_applicable` for a divergence or
+  a failure to converge, `:failure_not_localized` when no command is to
+  blame, `:missing_model_or_target` when the report records no model or no
+  target. The map contains:
   - `:trigger_command` - The command that triggers the failure
   - `:changes` - List of changes that eliminate the failure
   - `:likely_cause` - Inferred cause based on the changes
@@ -367,16 +375,18 @@ defmodule PropertyDamage.Analysis do
         {:error, :failure_not_localized}
 
       is_nil(model) or is_nil(reference) ->
-        {:error, :missing_model_or_adapter}
+        {:error, :missing_model_or_target}
 
       true ->
         # The target comes from opts, else the report's reference target
         target =
           Options.override_target!(opts, reference, "PropertyDamage.Analysis.isolate_trigger/2")
 
-        case reference_leaves(report, model, target) do
-          nil -> isolate_in_roots(report, model, target, {sequence, commands, step})
-          leaves -> isolate_in_leaves(report, model, target, leaves)
+        case {report.kind, reference_leaves(report, model, target)} do
+          # A divergence takes two targets; every variation runs one.
+          {kind, _leaves} when kind in [:diverged, :did_not_converge] -> {:error, :not_applicable}
+          {_kind, nil} -> isolate_in_roots(report, model, target, {sequence, commands, step})
+          {_kind, leaves} -> isolate_in_leaves(report, model, target, leaves)
         end
     end
   end
