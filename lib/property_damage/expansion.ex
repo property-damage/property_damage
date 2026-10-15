@@ -52,7 +52,6 @@ defmodule PropertyDamage.Expansion do
     Comparison,
     Generator,
     Model,
-    Placeholder,
     PlaceholderRegistry,
     Sequence,
     Validation
@@ -75,7 +74,8 @@ defmodule PropertyDamage.Expansion do
     * `leaves?` - true when `commands` are leaves at leaf positions; false when
       the root ran as itself at its own position (the identity included)
     * `seed_key` - the term the leaves' values were generated from, or nil
-    * `aliases` - `%{root placeholder id => leaf placeholder id}`
+    * `aliases` - `%{root placeholder id => leaf placeholder id}` (each id a
+      tuple of position, event index and field path)
     * `offered` - for a root the target drew at, every entry the function
       returned there, as `{key, leaf modules}`
     * `fields` - for leaves, per leaf index, values that replace what the
@@ -93,7 +93,7 @@ defmodule PropertyDamage.Expansion do
           required(:commands) => [struct()],
           required(:leaves?) => boolean(),
           required(:seed_key) => term() | nil,
-          required(:aliases) => %{Placeholder.id() => Placeholder.id()},
+          required(:aliases) => %{tuple() => tuple()},
           optional(:offered) => [{String.t(), [module()]}],
           optional(:fields) => %{non_neg_integer() => %{atom() => term()}},
           optional(:generated) => [[atom()]]
