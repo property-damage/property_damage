@@ -528,7 +528,12 @@ entries: ["Add[1]", "Add[1]", "Add[1]", "Add[0]", "Add[0]", "Add[0]", "Add[0]", 
    The arguments are the model, the report's `seed`, the run number (1-based)
    and the target name. `regenerated.sequence` is every command the target
    executed, in order. The pick is keyed on the target's name, so the result
-   does not depend on the other targets.
+   does not depend on the other targets. A root that ran as itself has no entry
+   key: its `entry` is `nil` when no expansion applied (its module is not
+   listed, the model has no `expansions/0`, or the target runs `:identity`),
+   `:forced` when no listed entry could be realized, and `:identity` when the
+   entry realized was one leaf equal to the root (or, after a shrink, when
+   shrinking replaced a listed entry by the root itself).
 
 3. **Replay the shrunk failure**, `only: [replay: path]`: runs the replay
    artifact. Each target executes the commands the artifact records, with no
