@@ -420,9 +420,11 @@ def total(state, _root), do: state.total
 
 - `every:` is the schedule: `1` (the default, after every root), `N` (every Nth
   root), `{N, Module}` (every Nth root of that module), `Module` or `[Modules]`
-  (after those roots), and `:end` alone or in a list (the final boundary). A
-  model with `expansions/0` needs at least one `@compare` whose schedule reaches
-  the end of the run (`every: 1` or one that names `:end`).
+  (after those roots), and `:end` alone or in a list (the final boundary). One
+  list may mix modules and `:end`: `every: [Report, :end]` compares after every
+  `Report` root and at the final boundary. A model with `expansions/0` needs at
+  least one `@compare` whose schedule reaches the end of the run (`every: 1` or
+  one that names `:end`).
 - `using:` is the agreement predicate, `fn reference_value, variant_value ->
   ... end`, returning `:match`, `true`, `false`, `{:mismatch, reason}`; the
   default is `&==/2`. `PropertyDamage.Equivalence` builds predicates:
