@@ -316,6 +316,38 @@ defmodule PropertyDamage.ExecuteTest do
     end
   end
 
+  describe "execute/2 injector setup and teardown" do
+    test "an injector's setup gets the target config and its teardown gets the setup context" do
+      config = %{test_pid: self(), tenant: "solo"}
+
+      {:ok, _} =
+        PropertyDamage.execute([],
+          targets: [
+            {TestAdapter, config: config, injectors: [PropertyDamage.Test.RecordingInjector]}
+          ]
+        )
+
+      assert_received {:injector_setup, %{tenant: "solo", event_queue: queue}, context}
+      assert is_pid(queue)
+      assert_received {:injector_teardown, ^context}
+    end
+
+    test "an injector whose setup returns {:error, reason} is a setup failure" do
+      config = %{test_pid: self(), injector_reply: {:error, :no_listener}}
+
+      injectors = [PropertyDamage.Test.RecordingInjector, PropertyDamage.Test.RefusingInjector]
+
+      assert {:error, %Failure{type: %Failure.Setup{}} = failure} =
+               PropertyDamage.execute([%{action: :create, id: 1}],
+                 targets: [{TestAdapter, config: config, injectors: injectors}]
+               )
+
+      assert Failure.detail(failure) == :no_listener
+      assert_received {:injector_setup, _config, context}
+      assert_received {:injector_teardown, ^context}
+    end
+  end
+
   describe "execute/2 options validation" do
     test "requires targets option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :targets option/, fn ->

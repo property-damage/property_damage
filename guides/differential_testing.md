@@ -481,7 +481,9 @@ earlier run left behind. Write it to be idempotent (see the `setup/1` notes in
 An adapter may call `runtime.start_poller` in a multi-target run, and a target
 may declare `injectors:` and `mocks:` in its `targets:` entry. Each belongs to
 its own variant: its events reach that variant only, and its pollers stop when
-the variant ends.
+the variant ends. An injector's `setup/1` receives its own target's `config:`
+plus `:event_queue`, so two targets on one adapter can point the same injector
+at different systems or tenants.
 
 ## Server-Generated Values (`external()`)
 
@@ -594,7 +596,7 @@ failure and for a startup check, which belong to no command.
 | `:check_failed` | A check failed in that target, at a command, at the `:startup` phase, or while the run finished (an `@eventually` timeout, a `:teardown` check). A raise in a `@compare` function or a `using:` predicate is one too. |
 | `:diverged` | Ready sides of a `@compare` observation differ at the convergence bound. |
 | `:did_not_converge` | A side of a `@compare` observation is still pending at the convergence bound. |
-| `:setup_failed` | `setup/1` returned an error or raised. An injector or mock setup that raised inside the target counts too. A setup failure is not shrunk. |
+| `:setup_failed` | `setup/1` returned an error or raised. An injector setup that returned an error or raised, or a mock setup that raised, inside the target counts too. A setup failure is not shrunk. |
 | `:execution_failed` | The adapter raised at a root or answered `{:error, _}`, or a nemesis, stutter or placeholder step failed. |
 
 ### Adapter errors

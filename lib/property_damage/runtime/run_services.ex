@@ -14,19 +14,26 @@ defmodule PropertyDamage.Runtime.RunServices do
   # Starts an event queue with the target's injectors and mocks for the linear
   # engine, runs `fun` with the queue and the mock registry, and releases all
   # of them again. The queue's stop is guaranteed by the outer `after`, so a
-  # raise in injector or mock setup cannot leak it.
+  # raise in injector or mock setup cannot leak it. An injector setup that
+  # fails returns `{:error, reason}` without calling `fun`, the shape
+  # `PropertyDamage.Executor.run/4` gives when the adapter's setup fails.
   def with_services(target, fun) do
     {:ok, event_queue} = EventQueue.start_link()
 
     try do
-      setup_injectors(target.injectors, event_queue)
-      {mock_registry, mock_contexts} = setup_mocks(target.mocks, event_queue)
+      case setup_injectors(target.injectors, target.config, event_queue) do
+        {:ok, injector_contexts} ->
+          {mock_registry, mock_contexts} = setup_mocks(target.mocks, event_queue)
 
-      try do
-        fun.(event_queue, mock_registry)
-      after
-        teardown_mocks(mock_registry, mock_contexts)
-        teardown_injectors(target.injectors)
+          try do
+            fun.(event_queue, mock_registry)
+          after
+            teardown_mocks(mock_registry, mock_contexts)
+            teardown_injectors(injector_contexts)
+          end
+
+        {:error, reason} ->
+          {:error, reason}
       end
     after
       EventQueue.stop(event_queue)
@@ -34,20 +41,46 @@ defmodule PropertyDamage.Runtime.RunServices do
   end
 
   @doc false
-  # Call setup/1 on each injector adapter with the run's event queue.
-  def setup_injectors(injectors, event_queue) do
-    for adapter <- injectors do
-      if exports?(adapter, :setup) do
-        adapter.setup(%{event_queue: event_queue})
+  # Call setup/1 on each injector with the target's config merged with the
+  # run's event queue (the framework key wins). Returns the per-injector setup
+  # contexts, which teardown_injectors/1 later hands back to each injector's
+  # teardown/1; an injector without setup/1 gets `%{}`. The first setup that
+  # answers `{:error, reason}`, or anything but `{:ok, map}`, stops the setup:
+  # the injectors already set up are torn down and the error is returned.
+  def setup_injectors(injectors, config, event_queue) do
+    injector_config = Map.merge(config, %{event_queue: event_queue})
+
+    Enum.reduce_while(injectors, {:ok, []}, fn module, {:ok, contexts} ->
+      case setup_injector(module, injector_config) do
+        {:ok, context} ->
+          {:cont, {:ok, contexts ++ [{module, context}]}}
+
+        {:error, reason} ->
+          teardown_injectors(contexts)
+          {:halt, {:error, reason}}
       end
+    end)
+  end
+
+  defp setup_injector(module, config) do
+    if exports?(module, :setup) do
+      case module.setup(config) do
+        {:ok, context} when is_map(context) -> {:ok, context}
+        {:error, reason} -> {:error, reason}
+        other -> {:error, {:invalid_injector_setup_return, module, other}}
+      end
+    else
+      {:ok, %{}}
     end
   end
 
   @doc false
-  def teardown_injectors(injectors) do
-    for adapter <- injectors do
-      if exports?(adapter, :teardown) do
-        adapter.teardown(%{})
+  # Call teardown/1 on each injector with the context its setup/1 returned,
+  # in setup order.
+  def teardown_injectors(contexts) do
+    for {module, context} <- contexts do
+      if exports?(module, :teardown) do
+        module.teardown(context)
       end
     end
   end

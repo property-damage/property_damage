@@ -406,7 +406,7 @@ defmodule PropertyDamage.Variant do
       guardian: start_guardian(self()),
       phase: :new,
       event_queue: nil,
-      injectors_up: false,
+      injector_contexts: [],
       mock_registry: nil,
       mock_contexts: [],
       ctx: nil,
@@ -559,9 +559,20 @@ defmodule PropertyDamage.Variant do
 
   defp start_services_and_adapter(state) do
     target = state.target
-    RunServices.setup_injectors(target.injectors, state.event_queue)
-    state = %{state | injectors_up: true}
 
+    case RunServices.setup_injectors(target.injectors, target.config, state.event_queue) do
+      {:ok, injector_contexts} ->
+        state = %{state | injector_contexts: injector_contexts}
+        start_mocks_and_adapter(state)
+
+      # The injectors set up before the failing one are already torn down.
+      {:error, reason} ->
+        {:error, reason, state}
+    end
+  end
+
+  defp start_mocks_and_adapter(state) do
+    target = state.target
     {registry, contexts} = RunServices.setup_mocks(target.mocks, state.event_queue)
     if registry, do: guard(state, [registry])
     state = %{state | mock_registry: registry, mock_contexts: contexts}
@@ -1070,9 +1081,7 @@ defmodule PropertyDamage.Variant do
   defp release_services(state) do
     best_effort(fn -> RunServices.teardown_mocks(state.mock_registry, state.mock_contexts) end)
 
-    if state.injectors_up do
-      best_effort(fn -> RunServices.teardown_injectors(state.target.injectors) end)
-    end
+    best_effort(fn -> RunServices.teardown_injectors(state.injector_contexts) end)
 
     if state.event_queue, do: best_effort(fn -> EventQueue.stop(state.event_queue) end)
     :ok

@@ -26,7 +26,8 @@ defmodule PropertyDamage.Target do
       `config:` (for example a tenant) so their variants isolate their slices of
       state.
     * `:injectors` (list of modules, default `[]`): injector adapters that push
-      events into the run.
+      events into the run. Each injector's `setup/1` receives this target's
+      `config:` merged with `:event_queue`.
     * `:mocks` (list, default `[]`): mock services the system under test calls;
       each entry is a `PropertyDamage.MockServiceAdapter` module or a
       `{module, config_map}` tuple.

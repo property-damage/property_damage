@@ -1277,12 +1277,6 @@ defmodule PropertyDamage do
     _ -> nil
   end
 
-  # Injector wiring for `execute/2`, shared with PropertyDamage.Variant.
-  defp setup_injectors(injectors, event_queue),
-    do: RunServices.setup_injectors(injectors, event_queue)
-
-  defp teardown_injectors(injectors), do: RunServices.teardown_injectors(injectors)
-
   # ============================================================================
   # Seed Library Replay Phase (DR-023)
   # ============================================================================
@@ -2758,35 +2752,40 @@ defmodule PropertyDamage do
     {:ok, event_queue} = EventQueue.start_link()
 
     try do
-      # Setup injector adapters
-      setup_injectors(injectors, event_queue)
-
-      # Setup main adapter
-      case adapter.setup(config) do
-        {:ok, adapter_context} ->
-          context = %{
-            adapter_context: adapter_context,
-            event_queue: event_queue
-          }
-
+      case RunServices.setup_injectors(injectors, config, event_queue) do
+        {:ok, injector_contexts} ->
           sequence = Sequence.linear(commands)
+          execute_with_injectors(sequence, adapter, config, event_queue, injector_contexts)
 
-          try do
-            Executor.execute_raw(sequence, adapter, context)
-          after
-            # Cleanup. The event queue is stopped by the outer `after`.
-            adapter.teardown(adapter_context)
-            teardown_injectors(injectors)
-          end
-
+        # The injectors set up before the failing one are already torn down.
         {:error, reason} ->
-          # Cleanup injectors on setup failure; the event queue is stopped by
-          # the outer `after`.
-          teardown_injectors(injectors)
           {:error, Failure.setup_failed(reason)}
       end
     after
       EventQueue.stop(event_queue)
+    end
+  end
+
+  # Sets the adapter up and runs the sequence once the injectors are up, then
+  # tears down the adapter and the injectors.
+  defp execute_with_injectors(sequence, adapter, config, event_queue, injector_contexts) do
+    case adapter.setup(config) do
+      {:ok, adapter_context} ->
+        context = %{adapter_context: adapter_context, event_queue: event_queue}
+
+        try do
+          Executor.execute_raw(sequence, adapter, context)
+        after
+          # Cleanup. The event queue is stopped by the caller's `after`.
+          adapter.teardown(adapter_context)
+          RunServices.teardown_injectors(injector_contexts)
+        end
+
+      {:error, reason} ->
+        # Cleanup injectors on setup failure; the event queue is stopped by the
+        # caller's `after`.
+        RunServices.teardown_injectors(injector_contexts)
+        {:error, Failure.setup_failed(reason)}
     end
   end
 
