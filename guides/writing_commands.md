@@ -849,13 +849,16 @@ entry and the leaf modules. A failure's `failed_at_index` stays the root index.
 
 ### Shrinking and Reproducing
 
-The shrinker deletes roots and simplifies root arguments, and keeps each
-target's entry for every surviving root. It never deletes or simplifies a leaf
-on its own, and it does not yet replace one entry with another, so a
-reproduction can be larger than the smallest rewrite that fails. A candidate
-whose expansion function (or a leaf's `overrides:` function or generator)
-raises, throws or exits, or stops offering the carried entry for a simplified
-root, is dropped. `shrink_further/2`, `Replay` and export run what
+The shrinker deletes roots, moves entries (the reference toward the root
+itself, every other target onto the reference's entry) and simplifies
+arguments, in the phases that
+[Reading a Divergence](path_equivalence_testing.md#reading-a-divergence)
+lists. It never deletes or reorders a leaf on its own, and it moves a target
+only to the identity, an earlier entry of the root's list or the reference's
+entry, so a reproduction can be larger than the smallest rewrite that fails.
+A candidate whose expansion function (or a leaf's `overrides:` function or
+generator) raises, throws or exits, or stops offering the carried entry for a
+simplified root, is dropped. `shrink_further/2`, `Replay` and export run what
 each target ran, never a new pick. `Analysis.isolate_trigger/2` raises for a
 target that ran leaves.
 
