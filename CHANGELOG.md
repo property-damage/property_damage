@@ -925,6 +925,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself, on every path that realizes leaves: a run, a shrink and a replay of
   recorded leaves. Execution is unchanged: each target still resolves the id
   from its own leaf's real events.
+- **An injector's `setup/1` receives its target's `config:`, and its
+  `teardown/1` receives its setup context.** `setup/1` was called with only
+  `%{event_queue: queue}` and `teardown/1` with `%{}`, so the documented
+  examples (reading `config[:port]`, matching `teardown(%{server: server})`)
+  could not run and an injector on two targets of one adapter could not tell
+  which system it served. `setup/1` now gets the target's `config:` merged with
+  `:event_queue` (the framework key wins) and `teardown/1` the context
+  `setup/1` returned, on every path: `run/1` with one target or several, its
+  shrink attempts and `execute/2`. A `setup/1` that returns `{:error, reason}`
+  now fails the target's setup as `:setup_failed` after tearing down the
+  injectors already set up (it used to be ignored); any return other than
+  `{:ok, map}` or `{:error, _}` fails with
+  `{:invalid_injector_setup_return, module, returned}`.
 - **A check recorded under `check_mode: :record` no longer skips the final
   boundary.** A target that recorded a failing check at an earlier root kept the
   final boundary from being compared, so a divergence there went unreported; it

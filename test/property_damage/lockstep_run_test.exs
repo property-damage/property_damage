@@ -22,6 +22,7 @@ defmodule PropertyDamage.LockstepRunTest do
   }
 
   alias PropertyDamage.Test.Lockstep.Ledger
+  alias PropertyDamage.Test.{RecordingInjector, RefusingInjector}
 
   @seed 12_345
 
@@ -591,6 +592,61 @@ defmodule PropertyDamage.LockstepRunTest do
 
       assert [{:setup, "a", setup_a}] = take_messages(:setup)
       assert [{:teardown, "a", ^setup_a}] = take_messages(:teardown)
+    end
+
+    test "each target's injector setup gets that target's config and its teardown gets the setup context" do
+      targets = [
+        step("a", %{test_pid: self(), tenant: "tenant-a"}, injectors: [RecordingInjector]),
+        step("b", %{test_pid: self(), tenant: "tenant-b"}, injectors: [RecordingInjector])
+      ]
+
+      assert {:ok, _stats} = run!(targets, max_runs: 1, max_commands: 2)
+
+      setups = take_messages(:injector_setup)
+      teardowns = take_messages(:injector_teardown)
+
+      for name <- ["a", "b"] do
+        assert [{:injector_setup, config, context}] =
+                 for({:injector_setup, %{name: ^name}, _} = setup <- setups, do: setup)
+
+        assert config.tenant == "tenant-#{name}"
+        assert is_pid(config.event_queue)
+
+        assert [{:injector_teardown, ^context}] =
+                 for({_, %{tenant: t}} = td <- teardowns, t == config.tenant, do: td)
+      end
+    end
+
+    test "an injector setup {:error, reason} is a setup failure; the injectors set up before it are torn down" do
+      failing = %{test_pid: self(), tenant: "tenant-b", injector_reply: {:error, :no_listener}}
+
+      report =
+        failure!([
+          step("a", %{test_pid: self()}),
+          step("b", failing, injectors: [RecordingInjector, RefusingInjector])
+        ])
+
+      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
+      assert report.failed_at_index == nil
+      assert Failure.detail(report.failure_reason) == :no_listener
+
+      assert [{:injector_setup, _config, context}] = take_messages(:injector_setup)
+      assert [{:injector_teardown, ^context}] = take_messages(:injector_teardown)
+      assert [{:setup, "a", setup_a}] = take_messages(:setup)
+      assert [{:teardown, "a", ^setup_a}] = take_messages(:teardown)
+    end
+
+    test "an injector setup that returns neither {:ok, map} nor {:error, _} is a setup failure naming it" do
+      report =
+        failure!([
+          step("a", %{test_pid: self()}),
+          step("b", %{injector_reply: :ok}, injectors: [RefusingInjector])
+        ])
+
+      assert %{kind: :setup_failed, variant: %{index: 1, name: "b"}} = report
+
+      assert Failure.detail(report.failure_reason) ==
+               {:invalid_injector_setup_return, RefusingInjector, :ok}
     end
 
     test "setup draws from a per-variant RNG seeded from the run seed and the variant index" do

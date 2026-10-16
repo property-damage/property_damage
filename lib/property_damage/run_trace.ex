@@ -253,8 +253,8 @@ defmodule PropertyDamage.RunTrace do
 
     # The target's injectors are set up against the run's event queue, as on
     # every other path that executes a run. `mocks:` is rejected above.
-    RunServices.with_services(target, fn event_queue, _mock_registry ->
-      {:ok, result} =
+    {:ok, result} =
+      RunServices.with_services(target, fn event_queue, _mock_registry ->
         Executor.run(plan, model, adapter,
           config: config,
           event_queue: event_queue,
@@ -264,25 +264,25 @@ defmodule PropertyDamage.RunTrace do
           setup_commands: plan.setup,
           teardown_commands: plan.teardown
         )
+      end)
 
-      new(
-        seed: seed,
-        run_number: run_number,
-        run_nonce: run_nonce,
-        mint_epoch: mint_epoch,
-        model: model,
-        adapter: adapter,
-        source_revision: Keyword.get_lazy(opts, :source_revision, &source_revision/0),
-        plan: plan,
-        plan_source: :generated,
-        executed: Map.get(result, :executed, %{}),
-        event_log: result.event_log,
-        command_labels: %{},
-        command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-        linearization: linearization_of(result),
-        outcome: outcome_of(result)
-      )
-    end)
+    new(
+      seed: seed,
+      run_number: run_number,
+      run_nonce: run_nonce,
+      mint_epoch: mint_epoch,
+      model: model,
+      adapter: adapter,
+      source_revision: Keyword.get_lazy(opts, :source_revision, &source_revision/0),
+      plan: plan,
+      plan_source: :generated,
+      executed: Map.get(result, :executed, %{}),
+      event_log: result.event_log,
+      command_labels: %{},
+      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+      linearization: linearization_of(result),
+      outcome: outcome_of(result)
+    )
   end
 
   # A model with expansions: the target's concrete sequence, as a run draws it

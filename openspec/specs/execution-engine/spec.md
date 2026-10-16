@@ -130,8 +130,15 @@ The system SHALL support injector adapters that receive events from external sou
 #### Scenario: Injector adapter lifecycle
 - **WHEN** the run's target lists `injectors:` (DR-043)
 - **THEN** each injector adapter SHALL have its `setup/1` called to start listening
+- **AND** `setup/1` SHALL receive the target's `config:` map (`%{}` when the target sets none) merged with `%{event_queue: queue}`, the framework key winning on a clash, on every path that sets injectors up (`PropertyDamage.run/1` with one target or several, its shrink attempts, and `PropertyDamage.execute/2`)
 - **AND** incoming payloads SHALL be transformed via `to_event/1` and pushed to the event queue
-- **AND** `teardown/1` SHALL be called to stop listening after the run completes
+- **AND** `teardown/1` SHALL be called to stop listening after the run completes, with the context `setup/1` returned in `{:ok, context}` (`%{}` for an injector without `setup/1`)
+
+#### Scenario: Injector setup failure
+- **WHEN** an injector's `setup/1` returns `{:error, reason}`
+- **THEN** the framework SHALL tear down the injectors already set up for that run
+- **AND** SHALL fail the target's setup as `:setup_failed` with `reason` as the detail (`PropertyDamage.execute/2` SHALL return `{:error, failure}` with that setup failure)
+- **AND** a return that is neither `{:ok, map}` nor `{:error, _}` SHALL fail the same way with the detail `{:invalid_injector_setup_return, module, returned}`
 
 #### Scenario: Emits declaration for validation
 - **WHEN** an injector adapter declares event types via `@emits`

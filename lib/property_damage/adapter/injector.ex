@@ -90,19 +90,33 @@ defmodule PropertyDamage.Adapter.Injector do
   @doc """
   Called once per run to start listening for external events.
 
-  The config will include:
+  The config is the `config:` map of the target that lists this injector (the
+  map its adapter's `setup/1` receives, `%{}` when the target sets none) merged
+  with:
   - `:event_queue` - PID of the EventQueue for pushing events
-  - Any adapter-specific config from the test setup
+
+  On a clash the framework's `:event_queue` wins. A key in the target's
+  `config:` is how an injector learns which system or tenant it serves when
+  several targets share one adapter.
 
   ## Returns
 
-  - `{:ok, context}` - Setup succeeded
-  - `{:error, reason}` - Setup failed
+  - `{:ok, context}` - Setup succeeded; `context` is a map, handed to
+    `c:teardown/1` when the run ends
+  - `{:error, reason}` - Setup failed: the injectors already set up for the run
+    are torn down and the run fails with a `:setup_failed` report (from
+    `PropertyDamage.execute/2`, `{:error, failure}` with a setup failure)
+
+  Any other return fails the setup the same way, with the reason
+  `{:invalid_injector_setup_return, module, returned}`.
   """
   @callback setup(config :: map()) :: {:ok, context :: map()} | {:error, term()}
 
   @doc """
   Called once per run to stop listening and cleanup.
+
+  `context` is the map `c:setup/1` returned in `{:ok, context}`; an injector
+  that does not define `setup/1` receives `%{}`.
 
   ## Returns
 

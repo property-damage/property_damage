@@ -358,7 +358,7 @@ The framework SHALL treat a boundary at which no side is pending and ready sides
 - **AND** SHALL tear down the variants that were already set up
 - **AND** SHALL NOT call `teardown/1` of the variant whose setup failed
 - **AND** no command SHALL execute
-- **AND** an injector or mock setup that raises inside a target SHALL be a `:setup_failed` failure too
+- **AND** an injector setup that returns `{:error, reason}` or raises, or a mock setup that raises, inside a target SHALL be a `:setup_failed` failure too
 - **AND** the setup failure SHALL go through `on_failure`, the regression handler and the seed-library append like any other failure
 - **AND** a setup failure SHALL NOT be shrunk
 

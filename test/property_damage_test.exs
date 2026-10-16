@@ -163,6 +163,44 @@ defmodule PropertyDamageTest do
       assert_receive {:DOWN, ^ref, :process, ^event_queue, _reason}, 1_000
     end
 
+    test "an injector's setup gets the target config and its teardown gets the setup context" do
+      config = %{test_pid: self(), tenant: "solo"}
+
+      assert {:ok, _stats} =
+               PropertyDamage.run(
+                 model: ExecutorModel,
+                 targets: [
+                   {SimpleAdapter,
+                    config: config, injectors: [PropertyDamage.Test.RecordingInjector]}
+                 ],
+                 max_runs: 1,
+                 max_commands: 3,
+                 validate: false
+               )
+
+      assert_received {:injector_setup, %{tenant: "solo", event_queue: queue}, context}
+      assert is_pid(queue)
+      assert_received {:injector_teardown, ^context}
+    end
+
+    test "an injector whose setup returns {:error, reason} is a setup failure" do
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+               PropertyDamage.run(
+                 model: ExecutorModel,
+                 targets: [
+                   {SimpleAdapter,
+                    config: %{injector_reply: {:error, :no_listener}},
+                    injectors: [PropertyDamage.Test.RefusingInjector]}
+                 ],
+                 max_runs: 1,
+                 max_commands: 3,
+                 validate: false
+               )
+
+      assert PropertyDamage.Failure.detail(report.failure_reason) == :no_listener
+      assert report.failed_at_index == nil
+    end
+
     test "adapter setup failure surfaces as an error, not a MatchError crash" do
       result =
         PropertyDamage.run(

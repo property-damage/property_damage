@@ -18,7 +18,8 @@ defmodule PropertyDamage.Options do
     injectors: [
       type: {:list, :atom},
       default: [],
-      doc: "Injector adapter modules that push events into the run."
+      doc:
+        "Injector adapter modules that push events into the run. Each injector's `setup/1` receives this target's `config:` merged with `:event_queue`."
     ],
     mocks: [
       type: {:custom, __MODULE__, :validate_mock_services, []},

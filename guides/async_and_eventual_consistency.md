@@ -757,6 +757,12 @@ PropertyDamage.run(
 )
 ```
 
+An injector's `setup/1` receives its target's `config:` map plus
+`:event_queue`, so a key in `config:` is how an injector learns which system or
+tenant it serves (above, `config[:webhook_port]` would come from that map). Its
+`teardown/1` receives the context its `setup/1` returned, and a setup that
+returns `{:error, reason}` fails the run as a `:setup_failed` report.
+
 The executor drains injected events after each command, applying them to
 projections just like events from regular command execution.
 
