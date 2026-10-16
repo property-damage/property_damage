@@ -1,6 +1,6 @@
 # DR-046: Boundary Observations, the Convergence Loop and Adapter Errors
 
-**Status:** Accepted. Amended by DR-047: `latency:` gains a budget grammar (`warmup:`, `p50`, `p95`, `p99` and `mean` with `max:` and `max_ratio:`), `:latency_exceeded` is produced, and persistence is version 12. Amended by DR-049: a model that defines `expansions/0` must declare a `@compare` whose schedule reaches the end of the run.
+**Status:** Accepted. Amended by DR-047: `latency:` gains a budget grammar (`warmup:`, `p50`, `p95`, `p99` and `mean` with `max:` and `max_ratio:`), `:latency_exceeded` is produced, and persistence is version 12. Amended by DR-049: a model that defines `expansions/0` must declare a `@compare` whose schedule reaches the end of the run. Amended by DR-051: `@compare` is a plain module attribute and `using:` names the relation (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`) instead of holding a function, for `@compare` and as a named alternative for `stutter:`; the `@/1` replacement in projection modules is removed.
 **Date:** 2026-10-06
 
 ## Context
