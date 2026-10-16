@@ -52,6 +52,7 @@ defmodule PropertyDamage.Expansion do
     Comparison,
     Generator,
     Model,
+    Placeholder,
     PlaceholderRegistry,
     Sequence,
     Validation
@@ -771,6 +772,7 @@ defmodule PropertyDamage.Expansion do
 
   defp replayed_choice(walk, name, base, {entry, index}, done, {state, minted}) do
     aliases = aliases!(walk, base, entry, done, minted)
+    state = as_root_state(walk, base, done, aliases, state)
 
     choice = %{
       root: base.root,
@@ -969,6 +971,7 @@ defmodule PropertyDamage.Expansion do
 
       {:ok, state, done, minted, warnings, generated} ->
         aliases = aliases!(walk, base, key, done, minted)
+        state = as_root_state(walk, base, done, aliases, state)
 
         choice = %{
           root: base.root,
@@ -1204,6 +1207,47 @@ defmodule PropertyDamage.Expansion do
                 )
     end
   end
+
+  # The state after the leaves `done`, folded again from the state at the
+  # root with each aliased leaf placeholder replaced by its root placeholder.
+  # A later root carries the root's placeholder, as the root sequence minted
+  # it, so every later reader of this target's state (a root's `simulate/2`,
+  # an expansion function, a leaf's `overrides:` and `when:`) finds the same
+  # ids as in a target that ran the root as itself. The leaves' commands and
+  # events, and the registry's aliases, are unchanged.
+  defp as_root_state(_walk, _base, _done, [], state), do: state
+
+  defp as_root_state(walk, base, done, aliases, _state) do
+    roots = Map.new(aliases, fn {root, leaf} -> {leaf.id, root} end)
+
+    Enum.reduce(done, base.state, fn %{command: command, events: events}, state ->
+      Generator.fold_step(
+        walk.model,
+        as_root(command, roots),
+        as_root(events, roots),
+        state
+      )
+    end)
+  end
+
+  defp as_root(%Placeholder{id: id} = placeholder, roots), do: Map.get(roots, id, placeholder)
+
+  defp as_root(%module{} = struct, roots) do
+    struct
+    |> Map.from_struct()
+    |> as_root(roots)
+    |> then(&struct(module, &1))
+  end
+
+  defp as_root(map, roots) when is_map(map),
+    do: Map.new(map, fn {key, value} -> {as_root(key, roots), as_root(value, roots)} end)
+
+  defp as_root(list, roots) when is_list(list), do: Enum.map(list, &as_root(&1, roots))
+
+  defp as_root(tuple, roots) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> as_root(roots) |> List.to_tuple()
+
+  defp as_root(value, _roots), do: value
 
   # ==========================================================================
   # Sampling

@@ -794,6 +794,11 @@ or two events of one leaf), are a generation error that names the root, the
 entry and the candidate leaves. Make the leaves' events agree with the root's
 event to fix it.
 
+In a target that ran the rewrite, the simulated state carries the root's
+placeholder where the leaf's would be. A later root's `simulate/2`, `when:` and
+`overrides:` therefore see the same id as in a target that ran the root as
+itself, and each target still resolves that id from its own leaf at execution.
+
 ### When Nothing Fits: "Identity, Forced"
 
 A leaf whose module has a `commands/0` entry with a `when:` that is false at its

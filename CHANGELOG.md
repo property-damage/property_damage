@@ -915,6 +915,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A rewritten root's id is in the target's simulated state.** In a target
+  that ran a rewrite at a root that mints an `external()` id, the simulated
+  state held the leaf's placeholder, while a later root carries the root's.
+  A later root's `simulate/2` that looked the id up in state missed it (a
+  `KeyError`, or a predicted not-found event), and so did an expansion
+  function, a leaf's `overrides:` and a leaf's `when:` reading that state. The
+  state now holds the root's placeholder, as in a target that ran the root as
+  itself, on every path that realizes leaves: a run, a shrink and a replay of
+  recorded leaves. Execution is unchanged: each target still resolves the id
+  from its own leaf's real events.
 - **A check recorded under `check_mode: :record` no longer skips the final
   boundary.** A target that recorded a failing check at an earlier root kept the
   final boundary from being compared, so a divergence there went unreported; it

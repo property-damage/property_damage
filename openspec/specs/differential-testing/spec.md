@@ -551,12 +551,17 @@ The `:random` pick at a root SHALL be a pure function of the run seed, the targe
 
 ### Requirement: Root Placeholder Aliasing (DR-049)
 
-In a target whose entry at a root is not the identity, every placeholder that the root's simulation minted SHALL be aliased, in that target's registry, to the placeholder of exactly one leaf whose simulated events hold the same event module at the same field path. Zero matches or several matches SHALL be a generation error that names the root, the entry key, the field and the candidate leaves (each as leaf index, module and event index), raised before any `Adapter.setup/1`. Several events of one leaf SHALL count as several matches. Resolution SHALL then happen at execution from the leaf's real events, as for any placeholder. A `:reference` target SHALL rebuild the reference's aliases in its own registry.
+In a target whose entry at a root is not the identity, every placeholder that the root's simulation minted SHALL be aliased, in that target's registry, to the placeholder of exactly one leaf whose simulated events hold the same event module at the same field path. Zero matches or several matches SHALL be a generation error that names the root, the entry key, the field and the candidate leaves (each as leaf index, module and event index), raised before any `Adapter.setup/1`. Several events of one leaf SHALL count as several matches. Resolution SHALL then happen at execution from the leaf's real events, as for any placeholder. A `:reference` target SHALL rebuild the reference's aliases in its own registry. In the target's simulated state after the root, each aliased leaf placeholder SHALL be replaced by its root placeholder, so a later root's `simulate/2`, an expansion function, and a leaf's `when:` and `overrides:` read the same ids as in a target that ran the root as itself; this SHALL hold when the target realizes the entry, when it replays recorded leaves and when it copies the reference's leaves.
 
 #### Scenario: One matching leaf aliases
 - **GIVEN** a root `Open` that mints an account id and an expansion `[Reserve, Confirm]` in which only `Confirm` emits that event
 - **WHEN** a later root consumes the account id in a target that ran the expansion
 - **THEN** the consumer SHALL receive the id that the `Confirm` leaf's real events resolved
+
+#### Scenario: A later root reads the root's id in the simulated state
+- **GIVEN** a root `Open` that mints an account id and an expansion `[Reserve, Confirm]` in which only `Confirm` emits that event
+- **WHEN** a target runs the expansion and a later root's `simulate/2` looks up the account id it carries in the simulated state
+- **THEN** the lookup SHALL find the account that `Confirm`'s simulated event added
 
 #### Scenario: Two leaves match
 - **WHEN** two leaves of one entry emit the same event module at the same field
