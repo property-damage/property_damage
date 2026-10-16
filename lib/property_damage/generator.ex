@@ -925,6 +925,14 @@ defmodule PropertyDamage.Generator do
   end
 
   @doc false
+  # Folds `command` and the `events` simulated for it into `state`, as a step
+  # folds them, without simulating the command again.
+  @spec fold_step(module(), struct(), [struct()], map()) :: map()
+  def fold_step(model, command, events, state) do
+    update_state(state, command, events, model.command_sequence_projection())
+  end
+
+  @doc false
   # The generator of `module`'s commands with `overrides` (a map) applied, as
   # the root draw builds it: a nemesis through `new!/2`, any other command
   # through `generator/1`, with every override key checked against the
