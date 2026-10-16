@@ -645,16 +645,13 @@ mix pd.validate Counter.Model --targets '[{Counter.Adapter, name: "left", config
   warns that `Counter.Add` declares no `:observables` and that the model has
   one command; both are expected for a model this small.
 
-Two known limits:
+A known limit:
 
 - Argument simplification can move a value below its generator's range (the
   quickstart's `Add 0`), and on some seeds that lets the shrink move the
   failing target onto the reference's entry, which then reads as an
   implementation bug. Re-run the reproduction command with `shrink: false` to
   see what each target ran before shrinking.
-- The artifact's file name is the model and the seed, so two failures of one
-  seed under different `targets:` write the same file, and the later one
-  replaces the earlier.
 
 ## Next Steps
 
