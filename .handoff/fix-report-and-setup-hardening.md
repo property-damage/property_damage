@@ -61,6 +61,17 @@ follows the color flag like the other color helpers.
 
 **Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/failure_report/timeline.ex`, `test/property_damage/failure_report/timeline_test.exs`
 
+### 2026-10-17T17:40 · commit · 8d6a4b3
+
+fix(report): keep a placeholder argument whole and mark a cut value
+
+The terminal report cut every command argument at a fixed width with no
+marker, so a placeholder printed without its closing bracket and two ids
+that differed past the cut printed alike. A placeholder now prints whole;
+a value the formatter cuts ends with a marker.
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/failure_report/formatter.ex`, `test/property_damage/formatter_test.exs`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not
