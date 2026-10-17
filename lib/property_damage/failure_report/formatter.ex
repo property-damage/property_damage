@@ -12,6 +12,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
   }
 
   alias PropertyDamage.Sequence.Position
+  alias PropertyDamage.FailureReport.SourceBadge
 
   @type format :: :terminal | :markdown | :json | :compact
 
@@ -760,16 +761,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     end
   end
 
-  defp source_badge(source, color) do
-    case source do
-      :command -> "#{green(color)}CMD#{reset(color)}"
-      :injector -> "#{yellow(color)}INJ#{reset(color)}"
-      :nemesis -> "#{red(color)}NEM#{reset(color)}"
-      :mock -> "#{magenta(color)}MOC#{reset(color)}"
-      :stutter -> "#{blue(color)}STU#{reset(color)}"
-      _ -> "#{dim(color)}???#{reset(color)}"
-    end
-  end
+  defp source_badge(source, color), do: SourceBadge.badge(source, color)
 
   # The seed reproduction, the call that regenerates the failing target's
   # sequence, and last the call that replays the artifact (or why there is
@@ -1414,12 +1406,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp yellow(true), do: "\e[33m"
   defp yellow(false), do: ""
-
-  defp blue(true), do: "\e[34m"
-  defp blue(false), do: ""
-
-  defp magenta(true), do: "\e[35m"
-  defp magenta(false), do: ""
 
   defp cyan(true), do: "\e[36m"
   defp cyan(false), do: ""

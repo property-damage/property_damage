@@ -30,6 +30,17 @@ docs(expansion): say :identity also names one leaf equal to its root
 
 **Files:** `lib/property_damage/expansion.ex`
 
+### 2026-10-17T17:36 · commit · c991983
+
+fix(mix): print a divergence's check name in pd.replay and pd.reshrink
+
+The summary line of both tasks interpolated the comparison key, a
+{projection, name} tuple, and raised Protocol.UndefinedError on every
+divergence report. The key now goes through FailureReport.format_name/1,
+the formatter the exporters already use.
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/mix/tasks/pd.replay.ex`, `lib/mix/tasks/pd.reshrink.ex`, `test/mix/tasks/pd_replay_test.exs`, `test/mix/tasks/pd_reshrink_test.exs`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not

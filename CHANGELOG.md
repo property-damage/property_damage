@@ -915,6 +915,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The printed Event Log names every event source.** An event a resource
+  poller delivered, a telemetry receiver derived or an adapter injected
+  mid-execution printed with a `???` badge in the terminal report and the
+  timeline. They print as `POL`, `TEL` and `EMT`, from one badge table both
+  printers share.
 - **`mix pd.replay` and `mix pd.reshrink` print a divergence's check name.**
   Both tasks interpolated the `@compare` key tuple into their summary line, so
   a `:diverged` or `:did_not_converge` report raised `Protocol.UndefinedError`

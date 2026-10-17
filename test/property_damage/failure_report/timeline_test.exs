@@ -73,6 +73,38 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
       assert output =~ "PaymentConfirmed"
     end
 
+    test "names a poller-delivered, a telemetry and an injected event" do
+      entries =
+        for {source, index} <- Enum.with_index([:resource_poller, :telemetry, :injected]) do
+          %Entry{
+            timestamp: index,
+            command_index: 0,
+            event: %PaymentConfirmed{id: index},
+            source: source
+          }
+        end
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: Sequence.linear([%CreateOrder{id: 1}]),
+          shrunk_sequence: Sequence.linear([%CreateOrder{id: 1}]),
+          failed_at_index: 0,
+          failure_reason: Failure.check_failed(:TestCheck, "boom"),
+          event_log: entries,
+          model: TestModel,
+          targets: [{TestAdapter, []}]
+        )
+
+      output = Timeline.format_event_timeline(report, color: false)
+
+      assert output =~ "POL"
+      assert output =~ "TEL"
+      assert output =~ "EMT"
+      refute output =~ "???", "an event source printed as unknown"
+    end
+
     test "shows the source badge for a command-attributed non-command event" do
       report =
         FailureReport.new(

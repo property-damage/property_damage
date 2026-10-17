@@ -36,7 +36,8 @@ defmodule PropertyDamage.Executor.SteppingOutcomeTest do
     ctx = context(ProbeModel, RaisingProbeAdapter)
 
     assert {:error, %Failure{type: %Failure.Execution{kind: :adapter_error, detail: detail}},
-            _failed_state, {:raised, %RuntimeError{message: "probe exploded"}}} =
+            _failed_state,
+            {:raised, %RuntimeError{message: "probe exploded"}}} =
              Stepping.step(%ProbeStep{value: 1}, 0, Stepping.init_state(ProbeModel), ctx)
 
     # The failure keeps the {exception, stacktrace} shape a full run reports.

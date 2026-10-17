@@ -2,6 +2,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
   @moduledoc false
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.FailureReport.SourceBadge
 
   @default_column_width 20
 
@@ -436,16 +437,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
     end
   end
 
-  defp format_source_badge(source, color) do
-    case source do
-      :command -> "#{green(color)}CMD#{reset()}"
-      :injector -> "#{yellow(color)}INJ#{reset()}"
-      :nemesis -> "#{red(color)}NEM#{reset()}"
-      :mock -> "#{magenta(color)}MOC#{reset()}"
-      :stutter -> "#{blue(color)}STU#{reset()}"
-      _ -> "#{dim(color)}???#{reset()}"
-    end
-  end
+  defp format_source_badge(source, color), do: SourceBadge.badge(source, color)
 
   # ============================================================================
   # Helpers
@@ -488,12 +480,6 @@ defmodule PropertyDamage.FailureReport.Timeline do
 
   defp yellow(true), do: "\e[33m"
   defp yellow(false), do: ""
-
-  defp blue(true), do: "\e[34m"
-  defp blue(false), do: ""
-
-  defp magenta(true), do: "\e[35m"
-  defp magenta(false), do: ""
 
   defp cyan(true), do: "\e[36m"
   defp cyan(false), do: ""

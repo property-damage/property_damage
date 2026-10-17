@@ -5,11 +5,16 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
   """
   use ExUnit.Case, async: true
 
+  alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.{Failure, FailureReport, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
   defmodule CreateAccount do
     defstruct [:currency]
+  end
+
+  defmodule Observed do
+    defstruct [:tag]
   end
 
   defp sut_failure do
@@ -75,6 +80,43 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
     test ":terminal output contains no ANSI escape bytes (I1)" do
       out = Formatter.format(sut_failure(), :terminal, color: false)
       refute out =~ "\e[", "plain output leaked an ANSI escape sequence"
+    end
+  end
+
+  # A report whose event log holds one event per source, all attributed to
+  # the failing command.
+  defp report_with_sources(sources) do
+    seq = Sequence.linear([%CreateAccount{currency: :USD}])
+
+    entries =
+      for {source, index} <- Enum.with_index(sources) do
+        %Entry{timestamp: index, command_index: 0, event: %Observed{tag: source}, source: source}
+      end
+
+    FailureReport.new(
+      seed: 1,
+      run_number: 1,
+      failed_at_index: 0,
+      failure_reason: Failure.check_failed(:NonNegativeBalance, "Balance cannot be negative"),
+      original_sequence: seq,
+      shrunk_sequence: seq,
+      event_log: entries
+    )
+  end
+
+  describe "Event Log source badges" do
+    test "names a poller-delivered, a telemetry and an injected event" do
+      out =
+        Formatter.format(
+          report_with_sources([:resource_poller, :telemetry, :injected]),
+          :terminal,
+          color: false
+        )
+
+      assert out =~ "POL"
+      assert out =~ "TEL"
+      assert out =~ "EMT"
+      refute out =~ "???", "an event source printed as unknown"
     end
   end
 end

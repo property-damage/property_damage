@@ -98,7 +98,8 @@ defmodule PropertyDamage.Validation do
   def sequence_warnings(model) do
     for callback <- [:setup_each, :teardown_each],
         PropertyDamage.ModuleCheck.exports?(model, callback, 0),
-        {module, opts} when is_atom(module) <- Enum.map(apply(model, callback, []), &entry_opts/1),
+        {module, opts} when is_atom(module) <-
+          Enum.map(apply(model, callback, []), &entry_opts/1),
         key <- [:when, :weight],
         Keyword.has_key?(opts, key) do
       "#{callback}/0: #{inspect(module)} sets #{key}: ignored in a sequence"
