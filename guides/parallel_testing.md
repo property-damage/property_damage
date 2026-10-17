@@ -1,18 +1,25 @@
 # Parallel Testing and Linearization
 
-PropertyDamage models concurrent operations as parallel branches to expose race
-conditions. It executes each branch over a shared adapter context, then checks
-whether the observed results are linearizable -- explainable by some valid
-sequential ordering. The concurrency is what the checker reasons about; the
-branches themselves are executed sequentially (see below).
+PropertyDamage generates branching sequences: a prefix, two or more branches
+and a suffix. It executes the branches one after another on one adapter
+context, then checks whether the observed results are linearizable: explainable
+by some ordering of the branch commands that keeps each branch's own order. The
+branches never overlap at the system under test, so this path detects no race.
+What it checks is that the system's observed events, under some such ordering,
+match what the model's simulator predicts, and that every step check passes.
 
-## Why Parallel Testing
+## Why Branching Sequences
 
-Sequential tests miss timing-dependent bugs. A `Transfer` command that reads a
-balance, computes the new value, and writes it back may work perfectly in
-isolation but lose updates under concurrency. Parallel testing surfaces these
-defects by checking whether the observed results could have arisen only from an
-illegal interleaving.
+A system called one command at a time can still disagree with its model about
+what a command does after other commands have run. The linearization checker
+asks whether any ordering of the branch commands explains the observed events
+against the simulator; when none does, the system and the model disagree.
+
+What it does not do is find timing-dependent bugs. A `Transfer` command that
+reads a balance, computes the new value and writes it back loses updates only
+when two calls overlap, and no two calls overlap here. Race detection waits for
+the concurrent redesign (DR-053); until then a `branching:` run is a check of
+the model's predictions under reordering, not a concurrency test.
 
 ## Branching Sequences
 
@@ -119,7 +126,7 @@ case PropertyDamage.Linearization.check(branches, branch_events, projections, mo
     :ok
 
   {:no_linearization, _refutation} ->
-    # No valid ordering explains the results -- race condition detected
+    # No ordering explains the observed events against the simulator
     raise "Non-linearizable execution!"
 
   {:indeterminate, _checked} ->
@@ -149,16 +156,42 @@ PropertyDamage.Linearization.feasibility(branches)
 
 Keep branch counts and lengths moderate to avoid combinatorial explosion.
 
-## What It Detects
+## What It Checks
 
-Parallel testing with linearization checking catches:
+A branching run passes when some interleaving of the branch commands, keeping
+the order inside each branch, has every command's observed events contain the
+simulator's predicted events (fields that are `nil`, placeholders or external
+markers are wildcards) and every step-triggered `@check` pass. The executed
+order is the first candidate the checker tries, so a system that behaves
+correctly when called one command at a time passes at once. A failure means no
+such ordering exists: the system reported something the model never predicts.
 
-- **Lost updates** -- Two concurrent writes, one overwrites the other.
-- **Dirty reads** -- Reading uncommitted data from a concurrent transaction.
-- **Write-write conflicts** -- Two branches modify the same record, final state
-  matches neither.
-- **Phantom reads** -- A query returns different results before and after a
-  concurrent insert.
+## Limits
+
+These hold until the concurrent redesign (DR-053) and are not defects of your
+model:
+
+- **No race is detected.** Branches run one after another on one adapter
+  context. A lost update, a dirty read or a write-write conflict needs two
+  calls to overlap, and none do.
+- **`{:indeterminate, _}` passes.** Without a simulator, or when the candidate
+  cap is reached before a consistent ordering is found, the run is recorded as
+  indeterminate and passes.
+- **Any ordering counts.** A sequential defect that another ordering explains
+  is accepted: a read that returned `nil` after a physically earlier write is
+  taken as "read first". The linear engine, with checks on, reports it.
+- **No `@eventually` poller for a branch command.** Checks are off inside the
+  branches; the synchronous checks run after the branch set.
+- **A converted replay cannot re-execute branch placeholders.** A replay
+  artifact of a failure found on this path and converted to linear cannot
+  re-execute placeholders minted in a branch (DR-050).
+- **Branches are generated from the post-prefix state and judged in reading
+  order.** The generator builds every branch from the same state; the executor
+  and the shrinker judge the branches one after another, so a generated run
+  can fail its own checks in the second branch.
+- **`latency:` and a `check_mode:` other than the default are option errors**
+  beside `branching:`: the path records no latency samples and halts at the
+  first failing check.
 
 ## Example: Concurrent Account Operations
 
@@ -235,21 +268,21 @@ PropertyDamage.run(
 )
 ```
 
-A non-linearizable result means the final balance does not match any valid
-ordering of the concurrent operations -- evidence of a concurrency bug in the
-SUT.
+A non-linearizable result means no ordering of the branch commands that keeps
+each branch's order explains the observed events against the simulator: a
+disagreement between the system and the model, not evidence of a race.
 
 ## When to Use
 
-Use parallel testing when:
+Use branching sequences when:
 
-- Your SUT handles concurrent requests (web APIs, databases, message queues).
-- You suspect race conditions in shared-state operations.
-- You want to verify serializability or linearizability guarantees.
+- Your model has a simulator and you want its predictions checked against the
+  observed events under reordering.
+- You want the prefix, branch and suffix generation shape, with its placeholder
+  scoping, exercised against your model.
 
-Skip parallel testing for:
+Do not use them to find races: the branches do not overlap. Skip them for:
 
-- Purely sequential systems with no concurrent access.
 - Early development when the basic sequential model is not yet stable.
 - Commands that have no shared state interactions.
 

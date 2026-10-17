@@ -534,7 +534,10 @@ defmodule PropertyDamage.Options do
     # Nested - Branching
     branching: [
       type: :keyword_list,
-      doc: "Options for parallel branch testing (race condition detection).",
+      doc:
+        "Options for branching sequences: a prefix, branches run one after another " <>
+          "on one target, and a suffix, checked for linearizability afterward. " <>
+          "Not with `latency:` or a `check_mode:` other than the default.",
       keys: [
         branch_probability: [
           type: :float,

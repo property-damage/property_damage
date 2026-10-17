@@ -9,13 +9,14 @@ defmodule PropertyDamage.Test.EtsRegister do
   store: the value-carrying `from/to` events let the linearization checker
   refute lost updates on EVENTS alone, independent of any check.
 
-  The bench drives this through PD's branching generation. Against the faithful
-  `CorrectAdapter` no ordering is ever refuted (locks in the linearization
-  soundness fix on a real concurrent data structure). The seeded
-  `StaleSnapshotAdapter` reports each increment from a snapshot it never
-  refreshes, so two parallel increments both claim `from: 0`: a lost update
-  that no serialization explains, which PD detects and shrinks to the minimal
-  two-increment race.
+  The bench drives this through PD's branching generation, whose branches run
+  one after another (DR-053). Against the faithful `CorrectAdapter` no ordering
+  is ever refuted (locks in the linearization soundness fix on a real concurrent
+  data structure). The seeded `StaleSnapshotAdapter` reports each increment
+  from a snapshot it never refreshes, so the second increment claims `from: 0`
+  again: a stale report under sequential calls that no ordering explains, which
+  PD detects and shrinks to the minimal two increments. No two increments
+  overlap, so what it detects is not a race.
   """
 
   @doc "Atomic increment. Returns {from, to}."

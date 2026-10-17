@@ -84,6 +84,54 @@ setup failure it is on every path, with the exception as its detail.
 
 **Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/runtime/run_services.ex`, `test/property_damage/run_services_test.exs`, `test/property_damage_test.exs`
 
+### 2026-10-17T17:43 · commit · 0635614
+
+fix(trace): return a setup-failed trace when an injector setup fails
+
+RunTrace.capture/1 matched the run result against {:ok, _}, so an
+injector setup that failed on a model without expansions raised
+MatchError in mix pd.audit and in run comparison. The capture now
+returns a trace whose outcome is the setup failure, as the scheduler
+path already did.
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/run_trace.ex`, `test/property_damage/capture_injectors_test.exs`
+
+### 2026-10-17T17:47 · commit · d60adca
+
+fix(executor): fail an @eventually whose function returns no predicate
+
+The executor handed the check function's return to the poller unchecked,
+so a function that returned a boolean raised BadFunctionError on every
+poll behind a warning and surfaced as a window timeout. The return is now
+checked where the poller would be spawned: anything but a 1-arity
+function is a check failure at that step, naming the check and the value,
+handled under check_mode like a synchronous check.
+
+**Files:** `CHANGELOG.md`, `lib/property_damage/executor.ex`, `lib/property_damage/model/projection.ex`, `openspec/specs/eventual-consistency/spec.md`, `test/property_damage/eventually_return_test.exs`
+
+### 2026-10-17T17:49 · commit · cf6819f
+
+test(expansion): cover a leaf when: and the :follow path on a rewritten root's id
+
+Two paths share the re-fold that keeps a rewritten root's id in the
+target's simulated state and had no test of their own: a leaf whose
+module's commands/0 when: reads that state, and the shrinker's phase 3,
+where a second target copies the reference's rewrite and the roots after
+it read the id again.
+
+**Files:** `test/property_damage/expansion_root_placeholder_state_test.exs`
+
+### 2026-10-17T17:51 · commit · dcf6a13
+
+fix(options): refuse latency: and a non-default check_mode: with branching:
+
+A branching run executes one branch at a time on one target through the
+linear engine, which records no latency samples and halts at the first
+failing check whatever check_mode: says. Both combinations were accepted
+and ignored; they are option errors at run start now.
+
+**Files:** `CHANGELOG.md`, `lib/property_damage/options.ex`, `test/property_damage/branching_option_conflicts_test.exs`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not

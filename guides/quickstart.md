@@ -203,7 +203,7 @@ PropertyDamage.run(model: M, targets: [A])
 # Seeded (reproducible)
 PropertyDamage.run(model: M, targets: [A], seed: 42)
 
-# Parallel / branching (race condition detection)
+# Branching sequences (one branch at a time, linearization-checked)
 PropertyDamage.run(
   model: M,
   targets: [A],

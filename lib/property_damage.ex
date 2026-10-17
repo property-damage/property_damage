@@ -226,7 +226,7 @@ defmodule PropertyDamage do
   - `:regression` - Keyword list for automatic regression test management (see below)
   - `:verbose` - Print progress and configuration (default: false)
   - `:validate` - Run configuration validation first (default: true)
-  - `:branching` - Keyword list for parallel branching (see below); one
+  - `:branching` - Keyword list for branching sequences (see below); one
     target only
   - `:stutter` - Keyword list for idempotency testing (see below)
   - `:check_mode` - How a failing check is handled: `:halt` (default),
@@ -311,15 +311,19 @@ defmodule PropertyDamage do
 
   ## Branching Options
 
-  Pass `branching: [...]` to generate branching (parallel) sequences:
+  Pass `branching: [...]` to generate branching sequences, a prefix, two or
+  more branches and a suffix, run on one target:
 
   - `:branch_probability` - Probability of creating a branch point (default: 0.2)
   - `:max_branches` - Maximum number of parallel branches (default: 3)
   - `:max_branch_length` - Maximum commands per branch (default: 5)
   - `:min_prefix_length` - Minimum commands before branching (default: 3)
 
-  Branching sequences enable detection of race conditions by executing
-  commands in parallel branches and checking linearizability.
+  The branches execute one after another on the one adapter context, each from
+  the forked post-prefix state, and the linearization checker then asks whether
+  some ordering of the branch commands explains the observed events against
+  the model's simulator. The path detects no race (DR-053). `latency:` and a
+  `check_mode:` other than the default are option errors beside `branching:`.
 
   ## Stutter Options (Idempotency Testing)
 

@@ -2,18 +2,18 @@
 
 ## Purpose
 
-Defines the branching execution model for parallel command sequences, linearization checking for consistency verification, and stutter/idempotency testing that together enable the PropertyDamage framework to detect race conditions and verify idempotent behavior in the SUT.
+Defines the branching execution model for command sequences with branches, linearization checking for consistency verification, and stutter/idempotency testing. Branches execute one after another, so the branching path checks the SUT's observed events against the model under reordering and detects no race (DR-053); stutter testing verifies idempotent behavior in the SUT.
 
 ## Requirements
 
 ### Requirement: Branching Sequences
 
-The system SHALL support branching command sequences consisting of a linear prefix, parallel branches, and an optional linear suffix. The prefix executes first, branches execute concurrently, and the suffix executes after all branches complete.
+The system SHALL support branching command sequences consisting of a linear prefix, two or more branches, and an optional linear suffix. The prefix executes first, the branches execute one after another, and the suffix executes after all branches complete.
 
 #### Scenario: Prefix then branches then suffix
 - **WHEN** a branching sequence is executed
 - **THEN** the prefix commands SHALL execute sequentially first
-- **AND** all branches SHALL execute concurrently after the prefix completes
+- **AND** the branches SHALL execute one after another after the prefix completes
 - **AND** the suffix commands SHALL execute sequentially after all branches complete
 
 #### Scenario: State forked at branch point
@@ -21,22 +21,23 @@ The system SHALL support branching command sequences consisting of a linear pref
 - **THEN** the projection state SHALL be forked at the branch point
 - **AND** each branch SHALL start from the same forked state
 
-### Requirement: Parallel Branch Execution
+### Requirement: Branch Execution (DR-053)
 
-Branches in a branching sequence SHALL execute concurrently against the SUT, with commands within each branch executing sequentially.
+Branches in a branching sequence SHALL execute one after another on the one adapter context, each from the forked post-prefix model state, with the order inside each branch preserved. The linearization checker SHALL judge the branch commands against the simulator's predictions over the interleavings that preserve that order. No two commands overlap at the SUT, so the branching path SHALL NOT be described as detecting races.
 
 #### Scenario: Intra-branch ordering preserved
 - **WHEN** a branch contains commands [A, B, C]
 - **THEN** command A SHALL complete before B begins
 - **AND** command B SHALL complete before C begins
 
-#### Scenario: Inter-branch concurrency
-- **WHEN** two branches execute in parallel
-- **THEN** commands from different branches MAY execute in any interleaved order
+#### Scenario: Branches do not overlap
+- **WHEN** two branches execute
+- **THEN** no command of the second branch SHALL begin before every command of the first has completed
+- **AND** the checker MAY explain the observed events by any interleaving that preserves the order inside each branch
 
 ### Requirement: Linearization Checking
 
-After parallel branch execution, the system SHALL verify that the observed results can be explained by some valid sequential ordering of all branch commands. This verification SHALL preserve happens-before ordering within each branch.
+After the branches have executed, the system SHALL verify that the observed results can be explained by some valid sequential ordering of all branch commands. This verification SHALL preserve happens-before ordering within each branch.
 
 #### Scenario: Valid linearization found
 - **WHEN** branch execution completes
@@ -47,7 +48,7 @@ After parallel branch execution, the system SHALL verify that the observed resul
 #### Scenario: No valid linearization exists
 - **WHEN** branch execution completes
 - **AND** no sequential ordering of the commands can produce the observed final state while preserving intra-branch order
-- **THEN** the system SHALL report a linearization failure indicating a race condition or consistency bug
+- **THEN** the system SHALL report a linearization failure indicating that no ordering explains the observed events against the simulator
 
 #### Scenario: Happens-before preserved
 - **WHEN** the system generates candidate linearizations

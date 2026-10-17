@@ -1,10 +1,10 @@
 defmodule PropertyDamage.Sequence do
   @moduledoc """
-  Represents a command sequence that may contain parallel branches.
+  Represents a command sequence that may contain branches.
 
   A sequence consists of three parts:
   - `prefix`: Commands executed sequentially before any branching
-  - `branches`: Optional list of parallel branches (each branch is a list of commands)
+  - `branches`: Optional list of branches (each branch is a list of commands), run one after another
   - `suffix`: Commands executed sequentially after branches merge
 
   ## Linear Sequences
@@ -20,7 +20,7 @@ defmodule PropertyDamage.Sequence do
   ## Branching Sequences
 
   A branching sequence has commands before the branch point in `prefix`,
-  parallel branches in `branches`, and commands after merge in `suffix`:
+  the branches in `branches`, and commands after merge in `suffix`:
 
       %Sequence{
         prefix: [cmd1, cmd2],
@@ -41,7 +41,7 @@ defmodule PropertyDamage.Sequence do
   1. Execute `prefix` commands sequentially
   2. If `branches` is not nil:
      a. Fork projection state
-     b. Execute each branch in parallel (or interleaved)
+     b. Execute each branch in turn, from the forked state
      c. Merge results and check for linearizability
   3. Execute `suffix` commands sequentially
 
