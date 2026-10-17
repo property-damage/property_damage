@@ -941,9 +941,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   On every path that brings a target's injectors up (a run, a shrink attempt,
   a trace capture, `PropertyDamage.execute/2`), a `setup/1` that raised left
   the earlier injectors' `teardown/1` uncalled, and a mock `setup/1` that
-  raised left every injector up. The raise is now a `:setup_failed` failure
-  whose detail is the exception, as a raising adapter `setup/1` already was,
-  and `execute/2` returns it instead of raising.
+  raised left every injector up, on the per-run wiring and on the variant
+  path alike. The raise is now a `:setup_failed` failure whose detail is the
+  exception, as a raising adapter `setup/1` already was, the injectors set up
+  before it are torn down, and `execute/2` returns it instead of raising.
 - **A placeholder argument prints whole in the terminal report.** The
   failing command's arguments were cut at a fixed width with no marker, so a
   placeholder lost its closing bracket and two distinct ids could print alike.

@@ -74,6 +74,17 @@ defmodule PropertyDamageTest do
     end
   end
 
+  # A mock service whose setup/1 raises.
+  defmodule RefusingMock do
+    use PropertyDamage.MockServiceAdapter
+
+    @impl true
+    def init_state, do: %{}
+
+    @impl true
+    def setup(_config), do: raise("mock setup boom")
+  end
+
   # An injector whose setup/1 raises. It reports the run's EventQueue pid to the
   # process it runs in and to the processes that started it (a target runs in
   # its own process, started by the test process) before blowing up, letting
@@ -178,6 +189,30 @@ defmodule PropertyDamageTest do
                  max_commands: 3,
                  validate: false
                )
+
+      assert_received {:injector_setup, _config, context}
+      assert_received {:injector_teardown, ^context}
+    end
+
+    test "a mock whose setup raises tears down the injectors set up before it" do
+      config = %{test_pid: self()}
+
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+               PropertyDamage.run(
+                 model: ExecutorModel,
+                 targets: [
+                   {SimpleAdapter,
+                    config: config,
+                    injectors: [PropertyDamage.Test.RecordingInjector],
+                    mocks: [{RefusingMock, %{}}]}
+                 ],
+                 max_runs: 1,
+                 max_commands: 3,
+                 validate: false
+               )
+
+      assert %RuntimeError{message: "mock setup boom"} =
+               PropertyDamage.Failure.detail(report.failure_reason)
 
       assert_received {:injector_setup, _config, context}
       assert_received {:injector_teardown, ^context}

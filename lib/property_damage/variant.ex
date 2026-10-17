@@ -573,14 +573,30 @@ defmodule PropertyDamage.Variant do
 
   defp start_mocks_and_adapter(state) do
     target = state.target
-    {registry, contexts} = RunServices.setup_mocks(target.mocks, state.event_queue)
-    if registry, do: guard(state, [registry])
-    state = %{state | mock_registry: registry, mock_contexts: contexts}
 
-    case call_adapter_setup(target) do
-      {:ok, adapter_context} -> {:ok, state, adapter_context}
-      {:error, reason} -> {:error, reason, state}
+    case start_mocks(target.mocks, state.event_queue) do
+      {:ok, registry, contexts} ->
+        if registry, do: guard(state, [registry])
+        state = %{state | mock_registry: registry, mock_contexts: contexts}
+
+        case call_adapter_setup(target) do
+          {:ok, adapter_context} -> {:ok, state, adapter_context}
+          {:error, reason} -> {:error, reason, state}
+        end
+
+      # The injectors are already up; `bring_up/1` releases them on this error.
+      {:error, reason} ->
+        {:error, reason, state}
     end
+  end
+
+  defp start_mocks(mocks, event_queue) do
+    {registry, contexts} = RunServices.setup_mocks(mocks, event_queue)
+    {:ok, registry, contexts}
+  rescue
+    exception -> {:error, exception}
+  catch
+    kind, reason -> {:error, {kind, reason}}
   end
 
   defp call_adapter_setup(target) do
