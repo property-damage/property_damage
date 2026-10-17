@@ -915,6 +915,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`mix pd.replay` and `mix pd.reshrink` print a divergence's check name.**
+  Both tasks interpolated the `@compare` key tuple into their summary line, so
+  a `:diverged` or `:did_not_converge` report raised `Protocol.UndefinedError`
+  before either task did any work. The key now prints as `Projection.name`,
+  as the exporters print it.
 - **A rewritten root's id is in the target's simulated state.** In a target
   that ran a rewrite at a root that mints an `external()` id, the simulated
   state held the leaf's placeholder, while a later root carries the root's.

@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Pd.Reshrink
-  alias PropertyDamage.{Executor, FailureReport, Persistence, Sequence}
+  alias PropertyDamage.{Executor, Failure, FailureReport, Persistence, Sequence}
   alias PropertyDamage.Test.TmpPath
 
   # The decision logic is exercised through `exec/1`, the halt-free seam: `run/1`
@@ -75,6 +75,32 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
 
     @impl true
     def command_sequence_projection, do: Counter
+  end
+
+  # A two-target model: the re-shrink of a divergence report runs the engine
+  # again, which needs a `@compare` function to compare the targets on.
+  defmodule ComparedCounter do
+    @moduledoc false
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{count: 0}
+
+    @impl true
+    def apply(state, %Counted{amount: n}), do: %{state | count: state.count + n}
+    def apply(state, _), do: state
+
+    @compare every: 1
+    def count(state, _root), do: state.count
+  end
+
+  defmodule ComparedModel do
+    @moduledoc false
+    @behaviour PropertyDamage.Model
+    @impl true
+    def commands, do: [Bump]
+    @impl true
+    def command_sequence_projection, do: ComparedCounter
   end
 
   setup do
@@ -240,6 +266,31 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
       assert status == :ok
       refute output =~ "branching"
       refute output =~ "could not run"
+    end
+  end
+
+  describe "a divergence report" do
+    test "prints the comparison key in the summary instead of raising", %{dir: dir} do
+      sequence = Sequence.linear([%Bump{}])
+
+      failure =
+        FailureReport.new(
+          seed: 0,
+          run_number: 1,
+          original_sequence: sequence,
+          shrunk_sequence: sequence,
+          failed_at_index: 0,
+          failure_reason: Failure.from_signature(:diverged, {ComparedCounter, :count}),
+          model: ComparedModel,
+          targets: [{FailingAdapter, name: "left"}, {FailingAdapter, name: "right"}]
+        )
+
+      {:ok, path} = Persistence.save(failure, dir)
+
+      {_status, output} = with_output(fn -> Reshrink.exec([path]) end)
+
+      assert output =~ "Failure:  "
+      assert output =~ "(#{inspect(ComparedCounter)}.count)"
     end
   end
 
