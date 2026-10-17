@@ -187,6 +187,40 @@ style(report): order the formatter aliases
 
 **Files:** `.handoff/fix-report-and-setup-hardening.md`, `lib/property_damage/failure_report/formatter.ex`, `test/property_damage/formatter_test.exs`
 
+### 2026-10-17T17:54 · commit · eb198c4
+
+style(report): order the formatter aliases
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `lib/property_damage/failure_report/formatter.ex`, `test/property_damage/formatter_test.exs`
+
+### 2026-10-17T17:55 · commit · 8117d72
+
+test(executor): cover check_mode: :log for an @eventually without a predicate
+
+**Files:** `test/property_damage/eventually_return_test.exs`
+
+### 2026-10-17T17:56 · commit · fa2d285
+
+docs(bench): say what the redis branching layer detects
+
+The redis bench's README and GetThenSet moduledoc called the stale-report
+failure under branching: a race. The branches run one after another, so
+the race never happens there; the checker refutes a write that reports a
+stale value.
+
+**Files:** `benches/redis_bench/README.md`, `benches/redis_bench/lib/redis_bench/commands.ex`
+
+### 2026-10-17T17:59 · commit · afd7a20
+
+fix(variant): tear down injectors when a mock setup raises
+
+On the variant path a mock setup/1 that raised escaped bring_up/1, so
+the report said setup failed but the injectors set up before the mock
+kept their listeners. The raise is now the setup error, and the error
+path releases what was set up, as it does for a failing injector.
+
+**Files:** `CHANGELOG.md`, `lib/property_damage/variant.ex`, `test/property_damage_test.exs`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not
