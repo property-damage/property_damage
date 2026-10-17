@@ -35,8 +35,41 @@ predicate than to a test body, and this record chooses the predicate rule.
 1. **A `@check` passes on a truthy return and fails on `nil` or `false`.** The
    failure is a check failure like a raise, with the same state snapshot. A
    raise is still a failure, and `fail!/2` is still how a check attaches a
-   message and details. The rule holds for `every:` and `at:` checks and in
-   every runner: the executor, forensics and the load-test worker.
+   message and details from inside a body. The rule holds for `every:` and
+   `at:` checks and in every runner: the executor, forensics and the
+   load-test worker.
+1a. **One verdict grammar for the three kinds**, read by one function
+   (`PropertyDamage.Verdict.read/1`, which replaces
+   `PropertyDamage.Equivalence.verdict/3`) in every runner, the poller and
+   the convergence loop:
+
+   | Return | `@check` | `@eventually` predicate | `using:` relation |
+   |--------|----------|-------------------------|-------------------|
+   | truthy | pass | satisfied | agree |
+   | `nil`, `false` | fail, generic message | not yet | disagree, both values |
+   | `{:fail, "text"}` | fail, that message | never: fail now, that reason | disagree, that message |
+   | `{:fail, %Exception{}}` | fail, that exception | never: fail now, that exception | disagree, that exception |
+   | raise | fail, the exception | fail, the exception | fail in that variant, the exception |
+   | bare exception struct, `{:error, _}` | fail, with the grammar nudge | same | same |
+
+   A string reason is wrapped in `CheckFailed` (checks, predicates) or
+   `ComparisonMismatch` (relations) so the report has one shape whichever
+   form the author chose. `{:fail, reason}` is the returned form of
+   `fail!/2`: raising is the early exit, returning is the tail. The tag is
+   `:fail`, not `:error`, because a verdict is a protocol return read by this
+   library alone, like `{:cont, _}`/`{:halt, _}` in `Enum.reduce_while/3`,
+   and an error tuple means something broke. `:match` and `{:mismatch, _}`
+   are retired (DR-046 item 2 and item 10).
+1b. **Two non-verdict shapes fail with a nudge.** A bare exception struct and
+   an `{:error, _}` tuple cannot have meant "pass" and would otherwise be
+   truthy; the reader fails on them carrying the value, plus one sentence:
+   "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`". One taught
+   form, no silent pass.
+1c. **Composition.** A verdict is a final value, never a boolean: `&&`,
+   `||`, `!` and `Enum.all?/2` see a `{:fail, _}` as truthy. Sub-checks
+   compose with `with true <- balance_ok(a), true <- limit_ok(a), do: true`,
+   or with a raising helper under `Enum.each/2`. The guides show both and
+   name the trap.
 2. **The `if condition, do: fail!(...)` idiom is retired**, because it
    returns `nil` when the check passes. A check is written as a predicate
    (`state.net >= state.fees`), as `condition or fail!("...", ...)` when it
@@ -59,20 +92,22 @@ predicate than to a test body, and this record chooses the predicate rule.
 5. **An `@eventually` function must return a 1-arity function.** Any other
    return is a check failure at once, at the step that triggered the check,
    naming the check and the value.
-6. **The predicate only ever returns a value judged for truthiness.** `nil`
-   and `false` mean "not yet"; anything else means satisfied. A raise inside
-   the predicate is a check failure at once, naming the check, the poll
-   count and the exception, never "not yet". An exit or throw inside the
+6. **The predicate returns a verdict.** `nil` and `false` mean "not yet";
+   `{:fail, reason}` means "never": the window ends at once as a check
+   failure with that reason (a payment that reached `:failed` no longer waits
+   out the timeout to report "never became `:confirmed`"); any other value
+   means satisfied. A raise inside the predicate is a check failure at once,
+   naming the check, the poll count and the exception, never "not yet". An exit or throw inside the
    predicate is caught and reported the same way, so the poller never kills
    the run. "Not yet" is written as a falsy return: the documentation teaches
    total predicates over the projection state (`get_in/2`, `match?/2`, a
    pattern with a fallback clause) and a timeout report reads "never became
    true" with nothing else to explain.
-7. **One verdict vocabulary for the three kinds.** A `@check` judges the
-   truthiness of its return now. An `@eventually` judges the truthiness of
-   its predicate's return within the window. A `@compare` judges its return
-   against the reference's through the relation (DR-051). In all three a
-   raise is a failure.
+7. **One verdict vocabulary for the three kinds.** A `@check` judges its
+   return now. An `@eventually` judges its predicate's return within the
+   window. A `@compare` judges its return against the reference's through the
+   relation (DR-051), whose return is read by the same grammar. In all three
+   a raise is a failure and `{:fail, reason}` is the reasoned failure.
 
 ## Consequences
 
@@ -89,7 +124,13 @@ predicate than to a test body, and this record chooses the predicate rule.
   predicates. A predicate bug now costs one poll, not one window per trigger.
 - `StatePoller` drops `last_predicate_error`; its rescue and catch clauses
   convert to a failure message instead of continuing.
-- A predicate is the shortest check, and it is now correct.
+- A predicate is the shortest check, and it is now correct; `condition ||
+  {:fail, "reason"}` is the shortest reasoned one.
+- Relations change their rich form from `{:mismatch, detail}` to
+  `{:fail, detail}`; the `using:` migration of DR-051 carries it, so `using:`
+  changes once. `Equivalence.verdict/3` is replaced by `Verdict.read/1`.
+- An `@eventually` window can end by verdict; the eventual-consistency spec,
+  the poller and the report distinguish "never" from a timeout.
 - No new failure kind and no persistence change: the verdict failure is a
   check failure with a message.
 
@@ -109,6 +150,15 @@ predicate than to a test body, and this record chooses the predicate rule.
   Retry-on-assertion helpers in test libraries exist because their predicate
   is written with `assert`; here the predicate returns a value, so a falsy
   return is the one spelling of "not yet".
+- **A bare exception struct as the reasoned failure ("a falsy Failure").**
+  Rejected: Elixir truthiness is closed to `nil` and `false`, so the struct
+  is truthy in every `&&`, `if` and `Enum.all?/2`; a returned exception has
+  no precedent outside a tuple; and `PropertyDamage.Failure.*` already names
+  the report's failure records.
+- **`{:error, reason}` as the tag.** Rejected: it borrows the general error
+  convention for a verdict, reads as "the comparator broke" on a relation,
+  and gains nothing, since no code outside this library matches a verdict
+  and `with` composes on any tag.
 - **A heuristic that detects every `nil`-returning body.** Rejected: not
   decidable at compile time; the guard covers the taught idiom and the run
   time message covers the rest.

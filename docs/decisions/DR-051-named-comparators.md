@@ -50,8 +50,11 @@ about one in eight carried a `using:`; the rest compared under `==`.
    literals a module attribute can hold (numbers, atoms, strings, lists,
    tuples, maps, module names); a function value in `args` is an error that
    names the form to use instead. Without `using:` the relation is `==`.
-   The contract of the relation's answer is unchanged from DR-046 item 2:
-   `:match`, a boolean or `{:mismatch, detail}`.
+   The relation's answer is a verdict under DR-052's grammar: truthy to
+   agree, `nil` or `false` to disagree with both values reported,
+   `{:fail, reason}` to disagree with a message or an exception. `:match`
+   and `{:mismatch, detail}` of DR-046 items 2 and 10 are retired, and
+   `Equivalence.verdict/3` becomes `Verdict.read/1`.
 3. **Checked at compile time.** An unknown form, a local function that is
    missing or has the wrong arity, and a module that does not export the
    function are each a `CompileError` naming the observation, the `using:`
@@ -86,6 +89,8 @@ about one in eight carried a `using:`; the rest compared under `==`.
 
 ## Consequences
 
+- Breaking for every relation that returned `:match` or `{:mismatch, _}`:
+  `:match` is simply truthy now, `{:mismatch, d}` becomes `{:fail, d}`.
 - Breaking for every `using:` value: `&local/2` becomes `:local`, `&Mod.fun/2`
   becomes `{Mod, :fun}`, a closure or a helper pipeline becomes a named
   private function. The CHANGELOG lists the change as BREAKING with the
