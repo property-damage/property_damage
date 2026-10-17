@@ -42,8 +42,9 @@ What it validates:
   and faithful `GetThenSet` branches are never falsely flagged (across seeds),
   while a `LostUpdateAdapter` that reports every write from a stale snapshot
   produces lost-update events `PropertyDamage.Linearization` refutes, surfacing
-  a `:linearization_failed` failure that shrinks to the minimal two-`GetThenSet`
-  race. Note: the executor runs branches sequentially over one shared context
+  a `:linearization_failed` failure that shrinks to the minimal two
+  `GetThenSet` commands. What layer 2 detects is a stale report under
+  sequential calls, not a race: the executor runs branches sequentially over one shared context
   and checks linearizability of the observed events *analytically* (it does not
   run branches concurrently), so the lost update is injected at the adapter
   level -- the same technique as the framework's `ets_linearization_test.exs`;

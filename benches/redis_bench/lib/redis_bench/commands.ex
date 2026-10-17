@@ -62,8 +62,9 @@ defmodule RedisBench.Commands.GetThenSet do
   linearizable, so it can never lose an update; a `GET`-then-`SET` is two
   separate round-trips, so concurrent read-modify-writes over separate
   connections can both read the same value and both write the same result,
-  losing one update. This is the command whose branches the linearization
-  checker refutes when the race bites.
+  losing one update. Under `branching:` the branches run one after another, so
+  the race itself never happens there; what the linearization checker refutes
+  is an adapter that reports a stale `from` for a later write.
   """
   use PropertyDamage.Command
 
