@@ -41,6 +41,16 @@ the formatter the exporters already use.
 
 **Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/mix/tasks/pd.replay.ex`, `lib/mix/tasks/pd.reshrink.ex`, `test/mix/tasks/pd_replay_test.exs`, `test/mix/tasks/pd_reshrink_test.exs`
 
+### 2026-10-17T17:38 · commit · d2a3dd0
+
+fix(report): badge poller, telemetry and injected events in the Event Log
+
+The terminal report and the timeline each carried their own badge table,
+and both lacked the three sources the event log entry documents last, so
+those events printed as ???. One table now serves both printers.
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/failure_report/formatter.ex`, `lib/property_damage/failure_report/source_badge.ex`, `lib/property_damage/failure_report/timeline.ex`, `lib/property_damage/validation.ex`, `test/property_damage/executor/stepping_outcome_test.exs`, `test/property_damage/failure_report/timeline_test.exs`, `test/property_damage/formatter_test.exs`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not

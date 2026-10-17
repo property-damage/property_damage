@@ -162,4 +162,20 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
   # `reset/0` emits its escape unconditionally even under `color: false`, so
   # strip all ANSI to assert on plain text.
   defp strip_ansi(text), do: String.replace(text, ~r/\e\[[0-9;]*m/, "")
+
+  describe "color: false" do
+    test "the event timeline emits no escape bytes" do
+      output = Timeline.format_event_timeline(report_with_async_event(), color: false)
+      refute output =~ "\e[", "plain output leaked an ANSI escape sequence"
+    end
+
+    test "a linear timeline emits no escape bytes" do
+      report = report_with_async_event()
+      refute Timeline.format(report, color: false) =~ "\e["
+    end
+
+    test "a branching timeline emits no escape bytes" do
+      refute Timeline.format(branch_failure_report(), color: false) =~ "\e["
+    end
+  end
 end

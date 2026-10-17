@@ -915,6 +915,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The timeline honors `color: false`.** `FailureReport.Timeline` reset its
+  colors with an escape sequence that ignored the option, so plain output
+  carried `\e[0m` after every colored span.
 - **The printed Event Log names every event source.** An event a resource
   poller delivered, a telemetry receiver derived or an adapter injected
   mid-execution printed with a `???` badge in the terminal report and the
