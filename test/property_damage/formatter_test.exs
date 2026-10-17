@@ -6,6 +6,7 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.{Placeholder, Sequence.Position}
   alias PropertyDamage.{Failure, FailureReport, Sequence}
   alias PropertyDamage.FailureReport.Formatter
 
@@ -15,6 +16,10 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
 
   defmodule Observed do
     defstruct [:tag]
+  end
+
+  defmodule UseAccount do
+    defstruct [:account_id, :note]
   end
 
   defp sut_failure do
@@ -117,6 +122,55 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
       assert out =~ "TEL"
       assert out =~ "EMT"
       refute out =~ "???", "an event source printed as unknown"
+    end
+  end
+
+  describe "command arguments" do
+    defp placeholder(offset) do
+      %Placeholder{
+        path: [:account_id],
+        position: %Position{section: :setup, offset: offset},
+        event_index: 0
+      }
+    end
+
+    defp report_with_command(command) do
+      seq = Sequence.linear([command])
+
+      FailureReport.new(
+        seed: 1,
+        run_number: 1,
+        failed_at_index: 0,
+        failure_reason: Failure.check_failed(:NonNegativeBalance, "Balance cannot be negative"),
+        original_sequence: seq,
+        shrunk_sequence: seq
+      )
+    end
+
+    test "two placeholders print as two whole ids" do
+      first =
+        Formatter.format(report_with_command(%UseAccount{account_id: placeholder(0)}), :terminal,
+          color: false
+        )
+
+      second =
+        Formatter.format(report_with_command(%UseAccount{account_id: placeholder(1)}), :terminal,
+          color: false
+        )
+
+      assert first =~ inspect(placeholder(0))
+      assert second =~ inspect(placeholder(1))
+    end
+
+    test "a cut value ends with a marker" do
+      wide = %{some_long_key_name: :another_long_value}
+      assert String.length(inspect(wide)) > 30
+
+      out =
+        Formatter.format(report_with_command(%UseAccount{note: wide}), :terminal, color: false)
+
+      assert out =~ ~r/note: %\{some_long_key_name: .*\.\.\./,
+             "a value cut by the formatter ends with ..."
     end
   end
 end

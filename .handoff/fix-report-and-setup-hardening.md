@@ -51,6 +51,16 @@ those events printed as ???. One table now serves both printers.
 
 **Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/failure_report/formatter.ex`, `lib/property_damage/failure_report/source_badge.ex`, `lib/property_damage/failure_report/timeline.ex`, `lib/property_damage/validation.ex`, `test/property_damage/executor/stepping_outcome_test.exs`, `test/property_damage/failure_report/timeline_test.exs`, `test/property_damage/formatter_test.exs`
 
+### 2026-10-17T17:38 · commit · 9f241e7
+
+fix(report): honor color: false in the timeline
+
+Every colored span in the timeline ended with a reset sequence written
+unconditionally, so plain output kept the reset bytes. The reset now
+follows the color flag like the other color helpers.
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/failure_report/timeline.ex`, `test/property_damage/failure_report/timeline_test.exs`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not

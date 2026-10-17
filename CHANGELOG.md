@@ -915,6 +915,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A placeholder argument prints whole in the terminal report.** The
+  failing command's arguments were cut at a fixed width with no marker, so a
+  placeholder lost its closing bracket and two distinct ids could print alike.
+  A placeholder is never cut; any other value that is cut ends with `...`.
 - **The timeline honors `color: false`.** `FailureReport.Timeline` reset its
   colors with an escape sequence that ignored the option, so plain output
   carried `\e[0m` after every colored span.

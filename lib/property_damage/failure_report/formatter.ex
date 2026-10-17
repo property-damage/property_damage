@@ -1350,14 +1350,17 @@ defmodule PropertyDamage.FailureReport.Formatter do
     module_name(event.__struct__)
   end
 
+  # A placeholder is an identifier: cut, two ids read as one, so it prints
+  # whole. Every other value is cut to a short width with a marker.
+  defp inspect_short(%PropertyDamage.Placeholder{} = placeholder), do: inspect(placeholder)
+
   defp inspect_short(value) when is_binary(value) and byte_size(value) > 20 do
     "\"#{String.slice(value, 0, 17)}...\""
   end
 
   defp inspect_short(value) do
-    value
-    |> inspect(limit: 3)
-    |> String.slice(0, 30)
+    text = inspect(value, limit: 3)
+    if String.length(text) > 30, do: String.slice(text, 0, 27) <> "...", else: text
   end
 
   defp summarize_state(state) when is_struct(state) do
