@@ -88,4 +88,20 @@ defmodule PropertyDamage.CaptureInjectorsTest do
     trace = RunTrace.capture(model: Model, targets: [Adapter], seed: 1, max_commands: 3)
     refute Enum.any?(RunTrace.async_entries(trace), &match?(%{event: %Injected{}}, &1))
   end
+
+  test "a failing injector setup yields a trace with a setup-failed outcome" do
+    trace =
+      RunTrace.capture(
+        model: Model,
+        targets: [{Adapter, injectors: [PropertyDamage.Test.RefusingInjector]}],
+        seed: 1,
+        max_commands: 3
+      )
+
+    assert {:fail, %PropertyDamage.Failure{} = failure} = trace.outcome
+    assert PropertyDamage.Failure.kind(failure) == :setup_failed
+    assert PropertyDamage.Failure.detail(failure) == :no_listener
+    assert trace.event_log == []
+    assert %PropertyDamage.Sequence{} = trace.plan
+  end
 end

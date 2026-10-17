@@ -11,6 +11,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     Target
   }
 
+  alias PropertyDamage.FailureReport.SourceBadge
   alias PropertyDamage.Sequence.Position
 
   @type format :: :terminal | :markdown | :json | :compact
@@ -760,16 +761,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
     end
   end
 
-  defp source_badge(source, color) do
-    case source do
-      :command -> "#{green(color)}CMD#{reset(color)}"
-      :injector -> "#{yellow(color)}INJ#{reset(color)}"
-      :nemesis -> "#{red(color)}NEM#{reset(color)}"
-      :mock -> "#{magenta(color)}MOC#{reset(color)}"
-      :stutter -> "#{blue(color)}STU#{reset(color)}"
-      _ -> "#{dim(color)}???#{reset(color)}"
-    end
-  end
+  defp source_badge(source, color), do: SourceBadge.badge(source, color)
 
   # The seed reproduction, the call that regenerates the failing target's
   # sequence, and last the call that replays the artifact (or why there is
@@ -1358,14 +1350,17 @@ defmodule PropertyDamage.FailureReport.Formatter do
     module_name(event.__struct__)
   end
 
+  # A placeholder is an identifier: cut, two ids read as one, so it prints
+  # whole. Every other value is cut to a short width with a marker.
+  defp inspect_short(%PropertyDamage.Placeholder{} = placeholder), do: inspect(placeholder)
+
   defp inspect_short(value) when is_binary(value) and byte_size(value) > 20 do
     "\"#{String.slice(value, 0, 17)}...\""
   end
 
   defp inspect_short(value) do
-    value
-    |> inspect(limit: 3)
-    |> String.slice(0, 30)
+    text = inspect(value, limit: 3)
+    if String.length(text) > 30, do: String.slice(text, 0, 27) <> "...", else: text
   end
 
   defp summarize_state(state) when is_struct(state) do
@@ -1414,12 +1409,6 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp yellow(true), do: "\e[33m"
   defp yellow(false), do: ""
-
-  defp blue(true), do: "\e[34m"
-  defp blue(false), do: ""
-
-  defp magenta(true), do: "\e[35m"
-  defp magenta(false), do: ""
 
   defp cyan(true), do: "\e[36m"
   defp cyan(false), do: ""

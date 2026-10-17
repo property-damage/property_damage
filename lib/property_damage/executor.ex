@@ -1127,10 +1127,13 @@ defmodule PropertyDamage.Executor do
                   })
 
                 # Spawn pollers for any @eventually checks triggered by these events
-                new_state = maybe_spawn_pollers(new_state, events, model, index)
-                new_state = update_poller_state_getters(new_state)
+                case maybe_spawn_pollers(new_state, events, model, resolved_command, index) do
+                  {:ok, new_state} ->
+                    {:ok, update_poller_state_getters(new_state)}
 
-                {:ok, new_state}
+                  {:error, check_name, reason, failed_state} ->
+                    {:error, Failure.check_failed(check_name, reason), failed_state}
+                end
 
               {:error, :idempotency_violation, violation} ->
                 failed_state =
@@ -1793,21 +1796,25 @@ defmodule PropertyDamage.Executor do
     Code.ensure_loaded?(module) and function_exported?(module, :awaits, 2)
   end
 
-  defp maybe_spawn_pollers(state, events, model, command_index) do
+  # Spawns a poller for every `@eventually` check an event of this step
+  # triggers. The check function's return must be the 1-arity predicate the
+  # poller calls; any other return is a check failure at this step, handled
+  # under the run's `check_mode:` like a synchronous check that failed.
+  # Returns `{:ok, state}` or `{:error, check_name, reason, state}`.
+  defp maybe_spawn_pollers(state, events, model, command, command_index) do
     check_mode = state.check_mode
 
     # Skip if checks are disabled
     if check_mode == :disabled do
-      state
+      {:ok, state}
     else
       all_projections = PropertyDamage.Model.projection_modules(model)
 
-      # For each event, check if any @eventually checks should be spawned.
-      # Each spawned poller is paired with its (projection, check name) so
-      # the spawn can be recorded as a firing (DR-026): spawning IS firing for a
-      # liveness check (the after: event arrived and verification began), so a
-      # timed-out or still-pending poller still counts as exercised.
-      spawned =
+      # For each event, the @eventually checks it triggers, each with the
+      # value its check function returned. Dispatch by function_name (the
+      # actual def), since :name is the logical (assert_-stripped) name shared
+      # with synchronous checks.
+      triggered =
         for event <- events,
             event_module = event.__struct__,
             projection <- all_projections,
@@ -1815,54 +1822,103 @@ defmodule PropertyDamage.Executor do
             check <- projection.__checks__(),
             check.type == :polling,
             Projection.event_matches_poll_trigger?(check.eventually, event_module) do
-          # Get current projection state
           projection_state = Map.get(state.projections, projection)
-
-          # Call the check function to get the predicate. Dispatch by
-          # function_name (the actual def), since :name is the logical
-          # (assert_-stripped) name shared with synchronous checks.
-          predicate = apply(projection, check.function_name, [projection_state, event])
-
-          # Build state getter for the poller
-          get_state_fn = fn proj ->
-            # This will be updated by the executor as state changes
-            Map.get(state.projections, proj)
-          end
-
-          # Spawn the poller
-          poller =
-            StatePoller.start(
-              predicate: predicate,
-              predicate_source: check.predicate_source,
-              projection: projection,
-              interval_ms: check.eventually.interval_ms,
-              timeout_ms: check.eventually.timeout_ms,
-              triggered_by: %{
-                event: event,
-                check_name: check.name,
-                command_index: command_index
-              },
-              get_state_fn: get_state_fn,
-              telemetry: state.telemetry
-            )
-
-          {projection, check.name, poller}
+          returned = apply(projection, check.function_name, [projection_state, event])
+          {projection, check, event, returned}
         end
 
-      if Enum.empty?(spawned) do
-        state
-      else
-        new_pollers = Enum.map(spawned, fn {_proj, _name, poller} -> poller end)
+      {predicates, others} =
+        Enum.split_with(triggered, fn {_projection, _check, _event, returned} ->
+          is_function(returned, 1)
+        end)
 
-        counters =
-          Enum.reduce(spawned, state.check_counters, fn {proj, name, _poller}, acc ->
-            bump_fired(acc, proj, name)
-          end)
-
-        existing_pollers = state.active_pollers
-        %{state | active_pollers: existing_pollers ++ new_pollers, check_counters: counters}
+      case reject_non_predicates(state, others, command, command_index) do
+        {:ok, state} -> {:ok, spawn_pollers(state, predicates, command_index)}
+        {:error, _name, _reason, _state} = error -> error
       end
     end
+  end
+
+  # The `@eventually` functions that returned something other than a
+  # predicate, judged under the run's `check_mode:`: `:halt` ends the run at
+  # the first, `:record` records each and goes on, `:log` warns and goes on.
+  defp reject_non_predicates(state, [], _command, _command_index), do: {:ok, state}
+
+  defp reject_non_predicates(state, others, command, command_index) do
+    require Logger
+
+    Enum.reduce_while(others, {:ok, state}, fn {_projection, check, event, returned},
+                                               {:ok, state} ->
+      reason =
+        "@eventually #{check.name} must return a 1-arity predicate function " <>
+          "for the poller to call; it returned #{inspect(returned)}"
+
+      case state.check_mode do
+        :halt ->
+          {:halt, {:error, check.name, reason, state}}
+
+        :record ->
+          failure = %{
+            check_name: check.name,
+            reason: reason,
+            command: command,
+            command_index: command_index,
+            step_type: :event,
+            module: event.__struct__,
+            timestamp: System.monotonic_time(:millisecond)
+          }
+
+          {:cont, {:ok, %{state | check_failures: [failure | state.check_failures]}}}
+
+        :log ->
+          Logger.warning("Check failed: #{check.name} - #{reason}")
+          {:cont, {:ok, state}}
+      end
+    end)
+  end
+
+  defp spawn_pollers(state, [], _command_index), do: state
+
+  defp spawn_pollers(state, predicates, command_index) do
+    # Each spawned poller is paired with its (projection, check name) so
+    # the spawn can be recorded as a firing (DR-026): spawning IS firing for a
+    # liveness check (the after: event arrived and verification began), so a
+    # timed-out or still-pending poller still counts as exercised.
+    spawned =
+      for {projection, check, event, predicate} <- predicates do
+        # Build state getter for the poller
+        get_state_fn = fn proj ->
+          # This will be updated by the executor as state changes
+          Map.get(state.projections, proj)
+        end
+
+        poller =
+          StatePoller.start(
+            predicate: predicate,
+            predicate_source: check.predicate_source,
+            projection: projection,
+            interval_ms: check.eventually.interval_ms,
+            timeout_ms: check.eventually.timeout_ms,
+            triggered_by: %{
+              event: event,
+              check_name: check.name,
+              command_index: command_index
+            },
+            get_state_fn: get_state_fn,
+            telemetry: state.telemetry
+          )
+
+        {projection, check.name, poller}
+      end
+
+    new_pollers = Enum.map(spawned, fn {_proj, _name, poller} -> poller end)
+
+    counters =
+      Enum.reduce(spawned, state.check_counters, fn {proj, name, _poller}, acc ->
+        bump_fired(acc, proj, name)
+      end)
+
+    %{state | active_pollers: state.active_pollers ++ new_pollers, check_counters: counters}
   end
 
   @doc false

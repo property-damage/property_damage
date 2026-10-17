@@ -2,6 +2,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
   @moduledoc false
 
   alias PropertyDamage.{FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.FailureReport.SourceBadge
 
   @default_column_width 20
 
@@ -106,8 +107,8 @@ defmodule PropertyDamage.FailureReport.Timeline do
     count = length(indexed)
 
     header = """
-    #{bold(color)}Timeline (Linear Execution)#{reset()}
-    #{dim(color)}════════════════════════════════════════════════════#{reset()}
+    #{bold(color)}Timeline (Linear Execution)#{reset(color)}
+    #{dim(color)}════════════════════════════════════════════════════#{reset(color)}
 
     """
 
@@ -123,17 +124,17 @@ defmodule PropertyDamage.FailureReport.Timeline do
         )
       end)
 
-    header <> body <> "\n\n#{dim(color)}► = Failure point#{reset()}"
+    header <> body <> "\n\n#{dim(color)}► = Failure point#{reset(color)}"
   end
 
   defp format_linear_command(cmd, idx, is_failure, is_last, color) do
     connector = if is_last, do: "└─", else: "├─"
-    marker = if is_failure, do: " #{red(color)}►#{reset()}", else: ""
+    marker = if is_failure, do: " #{red(color)}►#{reset(color)}", else: ""
     idx_str = "[#{idx}]"
     cmd_name = short_module_name(cmd.__struct__)
     fields = format_fields_short(cmd)
 
-    "#{connector}#{idx_str} #{cyan(color)}#{cmd_name}#{reset()} #{dim(color)}#{fields}#{reset()}#{marker}"
+    "#{connector}#{idx_str} #{cyan(color)}#{cmd_name}#{reset(color)} #{dim(color)}#{fields}#{reset(color)}#{marker}"
   end
 
   # ============================================================================
@@ -148,8 +149,8 @@ defmodule PropertyDamage.FailureReport.Timeline do
     # Header
     sections = [
       """
-      #{bold(color)}Timeline (Parallel Execution)#{reset()}
-      #{dim(color)}════════════════════════════════════════════════════#{reset()}
+      #{bold(color)}Timeline (Parallel Execution)#{reset(color)}
+      #{dim(color)}════════════════════════════════════════════════════#{reset(color)}
       """
       | sections
     ]
@@ -160,7 +161,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
         prefix_text = format_prefix_section(prefix, failed?, color)
 
         [
-          "\n#{yellow(color)}PREFIX#{reset()} #{dim(color)}(sequential)#{reset()}\n#{prefix_text}"
+          "\n#{yellow(color)}PREFIX#{reset(color)} #{dim(color)}(sequential)#{reset(color)}\n#{prefix_text}"
           | sections
         ]
       else
@@ -182,7 +183,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
           )
 
         [
-          "\n#{yellow(color)}BRANCHES#{reset()} #{dim(color)}(parallel)#{reset()}\n#{branch_text}"
+          "\n#{yellow(color)}BRANCHES#{reset(color)} #{dim(color)}(parallel)#{reset(color)}\n#{branch_text}"
           | sections
         ]
       else
@@ -200,7 +201,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
         suffix_text = format_suffix_section(suffix, suffix_start, failed?, color)
 
         [
-          "\n#{yellow(color)}SUFFIX#{reset()} #{dim(color)}(sequential)#{reset()}\n#{suffix_text}"
+          "\n#{yellow(color)}SUFFIX#{reset(color)} #{dim(color)}(sequential)#{reset(color)}\n#{suffix_text}"
           | sections
         ]
       else
@@ -208,7 +209,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
       end
 
     # Legend
-    sections = ["\n#{dim(color)}► = Failure point#{reset()}" | sections]
+    sections = ["\n#{dim(color)}► = Failure point#{reset(color)}" | sections]
 
     sections
     |> Enum.reverse()
@@ -288,7 +289,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
   end
 
   defp format_branch_cell(cmd, idx, is_failure, color, column_width) do
-    marker = if is_failure, do: " #{red(color)}►#{reset()}", else: ""
+    marker = if is_failure, do: " #{red(color)}►#{reset(color)}", else: ""
     cmd_name = short_module_name(cmd.__struct__)
 
     # Calculate visible length
@@ -297,10 +298,10 @@ defmodule PropertyDamage.FailureReport.Timeline do
     if visible_len > column_width - 2 do
       truncated = String.slice("[#{idx}] #{cmd_name}", 0, column_width - 5) <> ".."
 
-      " #{cyan(color)}#{truncated}#{reset()}#{marker}" <>
+      " #{cyan(color)}#{truncated}#{reset(color)}#{marker}" <>
         String.duplicate(" ", max(0, column_width - visible_len - 1))
     else
-      " #{cyan(color)}[#{idx}] #{cmd_name}#{reset()}#{marker}" <>
+      " #{cyan(color)}[#{idx}] #{cmd_name}#{reset(color)}#{marker}" <>
         String.duplicate(" ", column_width - visible_len - 1)
     end
   end
@@ -342,8 +343,8 @@ defmodule PropertyDamage.FailureReport.Timeline do
     max_events = Keyword.get(opts, :max_events_per_command, 5)
 
     header = """
-    #{bold(color)}Command → Event Timeline#{reset()}
-    #{dim(color)}════════════════════════════════════════════════════#{reset()}
+    #{bold(color)}Command → Event Timeline#{reset(color)}
+    #{dim(color)}════════════════════════════════════════════════════#{reset(color)}
 
     """
 
@@ -388,17 +389,17 @@ defmodule PropertyDamage.FailureReport.Timeline do
       |> Enum.map_join("\n", fn entry ->
         event_name = short_module_name(entry.event.__struct__)
         source = format_source_badge(entry.source, color)
-        "    #{source} #{green(color)}→#{reset()} #{event_name}"
+        "    #{source} #{green(color)}→#{reset(color)} #{event_name}"
       end)
 
     truncated =
       if length(events) > max_events do
-        "\n    #{dim(color)}... and #{length(events) - max_events} more events#{reset()}"
+        "\n    #{dim(color)}... and #{length(events) - max_events} more events#{reset(color)}"
       else
         ""
       end
 
-    "\n\n#{bold(color)}ASYNC#{reset()} #{dim(color)}(no command index)#{reset()}\n" <>
+    "\n\n#{bold(color)}ASYNC#{reset(color)} #{dim(color)}(no command index)#{reset(color)}\n" <>
       events_text <> truncated
   end
 
@@ -408,12 +409,14 @@ defmodule PropertyDamage.FailureReport.Timeline do
   # branch, keeping fault-injected/retry events visually distinct from SUT
   # output.
   defp format_command_with_events(cmd, idx, events, is_failure, max_events, color) do
-    marker = if is_failure, do: " #{red(color)}► FAILURE#{reset()}", else: ""
+    marker = if is_failure, do: " #{red(color)}► FAILURE#{reset(color)}", else: ""
     cmd_name = short_module_name(cmd.__struct__)
-    cmd_line = "#{bold(color)}[#{idx}]#{reset()} #{cyan(color)}#{cmd_name}#{reset()}#{marker}"
+
+    cmd_line =
+      "#{bold(color)}[#{idx}]#{reset(color)} #{cyan(color)}#{cmd_name}#{reset(color)}#{marker}"
 
     if events == [] do
-      cmd_line <> "\n    #{dim(color)}(no events)#{reset()}"
+      cmd_line <> "\n    #{dim(color)}(no events)#{reset(color)}"
     else
       events_text =
         events
@@ -421,13 +424,16 @@ defmodule PropertyDamage.FailureReport.Timeline do
         |> Enum.map_join("\n", fn entry ->
           event_name = short_module_name(entry.event.__struct__)
           source = format_source_badge(entry.source, color)
-          branch = if entry.branch_id, do: " #{dim(color)}B#{entry.branch_id}#{reset()}", else: ""
-          "    #{source}#{branch} #{green(color)}→#{reset()} #{event_name}"
+
+          branch =
+            if entry.branch_id, do: " #{dim(color)}B#{entry.branch_id}#{reset(color)}", else: ""
+
+          "    #{source}#{branch} #{green(color)}→#{reset(color)} #{event_name}"
         end)
 
       truncated =
         if length(events) > max_events do
-          "\n    #{dim(color)}... and #{length(events) - max_events} more events#{reset()}"
+          "\n    #{dim(color)}... and #{length(events) - max_events} more events#{reset(color)}"
         else
           ""
         end
@@ -436,16 +442,7 @@ defmodule PropertyDamage.FailureReport.Timeline do
     end
   end
 
-  defp format_source_badge(source, color) do
-    case source do
-      :command -> "#{green(color)}CMD#{reset()}"
-      :injector -> "#{yellow(color)}INJ#{reset()}"
-      :nemesis -> "#{red(color)}NEM#{reset()}"
-      :mock -> "#{magenta(color)}MOC#{reset()}"
-      :stutter -> "#{blue(color)}STU#{reset()}"
-      _ -> "#{dim(color)}???#{reset()}"
-    end
-  end
+  defp format_source_badge(source, color), do: SourceBadge.badge(source, color)
 
   # ============================================================================
   # Helpers
@@ -489,12 +486,6 @@ defmodule PropertyDamage.FailureReport.Timeline do
   defp yellow(true), do: "\e[33m"
   defp yellow(false), do: ""
 
-  defp blue(true), do: "\e[34m"
-  defp blue(false), do: ""
-
-  defp magenta(true), do: "\e[35m"
-  defp magenta(false), do: ""
-
   defp cyan(true), do: "\e[36m"
   defp cyan(false), do: ""
 
@@ -504,5 +495,6 @@ defmodule PropertyDamage.FailureReport.Timeline do
   defp dim(true), do: "\e[2m"
   defp dim(false), do: ""
 
-  defp reset, do: "\e[0m"
+  defp reset(true), do: "\e[0m"
+  defp reset(false), do: ""
 end

@@ -74,6 +74,17 @@ defmodule PropertyDamageTest do
     end
   end
 
+  # A mock service whose setup/1 raises.
+  defmodule RefusingMock do
+    use PropertyDamage.MockServiceAdapter
+
+    @impl true
+    def init_state, do: %{}
+
+    @impl true
+    def setup(_config), do: raise("mock setup boom")
+  end
+
   # An injector whose setup/1 raises. It reports the run's EventQueue pid to the
   # process it runs in and to the processes that started it (a target runs in
   # its own process, started by the test process) before blowing up, letting
@@ -163,6 +174,50 @@ defmodule PropertyDamageTest do
       assert_receive {:DOWN, ^ref, :process, ^event_queue, _reason}, 1_000
     end
 
+    test "an injector whose setup raises tears down the injectors set up before it" do
+      config = %{test_pid: self()}
+
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed}} =
+               PropertyDamage.run(
+                 model: ExecutorModel,
+                 targets: [
+                   {SimpleAdapter,
+                    config: config,
+                    injectors: [PropertyDamage.Test.RecordingInjector, LeakProbeInjector]}
+                 ],
+                 max_runs: 1,
+                 max_commands: 3,
+                 validate: false
+               )
+
+      assert_received {:injector_setup, _config, context}
+      assert_received {:injector_teardown, ^context}
+    end
+
+    test "a mock whose setup raises tears down the injectors set up before it" do
+      config = %{test_pid: self()}
+
+      assert {:error, %PropertyDamage.FailureReport{kind: :setup_failed} = report} =
+               PropertyDamage.run(
+                 model: ExecutorModel,
+                 targets: [
+                   {SimpleAdapter,
+                    config: config,
+                    injectors: [PropertyDamage.Test.RecordingInjector],
+                    mocks: [{RefusingMock, %{}}]}
+                 ],
+                 max_runs: 1,
+                 max_commands: 3,
+                 validate: false
+               )
+
+      assert %RuntimeError{message: "mock setup boom"} =
+               PropertyDamage.Failure.detail(report.failure_reason)
+
+      assert_received {:injector_setup, _config, context}
+      assert_received {:injector_teardown, ^context}
+    end
+
     test "an injector's setup gets the target config and its teardown gets the setup context" do
       config = %{test_pid: self(), tenant: "solo"}
 
@@ -238,12 +293,16 @@ defmodule PropertyDamageTest do
 
   describe "execute/2 error boundaries" do
     @tag :capture_log
-    test "an injector whose setup raises does not leak the EventQueue" do
-      assert_raise RuntimeError, ~r/injector setup boom/, fn ->
-        PropertyDamage.execute([],
-          targets: [{SimpleAdapter, injectors: [LeakProbeInjector]}]
-        )
-      end
+    test "an injector whose setup raises is a setup failure and does not leak the EventQueue" do
+      assert {:error, %PropertyDamage.Failure{} = failure} =
+               PropertyDamage.execute([],
+                 targets: [{SimpleAdapter, injectors: [LeakProbeInjector]}]
+               )
+
+      assert PropertyDamage.Failure.kind(failure) == :setup_failed
+
+      assert %RuntimeError{message: "injector setup boom"} =
+               PropertyDamage.Failure.detail(failure)
 
       assert_received {:leaked_event_queue, event_queue}
       refute Process.alive?(event_queue)

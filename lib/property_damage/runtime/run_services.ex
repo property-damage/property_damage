@@ -14,21 +14,26 @@ defmodule PropertyDamage.Runtime.RunServices do
   # Starts an event queue with the target's injectors and mocks for the linear
   # engine, runs `fun` with the queue and the mock registry, and releases all
   # of them again. The queue's stop is guaranteed by the outer `after`, so a
-  # raise in injector or mock setup cannot leak it. An injector setup that
-  # fails returns `{:error, reason}` without calling `fun`, the shape
-  # `PropertyDamage.Executor.run/4` gives when the adapter's setup fails.
+  # raise in injector or mock setup cannot leak it; the injectors are torn
+  # down by the middle `after`, so a mock setup that raises cannot leak them
+  # either. An injector setup that fails or raises returns `{:error, reason}`
+  # without calling `fun`, the shape `PropertyDamage.Executor.run/4` gives
+  # when the adapter's setup fails.
   def with_services(target, fun) do
     {:ok, event_queue} = EventQueue.start_link()
 
     try do
       case setup_injectors(target.injectors, target.config, event_queue) do
         {:ok, injector_contexts} ->
-          {mock_registry, mock_contexts} = setup_mocks(target.mocks, event_queue)
-
           try do
-            fun.(event_queue, mock_registry)
+            {mock_registry, mock_contexts} = setup_mocks(target.mocks, event_queue)
+
+            try do
+              fun.(event_queue, mock_registry)
+            after
+              teardown_mocks(mock_registry, mock_contexts)
+            end
           after
-            teardown_mocks(mock_registry, mock_contexts)
             teardown_injectors(injector_contexts)
           end
 
@@ -45,8 +50,9 @@ defmodule PropertyDamage.Runtime.RunServices do
   # run's event queue (the framework key wins). Returns the per-injector setup
   # contexts, which teardown_injectors/1 later hands back to each injector's
   # teardown/1; an injector without setup/1 gets `%{}`. The first setup that
-  # answers `{:error, reason}`, or anything but `{:ok, map}`, stops the setup:
-  # the injectors already set up are torn down and the error is returned.
+  # answers `{:error, reason}`, anything but `{:ok, map}`, or raises, stops
+  # the setup: the injectors already set up are torn down and the error is
+  # returned, a raise as the exception itself.
   def setup_injectors(injectors, config, event_queue) do
     injector_config = Map.merge(config, %{event_queue: event_queue})
 
@@ -72,6 +78,10 @@ defmodule PropertyDamage.Runtime.RunServices do
     else
       {:ok, %{}}
     end
+  rescue
+    exception -> {:error, exception}
+  catch
+    kind, reason -> {:error, {kind, reason}}
   end
 
   @doc false

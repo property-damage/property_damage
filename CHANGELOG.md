@@ -397,6 +397,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`latency:` and a non-default `check_mode:` are refused beside `branching:`.**
+  A branching run executes one branch at a time on one target through the
+  linear engine: it records no latency samples (`latency:` returned
+  `%{error: :no_data}`) and halts at the first failing check whatever
+  `check_mode:` said. Both combinations are option errors at run start. The
+  guides, the README, the option documentation and the concurrency
+  specification now say what the path does: branches run one after another,
+  the checker models the interleavings afterward, and no race is detected
+  (DR-053).
 - **BREAKING: persistence format version 14 becomes 15.** A report records the
   run's `check_mode`, the `campaign` a latency budget was judged over
   (`%{seed:, max_runs:}`, `nil` for every other kind),
@@ -915,6 +924,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An `@eventually` function that returns no predicate fails at its step.**
+  The poller took the function's return as its predicate without checking it,
+  so a function that answered the question itself (a boolean) raised
+  `BadFunctionError` on every poll behind a warning and the window timed out
+  as "never became true". The return is now checked when the poller would be
+  spawned: anything but a 1-arity function is a check failure at that step,
+  naming the check and the value, handled under `check_mode:` like a
+  synchronous check.
+- **A trace capture reports a failed injector setup.** `RunTrace.capture/1` of
+  a model without expansions raised `MatchError` when an injector's `setup/1`
+  returned `{:error, _}`, so `mix pd.audit` and `RunComparison` crashed instead
+  of reporting. The trace now carries a `:setup_failed` outcome and an empty
+  event log, as a capture through the scheduler already did.
+- **An injector setup that raises tears down the injectors set up before it.**
+  On every path that brings a target's injectors up (a run, a shrink attempt,
+  a trace capture, `PropertyDamage.execute/2`), a `setup/1` that raised left
+  the earlier injectors' `teardown/1` uncalled, and a mock `setup/1` that
+  raised left every injector up, on the per-run wiring and on the variant
+  path alike. The raise is now a `:setup_failed` failure whose detail is the
+  exception, as a raising adapter `setup/1` already was, the injectors set up
+  before it are torn down, and `execute/2` returns it instead of raising.
+- **A placeholder argument prints whole in the terminal report.** The
+  failing command's arguments were cut at a fixed width with no marker, so a
+  placeholder lost its closing bracket and two distinct ids could print alike.
+  A placeholder is never cut; any other value that is cut ends with `...`.
+- **The timeline honors `color: false`.** `FailureReport.Timeline` reset its
+  colors with an escape sequence that ignored the option, so plain output
+  carried `\e[0m` after every colored span.
+- **The printed Event Log names every event source.** An event a resource
+  poller delivered, a telemetry receiver derived or an adapter injected
+  mid-execution printed with a `???` badge in the terminal report and the
+  timeline. They print as `POL`, `TEL` and `EMT`, from one badge table both
+  printers share.
+- **`mix pd.replay` and `mix pd.reshrink` print a divergence's check name.**
+  Both tasks interpolated the `@compare` key tuple into their summary line, so
+  a `:diverged` or `:did_not_converge` report raised `Protocol.UndefinedError`
+  before either task did any work. The key now prints as `Projection.name`,
+  as the exporters print it.
 - **A rewritten root's id is in the target's simulated state.** In a target
   that ran a rewrite at a root that mints an `external()` id, the simulated
   state held the leaf's placeholder, while a later root carries the root's.

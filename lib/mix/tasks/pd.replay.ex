@@ -230,7 +230,7 @@ defmodule Mix.Tasks.Pd.Replay do
   end
 
   defp check_suffix(nil), do: ""
-  defp check_suffix(check), do: " (#{check})"
+  defp check_suffix(check), do: " (#{PropertyDamage.FailureReport.format_name(check)})"
 
   defp print_step(step, verbose) do
     IO.puts("  [#{step.index}] #{step.command_name} -> #{describe_result(step.result)}")

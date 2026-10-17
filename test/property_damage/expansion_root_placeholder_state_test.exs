@@ -217,6 +217,103 @@ defmodule PropertyDamage.ExpansionRootPlaceholderStateTest do
     defdelegate simulate(command, state), to: Model
   end
 
+  defmodule Guard do
+    @moduledoc false
+    # Fails once a use follows a reserve, so a failure needs a rewritten Open
+    # and a Use after it, and shrinking keeps both.
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{reserved: 0, used: 0}
+
+    @impl true
+    def apply(state, %Reserved{}), do: %{state | reserved: state.reserved + 1}
+    def apply(state, %Used{}), do: %{state | used: state.used + 1}
+    def apply(state, _other), do: state
+
+    @check every: 1
+    def no_use_after_reserve(state, _cmd_or_event) do
+      not (state.reserved >= 1 and state.used >= 1) or
+        PropertyDamage.fail!("a use after a reserve")
+    end
+  end
+
+  defmodule FollowModel do
+    @moduledoc false
+    # ReaderModel with a check that keeps a rewritten Open and a Use after it
+    # through shrinking, so a second target follows the reference's rewrite.
+    @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
+
+    @impl true
+    defdelegate commands, to: ReaderModel
+
+    @impl true
+    defdelegate command_sequence_projection, to: ReaderModel
+
+    @impl true
+    def check_projections, do: [Counts, Guard]
+
+    # Two entries for Open, so two `:random` targets can differ there; the
+    # second never reserves, so a run that fails ran the first.
+    @impl true
+    def expansions do
+      [
+        {Open, fn _open, _state -> [[Reserve, Confirm], [Confirm]] end}
+        | tl(ReaderModel.expansions())
+      ]
+    end
+
+    @impl true
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    defdelegate simulate(command, state), to: Model
+  end
+
+  defmodule LeafWhenModel do
+    @moduledoc false
+    # ReaderModel with Touch listed as a command whose `when:` reads the
+    # accounts the rewritten Open produced: a leaf's precondition is its
+    # module's `commands/0` `when:`, evaluated against the target's state.
+    @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
+
+    @impl true
+    def commands do
+      [
+        {Open, when: &(map_size(&1.accounts) == 0)},
+        {Use,
+         when: &(map_size(&1.accounts) > 0),
+         overrides: fn s ->
+           %{account_id: StreamData.member_of(Enum.sort(Map.keys(s.accounts)))}
+         end},
+        {Touch,
+         when: fn s ->
+           Enum.any?(s.accounts, fn {_id, account} -> match?(%{uses: _}, account) end)
+         end,
+         overrides: fn s ->
+           %{account_id: StreamData.member_of(Enum.sort(Map.keys(s.accounts)))}
+         end}
+      ]
+    end
+
+    @impl true
+    defdelegate command_sequence_projection, to: ReaderModel
+
+    @impl true
+    defdelegate check_projections, to: ReaderModel
+
+    @impl true
+    defdelegate expansions, to: ReaderModel
+
+    @impl true
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    defdelegate simulate(command, state), to: Model
+  end
+
   defp run(model) do
     PropertyDamage.run(
       model: model,
@@ -260,5 +357,60 @@ defmodule PropertyDamage.ExpansionRootPlaceholderStateTest do
     assert [%{leaves?: true, aliases: aliases} | rest] = replayed.variants["split"].choices
     assert map_size(aliases) == 1
     assert Enum.map(rest, & &1.commands) == Enum.map(uses, &[&1])
+  end
+
+  test "a leaf's when: holds against the state that carries the rewritten root's id" do
+    assert {:ok, stats} = run(LeafWhenModel)
+
+    assert %{"split" => %{Open => %{"Open[0]" => 3}, Use => %{"Use[0]" => uses}}} =
+             stats.expansion_counts
+
+    assert uses > 0
+  end
+
+  test "the :follow shrink path presents the root's id to the roots after the copied leaves" do
+    targets = [{Adapter, name: "ref"}, {Adapter, name: "copy"}]
+
+    run = fn seed, opts ->
+      PropertyDamage.run(
+        [
+          model: FollowModel,
+          targets: targets,
+          seed: seed,
+          max_commands: 4,
+          max_runs: 1,
+          compare: [converge_within: 1],
+          replay_dir: false,
+          validate: false
+        ] ++ opts
+      )
+    end
+
+    choice = fn report, name, root -> Enum.at(report.expansions[name], root) end
+
+    entry = fn report, name, root -> choice.(report, name, root).entry end
+
+    # A seed whose run fails with the reference running Open as the reserving
+    # entry and the copy as the other, so phase 3 has a choice to copy.
+    seed =
+      Enum.find(1..80, fn seed ->
+        case run.(seed, shrink: false) do
+          {:error, report} ->
+            report.kind == :check_failed and entry.(report, "ref", 0) == "Open[0]" and
+              entry.(report, "copy", 0) == "Open[1]"
+
+          {:ok, _stats} ->
+            false
+        end
+      end) || flunk("no seed in 1..80 fails with the reserving entry in the reference only")
+
+    assert {:error, report} = run.(seed, [])
+    assert report.kind == :check_failed
+
+    ref = choice.(report, "ref", 0)
+    copy = choice.(report, "copy", 0)
+    assert ref.entry == "Open[0]", "the reference kept its rewrite through shrinking"
+
+    assert {copy.entry, copy.leaves} == {ref.entry, ref.leaves}, "the copy followed the reference"
   end
 end

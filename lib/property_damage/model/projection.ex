@@ -66,7 +66,9 @@ defmodule PropertyDamage.Model.Projection do
 
   Spawn a background poller when an event arrives. The poller periodically
   checks if a predicate becomes true within a timeout. Use for eventual
-  consistency checks.
+  consistency checks. A command inside a branch of a `branching:` sequence
+  spawns no poller: checks are off inside the branches and run after the
+  branch set.
 
       @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
       def payment_confirmed(_state, %PaymentInitiated{id: id}) do
@@ -88,7 +90,9 @@ defmodule PropertyDamage.Model.Projection do
   If it returns without raising, the check passed.
 
   For `@eventually` checks, the function must return a predicate function
-  `(state -> boolean)` that will be polled.
+  `(state -> boolean)` that will be polled. Any other return is a check
+  failure at the step whose event triggered the check, under the run's
+  `check_mode:`.
 
   ## Raising in apply/2
 

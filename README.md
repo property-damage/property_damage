@@ -13,7 +13,7 @@ We want to thank [Bluecode](https://bluecode.com/en) for their support in develo
 - **Stateful Testing**: Generate sequences of commands, not just individual inputs
 - **Automatic Shrinking**: Failed sequences are minimized to the smallest reproduction
 - **Server-Generated Values**: Commands can reference `external()` results from earlier commands
-- **Parallel Execution**: Branching sequences for race condition detection
+- **Branching Sequences**: Prefix, branches and suffix, run one branch at a time and checked for linearizability against the model (no race detection yet)
 - **Linearization Checking**: Verify parallel results are sequentially explainable
 - **Idempotency Testing**: Built-in stutter testing for retry safety
 - **Rich Failure Reports**: Comprehensive diagnostics when tests fail
@@ -553,9 +553,11 @@ end
 
 ## Parallel Execution
 
-PropertyDamage supports branching sequences for detecting race conditions and
-concurrent bugs. Commands can execute in parallel branches, and the framework
-verifies that results are linearizable.
+PropertyDamage supports branching sequences: a prefix, two or more branches and
+a suffix, run on one target with the branches executed one after another, then
+checked for linearizability against the model's simulator. The branches never
+overlap at the system under test, so this path does not detect races; see the
+limits in the [Parallel Testing](guides/parallel_testing.md) guide.
 
 ### Enabling Branching Sequences
 
@@ -579,7 +581,7 @@ PropertyDamage.run(
 A branching sequence has three parts:
 
 1. **Prefix**: Commands executed sequentially before branching
-2. **Branches**: Parallel command lists executed concurrently
+2. **Branches**: Command lists executed one branch at a time, each from the forked post-prefix state
 3. **Suffix**: Commands executed after branches merge
 
 ```
@@ -596,9 +598,10 @@ Suffix: [cmd5]
 
 ### Linearization Checking
 
-After parallel execution, PropertyDamage verifies that the observed results
-can be explained by some sequential ordering of the commands. If no valid
-ordering exists, a `:linearization_failed` error is raised.
+After the branches have run, PropertyDamage verifies that the observed events
+can be explained by some ordering of the branch commands that keeps each
+branch's own order, against the model's simulator. If no valid ordering exists,
+a `:linearization_failed` error is raised.
 
 ```elixir
 alias PropertyDamage.Linearization
@@ -618,7 +621,7 @@ count = Linearization.linearization_count([[cmd1, cmd2], [cmd3]])
 
 The shrinker handles branching sequences with special strategies:
 
-1. **Convert to linear**: If race not required for failure
+1. **Convert to linear**: If the failure does not need the branch structure
 2. **Remove branches**: Eliminate unnecessary parallel branches
 3. **Shrink branches**: Remove commands within individual branches
 4. **Shrink prefix/suffix**: Remove non-essential sequential commands

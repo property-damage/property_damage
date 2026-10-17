@@ -69,7 +69,9 @@ defmodule PropertyDamage.Expansion do
     * `entry` - the entry key (`"Root[i]"`), `nil` when no expansion applied
       (the root is not listed, the model has no `expansions/0`, or the target
       runs `:identity`), `:forced` when no listed entry could be realized, or
-      `:identity` when shrinking replaced a listed entry by the root itself
+      `:identity` when the root ran as itself in place of an entry: shrinking
+      replaced a listed entry by the root, or the entry realized was one leaf
+      equal to its root
     * `index` - the entry's index in the list the function returned, or nil
     * `commands` - the commands executed for the root, in order
     * `leaves?` - true when `commands` are leaves at leaf positions; false when

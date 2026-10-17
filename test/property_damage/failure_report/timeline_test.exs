@@ -73,6 +73,38 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
       assert output =~ "PaymentConfirmed"
     end
 
+    test "names a poller-delivered, a telemetry and an injected event" do
+      entries =
+        for {source, index} <- Enum.with_index([:resource_poller, :telemetry, :injected]) do
+          %Entry{
+            timestamp: index,
+            command_index: 0,
+            event: %PaymentConfirmed{id: index},
+            source: source
+          }
+        end
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: Sequence.linear([%CreateOrder{id: 1}]),
+          shrunk_sequence: Sequence.linear([%CreateOrder{id: 1}]),
+          failed_at_index: 0,
+          failure_reason: Failure.check_failed(:TestCheck, "boom"),
+          event_log: entries,
+          model: TestModel,
+          targets: [{TestAdapter, []}]
+        )
+
+      output = Timeline.format_event_timeline(report, color: false)
+
+      assert output =~ "POL"
+      assert output =~ "TEL"
+      assert output =~ "EMT"
+      refute output =~ "???", "an event source printed as unknown"
+    end
+
     test "shows the source badge for a command-attributed non-command event" do
       report =
         FailureReport.new(
@@ -130,4 +162,20 @@ defmodule PropertyDamage.FailureReport.TimelineTest do
   # `reset/0` emits its escape unconditionally even under `color: false`, so
   # strip all ANSI to assert on plain text.
   defp strip_ansi(text), do: String.replace(text, ~r/\e\[[0-9;]*m/, "")
+
+  describe "color: false" do
+    test "the event timeline emits no escape bytes" do
+      output = Timeline.format_event_timeline(report_with_async_event(), color: false)
+      refute output =~ "\e[", "plain output leaked an ANSI escape sequence"
+    end
+
+    test "a linear timeline emits no escape bytes" do
+      report = report_with_async_event()
+      refute Timeline.format(report, color: false) =~ "\e["
+    end
+
+    test "a branching timeline emits no escape bytes" do
+      refute Timeline.format(branch_failure_report(), color: false) =~ "\e["
+    end
+  end
 end

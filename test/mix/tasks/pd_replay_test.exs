@@ -255,6 +255,31 @@ defmodule Mix.Tasks.Pd.ReplayTest do
     end
   end
 
+  describe "a divergence report" do
+    test "prints the comparison key in the summary instead of raising", %{dir: dir} do
+      sequence = Sequence.linear([%Bump{}])
+
+      failure =
+        FailureReport.new(
+          seed: 0,
+          run_number: 1,
+          original_sequence: sequence,
+          shrunk_sequence: sequence,
+          failed_at_index: 0,
+          failure_reason: Failure.from_signature(:diverged, {Counter, :count}),
+          model: FailingModel,
+          targets: [{FailingAdapter, []}, {FixedAdapter, []}]
+        )
+
+      {:ok, path} = Persistence.save(failure, dir)
+
+      {_status, output} = with_output(fn -> Replay.exec([path]) end)
+
+      assert output =~ "Failure:  "
+      assert output =~ "(#{inspect(Counter)}.count)"
+    end
+  end
+
   describe "argument handling (usage errors exit 2)" do
     test "no arguments returns :usage_error and prints usage" do
       {status, output} = with_output(fn -> Replay.exec([]) end)

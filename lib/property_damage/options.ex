@@ -534,7 +534,10 @@ defmodule PropertyDamage.Options do
     # Nested - Branching
     branching: [
       type: :keyword_list,
-      doc: "Options for parallel branch testing (race condition detection).",
+      doc:
+        "Options for branching sequences: a prefix, branches run one after another " <>
+          "on one target, and a suffix, checked for linearizability afterward. " <>
+          "Not with `latency:` or a `check_mode:` other than the default.",
       keys: [
         branch_probability: [
           type: :float,
@@ -720,6 +723,7 @@ defmodule PropertyDamage.Options do
     reject_retired_stutter_keys!(opts)
 
     reject_only_option_conflicts!(opts)
+    reject_branching_conflicts!(opts)
     validated = NimbleOptions.validate!(opts, @run_schema)
 
     case Keyword.get(validated, :regression) do
@@ -923,6 +927,37 @@ defmodule PropertyDamage.Options do
         message:
           "`branching:` sequences run against one target only; got " <>
             "#{length(opts[:targets])} `targets:` entries"
+    end
+
+    opts
+  end
+
+  # A branching run executes one branch at a time on one target through the
+  # linear engine, which records no latency samples and runs its checks as
+  # `:halt` whatever `check_mode:` says. Both are refused beside `branching:`
+  # instead of accepted and ignored. Read from the raw options, because the
+  # schema fills `check_mode:` in, and the default is what the path does.
+  defp reject_branching_conflicts!(opts) do
+    if Keyword.get(opts, :branching) != nil do
+      if opts[:latency] do
+        raise NimbleOptions.ValidationError,
+          key: :latency,
+          value: opts[:latency],
+          message:
+            "`latency:` cannot be used with `branching:`: a branching run executes one " <>
+              "branch at a time on one target and records no latency samples"
+      end
+
+      mode = Keyword.get(opts, :check_mode, :halt)
+
+      if mode != :halt do
+        raise NimbleOptions.ValidationError,
+          key: :check_mode,
+          value: mode,
+          message:
+            "`check_mode: #{inspect(mode)}` cannot be used with `branching:`: a branching " <>
+              "run halts at the first failing check and ignores the option"
+      end
     end
 
     opts
