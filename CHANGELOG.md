@@ -915,6 +915,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A trace capture reports a failed injector setup.** `RunTrace.capture/1` of
+  a model without expansions raised `MatchError` when an injector's `setup/1`
+  returned `{:error, _}`, so `mix pd.audit` and `RunComparison` crashed instead
+  of reporting. The trace now carries a `:setup_failed` outcome and an empty
+  event log, as a capture through the scheduler already did.
 - **An injector setup that raises tears down the injectors set up before it.**
   On every path that brings a target's injectors up (a run, a shrink attempt,
   a trace capture, `PropertyDamage.execute/2`), a `setup/1` that raised left

@@ -57,7 +57,7 @@ defmodule PropertyDamage.RunTrace do
   """
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{Executor, Expansion, Generator, Options, Scheduler}
+  alias PropertyDamage.{Executor, Expansion, Failure, Generator, Options, Scheduler}
   alias PropertyDamage.Runtime.RunServices
   alias PropertyDamage.RunTrace.Step
   alias PropertyDamage.Sequence
@@ -253,7 +253,7 @@ defmodule PropertyDamage.RunTrace do
 
     # The target's injectors are set up against the run's event queue, as on
     # every other path that executes a run. `mocks:` is rejected above.
-    {:ok, result} =
+    run_result =
       RunServices.with_services(target, fn event_queue, _mock_registry ->
         Executor.run(plan, model, adapter,
           config: config,
@@ -266,22 +266,36 @@ defmodule PropertyDamage.RunTrace do
         )
       end)
 
+    captured =
+      case run_result do
+        {:ok, result} ->
+          [
+            executed: Map.get(result, :executed, %{}),
+            event_log: result.event_log,
+            command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+            linearization: linearization_of(result),
+            outcome: outcome_of(result)
+          ]
+
+        # An injector's or the adapter's setup failed: nothing ran, and the
+        # trace says so instead of raising, as the scheduler path does.
+        {:error, reason} ->
+          [outcome: {:fail, Failure.setup_failed(reason)}]
+      end
+
     new(
-      seed: seed,
-      run_number: run_number,
-      run_nonce: run_nonce,
-      mint_epoch: mint_epoch,
-      model: model,
-      adapter: adapter,
-      source_revision: Keyword.get_lazy(opts, :source_revision, &source_revision/0),
-      plan: plan,
-      plan_source: :generated,
-      executed: Map.get(result, :executed, %{}),
-      event_log: result.event_log,
-      command_labels: %{},
-      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
-      linearization: linearization_of(result),
-      outcome: outcome_of(result)
+      [
+        seed: seed,
+        run_number: run_number,
+        run_nonce: run_nonce,
+        mint_epoch: mint_epoch,
+        model: model,
+        adapter: adapter,
+        source_revision: Keyword.get_lazy(opts, :source_revision, &source_revision/0),
+        plan: plan,
+        plan_source: :generated,
+        command_labels: %{}
+      ] ++ captured
     )
   end
 

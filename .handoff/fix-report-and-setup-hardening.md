@@ -72,6 +72,18 @@ a value the formatter cuts ends with a marker.
 
 **Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/failure_report/formatter.ex`, `test/property_damage/formatter_test.exs`
 
+### 2026-10-17T17:42 · commit · 32dfa1e
+
+fix(runtime): tear down earlier injectors when a later setup raises
+
+An injector setup/1 that raised escaped the per-run wiring, so the
+injectors set up before it kept their listeners, and a mock setup that
+raised left every injector up because the mocks were set up outside the
+block whose after clause tears the injectors down. The raise is now the
+setup failure it is on every path, with the exception as its detail.
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `CHANGELOG.md`, `lib/property_damage/runtime/run_services.ex`, `test/property_damage/run_services_test.exs`, `test/property_damage_test.exs`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not
