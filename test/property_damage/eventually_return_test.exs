@@ -29,7 +29,7 @@ defmodule PropertyDamage.EventuallyReturnTest do
 
     # The predicate is missing: the function answers the question itself.
     @eventually after: PaymentInitiated,
-                timeout: {300, :milliseconds},
+                timeout: {2, :seconds},
                 interval: {10, :milliseconds}
     def payment_confirmed(state, %PaymentInitiated{id: id}) do
       state.status[id] == :confirmed
@@ -81,13 +81,22 @@ defmodule PropertyDamage.EventuallyReturnTest do
     assert detail =~ "1-arity", "the message names the required shape: #{detail}"
     assert detail =~ "false", "the message names the value returned: #{detail}"
     assert result.failed_at_index == 0
-    assert elapsed < 250, "the failure waited for the window (#{elapsed} ms)"
+    assert elapsed < 1_000, "the failure waited for the window (#{elapsed} ms)"
   end
 
   test "under check_mode: :record the failure is recorded and the run goes on" do
     {:ok, result} = run_executor(check_mode: :record)
 
     assert Enum.any?(result.check_failures, &(&1.check_name == :payment_confirmed))
+    refute match?(%Failure{type: %Failure.Check{kind: :poll_timeout}}, result.failure_reason)
+  end
+
+  @tag :capture_log
+  test "under check_mode: :log the run goes on without a poller" do
+    {:ok, result} = run_executor(check_mode: :log)
+
+    assert result.success
+    assert result.check_failures == []
     refute match?(%Failure{type: %Failure.Check{kind: :poll_timeout}}, result.failure_reason)
   end
 
