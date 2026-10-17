@@ -63,8 +63,9 @@ about one in eight carried a `using:`; the rest compared under `==`.
    module, as `Plug.Builder` does for module plugs.
 4. **The dispatch is generated inside the projection.** `__compare_using__/1`
    returns a 2-arity function per observation, built from the named form, so
-   `PropertyDamage.Equivalence.verdict/3`, the convergence loop and the
-   shrinker are unchanged.
+   the convergence loop and the shrinker call a relation as they did; the
+   only change there is that the relation's answer is read through
+   `Verdict.read/1` (DR-052) instead of `Equivalence.verdict/3`.
 5. **The relation is recorded as written.** A `:diverged` failure carries the
    `using:` term (`{PropertyDamage.Equivalence, :within, [0.01]}`), and the
    reporter prints it beside the two values. The persistence version stays

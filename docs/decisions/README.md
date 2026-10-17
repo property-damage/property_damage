@@ -78,13 +78,13 @@ Every record is **self-contained**: it carries enough context and rationale to s
 - `openspec/specs/observability/spec.md`: DR-022, DR-024, DR-025, DR-026, DR-045, DR-049
 - `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-014, DR-015, DR-016, DR-017, DR-018, DR-021, DR-023, DR-024, DR-025, DR-026, DR-027, DR-029, DR-030, DR-032, DR-033, DR-034, DR-035, DR-036, DR-037, DR-042, DR-043, DR-044, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050
 - `openspec/specs/shrinking/spec.md`: DR-017, DR-025, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050
-- `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024, DR-026, DR-027, DR-028, DR-030, DR-044, DR-046
+- `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024, DR-026, DR-027, DR-028, DR-030, DR-044, DR-046, DR-052
 - `openspec/specs/failure-analysis/spec.md`: DR-026, DR-028, DR-033, DR-034, DR-035, DR-036, DR-040, DR-041, DR-049, DR-050
 - `openspec/specs/differential-testing/spec.md`: DR-021, DR-030, DR-033, DR-034, DR-035, DR-036, DR-040, DR-043, DR-044, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050
 - `openspec/specs/export/spec.md`: DR-021, DR-028, DR-043
 - `openspec/specs/load-testing/spec.md`: DR-021, DR-022, DR-042
 - `openspec/specs/persistence/spec.md`: DR-020, DR-023, DR-033, DR-034, DR-036, DR-039, DR-040, DR-041, DR-042, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050
-- `openspec/specs/concurrency/spec.md`: DR-028, DR-046
+- `openspec/specs/concurrency/spec.md`: DR-028, DR-046, DR-053
 - `openspec/specs/fault-injection/spec.md`: DR-031, DR-038
 
 DR-008 is additionally cited in `test/property_damage/shrinker_test.exs`, `test/support/test_commands.ex`, and `test/support/executor_test_support.ex`.

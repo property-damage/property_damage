@@ -91,7 +91,8 @@ predicate than to a test body, and this record chooses the predicate rule.
    that ends with `:ok`".
 5. **An `@eventually` function must return a 1-arity function.** Any other
    return is a check failure at once, at the step that triggered the check,
-   naming the check and the value.
+   naming the check and the value, handled under the run's `check_mode:` as
+   a synchronous check failure is.
 6. **The predicate returns a verdict.** `nil` and `false` mean "not yet";
    `{:fail, reason}` means "never": the window ends at once as a check
    failure with that reason (a payment that reached `:failed` no longer waits
@@ -133,6 +134,9 @@ predicate than to a test body, and this record chooses the predicate rule.
   the poller and the report distinguish "never" from a timeout.
 - No new failure kind and no persistence change: the verdict failure is a
   check failure with a message.
+- Item 5 is not breaking and shipped on its own, ahead of the rest of this
+  record, as a fix in the hardening release that followed it; the
+  eventual-consistency specification carries its scenario.
 
 ## Alternatives considered
 

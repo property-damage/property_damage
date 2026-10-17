@@ -117,7 +117,7 @@ The system SHALL support `@eventually` temporal checks that spawn a background p
 - **THEN** the state poller SHALL report failure with diagnostic information
 - **AND** the report SHALL include the trigger event, predicate source, final state, elapsed time, and poll count
 
-#### Scenario: The check function returns no predicate
+#### Scenario: The check function returns no predicate (DR-052)
 - **WHEN** an `@eventually` function returns anything but a 1-arity function
 - **THEN** the system SHALL NOT spawn a poller
 - **AND** SHALL treat the return as a check failure at the step whose event triggered the check, naming the check and the returned value, under the run's `check_mode:` as a synchronous check failure is
