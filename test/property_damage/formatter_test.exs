@@ -6,9 +6,9 @@ defmodule PropertyDamage.FailureReport.FormatterTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.EventLog.Entry
-  alias PropertyDamage.{Placeholder, Sequence.Position}
-  alias PropertyDamage.{Failure, FailureReport, Sequence}
+  alias PropertyDamage.{Failure, FailureReport, Placeholder, Sequence}
   alias PropertyDamage.FailureReport.Formatter
+  alias PropertyDamage.Sequence.Position
 
   defmodule CreateAccount do
     defstruct [:currency]

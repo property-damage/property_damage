@@ -11,7 +11,41 @@ What was asked, the acceptance criteria, and the explicit non-goals. Seed this
 from whatever produced it: a grill-me ledger, a campaign wave contract, a
 ticket, or by hand.
 
-_Not yet seeded._
+Source: the decision brief of 2026-10-16 (section 10, hardening batch) and its
+ruling of 2026-10-17, which chose one fix PR now; the two decision records
+DR-052 (decision 5) and DR-053 (decisions 2 to 4) that added work to it.
+
+**Asked.** One PR off `main`, RED-first per item, no breaking change, that
+fixes: the divergence check-name crash in `mix pd.replay` and `mix pd.reshrink`;
+the `???` Event Log badge; the placeholder cut in the terminal report; the
+`Expansion.choice` typedoc on `:identity`; the skipped injector teardown when a
+later setup raises; the `MatchError` in `RunTrace.capture/1` on a failed
+injector setup; the two missing tests on the rewritten-root contract; an
+`@eventually` function that returns no predicate; `latency:` and a non-default
+`check_mode:` accepted beside `branching:`; the branching documents that
+describe race detection the executor cannot perform; and, found while
+reproducing, the timeline's escape bytes under `color: false`.
+
+**Acceptance criteria.**
+
+- Each code fix has a test that failed against the code before the fix, with
+  the failing run logged; the two gap tests have a control run with the
+  earlier fix reverted, in which they fail.
+- `mix test`, `mix format --check-formatted`, `mix credo --strict` and
+  `mix compile --warnings-as-errors` exit 0; `docs_verify` passes on the
+  README, the quickstart and the parallel-testing guide.
+- The CHANGELOG lists each fix under `Fixed` and the option errors under
+  `Changed`; no entry is marked BREAKING.
+- No document in the repository still says that branches execute concurrently
+  or that the branching path detects races.
+- The DR-051/DR-052 migration (breaking, separate branch) is not touched: the
+  check verdict rule, the `using:` names and the verdict grammar stay as they
+  are on `main`.
+
+**Non-goals.** The branching redesign; the conformance oracle on the linear
+path; the deferred items on `generator/1` without `use` and the seed library
+in bench tests; any persistence format change; any change to the executor's
+sequential branch execution or to the linearization checker.
 
 ## Sessions
 
@@ -131,6 +165,27 @@ failing check whatever check_mode: says. Both combinations were accepted
 and ignored; they are option errors at run start now.
 
 **Files:** `CHANGELOG.md`, `lib/property_damage/options.ex`, `test/property_damage/branching_option_conflicts_test.exs`
+
+### 2026-10-17T17:53 · commit · c5f7c6f
+
+docs(branching): describe one-branch-at-a-time execution and its limits
+
+The guide, the README, the option documentation, the Sequence moduledoc
+and the concurrency specification described branching sequences as race
+detection and said the branches execute concurrently. The executor runs
+them one after another on one adapter context and the checker models the
+interleavings afterward, so no race can occur or be detected. The
+documents now say what the path does, list its limits until the
+concurrent redesign, and the register bench's moduledoc names the stale
+report it detects for what it is.
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `README.md`, `guides/parallel_testing.md`, `guides/quickstart.md`, `lib/property_damage.ex`, `lib/property_damage/model/projection.ex`, `lib/property_damage/options.ex`, `lib/property_damage/sequence.ex`, `openspec/specs/concurrency/spec.md`, `test/support/ets_register_support.ex`
+
+### 2026-10-17T17:54 · commit · ad30a9c
+
+style(report): order the formatter aliases
+
+**Files:** `.handoff/fix-report-and-setup-hardening.md`, `lib/property_damage/failure_report/formatter.ex`, `test/property_damage/formatter_test.exs`
 
 ## Reconstruction
 

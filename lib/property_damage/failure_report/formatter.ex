@@ -11,8 +11,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
     Target
   }
 
-  alias PropertyDamage.Sequence.Position
   alias PropertyDamage.FailureReport.SourceBadge
+  alias PropertyDamage.Sequence.Position
 
   @type format :: :terminal | :markdown | :json | :compact
 
