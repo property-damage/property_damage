@@ -915,6 +915,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An `@eventually` function that returns no predicate fails at its step.**
+  The poller took the function's return as its predicate without checking it,
+  so a function that answered the question itself (a boolean) raised
+  `BadFunctionError` on every poll behind a warning and the window timed out
+  as "never became true". The return is now checked when the poller would be
+  spawned: anything but a 1-arity function is a check failure at that step,
+  naming the check and the value, handled under `check_mode:` like a
+  synchronous check.
 - **A trace capture reports a failed injector setup.** `RunTrace.capture/1` of
   a model without expansions raised `MatchError` when an injector's `setup/1`
   returned `{:error, _}`, so `mix pd.audit` and `RunComparison` crashed instead

@@ -117,6 +117,11 @@ The system SHALL support `@eventually` temporal checks that spawn a background p
 - **THEN** the state poller SHALL report failure with diagnostic information
 - **AND** the report SHALL include the trigger event, predicate source, final state, elapsed time, and poll count
 
+#### Scenario: The check function returns no predicate
+- **WHEN** an `@eventually` function returns anything but a 1-arity function
+- **THEN** the system SHALL NOT spawn a poller
+- **AND** SHALL treat the return as a check failure at the step whose event triggered the check, naming the check and the returned value, under the run's `check_mode:` as a synchronous check failure is
+
 #### Scenario: Poll timeout attributed to its triggering command (DR-030)
 - **WHEN** a `@eventually` poller times out
 - **THEN** the failure's `failed_at_index` SHALL be the `command_index` of the command whose event opened the poll window, so the shrinker can truncate to it

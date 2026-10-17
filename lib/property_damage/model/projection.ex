@@ -88,7 +88,9 @@ defmodule PropertyDamage.Model.Projection do
   If it returns without raising, the check passed.
 
   For `@eventually` checks, the function must return a predicate function
-  `(state -> boolean)` that will be polled.
+  `(state -> boolean)` that will be polled. Any other return is a check
+  failure at the step whose event triggered the check, under the run's
+  `check_mode:`.
 
   ## Raising in apply/2
 
