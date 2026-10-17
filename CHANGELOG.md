@@ -397,6 +397,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`latency:` and a non-default `check_mode:` are refused beside `branching:`.**
+  A branching run executes one branch at a time on one target through the
+  linear engine: it records no latency samples (`latency:` returned
+  `%{error: :no_data}`) and halts at the first failing check whatever
+  `check_mode:` said. Both combinations are option errors at run start. The
+  guides, the README, the option documentation and the concurrency
+  specification now say what the path does: branches run one after another,
+  the checker models the interleavings afterward, and no race is detected
+  (DR-053).
 - **BREAKING: persistence format version 14 becomes 15.** A report records the
   run's `check_mode`, the `campaign` a latency budget was judged over
   (`%{seed:, max_runs:}`, `nil` for every other kind),
