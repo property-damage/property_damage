@@ -1339,21 +1339,32 @@ PropertyDamage.run(
 )
 ```
 
-### Agreement Predicates
+### Relations
+
+Values agree under `==`. Normalize in the observation, and name a relation in
+`using:` only when agreement is not an equality: `:fun` (a function of the
+projection, public or private), `{Mod, :fun}` or `{Mod, :fun, args}`, each
+called with the reference's value and the variant's value first (DR-051).
 
 ```elixir
 # Equality (default)
 @compare every: 1
 def totals(state, _root), do: state.totals
 
-# Ignore identifiers and timestamps, or any other keys
+# Ignore identifiers and timestamps, or any other keys, in the observation
 import PropertyDamage.Equivalence
-@compare using: by_key(fn v -> v |> normalize() |> drop_keys([:fees]) end)
-def orders(state, _root), do: state.orders
+@compare every: 1
+def orders(state, _root), do: state.orders |> normalize() |> drop_keys([:fees])
 
-# Custom predicate: a verdict, truthy to agree, false or {:fail, reason} to disagree
-@compare using: fn ref, target -> abs(ref - target) <= 1 end
+# A tolerance, named with its data
+@compare every: 1, using: {PropertyDamage.Equivalence, :within, [1]}
 def total_cents(state, _root), do: state.total_cents
+
+# A relation of your own: a verdict, truthy to agree, false or {:fail, reason} to disagree
+@compare every: 1, using: :same_members
+def members(state, _root), do: state.members
+
+defp same_members(ref, target), do: MapSet.new(ref) == MapSet.new(target)
 ```
 
 A function may return `{:pending, reason}` while its target is still catching up: the
@@ -1499,7 +1510,7 @@ PropertyDamage
 │   ├── Scheduler    - Runs one sequence on every target in lockstep
 │   ├── Variant      - One target's execution in its own process
 │   ├── Comparison   - Convergence loop over the `@compare` observations
-│   └── Equivalence  - `using:` predicate helpers (`by_key/1`, `normalize/1`, `drop_keys/2`)
+│   └── Equivalence  - `using:` relations and helpers (`within/3`, `by_key/1`, `normalize/1`, `drop_keys/2`)
 │
 └── Utilities
     ├── Persistence  - Save/load failures

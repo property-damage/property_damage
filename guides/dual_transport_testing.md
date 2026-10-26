@@ -137,9 +137,10 @@ adapter is set up.
 
 `every:` decides how often the transports are compared. `every: 1` compares
 after every root command, and `every: CreateLabel` compares after each root of that
-module. An observation may also use `using:` to say what "agree" means (see
-[Differential Testing](differential_testing.md#using-the-agreement-predicate)),
-for example to ignore a field one transport cannot report.
+module. An observation leaves out what the transports may differ on, such as
+a field one transport cannot report, by returning the value without it; a
+relation that is not an equality goes in `using:` (see
+[Differential Testing](differential_testing.md#using-the-relation)).
 
 ### When one transport lags
 
@@ -198,8 +199,8 @@ different ids and every later command targets a different entity. Link instead o
 `owner/name` repo path, a per-repo issue number — and ignore server ids in the
 observations: the projections fold names, never ids, so the `@compare` functions
 return values that do not hold them. If an observation must carry a record that
-does, strip the noise under `using:` with
-`PropertyDamage.Equivalence.by_key(&PropertyDamage.Equivalence.normalize/1)`.
+does, strip the noise in the observation with
+`PropertyDamage.Equivalence.normalize/1`.
 
 Both transports then navigate to the same logical entity, and ids and timestamps
 never cause spurious divergence reports. (If a later command genuinely consumes a

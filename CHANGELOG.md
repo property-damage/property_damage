@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PropertyDamage.Equivalence.within/3`, a tolerance (DR-051).**
+  `@compare using: {PropertyDamage.Equivalence, :within, [0.01]}` agrees when
+  two numbers differ by at most `0.01`, at every depth of maps, lists and
+  tuples of the same shape, and compares any other values under `==`. It is
+  the first relation that takes data through `{Mod, :fun, args}`.
+- **A divergence records its relation (DR-051).** `Failure.Divergence` carries
+  the observation's `using:` term as written in a new `using` field (`nil`
+  under `==`), and the printed report shows it on a `Using:` line beside the
+  two values. The persistence format stays at version 15.
 - **Every observation that disagrees at the convergence bound is reported.**
   The first disagreeing `@compare` key in declaration order still names the
   `:diverged` or `:did_not_converge` failure; every further key that differed or
@@ -19,13 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Boundary observations: `@compare` (DR-046).** A public projection function
   `def name(state, root)` marked `@compare every: ..., using: ...` is the only
   cross-target oracle. `every:` takes the `@check` schedule vocabulary (`1`, `N`,
-  `{N, Module}`, `Module`, `[Modules]`) plus `:end`; `using:` is a 2-arity
-  predicate whose return is a verdict (DR-052): truthy to agree, `false` or
+  `{N, Module}`, `Module`, `[Modules]`) plus `:end`; `using:` names the
+  relation (`:fun`, `{Mod, :fun}` or `{Mod, :fun, args}`, DR-051; default
+  `==`), whose return is a verdict (DR-052): truthy to agree, `false` or
   `nil` to disagree holding both values, `{:fail, "text"}` or
-  `{:fail, exception}` to disagree with that reason (default `&==/2`; any
-  expression). A function may return `{:pending, reason}` while its
-  target is catching up; a pending side is never a disagreement. A raise in a
-  `@compare` function or a `using:` predicate is a check failure naming the key.
+  `{:fail, exception}` to disagree with that reason. A function may return
+  `{:pending, reason}` while its target is catching up; a pending side is
+  never a disagreement. A raise in a `@compare` function or a `using:`
+  relation is a check failure naming the key.
   A run with two or more targets and no `@compare` is an error at run start,
   before any adapter setup; with one target no `@compare` function is called.
 - **The convergence loop and `compare: [converge_within: ms]` (DR-046).** At
@@ -38,9 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:diverged`. Both are named by the `@compare` key and report the time waited.
   An expired `@eventually` window is a check failure at once.
 - **`PropertyDamage.ComparisonMismatch` and `PropertyDamage.Equivalence` (DR-046).**
-  `Equivalence.by_key/1`, `normalize/1` and `drop_keys/2` build `using:`
-  predicates; `by_key/1` returns `true` or `{:fail, %ComparisonMismatch{}}`
-  holding both keys. `ComparisonMismatch` is the default mismatch detail.
+  `Equivalence.normalize/1` and `drop_keys/2` normalize a value in an
+  observation body, and `by_key/1` lifts a key function into a relation that
+  returns `true` or `{:fail, %ComparisonMismatch{}}` holding both keys. `ComparisonMismatch` is the default mismatch detail.
   `PropertyDamage.Verdict.read/1` reads a relation's return with the grammar
   shared with `@check` and `@eventually` (DR-052).
 - **Boundary counters (DR-046).** `compare_counts` on `stats` and the failure
@@ -80,9 +90,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same or an earlier target becomes primary and the divergence is listed
   there; a finalize-time repeat is listed once and nothing is dropped. New public type
   `t:PropertyDamage.Scheduler.compare_counts/0`.
-- **Stutter `using:` (DR-046).** `stutter: [using: fn original_events,
-  retry_events -> ... end]`, default `&==/2`, decides whether a retry agrees;
-  its return is a verdict, read like `@compare`'s `using:` (DR-052).
+- **Stutter `using:` (DR-046).** `stutter: [using: {Mod, :fun}]`, called
+  `Mod.fun(original_events, retry_events)`, decides whether a retry agrees;
+  `{Mod, :fun, args}` and a 2-arity function are accepted too (DR-051), and
+  equality is the default. Its return is a verdict, read like `@compare`'s
+  `using:` (DR-052).
   `Stutter.compare_events/3` returns `:agree` or `{:disagree, exception}`.
   `Stutter.Violation` carries `mismatch` (an exception) in place of
   `comparison_result`.
@@ -404,6 +416,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (DR-051): `using:` names the relation, and `@compare` is a plain
+  attribute.** `use PropertyDamage.Model.Projection` no longer replaces
+  `Kernel.@/1`: `@compare` is read like `@check` and `@eventually`, so a
+  projection module may import its own attribute macros, and
+  `PropertyDamage.Model.Projection.CompareAttribute` is removed. `using:` no
+  longer takes an expression; it names the relation in one of three forms:
+
+  | Form | Calls |
+  |------|-------|
+  | `:fun` | `fun(reference_value, variant_value)` in the projection, public or private |
+  | `{Mod, :fun}` | `Mod.fun(reference_value, variant_value)`, public |
+  | `{Mod, :fun, args}` | `Mod.fun(reference_value, variant_value, arg1, ..., argN)`, public |
+
+  `Mod` may be `__MODULE__`, and then the function may be private; `args` are
+  literals. An unknown form, a function value, a missing function and a wrong
+  arity are each a `CompileError` naming the observation, the `using:` term
+  and the expected arity; a remote relation adds a compile-time dependency on
+  its module. Migrate each `using:` as follows:
+
+  | Before | After |
+  |--------|-------|
+  | `using: &local/2` | `using: :local` |
+  | `using: &Mod.fun/2` | `using: {Mod, :fun}` |
+  | `using: fn a, b -> ... end` | `using: :name`, with `defp name(a, b), do: ...` |
+  | `using: by_key(fn v -> v \|> normalize() \|> drop_keys(keys) end)` | no `using:`; return `value \|> normalize() \|> drop_keys(keys)` from the observation |
+  | `using: fn a, b -> abs(a - b) <= 0.01 end` | `using: {PropertyDamage.Equivalence, :within, [0.01]}` |
+
+  `stutter: [using:]` accepts `{Mod, :fun}` and `{Mod, :fun, args}` beside a
+  2-arity function, and its default is `{Kernel, :==}`.
 - **BREAKING (DR-052): a check's verdict is its return value.**
   `PropertyDamage.Verdict.read/1` reads a `@check`'s return and an
   `@eventually` predicate's return with one grammar: a truthy return passes
@@ -531,7 +572,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed stutter configuration: `comparison:` with `:strict`,
     `{:structural, _}`, `{:custom, _}` and `:acceptable`, and the command key
     `acceptable_retry_events:` (in `use PropertyDamage.Command`, `command_spec/1`
-    and a `commands/0` entry). Use the `using:` predicate of `stutter:`.
+    and a `commands/0` entry). Use the `using:` relation of `stutter:`.
     `Stutter.Violation.comparison_result` is renamed `mismatch`.
   - An adapter `{:error, _}` answer is no longer an observation: with several
     targets, an agreed error used to pass and the variants continued. It is now

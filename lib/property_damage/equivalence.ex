@@ -1,12 +1,39 @@
 defmodule PropertyDamage.Equivalence do
   @moduledoc """
-  Builds and applies `using:` predicates.
+  Relations for `using:`, and helpers to normalize the values they compare.
 
-  A predicate decides whether two values agree. It is a 2-arity function,
-  called `using.(left, right)`: on `@compare` with the reference's value and a
-  variant's value, on `stutter:` with a command's original events and its retry
-  events. Its return is a verdict, read by `PropertyDamage.Verdict` with the
-  grammar a `@check` and an `@eventually` predicate share (DR-052):
+  A `@compare` function returns the value compared across targets, and values
+  agree under `==` unless `using:` names another relation. Normalize in the
+  observation body: return the canonical value, so that each target
+  normalizes its own value and a report shows what was compared.
+
+      import PropertyDamage.Equivalence
+
+      @compare every: :end
+      def totals(state, _root), do: state.totals |> normalize() |> drop_keys([:fees])
+
+  Keep `using:` for a relation that is not an equality: a tolerance,
+  order-insensitive agreement, or the variant holding at least the
+  reference's fields. `using:` names the relation (DR-051):
+
+  | Form | Calls |
+  |------|-------|
+  | `:fun` | `fun(reference_value, variant_value)` in the projection, public or private |
+  | `{Mod, :fun}` | `Mod.fun(reference_value, variant_value)`, public |
+  | `{Mod, :fun, args}` | `Mod.fun(reference_value, variant_value, arg1, ..., argN)`, public |
+
+  `Mod` may be `__MODULE__`, and then the function may be private; `args` are
+  literals. A tolerance is named with its data:
+
+      @compare every: :end, using: {PropertyDamage.Equivalence, :within, [0.01]}
+      def net(state, _root), do: state.net
+
+  `stutter: [using:]` takes `{Mod, :fun}` and `{Mod, :fun, args}` the same way,
+  called with a command's original events and its retry events, and also a
+  2-arity function, since a run option is runtime data.
+
+  A relation's return is a verdict, read by `PropertyDamage.Verdict` with
+  the grammar a `@check` and an `@eventually` predicate share (DR-052):
 
     * a truthy value: the values agree;
     * `false` or `nil`: they disagree, and the mismatch holds both values;
@@ -14,32 +41,29 @@ defmodule PropertyDamage.Equivalence do
     * `{:fail, exception}`: they disagree with that exception.
 
   A bare exception struct or an `{:error, _}` tuple is not a verdict: it is a
-  disagreement whose message says so. A raise in the predicate fails the
-  variant that was compared. Without `using:`, values agree under `==/2`.
+  disagreement whose message says so. A raise in the relation fails the
+  variant that was compared.
 
   A verdict is a final value, never a boolean: `&&`, `||` and `!` see a
   `{:fail, _}` as truthy. `left == right or {:fail, "reason"}` is the shortest
-  reasoned predicate.
+  reasoned relation.
 
-  Three helpers compose with `|>`:
+  The module offers:
 
-    * `by_key/1` lifts a 1-arity key function into a predicate that compares
-      the two keys and, when they differ, keeps them in the mismatch;
-    * `normalize/1` strips identifier and timestamp keys and unwraps
+    * `within/3`, a tolerance: numbers agree when they differ by at most the
+      given amount, at every depth of maps, lists and tuples;
+    * `normalize/1`, which strips identifier and timestamp keys and unwraps
       `{:ok, _}` and `{:error, _}`;
-    * `drop_keys/2` removes the given keys at every depth.
-
-  For example:
-
-      import PropertyDamage.Equivalence
-
-      @compare using: by_key(fn v -> v |> normalize() |> drop_keys([:fees]) end)
-      def totals(state, _root), do: state.totals
+    * `drop_keys/2`, which removes the given keys at every depth;
+    * `by_key/1`, which lifts a 1-arity key function into a 2-arity relation
+      that compares the two keys and, when they differ, keeps them in the
+      mismatch. Call it inside a named relation:
+      `defp same_ids(reference, variant), do: by_key(&ids/1).(reference, variant)`.
   """
 
   alias PropertyDamage.ComparisonMismatch
 
-  @typedoc "A `using:` predicate."
+  @typedoc "A 2-arity relation, such as `by_key/1` returns."
   @type predicate :: (term(), term() -> term())
 
   # Keys whose values usually differ between two systems or two runs.
@@ -69,6 +93,73 @@ defmodule PropertyDamage.Equivalence do
       left_key == right_key or {:fail, %ComparisonMismatch{left: left_key, right: right_key}}
     end
   end
+
+  @doc """
+  Agree when `reference` and `variant` differ by at most `tolerance`, a
+  non-negative number.
+
+  Two numbers agree when `abs(reference - variant) <= tolerance`. Maps,
+  lists and tuples agree when they have the same keys or length and their
+  elements agree under the same rule; any other pair of values agrees under
+  `==/2`. A tolerance is a relation, not an equality, so it belongs in
+  `using:` (DR-051), named with its tolerance:
+
+      @compare using: {PropertyDamage.Equivalence, :within, [0.01]}
+      def net(state, _root), do: state.net
+
+  Returns `true`, or `{:fail, %PropertyDamage.ComparisonMismatch{}}` holding
+  both values, the reference first.
+
+  ## Examples
+
+      iex> PropertyDamage.Equivalence.within(10.0, 10.004, 0.01)
+      true
+
+      iex> PropertyDamage.Equivalence.within(%{net: 1.0, cur: "EUR"}, %{net: 1.002, cur: "EUR"}, 0.01)
+      true
+
+      iex> {:fail, mismatch} = PropertyDamage.Equivalence.within(10.0, 10.5, 0.01)
+      iex> {mismatch.left, mismatch.right}
+      {10.0, 10.5}
+      iex> Exception.message(mismatch)
+      "the values differ by more than 0.01"
+  """
+  @spec within(term(), term(), number()) :: true | {:fail, ComparisonMismatch.t()}
+  def within(reference, variant, tolerance) when is_number(tolerance) and tolerance >= 0 do
+    close?(reference, variant, tolerance) or
+      {:fail,
+       %ComparisonMismatch{
+         left: reference,
+         right: variant,
+         message: "the values differ by more than #{tolerance}"
+       }}
+  end
+
+  defp close?(left, right, tolerance) when is_number(left) and is_number(right),
+    do: abs(left - right) <= tolerance
+
+  defp close?(left, right, tolerance) when is_list(left) and is_list(right),
+    do: length(left) == length(right) and all_close?(Enum.zip(left, right), tolerance)
+
+  defp close?(left, right, tolerance)
+       when is_tuple(left) and is_tuple(right) and tuple_size(left) == tuple_size(right),
+       do: close?(Tuple.to_list(left), Tuple.to_list(right), tolerance)
+
+  defp close?(%module{} = left, %module{} = right, tolerance),
+    do: close?(Map.from_struct(left), Map.from_struct(right), tolerance)
+
+  defp close?(left, right, tolerance)
+       when is_map(left) and is_map(right) and not is_struct(left) and not is_struct(right) do
+    map_size(left) == map_size(right) and
+      Enum.all?(left, fn {key, value} ->
+        Map.has_key?(right, key) and close?(value, Map.fetch!(right, key), tolerance)
+      end)
+  end
+
+  defp close?(left, right, _tolerance), do: left == right
+
+  defp all_close?(pairs, tolerance),
+    do: Enum.all?(pairs, fn {left, right} -> close?(left, right, tolerance) end)
 
   @doc """
   Strip the identifier and timestamp keys (`#{Enum.map_join(@noise_keys, ", ", &inspect/1)}`)

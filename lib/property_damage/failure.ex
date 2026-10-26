@@ -70,14 +70,17 @@ defmodule PropertyDamage.Failure.Divergence do
   @moduledoc """
   A variant's boundary observation differed from the reference's when the
   convergence bound expired: both sides were ready, and the observation's
-  `using:` predicate did not accept them. See `PropertyDamage.Failure` for the
+  `using:` relation did not accept them. See `PropertyDamage.Failure` for the
   kind table.
 
   `key` is the observation, `{projection, function}`, and names the failure.
   `root` is the index of the root command the boundary follows and `command`
   that command. `reference_value` and `variant_value` are the two values the
-  predicate was last called with, and `mismatch` the exception describing the
-  difference (by default a `PropertyDamage.ComparisonMismatch`).
+  relation was last called with, and `mismatch` the exception describing the
+  difference (by default a `PropertyDamage.ComparisonMismatch`). `using` is
+  the observation's `using:` term as written (`:fun`, `{Mod, :fun}` or
+  `{Mod, :fun, args}`, DR-051), `nil` when the values were compared under
+  `==`.
 
   `other_keys` lists every further observation compared at the same boundary
   that still differed or was still pending when the bound expired, in key
@@ -93,10 +96,20 @@ defmodule PropertyDamage.Failure.Divergence do
           reference_value: term(),
           variant_value: term(),
           mismatch: Exception.t() | nil,
+          using: atom() | {module(), atom()} | {module(), atom(), list()} | nil,
           other_keys: [PropertyDamage.Failure.other_key()]
         }
 
-  defstruct [:key, :root, :command, :reference_value, :variant_value, :mismatch, other_keys: []]
+  defstruct [
+    :key,
+    :root,
+    :command,
+    :reference_value,
+    :variant_value,
+    :mismatch,
+    :using,
+    other_keys: []
+  ]
 end
 
 defmodule PropertyDamage.Failure.Convergence do
@@ -241,7 +254,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:check_failed` | the check name, or the `{projection, function}` key of a `@compare` function or `using:` predicate that raised | the exception, message, or reason |
+  | `:check_failed` | the check name, or the `{projection, function}` key of a `@compare` function or `using:` relation that raised | the exception, message, or reason |
   | `:idempotency_violation` | `nil` | the `%Stutter.Violation{}` |
   | `:linearization` | `nil` | a human message |
   | `:poll_timeout` | the eventually check name | the poll-timeout info map |
@@ -558,7 +571,7 @@ defmodule PropertyDamage.Failure do
   A variant's boundary observation differed from the reference's at the
   convergence bound. `fields` holds `:key`, `:root`, `:command`,
   `:reference_value`, `:variant_value` and `:mismatch`, and optionally
-  `:other_keys` (see `PropertyDamage.Failure.Divergence`).
+  `:using` and `:other_keys` (see `PropertyDamage.Failure.Divergence`).
   """
   @spec diverged(map()) :: t()
   def diverged(fields) do

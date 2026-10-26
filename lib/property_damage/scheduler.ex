@@ -66,7 +66,7 @@ defmodule PropertyDamage.Scheduler do
   reference. At each root boundary an observation's `every:` schedule names,
   every variant evaluates it on its own projection state, and the comparison
   judges each other variant's value against the reference's with the
-  observation's `using:` predicate. When a side is
+  observation's `using:` relation. When a side is
   pending or the values differ, the convergence loop lets the variants catch
   up until they agree or the convergence bound (`compare: [converge_within:
   ms]`) expires; then a pending side did not converge and differing sides
@@ -104,7 +104,7 @@ defmodule PropertyDamage.Scheduler do
       poll predicate that raised), or the target's process crashed
       (`PropertyDamage.Failure.unknown/1` holding the exit reason).
 
-  A `@compare` function or `using:` predicate that raises is a `:check_failed`
+  A `@compare` function or `using:` relation that raises is a `:check_failed`
   in the target whose value it was producing or judging.
 
   An adapter `{:error, _}` or raise at a root is an `:execution_failed` in

@@ -160,7 +160,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     def teardown(_context), do: :ok
 
     # First execution returns Created; a stutter retry returns AlreadyExists,
-    # which the stutter `using:` predicate accepts.
+    # which the stutter `using:` relation accepts.
     @impl true
     def execute(%AcceptableRetryViaSpec{id: id}, _ctx, runtime) do
       if PropertyDamage.Runtime.stuttering?(runtime) do
@@ -177,7 +177,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     delay_ms: 0,
     commands: :all,
     enabled: true,
-    using: &__MODULE__.created_or_already_exists/2
+    using: {__MODULE__, :created_or_already_exists}
   }
 
   @doc false

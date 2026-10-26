@@ -236,8 +236,10 @@ defmodule PropertyDamage.Error do
     Suggestions:
       - Compare the two values; one of the targets has a bug
       - If the values differ only in identifiers, timestamps or other noise,
-        give the @compare function a `using:` predicate that ignores it
-        (see PropertyDamage.Equivalence)
+        return the value without them from the @compare function
+        (see PropertyDamage.Equivalence.normalize/1)
+      - If the values may differ within a tolerance, name the relation:
+        `using: {PropertyDamage.Equivalence, :within, [tolerance]}`
       - If the targets share one system, isolate each one through its `config:`
     """
     |> String.trim()

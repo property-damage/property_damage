@@ -188,7 +188,11 @@ Projections SHALL support synchronous checks whose timing is a lifecycle phase b
 
 Projections SHALL support boundary observations: public functions `def name(state, root)` decorated with `@compare`. A run with two or more targets compares its targets only through these functions. Each target evaluates the function on its own projection state with the root command as the second argument, and the value of every non-reference target is judged against the reference's. The observation's key is `{projection, name}`.
 
-`@compare` takes two options. `every:` is the schedule: `1` (default, every boundary), `N` (every Nth boundary), `{N, Module}` (every Nth root of that module), `Module` or `[Modules]` (after those roots) and `:end` or `[Modules, :end]` (the final boundary, compared after every target finalized its run). A key SHALL be compared at most once per boundary. `using:` is a 2-arity predicate called `using.(reference_value, variant_value)` whose return is a verdict (DR-052): truthy to agree, `false`, `nil` or `{:fail, reason}` to disagree; it defaults to `&==/2` and MAY be any expression that evaluates to a 2-arity function. A function SHALL carry one `@compare`, written above its first clause.
+`@compare` takes two options. `every:` is the schedule: `1` (default, every boundary), `N` (every Nth boundary), `{N, Module}` (every Nth root of that module), `Module` or `[Modules]` (after those roots) and `:end` or `[Modules, :end]` (the final boundary, compared after every target finalized its run). A key SHALL be compared at most once per boundary. A function SHALL carry one `@compare`, written above its first clause.
+
+`@compare` SHALL be a plain module attribute, read at `@on_definition` as `@check` and `@eventually` are (DR-051); `use PropertyDamage.Model.Projection` SHALL NOT replace `Kernel.@/1`.
+
+`using:` SHALL name the relation in one of three forms (DR-051): `:fun` calls `fun(reference_value, variant_value)` in the projection module, public or private; `{Mod, :fun}` calls the public `Mod.fun(reference_value, variant_value)`; `{Mod, :fun, args}` calls the public `Mod.fun(reference_value, variant_value, arg1, ..., argN)`. `Mod` MAY be `__MODULE__`, and then the function MAY be private. `args` SHALL be literals a module attribute can hold. Without `using:` the relation is `==`. The relation's return is a verdict (DR-052): truthy to agree, `false`, `nil` or `{:fail, reason}` to disagree. The framework SHALL check the named function at compile time: an unknown form, a function value, a local function that is missing or has the wrong arity, and a module that does not export the function SHALL each be a `CompileError` that names the observation, the `using:` term and the expected arity. The check of another module SHALL call `Code.ensure_compiled!/1` and SHALL add a compile-time dependency on that module. `__compare_using__/1` SHALL return a 2-arity function built from the named form, and `__compares__/0` SHALL record the `using:` term as written.
 
 A boundary observation MAY return `{:pending, reason}` when its target will reach a comparable value with no further command, through asynchronous catch-up only. A pending side SHALL NOT be a disagreement.
 
@@ -198,7 +202,7 @@ A boundary observation MAY return `{:pending, reason}` when its target will reac
 - **THEN** both targets evaluate the function on their own projection state with that root as the second argument
 - **AND** the non-reference value is judged against the reference value by `using:`
 
-#### Scenario: The default predicate is equality
+#### Scenario: The default relation is equality
 - **GIVEN** a `@compare` without `using:`
 - **WHEN** two values are judged
 - **THEN** they agree if and only if `==/2` holds
@@ -212,19 +216,27 @@ A boundary observation MAY return `{:pending, reason}` when its target will reac
 - **WHEN** `@compare` precedes a later clause of a function that already carries one
 - **THEN** compilation fails with a message naming the function
 
-#### Scenario: A @compare that another @ macro handles is a compile error
-- **WHEN** a projection module imports another `@/1` macro than the one `use PropertyDamage.Model.Projection` imports, or sets `@compare` through another `@/1`
-- **THEN** compilation SHALL fail: the compiler reports the conflicting import, and a `@compare` set as a plain module attribute fails with an error naming the module and `@compare`, so an observation is never dropped silently
+#### Scenario: A projection may import another @ macro (DR-051)
+- **GIVEN** a projection module that excludes `Kernel.@/1` and imports its own `@/1` macro, which forwards `@compare` to `Kernel.@/1`
+- **WHEN** a function carries `@compare`
+- **THEN** the observation SHALL be registered
+- **AND** without such an import, `Kernel.@/1` SHALL be in scope in the projection module
 
 #### Scenario: A misplaced @compare is a compile error
 - **WHEN** `@compare` precedes a private function, a function of another arity, `init/0` or `apply/2`, is combined with `@check` or `@eventually`, is repeated on one function, or has no function after it
 - **THEN** compilation fails with a message naming the problem
 
-#### Scenario: A using: that is not a 2-arity function is an error
-- **WHEN** `using:` is a literal that cannot be a 2-arity function
-- **THEN** compilation fails
-- **WHEN** `using:` is another expression that does not evaluate to a 2-arity function
-- **THEN** the run fails at run start, before any adapter setup
+#### Scenario: The three named forms call their function (DR-051)
+- **GIVEN** `@compare using: :fun`, `using: {Mod, :fun}` or `using: {Mod, :fun, args}`
+- **WHEN** a reference value and a variant value are judged
+- **THEN** the framework SHALL call `fun(reference_value, variant_value)`, `Mod.fun(reference_value, variant_value)` or `Mod.fun(reference_value, variant_value, arg1, ..., argN)`
+- **AND** a private function of the projection SHALL be accepted for `:fun` and for `{__MODULE__, :fun}` and `{__MODULE__, :fun, args}`
+
+#### Scenario: A using: that names no relation is a compile error (DR-051)
+- **WHEN** `using:` is an unknown form, a function value (a capture or a closure), or `{Mod, :fun, args}` with a function value in `args`
+- **THEN** compilation SHALL fail with a `CompileError` naming the observation and the `using:` term, and listing the named forms (for a function value in `args`, the form to write instead)
+- **WHEN** `using:` names a local function that is missing or has another arity, or a module that does not export the function with the expected arity
+- **THEN** compilation SHALL fail with a `CompileError` naming the observation, the `using:` term and the expected arity
 
 #### Scenario: One target does not evaluate observations
 - **WHEN** a run has one target

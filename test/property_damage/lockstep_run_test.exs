@@ -56,18 +56,21 @@ defmodule PropertyDamage.LockstepRunTest do
     def apply(values, %Stepped{value: v}), do: [v | values]
     def apply(values, _other), do: values
 
-    @compare using: fn reference, variant ->
-               Enum.zip(reference, variant) |> Enum.all?(fn {x, y} -> abs(x - y) <= 1 end)
-             end
+    @compare using: :within_one
     def values(values, _root), do: values
+
+    defp within_one(reference, variant),
+      do: Enum.zip(reference, variant) |> Enum.all?(fn {x, y} -> abs(x - y) <= 1 end)
   end
 
   defmodule NeverAgree do
     # A predicate that never accepts the variant's value.
     use PropertyDamage.Model.Projection
 
-    @compare using: fn _reference, _variant -> false end
+    @compare using: :never
     def anything(_state, root), do: root
+
+    defp never(_reference, _variant), do: false
   end
 
   defmodule Finished do
@@ -242,7 +245,19 @@ defmodule PropertyDamage.LockstepRunTest do
       divergence = Failure.detail(report.failure_reason)
 
       assert divergence |> Map.keys() |> Enum.sort() ==
-               [:command, :key, :mismatch, :other_keys, :reference_value, :root, :variant_value]
+               [
+                 :command,
+                 :key,
+                 :mismatch,
+                 :other_keys,
+                 :reference_value,
+                 :root,
+                 :using,
+                 :variant_value
+               ]
+
+      # The observation compares under ==, so no using: term is recorded.
+      assert divergence.using == nil
 
       # The model compares one observation, so no further key is listed.
       assert divergence.other_keys == []

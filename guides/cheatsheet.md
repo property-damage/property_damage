@@ -221,9 +221,12 @@ without `else` does not compile. A verdict is not a boolean: `&&` and
 |------|---------|------------|
 | `@check` | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`), never both | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
 | `@eventually` | `after:` (module or list), `timeout:`, `interval:` (all required; bare integer = seconds) | the predicate is still falsy at `timeout:`, returns `{:fail, reason}`, or raises |
-| `@compare` | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), `using:` (2-arity, default `&==/2`); a return of `{:pending, reason}` waits | ready sides differ (`:diverged`), or a side is pending at `converge_within:` (`:did_not_converge`) |
+| `@compare` | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`); a return of `{:pending, reason}` waits | ready sides differ (`:diverged`), or a side is pending at `converge_within:` (`:did_not_converge`) |
 
-A function carries one kind. Details: [Writing Invariants](writing_invariants.md#the-three-kinds-of-check)
+Each attribute sits above a 2-arity function of the state: a `@check` function
+returns its verdict, an `@eventually` function returns the predicate to poll,
+a `@compare` function returns the value compared. A function carries one kind.
+Details: [Writing Invariants](writing_invariants.md#the-three-kinds-of-check)
 and [Differential Testing](differential_testing.md#boundary-observations).
 
 ### @check Syntax
@@ -252,10 +255,14 @@ more targets and no `@compare` is an error at run start.
 | `@compare every: 5` | Compare after every 5th root |
 | `@compare every: {3, CreateOrder}` | Every 3rd `CreateOrder` root |
 | `@compare every: [ClearingReport, :end]` | After those roots, and at the final boundary |
-| `@compare using: &within_cent/2` | Agreement predicate `fn reference, variant -> verdict end`: truthy agrees; `false` or `{:fail, reason}` disagrees (default `&==/2`) |
+| `@compare using: :within_cent` | The relation `within_cent(reference, variant)` in this projection, public or private: truthy agrees; `false` or `{:fail, reason}` disagrees (default `==`) |
+| `@compare using: {Mod, :fun}` | `Mod.fun(reference, variant)` |
+| `@compare using: {PropertyDamage.Equivalence, :within, [0.01]}` | `Mod.fun(reference, variant, arg1, ..., argN)`; here, a tolerance |
 | `{:pending, reason}` (a return value) | The target is still catching up; waited for, never a disagreement |
 
-Helpers: `PropertyDamage.Equivalence.by_key/1`, `normalize/1`, `drop_keys/2`.
+Normalize in the observation body (`PropertyDamage.Equivalence.normalize/1`,
+`drop_keys/2`); keep `using:` for relations that are not equalities. A
+capture or a closure in `using:` is a compile error.
 The wait at a boundary is bounded by `compare: [converge_within: ms]`.
 
 ### @eventually Syntax
@@ -387,7 +394,7 @@ PropertyDamage.run(
     max_repeats: 2,           # max retries per stuttered command
     delay_ms: {0, 100},       # delay between retries (min, max) or integer
     commands: :all,            # :all or [Module1, Module2]
-    using: &==/2               # fn original_events, retry_events -> verdict end (truthy, false, {:fail, reason})
+    using: {Mod, :fun}         # Mod.fun(original_events, retry_events) -> verdict; default ==
   },
 
   # Several targets (compared through the model's @compare observations)

@@ -8,7 +8,10 @@ defmodule PropertyDamage.Stutter.Config do
           max_repeats: pos_integer(),
           delay_ms: {non_neg_integer(), non_neg_integer()} | non_neg_integer(),
           commands: :all | [module()],
-          using: PropertyDamage.Equivalence.predicate(),
+          using:
+            {module(), atom()}
+            | {module(), atom(), list()}
+            | PropertyDamage.Equivalence.predicate(),
           enabled: boolean()
         }
 
@@ -18,7 +21,7 @@ defmodule PropertyDamage.Stutter.Config do
     :delay_ms,
     :commands,
     :enabled,
-    using: &Kernel.==/2
+    using: {Kernel, :==}
   ]
 end
 
@@ -102,7 +105,7 @@ defmodule PropertyDamage.Stutter do
           max_repeats: 2,        # Up to 2 retries (3 total executions)
           delay_ms: {0, 100},    # Random delay between retries
           commands: :all,        # Or list of specific command modules
-          using: &==/2           # fn original_events, retry_events -> ... end
+          using: {MyRelations, :same_outcome}  # default ==
         ]
       )
 
@@ -117,12 +120,15 @@ defmodule PropertyDamage.Stutter do
 
   ## Comparing a retry
 
-  A retry agrees with the original when the `using:` predicate accepts it,
-  called `using.(original_events, retry_events)` with the contract of
-  `@compare`'s `using:` (see `PropertyDamage.Equivalence`): its return is a
+  A retry agrees with the original when the `using:` relation accepts it.
+  `using:` names the relation as `@compare`'s does (DR-051): `{Mod, :fun}`
+  calls `Mod.fun(original_events, retry_events)` and `{Mod, :fun, args}` calls
+  `Mod.fun(original_events, retry_events, arg1, ..., argN)`. Because a run
+  option is runtime data, a 2-arity function `fn original_events,
+  retry_events -> ... end` is accepted too. The relation's return is a
   verdict (DR-052), truthy to agree, and `false`, `nil`, `{:fail, "text"}` or
-  `{:fail, exception}` otherwise. Without `using:`, the events must be equal
-  under `==/2`.
+  `{:fail, exception}` otherwise (see `PropertyDamage.Equivalence`). Without
+  `using:`, the events must be equal under `==/2`.
   """
 
   alias PropertyDamage.Stutter.Config
@@ -137,7 +143,7 @@ defmodule PropertyDamage.Stutter do
       max_repeats: 2,
       delay_ms: {0, 100},
       commands: :all,
-      using: &Kernel.==/2,
+      using: {Kernel, :==},
       enabled: true
     }
   end
@@ -162,7 +168,7 @@ defmodule PropertyDamage.Stutter do
       max_repeats: Map.get(opts, :max_repeats, 2),
       delay_ms: Map.get(opts, :delay_ms, {0, 100}),
       commands: Map.get(opts, :commands, :all),
-      using: Map.get(opts, :using) || (&Kernel.==/2),
+      using: Map.get(opts, :using) || {Kernel, :==},
       enabled: true
     }
   end
@@ -270,7 +276,7 @@ defmodule PropertyDamage.Stutter do
 
   @doc """
   Compare events from first execution with retry execution under the
-  configuration's `using:` predicate.
+  configuration's `using:` relation.
 
   Returns `:agree`, or `{:disagree, exception}` read from the predicate's
   verdict by `PropertyDamage.Verdict`: a falsy answer is a
@@ -280,7 +286,12 @@ defmodule PropertyDamage.Stutter do
   @spec compare_events([struct()], [struct()], Config.t()) ::
           :agree | {:disagree, Exception.t()}
   def compare_events(original_events, retry_events, %Config{} = config) do
-    config.using.(original_events, retry_events)
+    config.using
+    |> call(original_events, retry_events)
     |> PropertyDamage.Verdict.relation(original_events, retry_events)
   end
+
+  defp call({module, fun}, left, right), do: apply(module, fun, [left, right])
+  defp call({module, fun, args}, left, right), do: apply(module, fun, [left, right | args])
+  defp call(using, left, right), do: using.(left, right)
 end

@@ -99,7 +99,7 @@ defmodule PropertyDamage.Comparison do
     end
   end
 
-  # The `using:` predicate of `key`, which must be a 2-arity function.
+  # The `using:` relation of `key`, which must be a 2-arity function.
   defp using!({projection, name} = key) do
     using = projection.__compare_using__(name)
 
@@ -110,6 +110,13 @@ defmodule PropertyDamage.Comparison do
             "@compare using: of #{label(key)} must be a 2-arity function " <>
               "`fn reference_value, variant_value -> ... end`, got: #{inspect(using)}"
     end
+  end
+
+  # The `using:` term of `key` as its `@compare` wrote it, `nil` without one.
+  defp written({projection, name}) do
+    Enum.find_value(projection.__compares__(), fn compare ->
+      if compare.name == name, do: compare.using
+    end)
   end
 
   @doc false
@@ -190,6 +197,7 @@ defmodule PropertyDamage.Comparison do
       command: command,
       keys: keys,
       usings: Map.new(keys, &{&1, using!(&1)}),
+      written: Map.new(keys, &{&1, written(&1)}),
       variants: variants,
       within: Keyword.fetch!(opts, :within),
       concurrency: Keyword.fetch!(opts, :concurrency),
@@ -277,7 +285,8 @@ defmodule PropertyDamage.Comparison do
        command: loop.command,
        reference_value: reference_value,
        variant_value: variant_value,
-       mismatch: mismatch
+       mismatch: mismatch,
+       using: Map.fetch!(loop.written, key)
      })}
   end
 

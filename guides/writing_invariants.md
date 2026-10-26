@@ -235,7 +235,7 @@ decorating attribute, and each answers a different question.
 |------|----------|----------|----------|------------|
 | `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
 | `@eventually` | Does this become true in time? | One target's state, polled | `after:` (event module or list), polled every `interval:` for up to `timeout:` | the predicate is still falsy at the `timeout:`, returns `{:fail, reason}`, or raises |
-| `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), agreement predicate `using:` | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
+| `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), relation `using:` (`:fun`, `{Mod, :fun}`, `{Mod, :fun, args}`; default `==`) | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
 
 When to pick which:
 
@@ -248,6 +248,11 @@ When to pick which:
 - Use `@compare` when the question needs two or more targets. A `@check` in one
   target cannot see another target, so `@compare` is the whole cross-target
   oracle.
+
+The three attributes are plain module attributes with one shape: each sits
+above a 2-arity function of the projection state. A `@check` function returns
+its verdict, an `@eventually` function returns the predicate to poll, and a
+`@compare` function returns the value compared across targets.
 
 A function carries exactly one of the three. The three share one verdict
 grammar (DR-052): a `@check` judges its return now, an `@eventually` judges its
@@ -367,41 +372,53 @@ end
 
 `every:` takes the same schedule vocabulary as `@check` (`1`, `N`,
 `{N, Module}`, `Module`, `[Modules]`) plus `:end` for the final boundary.
-`using:` is a 2-arity predicate (default `&==/2`) whose return is a verdict:
-truthy when the values agree, `false` or `{:fail, reason}` when they do not. A function may return
+Values agree under `==` unless `using:` names another relation: `:fun` (a
+function of the projection, public or private), `{Mod, :fun}` or
+`{Mod, :fun, args}`, each called with the reference's value and the variant's
+value first (DR-051). The relation's return is a verdict: truthy when the
+values agree, `false` or `{:fail, reason}` when they do not. Normalize in the
+observation body and keep `using:` for relations that are not equalities,
+such as a tolerance:
+
+```elixir
+@compare every: 1, using: {PropertyDamage.Equivalence, :within, [0.01]}
+def balance(state, _root), do: state.balance
+```
+
+A function may return
 `{:pending, reason}` while its target is still catching up; the comparison
 waits for it up to the run's `compare: [converge_within: ms]` (default 5000). A raise in a
-`@compare` function or a `using:` predicate is a check failure naming the
+`@compare` function or a `using:` relation is a check failure naming the
 observation. A `@compare` function cannot also carry `@check` or `@eventually`, and carries
 one `@compare`, written above its first clause: a second one on another clause
 is a compile error.
 
 The [Differential Testing](differential_testing.md) guide covers the schedule,
-the predicate helpers, `{:pending, reason}` and the convergence loop in full.
+the named relations, `{:pending, reason}` and the convergence loop in full.
 
 ### What `==` does not do
 
 `==` is what `assert a == b` uses, so authors are calibrated to it, and
-`using: &===/2` is the strict form. Five traps each produce a false
+`using: {Kernel, :===}` is the strict form. Five traps each produce a false
 "diverged":
 
 1. **List order.** Lists are ordered, and `normalize/1` does not sort. An
    observation that returns a list whose order is not part of the contract
    diverges when injector-delivered events were folded in a different order per
-   target. Return a map unless order is meant, or sort under
-   `by_key(&Enum.sort/1)`. The framework never sorts silently, because order is
-   sometimes the property under test.
+   target. Return a map unless order is meant, or sort in the observation
+   (`Enum.sort(state.items)`). The framework never sorts silently, because
+   order is sometimes the property under test.
 2. **Keyword lists.** Keyword lists compare as lists, so `[a: 1, b: 2]` and
    `[b: 2, a: 1]` differ. Maps and `MapSet`s compare without regard to order.
 3. **Number coercion.** `==` coerces numbers: `100 == 100.0`. That hides an
-   integer-cents against float difference. Use `&===/2` when the
-   representation matters.
+   integer-cents against float difference. Use `using: {Kernel, :===}` when
+   the representation matters.
 4. **Value structs.** `Decimal`, `Money` and `DateTime` compare field by field:
    `Decimal.new("1.0") != Decimal.new("1.00")`, and two `DateTime` values that
-   differ in microsecond precision or zone differ. Compare a key under
-   `by_key/1` instead.
+   differ in microsecond precision or zone differ. Return a key from the
+   observation instead, such as `DateTime.to_unix(at, :millisecond)`.
 5. **Floats.** Floats differ in the last bit across implementations. Use a
-   tolerance predicate such as `fn a, b -> abs(a - b) <= 0.01 end`.
+   tolerance: `using: {PropertyDamage.Equivalence, :within, [0.01]}`.
 
 Server-minted identifiers and timestamps break equality the same way: leave
 them out of the observation, or strip them with

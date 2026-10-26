@@ -1,8 +1,7 @@
 defmodule PropertyDamage.ComparePredicateTest do
-  # `using:` decides whether a variant's value agrees with the reference's.
-  # It is any expression that evaluates to a 2-arity function inside the
-  # projection module, called `using.(reference_value, variant_value)` for
-  # each non-reference variant.
+  # `using:` names the relation that decides whether a variant's value agrees
+  # with the reference's (DR-051): `:fun`, `{Mod, :fun}` or `{Mod, :fun, args}`,
+  # called with the reference value first for each non-reference variant.
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Failure
@@ -31,60 +30,72 @@ defmodule PropertyDamage.ComparePredicateTest do
     remote: """
     defmodule #{@ns}.Remote do
     #{@header}
-      @compare using: &PropertyDamage.Test.Compare.same_settled?/2
+      @compare using: {PropertyDamage.Test.Compare, :same_settled?}
+      def totals(s, _root), do: #{@value}
+    end
+    """,
+    remote_args: """
+    defmodule #{@ns}.RemoteArgs do
+    #{@header}
+      @compare using: {PropertyDamage.Test.Compare, :settled_within, [1]}
       def totals(s, _root), do: #{@value}
     end
     """,
     private: """
     defmodule #{@ns}.Private do
     #{@header}
-      @compare using: &within_one/2
+      @compare using: :within_one
       def totals(s, _root), do: #{@value}
 
       defp within_one(reference, variant) do
-        if abs(reference.settled - variant.settled) <= 1,
-          do: true,
-          else: {:fail, "settled differs by more than one"}
+        abs(reference.settled - variant.settled) <= 1 or
+          {:fail, "settled differs by more than one"}
       end
     end
     """,
-    inline: """
-    defmodule #{@ns}.Inline do
+    module_private: """
+    defmodule #{@ns}.ModulePrivate do
     #{@header}
-      @compare using: fn reference, variant -> reference.settled == variant.settled end
+      @compare using: {__MODULE__, :within, [1]}
       def totals(s, _root), do: #{@value}
+
+      defp within(reference, variant, tolerance),
+        do: abs(reference.settled - variant.settled) <= tolerance
     end
     """,
-    composed: """
-    defmodule #{@ns}.Composed do
+    normalized: """
+    defmodule #{@ns}.Normalized do
     #{@header}
       import PropertyDamage.Equivalence
 
-      @compare using: by_key(fn v -> v |> normalize() |> drop_keys([:fees]) end)
-      def totals(s, _root), do: #{@value}
+      @compare every: 1
+      def totals(s, _root), do: #{@value} |> normalize() |> drop_keys([:fees])
     end
     """,
     kept_exception: """
     defmodule #{@ns}.KeptException do
     #{@header}
-      @compare using: fn reference, variant ->
-                 if reference.settled == variant.settled,
-                   do: true,
-                   else: {:fail, %ArgumentError{message: "settled disagrees"}}
-               end
+      @compare using: :same_settled
       def totals(s, _root), do: #{@value}
+
+      defp same_settled(reference, variant) do
+        reference.settled == variant.settled or
+          {:fail, %ArgumentError{message: "settled disagrees"}}
+      end
     end
     """,
     positional: """
     defmodule #{@ns}.Positional do
     #{@header}
-      @compare using: fn reference, variant ->
-                 reference.settled == variant.settled or
-                   {:fail,
-                    "reference=" <> Integer.to_string(reference.settled) <>
-                      " variant=" <> Integer.to_string(variant.settled)}
-               end
+      @compare using: :same_settled
       def totals(s, _root), do: #{@value}
+
+      defp same_settled(reference, variant) do
+        reference.settled == variant.settled or
+          {:fail,
+           "reference=" <> Integer.to_string(reference.settled) <>
+             " variant=" <> Integer.to_string(variant.settled)}
+      end
     end
     """,
     exact: """
@@ -106,8 +117,10 @@ defmodule PropertyDamage.ComparePredicateTest do
     raising_predicate: """
     defmodule #{@ns}.RaisingPredicate do
     #{@header}
-      @compare using: fn _reference, _variant -> raise ArgumentError, "predicate exploded" end
+      @compare using: :explode
       def totals(s, _root), do: %{settled: s.settled}
+
+      defp explode(_reference, _variant), do: raise(ArgumentError, "predicate exploded")
     end
     """
   }
@@ -150,8 +163,8 @@ defmodule PropertyDamage.ComparePredicateTest do
      Map.fetch!(divergence, :mismatch)}
   end
 
-  describe "the four ways to write using:" do
-    test "a remote capture compiles and decides agreement", ctx do
+  describe "the three named forms of using:" do
+    test "{Mod, :fun} names a remote 2-arity relation", ctx do
       assert {:ok, _stats} = Compare.run(model!(ctx, :remote), targets(0))
 
       {reference, variant, mismatch} = diverge!(ctx, :remote, 5)
@@ -162,8 +175,13 @@ defmodule PropertyDamage.ComparePredicateTest do
       assert variant.settled == reference.settled + 5
     end
 
-    test "a capture of a private function of the projection compiles and decides agreement",
-         ctx do
+    test "{Mod, :fun, args} calls fun(reference, variant, arg1, ..., argN)", ctx do
+      assert {:ok, _stats} = Compare.run(model!(ctx, :remote_args), targets(1))
+      {reference, variant, _mismatch} = diverge!(ctx, :remote_args, 2)
+      assert variant.settled == reference.settled + 2
+    end
+
+    test ":fun names a private function of the projection", ctx do
       assert {:ok, _stats} = Compare.run(model!(ctx, :private), targets(0))
       assert {:ok, _stats} = Compare.run(model!(ctx, :private), targets(1))
 
@@ -174,22 +192,27 @@ defmodule PropertyDamage.ComparePredicateTest do
       assert Exception.message(mismatch) == "settled differs by more than one"
     end
 
-    test "an inline fn compiles and decides agreement", ctx do
-      assert {:ok, _stats} = Compare.run(model!(ctx, :inline), targets(0))
-
-      {reference, variant, mismatch} = diverge!(ctx, :inline, 5)
-      assert Compare.mismatch?(mismatch)
-      assert {mismatch.left, mismatch.right} == {reference, variant}
+    test "{__MODULE__, :fun, args} names a private function of the projection", ctx do
+      assert {:ok, _stats} = Compare.run(model!(ctx, :module_private), targets(1))
+      {reference, variant, _mismatch} = diverge!(ctx, :module_private, 2)
+      assert variant.settled == reference.settled + 2
     end
 
-    test "a by_key composition with a closure compiles and keeps the normalized diff", ctx do
-      assert {:ok, _stats} = Compare.run(model!(ctx, :composed), targets(0))
+    test "__compare_using__/1 returns a 2-arity function for each form", ctx do
+      for name <- [:remote, :remote_args, :private, :module_private, :exact] do
+        {projection, observation} = key(ctx, name)
+        assert is_function(projection.__compare_using__(observation), 2)
+      end
+    end
 
-      {reference, variant, mismatch} = diverge!(ctx, :composed, 5)
+    test "an observation that normalizes its own value needs no using:", ctx do
+      assert {:ok, _stats} = Compare.run(model!(ctx, :normalized), targets(0))
+
+      {reference, variant, mismatch} = diverge!(ctx, :normalized, 5)
       assert Compare.mismatch?(mismatch)
-      # The key function's values: ids stripped, fees dropped.
-      assert mismatch.left == %{settled: reference.settled}
-      assert mismatch.right == %{settled: variant.settled}
+      # The values compared: ids stripped, fees dropped.
+      assert reference == %{settled: variant.settled - 5}
+      assert {mismatch.left, mismatch.right} == {reference, variant}
     end
   end
 
@@ -242,50 +265,109 @@ defmodule PropertyDamage.ComparePredicateTest do
     end
   end
 
-  describe "a using: that is not a 2-arity function" do
-    for {label, using} <- [
-          {"an atom", ":exact"},
-          {"a 1-arity fn", "fn value -> value end"},
-          {"a 3-arity capture", "&Enum.at/3"}
-        ] do
-      test "#{label} is rejected at compile time or before any adapter setup" do
-        name = "BadUsing#{System.unique_integer([:positive])}"
-        projection = Module.concat(__MODULE__, name)
+  describe "a using: that names no relation is a CompileError" do
+    defp compile_using(using, extra \\ "") do
+      name = "BadUsing#{System.unique_integer([:positive])}"
 
-        source = """
-        defmodule #{inspect(projection)} do
-          use PropertyDamage.Model.Projection
+      Compare.compile("""
+      defmodule #{inspect(Module.concat(__MODULE__, name))} do
+        use PropertyDamage.Model.Projection
 
-          @impl true
-          def init, do: %{}
-
-          @impl true
-          def apply(s, _), do: s
-
-          @compare using: #{unquote(using)}
-          def observed(_s, _root), do: :value
-        end
-        """
-
-        case Compare.compile(source) do
-          {:error, message} ->
-            assert message =~ "@compare"
-            assert message =~ "using:"
-
-          {:ok, _modules} ->
-            model =
-              Compare.define_model!(Module.concat([__MODULE__, "Model", name]), [projection])
-
-            error =
-              Compare.raised(fn ->
-                Compare.run(model, [Compare.target("a"), Compare.target("b")])
-              end)
-
-            assert Exception.message(error) =~ "@compare"
-            assert Exception.message(error) =~ "using:"
-            refute_received {:setup, _name}
-        end
+        @compare using: #{using}
+        def observed(_s, _root), do: :value
+      #{extra}
       end
+      """)
+    end
+
+    # Every message names the observation, the using: term and the arity.
+    defp assert_using_error(using, extra \\ "", expected) do
+      assert {:error, message} = compile_using(using, extra)
+      assert message =~ "@compare on observed/2"
+      assert message =~ "has using: "
+      # `__MODULE__` reads back as the projection's own name.
+      assert message =~ String.replace(using, "{__MODULE__", "")
+
+      for fragment <- List.wrap(expected) do
+        assert message =~ fragment
+      end
+
+      message
+    end
+
+    for {label, using} <- [
+          {"a string", ~S("exact")},
+          {"a one-element tuple", "{Enum}"},
+          {"a tuple whose function is not an atom", ~S({Enum, "count"})},
+          {"args that are not a list", "{Enum, :count, 3}"}
+        ] do
+      test "an unknown form, #{label}, names the three forms" do
+        assert_using_error(unquote(using), ["not a relation name", "{Mod, :fun, args}"])
+      end
+    end
+
+    test "a function value names the form to write instead" do
+      {:error, message} = compile_using("fn reference, variant -> reference == variant end")
+      assert message =~ "@compare on observed/2"
+      assert message =~ "a function value cannot be printed in a report or recorded"
+      assert message =~ "`&fun/2` becomes `:fun`"
+      assert message =~ "a relation"
+    end
+
+    test "a function value inside args names the form to write instead" do
+      assert_using_error("{Enum, :count, [&Enum.count/1]}", [
+        "function value &Enum.count/1",
+        "`{Mod, :fun}`"
+      ])
+    end
+
+    test "a missing local function" do
+      assert_using_error(":close?", [
+        "defines no close?/2",
+        "a relation takes 2 arguments, close?(reference_value, variant_value)"
+      ])
+    end
+
+    test "a local function of the wrong arity" do
+      assert_using_error(":close?", "  def close?(a, b, c), do: a == b and c", [
+        "defines no close?/2 (it defines close?/3)",
+        "takes 2 arguments"
+      ])
+    end
+
+    test "a local function of the wrong arity for its args" do
+      assert_using_error(
+        "{__MODULE__, :close?, [1]}",
+        "  defp close?(a, b), do: a == b",
+        ["defines no close?/3 (it defines close?/2)", "with 1 args takes 3 arguments"]
+      )
+    end
+
+    test "a remote module that does not export the function" do
+      assert_using_error("{Enum, :to_list}", [
+        "Enum does not export to_list/2 (it defines to_list/1)",
+        "takes 2 arguments"
+      ])
+    end
+
+    test "a remote module that does not exist" do
+      assert_using_error("{PropertyDamage.NoSuchRelations, :close?}", [
+        "PropertyDamage.NoSuchRelations cannot be loaded",
+        "takes 2 arguments"
+      ])
+    end
+
+    test "__compares__/0 records the using: term as written" do
+      assert {:ok, [projection | _]} =
+               compile_using("{PropertyDamage.Test.Compare, :same_settled?}")
+
+      assert projection.__compares__() == [
+               %{
+                 name: :observed,
+                 schedule: %{roots: :all, end: false},
+                 using: {PropertyDamage.Test.Compare, :same_settled?}
+               }
+             ]
     end
   end
 

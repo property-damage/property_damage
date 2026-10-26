@@ -48,7 +48,7 @@ The framework SHALL compare the targets of a run only through the boundary obser
 #### Scenario: Agreement is judged by using: (DR-052)
 
 - **WHEN** a boundary observation's reference value and variant value are judged
-- **THEN** the framework SHALL call the observation's `using:` predicate with the reference value first and read its return with the verdict grammar shared with `@check` and `@eventually` (`PropertyDamage.Verdict`)
+- **THEN** the framework SHALL call the observation's `using:` relation with the reference value first and read its return with the verdict grammar shared with `@check` and `@eventually` (`PropertyDamage.Verdict`)
 - **AND** SHALL treat a truthy return as agreement
 - **AND** SHALL treat `false` or `nil` as a difference whose detail is a `PropertyDamage.ComparisonMismatch` holding both values
 - **AND** SHALL treat `{:fail, "text"}` as a difference whose detail is a `PropertyDamage.ComparisonMismatch` holding both values and the text, and `{:fail, exception}` as a difference whose detail is that exception
@@ -56,12 +56,19 @@ The framework SHALL compare the targets of a run only through the boundary obser
 
 #### Scenario: The retired relation returns are gone (DR-052)
 
-- **WHEN** a `using:` predicate is written
+- **WHEN** a `using:` relation is written
 - **THEN** `:match` and `{:mismatch, detail}` SHALL NOT be part of its contract, and `PropertyDamage.Equivalence.verdict/3` SHALL NOT exist; `PropertyDamage.Verdict.read/1` reads the return
+
+#### Scenario: A divergence records the relation as written (DR-051)
+
+- **WHEN** a boundary observation diverges at the convergence bound
+- **THEN** the `:diverged` failure (`PropertyDamage.Failure.Divergence`) SHALL carry the observation's `using:` term as written (`{PropertyDamage.Equivalence, :within, [0.01]}`), `nil` when the values were compared under `==`
+- **AND** the failure report SHALL print the term beside the two values
+- **AND** the persistence format version SHALL stay 15 while 15 is unreleased
 
 #### Scenario: A raise is a check failure
 
-- **WHEN** a `@compare` function or a `using:` predicate raises
+- **WHEN** a `@compare` function or a `using:` relation raises
 - **THEN** the framework SHALL report a failure of kind `:check_failed` in the variant where it ran, naming the observation's key
 - **AND** SHALL NOT report a divergence
 
@@ -295,11 +302,17 @@ The framework SHALL capture `external()` server-generated values and resolve the
 
 ### Requirement: Equivalence Helpers (DR-046)
 
-`PropertyDamage.Equivalence` SHALL offer helpers for `using:` predicates: `by_key/1` lifts a 1-arity key function into a predicate comparing the two keys under `==/2` and keeping both keys in the mismatch; `normalize/1` strips the identifier and timestamp keys (`id`, `inserted_at`, `updated_at`, `created_at`, `timestamp`, `uuid`, `request_id`, `correlation_id`) at every depth and unwraps a top-level `{:ok, _}` or `{:error, _}`; `drop_keys/2` removes the given keys at every depth. The framework MUST NOT sort or normalize a value silently.
+`PropertyDamage.Equivalence` SHALL offer relations for `using:` and helpers for observation bodies (DR-051): `within/3` is a tolerance, named `{PropertyDamage.Equivalence, :within, [tolerance]}`, under which two numbers agree when they differ by at most the tolerance, at every depth of maps, lists and tuples of the same shape, and any other pair of values agrees under `==/2`; `by_key/1` lifts a 1-arity key function into a 2-arity relation comparing the two keys under `==/2` and keeping both keys in the mismatch; `normalize/1` strips the identifier and timestamp keys (`id`, `inserted_at`, `updated_at`, `created_at`, `timestamp`, `uuid`, `request_id`, `correlation_id`) at every depth and unwraps a top-level `{:ok, _}` or `{:error, _}`; `drop_keys/2` removes the given keys at every depth. The framework MUST NOT sort or normalize a value silently.
+
+#### Scenario: within/3 is a tolerance (DR-051)
+
+- **WHEN** `within(reference, variant, 0.01)` judges two numbers that differ by at most 0.01
+- **THEN** it SHALL return `true`
+- **AND** WHEN they differ by more, it SHALL return `{:fail, %ComparisonMismatch{}}` holding both values, the reference first
 
 #### Scenario: by_key compares keys
 
-- **WHEN** `using: by_key(&normalize/1)` judges two values that differ only in an `id`
+- **WHEN** the relation `by_key(&normalize/1)` judges two values that differ only in an `id`
 - **THEN** it SHALL return `true`
 - **AND** WHEN they differ in another field, it SHALL return `{:fail, %ComparisonMismatch{}}` holding the two normalized values (DR-052)
 
