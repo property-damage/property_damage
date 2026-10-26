@@ -403,8 +403,8 @@ defmodule PropertyDamage.Command do
   # The error for the removed `acceptable_retry_events:` key.
   def retired_acceptable_retry_events do
     "`acceptable_retry_events:` was removed; a stutter retry agrees with the original " <>
-      "when `stutter: [using: fn original_events, retry_events -> ... end]` accepts it " <>
-      "(default `&==/2`)"
+      "when the relation `stutter: [using: {Mod, :fun}]` accepts it, " <>
+      "called `Mod.fun(original_events, retry_events)` (default `==`)"
   end
 
   @doc """

@@ -872,7 +872,7 @@ defmodule PropertyDamage.Model.Projection do
         :ok
 
       {module, fun, args} when is_atom(module) and is_atom(fun) and is_list(args) ->
-        case find_function_value(args) do
+        case __function_value__(args) do
           nil ->
             :ok
 
@@ -903,21 +903,26 @@ defmodule PropertyDamage.Model.Projection do
     end
   end
 
-  defp find_function_value(value) when is_function(value), do: value
+  @doc false
+  # The first function value inside `term`, at any depth, or `nil`: the args
+  # of a named relation are literals (DR-051 item 2), here and on
+  # `stutter: [using:]`.
+  @spec __function_value__(term()) :: function() | nil
+  def __function_value__(value) when is_function(value), do: value
 
-  defp find_function_value(list) when is_list(list),
-    do: Enum.find_value(list, &find_function_value/1)
+  def __function_value__(list) when is_list(list),
+    do: Enum.find_value(list, &__function_value__/1)
 
-  defp find_function_value(tuple) when is_tuple(tuple),
-    do: tuple |> Tuple.to_list() |> find_function_value()
+  def __function_value__(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> __function_value__()
 
-  defp find_function_value(%_{} = struct),
-    do: struct |> Map.from_struct() |> find_function_value()
+  def __function_value__(%_{} = struct),
+    do: struct |> Map.from_struct() |> __function_value__()
 
-  defp find_function_value(map) when is_map(map),
-    do: map |> Enum.flat_map(fn {key, value} -> [key, value] end) |> find_function_value()
+  def __function_value__(map) when is_map(map),
+    do: map |> Enum.flat_map(fn {key, value} -> [key, value] end) |> __function_value__()
 
-  defp find_function_value(_value), do: nil
+  def __function_value__(_value), do: nil
 
   # What a registered observation's `using:` term resolves to in the module
   # being compiled: `:equal` (no `using:`), `{:local, fun, args}` for a

@@ -359,6 +359,14 @@ defmodule PropertyDamage.Test.Compare do
   def same_settled?(reference, variant), do: reference.settled == variant.settled
 
   @doc false
+  # A stutter relation that accepts any retry.
+  def any_retry(_original, _retry), do: true
+
+  @doc false
+  # A stutter relation with one argument that answers it whatever the events.
+  def retry_answer(_original, _retry, answer), do: answer
+
+  @doc false
   # A remote relation with one argument, named `{Compare, :settled_within, [n]}`.
   def settled_within(reference, variant, tolerance),
     do: abs(reference.settled - variant.settled) <= tolerance

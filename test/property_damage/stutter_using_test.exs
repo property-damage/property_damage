@@ -98,6 +98,42 @@ defmodule PropertyDamage.StutterUsingTest do
     test "a using: that is not a 2-arity function is an option error naming using:" do
       assert stutter_error(using: fn events -> events end) =~ "using:"
     end
+
+    test "the error teaches the named forms before the function" do
+      message = stutter_error(using: "same")
+      assert message =~ "using:"
+      assert message =~ ~s(got: "same")
+      [named, function] = String.split(message, "{Mod, :fun, args}", parts: 2)
+      assert named =~ "{Mod, :fun}"
+      assert function =~ "fn original_events, retry_events"
+    end
+
+    test "a named function the module does not export is an option error naming it" do
+      message = stutter_error(using: {Enum, :to_list})
+      assert message =~ "using:"
+      assert message =~ "Enum does not export to_list/2"
+    end
+
+    test "a function value inside args is an option error" do
+      message = stutter_error(using: {Enum, :count, [&Enum.count/1]})
+      assert message =~ "using:"
+      assert message =~ "function value &Enum.count/1"
+    end
+  end
+
+  describe "a named using:" do
+    test "{Mod, :fun} names a remote 2-arity relation" do
+      assert {:ok, _stats} = run(:different, using: {Compare, :any_retry})
+    end
+
+    test "{Mod, :fun, args} calls fun(original, retry, arg1, ..., argN)" do
+      assert {:ok, _stats} = run(:different, using: {Compare, :retry_answer, [true]})
+
+      report = violation!(:different, using: {Compare, :retry_answer, [false]})
+      mismatch = detail(report, &Compare.mismatch?/1)
+      assert [%Paid{by: "first"}] = mismatch.left
+      assert [%Paid{by: "retry"}] = mismatch.right
+    end
   end
 
   describe "using:" do

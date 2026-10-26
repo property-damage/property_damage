@@ -589,10 +589,11 @@ defmodule PropertyDamage.Options do
         using: [
           type: {:custom, __MODULE__, :validate_stutter_using, []},
           doc: """
-          The predicate that decides whether a retry's events agree with the
-          original events, called `using.(original_events, retry_events)` with the
-          contract of `@compare`'s `using:` (see `PropertyDamage.Equivalence`).
-          Default `&==/2`.
+          The relation that decides whether a retry's events agree with the
+          original events: `{Mod, :fun}`, called `Mod.fun(original_events,
+          retry_events)`, `{Mod, :fun, args}`, called with the args after the two
+          event lists, or a 2-arity function. Its return is a verdict, as for
+          `@compare`'s `using:` (see `PropertyDamage.Equivalence`). Default `==`.
           """
         ]
       ]
@@ -1175,19 +1176,49 @@ defmodule PropertyDamage.Options do
     end
   end
 
+  @stutter_using_forms "names a relation `{Mod, :fun}` (Mod.fun/2) or " <>
+                         "`{Mod, :fun, args}` (Mod.fun/(2 + length(args))), called " <>
+                         "fun(original_events, retry_events, ...args), or is a 2-arity " <>
+                         "function `fn original_events, retry_events -> ... end`"
+
   defp compare_shape_error(value) do
     {:error,
      "expected `compare:` to be a keyword list `[converge_within: ms]`, got: #{inspect(value)}"}
   end
 
   @doc false
-  # `stutter: [using:]` option type: a 2-arity predicate.
+  # `stutter: [using:]` option type: a named relation `{Mod, :fun}` or
+  # `{Mod, :fun, args}` (DR-051 item 6), or a 2-arity function.
   def validate_stutter_using(using) when is_function(using, 2), do: {:ok, using}
 
+  def validate_stutter_using({module, fun, args} = using)
+      when is_atom(module) and is_atom(fun) and is_list(args) do
+    case PropertyDamage.Model.Projection.__function_value__(args) do
+      nil ->
+        stutter_relation_exported(using, module, fun, 2 + length(args))
+
+      value ->
+        {:error,
+         "`stutter: [using: #{inspect(using)}]` holds the function value #{inspect(value)} " <>
+           "in its args, which are literals; name a relation `{Mod, :fun}` that calls it"}
+    end
+  end
+
+  def validate_stutter_using({module, fun} = using) when is_atom(module) and is_atom(fun),
+    do: stutter_relation_exported(using, module, fun, 2)
+
   def validate_stutter_using(other) do
-    {:error,
-     "`stutter: [using: ...]` must be a 2-arity function " <>
-       "`fn original_events, retry_events -> ... end`, got: #{inspect(other)}"}
+    {:error, "`stutter: [using: ...]` " <> @stutter_using_forms <> ", got: #{inspect(other)}"}
+  end
+
+  defp stutter_relation_exported(using, module, fun, arity) do
+    if Code.ensure_loaded?(module) and function_exported?(module, fun, arity) do
+      {:ok, using}
+    else
+      {:error,
+       "`stutter: [using: #{inspect(using)}]`: #{inspect(module)} does not export " <>
+         "#{fun}/#{arity}; " <> @stutter_using_forms}
+    end
   end
 
   # The stutter comparison modes and the command-spec key they read were
@@ -1198,11 +1229,12 @@ defmodule PropertyDamage.Options do
         reject_retired_keys!(stutter, %{
           comparison:
             "`stutter: [comparison: ...]` was removed; pass `stutter: [using: " <>
-              "fn original_events, retry_events -> ... end]`, a predicate with the contract " <>
-              "of `@compare`'s `using:` (default `&==/2`)",
+              "{Mod, :fun}]`, a relation called `Mod.fun(original_events, retry_events)` " <>
+              "with the contract of `@compare`'s `using:` (default `==`)",
           acceptable_retry_events:
             "`acceptable_retry_events:` was removed; pass `stutter: [using: " <>
-              "fn original_events, retry_events -> ... end]` to decide which retry answers agree"
+              "{Mod, :fun}]`, a relation called `Mod.fun(original_events, retry_events)`, " <>
+              "to decide which retry answers agree"
         })
 
       _ ->
