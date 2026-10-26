@@ -88,7 +88,7 @@ defmodule PropertyDamage.StutterTest do
           max_repeats: 3,
           delay_ms: {10, 100},
           commands: [Cmd],
-          using: &Kernel.===/2
+          using: {Kernel, :===}
         )
 
       assert %Config{
@@ -99,7 +99,7 @@ defmodule PropertyDamage.StutterTest do
                enabled: true
              } = config
 
-      assert config.using == (&Kernel.===/2)
+      assert config.using == {Kernel, :===}
     end
 
     test "keyword list and equivalent map parse identically" do

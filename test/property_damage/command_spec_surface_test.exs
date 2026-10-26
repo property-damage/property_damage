@@ -177,7 +177,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     delay_ms: 0,
     commands: :all,
     enabled: true,
-    using: &__MODULE__.created_or_already_exists/2
+    using: {__MODULE__, :created_or_already_exists}
   }
 
   @doc false

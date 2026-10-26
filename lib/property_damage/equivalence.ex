@@ -71,6 +71,73 @@ defmodule PropertyDamage.Equivalence do
   end
 
   @doc """
+  Agree when `reference` and `variant` differ by at most `tolerance`, a
+  non-negative number.
+
+  Two numbers agree when `abs(reference - variant) <= tolerance`. Maps,
+  lists and tuples agree when they have the same keys or length and their
+  elements agree under the same rule; any other pair of values agrees under
+  `==/2`. A tolerance is a relation, not an equality, so it belongs in
+  `using:` (DR-051), named with its tolerance:
+
+      @compare using: {PropertyDamage.Equivalence, :within, [0.01]}
+      def net(state, _root), do: state.net
+
+  Returns `true`, or `{:fail, %PropertyDamage.ComparisonMismatch{}}` holding
+  both values, the reference first.
+
+  ## Examples
+
+      iex> PropertyDamage.Equivalence.within(10.0, 10.004, 0.01)
+      true
+
+      iex> PropertyDamage.Equivalence.within(%{net: 1.0, cur: "EUR"}, %{net: 1.002, cur: "EUR"}, 0.01)
+      true
+
+      iex> {:fail, mismatch} = PropertyDamage.Equivalence.within(10.0, 10.5, 0.01)
+      iex> {mismatch.left, mismatch.right}
+      {10.0, 10.5}
+      iex> Exception.message(mismatch)
+      "the values differ by more than 0.01"
+  """
+  @spec within(term(), term(), number()) :: true | {:fail, ComparisonMismatch.t()}
+  def within(reference, variant, tolerance) when is_number(tolerance) and tolerance >= 0 do
+    close?(reference, variant, tolerance) or
+      {:fail,
+       %ComparisonMismatch{
+         left: reference,
+         right: variant,
+         message: "the values differ by more than #{tolerance}"
+       }}
+  end
+
+  defp close?(left, right, tolerance) when is_number(left) and is_number(right),
+    do: abs(left - right) <= tolerance
+
+  defp close?(left, right, tolerance) when is_list(left) and is_list(right),
+    do: length(left) == length(right) and all_close?(Enum.zip(left, right), tolerance)
+
+  defp close?(left, right, tolerance)
+       when is_tuple(left) and is_tuple(right) and tuple_size(left) == tuple_size(right),
+       do: close?(Tuple.to_list(left), Tuple.to_list(right), tolerance)
+
+  defp close?(%module{} = left, %module{} = right, tolerance),
+    do: close?(Map.from_struct(left), Map.from_struct(right), tolerance)
+
+  defp close?(left, right, tolerance)
+       when is_map(left) and is_map(right) and not is_struct(left) and not is_struct(right) do
+    map_size(left) == map_size(right) and
+      Enum.all?(left, fn {key, value} ->
+        Map.has_key?(right, key) and close?(value, Map.fetch!(right, key), tolerance)
+      end)
+  end
+
+  defp close?(left, right, _tolerance), do: left == right
+
+  defp all_close?(pairs, tolerance),
+    do: Enum.all?(pairs, fn {left, right} -> close?(left, right, tolerance) end)
+
+  @doc """
   Strip the identifier and timestamp keys (`#{Enum.map_join(@noise_keys, ", ", &inspect/1)}`)
   from every map and struct in `value`, at every depth, and unwrap a
   top-level `{:ok, value}` or `{:error, reason}`.

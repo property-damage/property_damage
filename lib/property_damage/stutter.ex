@@ -21,7 +21,7 @@ defmodule PropertyDamage.Stutter.Config do
     :delay_ms,
     :commands,
     :enabled,
-    using: &Kernel.==/2
+    using: {Kernel, :==}
   ]
 end
 
@@ -143,7 +143,7 @@ defmodule PropertyDamage.Stutter do
       max_repeats: 2,
       delay_ms: {0, 100},
       commands: :all,
-      using: &Kernel.==/2,
+      using: {Kernel, :==},
       enabled: true
     }
   end
@@ -168,7 +168,7 @@ defmodule PropertyDamage.Stutter do
       max_repeats: Map.get(opts, :max_repeats, 2),
       delay_ms: Map.get(opts, :delay_ms, {0, 100}),
       commands: Map.get(opts, :commands, :all),
-      using: Map.get(opts, :using) || (&Kernel.==/2),
+      using: Map.get(opts, :using) || {Kernel, :==},
       enabled: true
     }
   end

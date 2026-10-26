@@ -333,9 +333,10 @@ defmodule PropertyDamage do
   - `:max_repeats` - Maximum retry attempts per stuttered command (default: 2)
   - `:delay_ms` - Delay between retries, `{min, max}` tuple or integer (default: {0, 100})
   - `:commands` - `:all` or list of command modules to stutter (default: :all)
-  - `:using` - The predicate deciding whether a retry agrees with the
-    original, called `using.(original_events, retry_events)` with the contract
-    of `@compare`'s `using:` (default `&==/2`)
+  - `:using` - The relation deciding whether a retry agrees with the
+    original: `{Mod, :fun}`, called `Mod.fun(original_events, retry_events)`,
+    `{Mod, :fun, args}`, or a 2-arity function, with the verdict contract of
+    `@compare`'s `using:` (default `==`)
 
   Stutter testing verifies that retrying commands produces consistent results
   (idempotency). Retry events are captured but not applied to projections.
@@ -2315,7 +2316,7 @@ defmodule PropertyDamage do
     if Keyword.has_key?(opts, :equivalence) do
       raise ArgumentError,
             "`equivalence:` was removed; targets are compared only through `@compare` " <>
-              "functions, each deciding agreement with its own `using:` predicate"
+              "functions, each deciding agreement with its own `using:` relation"
     end
 
     case Keyword.fetch(opts, :compare) do

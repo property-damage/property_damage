@@ -20,6 +20,38 @@ defmodule PropertyDamage.EquivalenceTest do
 
   defp mismatch(fields), do: struct(Compare.mismatch_module(), fields)
 
+  doctest PropertyDamage.Equivalence
+
+  defp within(reference, variant, tolerance),
+    do: equivalence().within(reference, variant, tolerance)
+
+  describe "within/3" do
+    test "agrees when two numbers differ by at most the tolerance" do
+      assert within(10.0, 10.004, 0.01) == true
+      assert within(10, 11, 1) == true
+    end
+
+    test "returns a mismatch holding both values, reference first, when they differ by more" do
+      assert {:fail, mismatch} = within(10.0, 10.5, 0.01)
+      assert %{left: 10.0, right: 10.5} = mismatch
+      assert Exception.message(mismatch) =~ "differ by more than 0.01"
+    end
+
+    test "compares numbers inside maps, lists and tuples of the same shape, others under ==" do
+      assert within(%{net: 1.0, items: [{:a, 2.0}]}, %{net: 1.001, items: [{:a, 2.002}]}, 0.01)
+      assert {:fail, _} = within(%{net: 1.0, cur: "EUR"}, %{net: 1.0, cur: "USD"}, 0.01)
+      assert {:fail, _} = within(%{net: 1.0}, %{net: 1.0, fees: 0}, 0.01)
+      assert {:fail, _} = within([1.0], [1.0, 2.0], 0.01)
+    end
+
+    test "is a named relation that @compare and stutter: accept" do
+      assert {:ok, _} =
+               PropertyDamage.Options.validate_stutter_using(
+                 {PropertyDamage.Equivalence, :within, [0.01]}
+               )
+    end
+  end
+
   describe "by_key/1" do
     test "is a 2-arity predicate that agrees when the keys are equal" do
       predicate = by_key(&Map.take(&1, [:net]))
