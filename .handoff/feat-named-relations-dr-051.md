@@ -175,7 +175,36 @@ check. The module is now aliased at the top of `PropertyDamage.Options`.
 
 ## Reconstruction
 
-Written when the PR opens, and labeled as such. May extend the Record; may not
-contradict it.
+Written 2026-10-26 by the orchestrator when the PR opened, from the implementer's
+hand-back report in this session's transcript. Labeled as reconstruction: it
+extends the Record and does not contradict it.
 
-_Not yet written._
+- **Rebase.** The branch was rebased by the orchestrator from `53219b4` onto
+  PR 1's final head `d476bbf` before the PR opened, so every commit hash in the
+  Record above names the pre-rebase commit; the subjects are unchanged and the
+  post-rebase hashes are in the pull request's commit list.
+- **The two flags the implementer raised and did not decide alone.** Quoted:
+  "FLAG.1, stutter `:fun`. DR-051 item 6 says `stutter: [using:]` takes 'the
+  same named forms'. But `:fun` means a function of the projection module, and
+  a run option has no projection module." and "FLAG.2, local capture.
+  `@compare using: &local/2` now fails with Elixir's own 'undefined function
+  local/2' error before the DR-051 check sees it, because a plain attribute is
+  evaluated in the module body first." Orchestrator rulings: FLAG.1 accepted as
+  implemented (the two remote forms and a function; a bare atom refused by the
+  option error), recorded for the owner as an item-6 clarification; FLAG.2
+  accepted, the CHANGELOG migration table covers the case.
+- **A red intermediate commit.** Quoted: "f2696a8 test(lockstep): expect the
+  using: field on a divergence (9eef7bf had left this one test red)". The
+  branch's final state is green; the one commit between them is not.
+- **Tests written after the code for items 2 and 3.** Quoted: "I proved them
+  RED (25 tests, 20 failures) against the base library, using a scratch copy of
+  the untouched dr052 worktree at `53219b4`, because checkout is forbidden."
+- **Two behavior changes the record did not ask for.** Quoted: "A `@compare`
+  option error now points at the line of the `def`, not the attribute line."
+  and "The stutter default is now `{Kernel, :==}` instead of a function, so a
+  stutter config prints its relation."
+- **What the implementer left unverified.** Quoted: "No test asserts the
+  compile-time dependency that the generated `require Mod` adds, so that part
+  is unverified." The orchestrator verified it afterwards with `mix xref graph
+  --label compile` on a consumer whose relation lives in its own file; the
+  edge is present.
