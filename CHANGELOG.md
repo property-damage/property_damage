@@ -397,6 +397,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (DR-052): a check's verdict is its return value, one grammar for
+  `@check`, `@eventually` and `using:`.** `PropertyDamage.Verdict.read/1`
+  reads all three: a truthy return passes (satisfied, agrees), `nil` or `false`
+  fails (not yet, disagrees holding both values), `{:fail, "text"}` or
+  `{:fail, %Exception{}}` fails with that reason, and a bare exception struct or
+  an `{:error, _}` tuple fails with the sentence "a verdict is truthy,
+  `nil`/`false`, or `{:fail, reason}`". A raise is a failure in all three.
+  - A `@check` that returned `nil` or `false` used to pass; it now fails, in the
+    executor, forensics, the load-test worker and the linearization checker,
+    for `every:` and `at:` checks, with a message that names the check, shows
+    the value and gives the three accepted forms: a predicate
+    (`state.net >= state.fees`), `condition or fail!("...", ...)`, or a body
+    that ends with a truthy value such as `:ok`. The failure is an ordinary
+    check failure; no new failure kind, no persistence change.
+    `{:fail, "text"}` is the returned form of `fail!/2` and carries the same
+    `CheckFailed`.
+  - The `if condition, do: fail!(...)` idiom is retired: a `@check` clause
+    whose last expression is an `if` or `unless` without `else` is a
+    `CompileError` naming the clause and the rewrite. Every check in the
+    library, the `mix pd.gen.projection` template, the guides and the benches
+    is rewritten.
+  - An `@eventually` predicate's `{:fail, reason}` means "never": the window
+    ends at once as a check failure with that reason instead of waiting out
+    the `timeout:`. A raise, exit or throw inside the predicate is a check
+    failure at once naming the check, the poll count and the exception; it no
+    longer means "not yet", and `last_predicate_error` is gone from the
+    poll-timeout info. Rewrite a predicate that raised before the state caught
+    up as a total one (`get_in/2`, `match?/2`, a `case` with a fallback).
+  - A `using:` relation (on `@compare` and on `stutter:`) no longer returns
+    `:match` or `{:mismatch, detail}`: it returns a truthy value, `false`, or
+    `{:fail, detail}`. `Equivalence.verdict/3` is removed (read a relation's
+    answer with `Verdict.read/1`), `Equivalence.by_key/1` returns `true` or
+    `{:fail, %ComparisonMismatch{}}`, and `Stutter.compare_events/3` returns
+    `:agree` or `{:disagree, exception}`.
 - **`latency:` and a non-default `check_mode:` are refused beside `branching:`.**
   A branching run executes one branch at a time on one target through the
   linear engine: it records no latency samples (`latency:` returned
