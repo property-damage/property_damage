@@ -6,7 +6,7 @@ defmodule PropertyDamage.EventuallyVerdictTest do
   # and the exception. Neither waits out the window or reports a timeout.
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{CheckFailed, Executor, Failure}
+  alias PropertyDamage.{CheckFailed, ErrorOrigin, Executor, Failure, FailureReport}
 
   defmodule PaymentInitiated, do: defstruct([:id])
 
@@ -130,11 +130,27 @@ defmodule PropertyDamage.EventuallyVerdictTest do
     assert %Failure{type: %Failure.Check{kind: :check_failed, name: :payment_settled}} =
              result.failure_reason
 
-    message = Exception.message(exception(result.failure_reason))
-    assert message =~ "payment_settled"
-    assert message =~ "poll 1"
-    assert message =~ "KeyError"
+    # The failure carries the raised exception itself, so the report and the
+    # error origin see a bug in the predicate, not a check verdict.
+    assert %KeyError{key: :settlements} = exception(result.failure_reason)
+
+    text = FailureReport.failure_message(result.failure_reason)
+    assert text =~ "payment_settled"
+    assert text =~ "poll 1"
+    assert text =~ "settlements"
     assert elapsed < 2_000, "the failure waited for the window (#{elapsed} ms)"
+  end
+
+  test "a raise in the predicate is classified as a test-code error" do
+    {result, _elapsed} = run_executor(Raising.Model)
+
+    assert %{origin: :test_code_error} = ErrorOrigin.classify(result.failure_reason)
+  end
+
+  test "a never is a check verdict: classified as an SUT error" do
+    {result, _elapsed} = run_executor(Never.Model)
+
+    assert %{origin: :sut_error} = ErrorOrigin.classify(result.failure_reason)
   end
 
   test "under check_mode: :record the never is recorded as a check failure" do

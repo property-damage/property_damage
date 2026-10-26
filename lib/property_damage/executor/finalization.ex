@@ -115,10 +115,12 @@ defmodule PropertyDamage.Executor.Finalization do
         resource_pollers = Map.get(state, :active_resource_pollers, [])
         Enum.each(resource_pollers, &ResourcePoller.stop/1)
 
+        {failure, stacktrace} = extract_stacktrace(Failure.eventually_failed(info))
+
         async_failure_result(
           state,
-          Failure.check_failed(info.triggered_by.check_name, info.reason),
-          nil,
+          failure,
+          stacktrace,
           Map.get(info.triggered_by, :command_index),
           linearization,
           check_failures
@@ -743,7 +745,8 @@ defmodule PropertyDamage.Executor.Finalization do
   defp timeout_to_failure({:failed, _id, info}) do
     %{
       check_name: info.triggered_by.check_name,
-      reason: info.reason,
+      reason: Failure.eventually_failed(info) |> Failure.detail(),
+      context: %{poll_count: info.poll_count, elapsed_ms: info.elapsed_ms},
       command: nil,
       command_index: Map.get(info.triggered_by, :command_index),
       step_type: :event,

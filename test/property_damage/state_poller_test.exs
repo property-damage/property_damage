@@ -404,17 +404,15 @@ defmodule PropertyDamage.StatePollerTest do
       assert Exception.message(info.reason) =~ "a verdict is truthy"
     end
 
-    test "a raise fails at the first poll, naming the check, the poll count and the exception" do
+    test "a raise fails at the first poll with the raised exception and the poll count" do
       {predicate, calls} = counting(fn _, _ -> raise "simulated error" end)
 
       assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
       assert :counters.get(calls, 1) == 1
       assert info.poll_count == 1
-
-      message = Exception.message(info.reason)
-      assert message =~ "test_check"
-      assert message =~ "poll 1"
-      assert message =~ "simulated error"
+      assert info.triggered_by.check_name == :test_check
+      assert %RuntimeError{message: "simulated error"} = info.reason
+      assert [_ | _] = info.stacktrace
     end
 
     test "a raise after falsy polls names the poll it happened on" do
@@ -422,7 +420,7 @@ defmodule PropertyDamage.StatePollerTest do
 
       assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
       assert info.poll_count == 3
-      assert Exception.message(info.reason) =~ "poll 3"
+      assert %KeyError{key: :missing} = info.reason
     end
 
     test "an exit does not kill the poller or its caller: it fails at once" do
@@ -430,6 +428,7 @@ defmodule PropertyDamage.StatePollerTest do
 
       assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
       assert Exception.message(info.reason) =~ ":predicate_boom"
+      refute match?(%PropertyDamage.CheckFailed{}, info.reason)
       assert Process.alive?(self())
     end
 
@@ -438,6 +437,7 @@ defmodule PropertyDamage.StatePollerTest do
 
       assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
       assert Exception.message(info.reason) =~ ":predicate_thrown"
+      refute match?(%PropertyDamage.CheckFailed{}, info.reason)
     end
 
     test "a timeout reports the window and nothing else" do

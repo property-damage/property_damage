@@ -2,6 +2,10 @@ defmodule PropertyDamage.Failure.Check do
   @moduledoc """
   A property or invariant did not hold. See `PropertyDamage.Failure` for the kind
   table.
+
+  `context` is `nil` except for an `@eventually` window that ended before its
+  timeout (DR-052), where it holds `poll_count` and `elapsed_ms`, so the report
+  can name the poll while `detail` keeps the exception itself.
   """
 
   @type kind ::
@@ -15,10 +19,11 @@ defmodule PropertyDamage.Failure.Check do
   @type t :: %__MODULE__{
           kind: kind(),
           name: atom() | {module(), atom()} | nil,
-          detail: term()
+          detail: term(),
+          context: map() | nil
         }
 
-  defstruct kind: nil, name: nil, detail: nil
+  defstruct kind: nil, name: nil, detail: nil, context: nil
 end
 
 defmodule PropertyDamage.Failure.Execution do
@@ -437,6 +442,26 @@ defmodule PropertyDamage.Failure do
   @spec check_failed(name(), term()) :: t()
   def check_failed(name, detail) do
     %__MODULE__{type: %Check{kind: :check_failed, name: name, detail: detail}}
+  end
+
+  @doc """
+  An `@eventually` window that ended before its timeout (DR-052): the
+  predicate said "never" or raised. `info` is the poller's failure info; the
+  detail is its exception (with the stacktrace of a raise) and the context its
+  poll count and elapsed time.
+  """
+  @spec eventually_failed(map()) :: t()
+  def eventually_failed(info) do
+    detail = if info[:stacktrace], do: {info.reason, info.stacktrace}, else: info.reason
+
+    %__MODULE__{
+      type: %Check{
+        kind: :check_failed,
+        name: info.triggered_by.check_name,
+        detail: detail,
+        context: %{poll_count: info.poll_count, elapsed_ms: info.elapsed_ms}
+      }
+    }
   end
 
   @doc "A command was not idempotent under stutter (`detail` is the violation)."

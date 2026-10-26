@@ -3,7 +3,7 @@ defmodule PropertyDamage.StatePoller do
 
   use GenServer
 
-  alias PropertyDamage.{CheckFailed, Verdict}
+  alias PropertyDamage.Verdict
 
   @typedoc """
   Options for starting a state poller.
@@ -57,13 +57,17 @@ defmodule PropertyDamage.StatePoller do
   @typedoc """
   A window that ended before its timeout because the predicate said "never"
   (`{:fail, reason}`, or a value that is not a verdict) or raised, exited or
-  threw. `reason` is the exception the check failure carries.
+  threw. `reason` is the exception the check failure carries: the verdict's
+  reason for a "never", the raised exception itself for a raise (an exit or a
+  throw becomes an `ErlangError` holding it), with its `stacktrace`; `nil`
+  for a "never".
   """
   @type failure_info :: %{
           predicate_source: String.t() | nil,
           projection: module(),
           triggered_by: map(),
           reason: Exception.t(),
+          stacktrace: Exception.stacktrace() | nil,
           elapsed_ms: non_neg_integer(),
           poll_count: pos_integer()
         }
@@ -343,7 +347,7 @@ defmodule PropertyDamage.StatePoller do
       current_state = get_projection_state(state)
       poll_count = state.poll_count + 1
 
-      case evaluate(state, current_state, poll_count) do
+      case evaluate(state, current_state) do
         :pass ->
           stop_span(state.span, true, nil)
           send(state.caller, {:poller_result, state.id, {:success, state.id}})
@@ -353,12 +357,13 @@ defmodule PropertyDamage.StatePoller do
           Process.send_after(self(), :poll, state.interval_ms)
           {:noreply, %{state | poll_count: poll_count, last_state: current_state}}
 
-        {:fail, reason} ->
+        {:fail, reason, stacktrace} ->
           failure_info = %{
             predicate_source: state.predicate_source,
             projection: state.projection,
             triggered_by: state.triggered_by,
             reason: reason,
+            stacktrace: stacktrace,
             elapsed_ms: elapsed,
             poll_count: poll_count
           }
@@ -370,20 +375,25 @@ defmodule PropertyDamage.StatePoller do
     end
   end
 
-  # The predicate's verdict on one poll. A raise, exit or throw is a failure
-  # naming the check, the poll and what escaped, never "not yet" (DR-052): a
-  # partial predicate would otherwise spend the whole window on every trigger.
-  # Catching an exit or throw also keeps it from killing the poller and,
-  # through its start_link, the run.
-  defp evaluate(state, current_state, poll_count) do
-    state.predicate.(current_state) |> Verdict.read()
+  # The predicate's verdict on one poll: `:pass`, `:falsy`, or
+  # `{:fail, exception, stacktrace}`. A raise, exit or throw is a failure at
+  # once, never "not yet" (DR-052): a partial predicate would otherwise spend
+  # the whole window on every trigger. The failure keeps the raised exception
+  # itself, so the report classifies it as a bug in the predicate; the check
+  # name and poll count travel beside it in the failure info. Catching an exit
+  # or throw also keeps it from killing the poller and, through its
+  # start_link, the run.
+  defp evaluate(state, current_state) do
+    case state.predicate.(current_state) |> Verdict.read() do
+      {:fail, reason} -> {:fail, reason, nil}
+      reading -> reading
+    end
   catch
-    kind, reason ->
-      message =
-        "@eventually #{state.triggered_by.check_name} predicate failed on poll " <>
-          "#{poll_count}: " <> Exception.format_banner(kind, reason, __STACKTRACE__)
+    :error, reason ->
+      {:fail, Exception.normalize(:error, reason, __STACKTRACE__), __STACKTRACE__}
 
-      {:fail, %CheckFailed{message: message, data: %{}}}
+    kind, reason ->
+      {:fail, %ErlangError{original: {kind, reason}}, __STACKTRACE__}
   end
 
   @impl true

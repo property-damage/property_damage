@@ -972,8 +972,7 @@ defmodule PropertyDamage.Variant do
 
   defp expired_failure(:timeout, info), do: Failure.poll_timeout(info)
 
-  defp expired_failure(:failed, info),
-    do: Failure.check_failed(info.triggered_by.check_name, info.reason)
+  defp expired_failure(:failed, info), do: Failure.eventually_failed(info)
 
   defp collect_poller_results(state) do
     receive do

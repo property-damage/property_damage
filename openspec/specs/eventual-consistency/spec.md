@@ -132,6 +132,7 @@ The system SHALL support `@eventually` temporal checks that spawn a background p
 - **GIVEN** a predicate that raises, for example on a key the state does not have yet
 - **WHEN** the poller evaluates it
 - **THEN** the window SHALL end at once as a check failure naming the check, the poll count and the exception
+- **AND** the failure SHALL carry the raised exception itself, not a `CheckFailed` wrapper, so its error origin is the test code; the check name and poll count travel beside it
 - **AND** the system SHALL NOT treat the raise as "not yet" or keep polling
 
 #### Scenario: An exit or throw in the predicate does not kill the run (DR-052)
