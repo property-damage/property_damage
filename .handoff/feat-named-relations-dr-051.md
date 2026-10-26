@@ -164,6 +164,15 @@ divergence are listed under Added.
 
 **Files:** `CHANGELOG.md`
 
+### 2026-10-26T12:31 · commit · 1d88ede
+
+refactor(options): alias the projection module for the args check
+
+Credo's strict run flagged the nested module call in the stutter `using:`
+check. The module is now aliased at the top of `PropertyDamage.Options`.
+
+**Files:** `lib/property_damage/options.ex`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not
