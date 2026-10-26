@@ -77,7 +77,7 @@ The system SHALL support probabilistic command retries to verify that the SUT be
 
 ### Requirement: Stutter Configuration
 
-Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (range or fixed), a commands filter, and a `using:` predicate.
+Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (range or fixed), a commands filter, and a `using:` relation.
 
 #### Scenario: Configuration with defaults
 - **WHEN** stutter testing is enabled without custom options
@@ -85,7 +85,7 @@ Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (r
 - **AND** the default max_repeats SHALL be 2
 - **AND** the default delay SHALL be a random value between 0 and 100ms
 - **AND** the default commands filter SHALL be `:all`
-- **AND** the default `using:` predicate SHALL be `&==/2`
+- **AND** the default `using:` relation SHALL be equality, `{Kernel, :==}`
 
 #### Scenario: Commands filter limits scope
 - **WHEN** stutter is configured with a specific list of command modules
@@ -94,19 +94,28 @@ Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (r
 
 ### Requirement: Stutter Comparison Through `using:` (DR-046)
 
-The system SHALL compare a retry's events with the original events through the `using:` option of `stutter:`: a 2-arity predicate called `using.(original_events, retry_events)` with the contract of `@compare`'s `using:`: its return is a verdict (DR-052), truthy to agree, and `false`, `nil`, `{:fail, text}` or `{:fail, exception}` otherwise, `&==/2` by default. The `comparison:` option, with its `:strict`, `{:structural, _}`, `{:custom, _}` and `:acceptable` values, MUST be rejected with an error that names `using:`.
+The system SHALL compare a retry's events with the original events through the `using:` option of `stutter:`, which SHALL accept the named forms of `@compare`'s `using:` beside a 2-arity function, since a run option is runtime data (DR-051 item 6): `{Mod, :fun}` calls `Mod.fun(original_events, retry_events)`, `{Mod, :fun, args}` calls `Mod.fun(original_events, retry_events, arg1, ..., argN)`, and a function is called `using.(original_events, retry_events)`. The relation's return is a verdict (DR-052), truthy to agree, and `false`, `nil`, `{:fail, text}` or `{:fail, exception}` otherwise; equality by default. A named function the module does not export, a function value inside `args`, and any other value MUST be rejected with an option error that names `using:`, and the error and the documentation SHALL teach the named form first. The `comparison:` option, with its `:strict`, `{:structural, _}`, `{:custom, _}` and `:acceptable` values, MUST be rejected with an error that names `using:`.
 
 #### Scenario: Default comparison
 - **WHEN** `stutter:` has no `using:`
 - **THEN** retry events MUST equal the initial events under `==/2` for the result to be a match
 
-#### Scenario: A predicate decides
+#### Scenario: A named relation decides (DR-051)
+- **WHEN** `using:` is `{Mod, :fun}` or `{Mod, :fun, args}`
+- **THEN** `Mod.fun` SHALL be called with the original and the retry events, then the args
+- **AND** its answer SHALL determine match or mismatch
+
+#### Scenario: A named relation that does not exist is rejected (DR-051)
+- **WHEN** `using:` is `{Mod, :fun}` and `Mod` does not export `fun/2`
+- **THEN** the framework SHALL raise an option error that names `using:` and `fun/2`, before any adapter setup
+
+#### Scenario: A function decides
 - **WHEN** `using:` is a 2-arity function
 - **THEN** it SHALL be called with the original and the retry events
 - **AND** its answer SHALL determine match or mismatch
 
-#### Scenario: A predicate accepts an alternative answer
-- **GIVEN** a predicate that returns `true` when the retry answers `AlreadyExists`
+#### Scenario: A relation accepts an alternative answer
+- **GIVEN** a relation that returns `true` when the retry answers `AlreadyExists`
 - **WHEN** a retried command answers `AlreadyExists`
 - **THEN** the retry SHALL NOT be an idempotency violation
 
@@ -116,7 +125,7 @@ The system SHALL compare a retry's events with the original events through the `
 
 ### Requirement: Stutter Violation Reporting
 
-When retry events do not match the initial execution according to the `using:` predicate, the system SHALL record an idempotency violation with all attempt details and the mismatch (an exception, by default a `PropertyDamage.ComparisonMismatch` holding the original and the retry events).
+When retry events do not match the initial execution according to the `using:` relation, the system SHALL record an idempotency violation with all attempt details and the mismatch (an exception, by default a `PropertyDamage.ComparisonMismatch` holding the original and the retry events).
 
 #### Scenario: Violation recorded
 - **WHEN** a stuttered command's retry produces different events than the initial execution
@@ -141,7 +150,7 @@ During retry executions, the adapter SHALL receive stutter context containing th
 
 ### Requirement: Acceptable Retry Events Are Removed (DR-046)
 
-The command key `acceptable_retry_events:` SHALL NOT exist. A command that may answer a retry differently from the original SHALL be handled by the `using:` predicate of the `stutter:` option.
+The command key `acceptable_retry_events:` SHALL NOT exist. A command that may answer a retry differently from the original SHALL be handled by the `using:` relation of the `stutter:` option.
 
 #### Scenario: The key is rejected
 - **WHEN** a command passes `acceptable_retry_events:` to `use PropertyDamage.Command`

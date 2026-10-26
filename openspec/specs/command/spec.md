@@ -167,8 +167,8 @@ Commands SHALL control stutter/idempotency testing behavior via `command_spec/1`
 
 #### Scenario: Acceptable retry events are removed (DR-046)
 - **WHEN** a command declares `acceptable_retry_events:` through `use PropertyDamage.Command` or a `commands/0` entry
-- **THEN** the framework SHALL reject it with an error that names the stutter `using:` predicate as the replacement
-- **AND** a different-but-valid retry answer (created vs. already exists) SHALL be accepted by the `using:` predicate of the `stutter:` option
+- **THEN** the framework SHALL reject it with an error that names the stutter `using:` relation as the replacement
+- **AND** a different-but-valid retry answer (created vs. already exists) SHALL be accepted by the `using:` relation of the `stutter:` option
 
 ### Requirement: Event Correlation via Awaits
 

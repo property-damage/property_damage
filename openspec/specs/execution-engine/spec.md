@@ -85,7 +85,7 @@ Stutter (idempotency-retry) decisions SHALL be driven by an explicit RNG threade
 
 This determinism is self-consistent (same seed produces the same decisions) and preserves shrink failure-equivalence (DR-017). It is NOT a guarantee of byte-identical reproduction of any prior process-global `:rand` stream.
 
-Because stutter decisions are reproducible, stutter failures (idempotency violations and stutter-retry execution failures) SHALL be shrinkable. The shrinker SHALL reproduce a stutter failure with stutter forced on (probability 1.0, preserving the original command filter, `using:` predicate (DR-046), and max-repeats) so that index-shift under sequence truncation cannot un-stutter the offending command, and SHALL minimize the failure to its smallest reproduction. Forced-stutter reproduction SHALL apply only when the original failure is a stutter failure; for all other failure types the shrinker SHALL re-run without stutter.
+Because stutter decisions are reproducible, stutter failures (idempotency violations and stutter-retry execution failures) SHALL be shrinkable. The shrinker SHALL reproduce a stutter failure with stutter forced on (probability 1.0, preserving the original command filter, `using:` relation (DR-046, DR-051), and max-repeats) so that index-shift under sequence truncation cannot un-stutter the offending command, and SHALL minimize the failure to its smallest reproduction. Forced-stutter reproduction SHALL apply only when the original failure is a stutter failure; for all other failure types the shrinker SHALL re-run without stutter.
 
 #### Scenario: Same seed reproduces the same stutter outcome
 - **WHEN** a sequence is run twice with the same run seed and stutter enabled
