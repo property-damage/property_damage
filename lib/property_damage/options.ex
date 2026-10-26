@@ -1,6 +1,8 @@
 defmodule PropertyDamage.Options do
   @moduledoc false
 
+  alias PropertyDamage.Model.Projection
+
   # ============================================================================
   # Targets (shared by every entry point that runs commands)
   # ============================================================================
@@ -1193,7 +1195,7 @@ defmodule PropertyDamage.Options do
 
   def validate_stutter_using({module, fun, args} = using)
       when is_atom(module) and is_atom(fun) and is_list(args) do
-    case PropertyDamage.Model.Projection.__function_value__(args) do
+    case Projection.__function_value__(args) do
       nil ->
         stutter_relation_exported(using, module, fun, 2 + length(args))
 
