@@ -115,7 +115,7 @@ A `@check every:` check fires on **every observed event** regardless of how the 
 - **AND WHEN** it returns `{:fail, exception}`, the check SHALL fail with that exception
 
 #### Scenario: A non-verdict return fails with the grammar nudge (DR-052)
-- **WHEN** a triggered check function returns a bare exception struct or an `{:error, _}` tuple
+- **WHEN** a triggered check function returns a bare exception struct, an `{:error, _}` tuple or the retired `{:mismatch, _}`
 - **THEN** the check SHALL fail carrying the value and the sentence "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
 
 #### Scenario: Check fails by raising

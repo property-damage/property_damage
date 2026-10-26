@@ -44,9 +44,9 @@ which is kept as it is.
 
 The `if condition, do: fail!(...)` idiom is retired: it returns `nil` when the
 check passes. A `@check` whose last expression is an `if` or `unless` without
-`else` does not compile. A bare exception struct or an `{:error, _}` tuple is
-not a verdict either: the check fails with a message that says so, because
-neither can have meant "pass".
+`else` does not compile. A bare exception struct, an `{:error, _}` tuple or the
+retired `{:mismatch, _}` is not a verdict either: the check fails with a
+message that says so, because none of them can have meant "pass".
 
 ### Composing sub-checks
 

@@ -30,9 +30,27 @@ defmodule PropertyDamage.VerdictTest do
       assert message =~ "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
     end
 
+    test "fails the retired {:mismatch, _} with the nudge, holding both values" do
+      assert {:fail, %ComparisonMismatch{left: 1, right: 2, message: message}} =
+               Verdict.read({:mismatch, "x"}, {:relation, 1, 2})
+
+      assert message =~ ~s({:mismatch, "x"})
+      assert message =~ "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
+    end
+
     test "reads falsy as falsy, for the caller to build the disagreement" do
       assert Verdict.read(false, {:relation, 1, 2}) == :falsy
       assert Verdict.read(nil, {:relation, 1, 2}) == :falsy
+    end
+  end
+
+  describe "read/2 for a check or a predicate" do
+    test "fails the retired {:mismatch, _} with the nudge" do
+      assert {:fail, %CheckFailed{} = failure} = Verdict.read({:mismatch, "x"})
+
+      assert Exception.message(failure) ==
+               ~s(returned {:mismatch, "x"}, which is not a verdict; ) <>
+                 "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
     end
   end
 

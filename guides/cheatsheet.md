@@ -206,7 +206,7 @@ end
 | `nil`, `false` | fail | not yet | disagree, both values |
 | `{:fail, "text"}` / `{:fail, %Exception{}}` | fail with it | never: fail now | disagree with it |
 | raise | fail | fail now | fail in that variant |
-| bare exception struct, `{:error, _}` | fail with a nudge | same | same |
+| bare exception struct, `{:error, _}`, `{:mismatch, _}` | fail with a nudge | same | same |
 
 Three forms of `@check`: a predicate (`state.net >= state.fees`),
 `condition or fail!("...", ...)`, or a body that ends with a truthy value

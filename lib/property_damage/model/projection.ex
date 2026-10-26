@@ -101,7 +101,7 @@ defmodule PropertyDamage.Model.Projection do
   | `nil`, `false` | fail | not yet | disagree, both values |
   | `{:fail, reason}` | fail with that reason | never: fail now | disagree with that reason |
   | raise | fail | fail now | fail in that variant |
-  | bare exception struct, `{:error, _}` | fail, naming the grammar | same | same |
+  | bare exception struct, `{:error, _}`, `{:mismatch, _}` | fail, naming the grammar | same | same |
 
   A `@check` is written as a predicate (`state.net >= state.fees`), as
   `condition or fail!("...", ...)` when it needs a message, or as a body that

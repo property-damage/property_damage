@@ -40,8 +40,9 @@ defmodule PropertyDamage.Equivalence do
     * `{:fail, "text"}`: they disagree with that message;
     * `{:fail, exception}`: they disagree with that exception.
 
-  A bare exception struct or an `{:error, _}` tuple is not a verdict: it is a
-  disagreement whose message says so. A raise in the relation fails the
+  A bare exception struct, an `{:error, _}` tuple or the retired
+  `{:mismatch, _}` is not a verdict: it is a disagreement whose message says
+  so. A raise in the relation fails the
   variant that was compared.
 
   A verdict is a final value, never a boolean: `&&`, `||` and `!` see a
