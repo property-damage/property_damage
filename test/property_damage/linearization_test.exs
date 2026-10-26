@@ -163,6 +163,52 @@ defmodule PropertyDamage.LinearizationTest do
     def simulate(_, _), do: []
   end
 
+  # A check that judges by its return (DR-052): `false` once the count passes
+  # one, so a history of two increments is refuted by the check, not by the
+  # events.
+  defmodule CountAtMostOne do
+    use PropertyDamage.Model.Projection
+
+    @impl true
+    def init, do: %{count: 0}
+
+    @impl true
+    def apply(state, %PropertyDamage.LinearizationTest.Counter.Incremented{to: to}),
+      do: %{state | count: to}
+
+    def apply(state, _), do: state
+
+    @check every: :event
+    def count_at_most_one(state, _event), do: state.count <= 1
+  end
+
+  defmodule CheckedCounterModel do
+    @behaviour PropertyDamage.Model
+    @behaviour PropertyDamage.Model.Simulator
+
+    @impl PropertyDamage.Model
+    def commands, do: []
+
+    @impl PropertyDamage.Model
+    def command_sequence_projection, do: PropertyDamage.LinearizationTest.CounterProjection
+
+    @impl PropertyDamage.Model
+    def check_projections, do: [PropertyDamage.LinearizationTest.CountAtMostOne]
+
+    @impl PropertyDamage.Model
+    def simulator, do: __MODULE__
+
+    @impl PropertyDamage.Model.Simulator
+    def simulate(%PropertyDamage.LinearizationTest.Counter.Incr{}, state) do
+      [
+        %PropertyDamage.LinearizationTest.Counter.Incremented{
+          from: state.count,
+          to: state.count + 1
+        }
+      ]
+    end
+  end
+
   defp counter_projections do
     %{CounterProjection => CounterProjection.init()}
   end
@@ -210,6 +256,24 @@ defmodule PropertyDamage.LinearizationTest do
                counter_projections(),
                CounterModel
              ) == {:no_linearization, nil}
+    end
+
+    test "a check returning false refutes an ordering, naming the check (DR-052)" do
+      branch_commands = [[%Counter.Incr{id: :a}], [%Counter.Incr{id: :b}]]
+      branch_events = %{0 => [incr_entry(0, 1, 0)], 1 => [incr_entry(1, 2, 0)]}
+
+      projections = %{
+        CounterProjection => CounterProjection.init(),
+        CountAtMostOne => CountAtMostOne.init()
+      }
+
+      assert {:no_linearization, %{check_name: :count_at_most_one}} =
+               Linearization.check(
+                 branch_commands,
+                 branch_events,
+                 projections,
+                 CheckedCounterModel
+               )
     end
 
     test "respects start_index when translating entry indices to positions" do

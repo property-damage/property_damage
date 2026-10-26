@@ -84,7 +84,7 @@ defmodule PropertyDamage.Linearization do
       end
   """
 
-  alias PropertyDamage.{External, Failure, Placeholder, Sequence}
+  alias PropertyDamage.{External, Failure, Placeholder, Sequence, Verdict}
 
   @default_max_candidates 1000
 
@@ -349,9 +349,15 @@ defmodule PropertyDamage.Linearization do
 
     Enum.reduce_while(checks, :ok, fn check, :ok ->
       if Projection.should_run?(check.trigger, ctx.step_type, ctx.module, counters) do
+        # The check's return is its verdict (DR-052); a raise fails it too.
         try do
-          apply(projection, check.function_name, [state, ctx.command_or_event])
-          {:cont, :ok}
+          projection
+          |> apply(check.function_name, [state, ctx.command_or_event])
+          |> Verdict.check(check.name)
+          |> case do
+            :pass -> {:cont, :ok}
+            {:fail, e} -> {:halt, {:refuted, check.name, Failure.check_failed(check.name, e)}}
+          end
         rescue
           e ->
             reason = Failure.check_failed(check.name, {e, __STACKTRACE__})

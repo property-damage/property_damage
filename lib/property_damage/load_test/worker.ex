@@ -510,12 +510,19 @@ defmodule PropertyDamage.LoadTest.Worker do
 
         Enum.reduce(checks, failures, fn check, acc_failures ->
           if Projection.should_run?(check.trigger, step_type, module, counters) do
+            # The check's return is its verdict (DR-052); a raise fails it too.
             try do
-              check_fn = check.function_name
-              apply(projection, check_fn, [projection_state, command_or_event])
-              acc_failures
+              projection
+              |> apply(check.function_name, [projection_state, command_or_event])
+              |> PropertyDamage.Verdict.check(check.name)
             rescue
-              e ->
+              e -> {:fail, e}
+            end
+            |> case do
+              :pass ->
+                acc_failures
+
+              {:fail, e} ->
                 failure = %{
                   reason: e,
                   command_index: command_index,

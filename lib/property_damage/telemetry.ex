@@ -282,10 +282,12 @@ defmodule PropertyDamage.Telemetry do
 
   @doc false
   # Evaluates one check for the engine inside a check start/stop pair when
-  # `context` is set. `fun` raises when the check fails; the raise is caught and
-  # returned as `{:raised, exception, stacktrace}`, a pass as `:ok`.
-  @spec check_span(map() | nil, module(), atom(), (-> term())) ::
-          :ok | {:raised, Exception.t(), list()}
+  # `context` is set. `fun` returns the check's verdict as read by
+  # `PropertyDamage.Verdict.check/2`, or raises. A pass returns `:ok`; a
+  # returned failure returns `{:failed, exception, []}` and a raise
+  # `{:failed, exception, stacktrace}`.
+  @spec check_span(map() | nil, module(), atom(), (-> :pass | {:fail, Exception.t()})) ::
+          :ok | {:failed, Exception.t(), list()}
   def check_span(context, projection, check_name, fun) do
     metadata =
       context &&
@@ -301,17 +303,19 @@ defmodule PropertyDamage.Telemetry do
 
     result =
       try do
-        fun.()
-        :ok
+        case fun.() do
+          :pass -> :ok
+          {:fail, exception} -> {:failed, exception, []}
+        end
       rescue
-        exception -> {:raised, exception, __STACKTRACE__}
+        exception -> {:failed, exception, __STACKTRACE__}
       end
 
     if metadata do
       {passed, message} =
         case result do
           :ok -> {true, nil}
-          {:raised, exception, _stacktrace} -> {false, Exception.message(exception)}
+          {:failed, exception, _stacktrace} -> {false, Exception.message(exception)}
         end
 
       check_stop(start_time, Map.merge(metadata, %{passed: passed, message: message}))

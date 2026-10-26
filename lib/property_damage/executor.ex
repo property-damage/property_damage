@@ -86,7 +86,8 @@ defmodule PropertyDamage.Executor do
     ResourcePoller,
     Sequence,
     StatePoller,
-    Stutter
+    Stutter,
+    Verdict
   }
 
   alias PropertyDamage.Model.Projection
@@ -1384,15 +1385,15 @@ defmodule PropertyDamage.Executor do
         # observation path (DR-025), which dispatches through run_step_checks/7.
         fired = bump_fired(acc_counters, projection, check.name)
 
-        # Execute check - checks raise on failure, captured with the stacktrace
+        # The check's return is its verdict (DR-052); a raise is captured
+        # with its stacktrace.
         case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
-               apply(projection, check.function_name, [
-                 projection_state,
-                 step_ctx.command_or_event
-               ])
+               projection
+               |> apply(check.function_name, [projection_state, step_ctx.command_or_event])
+               |> Verdict.check(check.name)
              end) do
           :ok -> {:cont, {:ok, fired}}
-          {:raised, e, stacktrace} -> {:halt, {:error, check.name, {e, stacktrace}, fired}}
+          {:failed, e, stacktrace} -> {:halt, {:error, check.name, {e, stacktrace}, fired}}
         end
       else
         {:cont, {:ok, acc_counters}}
@@ -1482,12 +1483,14 @@ defmodule PropertyDamage.Executor do
       fired = bump_fired(acc_counters, projection, check.name)
 
       case PropertyDamage.Telemetry.check_span(telemetry, projection, check.name, fn ->
-             apply(projection, check.function_name, [projection_state, phase])
+             projection
+             |> apply(check.function_name, [projection_state, phase])
+             |> Verdict.check(check.name)
            end) do
         :ok ->
           {:cont, {:ok, acc_recorded, fired}}
 
-        {:raised, e, stacktrace} ->
+        {:failed, e, stacktrace} ->
           case check_mode do
             :halt ->
               {:halt, {:halt, check.name, {e, stacktrace}, fired}}

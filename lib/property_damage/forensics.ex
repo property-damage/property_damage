@@ -324,16 +324,17 @@ defmodule PropertyDamage.Forensics do
 
     # Check if check should run given current context
     if Projection.should_run?(check.trigger, ctx.step_type, ctx.module, ctx.counters) do
-      # Execute check - checks raise on failure
+      # The check's return is its verdict (DR-052); a raise fails it too.
       try do
-        check_fn = check.function_name
-        apply(projection, check_fn, [projection_state, ctx.command_or_event])
-        # Success - no exception raised
-        run_projection_checks(projection, projection_state, rest, ctx)
+        projection
+        |> apply(check.function_name, [projection_state, ctx.command_or_event])
+        |> PropertyDamage.Verdict.check(check.name)
       rescue
-        e ->
-          # Check failed by raising exception
-          {:error, check.name, e}
+        e -> {:fail, e}
+      end
+      |> case do
+        :pass -> run_projection_checks(projection, projection_state, rest, ctx)
+        {:fail, e} -> {:error, check.name, e}
       end
     else
       run_projection_checks(projection, projection_state, rest, ctx)

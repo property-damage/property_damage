@@ -2629,6 +2629,10 @@ defmodule PropertyDamage do
   Convenience function to fail a check with a message and optional data.
 
   Use this in projection checks when you don't need a custom exception type.
+  It raises `PropertyDamage.CheckFailed`, so it is the early exit from a check
+  body. Its returned form is the verdict `{:fail, "message"}` (DR-052): a check
+  that returns it fails with the same `PropertyDamage.CheckFailed`, so a
+  reasoned check can end in `condition || {:fail, "message"}` without raising.
 
   ## Examples
 
