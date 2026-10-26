@@ -359,6 +359,11 @@ defmodule PropertyDamage.Test.Compare do
   def same_settled?(reference, variant), do: reference.settled == variant.settled
 
   @doc false
+  # A remote relation with one argument, named `{Compare, :settled_within, [n]}`.
+  def settled_within(reference, variant, tolerance),
+    do: abs(reference.settled - variant.settled) <= tolerance
+
+  @doc false
   # A PayAdapter target named `name` that reports to the calling process.
   def target(name, config \\ %{}) do
     {PayAdapter, name: name, config: Map.merge(%{name: name, test_pid: self()}, config)}

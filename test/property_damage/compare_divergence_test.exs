@@ -37,12 +37,13 @@ defmodule PropertyDamage.CompareDivergenceTest do
     tagged: """
     defmodule #{@ns}.Tagged do
     #{@header}
-      @compare using: fn reference, variant ->
-                 if reference == variant,
-                   do: true,
-                   else: {:fail, "settled " <> inspect(reference) <> " vs " <> inspect(variant)}
-               end
+      @compare using: :same_settled
       def totals(s, _root), do: s.settled
+
+      defp same_settled(reference, variant) do
+        reference == variant or
+          {:fail, "settled " <> inspect(reference) <> " vs " <> inspect(variant)}
+      end
     end
     """,
     raising: """

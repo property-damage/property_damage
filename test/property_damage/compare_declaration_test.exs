@@ -32,49 +32,37 @@ defmodule PropertyDamage.CompareDeclarationTest do
   end
 
   describe "beside a user's own @ macro" do
-    test "importing it next to the projection's @ is a compile error naming the conflict" do
-      for imports <- [
-            "use PropertyDamage.Model.Projection\n  import #{inspect(UserAttribute)}",
-            "import Kernel, except: [@: 1]\n  import #{inspect(UserAttribute)}\n  use PropertyDamage.Model.Projection"
-          ] do
-        assert {:error, message} =
-                 Compare.compile("""
-                 defmodule #{inspect(__MODULE__)}.Imported#{System.unique_integer([:positive])} do
-                   #{imports}
+    test "Kernel.@/1 is in scope in a projection module" do
+      assert {:ok, [projection | _]} =
+               compile("""
+                 @macros __ENV__.macros
+                 def macros, do: @macros
+               """)
 
-                   @compare every: 1
-                   def observed(s, _root), do: s
-                 end
-                 """)
-
-        # Elixir 1.17 reports the clash as "imported from both ... call is
-        # ambiguous"; later versions as "conflicting @/1 import". Both name
-        # the two modules.
-        assert message =~ "@/1"
-        assert message =~ inspect(UserAttribute)
-        assert message =~ "PropertyDamage.Model.Projection.CompareAttribute"
-      end
+      assert {:@, 1} in Keyword.fetch!(projection.macros(), Kernel)
     end
 
-    test "a @compare that reaches Kernel.@ through it is a compile error, never a dropped observation" do
-      name = "#{inspect(__MODULE__)}.Uncaptured#{System.unique_integer([:positive])}"
+    test "a projection importing another @/1 registers its @compare" do
+      name = "#{inspect(__MODULE__)}.Imported#{System.unique_integer([:positive])}"
 
-      assert {:error, message} =
+      assert {:ok, [projection | _]} =
                Compare.compile("""
                defmodule #{name} do
                  use PropertyDamage.Model.Projection
-                 import PropertyDamage.Model.Projection.CompareAttribute, only: []
+                 import Kernel, except: [@: 1]
                  import #{inspect(UserAttribute)}
 
                  @tagged :x
-                 @compare every: 1
+                 @compare every: :end
                  def observed(s, _root), do: s
+
+                 def tagged, do: Module.get_attribute(__MODULE__, :user_tagged, :x)
                end
                """)
 
-      assert message =~ name
-      assert message =~ "@compare"
-      assert message =~ "PropertyDamage.Model.Projection"
+      assert projection.__compares__() == [
+               %{name: :observed, schedule: %{roots: :none, end: true}, using: nil}
+             ]
     end
   end
 
@@ -155,7 +143,7 @@ defmodule PropertyDamage.CompareDeclarationTest do
              """)
 
     assert projection.__compares__() == [
-             %{name: :observed, schedule: %{roots: :none, end: true}}
+             %{name: :observed, schedule: %{roots: :none, end: true}, using: nil}
            ]
   end
 

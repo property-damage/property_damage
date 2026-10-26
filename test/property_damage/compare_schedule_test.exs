@@ -29,7 +29,7 @@ defmodule PropertyDamage.CompareScheduleTest do
     defmodule #{@ns}.Forms do
     #{@header}
       # No every: (only using:) means every root boundary.
-      @compare using: &Kernel.==/2
+      @compare using: {Kernel, :==}
       def plain(s, _root), do: s.paid
 
       @compare every: 1
