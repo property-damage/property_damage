@@ -275,9 +275,12 @@ boundaries.
 ### `using:`, the agreement predicate
 
 `using:` is a 2-arity function called `using.(reference_value, variant_value)`.
-It returns `:match` (or `true`) when the values agree, and `false`,
-`{:mismatch, "text"}` or `{:mismatch, exception}` when they do not. Without
-`using:` the values agree under `==/2`. It may be any expression: a capture, an
+Its return is a verdict, read with the grammar a `@check` and an `@eventually`
+predicate share (DR-052): a truthy value when the values agree, and `false` or
+`nil` (a mismatch holding both values), `{:fail, "text"}` or
+`{:fail, exception}` when they do not. A bare exception struct or an
+`{:error, _}` tuple is not a verdict and disagrees with a message that says so.
+Without `using:` the values agree under `==/2`. It may be any expression: a capture, an
 `fn`, or a pipeline of helpers.
 
 `PropertyDamage.Equivalence` has three helpers:
@@ -925,9 +928,8 @@ defmodule UserModel.Projections.Users do
   def users(state, _root), do: state.users
 
   def common_fields?(v1_users, v2_users) do
-    if Map.take(v2_users, Map.keys(v1_users)) == v1_users,
-      do: :match,
-      else: {:mismatch, "v2 users differ from v1 on the fields they share"}
+    Map.take(v2_users, Map.keys(v1_users)) == v1_users or
+      {:fail, "v2 users differ from v1 on the fields they share"}
   end
 end
 

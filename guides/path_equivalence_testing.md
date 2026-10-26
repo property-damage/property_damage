@@ -426,8 +426,8 @@ def total(state, _root), do: state.total
   least one `@compare` whose schedule reaches the end of the run (`every: 1` or
   one that names `:end`).
 - `using:` is the agreement predicate, `fn reference_value, variant_value ->
-  ... end`, returning `:match`, `true`, `false`, `{:mismatch, reason}`; the
-  default is `&==/2`. `PropertyDamage.Equivalence` builds predicates:
+  ... end`, returning a verdict: truthy to agree, `false` or
+  `{:fail, reason}` to disagree; the default is `&==/2`. `PropertyDamage.Equivalence` builds predicates:
   `by_key/1`, `normalize/1` (drops id and timestamp keys) and `drop_keys/2`.
 - A function returns `{:pending, reason}` when its target is still catching up
   and will reach a comparable value without a further command (a webhook not

@@ -69,8 +69,46 @@ defmodule PropertyDamage.Model.Projection do
 
       @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
       def payment_confirmed(_state, %PaymentInitiated{id: id}) do
-        fn s -> s.payments[id] == :confirmed end
+        fn s -> get_in(s, [:payments, id]) == :confirmed end
       end
+
+  ## One Verdict Grammar
+
+  The three kinds read a return value with one grammar (DR-052), through
+  `PropertyDamage.Verdict`, and each judges a different return:
+
+    * a `@check` judges its own return, now;
+    * an `@eventually` judges its predicate's return, within the window;
+    * a `@compare` judges its value against the reference's through the
+      `using:` relation, whose return is read the same way.
+
+  | Return | `@check` | `@eventually` predicate | `using:` relation |
+  |--------|----------|-------------------------|-------------------|
+  | truthy | pass | satisfied | agree |
+  | `nil`, `false` | fail | not yet | disagree, both values |
+  | `{:fail, reason}` | fail with that reason | never: fail now | disagree with that reason |
+  | raise | fail | fail now | fail in that variant |
+  | bare exception struct, `{:error, _}` | fail, naming the grammar | same | same |
+
+  A `@check` is written as a predicate (`state.net >= state.fees`), as
+  `condition or fail!("...", ...)` when it needs a message, or as a body that
+  ends with a truthy value (`:ok`, the result of `Enum.each/2`). The
+  `if condition, do: fail!(...)` idiom returns `nil` when the check passes, so a
+  `@check` clause whose last expression is an `if` or `unless` without `else`
+  is a compile error.
+
+  A verdict is a final value, never a boolean: `&&`, `||`, `!` and
+  `Enum.all?/2` see `{:fail, _}` as truthy, so `a(s) && b(s)` passes when `a/1`
+  returns `{:fail, "reason"}`. Compose sub-checks with `with`:
+
+      @check every: 1
+      def account_valid(state, _cmd_or_event) do
+        with true <- balance_ok(state),
+             true <- limit_ok(state),
+             do: true
+      end
+
+  or with raising helpers under `Enum.each/2`, which returns `:ok`.
 
   ## Defining Checks
 
@@ -83,13 +121,18 @@ defmodule PropertyDamage.Model.Projection do
   attribute. Both `@check` and `@eventually` functions can have any name.
   The `assert_` prefix is optional and conventional but not required.
 
-  If a synchronous check fails, raise an exception (or use `PropertyDamage.fail!/2`).
-  If it returns without raising, the check passed.
+  A synchronous check passes on a truthy return and fails on `nil`, `false`,
+  `{:fail, reason}` or a raise (see "One Verdict Grammar" above). The failure
+  message of a falsy return names the check, shows the value and gives the
+  three accepted forms.
 
-  For `@eventually` checks, the function must return a predicate function
-  `(state -> boolean)` that will be polled. Any other return is a check
-  failure at the step whose event triggered the check, under the run's
-  `check_mode:`.
+  For `@eventually` checks, the function must return a 1-arity predicate
+  function that will be polled. Any other return is a check failure at the
+  step whose event triggered the check, under the run's `check_mode:`. The
+  predicate's return is a verdict: `nil` and `false` mean "not yet",
+  `{:fail, reason}` means "never" and ends the window at once, and a raise
+  fails the check at once, so write a total predicate over the state
+  (`get_in/2`, `match?/2`, a `case` with a fallback clause).
 
   ## Raising in apply/2
 
@@ -281,8 +324,8 @@ defmodule PropertyDamage.Model.Projection do
   reported `:name` (so `def assert_total_ok` is reported as `:total_ok`) while the
   full function name is kept internally for dispatch. Exactly one `@check` or
   `@eventually` may decorate a check, never both and never more than one.
-  Should raise an exception if the check fails.
-  If the function returns without raising, the check passed.
+  A check passes on a truthy return and fails on `nil`, `false`,
+  `{:fail, reason}` or a raise.
 
   ## Example
 

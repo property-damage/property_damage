@@ -934,6 +934,45 @@ defmodule MyTest.AuthorizationPoller do
 end
 ```
 
+## Writing an `@eventually` predicate
+
+The function an `@eventually` returns is polled on the projection state, and
+its return is a verdict (DR-052):
+
+| The predicate returns | The poller |
+|-----------------------|------------|
+| a truthy value | is satisfied and stops |
+| `nil` or `false` | waits for the next poll ("not yet") |
+| `{:fail, reason}` | ends the window at once as a check failure with that reason ("never") |
+| a bare exception struct or `{:error, _}` | fails at once: neither is a verdict |
+| raises, exits or throws | fails at once, naming the check, the poll count and what escaped |
+
+Write the predicate as a **total** function of the state: a value for every
+state, including the states before the system has caught up. A predicate that
+reads `s.payments[id].status` raises while the payment does not exist yet, and
+that raise is a check failure at the first poll, not "not yet". Read with
+`get_in/2`, `match?/2` or a `case` with a fallback clause instead, and say
+"never" when the state shows the wait is over:
+
+```elixir
+@eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
+def payment_confirmed(_state, %PaymentInitiated{id: id}) do
+  fn state ->
+    case get_in(state, [:payments, id, :status]) do
+      :confirmed -> true
+      :failed -> {:fail, "payment #{id} reached :failed"}
+      _not_yet -> false
+    end
+  end
+end
+```
+
+A payment that reached `:failed` ends the window at once with that message,
+instead of waiting out the `timeout:` to report that it never became
+`:confirmed`. A window that does time out reports that the predicate never
+became true, and nothing else: with a total predicate, nothing else can have
+happened.
+
 ## Safety vs Liveness: `@check at: :teardown`
 
 Verifying an eventually-consistent effect has two halves, and they need
@@ -1030,9 +1069,9 @@ most one iteration, and the report states the time waited. See
 [Differential Testing](differential_testing.md#the-convergence-loop).
 
 **`@eventually`** is a liveness predicate on one target's projection state with
-its own `timeout:`. A window that expires while the convergence loop waits is a
-check failure at once; a polling window that has not expired does not block
-agreement.
+its own `timeout:`. A window that expires, or whose predicate says "never" with
+`{:fail, reason}`, while the convergence loop waits is a check failure at once;
+a polling window that has not expired does not block agreement.
 
 The convergence loop ends by convergence, by divergence, or by the bound
 expiring with a side still pending; only the third is did not converge.

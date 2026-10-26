@@ -73,8 +73,8 @@ A retry agrees with the original when the `using:` predicate accepts it. The
 predicate is a 2-arity function called `using.(original_events, retry_events)`,
 with the same contract as `@compare`'s `using:` (see
 [Differential Testing](differential_testing.md#using-the-agreement-predicate)).
-It returns `:match` or `true` when the retry agrees, and `false`,
-`{:mismatch, "text"}` or `{:mismatch, exception}` when it does not.
+Its return is a verdict (DR-052): a truthy value when the retry agrees, and
+`false`, `{:fail, "text"}` or `{:fail, exception}` when it does not.
 
 ### Default: `==`
 
@@ -111,11 +111,8 @@ accepts it:
 ```elixir
 stutter: [
   using: fn original, retry ->
-    cond do
-      original == retry -> :match
-      Enum.all?(retry, &match?(%OrderAlreadyExists{}, &1)) -> :match
-      true -> {:mismatch, "retry returned #{inspect(retry)}, expected #{inspect(original)}"}
-    end
+    original == retry or Enum.all?(retry, &match?(%OrderAlreadyExists{}, &1)) or
+      {:fail, "retry returned #{inspect(retry)}, expected #{inspect(original)}"}
   end
 ]
 ```
@@ -124,27 +121,27 @@ The mismatch is an exception: by default a `PropertyDamage.ComparisonMismatch`
 holding the original and the retry events, or the text you returned.
 
 The predicate is an ordinary function, so you can try it directly. Here
-`PropertyDamage.Equivalence.verdict/3` shows how the framework reads its answer:
+`PropertyDamage.Stutter.compare_events/3` shows how the framework reads its
+answer:
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
 accept_already_exists = fn original, retry ->
-  if original == retry or Enum.all?(retry, &(&1 == :already_exists)),
-    do: :match,
-    else: {:mismatch, "retry differs"}
+  original == retry or Enum.all?(retry, &(&1 == :already_exists)) or
+    {:fail, "retry differs"}
 end
 
 config = PropertyDamage.Stutter.parse_config(probability: 0.3, using: accept_already_exists)
 
-:match = PropertyDamage.Equivalence.verdict(config.using, [:created], [:already_exists])
-{:mismatch, %PropertyDamage.ComparisonMismatch{message: "retry differs"}} =
-  PropertyDamage.Equivalence.verdict(config.using, [:created], [:created, :created])
+:agree = PropertyDamage.Stutter.compare_events([:created], [:already_exists], config)
+{:disagree, %PropertyDamage.ComparisonMismatch{message: "retry differs"}} =
+  PropertyDamage.Stutter.compare_events([:created], [:created, :created], config)
 
 # Without using:, events must be equal under ==/2
 default = PropertyDamage.Stutter.parse_config(probability: 0.3)
-:match = PropertyDamage.Equivalence.verdict(default.using, [:created], [:created])
-{:mismatch, %PropertyDamage.ComparisonMismatch{left: [:created], right: [:gone]}} =
-  PropertyDamage.Equivalence.verdict(default.using, [:created], [:gone])
+:agree = PropertyDamage.Stutter.compare_events([:created], [:created], default)
+{:disagree, %PropertyDamage.ComparisonMismatch{left: [:created], right: [:gone]}} =
+  PropertyDamage.Stutter.compare_events([:created], [:gone], default)
 ```
 
 The options `comparison:` (with `:strict`, `{:structural, _}`, `{:custom, _}`)

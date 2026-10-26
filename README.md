@@ -1351,7 +1351,7 @@ import PropertyDamage.Equivalence
 @compare using: by_key(fn v -> v |> normalize() |> drop_keys([:fees]) end)
 def orders(state, _root), do: state.orders
 
-# Custom predicate: :match, {:mismatch, exception} or a boolean
+# Custom predicate: a verdict, truthy to agree, false or {:fail, reason} to disagree
 @compare using: fn ref, target -> abs(ref - target) <= 1 end
 def total_cents(state, _root), do: state.total_cents
 ```

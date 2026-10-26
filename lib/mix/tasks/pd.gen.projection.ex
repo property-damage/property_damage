@@ -137,11 +137,13 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       # ============================================================================
 
       # Example: Check eventual consistency after an event
-      # The function returns a predicate that is polled until true or timeout
+      # The function returns a predicate that is polled until it returns a
+      # truthy value or the timeout passes. nil/false mean "not yet",
+      # {:fail, reason} means "never"; keep the predicate total (no raise).
       #
       # @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
       # def payment_confirmed(_state, %PaymentInitiated{id: id}) do
-      #   fn s -> s.payments[id] == :confirmed end
+      #   fn s -> get_in(s, [:payments, id]) == :confirmed end
       # end
     end
     """
