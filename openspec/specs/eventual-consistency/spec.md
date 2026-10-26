@@ -126,7 +126,7 @@ The system SHALL support `@eventually` temporal checks that spawn a background p
 - **WHEN** the poller evaluates it
 - **THEN** the window SHALL end at once, without waiting for the timeout
 - **AND** the system SHALL report a check failure (kind `:check_failed`, not a poll timeout) naming the check, carrying that reason, at the command whose event opened the window, under the run's `check_mode:`
-- **AND** a `{:fail, exception}` return SHALL carry that exception, and a bare exception struct or an `{:error, _}` return SHALL fail the same way with the grammar nudge
+- **AND** a `{:fail, exception}` return SHALL carry that exception, and a bare exception struct, an `{:error, _}` return or the retired `{:mismatch, _}` SHALL fail the same way with the grammar nudge
 
 #### Scenario: A raise in the predicate fails at the first poll (DR-052)
 - **GIVEN** a predicate that raises, for example on a key the state does not have yet

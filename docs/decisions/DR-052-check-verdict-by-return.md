@@ -1,6 +1,6 @@
 # DR-052: A Check's Verdict Is Its Return Value
 
-**Status:** Accepted
+**Status:** Accepted. Amended 2026-10-26: item 1b names a third non-verdict shape, the retired `{:mismatch, _}`, and the item 1a table lists it; a `{:fail, reason}` whose reason is neither a string nor an exception is wrapped with `inspect/1`.
 **Date:** 2026-10-16
 
 ## Context
@@ -50,7 +50,10 @@ predicate than to a test body, and this record chooses the predicate rule.
    | `{:fail, "text"}` | fail, that message | never: fail now, that reason | disagree, that message |
    | `{:fail, %Exception{}}` | fail, that exception | never: fail now, that exception | disagree, that exception |
    | raise | fail, the exception | fail, the exception | fail in that variant, the exception |
-   | bare exception struct, `{:error, _}` | fail, with the grammar nudge | same | same |
+   | bare exception struct, `{:error, _}`, `{:mismatch, _}` | fail, with the grammar nudge | same | same |
+
+   A `{:fail, other}` whose reason is neither a string nor an exception is
+   wrapped as a string reason, the reason passed through `inspect/1`.
 
    A string reason is wrapped in `CheckFailed` (checks, predicates) or
    `ComparisonMismatch` (relations) so the report has one shape whichever
@@ -60,9 +63,12 @@ predicate than to a test body, and this record chooses the predicate rule.
    library alone, like `{:cont, _}`/`{:halt, _}` in `Enum.reduce_while/3`,
    and an error tuple means something broke. `:match` and `{:mismatch, _}`
    are retired (DR-046 item 2 and item 10).
-1b. **Two non-verdict shapes fail with a nudge.** A bare exception struct and
-   an `{:error, _}` tuple cannot have meant "pass" and would otherwise be
-   truthy; the reader fails on them carrying the value, plus one sentence:
+1b. **Three non-verdict shapes fail with a nudge.** A bare exception struct,
+   an `{:error, _}` tuple and `{:mismatch, _}` cannot have meant "pass" and
+   would otherwise be truthy. `{:mismatch, _}` is on the list because it is
+   the retired DR-046 form and truthy, so an unrewritten relation would agree
+   silently; `:match` is not, because it is truthy and meant agreement. The
+   reader fails on the three shapes carrying the value, plus one sentence:
    "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`". One taught
    form, no silent pass.
 1c. **Composition.** A verdict is a final value, never a boolean: `&&`,

@@ -449,8 +449,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PropertyDamage.Verdict.read/1` reads a `@check`'s return and an
   `@eventually` predicate's return with one grammar: a truthy return passes
   (is satisfied), `nil` or `false` fails (is not yet), `{:fail, "text"}` or
-  `{:fail, %Exception{}}` fails with that reason, and a bare exception struct or
-  an `{:error, _}` tuple fails with the sentence "a verdict is truthy,
+  `{:fail, %Exception{}}` fails with that reason, and a bare exception struct,
+  an `{:error, _}` tuple or the retired `{:mismatch, _}` fails with the
+  sentence "a verdict is truthy,
   `nil`/`false`, or `{:fail, reason}`". A raise is a failure in both.
   - A `@check` that returned `nil` or `false` used to pass; it now fails, in the
     executor, forensics, the load-test worker and the linearization checker,
@@ -475,6 +476,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     gone from the poll-timeout info. Rewrite a predicate that raised before the
     state caught up as a total one (`get_in/2`, `match?/2`, a `case` with a
     fallback).
+  - A `using:` relation that still returns the retired `{:mismatch, detail}`
+    (DR-046) used to agree, because the tuple is truthy; it now disagrees with
+    the same sentence, carrying the value. The reader fails a `@check` or an
+    `@eventually` predicate that returns it the same way. `:match` still agrees.
 - **`latency:` and a non-default `check_mode:` are refused beside `branching:`.**
   A branching run executes one branch at a time on one target through the
   linear engine: it records no latency samples (`latency:` returned

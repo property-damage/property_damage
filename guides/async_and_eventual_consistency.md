@@ -944,7 +944,7 @@ its return is a verdict (DR-052):
 | a truthy value | is satisfied and stops |
 | `nil` or `false` | waits for the next poll ("not yet") |
 | `{:fail, reason}` | ends the window at once as a check failure with that reason ("never") |
-| a bare exception struct or `{:error, _}` | fails at once: neither is a verdict |
+| a bare exception struct, `{:error, _}` or `{:mismatch, _}` | fails at once: none is a verdict |
 | raises, exits or throws | fails at once, naming the check, the poll count and what escaped |
 
 Write the predicate as a **total** function of the state: a value for every

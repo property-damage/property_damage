@@ -52,12 +52,13 @@ The framework SHALL compare the targets of a run only through the boundary obser
 - **AND** SHALL treat a truthy return as agreement
 - **AND** SHALL treat `false` or `nil` as a difference whose detail is a `PropertyDamage.ComparisonMismatch` holding both values
 - **AND** SHALL treat `{:fail, "text"}` as a difference whose detail is a `PropertyDamage.ComparisonMismatch` holding both values and the text, and `{:fail, exception}` as a difference whose detail is that exception
-- **AND** SHALL treat a bare exception struct or an `{:error, _}` return as a difference whose message names the grammar ("a verdict is truthy, `nil`/`false`, or `{:fail, reason}`")
+- **AND** SHALL treat a bare exception struct, an `{:error, _}` return or the retired `{:mismatch, _}` as a difference whose message names the grammar ("a verdict is truthy, `nil`/`false`, or `{:fail, reason}`")
 
 #### Scenario: The retired relation returns are gone (DR-052)
 
 - **WHEN** a `using:` relation is written
 - **THEN** `:match` and `{:mismatch, detail}` SHALL NOT be part of its contract, and `PropertyDamage.Equivalence.verdict/3` SHALL NOT exist; `PropertyDamage.Verdict.read/1` reads the return
+- **AND** a relation that still returns `{:mismatch, detail}` SHALL disagree with the grammar nudge, not agree, and `:match`, being truthy, SHALL agree
 
 #### Scenario: A divergence records the relation as written (DR-051)
 
