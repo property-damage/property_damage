@@ -38,11 +38,24 @@ defmodule PropertyDamage.Model.Projection do
         end
       end
 
-  ## Check Types
+  ## Three Attributes, One Shape
 
-  Two kinds of check look at one target's state, `@check` and `@eventually`.
-  A third kind, `@compare`, compares targets (see "Boundary Observations"
-  below).
+  `@check`, `@eventually` and `@compare` are plain module attributes. Each
+  sits above a 2-arity function of the projection state,
+  `def name(state, trigger)`, and the three differ in what that function
+  returns:
+
+  | Attribute | The function returns | Which is |
+  |-----------|----------------------|----------|
+  | `@check` | its verdict | judged now: pass or fail |
+  | `@eventually` | the predicate to poll | judged at each poll, until the window ends |
+  | `@compare` | the value compared across targets | judged against the reference's value by `using:` |
+
+  The second argument is the command or event that triggered a check, the
+  phase (`:startup` or `:teardown`) of an `at:` check, and the root command
+  of the boundary for a `@compare` function. `@check` and `@eventually` look
+  at one target's state; `@compare` compares targets (see "Boundary
+  Observations" below).
 
   ### Synchronous Checks (`@check`)
 
@@ -247,7 +260,7 @@ defmodule PropertyDamage.Model.Projection do
   (the reference's). The observation's key, `{projection, name}`, names any
   failure it causes.
 
-      @compare every: [ClearingReport, :end], using: :within_cent
+      @compare every: [ClearingReport, :end]
       def totals(state, _root) do
         if state.unsettled == %{},
           do: %{net: state.net, fees: state.fees},
@@ -258,14 +271,41 @@ defmodule PropertyDamage.Model.Projection do
   (every Nth boundary), `{N, Module}` (every Nth root of that module),
   `Module` or `[Modules]` (after those roots), and `:end` or
   `[Modules, :end]` (the final boundary, which is compared after every target
-  finalized its run). `using:` names the relation: `:fun`
-  (`fun/2` in the projection, public or private), `{Mod, :fun}` or
-  `{Mod, :fun, args}`, called `fun(reference_value, variant_value, ...args)`;
-  `==` when absent; see `PropertyDamage.Equivalence`. A function may return `{:pending, reason}`
-  while its target can still catch up without a further command: a pending
-  side is never a disagreement, and the comparison waits up to the run's
+  finalized its run). A function may return `{:pending, reason}` while its
+  target can still catch up without a further command: a pending side is
+  never a disagreement, and the comparison waits up to the run's
   `compare: [converge_within: ms]` for the sides to agree. With one target no
   observation is evaluated.
+
+  Values agree under `==` unless `using:` names another relation. Return the
+  canonical value from the function itself (drop identifiers and
+  timestamps), so that each target normalizes its own value and a report shows
+  what was compared. Keep `using:` for a relation that is not an equality: a
+  tolerance, order-insensitive agreement, or the variant holding at least the
+  reference's fields. `using:` names the relation in one of three forms
+  (DR-051):
+
+  | Form | Calls |
+  |------|-------|
+  | `:fun` | `fun(reference_value, variant_value)` in this module, public or private |
+  | `{Mod, :fun}` | `Mod.fun(reference_value, variant_value)`, public |
+  | `{Mod, :fun, args}` | `Mod.fun(reference_value, variant_value, arg1, ..., argN)`, public |
+
+  `Mod` may be `__MODULE__`, and then the function may be private. `args` are
+  literals a module attribute can hold. An unknown form, a function value, a
+  missing function and a wrong arity are each a compile error that names the
+  observation, the `using:` term and the arity expected. The relation's
+  return is a verdict (see "One Verdict Grammar" above), and a divergence
+  report prints the `using:` term as written:
+
+      @compare every: :end, using: {PropertyDamage.Equivalence, :within, [0.01]}
+      def net(state, _root), do: state.net
+
+      @compare every: :end, using: :same_members
+      def members(state, _root), do: state.members
+
+      defp same_members(reference, variant),
+        do: MapSet.new(reference) == MapSet.new(variant) or {:fail, "members differ"}
 
   A function carries one `@compare`, written above its first clause; its
   other clauses take none, and the observation is evaluated once per

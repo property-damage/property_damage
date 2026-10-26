@@ -1,7 +1,8 @@
 defmodule PropertyDamage.EquivalenceTest do
-  # `PropertyDamage.Equivalence` builds `using:` predicates: `by_key/1` lifts a
-  # key function into a predicate, `normalize/1` and `drop_keys/2` transform
-  # values. `PropertyDamage.ComparisonMismatch` is the default mismatch detail.
+  # `PropertyDamage.Equivalence` offers relations for `using:` and helpers for
+  # observation bodies: `within/3` is a tolerance, `by_key/1` lifts a key
+  # function into a relation, `normalize/1` and `drop_keys/2` transform values.
+  # `PropertyDamage.ComparisonMismatch` is the default mismatch detail.
   use ExUnit.Case, async: true
 
   alias PropertyDamage.Test.Compare

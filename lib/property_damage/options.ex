@@ -665,7 +665,7 @@ defmodule PropertyDamage.Options do
                       equivalence:
                         "`equivalence:` was removed; targets are compared only through " <>
                           "`@compare` functions on the model's projections, each deciding " <>
-                          "agreement with its own `using:` predicate"
+                          "agreement with its own `using:` relation"
                     })
   @retired_load_test_keys Map.put(@retired_target_keys, :assertion_mode, :check_mode)
 
@@ -1222,7 +1222,7 @@ defmodule PropertyDamage.Options do
   end
 
   # The stutter comparison modes and the command-spec key they read were
-  # replaced by the `using:` predicate.
+  # replaced by the `using:` relation.
   defp reject_retired_stutter_keys!(opts) do
     case Keyword.get(opts, :stutter) do
       stutter when is_list(stutter) ->

@@ -99,7 +99,7 @@ defmodule PropertyDamage.Comparison do
     end
   end
 
-  # The `using:` predicate of `key`, which must be a 2-arity function.
+  # The `using:` relation of `key`, which must be a 2-arity function.
   defp using!({projection, name} = key) do
     using = projection.__compare_using__(name)
 

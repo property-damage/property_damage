@@ -160,7 +160,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
     def teardown(_context), do: :ok
 
     # First execution returns Created; a stutter retry returns AlreadyExists,
-    # which the stutter `using:` predicate accepts.
+    # which the stutter `using:` relation accepts.
     @impl true
     def execute(%AcceptableRetryViaSpec{id: id}, _ctx, runtime) do
       if PropertyDamage.Runtime.stuttering?(runtime) do

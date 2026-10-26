@@ -71,7 +71,7 @@ do not have to reach into the `%Failure{}` by hand:
   failure kind.
 
 The violation records `command`, `command_index`, `mismatch` (the exception the
-`using:` predicate of `stutter:` produced), and `attempts`. `attempts` is the list you usually inspect: each entry is a map
+`using:` relation of `stutter:` produced), and `attempts`. `attempts` is the list you usually inspect: each entry is a map
 `%{attempt: n, events: [...], is_retry: boolean}`, so you can compare the events
 the SUT returned on the first execution against those from each retry.
 

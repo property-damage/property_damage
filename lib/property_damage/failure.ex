@@ -254,7 +254,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:check_failed` | the check name, or the `{projection, function}` key of a `@compare` function or `using:` predicate that raised | the exception, message, or reason |
+  | `:check_failed` | the check name, or the `{projection, function}` key of a `@compare` function or `using:` relation that raised | the exception, message, or reason |
   | `:idempotency_violation` | `nil` | the `%Stutter.Violation{}` |
   | `:linearization` | `nil` | a human message |
   | `:poll_timeout` | the eventually check name | the poll-timeout info map |

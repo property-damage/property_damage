@@ -250,7 +250,7 @@ An observation is a public function `def name(state, root)` in a projection
 Its key, `{Projection, name}`, names every failure it causes.
 
 ```elixir
-@compare every: [ClearingReport, :end], using: &within_cent/2
+@compare every: [ClearingReport, :end]
 def totals(state, _root) do
   if state.unsettled == %{},
     do: %{net: state.net, fees: state.fees},
@@ -272,22 +272,18 @@ A key is compared once per boundary, even when two entries of the list match.
 `every: N` and a module list bound the convergence cost by scheduling fewer
 boundaries.
 
-### `using:`, the agreement predicate
+### Normalize in the observation
 
-`using:` is a 2-arity function called `using.(reference_value, variant_value)`.
-Its return is a verdict, read with the grammar a `@check` and an `@eventually`
-predicate share (DR-052): a truthy value when the values agree, and `false` or
-`nil` (a mismatch holding both values), `{:fail, "text"}` or
-`{:fail, exception}` when they do not. A bare exception struct or an
-`{:error, _}` tuple is not a verdict and disagrees with a message that says so.
-Without `using:` the values agree under `==/2`. It may be any expression: a capture, an
-`fn`, or a pipeline of helpers.
+Without `using:` the values agree under `==`. When the targets' values differ
+only in noise (server-minted identifiers, timestamps, a field one target does
+not have), return the canonical value from the observation itself. Each
+target then normalizes its own value, and a failure report shows exactly what
+was compared.
 
-`PropertyDamage.Equivalence` has three helpers:
+`PropertyDamage.Equivalence` has helpers for the observation body:
 
 | Helper | Use |
 |--------|-----|
-| `by_key/1` | Compare `key.(left)` with `key.(right)`; a mismatch keeps both keys |
 | `normalize/1` | Strip identifier and timestamp keys (`id`, `inserted_at`, `updated_at`, `created_at`, `timestamp`, `uuid`, `request_id`, `correlation_id`) at every depth; unwrap `{:ok, _}` and `{:error, _}` |
 | `drop_keys/2` | Remove the given keys at every depth |
 
@@ -295,15 +291,55 @@ Without `using:` the values agree under `==/2`. It may be any expression: a capt
 import PropertyDamage.Equivalence
 
 # Ignore server-minted identifiers and the fee breakdown
-@compare using: by_key(fn v -> v |> normalize() |> drop_keys([:fees]) end)
-def orders(state, _root), do: state.orders
+@compare every: 1
+def orders(state, _root), do: state.orders |> normalize() |> drop_keys([:fees])
 ```
+
+### `using:`, the relation
+
+Keep `using:` for a relation that is not an equality: a tolerance,
+order-insensitive agreement, or the variant holding at least the reference's
+fields. `using:` names the relation in one of three forms (DR-051):
+
+| Form | Calls |
+|------|-------|
+| `:fun` | `fun(reference_value, variant_value)` in the projection, public or private |
+| `{Mod, :fun}` | `Mod.fun(reference_value, variant_value)`, public |
+| `{Mod, :fun, args}` | `Mod.fun(reference_value, variant_value, arg1, ..., argN)`, public |
+
+`Mod` may be `__MODULE__`, and then the function may be private. `args` are
+literals a module attribute can hold. A capture `&local/2` becomes `:local`,
+`&Mod.fun/2` becomes `{Mod, :fun}`, and a closure becomes a named private
+function. The compiler checks the name: an unknown form, a function value, a
+missing function and a wrong arity are each a compile error naming the
+observation, the `using:` term and the arity expected.
+
+```elixir
+# Agree when the nets differ by at most a cent
+@compare every: :end, using: {PropertyDamage.Equivalence, :within, [0.01]}
+def net(state, _root), do: state.net
+
+# Agree whatever order the targets list the members in
+@compare every: :end, using: :same_members
+def members(state, _root), do: state.members
+
+defp same_members(reference, variant),
+  do: MapSet.new(reference) == MapSet.new(variant) or {:fail, "members differ"}
+```
+
+The relation's return is a verdict, read with the grammar a `@check` and an
+`@eventually` predicate share (DR-052): a truthy value when the values agree,
+and `false` or `nil` (a mismatch holding both values), `{:fail, "text"}` or
+`{:fail, exception}` when they do not. A bare exception struct or an
+`{:error, _}` tuple is not a verdict and disagrees with a message that says
+so. A divergence report prints the `using:` term as written beside the two
+values.
 
 A mismatch is an exception: by default a `PropertyDamage.ComparisonMismatch`
 holding both values (or the text you returned), so a failure report shows
 exactly what differed.
 
-A `@compare` function or a `using:` predicate that raises is a check failure in
+A `@compare` function or a `using:` relation that raises is a check failure in
 the target where it ran, naming the key. It is never a divergence.
 
 ### `{:pending, reason}`
@@ -323,9 +359,9 @@ convergence bound, or the function claims a readiness it cannot reach.
 `==` is what `assert a == b` uses, so it is the default. Five traps each give a
 false divergence; the [Writing Invariants](writing_invariants.md#what--does-not-do)
 guide lists them. In short: return a map when order is not the contract,
-use `&===/2` when integer and float must differ, compare a key for value
-structs such as `Decimal` and `DateTime`, and use a tolerance predicate for
-floats.
+use `using: {Kernel, :===}` when integer and float must differ, compare a key
+for value structs such as `Decimal` and `DateTime`, and use
+`using: {PropertyDamage.Equivalence, :within, [tolerance]}` for floats.
 
 ## The Convergence Loop
 
@@ -501,8 +537,8 @@ whatever *that* adapter produced. This is the point under differential testing,
 since two implementations legitimately hand out different ids for the same
 operation. Keep those ids out of your `@compare` observations (return the part
 of the state that does not hold them), or strip them with
-`PropertyDamage.Equivalence.normalize/1` under `using:`, so they do not surface
-as a divergence.
+`PropertyDamage.Equivalence.normalize/1` in the observation, so they do not
+surface as a divergence.
 
 ## Understanding Results
 
@@ -596,7 +632,7 @@ failure and for a startup check, which belong to no command.
 
 | Kind | Meaning |
 |------|---------|
-| `:check_failed` | A check failed in that target, at a command, at the `:startup` phase, or while the run finished (an `@eventually` timeout, a `:teardown` check). A raise in a `@compare` function or a `using:` predicate is one too. |
+| `:check_failed` | A check failed in that target, at a command, at the `:startup` phase, or while the run finished (an `@eventually` timeout, a `:teardown` check). A raise in a `@compare` function or a `using:` relation is one too. |
 | `:diverged` | Ready sides of a `@compare` observation differ at the convergence bound. |
 | `:did_not_converge` | A side of a `@compare` observation is still pending at the convergence bound. |
 | `:setup_failed` | `setup/1` returned an error or raised. An injector setup that returned an error or raised, or a mock setup that raised, inside the target counts too. A setup failure is not shrunk. |
@@ -873,8 +909,8 @@ defmodule OrderModel.Projections.Orders do
 
   # ... init/0 and apply/2 fold OrderPlaced and OrderShipped events ...
 
-  @compare every: 1, using: by_key(&drop_keys(&1, [:id, :inserted_at]))
-  def orders(state, _root), do: state.orders
+  @compare every: 1
+  def orders(state, _root), do: drop_keys(state.orders, [:id, :inserted_at])
 end
 
 defmodule MigrationTest do
@@ -915,7 +951,7 @@ end
 
 ## Example: API Version Comparison
 
-Comparing v1 and v2 of an API. v2 returns additional fields, so the predicate
+Comparing v1 and v2 of an API. v2 returns additional fields, so the relation
 compares only the fields v1 has:
 
 ```elixir
@@ -924,10 +960,10 @@ defmodule UserModel.Projections.Users do
 
   # ... init/0 and apply/2 fold the users each target reports ...
 
-  @compare using: &__MODULE__.common_fields?/2
+  @compare using: :common_fields?
   def users(state, _root), do: state.users
 
-  def common_fields?(v1_users, v2_users) do
+  defp common_fields?(v1_users, v2_users) do
     Map.take(v2_users, Map.keys(v1_users)) == v1_users or
       {:fail, "v2 users differ from v1 on the fields they share"}
   end

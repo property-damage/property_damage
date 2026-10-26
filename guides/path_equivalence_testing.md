@@ -425,16 +425,19 @@ def total(state, _root), do: state.total
   `Report` root and at the final boundary. A model with `expansions/0` needs at
   least one `@compare` whose schedule reaches the end of the run (`every: 1` or
   one that names `:end`).
-- `using:` is the agreement predicate, `fn reference_value, variant_value ->
-  ... end`, returning a verdict: truthy to agree, `false` or
-  `{:fail, reason}` to disagree; the default is `&==/2`. `PropertyDamage.Equivalence` builds predicates:
-  `by_key/1`, `normalize/1` (drops id and timestamp keys) and `drop_keys/2`.
+- Values agree under `==` unless `using:` names another relation: `:fun` (a
+  function of the projection, public or private), `{Mod, :fun}` or
+  `{Mod, :fun, args}`, called with the reference's value and the variant's
+  value first and returning a verdict: truthy to agree, `false` or
+  `{:fail, reason}` to disagree (DR-051). Normalize in the observation body
+  with `PropertyDamage.Equivalence.normalize/1` (drops id and timestamp keys)
+  and `drop_keys/2`, and keep `using:` for relations that are not equalities,
+  such as `{PropertyDamage.Equivalence, :within, [0.01]}`.
 - A function returns `{:pending, reason}` when its target is still catching up
   and will reach a comparable value without a further command (a webhook not
   yet delivered). A pending side is never a disagreement.
-- `use PropertyDamage.Model.Projection` imports its own `@` to read `@compare`,
-  so a projection module cannot also import another `@` macro: the compiler
-  reports the conflict, and a `@compare` read by another `@` is a compile error.
+- `@compare` is a plain module attribute, read like `@check` and
+  `@eventually`, so a projection module may import its own attribute macros.
 
 At each scheduled boundary the framework runs the **convergence loop**: it folds
 each target's waiting events, evaluates again, and repeats until the sides
