@@ -611,6 +611,7 @@ defmodule PropertyDamage.Model.Projection do
 
       # @check decorated function - synchronous check
       has_check? ->
+        refute_nil_tail!(env, name, body)
         check_name = extract_check_name_from_function(name) || name
         {inv, opts} = extract_invariant_meta(hd(check_opts), check_name, env)
 
@@ -627,9 +628,10 @@ defmodule PropertyDamage.Model.Projection do
         Module.delete_attribute(env.module, :check)
 
       # A later clause of an already-registered (multi-clause) check: the
-      # @check sat on the first clause and was consumed; this is fine.
+      # @check sat on the first clause and was consumed; this is fine. A
+      # synchronous check's later clause is guarded like its first.
       already_registered? ->
-        :ok
+        if synchronous_check?(env.module, name), do: refute_nil_tail!(env, name, body), else: :ok
 
       # assert_* function without attribute - error
       extract_check_name_from_function(name) != nil ->
@@ -669,6 +671,40 @@ defmodule PropertyDamage.Model.Projection do
     end
 
     :ok
+  end
+
+  # A `@check` passes on a truthy return (DR-052), so a clause whose last
+  # expression is an `if` or `unless` without `else` (the retired
+  # `if condition, do: fail!(...)` idiom) returns `nil` when the check passes.
+  # This guards the one taught shape; a `nil` from elsewhere fails at run time.
+  defp refute_nil_tail!(env, name, body) do
+    case tail(body) do
+      {kind, _meta, [_condition, branches]} when kind in [:if, :unless] and is_list(branches) ->
+        if Keyword.has_key?(branches, :else) do
+          :ok
+        else
+          raise CompileError,
+            file: env.file,
+            line: env.line,
+            description:
+              "`#{name}/2` ends in `#{kind}` without `else`, which returns `nil` when the " <>
+                "check passes; write `condition or fail!(...)`"
+        end
+
+      _other ->
+        :ok
+    end
+  end
+
+  # The last expression of a definition's `do` body.
+  defp tail(body) when is_list(body), do: body |> Keyword.get(:do) |> tail()
+  defp tail({:__block__, _meta, [_ | _] = expressions}), do: List.last(expressions)
+  defp tail(expression), do: expression
+
+  defp synchronous_check?(module, function_name) do
+    module
+    |> Module.get_attribute(:checks)
+    |> Enum.any?(&(&1.function_name == function_name and &1.type == :synchronous))
   end
 
   # ============================================================================
