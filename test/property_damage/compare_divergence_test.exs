@@ -34,6 +34,15 @@ defmodule PropertyDamage.CompareDivergenceTest do
       end
     end
     """,
+    tolerant: """
+    defmodule #{@ns}.Tolerant do
+    #{@header}
+      @compare using: {PropertyDamage.Test.Compare, :settled_within, [1]}
+      def totals(s, _root) do
+        if s.unsettled == %{}, do: %{settled: s.settled}, else: {:pending, :unsettled}
+      end
+    end
+    """,
     tagged: """
     defmodule #{@ns}.Tagged do
     #{@header}
@@ -119,6 +128,28 @@ defmodule PropertyDamage.CompareDivergenceTest do
       assert text =~ "#{inspect(elem(key, 0))}.totals"
       assert text =~ "ledger-ref"
       assert text =~ "ledger-new"
+    end
+
+    test "carries the using: term as written, and the report prints it", ctx do
+      assert {:error, report} =
+               Compare.run(model!(ctx, :tolerant), b_at(1, {:sync, 2}),
+                 compare: [converge_within: 30]
+               )
+
+      assert report.kind == :diverged
+      using = {PropertyDamage.Test.Compare, :settled_within, [1]}
+      assert Map.fetch!(report.failure_reason.type, :using) == using
+      assert Compare.text(report) =~ ~r/Using:\s+#{Regex.escape(inspect(using))}/
+    end
+
+    test "without using:, the report names == as the relation", ctx do
+      assert {:error, report} =
+               Compare.run(model!(ctx, :ledger), b_at(1, {:sync, 1}),
+                 compare: [converge_within: 30]
+               )
+
+      assert Map.fetch!(report.failure_reason.type, :using) == nil
+      assert Compare.text(report) =~ ~r/Using:\s+== \(no using:\)/
     end
 
     test "the mismatch is detail: different mismatch texts at one key are one failure", ctx do
@@ -249,6 +280,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
         assert {:ok, loaded} = Persistence.load(path)
         assert loaded.kind == kind
         assert Failure.name(loaded.failure_reason) == key
+        assert loaded.failure_reason == report.failure_reason
 
         decoded = report |> Persistence.export_json() |> Jason.decode!()
         assert decoded["kind"] == Atom.to_string(kind)

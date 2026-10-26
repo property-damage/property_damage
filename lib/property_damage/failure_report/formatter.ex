@@ -371,8 +371,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp mismatch_text(mismatch) when is_exception(mismatch), do: Exception.message(mismatch)
   defp mismatch_text(other), do: inspect(other, pretty: true)
 
-  # A divergence: the observation, the root, both targets' values and the
-  # mismatch the observation's `using:` predicate reported.
+  # A divergence: the observation, the root, both targets' values, the
+  # `using:` relation as written and the mismatch it reported.
   defp format_divergence_terminal(report, color) do
     divergence = report.failure_reason.type
     observation = FailureReport.format_name(divergence.key)
@@ -385,6 +385,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       #{label("Root", color)}          #{divergence.root} #{dim(color)}#{inspect(divergence.command, limit: 5)}#{reset(color)}
       #{label("Reference", color)}     #{inspect(reference)}: #{inspect(divergence.reference_value, limit: 10)}
       #{label("Variant", color)}       #{inspect(variant)}: #{inspect(divergence.variant_value, limit: 10)}
+      #{label("Using", color)}         #{relation_text(divergence.using)}
       #{label("Mismatch", color)}
       #{indent_text(mismatch_text(divergence.mismatch), "    ")}
       """ <> terminal_other_keys(divergence, color)
@@ -396,6 +397,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
     {reason, why}
   end
+
+  defp relation_text(nil), do: "== (no using:)"
+  defp relation_text(using), do: inspect(using)
 
   # A failure to converge: the observation stayed pending until the bound.
   defp format_convergence_terminal(report, color) do
