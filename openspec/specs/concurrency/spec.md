@@ -94,7 +94,7 @@ Stutter testing SHALL be configurable with probability, max_repeats, delay_ms (r
 
 ### Requirement: Stutter Comparison Through `using:` (DR-046)
 
-The system SHALL compare a retry's events with the original events through the `using:` option of `stutter:`: a 2-arity predicate called `using.(original_events, retry_events)` with the contract of `@compare`'s `using:` (`:match` or `true` to agree; `false`, `{:mismatch, text}` or `{:mismatch, exception}` otherwise), `&==/2` by default. The `comparison:` option, with its `:strict`, `{:structural, _}`, `{:custom, _}` and `:acceptable` values, MUST be rejected with an error that names `using:`.
+The system SHALL compare a retry's events with the original events through the `using:` option of `stutter:`: a 2-arity predicate called `using.(original_events, retry_events)` with the contract of `@compare`'s `using:`: its return is a verdict (DR-052), truthy to agree, and `false`, `nil`, `{:fail, text}` or `{:fail, exception}` otherwise, `&==/2` by default. The `comparison:` option, with its `:strict`, `{:structural, _}`, `{:custom, _}` and `:acceptable` values, MUST be rejected with an error that names `using:`.
 
 #### Scenario: Default comparison
 - **WHEN** `stutter:` has no `using:`
@@ -106,7 +106,7 @@ The system SHALL compare a retry's events with the original events through the `
 - **AND** its answer SHALL determine match or mismatch
 
 #### Scenario: A predicate accepts an alternative answer
-- **GIVEN** a predicate that returns `:match` when the retry answers `AlreadyExists`
+- **GIVEN** a predicate that returns `true` when the retry answers `AlreadyExists`
 - **WHEN** a retried command answers `AlreadyExists`
 - **THEN** the retry SHALL NOT be an idempotency violation
 

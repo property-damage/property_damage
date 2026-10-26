@@ -538,9 +538,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       #{yellow(color)}Final State:#{reset(color)}
         #{dim(color)}#{inspect(info.final_state, pretty: true, limit: 10)}#{reset(color)}
 
-      #{yellow(color)}Why it failed:#{reset(color)} The predicate never returned true within the
-      timeout period. The eventually check expected the state to eventually
-      satisfy the condition, but it did not.
+      #{yellow(color)}Why it failed:#{reset(color)} The predicate never became true within the
+      timeout.
       """
     else
       """

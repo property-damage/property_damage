@@ -1292,8 +1292,16 @@ defmodule PropertyDamage.FailureReport do
 
   # Human-readable message for each failure kind, mirroring the per-tag wording
   # the old parser produced.
-  defp message_for(%Failure{type: %Check{kind: :check_failed, detail: detail}}),
-    do: extract_message(detail)
+  defp message_for(%Failure{type: %Check{kind: :check_failed, detail: detail} = check}) do
+    case Map.get(check, :context) do
+      %{poll_count: poll} ->
+        "@eventually #{format_name(check.name)} failed on poll #{poll}: " <>
+          extract_message(detail)
+
+      _ ->
+        extract_message(detail)
+    end
+  end
 
   defp message_for(%Failure{type: %Check{kind: :idempotency_violation, detail: violation}}),
     do: format_idempotency_message(violation)

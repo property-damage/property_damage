@@ -4,7 +4,7 @@
 
 Projections are the state management and invariant verification mechanism for stateful property-based tests. They serve a dual purpose: reducing commands and events into tracked state, and defining checks that verify invariants hold throughout test execution. A single behaviour supports both roles, from state-only projections that drive command generation to check-only projections that validate system correctness.
 
-Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-049 (Expansions, Roots That Run as Several Commands)
+Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-049 (Expansions, Roots That Run as Several Commands), DR-052 (A Check's Verdict Is Its Return Value)
 
 ## Requirements
 
@@ -99,17 +99,38 @@ A `@check every:` check fires on **every observed event** regardless of how the 
 - **WHEN** a check is decorated with a sampling count of zero or negative (e.g. `@check every: {0, :command}` or `@check every: 0`)
 - **THEN** the framework raises an ArgumentError at compile time rather than allowing a runtime ArithmeticError
 
-#### Scenario: Check passes by returning without raising
-- **WHEN** a triggered check function returns without raising an exception
-- **THEN** the check is considered to have passed
+#### Scenario: Check passes by returning a truthy value (DR-052)
+- **WHEN** a triggered check function returns a value other than `nil` or `false`
+- **THEN** the check SHALL be considered to have passed
+
+#### Scenario: Check fails by returning nil or false (DR-052)
+- **GIVEN** a check `net_covers_fees` that returns `nil`
+- **WHEN** it is triggered, in the executor, in forensics or in the load-test worker, under `every:` or `at:`
+- **THEN** the check SHALL fail as a check failure with the same state snapshot as a raise
+- **AND** the failure message SHALL name the check, show the returned value and give the three accepted forms: "check `net_covers_fees` returned `nil`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`"
+
+#### Scenario: Check fails with a returned reason (DR-052)
+- **WHEN** a triggered check function returns `{:fail, "text"}`
+- **THEN** the check SHALL fail with a `PropertyDamage.CheckFailed` carrying that text, the same exception `fail!("text")` raises
+- **AND WHEN** it returns `{:fail, exception}`, the check SHALL fail with that exception
+
+#### Scenario: A non-verdict return fails with the grammar nudge (DR-052)
+- **WHEN** a triggered check function returns a bare exception struct or an `{:error, _}` tuple
+- **THEN** the check SHALL fail carrying the value and the sentence "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
 
 #### Scenario: Check fails by raising
 - **WHEN** a triggered check function raises an exception
 - **THEN** the check is considered to have failed
 
+#### Scenario: A check ending in if without else is a compile error (DR-052)
+- **GIVEN** a `@check` clause, first or later, whose last expression is an `if` or `unless` without `else`
+- **WHEN** the projection compiles
+- **THEN** compilation SHALL fail with a CompileError naming the clause and the rewrite: "`net_covers_fees/2` ends in `if` without `else`, which returns `nil` when the check passes; write `condition or fail!(...)`"
+- **AND** an `if` with `else`, or an `if` that is not the last expression, SHALL compile
+
 ### Requirement: Temporal Checks via @eventually
 
-Projections SHALL support temporal checks decorated with the `@eventually` module attribute. These spawn background pollers when a trigger event occurs, periodically checking if a predicate becomes true within a timeout. The decorated function SHALL return a predicate function `(state -> boolean)`.
+Projections SHALL support temporal checks decorated with the `@eventually` module attribute. These spawn background pollers when a trigger event occurs, periodically checking if a predicate becomes true within a timeout. The decorated function SHALL return a 1-arity predicate function over the projection state, whose return is a verdict read with the grammar of `@check` (DR-052; see the eventual-consistency specification).
 
 #### Scenario: Poll state spawns poller on matching event
 - **WHEN** a check is decorated with `@eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}`
@@ -119,7 +140,7 @@ Projections SHALL support temporal checks decorated with the `@eventually` modul
 #### Scenario: Poll state predicate is checked periodically
 - **WHEN** a poller is spawned
 - **THEN** the predicate function returned by the check is evaluated at the configured interval
-- **AND** polling continues until the predicate returns true or the timeout expires
+- **AND** polling continues until the predicate returns a truthy value, returns `{:fail, reason}`, raises, or the timeout expires
 
 #### Scenario: Eventually checks support multiple trigger events
 - **WHEN** a check is decorated with `@eventually after: [EventA, EventB], ...`
@@ -167,7 +188,7 @@ Projections SHALL support synchronous checks whose timing is a lifecycle phase b
 
 Projections SHALL support boundary observations: public functions `def name(state, root)` decorated with `@compare`. A run with two or more targets compares its targets only through these functions. Each target evaluates the function on its own projection state with the root command as the second argument, and the value of every non-reference target is judged against the reference's. The observation's key is `{projection, name}`.
 
-`@compare` takes two options. `every:` is the schedule: `1` (default, every boundary), `N` (every Nth boundary), `{N, Module}` (every Nth root of that module), `Module` or `[Modules]` (after those roots) and `:end` or `[Modules, :end]` (the final boundary, compared after every target finalized its run). A key SHALL be compared at most once per boundary. `using:` is a 2-arity predicate called `using.(reference_value, variant_value)` that returns `:match`, `{:mismatch, exception}` or a boolean; it defaults to `&==/2` and MAY be any expression that evaluates to a 2-arity function. A function SHALL carry one `@compare`, written above its first clause.
+`@compare` takes two options. `every:` is the schedule: `1` (default, every boundary), `N` (every Nth boundary), `{N, Module}` (every Nth root of that module), `Module` or `[Modules]` (after those roots) and `:end` or `[Modules, :end]` (the final boundary, compared after every target finalized its run). A key SHALL be compared at most once per boundary. `using:` is a 2-arity predicate called `using.(reference_value, variant_value)` whose return is a verdict (DR-052): truthy to agree, `false`, `nil` or `{:fail, reason}` to disagree; it defaults to `&==/2` and MAY be any expression that evaluates to a 2-arity function. A function SHALL carry one `@compare`, written above its first clause.
 
 A boundary observation MAY return `{:pending, reason}` when its target will reach a comparable value with no further command, through asynchronous catch-up only. A pending side SHALL NOT be a disagreement.
 

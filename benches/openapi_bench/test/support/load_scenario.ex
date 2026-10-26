@@ -41,14 +41,13 @@ defmodule OpenapiBench.LoadConsistency do
   def assert_read_your_write(state, _command) do
     with {key, observed} <- state.last_read,
          expected when expected != :unset <- Map.get(state.store, key, :unset) do
-      if observed != expected do
+      observed == expected or
         PropertyDamage.fail!(
           "GET key=#{key} returned #{inspect(observed)}, model wrote #{inspect(expected)} this sequence",
           key: key,
           actual: observed,
           expected: expected
         )
-      end
     else
       _ -> :ok
     end

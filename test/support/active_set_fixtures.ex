@@ -68,11 +68,8 @@ defmodule PropertyDamage.Test.ActiveSet do
     def assert_torn_down_cleanly(state, _phase) do
       VariantSupport.record(state.sink, {:teardown_check, state.by})
 
-      if state.fail_teardown do
+      not state.fail_teardown or
         PropertyDamage.fail!("teardown check failed", variant: state.by)
-      end
-
-      :ok
     end
   end
 

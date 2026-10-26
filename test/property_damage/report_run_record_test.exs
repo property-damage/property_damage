@@ -84,8 +84,7 @@ defmodule PropertyDamage.ReportRunRecordTest do
 
     @check every: 1
     def below_limit(state, _command_or_event) do
-      if state.last >= 3, do: PropertyDamage.fail!("limit reached", last: state.last)
-      :ok
+      state.last < 3 or PropertyDamage.fail!("limit reached", last: state.last)
     end
   end
 

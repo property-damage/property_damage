@@ -110,11 +110,10 @@ defmodule PropertyDamage.AwaitsTest do
     # Safety: at most one closing webhook per issue.
     @check every: IssueClosedWebhook
     def assert_at_most_one_webhook(state, _event) do
-      unless Enum.all?(state.webhooks, fn {_id, n} -> n <= 1 end) do
+      Enum.all?(state.webhooks, fn {_id, n} -> n <= 1 end) or
         PropertyDamage.fail!("more than one closing webhook for an issue",
           webhooks: state.webhooks
         )
-      end
     end
   end
 
@@ -238,11 +237,10 @@ defmodule PropertyDamage.AwaitsTest do
 
     @check every: IssueClosedWebhook
     def assert_at_most_one_webhook(state, _event) do
-      unless Enum.all?(state.webhooks, fn {_id, n} -> n <= 1 end) do
+      Enum.all?(state.webhooks, fn {_id, n} -> n <= 1 end) or
         PropertyDamage.fail!("more than one closing webhook for an issue",
           webhooks: state.webhooks
         )
-      end
     end
   end
 

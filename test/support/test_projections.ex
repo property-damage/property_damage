@@ -63,23 +63,18 @@ defmodule PropertyDamage.Test.Projections.TestChecks do
 
   @check every: 1
   def assert_quantity_non_negative(state, _cmd_or_event) do
-    unless state.total_quantity >= 0 do
+    state.total_quantity >= 0 or
       PropertyDamage.fail!("Negative quantity", total: state.total_quantity)
-    end
   end
 
   @check every: CreateItem
   def assert_create_increments_count(state, _cmd_or_event) do
-    unless state.create_count > 0 do
-      PropertyDamage.fail!("Create count should be positive")
-    end
+    state.create_count > 0 or PropertyDamage.fail!("Create count should be positive")
   end
 
   @check every: [CreateItem, ViewItem]
   def assert_command_was_tracked(state, _cmd_or_event) do
-    unless state.create_count > 0 or state.view_count > 0 do
-      PropertyDamage.fail!("No commands tracked")
-    end
+    state.create_count > 0 or state.view_count > 0 or PropertyDamage.fail!("No commands tracked")
   end
 
   @check every: 5

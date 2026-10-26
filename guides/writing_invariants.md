@@ -6,25 +6,79 @@ real bugs.
 
 ## How an Invariant Signals Failure
 
-A synchronous check (a `@check`-annotated function in a check
-projection) **fails by raising**. The executor runs your check and treats a
-raised exception as a violation; if the function returns without raising, the
-check passed. The return value is ignored.
-
-Use `PropertyDamage.fail!/2` to raise a structured failure:
+A synchronous check (a `@check`-annotated function in a check projection)
+**passes by returning a truthy value** and fails on `nil` or `false`, like a
+predicate given to `Enum.filter/2` (DR-052). A raise is a failure too. Write a
+check in one of three forms:
 
 ```elixir
+# A predicate: the shortest check.
+@check every: 1
+def balance_non_negative(state, _cmd_or_event), do: state.balance >= 0
+
+# A predicate with a message: fail!/2 raises when the condition is false.
 @check every: 1
 def assert_balance_non_negative(state, _cmd_or_event) do
-  if state.balance < 0 do
-    PropertyDamage.fail!("balance is negative", balance: state.balance)
-  end
+  state.balance >= 0 or PropertyDamage.fail!("balance is negative", balance: state.balance)
+end
+
+# A body that ends with a truthy value, such as the :ok of Enum.each/2.
+@check every: 1
+def assert_no_negative_accounts(state, _cmd_or_event) do
+  Enum.each(state.accounts, fn {id, account} ->
+    account.balance >= 0 or PropertyDamage.fail!("negative account", id: id)
+  end)
 end
 ```
 
-> **Do not** return `{:error, "..."}` to signal a violation. A returned tuple is
-> discarded, so the check silently passes and the bug is never caught. Raise
-> (via `PropertyDamage.fail!/2` or any exception) instead.
+A check that returns `nil` or `false` fails with a message that names it and
+shows the value, for example: "check `balance_non_negative` returned `false`;
+a check passes by returning a truthy value: a predicate,
+`condition or fail!(...)`, or a body that ends with `:ok`".
+
+`{:fail, reason}` is the returned form of `fail!/2`: it fails the check with
+that reason without raising, so `condition || {:fail, "reason"}` is the
+shortest reasoned check. The reason is a string, which becomes a
+`PropertyDamage.CheckFailed` like the one `fail!/2` raises, or an exception,
+which is kept as it is.
+
+The `if condition, do: fail!(...)` idiom is retired: it returns `nil` when the
+check passes. A `@check` whose last expression is an `if` or `unless` without
+`else` does not compile. A bare exception struct or an `{:error, _}` tuple is
+not a verdict either: the check fails with a message that says so, because
+neither can have meant "pass".
+
+### Composing sub-checks
+
+A verdict is a final value, never a boolean. `&&`, `||`, `!` and
+`Enum.all?/2` see a `{:fail, _}` as truthy, so `balance_ok(a) && limit_ok(a)`
+passes when `balance_ok/1` returns `{:fail, "overdrawn"}`. Compose sub-checks
+with `with`, which stops at the first value that is not `true`:
+
+```elixir
+@check every: 1
+def account_valid(state, _cmd_or_event) do
+  with true <- balance_ok(state.account),
+       true <- limit_ok(state.account),
+       do: true
+end
+
+defp balance_ok(account), do: account.balance >= 0 || {:fail, "overdrawn"}
+defp limit_ok(account), do: account.spent <= account.limit || {:fail, "over limit"}
+```
+
+Or give each sub-check a raising helper and run them under `Enum.each/2`,
+which returns `:ok` when none raised:
+
+```elixir
+@check every: 1
+def accounts_valid(state, _cmd_or_event) do
+  Enum.each(state.accounts, &balance_ok!/1)
+end
+
+defp balance_ok!({id, account}),
+  do: account.balance >= 0 or PropertyDamage.fail!("overdrawn", id: id)
+```
 
 ## What Makes a Good Invariant?
 
@@ -64,9 +118,7 @@ def assert_balance_matches_ledger(state, _cmd_or_event) do
       account.balance != expected
     end)
 
-  unless Enum.empty?(mismatches) do
-    PropertyDamage.fail!("Balance mismatches", mismatches: mismatches)
-  end
+  Enum.empty?(mismatches) or PropertyDamage.fail!("Balance mismatches", mismatches: mismatches)
 end
 ```
 
@@ -80,10 +132,8 @@ def assert_emails_unique(state, _cmd_or_event) do
   emails = Enum.map(state.users, fn {_id, user} -> user.email end)
   unique_emails = Enum.uniq(emails)
 
-  unless length(emails) == length(unique_emails) do
-    duplicates = emails -- unique_emails
-    PropertyDamage.fail!("Duplicate emails", duplicates: duplicates)
-  end
+  length(emails) == length(unique_emails) or
+    PropertyDamage.fail!("Duplicate emails", duplicates: emails -- unique_emails)
 end
 ```
 
@@ -110,9 +160,7 @@ def assert_valid_status_transitions(state, _cmd_or_event) do
       to not in valid_next
     end)
 
-  unless Enum.empty?(invalid) do
-    PropertyDamage.fail!("Invalid transitions", invalid: invalid)
-  end
+  Enum.empty?(invalid) or PropertyDamage.fail!("Invalid transitions", invalid: invalid)
 end
 ```
 
@@ -131,9 +179,8 @@ def assert_orders_reference_valid_users(state, _cmd_or_event) do
       order.user_id not in user_ids
     end)
 
-  unless Enum.empty?(orphan_orders) do
+  Enum.empty?(orphan_orders) or
     PropertyDamage.fail!("Orphan orders", ids: Enum.map(orphan_orders, &elem(&1, 0)))
-  end
 end
 ```
 
@@ -148,9 +195,7 @@ def assert_balances_non_negative(state, _cmd_or_event) do
     state.accounts
     |> Enum.filter(fn {_id, account} -> account.balance < 0 end)
 
-  unless Enum.empty?(negative) do
-    PropertyDamage.fail!("Negative balances", negative: negative)
-  end
+  Enum.empty?(negative) or PropertyDamage.fail!("Negative balances", negative: negative)
 end
 
 @check every: 1
@@ -159,9 +204,7 @@ def assert_inventory_non_negative(state, _cmd_or_event) do
     state.inventory
     |> Enum.filter(fn {_sku, qty} -> qty < 0 end)
 
-  unless Enum.empty?(negative) do
-    PropertyDamage.fail!("Negative inventory", negative: negative)
-  end
+  Enum.empty?(negative) or PropertyDamage.fail!("Negative inventory", negative: negative)
 end
 ```
 
@@ -178,9 +221,8 @@ def assert_expiry_after_creation(state, _cmd_or_event) do
       DateTime.compare(auth.expires_at, auth.created_at) != :gt
     end)
 
-  unless Enum.empty?(invalid) do
+  Enum.empty?(invalid) or
     PropertyDamage.fail!("Authorizations with invalid expiry", invalid: invalid)
-  end
 end
 ```
 
@@ -191,8 +233,8 @@ decorating attribute, and each answers a different question.
 
 | Kind | Question | Looks at | Schedule | Fails when |
 |------|----------|----------|----------|------------|
-| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`) | the function raises |
-| `@eventually` | Does this become true in time? | One target's state, polled | `after:` (event module or list), polled every `interval:` for up to `timeout:` | the predicate is still false at the `timeout:` |
+| `@check` | Does this hold now? | One target's state | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`) | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
+| `@eventually` | Does this become true in time? | One target's state, polled | `after:` (event module or list), polled every `interval:` for up to `timeout:` | the predicate is still falsy at the `timeout:`, returns `{:fail, reason}`, or raises |
 | `@compare` | Do the targets agree? | The same observation in two or more targets | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), agreement predicate `using:` | ready sides differ (`:diverged`) or a side is still `{:pending, reason}` at the bound (`:did_not_converge`) |
 
 When to pick which:
@@ -207,8 +249,14 @@ When to pick which:
   target cannot see another target, so `@compare` is the whole cross-target
   oracle.
 
-A function carries exactly one of the three. The sections below teach `@check`
-first, then `@eventually`, then `@compare`.
+A function carries exactly one of the three. The three share one verdict
+grammar (DR-052): a `@check` judges its return now, an `@eventually` judges its
+predicate's return within the window, and a `@compare` judges its value against
+the reference's through the `using:` relation, whose return is read the same
+way. In all three a truthy return is good, a raise is a failure, and
+`{:fail, reason}` is the reasoned failure.
+
+The sections below teach `@check` first, then `@eventually`, then `@compare`.
 
 ## Check Triggers
 
@@ -267,19 +315,30 @@ guide for the safety/liveness pairing and the accumulator contract.
 
 A `@eventually` function takes the projection state and the event that opened
 the window, and returns a predicate over the projection state. The framework
-polls the predicate until it returns true or the `timeout:` passes. All three
-options are required, and a bare integer means seconds; use `{n, unit}` with
-`:millisecond(s)`, `:second(s)` or `:minute(s)` for anything else:
+polls the predicate until it returns a truthy value or the `timeout:` passes.
+All three options are required, and a bare integer means seconds; use
+`{n, unit}` with `:millisecond(s)`, `:second(s)` or `:minute(s)` for anything
+else:
 
 ```elixir
 @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
 def payment_confirmed(_state, %PaymentInitiated{id: id}) do
-  fn state -> state.payments[id] == :confirmed end
+  fn state ->
+    case get_in(state, [:payments, id]) do
+      :confirmed -> true
+      :failed -> {:fail, "payment #{id} reached :failed"}
+      _pending -> false
+    end
+  end
 end
 ```
 
-A predicate that has not become true by the `timeout:` fails the run with a
-`:poll_timeout` failure. Such a failure can mean the system is slow, not wrong,
+The predicate's return is a verdict: `nil` or `false` means "not yet", a
+truthy value means satisfied, and `{:fail, reason}` means "never", which ends
+the window at once as a check failure. Write the predicate as a total function
+of the state: a raise inside it is a check failure at the first poll, not "not
+yet". A predicate that has not become true by the `timeout:` fails the run with
+a `:poll_timeout` failure. Such a failure can mean the system is slow, not wrong,
 so raise the `timeout:` before you suspect a bug. A predicate cannot express
 "never too many", because it stops at the first true value: pair it with a
 `@check at: :teardown` for that. See
@@ -308,8 +367,8 @@ end
 
 `every:` takes the same schedule vocabulary as `@check` (`1`, `N`,
 `{N, Module}`, `Module`, `[Modules]`) plus `:end` for the final boundary.
-`using:` is a 2-arity predicate (default `&==/2`) returning `:match`,
-`{:mismatch, exception}` or a boolean. A function may return
+`using:` is a 2-arity predicate (default `&==/2`) whose return is a verdict:
+truthy when the values agree, `false` or `{:fail, reason}` when they do not. A function may return
 `{:pending, reason}` while its target is still catching up; the comparison
 waits for it up to the run's `compare: [converge_within: ms]` (default 5000). A raise in a
 `@compare` function or a `using:` predicate is a check failure naming the
@@ -377,9 +436,8 @@ defmodule MyApp.Projections.AuditInvariants do
 
   @check every: 25
   def assert_no_suspicious_patterns(state, _cmd_or_event) do
-    unless Enum.empty?(state.suspicious_patterns) do
+    Enum.empty?(state.suspicious_patterns) or
       PropertyDamage.fail!("Suspicious patterns detected", patterns: state.suspicious_patterns)
-    end
   end
 end
 ```
@@ -392,11 +450,10 @@ When using nemesis (chaos engineering), some invariants may not apply:
 @check every: 1
 def assert_latency_within_sla(state, _cmd_or_event) do
   # Skip SLA check during active network partition
-  unless Map.get(state.active_faults, :network_partition) do
-    if state.last_latency_ms >= 100 do
-      PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
-    end
-  end
+  partitioned? = Map.get(state.active_faults, :network_partition, false)
+
+  partitioned? or state.last_latency_ms < 100 or
+    PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
 end
 ```
 
@@ -410,9 +467,7 @@ end
 # Don't do this - relies on implementation details
 @check every: 1
 def assert_cache_hit_ratio(state, _cmd_or_event) do
-  if state.cache.hits / state.cache.total <= 0.8 do
-    PropertyDamage.fail!("Low cache hits")
-  end
+  state.cache.hits / state.cache.total > 0.8 or PropertyDamage.fail!("Low cache hits")
 end
 ```
 
@@ -435,9 +490,8 @@ end
 # Don't do this - can fail due to timing
 @check every: 1
 def assert_recent_activity(state, _cmd_or_event) do
-  if DateTime.diff(DateTime.utc_now(), state.last_activity, :second) >= 60 do
+  DateTime.diff(DateTime.utc_now(), state.last_activity, :second) < 60 or
     PropertyDamage.fail!("No recent activity")
-  end
 end
 ```
 
@@ -448,7 +502,7 @@ end
 @check every: 1
 def assert_activity_ordering(state, _cmd_or_event) do
   sorted = Enum.sort_by(state.activities, & &1.timestamp)
-  unless state.activities == sorted, do: PropertyDamage.fail!("Out of order")
+  state.activities == sorted or PropertyDamage.fail!("Out of order")
 end
 ```
 
@@ -460,7 +514,7 @@ end
 # Too specific - will break with any change
 @check every: 1
 def assert_exact_balance(state, _cmd_or_event) do
-  unless state.accounts["acc_1"].balance == 1000, do: PropertyDamage.fail!("Wrong")
+  state.accounts["acc_1"].balance == 1000 or PropertyDamage.fail!("Wrong")
 end
 ```
 
@@ -472,7 +526,7 @@ end
 def assert_credits_minus_debits(state, _cmd_or_event) do
   expected = state.total_credits - state.total_debits
   actual = Enum.reduce(state.accounts, 0, fn {_, acc}, sum -> sum + acc.balance end)
-  unless expected == actual, do: PropertyDamage.fail!("Mismatch")
+  expected == actual or PropertyDamage.fail!("Mismatch")
 end
 ```
 

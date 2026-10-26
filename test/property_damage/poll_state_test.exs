@@ -45,7 +45,7 @@ defmodule PropertyDamage.PollStateTest do
     # Synchronous check
     @check every: PaymentInitiated
     def assert_amount_positive(_state, %PaymentInitiated{amount: amt}) do
-      if amt <= 0, do: PropertyDamage.fail!("amount must be positive")
+      amt > 0 or PropertyDamage.fail!("amount must be positive")
     end
 
     # Eventually check - payment should be confirmed within timeout

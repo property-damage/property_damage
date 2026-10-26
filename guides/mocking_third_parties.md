@@ -215,10 +215,11 @@ defmodule PaymentInvariant do
   @check every: PaymentDeclined
   def assert_rollback_on_decline(state, %PaymentDeclined{order_id: id}) do
     order = state.orders[id]
-    if order.status != :declined do
+    order.status == :declined or
       PropertyDamage.fail!("order not rolled back after decline",
-        order_id: id, status: order.status)
-    end
+        order_id: id,
+        status: order.status
+      )
   end
 end
 ```
@@ -348,9 +349,8 @@ end
 def assert_no_duplicate_charges(state, _) do
   charges = Enum.filter(state.mock_requests, &(&1.path == "/charge"))
   order_ids = Enum.map(charges, & &1.body["order_id"])
-  if length(order_ids) != length(Enum.uniq(order_ids)) do
+  length(order_ids) == length(Enum.uniq(order_ids)) or
     PropertyDamage.fail!("duplicate charge attempts", order_ids: order_ids)
-  end
 end
 ```
 

@@ -102,8 +102,7 @@ defmodule PropertyDamage.Test.Compare do
 
     @check every: Settled
     def assert_settled_amount(_state, %Settled{amount: amount}) do
-      if amount < 0, do: PropertyDamage.fail!("negative settlement", amount: amount)
-      :ok
+      amount >= 0 or PropertyDamage.fail!("negative settlement", amount: amount)
     end
   end
 

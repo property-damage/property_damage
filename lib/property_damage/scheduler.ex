@@ -884,7 +884,7 @@ defmodule PropertyDamage.Scheduler do
          target,
          %{success: false, failure_reason: nil, check_failures: [first | _]}
        ) do
-    reason = Failure.check_failed(first.check_name, first.reason)
+    reason = recorded_failure(first)
 
     case first.command_index do
       # A check recorded on a setup command's event is a setup failure.
@@ -908,6 +908,15 @@ defmodule PropertyDamage.Scheduler do
   end
 
   defp finalize_failure(_config, _target, _result), do: nil
+
+  # A recorded check failure as a `%Failure{}`; an `@eventually` window that
+  # ended early keeps its poll context (DR-052).
+  defp recorded_failure(%{context: context} = recorded) when is_map(context) do
+    failure = Failure.check_failed(recorded.check_name, recorded.reason)
+    %{failure | type: %{failure.type | context: context}}
+  end
+
+  defp recorded_failure(recorded), do: Failure.check_failed(recorded.check_name, recorded.reason)
 
   # Whether `finalize_failure/3` reports a check `check_mode: :record`
   # recorded.

@@ -76,13 +76,13 @@ defmodule Bank.Ledger do
 
   @check every: 1, validates: :balance_nonneg
   def assert_balance_nonneg(state, _step) do
-    if state.balance < 0, do: PropertyDamage.fail!("balance went negative", balance: state.balance)
+    state.balance >= 0 or PropertyDamage.fail!("balance went negative", balance: state.balance)
   end
 
   # Fires only on AccountClosed, which no command emits -> never exercised.
   @check every: AccountClosed, validates: :closed_balance_zero
   def assert_closed_balance_zero(_state, %AccountClosed{balance: b}) do
-    if b != 0, do: PropertyDamage.fail!("closed with non-zero balance", balance: b)
+    b == 0 or PropertyDamage.fail!("closed with non-zero balance", balance: b)
   end
 end
 

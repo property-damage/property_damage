@@ -42,7 +42,7 @@ defmodule PropertyDamage.SetupCommandsReportTest do
 
     @check every: PropertyDamage.Test.SetupCommands.Acted
     def assert_not_second_act(_state, %{n: n}) do
-      if n == 1, do: PropertyDamage.fail!("the second act"), else: :ok
+      n != 1 or PropertyDamage.fail!("the second act")
     end
   end
 

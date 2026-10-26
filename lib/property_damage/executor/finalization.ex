@@ -109,6 +109,23 @@ defmodule PropertyDamage.Executor.Finalization do
     # and errors are halt-worthy; the error case previously fell through and
     # was reported as success.
     case halt_failure do
+      # DR-052: the predicate said "never" or raised; the window ended at once
+      # and reports as a check failure at the command that opened it.
+      {:failed, _id, info} ->
+        resource_pollers = Map.get(state, :active_resource_pollers, [])
+        Enum.each(resource_pollers, &ResourcePoller.stop/1)
+
+        {failure, stacktrace} = extract_stacktrace(Failure.eventually_failed(info))
+
+        async_failure_result(
+          state,
+          failure,
+          stacktrace,
+          Map.get(info.triggered_by, :command_index),
+          linearization,
+          check_failures
+        )
+
       {:timeout, _id, info} ->
         resource_pollers = Map.get(state, :active_resource_pollers, [])
         Enum.each(resource_pollers, &ResourcePoller.stop/1)
@@ -437,6 +454,7 @@ defmodule PropertyDamage.Executor.Finalization do
         Enum.split_with(results, fn {_id, result} ->
           case result do
             {:timeout, _, _} -> true
+            {:failed, _, _} -> true
             {:error, _} -> true
             _ -> false
           end
@@ -465,6 +483,12 @@ defmodule PropertyDamage.Executor.Finalization do
                   Logger.warning(
                     "Poll timeout in #{info.triggered_by.check_name}: " <>
                       "#{info.predicate_source}"
+                  )
+
+                {:failed, _, info} ->
+                  Logger.warning(
+                    "Check failed in #{info.triggered_by.check_name}: " <>
+                      Exception.message(info.reason)
                   )
 
                 {:error, reason} ->
@@ -715,6 +739,19 @@ defmodule PropertyDamage.Executor.Finalization do
       module: info.triggered_by.event.__struct__,
       timestamp: System.monotonic_time(:millisecond),
       poll_timeout_info: info
+    }
+  end
+
+  defp timeout_to_failure({:failed, _id, info}) do
+    %{
+      check_name: info.triggered_by.check_name,
+      reason: Failure.eventually_failed(info) |> Failure.detail(),
+      context: %{poll_count: info.poll_count, elapsed_ms: info.elapsed_ms},
+      command: nil,
+      command_index: Map.get(info.triggered_by, :command_index),
+      step_type: :event,
+      module: info.triggered_by.event.__struct__,
+      timestamp: System.monotonic_time(:millisecond)
     }
   end
 

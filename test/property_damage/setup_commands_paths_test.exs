@@ -59,7 +59,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
 
     @check every: PropertyDamage.Test.SetupCommands.ThingMade
     def assert_fewer_than_two_things(state, _event) do
-      if state.things >= 2, do: PropertyDamage.fail!("two things made"), else: :ok
+      state.things < 2 or PropertyDamage.fail!("two things made")
     end
   end
 
@@ -91,7 +91,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
 
     @check every: PropertyDamage.Test.SetupCommands.Acted
     def assert_not_second_act(_state, %{n: n}) do
-      if n == 1, do: PropertyDamage.fail!("the second act"), else: :ok
+      n != 1 or PropertyDamage.fail!("the second act")
     end
   end
 

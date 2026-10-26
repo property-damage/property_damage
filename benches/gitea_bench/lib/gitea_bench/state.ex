@@ -137,42 +137,32 @@ defmodule GiteaBench.State do
 
   @check every: UserCreated, validates: :user_login_faithful
   def assert_user_login(_state, %UserCreated{login: login, requested_login: requested}) do
-    if login != requested do
+    login == requested or
       PropertyDamage.fail!("user created under wrong login",
         requested: requested,
         observed: login
       )
-    end
   end
 
   @check every: RepoCreated, validates: :repo_name_faithful
   def assert_repo_name(_state, %RepoCreated{name: name, requested_name: requested}) do
-    if name != requested do
-      PropertyDamage.fail!("repo created under wrong name",
-        requested: requested,
-        observed: name
-      )
-    end
+    name == requested or
+      PropertyDamage.fail!("repo created under wrong name", requested: requested, observed: name)
   end
 
   @check every: IssueCreated, validates: :issue_title_faithful
   def assert_issue_title(_state, %IssueCreated{title: title, requested_title: requested}) do
-    if title != requested do
+    title == requested or
       PropertyDamage.fail!("issue stored under wrong title",
         requested: requested,
         observed: title
       )
-    end
   end
 
   @check every: LabelCreated, validates: :label_name_faithful
   def assert_label_name(_state, %LabelCreated{name: name, requested_name: requested}) do
-    if name != requested do
-      PropertyDamage.fail!("label created under wrong name",
-        requested: requested,
-        observed: name
-      )
-    end
+    name == requested or
+      PropertyDamage.fail!("label created under wrong name", requested: requested, observed: name)
   end
 
   @check every: LabelAssigned, validates: :assigned_label_defined
@@ -182,13 +172,12 @@ defmodule GiteaBench.State do
       }) do
     labels = get_in(state, [:repos, full_name, :labels]) || MapSet.new()
 
-    unless MapSet.member?(labels, label) do
+    MapSet.member?(labels, label) or
       PropertyDamage.fail!("assigned a label that was never defined in the repo",
         repo: full_name,
         label: label,
         defined: MapSet.to_list(labels)
       )
-    end
   end
 
   @check every: LabelAssigned, validates: :assigned_label_observed
@@ -196,19 +185,17 @@ defmodule GiteaBench.State do
         requested_label: label,
         labels: observed
       }) do
-    unless label in (observed || []) do
+    label in (observed || []) or
       PropertyDamage.fail!("SUT does not show the assigned label on the issue",
         requested: label,
         observed: observed
       )
-    end
   end
 
   @check every: IssueClosed, validates: :issue_closed_observed
   def assert_issue_closed_observed(_state, %IssueClosed{state: state}) do
-    unless state == "closed" do
+    state == "closed" or
       PropertyDamage.fail!("issue not reported closed by the SUT", observed_state: state)
-    end
   end
 
   # --- Whole-run structural consistency --------------------------------------
@@ -217,14 +204,13 @@ defmodule GiteaBench.State do
   def assert_labels_subset(state, _phase) do
     Enum.each(state.repos, fn {full_name, repo} ->
       Enum.each(repo.issues, fn {number, issue} ->
-        unless MapSet.subset?(issue.labels, repo.labels) do
+        MapSet.subset?(issue.labels, repo.labels) or
           PropertyDamage.fail!("issue carries a label not defined in its repo",
             repo: full_name,
             issue: number,
             issue_labels: MapSet.to_list(issue.labels),
             repo_labels: MapSet.to_list(repo.labels)
           )
-        end
       end)
     end)
   end

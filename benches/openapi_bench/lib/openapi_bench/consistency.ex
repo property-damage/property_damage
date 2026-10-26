@@ -37,14 +37,13 @@ defmodule OpenapiBench.Consistency do
       {key, observed} ->
         expected = Map.get(state.store, key, :unset)
 
-        if observed != expected do
+        observed == expected or
           PropertyDamage.fail!(
             "GET key=#{key} returned #{inspect(observed)}, model expects #{inspect(expected)}",
             key: key,
             actual: observed,
             expected: expected
           )
-        end
 
       nil ->
         :ok

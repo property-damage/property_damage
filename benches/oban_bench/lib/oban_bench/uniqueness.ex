@@ -74,13 +74,12 @@ defmodule ObanBench.Uniqueness.Projection do
     for {counter, observed} <- state.observed do
       expected = state.keys |> Map.get(counter, MapSet.new()) |> MapSet.size()
 
-      if observed > expected do
+      observed <= expected or
         PropertyDamage.fail!("exactly-once violated (uniqueness)",
           counter: counter,
           observed: observed,
           expected: expected
         )
-      end
     end
   end
 end

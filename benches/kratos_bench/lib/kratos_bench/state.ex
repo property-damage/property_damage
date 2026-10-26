@@ -65,14 +65,13 @@ defmodule KratosBench.State do
     expected = state.identities |> Map.keys() |> MapSet.new()
     actual = listed |> Map.keys() |> MapSet.new()
 
-    if expected != actual do
+    expected == actual or
       PropertyDamage.fail!("Kratos identity set diverged from the model",
         expected: Enum.sort(expected),
         observed: Enum.sort(actual),
         leaked: MapSet.difference(actual, expected) |> Enum.sort(),
         missing: MapSet.difference(expected, actual) |> Enum.sort()
       )
-    end
   end
 
   @check every: IdentitiesListed, validates: :accepted_traits_faithful
@@ -80,13 +79,12 @@ defmodule KratosBench.State do
     for {email, %{role: expected_role}} <- state.identities, Map.has_key?(listed, email) do
       observed_role = get_in(listed, [email, :role])
 
-      if expected_role != observed_role do
+      expected_role == observed_role or
         PropertyDamage.fail!("identity carries the wrong role trait",
           email: email,
           expected_role: expected_role,
           observed_role: observed_role
         )
-      end
     end
   end
 
@@ -94,13 +92,12 @@ defmodule KratosBench.State do
   def assert_login(state, %LoginAttempted{email: email, outcome: outcome}) do
     expected = if Map.has_key?(state.identities, email), do: :success, else: :failure
 
-    if outcome != expected do
+    outcome == expected or
       PropertyDamage.fail!("login outcome inconsistent with model state",
         email: email,
         expected: expected,
         observed: outcome,
         known_identity?: Map.has_key?(state.identities, email)
       )
-    end
   end
 end

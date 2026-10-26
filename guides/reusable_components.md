@@ -194,11 +194,11 @@ defmodule BalanceInvariant do
 
   @check every: 1
   def assert_captured_within_authorized(state, _context) do
-    if state.total_captured > state.total_authorized do
+    state.total_captured <= state.total_authorized or
       PropertyDamage.fail!("captured exceeds authorized",
         captured: state.total_captured,
-        authorized: state.total_authorized)
-    end
+        authorized: state.total_authorized
+      )
   end
 end
 ```

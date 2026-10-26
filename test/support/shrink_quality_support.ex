@@ -149,14 +149,13 @@ defmodule PropertyDamage.Test.ShrinkQuality.Projection do
     {key, actual} = state.last_read
     expected = Map.get(state.expected, key)
 
-    if actual != expected do
+    actual == expected or
       PropertyDamage.fail!(
         "Read of #{inspect(key)} returned #{inspect(actual)}, model expects #{inspect(expected)}",
         key: key,
         actual: actual,
         expected: expected
       )
-    end
   end
 end
 

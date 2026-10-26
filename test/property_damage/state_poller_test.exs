@@ -347,88 +347,102 @@ defmodule PropertyDamage.StatePollerTest do
     end
   end
 
-  describe "predicate error handling" do
-    @tag :capture_log
-    test "continues polling even if predicate raises" do
-      import ExUnit.CaptureLog
-
-      call_count = :counters.new(1, [:atomics])
-
-      predicate = fn _state ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        if count < 2 do
-          raise "simulated error"
-        else
-          true
-        end
-      end
-
-      poller =
-        StatePoller.start(
-          predicate: predicate,
-          projection: TestProjection,
-          interval_ms: 10,
-          # The poller returns on the first true predicate; the long timeout
-          # only keeps a loaded machine from timing out before the third poll.
-          timeout_ms: 5_000,
-          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
-          get_state_fn: fn _proj -> %{} end
-        )
-
-      # Capture log to suppress warnings during test
-      log =
-        capture_log(fn ->
-          result = StatePoller.await(poller)
-          assert {:success, _} = result
-        end)
-
-      # Verify warnings were logged
-      assert log =~ "StatePoller predicate raised"
-      assert log =~ "simulated error"
-
-      # Should have been called at least 3 times (2 failures + 1 success)
-      assert :counters.get(call_count, 1) >= 3
+  describe "the predicate's verdict (DR-052)" do
+    defp start_poller(predicate, timeout_ms \\ 5_000) do
+      StatePoller.start(
+        predicate: predicate,
+        projection: TestProjection,
+        interval_ms: 10,
+        timeout_ms: timeout_ms,
+        triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
+        get_state_fn: fn _proj -> %{} end
+      )
     end
 
-    @tag :capture_log
-    test "continues polling even if predicate exits" do
-      import ExUnit.CaptureLog
+    defp counting(fun) do
+      calls = :counters.new(1, [:atomics])
 
-      call_count = :counters.new(1, [:atomics])
-
-      predicate = fn _state ->
-        count = :counters.get(call_count, 1)
-        :counters.add(call_count, 1, 1)
-
-        # A GenServer.call to a dead process exits; simulate that BEAM exit here.
-        # It bypasses `rescue`, so before the fix it killed the poller and, via
-        # the start_link, the caller (the run) with it.
-        if count < 2 do
-          exit(:predicate_boom)
-        else
-          true
-        end
+      predicate = fn state ->
+        :counters.add(calls, 1, 1)
+        fun.(:counters.get(calls, 1), state)
       end
 
-      poller =
-        StatePoller.start(
-          predicate: predicate,
-          projection: TestProjection,
-          interval_ms: 10,
-          # The poller returns on the first true predicate; the long timeout
-          # only keeps a loaded machine from timing out before the third poll.
-          timeout_ms: 5_000,
-          triggered_by: %{event: %TestEvent{id: "1"}, check_name: :test_check},
-          get_state_fn: fn _proj -> %{} end
-        )
+      {predicate, calls}
+    end
 
-      capture_log(fn ->
-        assert {:success, _} = StatePoller.await(poller)
-      end)
+    test "a falsy return is not yet: the poller keeps polling until a truthy one" do
+      {predicate, calls} = counting(fn n, _ -> if n < 3, do: nil, else: :confirmed end)
 
-      assert :counters.get(call_count, 1) >= 3
+      assert {:success, _} = StatePoller.await(start_poller(predicate))
+      assert :counters.get(calls, 1) == 3
+    end
+
+    test "{:fail, text} is never: the window ends at once with that reason" do
+      {predicate, calls} = counting(fn _, _ -> {:fail, "payment reached :failed"} end)
+
+      started = System.monotonic_time(:millisecond)
+      assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
+
+      assert System.monotonic_time(:millisecond) - started < 1_000
+      assert :counters.get(calls, 1) == 1
+      assert %PropertyDamage.CheckFailed{message: "payment reached :failed"} = info.reason
+      assert info.poll_count == 1
+      assert info.triggered_by.check_name == :test_check
+    end
+
+    test "{:fail, exception} is never with that exception" do
+      {predicate, _calls} = counting(fn _, _ -> {:fail, %ArgumentError{message: "never"}} end)
+
+      assert {:failed, _id, %{reason: %ArgumentError{message: "never"}}} =
+               StatePoller.await(start_poller(predicate))
+    end
+
+    test "a non-verdict return fails at once with the grammar nudge" do
+      {predicate, _calls} = counting(fn _, _ -> {:error, :lookup} end)
+
+      assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
+      assert Exception.message(info.reason) =~ "a verdict is truthy"
+    end
+
+    test "a raise fails at the first poll with the raised exception and the poll count" do
+      {predicate, calls} = counting(fn _, _ -> raise "simulated error" end)
+
+      assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
+      assert :counters.get(calls, 1) == 1
+      assert info.poll_count == 1
+      assert info.triggered_by.check_name == :test_check
+      assert %RuntimeError{message: "simulated error"} = info.reason
+      assert [_ | _] = info.stacktrace
+    end
+
+    test "a raise after falsy polls names the poll it happened on" do
+      {predicate, _calls} = counting(fn n, s -> if n < 3, do: false, else: s.missing end)
+
+      assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
+      assert info.poll_count == 3
+      assert %KeyError{key: :missing} = info.reason
+    end
+
+    test "an exit does not kill the poller or its caller: it fails at once" do
+      {predicate, _calls} = counting(fn _, _ -> exit(:predicate_boom) end)
+
+      assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
+      assert Exception.message(info.reason) =~ ":predicate_boom"
+      refute match?(%PropertyDamage.CheckFailed{}, info.reason)
+      assert Process.alive?(self())
+    end
+
+    test "a throw does not kill the poller or its caller: it fails at once" do
+      {predicate, _calls} = counting(fn _, _ -> throw(:predicate_thrown) end)
+
+      assert {:failed, _id, info} = StatePoller.await(start_poller(predicate))
+      assert Exception.message(info.reason) =~ ":predicate_thrown"
+      refute match?(%PropertyDamage.CheckFailed{}, info.reason)
+    end
+
+    test "a timeout reports the window and nothing else" do
+      assert {:timeout, _id, info} = StatePoller.await(start_poller(fn _ -> false end, 50))
+      refute Map.has_key?(info, :last_predicate_error)
     end
   end
 end

@@ -3,11 +3,14 @@ defmodule PropertyDamage.StatePoller do
 
   use GenServer
 
+  alias PropertyDamage.Verdict
+
   @typedoc """
   Options for starting a state poller.
 
   Required:
-  - `:predicate` - Function `(state -> boolean)` to evaluate
+  - `:predicate` - Function `(state -> verdict)` to evaluate; its return is
+    read by `PropertyDamage.Verdict`
   - `:projection` - The projection module whose state is checked
   - `:interval_ms` - Polling interval in milliseconds
   - `:timeout_ms` - Maximum time to poll before timing out
@@ -21,7 +24,7 @@ defmodule PropertyDamage.StatePoller do
     `[:property_damage, :check, :stop]` when the predicate holds or times out
   """
   @type start_opts :: [
-          predicate: (any() -> boolean()),
+          predicate: (any() -> term()),
           predicate_source: String.t() | nil,
           projection: module(),
           interval_ms: pos_integer(),
@@ -37,6 +40,7 @@ defmodule PropertyDamage.StatePoller do
   @type result ::
           {:success, reference()}
           | {:timeout, reference(), timeout_info()}
+          | {:failed, reference(), failure_info()}
 
   @typedoc """
   Information about a poll timeout for debugging.
@@ -51,11 +55,29 @@ defmodule PropertyDamage.StatePoller do
         }
 
   @typedoc """
+  A window that ended before its timeout because the predicate said "never"
+  (`{:fail, reason}`, or a value that is not a verdict) or raised, exited or
+  threw. `reason` is the exception the check failure carries: the verdict's
+  reason for a "never", the raised exception itself for a raise (an exit or a
+  throw becomes an `ErlangError` holding it), with its `stacktrace`; `nil`
+  for a "never".
+  """
+  @type failure_info :: %{
+          predicate_source: String.t() | nil,
+          projection: module(),
+          triggered_by: map(),
+          reason: Exception.t(),
+          stacktrace: Exception.stacktrace() | nil,
+          elapsed_ms: non_neg_integer(),
+          poll_count: pos_integer()
+        }
+
+  @typedoc """
   Poller handle returned by start/1.
   """
   @type t :: %__MODULE__{
           id: reference(),
-          predicate: (any() -> boolean()),
+          predicate: (any() -> term()),
           predicate_source: String.t() | nil,
           projection: module(),
           interval_ms: pos_integer(),
@@ -87,7 +109,10 @@ defmodule PropertyDamage.StatePoller do
   Start polling for a predicate.
 
   Spawns a polling process that periodically evaluates the predicate against
-  the projection state until it returns `true` or the timeout expires.
+  the projection state until its verdict (DR-052) is truthy, it says "never",
+  or the timeout expires. `nil` and `false` mean "not yet"; `{:fail, reason}`
+  means "never" and ends the window at once; a raise, exit or throw in the
+  predicate ends it at once too.
 
   Returns a handle that can be used with `await/2` to wait for completion.
 
@@ -133,7 +158,6 @@ defmodule PropertyDamage.StatePoller do
       get_state_fn: get_state_fn,
       poll_count: 0,
       last_state: nil,
-      last_predicate_error: nil,
       span: span
     }
 
@@ -166,6 +190,7 @@ defmodule PropertyDamage.StatePoller do
 
   - `{:success, id}` - Predicate became true
   - `{:timeout, id, timeout_info}` - Poller timed out
+  - `{:failed, id, failure_info}` - The predicate said "never" or raised
   - `{:error, :await_timeout}` - Await itself timed out (shouldn't happen normally)
   """
   @spec await(t(), keyword()) :: result() | {:error, :await_timeout}
@@ -312,68 +337,63 @@ defmodule PropertyDamage.StatePoller do
         triggered_by: state.triggered_by,
         final_state: state.last_state,
         elapsed_ms: elapsed,
-        poll_count: state.poll_count,
-        last_predicate_error: state.last_predicate_error
+        poll_count: state.poll_count
       }
 
       stop_span(state.span, false, "did not hold within #{state.timeout_ms} ms")
       send(state.caller, {:poller_result, state.id, {:timeout, state.id, timeout_info}})
       {:stop, :normal, state}
     else
-      # Get current state and evaluate predicate
       current_state = get_projection_state(state)
       poll_count = state.poll_count + 1
 
-      try do
-        if state.predicate.(current_state) do
-          # Success!
+      case evaluate(state, current_state) do
+        :pass ->
           stop_span(state.span, true, nil)
           send(state.caller, {:poller_result, state.id, {:success, state.id}})
           {:stop, :normal, state}
-        else
-          # Continue polling
+
+        :falsy ->
           Process.send_after(self(), :poll, state.interval_ms)
           {:noreply, %{state | poll_count: poll_count, last_state: current_state}}
-        end
-      rescue
-        e ->
-          # Predicate raised - treat as not satisfied but log. A predicate that
-          # always raises (e.g. non-exhaustive heads) would otherwise time out
-          # looking like "condition never became true"; we keep the last error
-          # so the timeout report can name the real cause.
-          require Logger
 
-          Logger.warning(
-            "StatePoller predicate raised: #{inspect(e)} in #{state.triggered_by.check_name}"
-          )
+        {:fail, reason, stacktrace} ->
+          failure_info = %{
+            predicate_source: state.predicate_source,
+            projection: state.projection,
+            triggered_by: state.triggered_by,
+            reason: reason,
+            stacktrace: stacktrace,
+            elapsed_ms: elapsed,
+            poll_count: poll_count
+          }
 
-          Process.send_after(self(), :poll, state.interval_ms)
-
-          {:noreply,
-           %{state | poll_count: poll_count, last_state: current_state, last_predicate_error: e}}
-      catch
-        # A BEAM exit/throw (e.g. a GenServer.call to a dead process) bypasses
-        # `rescue`; without this it kills the poller and, through its start_link,
-        # the run. Treat it exactly like a raising predicate (A3).
-        kind, reason ->
-          require Logger
-
-          Logger.warning(
-            "StatePoller predicate escaped via #{kind}: #{inspect(reason)} " <>
-              "in #{state.triggered_by.check_name}"
-          )
-
-          Process.send_after(self(), :poll, state.interval_ms)
-
-          {:noreply,
-           %{
-             state
-             | poll_count: poll_count,
-               last_state: current_state,
-               last_predicate_error: {kind, reason}
-           }}
+          stop_span(state.span, false, Exception.message(reason))
+          send(state.caller, {:poller_result, state.id, {:failed, state.id, failure_info}})
+          {:stop, :normal, state}
       end
     end
+  end
+
+  # The predicate's verdict on one poll: `:pass`, `:falsy`, or
+  # `{:fail, exception, stacktrace}`. A raise, exit or throw is a failure at
+  # once, never "not yet" (DR-052): a partial predicate would otherwise spend
+  # the whole window on every trigger. The failure keeps the raised exception
+  # itself, so the report classifies it as a bug in the predicate; the check
+  # name and poll count travel beside it in the failure info. Catching an exit
+  # or throw also keeps it from killing the poller and, through its
+  # start_link, the run.
+  defp evaluate(state, current_state) do
+    case state.predicate.(current_state) |> Verdict.read() do
+      {:fail, reason} -> {:fail, reason, nil}
+      reading -> reading
+    end
+  catch
+    :error, reason ->
+      {:fail, Exception.normalize(:error, reason, __STACKTRACE__), __STACKTRACE__}
+
+    kind, reason ->
+      {:fail, %ErlangError{original: {kind, reason}}, __STACKTRACE__}
   end
 
   @impl true

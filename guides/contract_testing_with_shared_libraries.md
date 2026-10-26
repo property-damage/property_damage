@@ -355,9 +355,8 @@ defmodule OrderModel.Projections.OrderInvariants do
 
   @check every: OrderCreated
   def assert_orders_have_valid_amount(state, _event) do
-    unless Enum.all?(state.orders, fn {_id, o} -> o.amount > 0 end) do
+    Enum.all?(state.orders, fn {_id, o} -> o.amount > 0 end) or
       PropertyDamage.fail!("All orders must have positive amounts")
-    end
   end
 end
 

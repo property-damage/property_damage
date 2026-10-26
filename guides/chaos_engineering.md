@@ -177,9 +177,8 @@ defmodule Cache.State do
   def assert_reads_are_consistent(state, %KeyRead{key: key, value: value}) do
     expected = Map.get(state.store, key)
 
-    unless value == expected do
+    value == expected or
       PropertyDamage.fail!("stale read", key: key, got: value, expected: expected)
-    end
   end
 end
 

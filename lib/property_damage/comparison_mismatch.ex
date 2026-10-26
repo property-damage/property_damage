@@ -6,8 +6,8 @@ defmodule PropertyDamage.ComparisonMismatch do
   The default detail of a disagreement between two compared values.
 
   A `using:` predicate (on `@compare` or on `stutter:`) that returns `false`
-  produces one holding both values, and one that returns
-  `{:mismatch, "text"}` produces one holding the text. `left` is the first
+  or `nil` produces one holding both values, and one that returns
+  `{:fail, "text"}` produces one holding both values and the text. `left` is the first
   value the predicate was called with and `right` the second: for `@compare`
   the reference's value and the variant's, for stutter the original events
   and the retry events.

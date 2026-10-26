@@ -2629,6 +2629,10 @@ defmodule PropertyDamage do
   Convenience function to fail a check with a message and optional data.
 
   Use this in projection checks when you don't need a custom exception type.
+  It raises `PropertyDamage.CheckFailed`, so it is the early exit from a check
+  body. Its returned form is the verdict `{:fail, "message"}` (DR-052): a check
+  that returns it fails with the same `PropertyDamage.CheckFailed`, so a
+  reasoned check can end in `condition || {:fail, "message"}` without raising.
 
   ## Examples
 
@@ -2641,9 +2645,7 @@ defmodule PropertyDamage do
       # In a projection check
       @check every: 1
       def assert_balance_positive(state, _cmd) do
-        if state.balance < 0 do
-          PropertyDamage.fail!("negative balance", balance: state.balance)
-        end
+        state.balance >= 0 or PropertyDamage.fail!("negative balance", balance: state.balance)
       end
 
   ## Custom Exceptions

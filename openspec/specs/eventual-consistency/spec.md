@@ -4,7 +4,7 @@
 
 Defines the settle retry logic, resource polling, state polling, and probe command semantics that enable the PropertyDamage framework to test eventually consistent systems where operations may not produce immediate results.
 
-Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-030 (Command-Correlated Injector Events -- liveness over a correlated set, poll-timeout locality), DR-044 (Variants and the Lockstep Scheduler -- pollers inside multi-target runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors -- convergence versus settle versus `@eventually`)
+Reference DRs: DR-008 (Command Semantics -- probe/async), DR-018 (Command-Triggered Resource Polling), DR-024 (Lifecycle-Boundary Assertions), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-030 (Command-Correlated Injector Events -- liveness over a correlated set, poll-timeout locality), DR-044 (Variants and the Lockstep Scheduler -- pollers inside multi-target runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors -- convergence versus settle versus `@eventually`), DR-052 (A Check's Verdict Is Its Return Value -- the predicate returns a verdict)
 
 ## Requirements
 
@@ -104,18 +104,41 @@ The system SHALL support command-triggered background polling of external resour
 
 ### Requirement: State Poller for Temporal Checks
 
-The system SHALL support `@eventually` temporal checks that spawn a background poller to periodically check a predicate against projection state. The poller SHALL succeed when the predicate becomes true or fail on timeout.
+The system SHALL support `@eventually` temporal checks that spawn a background poller to periodically check a predicate against projection state. The predicate's return SHALL be read as a verdict with the grammar of `@check` (DR-052): `nil` and `false` mean "not yet", `{:fail, reason}` means "never", and any other value means satisfied. The poller SHALL succeed when the predicate is satisfied, fail at once when it says "never" or does not return, and fail on timeout otherwise.
 
 #### Scenario: Predicate becomes true
 - **WHEN** a `@eventually` check is triggered by a matching event
-- **AND** the predicate evaluates to true within the timeout
+- **AND** the predicate returns a truthy value within the timeout
 - **THEN** the state poller SHALL report success
+
+#### Scenario: A falsy predicate is not yet (DR-052)
+- **WHEN** the predicate returns `nil` or `false`
+- **THEN** the poller SHALL poll again at the next interval
 
 #### Scenario: Predicate times out
 - **WHEN** a `@eventually` check is triggered
 - **AND** the predicate never becomes true before the timeout
 - **THEN** the state poller SHALL report failure with diagnostic information
-- **AND** the report SHALL include the trigger event, predicate source, final state, elapsed time, and poll count
+- **AND** the report SHALL include the trigger event, predicate source, final state, elapsed time, and poll count, and SHALL say that the predicate never became true, with no predicate error to explain
+
+#### Scenario: {:fail, reason} ends the window at once (DR-052)
+- **GIVEN** a predicate that returns `{:fail, "payment reached :failed"}`
+- **WHEN** the poller evaluates it
+- **THEN** the window SHALL end at once, without waiting for the timeout
+- **AND** the system SHALL report a check failure (kind `:check_failed`, not a poll timeout) naming the check, carrying that reason, at the command whose event opened the window, under the run's `check_mode:`
+- **AND** a `{:fail, exception}` return SHALL carry that exception, and a bare exception struct or an `{:error, _}` return SHALL fail the same way with the grammar nudge
+
+#### Scenario: A raise in the predicate fails at the first poll (DR-052)
+- **GIVEN** a predicate that raises, for example on a key the state does not have yet
+- **WHEN** the poller evaluates it
+- **THEN** the window SHALL end at once as a check failure naming the check, the poll count and the exception
+- **AND** the failure SHALL carry the raised exception itself, not a `CheckFailed` wrapper, so its error origin is the test code; the check name and poll count travel beside it
+- **AND** the system SHALL NOT treat the raise as "not yet" or keep polling
+
+#### Scenario: An exit or throw in the predicate does not kill the run (DR-052)
+- **WHEN** the predicate exits or throws
+- **THEN** the poller SHALL catch it and report a check failure naming the check, the poll count and the exit or thrown value
+- **AND** neither the poller nor the run SHALL crash
 
 #### Scenario: The check function returns no predicate (DR-052)
 - **WHEN** an `@eventually` function returns anything but a 1-arity function

@@ -48,9 +48,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
 
     @check every: 1
     def under_limit(state, _item) do
-      unless state.sum <= 100 do
-        PropertyDamage.fail!("sum exceeds limit", sum: state.sum)
-      end
+      state.sum <= 100 or PropertyDamage.fail!("sum exceeds limit", sum: state.sum)
     end
   end
 

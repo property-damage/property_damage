@@ -43,8 +43,8 @@ defmodule PropertyDamage.ComparePredicateTest do
 
       defp within_one(reference, variant) do
         if abs(reference.settled - variant.settled) <= 1,
-          do: :match,
-          else: {:mismatch, "settled differs by more than one"}
+          do: true,
+          else: {:fail, "settled differs by more than one"}
       end
     end
     """,
@@ -69,8 +69,8 @@ defmodule PropertyDamage.ComparePredicateTest do
     #{@header}
       @compare using: fn reference, variant ->
                  if reference.settled == variant.settled,
-                   do: :match,
-                   else: {:mismatch, %ArgumentError{message: "settled disagrees"}}
+                   do: true,
+                   else: {:fail, %ArgumentError{message: "settled disagrees"}}
                end
       def totals(s, _root), do: #{@value}
     end
@@ -80,7 +80,7 @@ defmodule PropertyDamage.ComparePredicateTest do
     #{@header}
       @compare using: fn reference, variant ->
                  reference.settled == variant.settled or
-                   {:mismatch,
+                   {:fail,
                     "reference=" <> Integer.to_string(reference.settled) <>
                       " variant=" <> Integer.to_string(variant.settled)}
                end
@@ -194,7 +194,7 @@ defmodule PropertyDamage.ComparePredicateTest do
   end
 
   describe "what using: returns" do
-    test "{:mismatch, exception} keeps that exception as the mismatch", ctx do
+    test "{:fail, exception} keeps that exception as the mismatch", ctx do
       {_reference, _variant, mismatch} = diverge!(ctx, :kept_exception, 5)
       assert %ArgumentError{message: "settled disagrees"} = mismatch
     end

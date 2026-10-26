@@ -388,7 +388,7 @@ defmodule PropertyDamage.Test.ShrinkAxis do
 
       @check every: G.Probed
       def assert_probe_before_branch(state, _event) do
-        if state.branched, do: PropertyDamage.fail!("probe after a branch")
+        not state.branched or PropertyDamage.fail!("probe after a branch")
       end
     end
 

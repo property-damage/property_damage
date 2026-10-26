@@ -73,7 +73,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
     # Async safety: trips on the poller's second Bumped, observed during the drain.
     @check every: Bumped
     def assert_count_at_most_one(state, _event) do
-      if state.max > 1, do: PropertyDamage.fail!("count exceeded 1", max: state.max)
+      state.max <= 1 or PropertyDamage.fail!("count exceeded 1", max: state.max)
     end
   end
 
@@ -213,7 +213,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
     @check every: Bumped
     def assert_count_at_most_one(state, _event) do
-      if state.max > 1, do: PropertyDamage.fail!("count exceeded 1", max: state.max)
+      state.max <= 1 or PropertyDamage.fail!("count exceeded 1", max: state.max)
     end
   end
 
@@ -296,7 +296,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
 
     @check at: :teardown
     def assert_count_at_most_one(state, _phase) do
-      if state.max > 1, do: PropertyDamage.fail!("count exceeded 1 at settle", max: state.max)
+      state.max <= 1 or PropertyDamage.fail!("count exceeded 1 at settle", max: state.max)
     end
   end
 

@@ -187,25 +187,40 @@ defmodule MyApp.Projections.BalanceInvariant do
   @check every: 1
   def assert_total_matches_sum(state, _cmd_or_event) do
     sum = state.balances |> Map.values() |> Enum.sum()
-    if sum != state.total do
-      PropertyDamage.fail!("total mismatch", expected: sum, got: state.total)
-    end
+    sum == state.total or PropertyDamage.fail!("total mismatch", expected: sum, got: state.total)
   end
 
-  # Temporal check (eventual consistency)
+  # Temporal check (eventual consistency); the predicate is total
   # @eventually after: PaymentInitiated, timeout: 5, interval: {100, :milliseconds}
   # def payment_confirmed(_state, %PaymentInitiated{id: id}) do
-  #   fn s -> s.payments[id] == :confirmed end
+  #   fn s -> get_in(s, [:payments, id]) == :confirmed end
   # end
 end
 ```
+
+### The Verdict Grammar (DR-052)
+
+| A check, predicate or `using:` returns | `@check` | `@eventually` predicate | `using:` relation |
+|----------------------------------------|----------|-------------------------|-------------------|
+| truthy | pass | satisfied | agree |
+| `nil`, `false` | fail | not yet | disagree, both values |
+| `{:fail, "text"}` / `{:fail, %Exception{}}` | fail with it | never: fail now | disagree with it |
+| raise | fail | fail now | fail in that variant |
+| bare exception struct, `{:error, _}` | fail with a nudge | same | same |
+
+Three forms of `@check`: a predicate (`state.net >= state.fees`),
+`condition or fail!("...", ...)`, or a body that ends with a truthy value
+(`:ok`, the result of `Enum.each/2`). A check ending in `if` or `unless`
+without `else` does not compile. A verdict is not a boolean: `&&` and
+`Enum.all?/2` treat `{:fail, _}` as truthy, so compose with
+`with true <- a(s), true <- b(s), do: true`.
 
 ### The Three Kinds of Check
 
 | Kind | Options | Fails when |
 |------|---------|------------|
-| `@check` | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`), never both | the function raises |
-| `@eventually` | `after:` (module or list), `timeout:`, `interval:` (all required; bare integer = seconds) | the predicate is still false at `timeout:` |
+| `@check` | `every:` (`1`, `N`, `:command`, `:event`, `Module`, `[Modules]`, `{N, target}`) or `at:` (`:startup`, `:teardown`), never both | the function returns `nil`, `false` or `{:fail, reason}`, or raises |
+| `@eventually` | `after:` (module or list), `timeout:`, `interval:` (all required; bare integer = seconds) | the predicate is still falsy at `timeout:`, returns `{:fail, reason}`, or raises |
 | `@compare` | `every:` (`1`, `N`, `{N, Module}`, `Module`, `[Modules]`, `:end`), `using:` (2-arity, default `&==/2`); a return of `{:pending, reason}` waits | ready sides differ (`:diverged`), or a side is pending at `converge_within:` (`:did_not_converge`) |
 
 A function carries one kind. Details: [Writing Invariants](writing_invariants.md#the-three-kinds-of-check)
@@ -237,7 +252,7 @@ more targets and no `@compare` is an error at run start.
 | `@compare every: 5` | Compare after every 5th root |
 | `@compare every: {3, CreateOrder}` | Every 3rd `CreateOrder` root |
 | `@compare every: [ClearingReport, :end]` | After those roots, and at the final boundary |
-| `@compare using: &within_cent/2` | Agreement predicate `fn reference, variant -> :match \| {:mismatch, exception} \| boolean end` (default `&==/2`) |
+| `@compare using: &within_cent/2` | Agreement predicate `fn reference, variant -> verdict end`: truthy agrees; `false` or `{:fail, reason}` disagrees (default `&==/2`) |
 | `{:pending, reason}` (a return value) | The target is still catching up; waited for, never a disagreement |
 
 Helpers: `PropertyDamage.Equivalence.by_key/1`, `normalize/1`, `drop_keys/2`.
@@ -372,7 +387,7 @@ PropertyDamage.run(
     max_repeats: 2,           # max retries per stuttered command
     delay_ms: {0, 100},       # delay between retries (min, max) or integer
     commands: :all,            # :all or [Module1, Module2]
-    using: &==/2               # fn original_events, retry_events -> :match | {:mismatch, e} | boolean end
+    using: &==/2               # fn original_events, retry_events -> verdict end (truthy, false, {:fail, reason})
   },
 
   # Several targets (compared through the model's @compare observations)
@@ -485,10 +500,12 @@ and still runs the teardown commands, except for a target whose
 ```elixir
 @check every: 1
 def assert_conservation(state, _) do
-  if state.total_credits != state.total_debits + state.total_balance do
+  state.total_credits == state.total_debits + state.total_balance or
     PropertyDamage.fail!("conservation violated",
-      credits: state.total_credits, debits: state.total_debits, balance: state.total_balance)
-  end
+      credits: state.total_credits,
+      debits: state.total_debits,
+      balance: state.total_balance
+    )
 end
 ```
 
@@ -499,9 +516,7 @@ end
 def assert_valid_transition(state, %StatusChanged{id: id, new_status: new}) do
   old = state.statuses[id]
   valid = %{pending: [:approved, :rejected], approved: [:shipped], shipped: [:delivered]}
-  unless new in Map.get(valid, old, []) do
-    PropertyDamage.fail!("invalid transition", from: old, to: new)
-  end
+  new in Map.get(valid, old, []) or PropertyDamage.fail!("invalid transition", from: old, to: new)
 end
 ```
 
@@ -511,9 +526,7 @@ end
 @check every: :command
 def assert_refs_valid(state, cmd) do
   for {_field, ref} <- Map.from_struct(cmd), is_binary(ref), String.starts_with?(ref, "acc_") do
-    unless Map.has_key?(state.accounts, ref) do
-      PropertyDamage.fail!("dangling ref", ref: ref)
-    end
+    Map.has_key?(state.accounts, ref) or PropertyDamage.fail!("dangling ref", ref: ref)
   end
 end
 ```
@@ -527,7 +540,7 @@ defmodule AmountValidator do
 
   @check every: Credited
   def assert_positive_credit(_state, %Credited{amount: amt}) do
-    if amt <= 0, do: PropertyDamage.fail!("non-positive credit", amount: amt)
+    amt > 0 or PropertyDamage.fail!("non-positive credit", amount: amt)
   end
 end
 ```

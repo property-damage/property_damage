@@ -329,11 +329,8 @@ defmodule PropertyDamage.Test.Lockstep do
 
     @check every: Stepped
     def assert_step_is_good(_state, %Stepped{value: value, mark: mark}) do
-      if value == 13 or mark == :bad do
+      (value != 13 and mark != :bad) or
         PropertyDamage.fail!("bad step", value: value, mark: mark)
-      end
-
-      :ok
     end
   end
 
@@ -353,11 +350,8 @@ defmodule PropertyDamage.Test.Lockstep do
 
     @check at: :startup
     def assert_ready(_state, _phase) do
-      if Process.get(:lockstep_fail_startup) do
+      !Process.get(:lockstep_fail_startup) or
         PropertyDamage.fail!("startup precondition not met")
-      end
-
-      :ok
     end
   end
 

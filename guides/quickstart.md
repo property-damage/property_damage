@@ -82,9 +82,8 @@ defmodule AccountState do
   # writing_invariants.md for invariants that catch real bugs.
   @check every: 1
   def assert_names_present(state, _) do
-    if Enum.any?(state.accounts, fn {_id, acc} -> acc.name in [nil, ""] end) do
+    Enum.all?(state.accounts, fn {_id, acc} -> acc.name not in [nil, ""] end) or
       PropertyDamage.fail!("account with empty name", accounts: state.accounts)
-    end
   end
 end
 

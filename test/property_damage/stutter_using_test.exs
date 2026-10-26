@@ -1,9 +1,10 @@
 defmodule PropertyDamage.StutterUsingTest do
   # Stutter compares a command's retry events with its original events under
   # `using:`, the same predicate contract as `@compare`: a 2-arity function
-  # called `using.(original_events, retry_events)` that returns `:match`,
-  # `{:mismatch, exception}`, `{:mismatch, "text"}` or a boolean, `&==/2` when
-  # absent. The `comparison:` modes are gone.
+  # called `using.(original_events, retry_events)` whose return is a verdict
+  # (DR-052): truthy agrees, `false` or `nil` disagrees holding both event
+  # lists, `{:fail, "text"}` or `{:fail, exception}` disagrees with that
+  # reason. `&==/2` when absent. The `comparison:` modes are gone.
   use ExUnit.Case, async: true
 
   alias PropertyDamage.{Failure, Shrinker}
@@ -114,8 +115,8 @@ defmodule PropertyDamage.StutterUsingTest do
       assert_received {:stutter_using, [%Paid{by: "first"}], [%Paid{by: "retry"}]}
     end
 
-    test ":match agrees and the default is ==" do
-      assert {:ok, _stats} = run(:different, using: fn _original, _retry -> :match end)
+    test "a truthy return agrees and the default is ==" do
+      assert {:ok, _stats} = run(:different, using: fn _original, _retry -> :ok end)
       assert {:ok, _stats} = run(:same, [])
       assert {:error, _report} = run(:different, [])
     end
@@ -140,23 +141,33 @@ defmodule PropertyDamage.StutterUsingTest do
       assert [%Paid{by: "retry", amount: ^amount}] = mismatch.right
     end
 
-    test "{:mismatch, text} becomes a mismatch with that message" do
+    test "{:fail, text} becomes a mismatch with that message, holding original and retry" do
       report =
-        violation!(:different, using: fn _original, _retry -> {:mismatch, "retry differs"} end)
+        violation!(:different, using: fn _original, _retry -> {:fail, "retry differs"} end)
 
       mismatch = detail(report, &Compare.mismatch?/1)
       assert Exception.message(mismatch) == "retry differs"
+      assert [%Paid{by: "first"}] = mismatch.left
+      assert [%Paid{by: "retry"}] = mismatch.right
     end
 
-    test "{:mismatch, exception} keeps the exception" do
+    test "{:fail, exception} keeps the exception" do
       report =
         violation!(:different,
           using: fn _original, _retry ->
-            {:mismatch, %ArgumentError{message: "not idempotent"}}
+            {:fail, %ArgumentError{message: "not idempotent"}}
           end
         )
 
       assert detail(report, &match?(%ArgumentError{}, &1)).message == "not idempotent"
+    end
+
+    test "{:error, reason} is not a verdict: a mismatch carrying the grammar nudge" do
+      report = violation!(:different, using: fn _original, _retry -> {:error, :boom} end)
+
+      message = Exception.message(detail(report, &Compare.mismatch?/1))
+      assert message =~ "{:error, :boom}"
+      assert message =~ "a verdict is truthy, `nil`/`false`, or `{:fail, reason}`"
     end
 
     test "a violation keeps its shrinker identity" do

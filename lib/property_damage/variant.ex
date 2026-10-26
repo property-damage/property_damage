@@ -925,8 +925,9 @@ defmodule PropertyDamage.Variant do
   end
 
   # An `@eventually` poller whose window expired reported its timeout to this
-  # process, which keeps poller results until `finish/1` replays them. Under
-  # `check_mode: :halt` the timeout fails the variant now, at the command whose
+  # process, which keeps poller results until `finish/1` replays them; so did a
+  # poller whose predicate said "never" or raised (DR-052). Under
+  # `check_mode: :halt` either fails the variant now, at the command whose
   # event opened the window, instead of at the end of the run.
   defp surface_expired_eventually(%{check_mode: :halt} = state) do
     state = collect_poller_results(state)
@@ -934,16 +935,19 @@ defmodule PropertyDamage.Variant do
 
     expired =
       Enum.find(Enum.reverse(state.stash), fn
-        {:poller_result, id, {:timeout, _id, _info}} -> MapSet.member?(active, id)
-        _other -> false
+        {:poller_result, id, {ended, _id, _info}} when ended in [:timeout, :failed] ->
+          MapSet.member?(active, id)
+
+        _other ->
+          false
       end)
 
     case expired do
       nil ->
         {:ok, state}
 
-      {:poller_result, id, {:timeout, _id, info} = result} ->
-        failure = Failure.poll_timeout(info)
+      {:poller_result, id, {ended, _id, info} = result} ->
+        failure = expired_failure(ended, info)
         root = Map.get(info.triggered_by, :command_index)
 
         exec = %{
@@ -965,6 +969,10 @@ defmodule PropertyDamage.Variant do
   end
 
   defp surface_expired_eventually(state), do: {:ok, state}
+
+  defp expired_failure(:timeout, info), do: Failure.poll_timeout(info)
+
+  defp expired_failure(:failed, info), do: Failure.eventually_failed(info)
 
   defp collect_poller_results(state) do
     receive do

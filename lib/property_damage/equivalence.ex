@@ -5,9 +5,21 @@ defmodule PropertyDamage.Equivalence do
   A predicate decides whether two values agree. It is a 2-arity function,
   called `using.(left, right)`: on `@compare` with the reference's value and a
   variant's value, on `stutter:` with a command's original events and its retry
-  events. It returns `:match` or `true` when the values agree, and `false`,
-  `{:mismatch, "text"}` or `{:mismatch, exception}` when they do not. Without
-  `using:`, values agree under `==/2`.
+  events. Its return is a verdict, read by `PropertyDamage.Verdict` with the
+  grammar a `@check` and an `@eventually` predicate share (DR-052):
+
+    * a truthy value: the values agree;
+    * `false` or `nil`: they disagree, and the mismatch holds both values;
+    * `{:fail, "text"}`: they disagree with that message;
+    * `{:fail, exception}`: they disagree with that exception.
+
+  A bare exception struct or an `{:error, _}` tuple is not a verdict: it is a
+  disagreement whose message says so. A raise in the predicate fails the
+  variant that was compared. Without `using:`, values agree under `==/2`.
+
+  A verdict is a final value, never a boolean: `&&`, `||` and `!` see a
+  `{:fail, _}` as truthy. `left == right or {:fail, "reason"}` is the shortest
+  reasoned predicate.
 
   Three helpers compose with `|>`:
 
@@ -28,7 +40,7 @@ defmodule PropertyDamage.Equivalence do
   alias PropertyDamage.ComparisonMismatch
 
   @typedoc "A `using:` predicate."
-  @type predicate :: (term(), term() -> :match | boolean() | {:mismatch, term()})
+  @type predicate :: (term(), term() -> term())
 
   # Keys whose values usually differ between two systems or two runs.
   @noise_keys [
@@ -46,17 +58,15 @@ defmodule PropertyDamage.Equivalence do
   Lift the key function `key` into a predicate that compares `key.(left)`
   with `key.(right)` under `==/2`.
 
-  When the keys differ, the mismatch holds the two keys, so a report shows
-  the values as the key function saw them.
+  The predicate returns `true` when the keys are equal and otherwise
+  `{:fail, %PropertyDamage.ComparisonMismatch{}}` holding the two keys, so a
+  report shows the values as the key function saw them.
   """
   @spec by_key((term() -> term())) :: predicate()
   def by_key(key) when is_function(key, 1) do
     fn left, right ->
       {left_key, right_key} = {key.(left), key.(right)}
-
-      if left_key == right_key,
-        do: :match,
-        else: {:mismatch, %ComparisonMismatch{left: left_key, right: right_key}}
+      left_key == right_key or {:fail, %ComparisonMismatch{left: left_key, right: right_key}}
     end
   end
 
@@ -97,38 +107,5 @@ defmodule PropertyDamage.Equivalence do
     map
     |> Map.drop(keys)
     |> Map.new(fn {key, value} -> {key, drop_keys(value, keys)} end)
-  end
-
-  @doc """
-  Apply the predicate `using` to `left` and `right` and read its answer.
-
-  Returns `:match`, or `{:mismatch, exception}`: `false` becomes a
-  `PropertyDamage.ComparisonMismatch` holding both values, a string becomes one
-  holding that message, and an exception is kept as it is. Any other answer is
-  a mismatch whose message names the answer. A raise in the predicate is not
-  caught.
-  """
-  @spec verdict(predicate(), term(), term()) :: :match | {:mismatch, Exception.t()}
-  def verdict(using, left, right) do
-    case using.(left, right) do
-      answer when answer in [:match, true] ->
-        :match
-
-      false ->
-        {:mismatch, %ComparisonMismatch{left: left, right: right}}
-
-      {:mismatch, text} when is_binary(text) ->
-        {:mismatch, %ComparisonMismatch{left: left, right: right, message: text}}
-
-      {:mismatch, exception} when is_exception(exception) ->
-        {:mismatch, exception}
-
-      other ->
-        message =
-          "a using: predicate must return :match, a boolean or {:mismatch, detail}, " <>
-            "got: #{inspect(other)}"
-
-        {:mismatch, %ComparisonMismatch{left: left, right: right, message: message}}
-    end
   end
 end

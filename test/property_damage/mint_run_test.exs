@@ -28,7 +28,7 @@ defmodule PropertyDamage.MintRunTest do
     # Always fails once a command has run, so the run fails and shrinks.
     @check every: 1
     def always_fails(state, _cmd_or_event) do
-      if state.count >= 1, do: PropertyDamage.fail!("boom", count: state.count)
+      state.count < 1 or PropertyDamage.fail!("boom", count: state.count)
     end
   end
 

@@ -91,8 +91,7 @@ defmodule PropertyDamage.VariantLifecycleTest do
 
     @check every: Late
     def assert_late_is_fine(_state, %Late{from: from}) do
-      if from == :bad, do: PropertyDamage.fail!("bad late event", from: from)
-      :ok
+      from != :bad or PropertyDamage.fail!("bad late event", from: from)
     end
   end
 

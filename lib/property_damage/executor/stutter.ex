@@ -176,8 +176,8 @@ defmodule PropertyDamage.Executor.Stutter do
       end)
 
     # Check for any mismatches
-    case Enum.find(comparisons, fn {_, _, result} -> result != :match end) do
-      {_attempt, _retry_events, {:mismatch, mismatch}} ->
+    case Enum.find(comparisons, fn {_, _, result} -> result != :agree end) do
+      {_attempt, _retry_events, {:disagree, mismatch}} ->
         # Idempotency violation detected
         violation = %Stutter.Violation{
           command: command,

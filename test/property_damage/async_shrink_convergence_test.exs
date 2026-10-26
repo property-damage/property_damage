@@ -51,9 +51,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
 
     @check every: Bumped
     def assert_count_at_most_one(state, _event) do
-      if state.max > 1 do
-        PropertyDamage.fail!("count exceeded 1", max: state.max)
-      end
+      state.max <= 1 or PropertyDamage.fail!("count exceeded 1", max: state.max)
     end
   end
 
@@ -180,11 +178,10 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
     # is race-free regardless of when the poller's events fold in.
     @check every: :command
     def assert_triggered_only_by_commands(_state, command_or_event) do
-      if match?(%Bumped{}, command_or_event) do
+      not match?(%Bumped{}, command_or_event) or
         PropertyDamage.fail!("every: :command was triggered by an event",
           arg: command_or_event
         )
-      end
     end
   end
 

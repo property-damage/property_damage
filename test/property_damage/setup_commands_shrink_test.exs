@@ -161,7 +161,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
 
     @check at: :teardown
     def assert_fewer_than_two_things(state, _phase) do
-      if state.things >= 2, do: PropertyDamage.fail!("two things made"), else: :ok
+      state.things < 2 or PropertyDamage.fail!("two things made")
     end
   end
 
@@ -180,7 +180,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
 
     @check at: :teardown
     def assert_fewer_than_two_acts(state, _phase) do
-      if state.acts >= 2, do: PropertyDamage.fail!("acted twice"), else: :ok
+      state.acts < 2 or PropertyDamage.fail!("acted twice")
     end
   end
 

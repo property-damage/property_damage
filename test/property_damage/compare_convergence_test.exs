@@ -58,8 +58,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
 
       @check every: Settled
       def assert_settled_nonneg(_s, %Settled{amount: amount}) do
-        if amount < 0, do: PropertyDamage.fail!("negative settlement", amount: amount)
-        :ok
+        amount >= 0 or PropertyDamage.fail!("negative settlement", amount: amount)
       end
     end
     """,
@@ -86,8 +85,7 @@ defmodule PropertyDamage.CompareConvergenceTest do
     #{@header}
       @check every: Paid
       def assert_not_first(_s, %Paid{n: n}) do
-        if n == 0, do: PropertyDamage.fail!("first payment", n: n)
-        :ok
+        n != 0 or PropertyDamage.fail!("first payment", n: n)
       end
 
       @compare every: 1

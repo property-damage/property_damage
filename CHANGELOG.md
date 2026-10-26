@@ -20,8 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `def name(state, root)` marked `@compare every: ..., using: ...` is the only
   cross-target oracle. `every:` takes the `@check` schedule vocabulary (`1`, `N`,
   `{N, Module}`, `Module`, `[Modules]`) plus `:end`; `using:` is a 2-arity
-  predicate returning `:match`, `{:mismatch, exception}` or a boolean (default
-  `&==/2`; any expression). A function may return `{:pending, reason}` while its
+  predicate whose return is a verdict (DR-052): truthy to agree, `false` or
+  `nil` to disagree holding both values, `{:fail, "text"}` or
+  `{:fail, exception}` to disagree with that reason (default `&==/2`; any
+  expression). A function may return `{:pending, reason}` while its
   target is catching up; a pending side is never a disagreement. A raise in a
   `@compare` function or a `using:` predicate is a check failure naming the key.
   A run with two or more targets and no `@compare` is an error at run start,
@@ -37,7 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   An expired `@eventually` window is a check failure at once.
 - **`PropertyDamage.ComparisonMismatch` and `PropertyDamage.Equivalence` (DR-046).**
   `Equivalence.by_key/1`, `normalize/1` and `drop_keys/2` build `using:`
-  predicates; `ComparisonMismatch` is the default mismatch detail.
+  predicates; `by_key/1` returns `true` or `{:fail, %ComparisonMismatch{}}`
+  holding both keys. `ComparisonMismatch` is the default mismatch detail.
+  `PropertyDamage.Verdict.read/1` reads a relation's return with the grammar
+  shared with `@check` and `@eventually` (DR-052).
 - **Boundary counters (DR-046).** `compare_counts` on `stats` and the failure
   report holds `compared_at`, `waited_at` and `waited_ms` per `@compare` key. The
   reporter prints it, and persistence stores it.
@@ -76,7 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   there; a finalize-time repeat is listed once and nothing is dropped. New public type
   `t:PropertyDamage.Scheduler.compare_counts/0`.
 - **Stutter `using:` (DR-046).** `stutter: [using: fn original_events,
-  retry_events -> ... end]`, default `&==/2`, decides whether a retry agrees.
+  retry_events -> ... end]`, default `&==/2`, decides whether a retry agrees;
+  its return is a verdict, read like `@compare`'s `using:` (DR-052).
+  `Stutter.compare_events/3` returns `:agree` or `{:disagree, exception}`.
   `Stutter.Violation` carries `mismatch` (an exception) in place of
   `comparison_result`.
 - **One runner for one or more targets (DR-045, DR-046).** `PropertyDamage.run/1`
@@ -397,6 +404,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (DR-052): a check's verdict is its return value.**
+  `PropertyDamage.Verdict.read/1` reads a `@check`'s return and an
+  `@eventually` predicate's return with one grammar: a truthy return passes
+  (is satisfied), `nil` or `false` fails (is not yet), `{:fail, "text"}` or
+  `{:fail, %Exception{}}` fails with that reason, and a bare exception struct or
+  an `{:error, _}` tuple fails with the sentence "a verdict is truthy,
+  `nil`/`false`, or `{:fail, reason}`". A raise is a failure in both.
+  - A `@check` that returned `nil` or `false` used to pass; it now fails, in the
+    executor, forensics, the load-test worker and the linearization checker,
+    for `every:` and `at:` checks, with a message that names the check, shows
+    the value and gives the three accepted forms: a predicate
+    (`state.net >= state.fees`), `condition or fail!("...", ...)`, or a body
+    that ends with a truthy value such as `:ok`. The failure is an ordinary
+    check failure; no new failure kind.
+    `{:fail, "text"}` is the returned form of `fail!/2` and carries the same
+    `CheckFailed`.
+  - The `if condition, do: fail!(...)` idiom is retired: a `@check` clause
+    whose last expression is an `if` or `unless` without `else` is a
+    `CompileError` naming the clause and the rewrite. Every check in the
+    library, the `mix pd.gen.projection` template, the guides and the benches
+    is rewritten.
+  - An `@eventually` predicate's `{:fail, reason}` means "never": the window
+    ends at once as a check failure with that reason instead of waiting out
+    the `timeout:`. A raise, exit or throw inside the predicate is a check
+    failure at once that keeps the raised exception and names the check and
+    the poll count (a new `context` field on `Failure.Check` holds the poll
+    count and elapsed time); it no longer means "not yet", and `last_predicate_error` is
+    gone from the poll-timeout info. Rewrite a predicate that raised before the
+    state caught up as a total one (`get_in/2`, `match?/2`, a `case` with a
+    fallback).
 - **`latency:` and a non-default `check_mode:` are refused beside `branching:`.**
   A branching run executes one branch at a time on one target through the
   linear engine: it records no latency samples (`latency:` returned

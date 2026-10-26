@@ -43,9 +43,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
 
     @check at: :teardown
     def assert_count_at_most_one(state, _phase) do
-      if state.max > 1 do
-        PropertyDamage.fail!("count exceeded 1 at settle", max: state.max)
-      end
+      state.max <= 1 or PropertyDamage.fail!("count exceeded 1 at settle", max: state.max)
     end
   end
 
@@ -339,9 +337,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
 
     @check at: :startup
     def assert_ready(state, _phase) do
-      unless state.ready do
-        PropertyDamage.fail!("startup precondition not met")
-      end
+      state.ready || PropertyDamage.fail!("startup precondition not met")
     end
   end
 
@@ -409,7 +405,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
 
     @check at: :startup
     def assert_ready(state, _phase) do
-      unless state.ready, do: PropertyDamage.fail!("not ready")
+      state.ready || PropertyDamage.fail!("not ready")
     end
   end
 
@@ -586,7 +582,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
 
     @check at: :teardown
     def assert_never_exceeded_one(state, _phase) do
-      if state.max > 1, do: PropertyDamage.fail!("max exceeded 1", max: state.max)
+      state.max <= 1 or PropertyDamage.fail!("max exceeded 1", max: state.max)
     end
   end
 
@@ -611,7 +607,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
 
     @check at: :teardown
     def assert_never_exceeds_one(state, _phase) do
-      if state.count > 1, do: PropertyDamage.fail!("count exceeded 1", count: state.count)
+      state.count <= 1 or PropertyDamage.fail!("count exceeded 1", count: state.count)
     end
   end
 

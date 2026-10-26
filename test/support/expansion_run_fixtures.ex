@@ -347,7 +347,7 @@ defmodule PropertyDamage.Test.ExpansionRun do
 
     @check every: PropertyDamage.Test.ExpansionRun.Credited
     def assert_not_second_part(_state, %{part: part}) do
-      if part == 1, do: PropertyDamage.fail!("the second credit"), else: :ok
+      part != 1 or PropertyDamage.fail!("the second credit")
     end
   end
 

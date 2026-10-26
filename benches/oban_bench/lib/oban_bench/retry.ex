@@ -51,13 +51,12 @@ defmodule ObanBench.Retry.Projection do
     for {counter, observed} <- state.observed do
       expected = Map.get(state.enqueued, counter, 0)
 
-      if observed > expected do
+      observed <= expected or
         PropertyDamage.fail!("exactly-once violated (retry)",
           counter: counter,
           observed: observed,
           expected: expected
         )
-      end
     end
   end
 end

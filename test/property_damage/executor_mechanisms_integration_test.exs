@@ -76,9 +76,7 @@ defmodule PropertyDamage.ExecutorMechanismsIntegrationTest do
     def assert_status_valid(state, _cmd_or_event) do
       bad = Enum.reject(Map.values(state.status), &(&1 in [:initiated, :confirmed]))
 
-      if bad != [] do
-        PropertyDamage.fail!("Payment in an invalid status", bad: bad)
-      end
+      bad == [] or PropertyDamage.fail!("Payment in an invalid status", bad: bad)
     end
 
     # Eventual consistency: the confirmation arrives via a resource poller after
