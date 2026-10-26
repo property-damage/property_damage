@@ -83,9 +83,8 @@ defmodule PropertyDamage.MockServiceRunTest do
     # check is only reachable BECAUSE handle_request/2 injected it.
     @check every: FraudChecked
     def assert_high_declined(_state, %FraudChecked{amount: a, approved: ap}) do
-      if a > 50 and ap do
+      a <= 50 or not ap or
         PropertyDamage.fail!("over-limit charge approved by fraud service", amount: a)
-      end
     end
   end
 

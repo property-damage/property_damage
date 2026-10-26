@@ -268,9 +268,8 @@ defmodule IdempotencyProjection do
   def assert_no_duplicate_creation(state, _event) do
     duplicates = Enum.filter(state.creation_counts, fn {_k, v} -> v > 1 end)
 
-    if duplicates != [] do
+    duplicates == [] or
       PropertyDamage.fail!("duplicate creation detected", duplicates: duplicates)
-    end
   end
 end
 ```

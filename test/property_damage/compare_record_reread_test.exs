@@ -29,8 +29,7 @@ defmodule PropertyDamage.CompareRecordRereadTest do
 
     @check every: Balance
     def assert_sane_balance(_state, %Balance{value: value}) do
-      if value == 99, do: PropertyDamage.fail!("balance 99 is never valid", value: value)
-      :ok
+      value != 99 or PropertyDamage.fail!("balance 99 is never valid", value: value)
     end
   end
 

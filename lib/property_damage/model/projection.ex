@@ -28,14 +28,13 @@ defmodule PropertyDamage.Model.Projection do
         # Synchronous check - runs immediately when event occurs
         @check every: 1
         def assert_total_non_negative(state, _cmd_or_event) do
-          if state.total < 0, do: PropertyDamage.fail!("total is negative", total: state.total)
+          state.total >= 0 or PropertyDamage.fail!("total is negative", total: state.total)
         end
 
         @check every: CreateOrder
         def assert_order_tracked(state, %CreateOrder{id: id}) do
-          unless Map.has_key?(state.orders, id) do
+          Map.has_key?(state.orders, id) or
             PropertyDamage.fail!("order not tracked", order_id: id)
-          end
         end
       end
 
@@ -52,9 +51,7 @@ defmodule PropertyDamage.Model.Projection do
 
       @check every: 1
       def assert_balance_positive(state, _cmd_or_event) do
-        if state.balance < 0 do
-          PropertyDamage.fail!("balance is negative", balance: state.balance)
-        end
+        state.balance >= 0 or PropertyDamage.fail!("balance is negative", balance: state.balance)
       end
 
   `@check` also supports an `at:` timing for one-shot checks at a lifecycle
@@ -144,9 +141,8 @@ defmodule PropertyDamage.Model.Projection do
 
       @check at: :teardown
       def assert_balance_reconciles(state, _phase) do
-        if state.debits != state.credits do
+        state.debits == state.credits or
           PropertyDamage.fail!("ledger did not reconcile", state: state)
-        end
       end
 
   `at: :teardown` is the natural home for a **safety** property ("this never
@@ -172,7 +168,7 @@ defmodule PropertyDamage.Model.Projection do
 
       @check at: :teardown
       def assert_at_most_once(state, _phase) do
-        if state.max > 1, do: PropertyDamage.fail!("applied more than once", max: state.max)
+        state.max <= 1 or PropertyDamage.fail!("applied more than once", max: state.max)
       end
 
       # BAD — snapshots: a 0 -> 2 -> 1 transient is invisible at settle.
@@ -246,7 +242,7 @@ defmodule PropertyDamage.Model.Projection do
 
         @check every: CreateOrder
         def assert_order_has_items(_state, %CreateOrder{items: items}) do
-          if Enum.empty?(items), do: PropertyDamage.fail!("order must have items")
+          items != [] or PropertyDamage.fail!("order must have items")
         end
       end
 
@@ -292,7 +288,7 @@ defmodule PropertyDamage.Model.Projection do
 
       @check every: 1
       def assert_total_non_negative(state, _cmd_or_event) do
-        if state.total < 0, do: PropertyDamage.fail!("total is negative")
+        state.total >= 0 or PropertyDamage.fail!("total is negative")
       end
 
   ## Parameters

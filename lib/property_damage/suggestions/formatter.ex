@@ -350,9 +350,8 @@ defmodule PropertyDamage.Suggestions.Formatter do
           Map.get(entity, :#{field}, 0) < 0
         end)
 
-      unless Enum.empty?(violations) do
+      Enum.empty?(violations) or
         PropertyDamage.fail!("Negative #{field} detected", violations: violations)
-      end
     end
     """
   end
@@ -368,9 +367,8 @@ defmodule PropertyDamage.Suggestions.Formatter do
           entity && entity.currency != op.currency
         end)
 
-      unless Enum.empty?(violations) do
+      Enum.empty?(violations) or
         PropertyDamage.fail!("Currency mismatch detected", violations: violations)
-      end
     end
     """
   end
@@ -385,9 +383,8 @@ defmodule PropertyDamage.Suggestions.Formatter do
       known_refs = Map.keys(state.#{entity}s)
       missing = refs_in_use -- known_refs
 
-      unless Enum.empty?(missing) do
+      Enum.empty?(missing) or
         PropertyDamage.fail!("Invalid #{field} references", missing: missing)
-      end
     end
     """
   end
@@ -404,9 +401,7 @@ defmodule PropertyDamage.Suggestions.Formatter do
           Map.get(e, :#{field}) not in valid_statuses
         end)
 
-      unless Enum.empty?(invalid) do
-        PropertyDamage.fail!("Invalid #{field} values", invalid: invalid)
-      end
+      Enum.empty?(invalid) or PropertyDamage.fail!("Invalid #{field} values", invalid: invalid)
     end
     """
   end

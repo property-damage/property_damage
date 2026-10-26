@@ -122,17 +122,14 @@ defmodule Mix.Tasks.Pd.Gen.Projection do
       # Example: Check invariant after every step
       # @check every: 1
       # def assert_total_non_negative(state, _cmd_or_event) do
-      #   if state.total < 0 do
-      #     PropertyDamage.fail!("total is negative", total: state.total)
-      #   end
+      #   state.total >= 0 or PropertyDamage.fail!("total is negative", total: state.total)
       # end
 
       # Example: Check invariant after specific event
       # @check every: OrderCreated
       # def assert_order_tracked(state, %OrderCreated{id: id}) do
-      #   unless Map.has_key?(state.orders, id) do
+      #   Map.has_key?(state.orders, id) or
       #     PropertyDamage.fail!("order not tracked", order_id: id)
-      #   end
       # end
 
       # ============================================================================

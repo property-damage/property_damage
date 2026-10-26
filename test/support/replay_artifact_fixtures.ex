@@ -198,7 +198,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
 
     @check every: PropertyDamage.Test.ReplayFixtures.Credited
     def credit_answered_plainly(_state, %{part: part}) do
-      if part == :skewed, do: PropertyDamage.fail!("a credit answered skewed"), else: :ok
+      part != :skewed or PropertyDamage.fail!("a credit answered skewed")
     end
   end
 

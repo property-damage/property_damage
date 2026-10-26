@@ -242,13 +242,11 @@ defmodule BalanceInvariant do
   def assert_balance_consistent(state, _event) do
     expected = state.deposits - state.withdrawals
 
-    if state.observed_balance != expected do
-      PropertyDamage.fail!(
-        "balance mismatch",
+    state.observed_balance == expected or
+      PropertyDamage.fail!("balance mismatch",
         expected: expected,
         observed: state.observed_balance
       )
-    end
   end
 end
 ```

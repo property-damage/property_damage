@@ -120,9 +120,8 @@ defmodule MyApp.Projections.Users do
   # generator can legitimately repeat them; assert on what the SUT guarantees.)
   @check every: 1
   def assert_emails_present(state, _cmd_or_event) do
-    if Enum.any?(state.users, fn {_id, u} -> u.email in [nil, ""] end) do
+    Enum.all?(state.users, fn {_id, u} -> u.email not in [nil, ""] end) or
       PropertyDamage.fail!("user with missing email", users: state.users)
-    end
   end
 end
 ```
@@ -822,11 +821,10 @@ context = %{
 @check every: 1
 def assert_latency_sla(state, _cmd_or_event) do
   # Skip SLA check during partition
-  unless Map.get(state.active_faults, :network_partition) do
-    unless state.last_latency_ms < 100 do
-      PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
-    end
-  end
+  partitioned? = Map.get(state.active_faults, :network_partition, false)
+
+  partitioned? or state.last_latency_ms < 100 or
+    PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
 end
 ```
 

@@ -31,8 +31,7 @@ defmodule PropertyDamage.FailureListOrderTest do
 
     @check every: Booked
     def assert_no_poison(_state, %Booked{n: n, by: by}) do
-      if poison?(by, n), do: PropertyDamage.fail!("poisoned booking", n: n)
-      :ok
+      not poison?(by, n) or PropertyDamage.fail!("poisoned booking", n: n)
     end
 
     defp poison?(by, n), do: by == "b" and n == 2
@@ -59,8 +58,7 @@ defmodule PropertyDamage.FailureListOrderTest do
 
     @check every: Booked
     def assert_no_early_poison(_state, %Booked{n: n, by: by}) do
-      if poison?(by, n), do: PropertyDamage.fail!("poisoned booking", n: n)
-      :ok
+      not poison?(by, n) or PropertyDamage.fail!("poisoned booking", n: n)
     end
 
     defp poison?(by, n), do: by in ["b", "c"] and n == 0
@@ -88,8 +86,7 @@ defmodule PropertyDamage.FailureListOrderTest do
 
     @check every: Booked
     def assert_no_twice_poison(_state, %Booked{n: n, by: by}) do
-      if poison?(by, n), do: PropertyDamage.fail!("poisoned booking", n: n)
-      :ok
+      not poison?(by, n) or PropertyDamage.fail!("poisoned booking", n: n)
     end
 
     defp poison?(by, n), do: {by, n} in [{"a", 0}, {"b", 1}, {"b", 3}]

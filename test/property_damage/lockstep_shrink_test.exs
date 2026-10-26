@@ -112,13 +112,12 @@ defmodule PropertyDamage.LockstepShrinkTest do
     def apply(state, _), do: state
 
     @check every: Flipped
-    def assert_flip_is_armed(state, _event) do
-      unless state.armed do
-        if pid = Process.whereis(:pd_lockstep_shrink_probe), do: send(pid, :unarmed_flip)
-        PropertyDamage.fail!("flip without arm")
-      end
+    def assert_flip_is_armed(state, _event), do: state.armed or flip_without_arm!()
 
-      :ok
+    defp flip_without_arm! do
+      probe = Process.whereis(:pd_lockstep_shrink_probe)
+      probe && send(probe, :unarmed_flip)
+      PropertyDamage.fail!("flip without arm")
     end
   end
 

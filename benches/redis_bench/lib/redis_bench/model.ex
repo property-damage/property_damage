@@ -22,13 +22,12 @@ defmodule RedisBench.Projection do
 
   @check every: ReadValue
   def assert_value_consistent(state, _command) do
-    if state.last_read != state.count do
+    state.last_read == state.count or
       PropertyDamage.fail!(
         "Read returned #{inspect(state.last_read)}, model expects #{inspect(state.count)}",
         actual: state.last_read,
         expected: state.count
       )
-    end
   end
 end
 

@@ -2641,9 +2641,7 @@ defmodule PropertyDamage do
       # In a projection check
       @check every: 1
       def assert_balance_positive(state, _cmd) do
-        if state.balance < 0 do
-          PropertyDamage.fail!("negative balance", balance: state.balance)
-        end
+        state.balance >= 0 or PropertyDamage.fail!("negative balance", balance: state.balance)
       end
 
   ## Custom Exceptions

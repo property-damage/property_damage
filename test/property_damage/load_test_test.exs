@@ -560,9 +560,8 @@ defmodule PropertyDamage.LoadTestTest do
 
     @check every: PropertyDamage.LoadTestTest.OrderingCommand
     def assert_sees_own_event(state, _cmd) do
-      if state.last == nil do
+      state.last != nil or
         PropertyDamage.fail!("command-level check ran before the command's own event was folded")
-      end
     end
   end
 
@@ -1265,9 +1264,8 @@ defmodule PropertyDamage.LoadTestTest do
       @check every: 1
       def assert_count_check(state, _cmd_or_event) do
         # Fail every 3rd check to simulate intermittent failures
-        if rem(state.count, 3) == 0 do
+        rem(state.count, 3) != 0 or
           PropertyDamage.fail!("count is divisible by 3", count: state.count)
-        end
       end
     end
 

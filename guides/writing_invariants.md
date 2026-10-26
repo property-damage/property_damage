@@ -16,9 +16,7 @@ Use `PropertyDamage.fail!/2` to raise a structured failure:
 ```elixir
 @check every: 1
 def assert_balance_non_negative(state, _cmd_or_event) do
-  if state.balance < 0 do
-    PropertyDamage.fail!("balance is negative", balance: state.balance)
-  end
+  state.balance >= 0 or PropertyDamage.fail!("balance is negative", balance: state.balance)
 end
 ```
 
@@ -64,9 +62,7 @@ def assert_balance_matches_ledger(state, _cmd_or_event) do
       account.balance != expected
     end)
 
-  unless Enum.empty?(mismatches) do
-    PropertyDamage.fail!("Balance mismatches", mismatches: mismatches)
-  end
+  Enum.empty?(mismatches) or PropertyDamage.fail!("Balance mismatches", mismatches: mismatches)
 end
 ```
 
@@ -80,10 +76,8 @@ def assert_emails_unique(state, _cmd_or_event) do
   emails = Enum.map(state.users, fn {_id, user} -> user.email end)
   unique_emails = Enum.uniq(emails)
 
-  unless length(emails) == length(unique_emails) do
-    duplicates = emails -- unique_emails
-    PropertyDamage.fail!("Duplicate emails", duplicates: duplicates)
-  end
+  length(emails) == length(unique_emails) or
+    PropertyDamage.fail!("Duplicate emails", duplicates: emails -- unique_emails)
 end
 ```
 
@@ -110,9 +104,7 @@ def assert_valid_status_transitions(state, _cmd_or_event) do
       to not in valid_next
     end)
 
-  unless Enum.empty?(invalid) do
-    PropertyDamage.fail!("Invalid transitions", invalid: invalid)
-  end
+  Enum.empty?(invalid) or PropertyDamage.fail!("Invalid transitions", invalid: invalid)
 end
 ```
 
@@ -131,9 +123,8 @@ def assert_orders_reference_valid_users(state, _cmd_or_event) do
       order.user_id not in user_ids
     end)
 
-  unless Enum.empty?(orphan_orders) do
+  Enum.empty?(orphan_orders) or
     PropertyDamage.fail!("Orphan orders", ids: Enum.map(orphan_orders, &elem(&1, 0)))
-  end
 end
 ```
 
@@ -148,9 +139,7 @@ def assert_balances_non_negative(state, _cmd_or_event) do
     state.accounts
     |> Enum.filter(fn {_id, account} -> account.balance < 0 end)
 
-  unless Enum.empty?(negative) do
-    PropertyDamage.fail!("Negative balances", negative: negative)
-  end
+  Enum.empty?(negative) or PropertyDamage.fail!("Negative balances", negative: negative)
 end
 
 @check every: 1
@@ -159,9 +148,7 @@ def assert_inventory_non_negative(state, _cmd_or_event) do
     state.inventory
     |> Enum.filter(fn {_sku, qty} -> qty < 0 end)
 
-  unless Enum.empty?(negative) do
-    PropertyDamage.fail!("Negative inventory", negative: negative)
-  end
+  Enum.empty?(negative) or PropertyDamage.fail!("Negative inventory", negative: negative)
 end
 ```
 
@@ -178,9 +165,8 @@ def assert_expiry_after_creation(state, _cmd_or_event) do
       DateTime.compare(auth.expires_at, auth.created_at) != :gt
     end)
 
-  unless Enum.empty?(invalid) do
+  Enum.empty?(invalid) or
     PropertyDamage.fail!("Authorizations with invalid expiry", invalid: invalid)
-  end
 end
 ```
 
@@ -377,9 +363,8 @@ defmodule MyApp.Projections.AuditInvariants do
 
   @check every: 25
   def assert_no_suspicious_patterns(state, _cmd_or_event) do
-    unless Enum.empty?(state.suspicious_patterns) do
+    Enum.empty?(state.suspicious_patterns) or
       PropertyDamage.fail!("Suspicious patterns detected", patterns: state.suspicious_patterns)
-    end
   end
 end
 ```
@@ -392,11 +377,10 @@ When using nemesis (chaos engineering), some invariants may not apply:
 @check every: 1
 def assert_latency_within_sla(state, _cmd_or_event) do
   # Skip SLA check during active network partition
-  unless Map.get(state.active_faults, :network_partition) do
-    if state.last_latency_ms >= 100 do
-      PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
-    end
-  end
+  partitioned? = Map.get(state.active_faults, :network_partition, false)
+
+  partitioned? or state.last_latency_ms < 100 or
+    PropertyDamage.fail!("SLA violated", latency_ms: state.last_latency_ms)
 end
 ```
 
@@ -410,9 +394,7 @@ end
 # Don't do this - relies on implementation details
 @check every: 1
 def assert_cache_hit_ratio(state, _cmd_or_event) do
-  if state.cache.hits / state.cache.total <= 0.8 do
-    PropertyDamage.fail!("Low cache hits")
-  end
+  state.cache.hits / state.cache.total > 0.8 or PropertyDamage.fail!("Low cache hits")
 end
 ```
 
@@ -435,9 +417,8 @@ end
 # Don't do this - can fail due to timing
 @check every: 1
 def assert_recent_activity(state, _cmd_or_event) do
-  if DateTime.diff(DateTime.utc_now(), state.last_activity, :second) >= 60 do
+  DateTime.diff(DateTime.utc_now(), state.last_activity, :second) < 60 or
     PropertyDamage.fail!("No recent activity")
-  end
 end
 ```
 
@@ -448,7 +429,7 @@ end
 @check every: 1
 def assert_activity_ordering(state, _cmd_or_event) do
   sorted = Enum.sort_by(state.activities, & &1.timestamp)
-  unless state.activities == sorted, do: PropertyDamage.fail!("Out of order")
+  state.activities == sorted or PropertyDamage.fail!("Out of order")
 end
 ```
 
@@ -460,7 +441,7 @@ end
 # Too specific - will break with any change
 @check every: 1
 def assert_exact_balance(state, _cmd_or_event) do
-  unless state.accounts["acc_1"].balance == 1000, do: PropertyDamage.fail!("Wrong")
+  state.accounts["acc_1"].balance == 1000 or PropertyDamage.fail!("Wrong")
 end
 ```
 
@@ -472,7 +453,7 @@ end
 def assert_credits_minus_debits(state, _cmd_or_event) do
   expected = state.total_credits - state.total_debits
   actual = Enum.reduce(state.accounts, 0, fn {_, acc}, sum -> sum + acc.balance end)
-  unless expected == actual, do: PropertyDamage.fail!("Mismatch")
+  expected == actual or PropertyDamage.fail!("Mismatch")
 end
 ```
 

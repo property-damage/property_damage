@@ -70,9 +70,7 @@ defmodule PropertyDamage.Test.FI.Balance do
 
   @check every: 1
   def assert_balance_non_negative(state, _cmd_or_event) do
-    unless state.balance >= 0 do
-      PropertyDamage.fail!("Balance is negative", balance: state.balance)
-    end
+    state.balance >= 0 or PropertyDamage.fail!("Balance is negative", balance: state.balance)
   end
 end
 

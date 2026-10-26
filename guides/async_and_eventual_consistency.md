@@ -148,12 +148,11 @@ defmodule Warehouse.State do
   # arrive if it was shipped. This fires once per settled AwaitWidget probe.
   @check every: Warehouse.Events.WidgetArrived
   def assert_arrivals_were_shipped(state, %WidgetArrived{sku: sku}) do
-    unless MapSet.member?(state.shipped, sku) do
+    MapSet.member?(state.shipped, sku) or
       PropertyDamage.fail!("widget arrived without being shipped",
         sku: sku,
         shipped: state.shipped
       )
-    end
   end
 end
 
@@ -978,10 +977,8 @@ defmodule JobProjection do
   # Safety: it never over-applies. Evaluated on the settled state.
   @check at: :teardown
   def assert_effectively_once(state, _phase) do
-    if state.max_applied > state.expected do
-      PropertyDamage.fail!("over-applied",
-        applied: state.max_applied, expected: state.expected)
-    end
+    state.max_applied <= state.expected or
+      PropertyDamage.fail!("over-applied", applied: state.max_applied, expected: state.expected)
   end
 end
 ```

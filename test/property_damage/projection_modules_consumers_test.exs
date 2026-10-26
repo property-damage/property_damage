@@ -41,7 +41,7 @@ defmodule PropertyDamage.ProjectionModulesConsumersTest do
 
     @check every: Ping
     def ping_ok(_state, %Ping{fail: fail}) do
-      if fail, do: PropertyDamage.fail!("ping failed")
+      not fail or PropertyDamage.fail!("ping failed")
     end
 
     @eventually after: Pinged, timeout: {30, :milliseconds}, interval: {5, :milliseconds}

@@ -49,9 +49,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
     @check every: 1
     def count_bounded(state, _cmd_or_event) do
-      if state.count >= 3 do
-        PropertyDamage.fail!("count exceeded bound", count: state.count)
-      end
+      state.count < 3 or PropertyDamage.fail!("count exceeded bound", count: state.count)
     end
   end
 

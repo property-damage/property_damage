@@ -187,9 +187,7 @@ defmodule MyApp.Projections.BalanceInvariant do
   @check every: 1
   def assert_total_matches_sum(state, _cmd_or_event) do
     sum = state.balances |> Map.values() |> Enum.sum()
-    if sum != state.total do
-      PropertyDamage.fail!("total mismatch", expected: sum, got: state.total)
-    end
+    sum == state.total or PropertyDamage.fail!("total mismatch", expected: sum, got: state.total)
   end
 
   # Temporal check (eventual consistency)
@@ -485,10 +483,12 @@ and still runs the teardown commands, except for a target whose
 ```elixir
 @check every: 1
 def assert_conservation(state, _) do
-  if state.total_credits != state.total_debits + state.total_balance do
+  state.total_credits == state.total_debits + state.total_balance or
     PropertyDamage.fail!("conservation violated",
-      credits: state.total_credits, debits: state.total_debits, balance: state.total_balance)
-  end
+      credits: state.total_credits,
+      debits: state.total_debits,
+      balance: state.total_balance
+    )
 end
 ```
 
@@ -499,9 +499,7 @@ end
 def assert_valid_transition(state, %StatusChanged{id: id, new_status: new}) do
   old = state.statuses[id]
   valid = %{pending: [:approved, :rejected], approved: [:shipped], shipped: [:delivered]}
-  unless new in Map.get(valid, old, []) do
-    PropertyDamage.fail!("invalid transition", from: old, to: new)
-  end
+  new in Map.get(valid, old, []) or PropertyDamage.fail!("invalid transition", from: old, to: new)
 end
 ```
 
@@ -511,9 +509,7 @@ end
 @check every: :command
 def assert_refs_valid(state, cmd) do
   for {_field, ref} <- Map.from_struct(cmd), is_binary(ref), String.starts_with?(ref, "acc_") do
-    unless Map.has_key?(state.accounts, ref) do
-      PropertyDamage.fail!("dangling ref", ref: ref)
-    end
+    Map.has_key?(state.accounts, ref) or PropertyDamage.fail!("dangling ref", ref: ref)
   end
 end
 ```
@@ -527,7 +523,7 @@ defmodule AmountValidator do
 
   @check every: Credited
   def assert_positive_credit(_state, %Credited{amount: amt}) do
-    if amt <= 0, do: PropertyDamage.fail!("non-positive credit", amount: amt)
+    amt > 0 or PropertyDamage.fail!("non-positive credit", amount: amt)
   end
 end
 ```
