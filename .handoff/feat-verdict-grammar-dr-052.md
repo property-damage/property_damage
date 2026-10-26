@@ -236,9 +236,64 @@ semantics.
 
 **Files:** `CHANGELOG.md`
 
+### 2026-10-26T12:11 · commit · 306fbd3
+
+docs(notebooks): rewrite the demo notebook's checks as predicates
+
+The first DR-052 sweep missed the Livebook notebook. Its two
+assert_balance_non_negative checks ended in `unless ... do fail!(...)
+end`, which the compile guard now refuses, so the docs gate failed on
+the notebook. Both checks now read `negative == [] or fail!(...)`, and
+the notebook's prose says a check's return is its verdict instead of
+"a returned value is ignored".
+
+**Files:** `notebooks/property_damage_demo.livemd`
+
+### 2026-10-26T12:14 · commit · afe389c
+
+test(scheduler): cover the poll context of a recorded lockstep failure
+
+Scheduler.recorded_failure/1 restores the poll context of an
+@eventually failure recorded under check_mode: :record, and no test
+drove it. A two-target run under :record with a raising predicate now
+asserts that the reported check failure carries context.poll_count, the
+raised KeyError, and a message naming the check and the poll.
+
+**Files:** `test/property_damage/eventually_verdict_test.exs`
+
 ## Reconstruction
 
-Written when the PR opens, and labeled as such. May extend the Record; may not
-contradict it.
+Written 2026-10-26 by the orchestrator when the PR opened, from the implementer's
+hand-back reports in this session's transcript. Labeled as reconstruction: it
+extends the Record and does not contradict it.
 
-_Not yet written._
+- **Interpretation points the implementer raised and did not decide alone.**
+  Quoted from the first hand-back: "Seven interpretation points need your
+  ruling; none blocked the work." They were the `read/2` signature, the relation
+  nudge row, the silently-agreeing retired forms, persisted values without a
+  version bump, the error-origin classification of a predicate raise, the
+  uncovered `{:fail, other}` shape, and the CHANGELOG `:match` mention. Rulings:
+  1 and 2 and 4 and 6 accepted as interpretations; 5 and 7 became fix-backs A
+  and B (commits a14c438, f9b28b3); 3 is recorded as a proposed DR-052 amendment
+  for the owner, not implemented.
+- **Why the idiom rewrite commit precedes the verdict commit.** Quoted: "The
+  idiom rewrite lands before the check verdict and the compile guard. Either of
+  those would otherwise turn the old idiom red, so each commit stays green on
+  its own."
+- **How the sweep was done and what it missed.** Quoted: "A scripted rewrite
+  handled about 120 sites; the rest I edited by hand." The sweep covered lib,
+  test, guides, benches and README; the orchestrator's run of the docs gate
+  with network found two more sites in `notebooks/property_damage_demo.livemd`,
+  fixed as fix-back C (306fbd3).
+- **Offline workarounds that were later replaced by online runs.** Quoted:
+  "I seeded its template inside the worktree's gitignored `tmp/` from the main
+  checkout's cached packages, so no network was used." The gate was later run
+  with network and a fresh template (exit 0, 18 passed). Benches were "rewritten
+  and format-checked, but not compiled or tested" in the first round; the
+  orchestrator compiled all six under OTP 27 afterwards.
+- **Fix-back A deviation.** Quoted: "`Exception.normalize/3` hands back exit and
+  throw payloads unchanged, so it produces no exception there. I wrap those as
+  `%ErlangError{original: {kind, reason}}` instead."
+- **Fix-back D outcome.** Quoted: "the clause in `Scheduler.recorded_failure/1`
+  that restores the context is live code, not dead." RED with the clause
+  removed: 7 tests, 1 failure.
