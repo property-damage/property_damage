@@ -45,12 +45,19 @@ The framework SHALL compare the targets of a run only through the boundary obser
 - **THEN** the framework SHALL raise `NimbleOptions.ValidationError` whose message names the replacement (`@compare` with `using:`, `latency: true` (or a `latency:` budget), or `compare: [converge_within: ms]`)
 - **AND** no command SHALL execute
 
-#### Scenario: Agreement is judged by using:
+#### Scenario: Agreement is judged by using: (DR-052)
 
 - **WHEN** a boundary observation's reference value and variant value are judged
-- **THEN** the framework SHALL call the observation's `using:` predicate with the reference value first
-- **AND** SHALL treat `:match` and `true` as agreement
-- **AND** SHALL treat `false` and `{:mismatch, detail}` as a difference, whose detail is a `PropertyDamage.ComparisonMismatch` (holding both values or the given text) or the exception given
+- **THEN** the framework SHALL call the observation's `using:` predicate with the reference value first and read its return with the verdict grammar shared with `@check` and `@eventually` (`PropertyDamage.Verdict`)
+- **AND** SHALL treat a truthy return as agreement
+- **AND** SHALL treat `false` or `nil` as a difference whose detail is a `PropertyDamage.ComparisonMismatch` holding both values
+- **AND** SHALL treat `{:fail, "text"}` as a difference whose detail is a `PropertyDamage.ComparisonMismatch` holding both values and the text, and `{:fail, exception}` as a difference whose detail is that exception
+- **AND** SHALL treat a bare exception struct or an `{:error, _}` return as a difference whose message names the grammar ("a verdict is truthy, `nil`/`false`, or `{:fail, reason}`")
+
+#### Scenario: The retired relation returns are gone (DR-052)
+
+- **WHEN** a `using:` predicate is written
+- **THEN** `:match` and `{:mismatch, detail}` SHALL NOT be part of its contract, and `PropertyDamage.Equivalence.verdict/3` SHALL NOT exist; `PropertyDamage.Verdict.read/1` reads the return
 
 #### Scenario: A raise is a check failure
 
@@ -293,8 +300,8 @@ The framework SHALL capture `external()` server-generated values and resolve the
 #### Scenario: by_key compares keys
 
 - **WHEN** `using: by_key(&normalize/1)` judges two values that differ only in an `id`
-- **THEN** it SHALL return `:match`
-- **AND** WHEN they differ in another field, it SHALL return `{:mismatch, %ComparisonMismatch{}}` holding the two normalized values
+- **THEN** it SHALL return `true`
+- **AND** WHEN they differ in another field, it SHALL return `{:fail, %ComparisonMismatch{}}` holding the two normalized values (DR-052)
 
 #### Scenario: drop_keys keeps struct types
 
