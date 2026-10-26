@@ -127,7 +127,7 @@ defmodule PropertyDamage.EventLog.Entry do
           span_id: String.t() | nil,
           branch_id: non_neg_integer() | nil,
           stutter_attempt: pos_integer() | nil,
-          stutter_comparison: :match | {:mismatch, Exception.t()} | nil,
+          stutter_comparison: :agree | {:disagree, Exception.t()} | nil,
           resource_poller_id: reference() | nil,
           phase: phase(),
           fold_index: non_neg_integer() | nil,
@@ -387,7 +387,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Examples
 
-      iex> entry = PropertyDamage.EventLog.Entry.from_stutter(%OrderCreated{}, 5, 2, :match)
+      iex> entry = PropertyDamage.EventLog.Entry.from_stutter(%OrderCreated{}, 5, 2, :agree)
       iex> entry.source
       :stutter
       iex> entry.stutter_attempt
@@ -416,7 +416,7 @@ defmodule PropertyDamage.EventLog.Entry do
 
   ## Examples
 
-      iex> entry = PropertyDamage.EventLog.Entry.from_stutter(%SomeEvent{}, 0, 2, :match)
+      iex> entry = PropertyDamage.EventLog.Entry.from_stutter(%SomeEvent{}, 0, 2, :agree)
       iex> PropertyDamage.EventLog.Entry.stutter?(entry)
       true
   """

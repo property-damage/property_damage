@@ -39,8 +39,8 @@ defmodule PropertyDamage.CompareDivergenceTest do
     #{@header}
       @compare using: fn reference, variant ->
                  if reference == variant,
-                   do: :match,
-                   else: {:mismatch, "settled " <> inspect(reference) <> " vs " <> inspect(variant)}
+                   do: true,
+                   else: {:fail, "settled " <> inspect(reference) <> " vs " <> inspect(variant)}
                end
       def totals(s, _root), do: s.settled
     end

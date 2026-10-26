@@ -17,7 +17,7 @@ defmodule PropertyDamage.Comparison do
   # between iterations, so an iteration that started before the bound runs to
   # its end (a probe re-read runs to its own per-command settle).
 
-  alias PropertyDamage.{Equivalence, Failure, Model, Variant}
+  alias PropertyDamage.{Failure, Model, Variant, Verdict}
 
   # How often the loop drains the variants while it waits after a mutation
   # root (ms). A drain that delivers an event to a variant ends the wait at
@@ -342,10 +342,10 @@ defmodule PropertyDamage.Comparison do
 
             {:value, value} ->
               case verdict(using, reference_value, value) do
-                :match ->
+                :agree ->
                   {:cont, :agree}
 
-                {:mismatch, mismatch} ->
+                {:disagree, mismatch} ->
                   {:halt, {:differ, target, reference_value, value, mismatch}}
 
                 {:raised, exception} ->
@@ -357,7 +357,7 @@ defmodule PropertyDamage.Comparison do
   end
 
   defp verdict(using, reference_value, value) do
-    Equivalence.verdict(using, reference_value, value)
+    using.(reference_value, value) |> Verdict.relation(reference_value, value)
   rescue
     exception -> {:raised, exception}
   end

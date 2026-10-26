@@ -119,10 +119,10 @@ defmodule PropertyDamage.Stutter do
 
   A retry agrees with the original when the `using:` predicate accepts it,
   called `using.(original_events, retry_events)` with the contract of
-  `@compare`'s `using:` (see `PropertyDamage.Equivalence`): it returns
-  `:match` or `true` to agree, and `false`, `{:mismatch, "text"}` or
-  `{:mismatch, exception}` otherwise. Without `using:`, the events must be
-  equal under `==/2`.
+  `@compare`'s `using:` (see `PropertyDamage.Equivalence`): its return is a
+  verdict (DR-052), truthy to agree, and `false`, `nil`, `{:fail, "text"}` or
+  `{:fail, exception}` otherwise. Without `using:`, the events must be equal
+  under `==/2`.
   """
 
   alias PropertyDamage.Stutter.Config
@@ -272,14 +272,15 @@ defmodule PropertyDamage.Stutter do
   Compare events from first execution with retry execution under the
   configuration's `using:` predicate.
 
-  Returns `:match`, or `{:mismatch, exception}` (see
-  `PropertyDamage.Equivalence.verdict/3`): a `false` answer is a
+  Returns `:agree`, or `{:disagree, exception}` read from the predicate's
+  verdict by `PropertyDamage.Verdict`: a falsy answer is a
   `PropertyDamage.ComparisonMismatch` with the original events as `left` and
   the retry's as `right`.
   """
   @spec compare_events([struct()], [struct()], Config.t()) ::
-          :match | {:mismatch, Exception.t()}
+          :agree | {:disagree, Exception.t()}
   def compare_events(original_events, retry_events, %Config{} = config) do
-    PropertyDamage.Equivalence.verdict(config.using, original_events, retry_events)
+    config.using.(original_events, retry_events)
+    |> PropertyDamage.Verdict.relation(original_events, retry_events)
   end
 end

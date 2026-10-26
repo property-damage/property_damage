@@ -24,13 +24,13 @@ defmodule PropertyDamage.EquivalenceTest do
     test "is a 2-arity predicate that agrees when the keys are equal" do
       predicate = by_key(&Map.take(&1, [:net]))
       assert is_function(predicate, 2)
-      assert predicate.(%{net: 1, fees: 2}, %{net: 1, fees: 3}) in [:match, true]
+      assert predicate.(%{net: 1, fees: 2}, %{net: 1, fees: 3}) == true
     end
 
     test "returns a mismatch holding the two keys, reference first" do
       predicate = by_key(&Map.take(&1, [:net]))
 
-      assert {:mismatch, detail} = predicate.(%{net: 1, fees: 2}, %{net: 4, fees: 2})
+      assert {:fail, detail} = predicate.(%{net: 1, fees: 2}, %{net: 4, fees: 2})
       assert Compare.mismatch?(detail)
       assert detail.left == %{net: 1}
       assert detail.right == %{net: 4}
@@ -39,12 +39,10 @@ defmodule PropertyDamage.EquivalenceTest do
     test "composes with normalize/1 and drop_keys/2 inside a closure" do
       predicate = by_key(fn v -> v |> normalize() |> drop_keys([:fees]) end)
 
-      assert predicate.({:ok, %{net: 5, fees: 1, id: "a"}}, {:ok, %{net: 5, fees: 2, id: "b"}}) in [
-               :match,
+      assert predicate.({:ok, %{net: 5, fees: 1, id: "a"}}, {:ok, %{net: 5, fees: 2, id: "b"}}) ==
                true
-             ]
 
-      assert {:mismatch, detail} = predicate.(%{net: 5, id: "a"}, %{net: 6, id: "b"})
+      assert {:fail, detail} = predicate.(%{net: 5, id: "a"}, %{net: 6, id: "b"})
       assert {detail.left, detail.right} == {%{net: 5}, %{net: 6}}
     end
   end
