@@ -136,8 +136,10 @@ end
 
 A projection reduces events into state with `apply/2`. Functions tagged
 `@check` are **invariants**: PropertyDamage runs them at the configured points
-and treats a raised exception (via `PropertyDamage.fail!/2`) as a violation. A
-returned value is ignored — an invariant signals failure only by raising.
+and reads the return value as the verdict. A truthy return passes; `nil`,
+`false`, `{:fail, reason}` or a raised exception (via `PropertyDamage.fail!/2`)
+is a violation. `condition or fail!(...)` passes with `true` and fails with a
+message.
 
 Our invariant is the classic bounds property: **no account balance is ever
 negative**. We name it with `@invariant` and link the check with
@@ -183,9 +185,8 @@ defmodule Demo.Bank do
   def assert_balance_non_negative(state, _step) do
     negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
 
-    unless negative == [] do
+    negative == [] or
       PropertyDamage.fail!("account balance went negative", accounts: negative)
-    end
   end
 end
 ```
@@ -563,9 +564,8 @@ defmodule Demo.ChaosBank do
   def assert_balance_non_negative(state, _step) do
     negative = Enum.filter(state.accounts, fn {_id, acct} -> acct.balance < 0 end)
 
-    unless negative == [] do
+    negative == [] or
       PropertyDamage.fail!("account balance went negative", accounts: negative)
-    end
   end
 end
 
