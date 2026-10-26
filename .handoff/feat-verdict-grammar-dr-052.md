@@ -206,6 +206,36 @@ without else, the @eventually never-and-raise changes, and the retired
 
 **Files:** `CHANGELOG.md`
 
+### 2026-10-26T11:57 · commit · a14c438
+
+fix(eventually): keep the raised exception when a predicate raises
+
+A raise inside an @eventually predicate was wrapped in a CheckFailed to
+carry the poll count, so ErrorOrigin classified a bug in the predicate
+as an SUT error. The poller now keeps the raised exception itself, with
+its stacktrace (an exit or a throw becomes an ErlangError holding it).
+The check name and poll count travel beside it: Failure.eventually_failed/1
+builds the check failure with the exception as its detail and the poll
+count and elapsed time in a new Failure.Check context field, and the
+report message names the check and the poll. A {:fail, reason} "never"
+keeps its CheckFailed and stays an SUT error.
+
+**Files:** `lib/property_damage/executor/finalization.ex`, `lib/property_damage/failure.ex`, `lib/property_damage/failure_report.ex`, `lib/property_damage/scheduler.ex`, `lib/property_damage/state_poller.ex`, `lib/property_damage/variant.ex`, `openspec/specs/eventual-consistency/spec.md`, `test/property_damage/eventually_verdict_test.exs`, `test/property_damage/state_poller_test.exs`
+
+### 2026-10-26T11:58 · commit · f9b28b3
+
+docs(changelog): describe the relation verdict in the unreleased DR-046 entries
+
+The :match and {:mismatch, _} relation returns were added and retired
+inside the same unreleased section, so their retirement breaks no 0.2.0
+user. The DR-046 entries for @compare using:, Equivalence and stutter
+using: now describe the final verdict grammar, and the DR-052 BREAKING
+entry keeps only what breaks a 0.2.0 user: the check return verdict,
+the retired idiom's compile error and the @eventually predicate
+semantics.
+
+**Files:** `CHANGELOG.md`
+
 ## Reconstruction
 
 Written when the PR opens, and labeled as such. May extend the Record; may not
