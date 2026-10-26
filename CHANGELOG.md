@@ -475,6 +475,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     gone from the poll-timeout info. Rewrite a predicate that raised before the
     state caught up as a total one (`get_in/2`, `match?/2`, a `case` with a
     fallback).
+  - A `using:` relation that still returns the retired `{:mismatch, detail}`
+    (DR-046) used to agree, because the tuple is truthy; it now disagrees with
+    the same sentence, carrying the value. The reader fails a `@check` or an
+    `@eventually` predicate that returns it the same way. `:match` still agrees.
 - **`latency:` and a non-default `check_mode:` are refused beside `branching:`.**
   A branching run executes one branch at a time on one target through the
   linear engine: it records no latency samples (`latency:` returned
