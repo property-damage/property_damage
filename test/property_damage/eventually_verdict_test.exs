@@ -176,4 +176,32 @@ defmodule PropertyDamage.EventuallyVerdictTest do
     assert %Failure{type: %Failure.Check{kind: :check_failed, name: :payment_confirmed}} =
              report.failure_reason
   end
+
+  test "with two targets under check_mode: :record a raising predicate keeps its poll context" do
+    assert {:error, %PropertyDamage.FailureReport{} = report} =
+             PropertyDamage.run(
+               model: Raising.Model,
+               targets: [{Adapter, name: "a"}, {Adapter, name: "b"}],
+               check_mode: :record,
+               seed: 1,
+               max_commands: 1,
+               max_runs: 1,
+               shrink: false,
+               validate: false
+             )
+
+    assert %Failure{
+             type: %Failure.Check{
+               kind: :check_failed,
+               name: :payment_settled,
+               context: %{poll_count: 1}
+             }
+           } = report.failure_reason
+
+    assert %KeyError{key: :settlements} = exception(report.failure_reason)
+
+    text = FailureReport.failure_message(report)
+    assert text =~ "payment_settled"
+    assert text =~ "poll 1"
+  end
 end
