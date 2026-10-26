@@ -99,3 +99,13 @@ Written when the PR opens, and labeled as such. May extend the Record; may not
 contradict it.
 
 _Not yet written._
+
+## Reconstruction
+
+Written afterwards by the orchestrator from this session's transcript; it extends the Record and never contradicts it.
+
+- The implementer (an Opus agent) worked from the orchestrator's brief; the orchestrator reviewed the diff, reran the gauntlet and the docs gate, and owns this ledger.
+- Brief said: "RED-first for the code change". Transcript, implementer's report: "RED log `evidence/red_amend_mismatch.log`: exit 2, 39/42 passed, 3 failures (the 3 new tests). The relation test failed because the run returned `{:ok, ...}`, which is the silent agreement." That `{:ok, ...}` is the defect the owner witnessed on a consumer.
+- Implementer flag, accepted by the orchestrator: "Grepping `mismatch` alone missed most of the places that list the nudge shapes. I also grepped for `{:error, _}` and `bare exception`, then updated 4 guides, the moduledocs in equivalence.ex and model/projection.ex, and 3 OpenSpec specs." Those edits ride in the first commit.
+- Implementer flag, ruled by the orchestrator: the CHANGELOG lead sentence still listed two shapes; ruling "extend the lead sentence ... so it lists the three nudge shapes", which became the fifth commit. The added OpenSpec AND line ("a relation that still returns `{:mismatch, detail}` SHALL disagree with the grammar nudge") was kept.
+- Implementer note: the worktree had no `deps/`; it copied the gitignored `deps/` from the main checkout after confirming the two `mix.lock` files were byte-identical. No dependency changed.
