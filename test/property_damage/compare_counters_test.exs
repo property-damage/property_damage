@@ -119,18 +119,23 @@ defmodule PropertyDamage.CompareCountersTest do
     assert counts[never] == %{compared_at: 0, waited_at: 0, waited_ms: 0}
   end
 
-  test "the report prints one line per key", ctx do
+  test "the JSON export holds one count per key, and the report prints the failing key's wait",
+       ctx do
+    # The printed report shows the wait of the observation that failed (DR-055);
+    # the counts of every key are in the export.
     {totals, paid, never} = keys(ctx)
-    lines = ctx |> failed_report() |> Compare.text() |> String.split("\n")
+    report = failed_report(ctx)
+    exported = report |> Persistence.export_json() |> Jason.decode!()
 
     for {projection, function} <- [totals, paid, never] do
       label = "#{inspect(projection)}.#{function}"
 
-      assert Enum.any?(lines, fn line ->
-               String.contains?(line, label) and line =~ ~r/compared/i and line =~ ~r/waited/i
-             end),
-             "no counts line for #{label}"
+      assert %{"compared_at" => _, "waited_at" => _, "waited_ms" => _} =
+               exported["compare_counts"][label]
     end
+
+    assert Compare.text(report) =~
+             ~r/^Compared\s+using ==, still differing after \d+ ms \(bound 300 ms\)$/m
   end
 
   @tag :tmp_dir

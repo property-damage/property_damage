@@ -151,7 +151,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
       assert report.kind == :diverged
       using = {PropertyDamage.Test.Compare, :settled_within, [1]}
       assert Map.fetch!(report.failure_reason.type, :using) == using
-      assert Compare.text(report) =~ ~r/Using:\s+#{Regex.escape(inspect(using))}/
+      assert Compare.text(report) =~ ~r/^Compared\s+using #{Regex.escape(inspect(using))}, /m
     end
 
     test "without using:, the report names == as the relation", ctx do
@@ -161,7 +161,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
                )
 
       assert Map.fetch!(report.failure_reason.type, :using) == nil
-      assert Compare.text(report) =~ ~r/Using:\s+== \(no using:\)/
+      assert Compare.text(report) =~ ~r/^Compared\s+using ==, /m
     end
 
     test "the mismatch is detail: different mismatch texts at one key are one failure", ctx do

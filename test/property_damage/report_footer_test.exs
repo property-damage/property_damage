@@ -111,11 +111,11 @@ defmodule PropertyDamage.ReportFooterTest do
       report = failing(two(), max_commands: @max_commands)
 
       assert R.last_lines(report, 5) == [
-               FailureReport.reproduction_command(report),
-               "Regenerate the failing variant:",
-               expansion_command(report),
-               "Replay the shrunk failure:",
-               replay_command(report)
+               R.printed(report, FailureReport.reproduction_command(report)),
+               "# Regenerate the failing variant:",
+               R.printed(report, expansion_command(report)),
+               "# Replay the shrunk failure:",
+               R.printed(report, replay_command(report))
              ]
     end
 
@@ -123,13 +123,13 @@ defmodule PropertyDamage.ReportFooterTest do
       report = failing(two(), max_commands: @max_commands, replay_dir: false)
 
       assert [regenerate, _call, label, last] = R.last_lines(report, 4)
-      assert regenerate == "Regenerate the failing variant:"
-      assert label == "Replay the shrunk failure:"
+      assert regenerate == "# Regenerate the failing variant:"
+      assert label == "# Replay the shrunk failure:"
       assert last =~ "replay_dir: false"
       refute last =~ "only: [replay:"
     end
 
-    test "prints an identity reached by shrinking as such beside the failing root" do
+    test "prints an identity reached by shrinking as such on the failing root's line" do
       refund = %F.Refund{amount: 10}
       sequence = Sequence.linear([refund])
 
@@ -165,7 +165,16 @@ defmodule PropertyDamage.ReportFooterTest do
           seed: 1,
           run_number: 0,
           failed_at_index: 0,
-          failure_reason: Failure.check_failed(:refund_total, "totals differ"),
+          failure_reason:
+            Failure.diverged(%{
+              key: {@model, :refund_total},
+              root: 0,
+              command: refund,
+              reference_value: 10,
+              variant_value: 11,
+              mismatch: nil
+            }),
+          reference_result: %{event_log: [], executed: %{}, command_fold_ordinals: %{}},
           original_sequence: sequence,
           shrunk_sequence: sequence,
           model: @model,
@@ -174,10 +183,16 @@ defmodule PropertyDamage.ReportFooterTest do
           expansion: expansion
         )
 
-      lines = report |> R.text() |> String.split("\n") |> Enum.map(&String.trim/1)
+      text = R.text(report)
+      [_, reference, variant] = String.split(text, ~r/^(Reference|Variant): target .*$/m)
 
-      assert "ref (reference): Refund (identity, by shrinking)" in lines
-      assert "second: Refund[1] = [Credit, Credit]" in lines
+      # The reference ran the root as itself, the variant as its leaves.
+      assert reference =~
+               ~r/^► \[0\] %.*Refund\{amount: 10\}  as itself \(identity, by shrinking\)/m
+
+      assert variant =~ ~r/^► \[0\] %.*Refund\{amount: 10\}  as Refund\[1\]/m
+      assert variant =~ ~r/^    \[0\.0\] %.*Credit\{/m
+      assert variant =~ ~r/^    \[0\.1\] %.*Credit\{/m
     end
   end
 

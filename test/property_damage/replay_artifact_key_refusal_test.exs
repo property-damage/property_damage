@@ -72,7 +72,7 @@ defmodule PropertyDamage.ReplayArtifactKeyRefusalTest do
     assert {:refused, %{target: "second", root: 0, leaf: 0, field: field}} = report.replay
 
     [label, last] = R.last_lines(report, 2)
-    assert label == "Replay the shrunk failure:"
+    assert label == "# Replay the shrunk failure:"
     assert last =~ "refused"
     assert last =~ "payload"
     assert last =~ "[key "

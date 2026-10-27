@@ -43,11 +43,11 @@ defmodule PropertyDamage.ReplayWitnessTest do
     assert replay_call =~ "only: [replay: #{inspect(path)}]"
 
     assert R.last_lines(report, 5) == [
-             FailureReport.reproduction_command(report),
-             "Regenerate the failing variant:",
-             expansion_call,
-             "Replay the shrunk failure:",
-             replay_call
+             R.printed(report, FailureReport.reproduction_command(report)),
+             "# Regenerate the failing variant:",
+             R.printed(report, expansion_call),
+             "# Replay the shrunk failure:",
+             R.printed(report, replay_call)
            ]
 
     # Replaying the artifact reproduces the failure at the same root.

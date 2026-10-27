@@ -115,19 +115,25 @@ defmodule PropertyDamage.ExpansionReportTest do
                report |> expansions("beta") |> Enum.at(report.failed_at_index)
     end
 
-    test "the terminal report prints beside the failing root the entry each variant ran" do
+    test "the terminal report names on the failing root's line the entry each side ran" do
       {report, _entries} = diverged_report()
-      lines = report |> Formatter.format(:terminal, color: false) |> String.split("\n")
+      root = report.failed_at_index
+      text = Formatter.format(report, :terminal, color: false)
 
-      alpha = report |> expansions("alpha") |> Enum.at(report.failed_at_index) |> entry_text()
-      beta = report |> expansions("beta") |> Enum.at(report.failed_at_index) |> entry_text()
-      assert beta == "Refund[1] = [Credit, Credit]"
+      alpha = report |> expansions("alpha") |> Enum.at(root)
+      beta = report |> expansions("beta") |> Enum.at(root)
+      assert entry_text(alpha) == "Refund[0] = [Refund]"
+      assert entry_text(beta) == "Refund[1] = [Credit, Credit]"
 
-      assert Enum.any?(lines, &(&1 =~ "alpha" and &1 =~ alpha and &1 =~ ~r/reference/i)),
-             "no line names alpha's entry #{alpha} as the reference's"
+      [_, reference, variant] = String.split(text, ~r/^(Reference|Variant): target .*$/m)
+      assert text =~ ~s(Reference: target "alpha") and text =~ ~s(Variant: target "beta")
 
-      assert Enum.any?(lines, &(&1 =~ "beta" and &1 =~ beta)),
-             "no line names beta's entry #{beta}"
+      # Each side's failing root line names the entry it ran; beta's leaves follow it.
+      assert reference =~ ~r/^► \[#{root}\] .*  as Refund\[0\]  ◄── diverged$/m
+      assert variant =~ ~r/^► \[#{root}\] .*  as Refund\[1\]  ◄── diverged$/m
+
+      assert variant =~
+               ~r/^    \[#{root}\.0\] %.*Credit\{.*\n(.*\n)*    \[#{root}\.1\] %.*Credit\{/m
     end
 
     @tag :tmp_dir
@@ -163,8 +169,10 @@ defmodule PropertyDamage.ExpansionReportTest do
       assert step.position == X.call(Position, :leaf, [root, 1])
       assert X.call(Position, :describe, [step.position]) == "leaf 1 of root #{root}"
 
+      # The report labels the leaf under the root it belongs to.
       formatted = Formatter.format(report, :terminal, color: false)
-      assert formatted =~ "leaf 1 of root #{root}"
+      assert formatted =~ ~r/^At\s+\[#{root}\.1\] %.*Credit\{/m
+      assert formatted =~ ~r/^►\s+\[#{root}\.1\] %.*Credit\{.*◄── failed$/m
     end
 
     test "progress printing names the leaf" do

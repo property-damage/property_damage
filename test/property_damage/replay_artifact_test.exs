@@ -281,7 +281,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
       assert R.files(dir) == []
 
       assert [label, last] = R.last_lines(report, 2)
-      assert label == "Replay the shrunk failure:"
+      assert label == "# Replay the shrunk failure:"
       assert last =~ "replay_dir: false"
     end
   end
@@ -313,7 +313,7 @@ defmodule PropertyDamage.ReplayArtifactTest do
         assert R.files(dir) == []
 
         assert [label, last] = R.last_lines(report, 2)
-        assert label == "Replay the shrunk failure:"
+        assert label == "# Replay the shrunk failure:"
         assert last =~ "refused"
         assert last =~ "payload"
       end

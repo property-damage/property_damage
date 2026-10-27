@@ -220,9 +220,10 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert waited >= 100
 
       text = Compare.text(report)
-      assert text =~ ~r/did not converge within 100 ?ms at root 1 in variant "?b"?/
-      assert text =~ "waited"
-      assert text =~ Integer.to_string(waited)
+      assert text =~ ~r/^Failure\s+did not converge$/m
+      assert text =~ ~r/^At\s+\[1\] /m
+      assert text =~ ~r/^Variant\s+"b"\s+still pending: \{:unsettled, \[1\]\}$/m
+      assert text =~ ~r/^Compared\s+using ==, still pending after #{waited} ms \(bound 100 ms\)$/m
     end
 
     test "ready sides that still differ diverged, carrying the mismatch", ctx do
@@ -297,8 +298,8 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert Map.fetch!(pending.type, :reason) == [1]
 
       text = inspect(report, pretty: true)
-      assert text =~ "#{inspect(key(ctx, :keyed, :totals) |> elem(0))}.totals"
-      assert text =~ "did not converge within 100 ms at root 1"
+      totals = "#{inspect(key(ctx, :keyed, :totals) |> elem(0))}.totals"
+      assert text =~ ~r/^Also differed\s+#{Regex.escape(totals)}\s+"b" still pending: \[1\]$/m
     end
 
     test "the further keys of a comparison failure that is not the primary failure are printed too",
@@ -319,11 +320,12 @@ defmodule PropertyDamage.CompareConvergenceTest do
       assert [%{failure: pending}] = Map.fetch!(diverged.failure.type, :other_keys)
       assert Failure.name(pending) == key(ctx, :keyed_checked, :totals)
 
-      [_before, other_failures] =
-        String.split(inspect(report, pretty: true), "Other Failures In This Run")
+      [failure | _] = String.split(inspect(report, pretty: true), "## Minimal Reproduction")
+      [_before, other_failure] = String.split(failure, ~r/^Other failure\s+diverged/m, parts: 2)
 
-      assert other_failures =~ "Also disagreed"
-      assert other_failures =~ "did_not_converge"
+      assert other_failure =~ "also differed"
+      assert other_failure =~ "#{inspect(key(ctx, :keyed_checked, :totals) |> elem(0))}.totals"
+      assert other_failure =~ "still pending"
     end
   end
 

@@ -405,7 +405,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
 
       for format <- [:terminal, :markdown, :json] do
         text = FailureReport.Formatter.format(report, format)
-        assert text =~ "Latency Exceeded"
+        assert text =~ ~r/Latency Exceeded|latency exceeded/
         assert text =~ "p95 max_ratio:"
       end
 

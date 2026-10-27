@@ -54,8 +54,7 @@ defmodule PropertyDamage.OtherFailuresReportTest do
 
     for format <- [:terminal, :markdown] do
       text = Formatter.format(report, format, color: false)
-      assert text =~ "Other Failures In This Run"
-      assert text =~ ~s[adapter_error in target "b" (index 1) at root 4]
+      assert text =~ ~r/^Other failure\s+adapter error in target "b" \(index 1\) at root 4/m
       refute text =~ ~s[in target "c" (index 2) at root 2]
     end
   end
