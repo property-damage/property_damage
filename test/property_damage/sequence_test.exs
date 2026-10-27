@@ -3,6 +3,8 @@ defmodule PropertyDamage.SequenceTest do
 
   alias PropertyDamage.Sequence
 
+  doctest PropertyDamage.Sequence.Position
+
   # Mock command structs for testing
   defmodule Cmd1, do: defstruct([:id])
   defmodule Cmd2, do: defstruct([:id])
@@ -132,6 +134,36 @@ defmodule PropertyDamage.SequenceTest do
 
       for {position, command_index, branch_id} <- cases do
         assert Sequence.position_at(seq, command_index, branch_id) == position
+      end
+    end
+  end
+
+  describe "Position.label/2" do
+    alias PropertyDamage.Sequence.Position
+
+    test "every command of a branching sequence gets a distinct label" do
+      # The suffix command follows the prefix and the three branch commands.
+      seq =
+        Sequence.branching([%Cmd1{id: 0}], [[%Cmd2{id: 1}, %Cmd2{id: 2}], [%Cmd3{id: 3}]], [
+          %Cmd1{id: 4}
+        ])
+
+      labels =
+        for {position, index, _cmd} <- Sequence.indexed(seq), do: Position.label(position, index)
+
+      assert labels == ["[0]", "[branch 0.0]", "[branch 0.1]", "[branch 1.0]", "[4]"]
+    end
+
+    test "a leaf is labeled by the index of the root it is listed under, not its generated id" do
+      # The root was generated at index 2 and printed at index 0 after a shrink.
+      assert Position.label(Position.leaf(2, 0), 0) == "[0.0]"
+      assert Position.label(Position.leaf(2, 1), 0) == "[0.1]"
+    end
+
+    test "a suffix or leaf position without its root raises an ArgumentError naming the root" do
+      # Neither label can be printed without the root's reading-order index.
+      for position <- [Position.suffix(0), Position.leaf(2, 1)] do
+        assert_raise ArgumentError, ~r/root/, fn -> Position.label(position) end
       end
     end
   end

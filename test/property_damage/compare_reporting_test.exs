@@ -72,8 +72,7 @@ defmodule PropertyDamage.CompareReportingTest do
     for reason <- [diverged(), did_not_converge()] do
       report = report(reason)
 
-      assert Formatter.format(report, :markdown) =~ "Did Not Converge" or
-               Formatter.format(report, :markdown) =~ "Divergence"
+      assert Formatter.format(report, :markdown) =~ ~r/^Failure\s+(did not converge|diverged)$/m
 
       assert Jason.decode!(Formatter.format(report, :json))["failure"]["check_name"] == @label
       assert is_binary(Formatter.format(report, :compact))

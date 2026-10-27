@@ -501,6 +501,14 @@ defmodule PropertyDamage.Test.ReplayFixtures do
   # `PropertyDamage.FailureReport.expansion_command(report)`.
   def expansion_command(report), do: call(failure_report_module(), :expansion_command, [report])
 
+  @doc false
+  # `call` as the printed report shows it: the report binds its targets once
+  # (`targets = [...]`) and every call names `targets: targets`.
+  def printed(report, call) do
+    source = call(failure_report_module(), :targets_source, [report])
+    String.replace(call, "targets: " <> source, "targets: targets")
+  end
+
   defp failure_report_module, do: Module.concat([PropertyDamage, "FailureReport"])
 
   # A call into a function that may not exist yet.

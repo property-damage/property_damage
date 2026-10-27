@@ -80,7 +80,9 @@ defmodule PropertyDamage.Failure.Divergence do
   difference (by default a `PropertyDamage.ComparisonMismatch`). `using` is
   the observation's `using:` term as written (`:fun`, `{Mod, :fun}` or
   `{Mod, :fun, args}`, DR-051), `nil` when the values were compared under
-  `==`.
+  `==`. `waited_ms` is how long the comparison waited at the boundary and
+  `within_ms` the convergence bound it waited against; both are `nil` on a
+  divergence saved before they were recorded.
 
   `other_keys` lists every further observation compared at the same boundary
   that still differed or was still pending when the bound expired, in key
@@ -97,6 +99,8 @@ defmodule PropertyDamage.Failure.Divergence do
           variant_value: term(),
           mismatch: Exception.t() | nil,
           using: atom() | {module(), atom()} | {module(), atom(), list()} | nil,
+          waited_ms: non_neg_integer() | nil,
+          within_ms: pos_integer() | nil,
           other_keys: [PropertyDamage.Failure.other_key()]
         }
 
@@ -108,6 +112,8 @@ defmodule PropertyDamage.Failure.Divergence do
     :variant_value,
     :mismatch,
     :using,
+    :waited_ms,
+    :within_ms,
     other_keys: []
   ]
 end
@@ -284,7 +290,7 @@ defmodule PropertyDamage.Failure do
 
   | kind | name | detail |
   |------|------|--------|
-  | `:diverged` | the observation's `{projection, function}` key | `%{key:, root:, command:, reference_value:, variant_value:, mismatch:, other_keys:}` |
+  | `:diverged` | the observation's `{projection, function}` key | `%{key:, root:, command:, reference_value:, variant_value:, mismatch:, using:, waited_ms:, within_ms:, other_keys:}` |
 
   ### `Failure.Convergence` - a boundary observation stayed pending
 
@@ -571,7 +577,8 @@ defmodule PropertyDamage.Failure do
   A variant's boundary observation differed from the reference's at the
   convergence bound. `fields` holds `:key`, `:root`, `:command`,
   `:reference_value`, `:variant_value` and `:mismatch`, and optionally
-  `:using` and `:other_keys` (see `PropertyDamage.Failure.Divergence`).
+  `:using`, `:waited_ms`, `:within_ms` and `:other_keys` (see
+  `PropertyDamage.Failure.Divergence`).
   """
   @spec diverged(map()) :: t()
   def diverged(fields) do

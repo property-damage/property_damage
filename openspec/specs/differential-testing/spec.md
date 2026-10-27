@@ -63,7 +63,7 @@ The framework SHALL compare the targets of a run only through the boundary obser
 
 - **WHEN** a boundary observation diverges at the convergence bound
 - **THEN** the `:diverged` failure (`PropertyDamage.Failure.Divergence`) SHALL carry the observation's `using:` term as written (`{PropertyDamage.Equivalence, :within, [0.01]}`), `nil` when the values were compared under `==`
-- **AND** the failure report SHALL print the term beside the two values
+- **AND** the failure report SHALL print the term on its `Compared` line, under the two values (DR-056)
 - **AND** the persistence format version SHALL stay 15 while 15 is unreleased
 
 #### Scenario: A raise is a check failure
@@ -112,6 +112,7 @@ Vocabulary: *settle* is one system catching up with itself per adapter call (the
 
 - **WHEN** no side is pending and the sides still differ when the bound expires
 - **THEN** the framework SHALL report a failure of kind `:diverged` carrying the key, the root, the reference value, the variant value and the mismatch
+- **AND** the failure SHALL carry `waited_ms`, the time the comparison waited at the boundary, and `within_ms`, the bound it waited against, and the report SHALL state both (DR-055, DR-056)
 
 #### Scenario: A probe root is re-read
 
@@ -143,7 +144,7 @@ Vocabulary: *settle* is one system catching up with itself per adapter call (the
 
 ### Requirement: Boundary Counters (DR-046)
 
-For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the reporter SHALL print them. A shrunk failure report SHALL carry the counts of the reproduction of its shrunk sequence, from `run/1` and from `shrink_further/2`.
+For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the JSON export of a report SHALL hold them; the printed report SHALL show the wait of the failing observation only (DR-055). A shrunk failure report SHALL carry the counts of the reproduction of its shrunk sequence, from `run/1` and from `shrink_further/2`.
 
 #### Scenario: Counters of a passing run
 
@@ -199,7 +200,8 @@ The budget SHALL be judged once, at campaign end, on the aggregates of the measu
 #### Scenario: An absolute bound
 
 - **WHEN** a target's `p95` exceeds `max: {n, unit}`
-- **THEN** the report SHALL have kind `:latency_exceeded`, name the target, the statistic, the measured value and the limit
+- **THEN** the report SHALL have kind `:latency_exceeded`, name the target in `variant`, and carry the statistic, the measured value and the limit
+- **AND** the printed Failure section SHALL show the statistic, the bound, the limit and the measured value, and a `Target` field only in a run of several targets (DR-056)
 - **AND** this SHALL hold for the reference and for a run with one target
 
 #### Scenario: A ratio bound
@@ -451,6 +453,7 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 - **WHEN** a run ends with failures in more than one variant
 - **THEN** `report.other_failures` SHALL list each failure other than the primary with its variant, its root and its `%Failure{}`
 - **AND** the terminal, markdown and JSON formats SHALL show them
+- **AND** the terminal and markdown formats SHALL print one `Other failure` field per failure, naming its kind, name and target once and its root only when it has one; a comparison failure SHALL print its two values as an `Also differed` line does, and no `left:`/`right:` text (DR-056)
 
 ### Requirement: Per-Target Injectors, Mocks and Pollers in Multi-Target Runs (DR-044)
 

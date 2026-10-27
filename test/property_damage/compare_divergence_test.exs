@@ -130,6 +130,18 @@ defmodule PropertyDamage.CompareDivergenceTest do
       assert text =~ "ledger-new"
     end
 
+    test "records how long the comparison waited and the bound it waited against", ctx do
+      # The comparison waits until the bound expires, so it waited at least the bound.
+      assert {:error, report} =
+               Compare.run(model!(ctx, :ledger), b_at(1, {:sync, 1}),
+                 compare: [converge_within: 40]
+               )
+
+      divergence = report.failure_reason.type
+      assert Map.fetch!(divergence, :within_ms) == 40
+      assert Map.fetch!(divergence, :waited_ms) >= 40
+    end
+
     test "carries the using: term as written, and the report prints it", ctx do
       assert {:error, report} =
                Compare.run(model!(ctx, :tolerant), b_at(1, {:sync, 2}),
@@ -139,7 +151,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
       assert report.kind == :diverged
       using = {PropertyDamage.Test.Compare, :settled_within, [1]}
       assert Map.fetch!(report.failure_reason.type, :using) == using
-      assert Compare.text(report) =~ ~r/Using:\s+#{Regex.escape(inspect(using))}/
+      assert Compare.text(report) =~ ~r/^Compared\s+using #{Regex.escape(inspect(using))}, /m
     end
 
     test "without using:, the report names == as the relation", ctx do
@@ -149,7 +161,7 @@ defmodule PropertyDamage.CompareDivergenceTest do
                )
 
       assert Map.fetch!(report.failure_reason.type, :using) == nil
-      assert Compare.text(report) =~ ~r/Using:\s+== \(no using:\)/
+      assert Compare.text(report) =~ ~r/^Compared\s+using ==, /m
     end
 
     test "the mismatch is detail: different mismatch texts at one key are one failure", ctx do

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A divergence records how long it waited (DR-055).** `Failure.Divergence`
+  gains `waited_ms`, how long the comparison waited at the boundary, and
+  `within_ms`, the convergence bound it waited against, as
+  `Failure.Convergence` already had. The report prints both, so a reader can
+  tell a real disagreement from a bound set too tight. A version-15 file saved
+  before the fields existed loads with each of them `nil`; the persistence
+  format stays at version 15.
 - **`PropertyDamage.Equivalence.within/3`, a tolerance (DR-051).**
   `@compare using: {PropertyDamage.Equivalence, :within, [0.01]}` agrees when
   two numbers differ by at most `0.01`, at every depth of maps, lists and
@@ -16,8 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first relation that takes data through `{Mod, :fun, args}`.
 - **A divergence records its relation (DR-051).** `Failure.Divergence` carries
   the observation's `using:` term as written in a new `using` field (`nil`
-  under `==`), and the printed report shows it on a `Using:` line beside the
-  two values. The persistence format stays at version 15.
+  under `==`), and the printed report shows it in the Failure section's
+  `Compared` field, under the two values (DR-056). The persistence format
+  stays at version 15.
 - **Every observation that disagrees at the convergence bound is reported.**
   The first disagreeing `@compare` key in declaration order still names the
   `:diverged` or `:did_not_converge` failure; every further key that differed or
@@ -54,8 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PropertyDamage.Verdict.read/1` reads a relation's return with the grammar
   shared with `@check` and `@eventually` (DR-052).
 - **Boundary counters (DR-046).** `compare_counts` on `stats` and the failure
-  report holds `compared_at`, `waited_at` and `waited_ms` per `@compare` key. The
-  reporter prints it, and persistence stores it.
+  report holds `compared_at`, `waited_at` and `waited_ms` per `@compare` key.
+  `Persistence.export_json/1` writes the counts and persistence stores them;
+  the printed report shows only the failing observation's wait (DR-056).
 - **`latency: true` (DR-046).** Measures each target's latency per command
   (`p50`, `p95`, `p99`, `mean`, `min`, `max`, `commands` and `by_command`).
   Requires `concurrency: :serial`. DR-047 adds `warmup:` and a budget.
@@ -415,6 +424,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `only: [replay: path]` call is the last line.
 
 ### Changed
+
+- **BREAKING (DR-055, DR-056): the terminal and markdown reports print one
+  layout.** A report opens with a banner of one width (`BUG DETECTED!` or
+  `TEST CODE ERROR`) and `Seed: <seed>`, then four sections. Failure names the
+  failure, the step and the fields of its kind in one aligned column; a
+  comparison prints both values, the relation and the wait against the bound,
+  and `Mismatch` only for a relation's own reason. Minimal Reproduction counts
+  roots, lists the reference and the variant of a comparison failure, and
+  prints each step's events under it with an offset. Projections prints full
+  states attribute by attribute, reference against variant at the failing
+  boundary or before against after the failing step. Reproduction binds
+  `targets = [...]` once, every call names `targets: targets`, and a line
+  names each pid, reference, port or function the list holds. Every step has
+  one label in every section (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`,
+  `[branch b.i]`), from the new `Sequence.Position.label/2`. The markdown
+  report is the terminal text without color, each section's body in a fenced
+  block. Run Number, Command Index, Timestamp, State Transition, Event Log,
+  Boundary Comparisons, Shrinking Statistics and Original Sequence are no
+  longer printed; the JSON format keeps every field. `Formatter.format/3`
+  no longer reads `:show_event_log`, `:show_state`, `:show_original`,
+  `:max_events` or `:max_commands`: every step and every event prints.
 
 - **BREAKING (DR-051): `using:` names the relation, and `@compare` is a plain
   attribute.** `use PropertyDamage.Model.Projection` no longer replaces
@@ -1030,7 +1060,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The timeline honors `color: false`.** `FailureReport.Timeline` reset its
   colors with an escape sequence that ignored the option, so plain output
   carried `\e[0m` after every colored span.
-- **The printed Event Log names every event source.** An event a resource
+- **The printed report names every event source.** An event a resource
   poller delivered, a telemetry receiver derived or an adapter injected
   mid-execution printed with a `???` badge in the terminal report and the
   timeline. They print as `POL`, `TEL` and `EMT`, from one badge table both

@@ -105,4 +105,52 @@ defmodule PropertyDamage.Sequence.Position do
   def describe(%__MODULE__{section: :setup, offset: i}), do: "setup position #{i}"
   def describe(%__MODULE__{section: :teardown, offset: i}), do: "teardown position #{i}"
   def describe(%__MODULE__{section: {:leaf, r}, offset: i}), do: "leaf #{i} of root #{r}"
+
+  @doc """
+  The label the failure report prints for the command at `position` (DR-055,
+  DR-056).
+
+  A root is `[i]`, a leaf `[i.j]` under its root, a branch command
+  `[branch b.i]`, and a setup or teardown command `[setup i]` or
+  `[teardown i]`. Every index counts from 0.
+
+  `root` is the reading-order index (see `PropertyDamage.Sequence.indexed/1`)
+  of the root the command is or belongs to. A leaf needs it, because its
+  position names the root by its index as generated, which shrinking does not
+  renumber: a leaf of the root printed as `[0]` is `[0.1]`, never `[2.1]`. A
+  suffix command needs it too: a suffix command is labeled by its reading-order
+  index, which follows the prefix and every branch command, so its label never
+  equals a prefix command's. Without `root`, a leaf or suffix position raises
+  an `ArgumentError`. The other sections ignore `root`.
+
+      iex> alias PropertyDamage.Sequence.Position
+      iex> Position.label(Position.prefix(1))
+      "[1]"
+      iex> Position.label(Position.leaf(2, 1), 0)
+      "[0.1]"
+      iex> Position.label(Position.branch(0, 1))
+      "[branch 0.1]"
+      iex> Position.label(Position.suffix(0), 4)
+      "[4]"
+      iex> Position.label(Position.setup(1))
+      "[setup 1]"
+      iex> Position.label(Position.teardown(0))
+      "[teardown 0]"
+  """
+  @spec label(t(), non_neg_integer() | nil) :: String.t()
+  def label(position, root \\ nil)
+  def label(%__MODULE__{section: :prefix, offset: i}, _root), do: "[#{i}]"
+  def label(%__MODULE__{section: {:branch, b}, offset: i}, _root), do: "[branch #{b}.#{i}]"
+  def label(%__MODULE__{section: :setup, offset: i}, _root), do: "[setup #{i}]"
+  def label(%__MODULE__{section: :teardown, offset: i}, _root), do: "[teardown #{i}]"
+
+  def label(%__MODULE__{section: :suffix}, root) when is_integer(root), do: "[#{root}]"
+
+  def label(%__MODULE__{section: {:leaf, _id}, offset: j}, root) when is_integer(root),
+    do: "[#{root}.#{j}]"
+
+  def label(%__MODULE__{} = position, nil) do
+    raise ArgumentError,
+          "the label of #{describe(position)} needs the reading-order index of its root"
+  end
 end
