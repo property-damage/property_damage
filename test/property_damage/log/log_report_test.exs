@@ -69,7 +69,9 @@ defmodule PropertyDamage.Log.ReportTest do
     Agent.update(agent, fn _ -> "agent value after the run" end)
 
     text = F.plain(report)
-    assert [string, value, read, raised, stopped] = text |> F.listing(nil) |> F.block("[0]")
+
+    assert [string, value, read, raised, stopped] =
+             text |> F.listing(nil) |> F.block("[0]") |> F.logs()
 
     assert string.message == "a plain string"
     assert F.entry_text(value) =~ ~s(account: "alice")
@@ -81,7 +83,8 @@ defmodule PropertyDamage.Log.ReportTest do
 
     assert F.plain(report) == text, "formatting twice changed the text"
 
-    colored = report |> F.colored() |> F.strip_ansi() |> F.listing(nil) |> F.block("[0]")
+    colored =
+      report |> F.colored() |> F.strip_ansi() |> F.listing(nil) |> F.block("[0]") |> F.logs()
 
     assert Enum.map(colored, &F.entry_text/1) ==
              Enum.map([string, value, read, raised, stopped], &F.entry_text/1)
