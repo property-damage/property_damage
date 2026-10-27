@@ -42,6 +42,9 @@ defmodule PropertyDamage.Test.LogFixtures do
   #   {:log, message}            PropertyDamage.log(message)
   #   {:log_http_url, message}   ... tags: [:http, :url]
   #   {:log_http, message}       ... tags: [:http]
+  #   {:log_http_headers, message}  ... tags: [:http, :headers]
+  #   {:log_http_body, message}  ... tags: [:http, :body]
+  #   {:log_seed, message}       ... tags: [:seed]
   #   {:sleep, ms}
   #   {:inject, note}            runtime.inject.(%Injected{n, by, note})
   #   {:nested, message}         a Task that starts a Task that logs
@@ -601,6 +604,15 @@ defmodule PropertyDamage.Test.LogFixtures do
     defp act({:log_http, message}, _n, _ctx, _runtime),
       do: PropertyDamage.log(message, tags: [:http])
 
+    defp act({:log_http_headers, message}, _n, _ctx, _runtime),
+      do: PropertyDamage.log(message, tags: [:http, :headers])
+
+    defp act({:log_http_body, message}, _n, _ctx, _runtime),
+      do: PropertyDamage.log(message, tags: [:http, :body])
+
+    defp act({:log_seed, message}, _n, _ctx, _runtime),
+      do: PropertyDamage.log(message, tags: [:seed])
+
     defp act({:sleep, ms}, _n, _ctx, _runtime), do: Process.sleep(ms)
 
     defp act({:inject, note}, n, ctx, runtime),
@@ -853,6 +865,34 @@ defmodule PropertyDamage.Test.LogFixtures do
       other -> flunk("expected a failure report, got: #{inspect(other, limit: 12)}")
     end
   end
+
+  @doc false
+  # The script of the tag-filter tests: step `[0]` logs one line per tag set,
+  # in this order. The hidden messages are unmistakable in any output.
+  def filter_script do
+    %{
+      0 => [
+        {:log, "plain line"},
+        {:log_http, "GET /a"},
+        {:log_http_headers, "accept: json"},
+        {:log_http_body, "BODY-HIDDEN"},
+        {:log_seed, "SEED-HIDDEN"}
+      ]
+    }
+  end
+
+  @doc false
+  # The report of one `alice` target that logs `filter_script/0` and fails at
+  # command 1. `config` is merged into the target's config.
+  def filter_report!(extra \\ [], config \\ %{}) do
+    config = Map.merge(%{quiet: true, fail_at: 1, script: filter_script()}, config)
+    report!(Model, [target("alice", config)], extra)
+  end
+
+  @doc false
+  # The shown lines of step `[0]` in the printed `text`: each line's message,
+  # each gap as `{:gap, text}`.
+  def step_zero_shown(text), do: text |> listing(nil) |> block("[0]") |> shown_logs()
 
   @doc false
   # Calls a function that may not exist yet.
