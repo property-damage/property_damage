@@ -10,10 +10,10 @@ defmodule PropertyDamage.Log do
 
       require PropertyDamage
 
-      def execute(%Transfer{} = cmd, %{client: client}, _runtime) do
+      def execute(%Transfer{amount: amount}, _user_context, _runtime) do
         PropertyDamage.log("POST /transfers", tags: [:http, :url])
-        PropertyDamage.log(cmd, tags: [:http, :body])
-        ...
+        PropertyDamage.log(%{amount: amount}, tags: [:http, :body])
+        {:ok, [%Transferred{amount: amount}]}
       end
 
   ## Scopes

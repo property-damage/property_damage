@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Log lines in the failure report (DR-054).** `PropertyDamage.log/2`, a
+  macro behind `require PropertyDamage`, writes a line that the failure
+  report prints under the step that wrote it. The line sits in timestamp
+  order with that step's events, as `+0.12s log   [http url] POST /transfers`.
+  - A string prints as written. Any other value is inspected when the report
+    is formatted, and a 0-arity function is called then.
+  - `tags:` is the only option, a literal list of atoms.
+  - Every phase that runs user code is a scope: the adapter's `setup/1` and
+    `teardown/1`, every command, every settle and stutter attempt, a
+    nemesis's `inject/2` and `restore/2`, and injector and mock setup. A
+    `Task` the adapter starts logs to its step. A call outside any scope
+    raises `PropertyDamage.Log.NoScopeError`, which the report classifies as
+    a test code error.
+  - `PropertyDamage.Runtime.log/3` writes to the same place from a process
+    that has no scope, such as a `GenServer`.
+  - A timeout that kills `execute/3` loses no line written before it.
+  - Lines live only in memory: only the reported run keeps them, and no saved
+    report, saved trace or replay artifact holds one. The `:json` and
+    `:compact` formats are unchanged.
+  - `benches/cachex_bench` logs its cache calls.
+
 - **A divergence records how long it waited (DR-055).** `Failure.Divergence`
   gains `waited_ms`, how long the comparison waited at the boundary, and
   `within_ms`, the convergence bound it waited against, as
@@ -424,6 +445,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `only: [replay: path]` call is the last line.
 
 ### Changed
+
+- **`%PropertyDamage.Runtime{}` gains `log` (DR-054, amending DR-027).** It
+  holds the function that writes a log line under the command, which
+  `PropertyDamage.Runtime.log/3` calls; it defaults to `nil` on a hand-built
+  runtime.
+- **`RunTrace` gains `logs`, and `RunTrace.Step` gains `logs` (DR-054).**
+  `RunTrace.logs` maps a step's `Sequence.Position` (or `:adapter_setup` and
+  `:adapter_teardown`) to its log lines. `Step.logs` holds the step's lines.
+  `RunTrace.build_steps/5` takes a `:logs` option. A saved trace or report is
+  written and loaded with `logs: %{}`, so files saved before the field existed
+  load unchanged, and the persistence format stays at version 15.
+- **`PropertyDamage.Variant.release/1` (DR-054).** It releases what `stop/1`
+  releases, without exiting, and returns the variant's log lines; the
+  scheduler puts them on each target's result.
 
 - **BREAKING (DR-055, DR-056): the terminal and markdown reports print one
   layout.** A report opens with a banner of one width (`BUG DETECTED!` or

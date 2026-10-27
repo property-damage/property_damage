@@ -471,3 +471,23 @@ The system SHALL replay production event logs through model projections to detec
 - **WHEN** production events have different field names or structures than framework event structs
 - **THEN** the system SHALL use an `EventMapping` behaviour module to translate production events
 - **AND** events returning `:skip` from the mapping SHALL be excluded from replay
+
+### Requirement: Log Lines in the Printed Report (DR-054, DR-055)
+
+The `:terminal` and `:markdown` reports SHALL print every log line of the reported run (DR-054) in the target's listing, under the step that wrote it, merged with that step's events in timestamp order; on an equal millisecond a line SHALL print before an event. A line SHALL print at the event column as `+S.SSs`, a space, the badge `log` padded to five columns, a space, then the tags in brackets separated by spaces when it has tags, then the message; a message over several lines SHALL continue at the message's column. Offsets of events and lines SHALL count from one origin per target: the earliest timestamp among that target's events and lines. A string SHALL print as written; any other value SHALL print through the report's one `inspect/2` call, with syntax colors when the report is colored; a function SHALL be called each time the report is formatted and its result printed by those rules, and one that raises, throws or exits SHALL print `(log line raised: ...)`. The lines of the adapter's `setup/1` SHALL print before the first listed step under the note `adapter setup/1`, and those of its `teardown/1` after the last listed step under the note `adapter teardown/1`, each only when there are some. For a comparison failure each listing SHALL hold its own target's lines. Only the reported run's lines SHALL print: no line of a shrink attempt or of a target the report does not list. The `:json` and `:compact` formats SHALL NOT print lines.
+
+#### Scenario: A timed-out step shows the lines written before the kill
+- **WHEN** an adapter logs two tagged lines and then hangs past its timeout
+- **THEN** the `:execution_failed` report SHALL print both lines under the timed-out step with their offsets and tags
+
+#### Scenario: A divergence lists each target's lines
+- **WHEN** the report is `:diverged`
+- **THEN** the Reference listing SHALL hold the reference's lines and the Variant listing the variant's, each under its step with that step's events
+
+#### Scenario: A setup failure shows the adapter's setup lines
+- **WHEN** the adapter's `setup/1` logs and then fails
+- **THEN** the `:setup_failed` report SHALL print the line under the `adapter setup/1` note
+
+#### Scenario: A shrunk report shows the reported run's lines only
+- **WHEN** a failure is shrunk
+- **THEN** each listed step SHALL show the lines of its one execution in the reported run, and no line of a shrink attempt

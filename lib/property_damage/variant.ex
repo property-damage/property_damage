@@ -21,6 +21,7 @@ defmodule PropertyDamage.Variant do
       state = Variant.snapshot(pid)
       result = Variant.finish(pid)                         # what Executor.run/4 reports
       {:ok, _entries} = Variant.run_teardown(pid)          # the teardown commands
+      {:ok, _logs} = Variant.release(pid)                  # teardown/1, the log lines
       :ok = Variant.stop(pid)
 
   `advance_to/2` steps every root from the next unexecuted index up to and
