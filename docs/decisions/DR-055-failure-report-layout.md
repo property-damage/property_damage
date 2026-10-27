@@ -1,6 +1,6 @@
 # DR-055: Failure Report Layout
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-27
 
 ## Context

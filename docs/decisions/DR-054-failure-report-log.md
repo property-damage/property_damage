@@ -1,6 +1,6 @@
 # DR-054: Log Lines for the Failure Report
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-27
 
 ## Context
