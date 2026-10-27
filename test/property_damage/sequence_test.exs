@@ -159,6 +159,13 @@ defmodule PropertyDamage.SequenceTest do
       assert Position.label(Position.leaf(2, 0), 0) == "[0.0]"
       assert Position.label(Position.leaf(2, 1), 0) == "[0.1]"
     end
+
+    test "a suffix or leaf position without its root raises an ArgumentError naming the root" do
+      # Neither label can be printed without the root's reading-order index.
+      for position <- [Position.suffix(0), Position.leaf(2, 1)] do
+        assert_raise ArgumentError, ~r/root/, fn -> Position.label(position) end
+      end
+    end
   end
 
   describe "linear?/1" do
