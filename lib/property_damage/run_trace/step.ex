@@ -37,6 +37,10 @@ defmodule PropertyDamage.RunTrace.Step do
     `branch_id`. The bare event struct is `entry.event`. Injector / telemetry
     events carry no command index and belong to no step (see
     `PropertyDamage.RunTrace.async_entries/1`).
+  - `logs` — the `PropertyDamage.Log.Line` structs the command's user code
+    wrote (DR-054), every attempt's, in the order written: the lines the
+    trace keeps under this step's `position`. Lines are not events and never
+    appear in `entries`. `[]` for a step that logged nothing.
   - `label` — the command's human-readable label (`command_labels` for this
     `flattened_index`), or `nil` if the model produced none.
   - `failed?` — `true` for the single step where a failure was localized, and
@@ -58,6 +62,7 @@ defmodule PropertyDamage.RunTrace.Step do
           command: struct(),
           executed_command: struct() | nil,
           entries: [Entry.t()],
+          logs: [PropertyDamage.Log.Line.t()],
           label: String.t() | nil,
           failed?: boolean()
         }
@@ -70,6 +75,7 @@ defmodule PropertyDamage.RunTrace.Step do
     :executed_command,
     :entries,
     :label,
-    :failed?
+    :failed?,
+    logs: []
   ]
 end

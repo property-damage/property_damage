@@ -25,8 +25,11 @@ defmodule PropertyDamage.Executor.Stutter do
   alias PropertyDamage.Stutter
 
   @doc false
-  # Execute stutter retries after successful first execution
-  # Returns {:ok, event_log} or {:error, :idempotency_violation, details}
+  # Execute stutter retries after successful first execution.
+  # Returns {outcome, lines}: the outcome is {:ok, event_log} or
+  # {:error, :idempotency_violation | :stutter_execution_failed, details}, and
+  # the lines are the log lines the retries wrote (DR-054), each recording its
+  # attempt (2 for the first retry); [] when no retry ran.
   def maybe_execute_stutter_retries(
         command,
         resolved_command,
@@ -51,19 +54,23 @@ defmodule PropertyDamage.Executor.Stutter do
     {do_stutter?, rng} = Stutter.should_stutter?(command, stutter_config, rng, spec)
 
     if do_stutter? do
-      execute_stutter_retries(
-        resolved_command,
-        original_events,
-        index,
-        event_log,
-        stutter_config,
-        adapter,
-        adapter_context,
-        state.branch_id,
-        rng
-      )
+      # The retries run after the command's own sink closed, so they write
+      # their lines into a sink of their own.
+      PropertyDamage.Log.collect(fn sink ->
+        execute_stutter_retries(
+          resolved_command,
+          original_events,
+          index,
+          event_log,
+          stutter_config,
+          adapter,
+          adapter_context,
+          state.branch_id,
+          {rng, sink}
+        )
+      end)
     else
-      {:ok, event_log}
+      {{:ok, event_log}, []}
     end
   end
 
@@ -84,7 +91,7 @@ defmodule PropertyDamage.Executor.Stutter do
          adapter,
          adapter_context,
          branch_id,
-         rng
+         {rng, sink}
        ) do
     {retry_count, rng} = Stutter.retry_count(stutter_config, rng)
     idempotency_key = Stutter.get_idempotency_key(resolved_command)
@@ -103,7 +110,11 @@ defmodule PropertyDamage.Executor.Stutter do
         # retries run after the per-command injection window has closed, so
         # inject/start_poller raise if an adapter reaches for them here.
         stutter_ctx = Stutter.build_context(attempt, true, idempotency_key)
-        runtime = Executor.inject_unavailable_runtime("during stutter retries", stutter_ctx)
+
+        runtime = %{
+          Executor.inject_unavailable_runtime("during stutter retries", stutter_ctx)
+          | log: PropertyDamage.Log.writer(sink, attempt)
+        }
 
         # Execute retry (bounded by adapter.timeout/1, DR-032)
         result =

@@ -442,6 +442,15 @@ defmodule PropertyDamage.IEx do
     # Print command
     print_command_detail(command, refs)
 
+    # The adapter's setup/1, execute/3 and teardown/1 run in one scope; this
+    # helper builds no failure report, so their log lines are dropped (DR-054).
+    {result, _lines} =
+      PropertyDamage.Log.inline(fn -> run_debug_command(command, adapter, adapter_opts, refs) end)
+
+    result
+  end
+
+  defp run_debug_command(command, adapter, adapter_opts, refs) do
     # Setup adapter
     case adapter.setup(adapter_opts) do
       {:ok, context} ->
@@ -453,6 +462,7 @@ defmodule PropertyDamage.IEx do
           # injection window, so the Runtime's inject/start_poller raise if used
           # (DR-027); user_context is the adapter's setup/1 return.
           runtime = %PropertyDamage.Runtime{
+            log: PropertyDamage.Log.lookup(),
             inject: fn _event ->
               raise ArgumentError,
                     "Runtime.inject is not available in iex single-command execution"

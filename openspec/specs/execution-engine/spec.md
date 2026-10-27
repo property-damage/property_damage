@@ -938,3 +938,39 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 #### Scenario: replay_dir false
 - **WHEN** a run fails with `replay_dir: false`
 - **THEN** no file SHALL be written and the report's `replay_status` SHALL be `:disabled`
+
+### Requirement: Log Lines and Their Scopes (DR-054)
+
+`PropertyDamage.log(message, opts \\ [])`, a macro behind `require PropertyDamage`, SHALL write one log line for the failure report and record the file and line of its call. `opts` SHALL take only `tags:`, a literal list of atoms; any other option, a tag that is not an atom, or options that are not a literal keyword list SHALL be a compile error that names the offending option and says `tags:` is the only option. A message SHALL be stored as given: a string, any other value, or a 0-arity function, which the macro SHALL NOT wrap in a function on its own. The engine SHALL open a scope before it runs user code at every execution point: the adapter's `setup/1` (with the injector and mock setup beside it), each setup command, each root and each leaf, each settle and stutter attempt, a nemesis's `inject/2` and `restore/2`, a mock's `on_command/2` and `on_event/2` (under the scope of the command they are told of, so their lines are kept under its step), each teardown command, and the adapter's `teardown/1` (with the mock and injector teardown beside it). Every path that calls adapter code SHALL open one, including paths that build no failure report (`PropertyDamage.execute/2`, load-test workers, the IEx helpers, a `PropertyDamage.Replay` session), which SHALL drop their lines. `%PropertyDamage.Runtime{}` SHALL carry a `log` function, and `PropertyDamage.Runtime.log/3` SHALL write through it to the same place `PropertyDamage.log/2` writes. Each line SHALL go synchronously into the command's `Runtime.Sink`, and when the command ends it SHALL move into the run's `RunTrace.logs` under the step's `Sequence.Position` (`:adapter_setup` and `:adapter_teardown` for the adapter's `setup/1` and `teardown/1`). A line SHALL never enter the event log.
+
+#### Scenario: A Task the adapter starts logs to its step
+- **WHEN** `execute/3` starts a `Task` (or a `Task` inside a `Task`) that calls `PropertyDamage.log/2`
+- **THEN** the call SHALL find the scope in the first live process of its `$callers` that holds one, and the line SHALL be kept under the step that started the `Task`, once
+- **AND** a dead process in `$callers` SHALL end the lookup, so a process left running by a step that has ended never writes under a later step
+
+#### Scenario: A process an inline point left running finds no later point
+- **WHEN** a point that runs in a process outliving it (the adapter's `setup/1` or `teardown/1`, injector and mock setup and teardown, a nemesis's `inject/2` or `restore/2`, a mock's `on_command/2` or `on_event/2`) starts a process and leaves it running, and that process calls `PropertyDamage.log/2` during a later such point of the same holder
+- **THEN** the call SHALL raise `PropertyDamage.Log.NoScopeError`: the point admits a `$callers` chain only when the process directly below its holder in the chain was started by the holder while the point ran (the point marks its holder's `$callers` with a token of its own while it runs, and a process started then carries the token)
+- **AND** a `Task` the point starts while it runs SHALL log under that point
+
+#### Scenario: A call with no scope raises
+- **WHEN** `PropertyDamage.log/2` is called in a process that holds no scope and whose `$callers` hold none (a check, a projection, a `GenServer` the adapter called, a test process)
+- **THEN** it SHALL raise `PropertyDamage.Log.NoScopeError`, whose message names the call site (`file:line`), the calling process, and the three fixes: call it from code PropertyDamage runs, wrap the code in `PropertyDamage.Log.capture/1`, or log through `PropertyDamage.Runtime.log/3`
+- **AND** inside `execute/3`, raised directly or as the exit reason of a call into a process that raised it, the error SHALL reach the report as an adapter error classified `:test_code_error`
+
+#### Scenario: A GenServer logs through the runtime
+- **WHEN** a process the adapter did not start through `Task` calls `PropertyDamage.Runtime.log(runtime, message, tags: tags)` with the runtime `execute/3` received
+- **THEN** the line SHALL be kept under that command's step
+- **AND** a line written after the command ended SHALL be dropped without raising
+
+#### Scenario: A timeout loses no line
+- **WHEN** `execute/3` logs and then hangs past the adapter's `timeout/1`
+- **THEN** every line written before the timeout killed the `Task` SHALL be kept under the timed-out step
+
+#### Scenario: Every attempt keeps its lines
+- **WHEN** a settle or stutter retry executes a command several times
+- **THEN** every attempt's lines SHALL be kept, each recording its attempt number (1 for the first execution)
+
+#### Scenario: Lines leave the event log and the projections unchanged
+- **WHEN** an adapter logs during a run
+- **THEN** the event log, the projections and every check SHALL be what a run of the same adapter without log calls produces

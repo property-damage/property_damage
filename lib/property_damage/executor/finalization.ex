@@ -70,7 +70,8 @@ defmodule PropertyDamage.Executor.Finalization do
       linearization: linearization,
       check_failures: check_failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -245,7 +246,8 @@ defmodule PropertyDamage.Executor.Finalization do
               linearization: linearization,
               check_failures: all_failures,
               check_counters: teardown_counters,
-              command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+              command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+              logs: Map.get(state, :logs, %{})
             }
         end
     end
@@ -269,7 +271,8 @@ defmodule PropertyDamage.Executor.Finalization do
       linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -299,7 +302,8 @@ defmodule PropertyDamage.Executor.Finalization do
       linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -328,7 +332,8 @@ defmodule PropertyDamage.Executor.Finalization do
       linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -395,8 +400,9 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :await_matchers, [])
       )
 
-    # A mock event pushed after the last command's own flush belongs to it.
-    {projections, event_log, fold_counter} =
+    # A mock event pushed after the last command's own flush belongs to it,
+    # and so do the lines the mocks' on_event/2 writes (DR-054).
+    {projections, event_log, fold_counter, mock_lines} =
       Executor.Events.process_mock_events(
         Map.get(state, :mock_registry),
         Map.get(state, :last_command_index),
@@ -406,7 +412,20 @@ defmodule PropertyDamage.Executor.Finalization do
         fold_counter
       )
 
-    state = %{state | projections: projections, event_log: event_log, fold_counter: fold_counter}
+    logs =
+      PropertyDamage.Log.append(
+        Map.get(state, :logs, %{}),
+        Map.get(state, :current_position),
+        mock_lines
+      )
+
+    state =
+      Map.merge(state, %{
+        projections: projections,
+        event_log: event_log,
+        fold_counter: fold_counter,
+        logs: logs
+      })
 
     case Executor.check_async(
            Map.fetch!(state, :model),

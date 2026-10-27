@@ -28,6 +28,11 @@ defmodule PropertyDamage.Runtime do
       this handle (`get_handler_state/2` → the mock's `handle_request/2` →
       `push_events/3`); the framework flushes those events after the command
       (`source: :mock`).
+    * `:log` - a 2-arity function that writes one log line under this command
+      (DR-054); call it through `PropertyDamage.Runtime.log/3`. It writes where
+      `PropertyDamage.log/2` writes, so a process that has no scope of its own
+      (a `GenServer` the adapter calls, for example) logs through the runtime
+      it was handed. A line written after the command ended is dropped.
 
   ## Example
 
@@ -57,11 +62,46 @@ defmodule PropertyDamage.Runtime do
           inject: (struct() -> :ok),
           start_poller: (keyword() -> PropertyDamage.ResourcePoller.t()),
           stutter: stutter(),
-          mock_registry: pid() | nil
+          mock_registry: pid() | nil,
+          log: (term(), keyword() -> :ok) | nil
         }
 
   @enforce_keys [:inject, :start_poller]
-  defstruct [:inject, :start_poller, stutter: nil, mock_registry: nil]
+  defstruct [:inject, :start_poller, stutter: nil, mock_registry: nil, log: nil]
+
+  @doc """
+  Writes one log line under the command this runtime was handed for (DR-054).
+
+  The explicit form of `PropertyDamage.log/2`: both write to the same place.
+  Use it from a process that has no scope of its own, such as a `GenServer`
+  the adapter calls, by passing it the runtime `execute/3` received.
+  `message` is a string, any other value, or a 0-arity function, formatted as
+  `PropertyDamage.log/2` formats it. `opts` takes one key, `tags:`, a list of
+  atoms; any other option raises `ArgumentError`. The call site is not
+  recorded.
+
+  Returns `:ok`. A line written after the command ended is dropped.
+
+  ## Example
+
+      def handle_call({:charge, runtime, amount}, _from, state) do
+        PropertyDamage.Runtime.log(runtime, "charging \#{amount}", tags: [:charge])
+        {:reply, :ok, state}
+      end
+  """
+  @spec log(t(), term(), keyword()) :: :ok
+  def log(runtime, message, opts \\ [])
+
+  def log(%__MODULE__{log: log}, message, opts) when is_function(log, 2) do
+    tags = PropertyDamage.Log.tags!(opts)
+    log.(message, tags: tags)
+    :ok
+  end
+
+  def log(%__MODULE__{log: nil}, _message, _opts) do
+    raise ArgumentError,
+          "this runtime has no log scope: it was not handed to execute/3 by PropertyDamage"
+  end
 
   @doc """
   Returns `true` when this is a stutter/idempotency retry execution.

@@ -60,8 +60,20 @@ defmodule PropertyDamage.Adapter do
     merges nothing into it, so a `setup/1` that returns `%{inject: ...}` is never
     clobbered, and you can pattern-match your own keys with confidence.
   - `runtime` is a `%PropertyDamage.Runtime{}` handle carrying the per-command
-    framework affordances (`inject`, `start_poller`, `stutter`). See
+    framework affordances (`inject`, `start_poller`, `stutter`, `log`). See
     `PropertyDamage.Runtime`.
+
+  ## Log lines (DR-054)
+
+  `execute/3`, `setup/1` and `teardown/1` can write log lines for the failure
+  report with `PropertyDamage.log/2` (behind `require PropertyDamage`). A line
+  is printed only in a failure report, under the step that wrote it, beside
+  that step's events; `setup/1` and `teardown/1` lines print under
+  `adapter setup/1` and `adapter teardown/1` notes. A `Task` the adapter starts
+  logs to the step that started it. A process the adapter did not start
+  through `Task`, such as a `GenServer`, logs with
+  `PropertyDamage.Runtime.log/3` and the runtime `execute/3` received. See
+  `PropertyDamage.Log`.
 
   ## Execution process and the per-command timeout (DR-032)
 

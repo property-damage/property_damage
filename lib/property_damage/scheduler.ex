@@ -185,9 +185,12 @@ defmodule PropertyDamage.Scheduler do
   failure belongs to, `nil` for a setup failure or a failed `:startup` check.
   A check that raised and an adapter that raised hold the exception alone in
   `reason`'s detail; its stacktrace is in `stacktrace` (`nil` for every other
-  failure).
+  failure). A target whose adapter `setup/1` failed has no result, so its
+  failure carries the log lines that setup wrote in `logs` (DR-054); no
+  other failure has the key.
   """
   @type failure :: %{
+          optional(:logs) => PropertyDamage.Log.logs(),
           kind: :check_failed | :setup_failed | :execution_failed | :diverged | :did_not_converge,
           variant: variant(),
           run: non_neg_integer(),
@@ -201,7 +204,9 @@ defmodule PropertyDamage.Scheduler do
   in target order (none when the reference's `setup/1` failed; a `nil` result
   and no latencies for another target whose `setup/1` failed). Each result is what
   `PropertyDamage.Executor.run/4` reports for that target's run; a retired
-  target's is the result it had when it left the run. `failure` is the
+  target's is the result it had when it left the run. A result's `logs` hold
+  every log line the target's user code wrote (DR-054), its adapter's
+  `setup/1` and `teardown/1` included. `failure` is the
   primary failure and `other_failures` the run's other failures, in root
   order, then target order (see "Which targets go on after a failure").
   `compare_counts` holds, per boundary observation the model declares, the
@@ -356,11 +361,16 @@ defmodule PropertyDamage.Scheduler do
         {:ok, variant} ->
           {:cont, {:ok, %{run | active: run.active ++ [variant]}}}
 
-        {:error, reason} when target.index == 0 ->
-          {:halt, {:error, failure(config, target, nil, Failure.setup_failed(reason))}}
-
-        {:error, reason} ->
+        {:error, reason, logs} when target.index == 0 ->
           failure = failure(config, target, nil, Failure.setup_failed(reason))
+          {:halt, {:error, Map.put(failure, :logs, logs)}}
+
+        {:error, reason, logs} ->
+          failure =
+            config
+            |> failure(target, nil, Failure.setup_failed(reason))
+            |> Map.put(:logs, logs)
+
           gone = %{pid: nil, target: target, retired: {nil, []}}
 
           {:cont,
@@ -403,11 +413,12 @@ defmodule PropertyDamage.Scheduler do
         {:ok, variant}
 
       {:ok, {:error, reason}} ->
+        logs = release_variant(variant)
         stop_variant(variant)
-        {:error, setup_reason(reason)}
+        {:error, setup_reason(reason), logs}
 
       {:crashed, reason} ->
-        {:error, reason}
+        {:error, reason, %{}}
     end
   end
 
@@ -579,8 +590,7 @@ defmodule PropertyDamage.Scheduler do
     {result, failure, teardown_failures} =
       case variant.pid && call(variant.pid, &Variant.retire/1) do
         {:ok, {:ok, result, teardown_failures}} ->
-          result = with_teardown_entries(result, variant)
-          stop_variant(variant)
+          result = result |> with_teardown_entries(variant) |> end_variant(variant)
           {result, with_result_reason(failure, result), teardown_failures}
 
         _crashed_or_gone ->
@@ -867,8 +877,7 @@ defmodule PropertyDamage.Scheduler do
 
     case call(variant.pid, &Variant.finish/1) do
       {:ok, result} ->
-        result = with_teardown_entries(result, variant)
-        stop_variant(variant)
+        result = result |> with_teardown_entries(variant) |> end_variant(variant)
         {result, latency, {:finished, result}}
 
       {:crashed, reason} ->
@@ -959,6 +968,25 @@ defmodule PropertyDamage.Scheduler do
 
       _no_entries ->
         result
+    end
+  end
+
+  # Releases and stops the variant; the result takes every log line the
+  # variant holds, its adapter's teardown/1 lines included (DR-054).
+  defp end_variant(result, variant) do
+    logs = release_variant(variant)
+    stop_variant(variant)
+
+    case result do
+      %{} -> Map.put(result, :logs, logs)
+      other -> other
+    end
+  end
+
+  defp release_variant(variant) do
+    case call(variant.pid, &Variant.release/1) do
+      {:ok, {:ok, logs}} -> logs
+      {:crashed, _reason} -> %{}
     end
   end
 

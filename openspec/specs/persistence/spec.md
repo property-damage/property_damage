@@ -288,3 +288,19 @@ A `RunTrace` SHALL be serializable to and loadable from disk independently of a 
 - **WHEN** a v3 (or older) report file is loaded
 - **THEN** the loader SHALL synthesize the embedded `RunTrace` from the legacy fields
 - **AND** `FailureReport.steps/1` and `event_entries_at/2` SHALL work on the loaded report exactly as they did before the composition
+
+### Requirement: Log Lines Live Only in Memory (DR-054)
+
+A run's log lines SHALL be dropped when the run ends, unless the run is the one a failure report describes. `Persistence.save/3` and `Persistence.save_trace/3` SHALL write every `RunTrace` they hold (a report's `trace` and `reference_trace`) with `logs: %{}`, and `Persistence.load/1` and `Persistence.load_trace/1` SHALL return every trace with `logs: %{}`, a version-15 file saved before the field existed included. The format version SHALL stay 15. A replay artifact, an export and every other file PropertyDamage writes SHALL carry no line text.
+
+#### Scenario: A saved report holds no line
+- **WHEN** a report whose traces hold log lines is saved and loaded again
+- **THEN** the file SHALL not contain the lines' text, and the loaded report's `trace` and `reference_trace` SHALL have `logs: %{}`
+
+#### Scenario: A file saved before the field existed loads
+- **WHEN** a version-15 report file whose traces lack `logs` is loaded
+- **THEN** each trace SHALL have `logs: %{}` and the report SHALL print in the terminal and markdown formats
+
+#### Scenario: A replay artifact holds no line
+- **WHEN** a run that logged writes its replay artifact
+- **THEN** no file in the replay directory SHALL contain the text of a line

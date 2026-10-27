@@ -129,6 +129,27 @@ defmodule PropertyDamage.FailureReport.Render do
       " " <> badge(event.source, color) <> " " <> hanging(value(event.event, color, width), width)
   end
 
+  # A log line (DR-054) at the event column: the offset, the badge `log`
+  # padded to five columns, the tags in brackets when it has some, then the
+  # message, whose later lines continue at the message's column.
+  defp line({:log, log}, _column, color) do
+    offset = "+" <> :erlang.float_to_binary(log.offset_ms / 1000, decimals: 2) <> "s"
+    tags = tags_text(log.tags)
+    width = @event_indent + String.length(offset) + 7 + String.length(tags)
+
+    text =
+      case log.message do
+        {:text, text} -> text
+        {:value, term} -> value(term, color, width)
+      end
+
+    String.duplicate(" ", @event_indent) <>
+      paint(offset, [:faint], color) <>
+      " " <>
+      paint("log  ", [:faint], color) <>
+      " " <> paint(tags, [:cyan], color and tags != "") <> hanging(text, width)
+  end
+
   defp line({:note, text}, _column, color), do: "  " <> paint(text, [:faint], color)
 
   defp line({:projection, name, applied}, _column, color) do
@@ -156,6 +177,9 @@ defmodule PropertyDamage.FailureReport.Render do
   defp line({:comment, text}, _column, color), do: paint("# " <> text, [:faint], color)
   defp line({:code, text}, _column, color), do: paint(text, [:green], color)
   defp line({:text, text}, _column, _color), do: text
+
+  defp tags_text([]), do: ""
+  defp tags_text(tags), do: "[" <> Enum.map_join(tags, " ", &Atom.to_string/1) <> "] "
 
   defp key_text(nil), do: ""
   defp key_text(key) when is_atom(key), do: "#{key}: "

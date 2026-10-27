@@ -253,7 +253,10 @@ defmodule PropertyDamage.Executor.Branching do
           state
           | active_pollers: collect_branch_pollers(branch_results, :active_pollers),
             active_resource_pollers:
-              collect_branch_pollers(branch_results, :active_resource_pollers)
+              collect_branch_pollers(branch_results, :active_resource_pollers),
+            # Every branch ran its commands, so every branch's lines are kept
+            # (DR-054).
+            logs: merge_branch_logs(state.logs, branch_results)
         }
 
         {:error, branch_id, index, reason, state}
@@ -450,8 +453,21 @@ defmodule PropertyDamage.Executor.Branching do
         active_pollers: merged_pollers,
         active_resource_pollers: merged_resource_pollers,
         command_fold_ordinals: merged_command_fold_ordinals,
-        fold_counter: merged_fold_counter
+        fold_counter: merged_fold_counter,
+        logs: merge_branch_logs(prefix_state.logs, branch_results)
     }
+  end
+
+  # Each branch forked from the prefix state, so its logs hold the prefix's
+  # lines and its own; the merge keeps each line once (DR-054).
+  defp merge_branch_logs(logs, branch_results) do
+    Enum.reduce(branch_results, logs, fn
+      {_branch_id, {:failed, _index, _reason, %{logs: branch_logs}}, _commands}, acc ->
+        PropertyDamage.Log.merge(acc, branch_logs)
+
+      {_branch_id, %{logs: branch_logs}, _commands}, acc ->
+        PropertyDamage.Log.merge(acc, branch_logs)
+    end)
   end
 
   # Combine branch registries: keep a placeholder's resolved value if any branch

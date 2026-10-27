@@ -24,13 +24,21 @@ defmodule PropertyDamage.Executor.Settle do
   # speaks the adapter protocol, so on the probe/async path the tag is thrown
   # past it and caught here; a raise ends the settle loop, as an `{:error, _}`
   # attempt does.
-  def execute_with_settle(command, adapter, user_context, runtime, spec) do
+  #
+  # `runtime_for` gives the runtime of each attempt, counted from 1, so the
+  # lines an attempt logs record which attempt wrote them (DR-054).
+  def execute_with_settle(command, adapter, user_context, runtime_for, spec)
+      when is_function(runtime_for, 1) do
     execution = settle_execution(command, spec)
 
     if execution in [:probe, :async] do
       config = settle_config(command, spec)
+      attempts = :counters.new(1, [])
 
       attempt = fn ->
+        :counters.add(attempts, 1, 1)
+        runtime = runtime_for.(:counters.get(attempts, 1))
+
         case Timeout.execute_tagged(adapter, command, user_context, runtime) do
           {:raised, _exception, _stacktrace} = raised -> throw({__MODULE__, raised})
           result -> result
@@ -47,7 +55,7 @@ defmodule PropertyDamage.Executor.Settle do
         :throw, {__MODULE__, raised} -> raised
       end
     else
-      Timeout.execute_tagged(adapter, command, user_context, runtime)
+      Timeout.execute_tagged(adapter, command, user_context, runtime_for.(1))
     end
   end
 

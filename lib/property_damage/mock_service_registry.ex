@@ -97,10 +97,15 @@ defmodule PropertyDamage.MockServiceRegistry do
   Each mock's `on_command/2` is called with the command. Returns `:ok`, or
   `{:error, {module, :on_command, reason}}` if a mock's callback raised, exited,
   or threw (the registry stays up).
+
+  `log` is the scope the engine opens for the command (DR-054): the callbacks
+  run under it, so their `PropertyDamage.log/2` lines go under the command's
+  step. With `nil`, they run under no scope.
   """
-  @spec notify_command(t(), struct()) :: :ok | {:error, term()}
-  def notify_command(registry, command) do
-    GenServer.call(registry, {:notify_command, command})
+  @spec notify_command(t(), struct(), PropertyDamage.Log.writer() | nil) ::
+          :ok | {:error, term()}
+  def notify_command(registry, command, log \\ nil) do
+    GenServer.call(registry, {:notify_command, command, log})
   end
 
   @doc """
@@ -109,10 +114,14 @@ defmodule PropertyDamage.MockServiceRegistry do
   Each mock's `on_event/2` is called with the event. Returns `:ok`, or
   `{:error, {module, :on_event, reason}}` if a mock's callback raised, exited,
   or threw (the registry stays up).
+
+  `log` is the scope of the command the event belongs to, as for
+  `notify_command/3`.
   """
-  @spec notify_event(t(), struct()) :: :ok | {:error, term()}
-  def notify_event(registry, event) do
-    GenServer.call(registry, {:notify_event, event})
+  @spec notify_event(t(), struct(), PropertyDamage.Log.writer() | nil) ::
+          :ok | {:error, term()}
+  def notify_event(registry, event, log \\ nil) do
+    GenServer.call(registry, {:notify_event, event, log})
   end
 
   @doc """
@@ -221,20 +230,23 @@ defmodule PropertyDamage.MockServiceRegistry do
   end
 
   @impl true
-  def handle_call({:notify_command, command}, _from, state) do
+  def handle_call({:notify_command, command, log}, _from, state) do
     # A user mock's on_command/2 runs here, inside the registry GenServer. Guard
     # it so a raising/exiting/throwing callback surfaces as an error result
     # instead of crashing the registry and, through its start_link, the run (J13).
-    case notify_all(state.adapters, :on_command, command) do
+    # It runs under the command's scope (DR-054).
+    case PropertyDamage.Log.with_scope(log, fn ->
+           notify_all(state.adapters, :on_command, command)
+         end) do
       {:ok, new_adapters} -> {:reply, :ok, %{state | adapters: new_adapters}}
       {:error, _reason} = error -> {:reply, error, state}
     end
   end
 
   @impl true
-  def handle_call({:notify_event, event}, _from, state) do
-    # Same guard as :notify_command for the on_event/2 callback.
-    case notify_all(state.adapters, :on_event, event) do
+  def handle_call({:notify_event, event, log}, _from, state) do
+    # Same guard and scope as :notify_command for the on_event/2 callback.
+    case PropertyDamage.Log.with_scope(log, fn -> notify_all(state.adapters, :on_event, event) end) do
       {:ok, new_adapters} -> {:reply, :ok, %{state | adapters: new_adapters}}
       {:error, _reason} = error -> {:reply, error, state}
     end

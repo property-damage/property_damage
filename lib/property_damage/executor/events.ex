@@ -181,9 +181,12 @@ defmodule PropertyDamage.Executor.Events do
     _ -> false
   end
 
-  # Flush and process events from mock service adapters
+  # Flush and process events from mock service adapters. Each mock's
+  # on_event/2 runs under a scope of its own, and the lines it wrote come
+  # back fourth, for the caller to keep under the command the events belong
+  # to (DR-054).
   def process_mock_events(nil, _command_index, event_log, projections, _branch_id, fold_counter),
-    do: {projections, event_log, fold_counter}
+    do: {projections, event_log, fold_counter, []}
 
   def process_mock_events(
         mock_registry,
@@ -193,9 +196,28 @@ defmodule PropertyDamage.Executor.Events do
         branch_id,
         fold_counter
       ) do
-    events = MockServiceRegistry.flush_events(mock_registry)
+    case MockServiceRegistry.flush_events(mock_registry) do
+      [] ->
+        {projections, event_log, fold_counter, []}
 
-    Enum.reduce(events, {projections, event_log, fold_counter}, fn event, {projs, log, fc} ->
+      events ->
+        {{projections, event_log, fold_counter}, lines} =
+          PropertyDamage.Log.collect(fn sink ->
+            fold_mock_events(
+              events,
+              {mock_registry, PropertyDamage.Log.writer(sink, 1)},
+              command_index,
+              {projections, event_log, fold_counter},
+              branch_id
+            )
+          end)
+
+        {projections, event_log, fold_counter, lines}
+    end
+  end
+
+  defp fold_mock_events(events, {mock_registry, log}, command_index, folded, branch_id) do
+    Enum.reduce(events, folded, fn event, {projs, log_entries, fc} ->
       entry =
         Entry.attribute(
           %Entry{
@@ -211,10 +233,10 @@ defmodule PropertyDamage.Executor.Events do
         )
 
       # Notify mock registry of the event so mocks can react
-      MockServiceRegistry.notify_event(mock_registry, event)
+      MockServiceRegistry.notify_event(mock_registry, event, log)
 
       new_projs = update_projections(projs, event)
-      {new_projs, [entry | log], fc + 1}
+      {new_projs, [entry | log_entries], fc + 1}
     end)
   end
 end

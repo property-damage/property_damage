@@ -87,6 +87,11 @@ defmodule PropertyDamage.Executor.State do
       linked to the process that started it (a per-command Task), so an owner
       that must reap every poller even when it is killed mid-command
       (`PropertyDamage.Variant`) learns of it here. `nil` everywhere else.
+    * `:logs` - the log lines the run's user code wrote (DR-054), by the step
+      they belong to (`PropertyDamage.Log`): a `Sequence.Position` for a
+      command, `:adapter_setup` or `:adapter_teardown` for the adapter's
+      `setup/1` or `teardown/1`. Each list is in the order written. Feeds
+      `RunTrace.logs`.
     * `:telemetry` - `nil`, or the context command and check telemetry is
       emitted with (`%{variant: %{index, name}, run_number: n}`, see
       `PropertyDamage.Telemetry`); `nil` when nothing listens.
@@ -137,6 +142,7 @@ defmodule PropertyDamage.Executor.State do
     last_execute_us: nil,
     last_command_index: nil,
     on_resource_poller_start: nil,
+    logs: %{},
     telemetry: nil
   ]
 
@@ -172,6 +178,7 @@ defmodule PropertyDamage.Executor.State do
           last_execute_us: non_neg_integer() | nil,
           last_command_index: non_neg_integer() | {:setup, non_neg_integer()} | nil,
           on_resource_poller_start: (pid() -> term()) | nil,
+          logs: PropertyDamage.Log.logs(),
           telemetry: map() | nil
         }
 end
