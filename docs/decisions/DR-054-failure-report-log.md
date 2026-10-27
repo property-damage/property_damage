@@ -138,6 +138,33 @@ Three constraints shape any answer.
     same colored `inspect`, except in the projection diff, which keeps its
     red and green diff colors.
 
+13. **A retried command keeps its first and last attempts.** A settle or
+    stutter retry can run one command hundreds of times, and each attempt logs
+    the same few lines. For each step, the run keeps the lines of the first
+    attempt (the request as first sent) and of the last three attempts (the
+    state the system ended in). When a newer attempt pushes an older one out
+    of the last three, the run drops that attempt's lines and counts them, so
+    memory stays bounded. The report shows each gap with its count
+    (`... 296 attempts omitted (1,184 lines)`), so a gap never reads as "nothing
+    happened". The cap drops whole attempts; it never cuts a line or a value.
+    `log: [keep_attempts: n]` changes the number of last attempts kept.
+
+14. **`PD_LOG` sets the tag filter for one invocation.** The `log:` filter in a
+    test is its author's default view. Choosing tags is the reader's call for
+    one debugging session, and `mix test` takes no custom flags. So the
+    environment variable `PD_LOG` holds the same `only:` and `except:` filter
+    as text, for example `PD_LOG="only:http,seed except:body" mix test`.
+    - When `PD_LOG` is set, it replaces the `log:` tag filter given in code;
+      the two are never merged. The report prints the filter it applied and
+      where it came from.
+    - It applies to every report formatted in that process: a test run, a
+      replay call or `PropertyDamage.ExUnit.format_failure/2`.
+    - It is read only when a report is formatted, so it cannot change a
+      verdict, a shrink or a replay artifact.
+    - A value that does not parse raises an error that shows the expected
+      syntax. A tag in it that no line carries gets the warning of
+      decision 11.
+
 ## Example
 
 A shared HTTP helper logs each part of a request under its own tag:
@@ -228,11 +255,3 @@ end
   formatted again without a rerun. Rejected for now: artifacts get committed,
   and an unredacted line would be published. It could return later as an
   explicit opt-in.
-
-## Open questions
-
-- An environment variable (for example `PD_LOG="except:body"`) would let a
-  reader change the display without editing the test, since `mix test` takes no
-  custom flags. Not decided.
-- The cap on lines kept per step, for commands retried many times by settle or
-  stutter. Not decided.
