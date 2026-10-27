@@ -22,14 +22,18 @@ defmodule PropertyDamage.Executor.Stutter do
   alias PropertyDamage.EventLog.Entry
   alias PropertyDamage.Executor
   alias PropertyDamage.Executor.Timeout
+  alias PropertyDamage.Log.Cap
   alias PropertyDamage.Stutter
 
   @doc false
   # Execute stutter retries after successful first execution.
   # Returns {outcome, lines}: the outcome is {:ok, event_log} or
   # {:error, :idempotency_violation | :stutter_execution_failed, details}, and
-  # the lines are the log lines the retries wrote (DR-054), each recording its
-  # attempt (2 for the first retry); [] when no retry ran.
+  # the lines are the step's whole list of log lines (DR-054) once the retries
+  # wrote theirs, each recording its attempt (2 for the first retry); nil when
+  # no retry ran. The retries are attempts of the same step: they continue the
+  # step's kept lines under the same cap, so the step still holds the lines of
+  # at most `keep_attempts + 1` attempts.
   def maybe_execute_stutter_retries(
         command,
         resolved_command,
@@ -55,22 +59,33 @@ defmodule PropertyDamage.Executor.Stutter do
 
     if do_stutter? do
       # The retries run after the command's own sink closed, so they write
-      # their lines into a sink of their own.
-      PropertyDamage.Log.collect(fn sink ->
-        execute_stutter_retries(
-          resolved_command,
-          original_events,
-          index,
-          event_log,
-          stutter_config,
-          adapter,
-          adapter_context,
-          state.branch_id,
-          {rng, sink}
-        )
-      end)
+      # their lines into a sink of their own, seeded with the step's lines.
+      seed = Map.get(Map.get(state, :logs, %{}), Map.get(state, :current_position), [])
+
+      sink_opts = [
+        keep_attempts: Map.get(state, :keep_attempts) || Cap.default_keep_attempts(),
+        phase: :stutter,
+        lines: seed
+      ]
+
+      PropertyDamage.Log.collect(
+        fn sink ->
+          execute_stutter_retries(
+            resolved_command,
+            original_events,
+            index,
+            event_log,
+            stutter_config,
+            adapter,
+            adapter_context,
+            state.branch_id,
+            {rng, sink}
+          )
+        end,
+        sink_opts
+      )
     else
-      {{:ok, event_log}, []}
+      {{:ok, event_log}, nil}
     end
   end
 

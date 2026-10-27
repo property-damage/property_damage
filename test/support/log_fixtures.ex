@@ -34,6 +34,8 @@ defmodule PropertyDamage.Test.LogFixtures do
   #                  attempt number reaches this value (default 3)
   #   :spin_detail   each Spin attempt logs a second line, `"spin detail <n>"`
   #   :spin_multiline  the first Spin attempt logs a two-line string first
+  #   :spin_skew_retry  a Spin attempt past :spin_at (a stutter retry) answers
+  #                  a Done whose value is 2, an idempotency violation
   #
   # Actions (tags must be literal, so each tag set has its own action):
   #
@@ -427,12 +429,17 @@ defmodule PropertyDamage.Test.LogFixtures do
   end
 
   def answer(%Probe{n: n}, ctx), do: {:ok, [%Done{n: n, by: ctx.name}]}
-  def answer(%Spin{n: n}, ctx), do: {:ok, [%Done{n: n, by: ctx.name}]}
+  def answer(%Spin{n: n}, ctx), do: answer_spin(n, ctx, 1)
   def answer(%Prepare{}, ctx), do: {:ok, [%Prepared{by: ctx.name}]}
   def answer(%Tidy{}, ctx), do: {:ok, [%Tidied{by: ctx.name}]}
 
   def answer(%Part{root: root, part: part}, ctx),
     do: {:ok, [%Parted{root: root, part: part, by: ctx.name}]}
+
+  @doc false
+  # A Spin's Done carries `value`: a stutter retry that answers another value
+  # is an idempotency violation.
+  def answer_spin(n, ctx, value), do: {:ok, [%Done{n: n, by: ctx.name, value: value}]}
 
   defmodule PlainAdapter do
     @moduledoc false
@@ -563,7 +570,12 @@ defmodule PropertyDamage.Test.LogFixtures do
       if ctx[:spin_multiline] && attempt == 1, do: PropertyDamage.log("first line\nsecond line")
       PropertyDamage.log("spin attempt #{attempt}")
       if ctx[:spin_detail], do: PropertyDamage.log("spin detail #{attempt}")
-      if attempt < Map.get(ctx, :spin_at, 3), do: {:retry, :not_yet}, else: F.answer(command, ctx)
+
+      cond do
+        attempt < Map.get(ctx, :spin_at, 3) -> {:retry, :not_yet}
+        attempt > Map.get(ctx, :spin_at, 3) and ctx[:spin_skew_retry] -> F.answer_spin(command.n, ctx, 2)
+        true -> F.answer(command, ctx)
+      end
     end
 
     def execute(%F.Prepare{} = command, ctx, _runtime) do

@@ -92,10 +92,15 @@ defmodule PropertyDamage.Executor.State do
       command, `:adapter_setup` or `:adapter_teardown` for the adapter's
       `setup/1` or `teardown/1`. Each list is in the order written. Feeds
       `RunTrace.logs`.
+    * `:keep_attempts` - how many of a step's last settle or stutter attempts
+      keep their log lines, besides the first attempt's (`log: [keep_attempts: n]`,
+      DR-054 decision 13).
     * `:telemetry` - `nil`, or the context command and check telemetry is
       emitted with (`%{variant: %{index, name}, run_number: n}`, see
       `PropertyDamage.Telemetry`); `nil` when nothing listens.
   """
+
+  alias PropertyDamage.Log.Cap
 
   @enforce_keys [
     :model,
@@ -143,6 +148,7 @@ defmodule PropertyDamage.Executor.State do
     last_command_index: nil,
     on_resource_poller_start: nil,
     logs: %{},
+    keep_attempts: Cap.default_keep_attempts(),
     telemetry: nil
   ]
 
@@ -179,6 +185,7 @@ defmodule PropertyDamage.Executor.State do
           last_command_index: non_neg_integer() | {:setup, non_neg_integer()} | nil,
           on_resource_poller_start: (pid() -> term()) | nil,
           logs: PropertyDamage.Log.logs(),
+          keep_attempts: pos_integer(),
           telemetry: map() | nil
         }
 end

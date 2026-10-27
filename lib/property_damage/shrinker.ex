@@ -156,6 +156,8 @@ defmodule PropertyDamage.Shrinker do
   ```
   """
 
+  alias PropertyDamage.Log.Cap
+
   alias PropertyDamage.{
     Executor,
     Expansion,
@@ -502,6 +504,7 @@ defmodule PropertyDamage.Shrinker do
       concurrency: Keyword.get(opts, :concurrency, :serial),
       compare: Keyword.get(opts, :compare, converge_within: 5_000),
       check_mode: Keyword.get(opts, :check_mode, :halt),
+      keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
       config: Keyword.get(opts, :config, Config.new()),
       iterations: 0,
       # Candidates adopted so far, and the shrink cycles run.
@@ -1014,6 +1017,7 @@ defmodule PropertyDamage.Shrinker do
               # Carry stutter reproduction into the converted-linear shrink. The
               # config is already forced (re-forcing is idempotent).
               stutter_config: state.stutter_config,
+              keep_attempts: state.keep_attempts,
               rng_seed: state.rng_seed,
               # One mint-epoch counter for every attempt of this shrink (DR-034).
               run_nonce: state.run_nonce,
@@ -1684,6 +1688,7 @@ defmodule PropertyDamage.Shrinker do
         concurrency: state.concurrency,
         compare: state.compare,
         stutter_config: state.stutter_config,
+        keep_attempts: state.keep_attempts,
         check_mode: state.check_mode
       )
 
@@ -1729,6 +1734,7 @@ defmodule PropertyDamage.Shrinker do
           event_queue: event_queue,
           mock_registry: mock_registry,
           stutter_config: state.stutter_config,
+          keep_attempts: state.keep_attempts,
           rng_seed: state.rng_seed,
           run_nonce: state.run_nonce,
           mint_epoch: next_mint_epoch(state),

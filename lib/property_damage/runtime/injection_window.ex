@@ -67,16 +67,19 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
   `execute_fn` is given the runtime and the sink, so a caller that hands the
   adapter a runtime per attempt can build each attempt's `log` function over
   the same sink (`PropertyDamage.Log`). Returns
-  `{result, final_ctx, pollers, lines}`, the lines in the order written. The
+  `{result, final_ctx, pollers, lines}`, the lines in the order written, as
+  `Runtime.Sink.lines/1` keeps them under the retry cap. The
   lines are read before the sink stops, so a line written before a timeout
   killed the adapter's `Task` is among them; one written after is dropped.
+  `opts` are the sink's (`Runtime.Sink.start_link/1`): `keep_attempts:`.
   """
-  @spec run_logged(map(), (pid() -> Runtime.t()), (Runtime.t(), pid() -> result)) ::
-          {result, map() | nil, [term()], [PropertyDamage.Log.Line.t()]}
+  @spec run_logged(map(), (pid() -> Runtime.t()), (Runtime.t(), pid() -> result), keyword()) ::
+          {result, map() | nil, [term()],
+           [PropertyDamage.Log.Line.t() | PropertyDamage.Log.Gap.t()]}
         when result: var
-  def run_logged(initial_ctx, build_runtime, execute_fn)
+  def run_logged(initial_ctx, build_runtime, execute_fn, opts \\ [])
       when is_function(build_runtime, 1) and is_function(execute_fn, 2) do
-    {:ok, sink} = Runtime.Sink.start_link()
+    {:ok, sink} = Runtime.Sink.start_link(opts)
 
     try do
       Runtime.Sink.put_ctx(sink, initial_ctx)

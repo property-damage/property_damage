@@ -160,13 +160,16 @@ defmodule PropertyDamage.Log.RetryCapTest do
   describe "a stutter retry counts as an attempt of the step" do
     test "the first execution and the last keep_attempts of the combined order stay" do
       # Four settle attempts, then one stutter retry (attempt 5 of the
-      # adapter): with keep_attempts: 2 the step keeps 1, 4 and the retry.
+      # adapter) that answers another value, so the report is the idempotency
+      # violation: with keep_attempts: 2 the step keeps 1, 4 and the retry.
       report =
         spin_report(
           4,
-          stutter: [probability: 1.0, max_repeats: 1, delay_ms: 0],
-          log: [keep_attempts: 2]
+          [stutter: [probability: 1.0, max_repeats: 1, delay_ms: 0], log: [keep_attempts: 2]],
+          %{spin_skew_retry: true}
         )
+
+      assert F.plain(report) =~ "idempotency violation"
 
       assert F.shown_logs(step_zero(report)) ==
                attempt_lines(1..1) ++

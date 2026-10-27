@@ -49,6 +49,10 @@ defmodule PropertyDamage.Log do
   (a `GenServer`, for example) logs through the runtime it was handed, with
   `PropertyDamage.Runtime.log/3`. Both forms write to the same place.
 
+  Code outside a run, such as seeding a system before the run starts, gets a
+  scope from `capture/1`, and its lines reach the report through the run's
+  `setup_log:` option.
+
   ## Storage
 
   A line goes, at the call and synchronously, into the command's
@@ -59,11 +63,26 @@ defmodule PropertyDamage.Log do
   `PropertyDamage.Sequence.Position`). A line written after its command ended
   is dropped.
 
+  A settle or stutter retry can run one command hundreds of times, so the sink
+  caps what a step keeps (DR-054 decision 13): the lines of the first attempt
+  and of the last three attempts. When a newer attempt pushes an older one out
+  of the last three, the sink drops that attempt's lines at once and counts
+  them, so a 1,000-attempt settle holds the lines of at most four attempts. One
+  `PropertyDamage.Log.Gap` stands in the step's lines, between the first
+  attempt's and the kept ones, with the number of attempts and lines dropped;
+  the failure report prints it as `... 296 attempts omitted (1,184 lines)`. The
+  cap drops whole attempts and never cuts a line or a value. The stutter
+  retries of a command count as further attempts of the same step, after its
+  settle attempts. `log: [keep_attempts: n]` on `PropertyDamage.run/1` changes
+  the number of last attempts kept. Lines of `capture/1`, of an adapter's
+  `setup/1` and `teardown/1` and of the other points that have no attempts are
+  never capped.
+
   Lines live only in memory: a saved trace or report, a replay artifact and
   every other file carry none.
   """
 
-  alias PropertyDamage.Log.{Line, NoScopeError}
+  alias PropertyDamage.Log.{Gap, Line, NoScopeError}
   alias PropertyDamage.Runtime.Sink
 
   @scope_key {__MODULE__, :scope}
@@ -76,8 +95,11 @@ defmodule PropertyDamage.Log do
   """
   @type key :: PropertyDamage.Sequence.Position.t() | :adapter_setup | :adapter_teardown
 
-  @typedoc "Lines by the step they belong to, each list in the order written."
-  @type logs :: %{key() => [Line.t()]}
+  @typedoc """
+  Lines by the step they belong to, each list in the order written, with a
+  `PropertyDamage.Log.Gap` in the place of the attempts the retry cap dropped.
+  """
+  @type logs :: %{key() => [Line.t() | Gap.t()]}
 
   @typedoc "A function that writes one line: `(message, opts) -> :ok`."
   @type writer :: (term(), keyword() -> :ok)
@@ -293,11 +315,11 @@ defmodule PropertyDamage.Log do
 
   @doc false
   # Runs `fun` with a sink of its own, given to it, and returns its result
-  # with the lines written into the sink, in order. The sink stops even when
-  # `fun` raises.
-  @spec collect((pid() -> result)) :: {result, [Line.t()]} when result: var
-  def collect(fun) do
-    {:ok, sink} = Sink.start_link()
+  # with the lines the sink keeps, in order (`Sink.lines/1`). `opts` are the
+  # sink's (`Sink.start_link/1`). The sink stops even when `fun` raises.
+  @spec collect((pid() -> result), keyword()) :: {result, [Line.t() | Gap.t()]} when result: var
+  def collect(fun, opts \\ []) do
+    {:ok, sink} = Sink.start_link(opts)
 
     try do
       result = fun.(sink)
@@ -313,6 +335,44 @@ defmodule PropertyDamage.Log do
   # result with the lines it wrote.
   @spec inline((-> result)) :: {result, [Line.t()]} when result: var
   def inline(fun), do: collect(fn sink -> with_scope(writer(sink, 1), fun) end)
+
+  @doc """
+  Runs `fun` as a scope and returns `{result, lines}`: what `fun` returned and
+  the `PropertyDamage.Log.Line` structs it logged, in the order written.
+
+  Use it for code that runs outside a run, such as seeding a system in an
+  ExUnit `setup_all`, and hand the lines to the run as `setup_log: lines`
+  (DR-054 decision 8):
+
+      require PropertyDamage
+
+      {accounts, setup_log} =
+        PropertyDamage.Log.capture(fn ->
+          PropertyDamage.log("seeding accounts", tags: [:seed])
+          MyApp.seed!(alice: 100, bob: 0)
+        end)
+
+      PropertyDamage.run(model: MyModel, targets: targets(accounts), setup_log: setup_log)
+
+  The same rules as for a run's scopes apply: `PropertyDamage.log/2` finds the
+  capture in the calling process or in a process of its `$callers`, so a `Task`
+  started inside `fun` logs into it. A nested `capture/1` collects into the
+  innermost one, and the outer one gets none of its lines. A `capture/1`
+  inside an adapter's `execute/3` keeps its lines out of the step. Lines have
+  attempt 1. The capture closes when `fun` returns: a process left running
+  finds no scope afterwards.
+
+  An error, throw or exit in `fun` propagates, and the lines written before it
+  are dropped. `fun` must be a 0-arity function, or `capture/1` raises
+  `ArgumentError`.
+  """
+  @spec capture((-> result)) :: {result, [Line.t()]} when result: var
+  def capture(fun) when is_function(fun, 0), do: inline(fun)
+
+  def capture(other) do
+    raise ArgumentError,
+          "PropertyDamage.Log.capture/1 takes a 0-arity function, got: #{inspect(other)}"
+  end
 
   @doc false
   # Adds `lines` to the end of the lines kept under `key`. No lines, no key.

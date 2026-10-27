@@ -93,6 +93,7 @@ defmodule PropertyDamage.Executor do
   alias PropertyDamage.Model.Projection
 
   alias PropertyDamage.EventLog.Entry
+  alias PropertyDamage.Log.Cap
 
   alias PropertyDamage.Executor.Branching
   alias PropertyDamage.Executor.Events
@@ -152,6 +153,8 @@ defmodule PropertyDamage.Executor do
   - `:config` - Config passed to adapter.setup/1
   - `:event_queue` - EventQueue pid for injector events (optional)
   - `:stutter_config` - Stutter.Config for idempotency testing (optional)
+  - `:keep_attempts` - How many of a step's last settle or stutter attempts keep
+    their log lines, besides the first attempt's (default 3, DR-054)
   - `:mock_registry` - MockServiceRegistry pid for mock service support (optional)
   - `:check_mode` - How to handle checks (`:disabled`, `:halt`, `:record`, `:log`). Default: `:halt`
   - `:telemetry` - The context command and check telemetry is emitted with
@@ -271,6 +274,7 @@ defmodule PropertyDamage.Executor do
           telemetry: telemetry,
           setup_commands: Keyword.get(opts, :setup_commands, []),
           teardown_commands: Keyword.get(opts, :teardown_commands, []),
+          keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
           logs: PropertyDamage.Log.append(%{}, :adapter_setup, setup_lines)
         }
 
@@ -436,7 +440,11 @@ defmodule PropertyDamage.Executor do
       )
 
     # The adapter setup/1's log lines, when the run set the adapter up itself.
-    initial_state = %{initial_state | logs: Map.get(env, :logs, %{})}
+    initial_state = %{
+      initial_state
+      | logs: Map.get(env, :logs, %{}),
+        keep_attempts: Map.get(env, :keep_attempts, Cap.default_keep_attempts())
+    }
 
     ctx = %PropertyDamage.Executor.Stepping.Context{
       model: env.model,
@@ -896,7 +904,12 @@ defmodule PropertyDamage.Executor do
         # stops the sink (even if the adapter raises). The lines move under
         # the command's position on every outcome path below (DR-054).
         {{result, execute_us}, final_injection_ctx, started_resource_pollers, lines} =
-          Runtime.InjectionWindow.run_logged(initial_ctx, build_runtime, execute_fn)
+          Runtime.InjectionWindow.run_logged(
+            initial_ctx,
+            build_runtime,
+            execute_fn,
+            keep_attempts: state.keep_attempts
+          )
 
         started_resource_pollers = drop_timed_out_pollers(result, started_resource_pollers)
 
@@ -1217,7 +1230,9 @@ defmodule PropertyDamage.Executor do
              ) do
           {:ok, check_counters, updated_failures} ->
             # 9. Execute stutter retries if configured. Their log lines join
-            #    the command's, each with its attempt number (DR-054).
+            #    the command's under the same cap, each with its attempt
+            #    number (DR-054); `stutter_lines` is the step's whole list
+            #    then, and nil when no retry ran.
             {stutter_outcome, stutter_lines} =
               PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
                 command,
@@ -1230,7 +1245,10 @@ defmodule PropertyDamage.Executor do
                 adapter_context
               )
 
-            logs = PropertyDamage.Log.append(state.logs, state.current_position, stutter_lines)
+            logs =
+              if stutter_lines,
+                do: Map.put(state.logs, state.current_position, stutter_lines),
+                else: state.logs
 
             case stutter_outcome do
               {:ok, final_event_log} ->

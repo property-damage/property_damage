@@ -167,6 +167,14 @@ defmodule PropertyDamage.FailureReport do
   `reference_event_log/1` read the reference's trace the way `steps/1` and
   `event_log/1` read the failing target's, which they keep meaning.
 
+  `setup_log` holds the `PropertyDamage.Log.Line` structs the run's `setup_log:`
+  option carried, the lines a test captured with `PropertyDamage.Log.capture/1`
+  for work done before the run (DR-054). Every report `PropertyDamage.run/1`
+  builds has them, and `PropertyDamage.shrink_further/2` keeps them. The report
+  prints them once, in a Setup section, whatever the number of targets. Like
+  every log line they live only in memory: a saved report holds `[]`, and so
+  does a loaded one.
+
   `shrink_stop` records why the shrinker stopped: `:done` when it finished
   inside its budget or never ran (`shrink: false`, a setup failure, a latency
   report), `:max_iterations` or `:max_time` when a budget ran out first (the
@@ -271,6 +279,11 @@ defmodule PropertyDamage.FailureReport do
           # deep structures (plan, event_log, executed) live here once;
           # `shrunk_sequence/1` and `event_log/1` are accessors over it.
           trace: RunTrace.t(),
+
+          # The lines `PropertyDamage.Log.capture/1` returned for work done
+          # before the run (`setup_log:`); memory only, `[]` in a saved or
+          # loaded report.
+          setup_log: [PropertyDamage.Log.Line.t()],
 
           # The reference target's trace of the same run, and its projection
           # state at the failing boundary, for `:diverged` and
@@ -396,6 +409,7 @@ defmodule PropertyDamage.FailureReport do
             campaign: nil,
             latency: false,
             metrics: nil,
+            setup_log: [],
             trace: nil,
             reference_trace: nil,
             reference_state_at_failure: nil,
@@ -451,6 +465,8 @@ defmodule PropertyDamage.FailureReport do
   - `:shrink_stop` - Why the shrinker stopped (default `:done`)
   - `:logs` - The log lines of the run the report describes, by step
     (`RunTrace.logs`, DR-054); default `%{}`
+  - `:setup_log` - The lines `PropertyDamage.Log.capture/1` returned for work
+    done before the run (`setup_log:` of `PropertyDamage.run/1`); default `[]`
   - `:reference_result` - The reference target's finished result of the
     reported run (`event_log`, `executed`, `command_fold_ordinals`, `logs`); for
     `:diverged` and `:did_not_converge` it becomes `reference_trace` and
@@ -578,6 +594,7 @@ defmodule PropertyDamage.FailureReport do
       campaign: Keyword.get(opts, :campaign),
       latency: Keyword.get(opts, :latency, false),
       metrics: Keyword.get(opts, :metrics),
+      setup_log: Keyword.get(opts, :setup_log, []),
       trace: trace,
       reference_trace: reference_trace,
       reference_state_at_failure: reference_state(reference_trace, failed_at_index),

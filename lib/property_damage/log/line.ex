@@ -18,7 +18,10 @@ defmodule PropertyDamage.Log.Line do
       clock `PropertyDamage.EventLog.Entry` uses, so lines and events of one
       run order against each other.
     * `:attempt` - which execution of its step wrote the line: `1` for the
-      first, then one more for each settle or stutter retry.
+      first, then one more for each settle or stutter retry. A line written
+      under `PropertyDamage.Log.capture/1` has attempt `1`. The failure report
+      keeps the lines of a step's first and last attempts only
+      (`PropertyDamage.Log.Gap`).
   """
 
   @type t :: %__MODULE__{
