@@ -157,7 +157,7 @@ defmodule PropertyDamage.FailureReport do
   `shrink_stop` records why the shrinker stopped: `:done` when it finished
   inside its budget or never ran (`shrink: false`, a setup failure, a latency
   report), `:max_iterations` or `:max_time` when a budget ran out first (the
-  iteration cap wins when both did), so the minimal reproduction may not be
+  iteration cap wins when both did), in which case the reproduction may not be
   minimal. It is `nil` on a report saved before the field existed.
 
   `compare_counts` holds, per boundary observation `{projection, function}`,
