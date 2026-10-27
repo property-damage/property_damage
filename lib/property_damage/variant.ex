@@ -135,6 +135,8 @@ defmodule PropertyDamage.Variant do
 
   use GenServer
 
+  alias PropertyDamage.Log.Cap
+
   alias PropertyDamage.{
     EventQueue,
     Executor,
@@ -189,6 +191,8 @@ defmodule PropertyDamage.Variant do
       sent.
     * `:stutter_config` - stutter configuration (default `nil`)
     * `:check_mode` - `:halt` | `:record` | `:log` | `:disabled` (default `:halt`)
+    * `:keep_attempts` - how many of a step's last settle or stutter attempts
+      keep their log lines besides the first attempt's (default 3, DR-054)
     * `:measure_latency` - when `true`, record the wall-clock time of every
       command's `execute/3` (see `latencies/1`); default `false`
     * `:setup_commands`, `:teardown_commands` - the sequence's setup and
@@ -418,6 +422,7 @@ defmodule PropertyDamage.Variant do
       mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
+      keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
       measure_latency: Keyword.get(opts, :measure_latency, false),
       latencies: [],
       owner_ref: owner_ref,
@@ -655,6 +660,7 @@ defmodule PropertyDamage.Variant do
         stutter_config: state.stutter_config,
         mock_registry: state.mock_registry,
         check_mode: state.check_mode,
+        keep_attempts: state.keep_attempts,
         placeholder_registry: state.placeholder_registry,
         rng_seed: state.run_seed,
         run_nonce: state.run_nonce,

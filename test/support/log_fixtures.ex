@@ -30,6 +30,12 @@ defmodule PropertyDamage.Test.LogFixtures do
   #   :error_at      Act `n` answers `{:error, :refused}`
   #   :fail_at       Act `n` answers a Done that `Guard` fails on
   #   :skew_at       Act `n` answers a Done whose value is 2, not 1
+  #   :spin_at       a Spin command answers `{:retry, _}` until its
+  #                  attempt number reaches this value (default 3)
+  #   :spin_detail   each Spin attempt logs a second line, `"spin detail <n>"`
+  #   :spin_multiline  the first Spin attempt logs a two-line string first
+  #   :spin_skew_retry  a Spin attempt past :spin_at (a stutter retry) answers
+  #                  a Done whose value is 2, an idempotency violation
   #
   # Actions (tags must be literal, so each tag set has its own action):
   #
@@ -52,6 +58,9 @@ defmodule PropertyDamage.Test.LogFixtures do
   #                              holds only the parts, so a file that holds
   #                              the joined text got it from a line
   #   {:value, term}             logs `term`
+  #   {:capture, message}        runs `PropertyDamage.Log.capture/1` around a
+  #                              log call and sends `{:captured, lines}` to
+  #                              :test_pid
 
   import ExUnit.Assertions
 
@@ -109,6 +118,24 @@ defmodule PropertyDamage.Test.LogFixtures do
     use PropertyDamage.Command,
       execution: :probe,
       settle: %{timeout_ms: 2_000, interval_ms: 5, backoff: :linear}
+
+    defstruct [:n]
+
+    @impl true
+    def generator(overrides \\ %{}) do
+      %{n: StreamData.constant(0)}
+      |> Generator.merge_overrides(overrides)
+      |> StreamData.fixed_map()
+    end
+  end
+
+  defmodule Spin do
+    @moduledoc false
+    # A probe that retries without waiting, so a run can hold hundreds of
+    # attempts.
+    use PropertyDamage.Command,
+      execution: :probe,
+      settle: %{timeout_ms: 30_000, interval_ms: 0, backoff: :linear}
 
     defstruct [:n]
 
@@ -187,6 +214,9 @@ defmodule PropertyDamage.Test.LogFixtures do
       do: %{state | count: state.count + 1}
 
     def apply(state, %PropertyDamage.Test.LogFixtures.Split{}),
+      do: %{state | count: state.count + 1}
+
+    def apply(state, %PropertyDamage.Test.LogFixtures.Spin{}),
       do: %{state | count: state.count + 1}
 
     def apply(state, _other), do: state
@@ -314,6 +344,30 @@ defmodule PropertyDamage.Test.LogFixtures do
     defp number(state), do: %{n: state.count}
   end
 
+  defmodule SpinModel do
+    @moduledoc false
+    # Root 0 is a Spin, every later root an Act.
+    @behaviour PropertyDamage.Model
+
+    alias PropertyDamage.Test.LogFixtures.{Act, Spin}
+
+    @impl true
+    def commands do
+      [
+        {Spin, when: &(&1.count == 0), overrides: &number/1},
+        {Act, when: &(&1.count > 0), overrides: &number/1}
+      ]
+    end
+
+    @impl true
+    def command_sequence_projection, do: PropertyDamage.Test.LogFixtures.Counter
+
+    @impl true
+    def check_projections, do: [PropertyDamage.Test.LogFixtures.Guard]
+
+    defp number(state), do: %{n: state.count}
+  end
+
   defmodule PhaseModel do
     @moduledoc false
     # One setup command (Prepare), Split roots that always run as two Part
@@ -375,11 +429,17 @@ defmodule PropertyDamage.Test.LogFixtures do
   end
 
   def answer(%Probe{n: n}, ctx), do: {:ok, [%Done{n: n, by: ctx.name}]}
+  def answer(%Spin{n: n}, ctx), do: answer_spin(n, ctx, 1)
   def answer(%Prepare{}, ctx), do: {:ok, [%Prepared{by: ctx.name}]}
   def answer(%Tidy{}, ctx), do: {:ok, [%Tidied{by: ctx.name}]}
 
   def answer(%Part{root: root, part: part}, ctx),
     do: {:ok, [%Parted{root: root, part: part, by: ctx.name}]}
+
+  @doc false
+  # A Spin's Done carries `value`: a stutter retry that answers another value
+  # is an idempotency violation.
+  def answer_spin(n, ctx, value), do: {:ok, [%Done{n: n, by: ctx.name, value: value}]}
 
   defmodule PlainAdapter do
     @moduledoc false
@@ -505,6 +565,19 @@ defmodule PropertyDamage.Test.LogFixtures do
       if attempt < 3, do: {:retry, :not_yet}, else: F.answer(command, ctx)
     end
 
+    def execute(%F.Spin{} = command, ctx, _runtime) do
+      attempt = :atomics.add_get(ctx.attempts, 1, 1)
+      if ctx[:spin_multiline] && attempt == 1, do: PropertyDamage.log("first line\nsecond line")
+      PropertyDamage.log("spin attempt #{attempt}")
+      if ctx[:spin_detail], do: PropertyDamage.log("spin detail #{attempt}")
+
+      cond do
+        attempt < Map.get(ctx, :spin_at, 3) -> {:retry, :not_yet}
+        attempt > Map.get(ctx, :spin_at, 3) and ctx[:spin_skew_retry] -> F.answer_spin(command.n, ctx, 2)
+        true -> F.answer(command, ctx)
+      end
+    end
+
     def execute(%F.Prepare{} = command, ctx, _runtime) do
       PropertyDamage.log("prepare by #{ctx.name}")
       F.answer(command, ctx)
@@ -572,6 +645,12 @@ defmodule PropertyDamage.Test.LogFixtures do
     end
 
     defp act({:value, term}, _n, _ctx, _runtime), do: PropertyDamage.log(term)
+
+    # Called through apply/3 so the fixtures compile before capture/1 exists.
+    defp act({:capture, message}, _n, ctx, _runtime) do
+      {_result, lines} = apply(PropertyDamage.Log, :capture, [fn -> PropertyDamage.log(message) end])
+      notify(ctx, {:captured, lines})
+    end
 
     defp notify(%{test_pid: pid}, message) when is_pid(pid), do: send(pid, message)
     defp notify(_config, _message), do: :ok
@@ -825,6 +904,9 @@ defmodule PropertyDamage.Test.LogFixtures do
 
   @log ~r/^(\s+)\+(\d+)\.(\d{2})s log   (?:\[([a-z_ ]+)\] )?(.*)$/
 
+  # The line that stands for attempts the retry cap dropped.
+  @gap ~r/^(\s+)(\.\.\. (\d[\d,]*) attempts? omitted \((\d[\d,]*) lines?\))$/
+
   @doc false
   # The body lines of the `## ` section whose heading starts with `name`.
   def section(text, name) do
@@ -901,6 +983,9 @@ defmodule PropertyDamage.Test.LogFixtures do
         match = Regex.run(~r/^(►)?\s*(#{@label})(?:\s|$)/u, line) ->
           [{:step, Enum.at(match, 2), line} | acc]
 
+        Regex.match?(@gap, line) ->
+          [{:entry, gap_entry(line)} | acc]
+
         Regex.match?(@entry, line) ->
           [{:entry, entry(line)} | acc]
 
@@ -924,6 +1009,25 @@ defmodule PropertyDamage.Test.LogFixtures do
 
   defp continue(acc, line),
     do: flunk("a line continues nothing: #{inspect(line)}\n#{inspect(acc)}")
+
+  # A gap is an entry of kind `:gap`: its text is the message, its counts
+  # are parsed (thousands separators removed), and it has no offset.
+  defp gap_entry(line) do
+    [_, indent, text, attempts, lines] = Regex.run(@gap, line)
+
+    %{
+      kind: :gap,
+      line: line,
+      indent: String.length(indent),
+      offset: nil,
+      badge: nil,
+      tags: [],
+      message: text,
+      attempts: attempts |> String.replace(",", "") |> String.to_integer(),
+      lines: lines |> String.replace(",", "") |> String.to_integer(),
+      continuation: []
+    }
+  end
 
   defp entry(line) do
     case Regex.run(@log, line) do
@@ -1008,6 +1112,18 @@ defmodule PropertyDamage.Test.LogFixtures do
   def logs(entries), do: Enum.filter(entries, &(&1.kind == :log))
 
   @doc false
+  def gaps(entries), do: Enum.filter(entries, &(&1.kind == :gap))
+
+  @doc false
+  # What a step shows of its log lines, in order: each line's message, each
+  # gap as `{:gap, text}`. Events are left out.
+  def shown_logs(entries) do
+    for %{kind: kind} = entry <- entries, kind in [:log, :gap] do
+      if kind == :log, do: entry.message, else: {:gap, entry.message}
+    end
+  end
+
+  @doc false
   def events(entries), do: Enum.filter(entries, &(&1.kind == :event))
 
   @doc false
@@ -1053,7 +1169,7 @@ defmodule PropertyDamage.Test.LogFixtures do
   # Offsets that never decrease, none negative (a negative offset would not
   # parse as `+S.SSs`).
   def assert_offsets_ordered(entries) do
-    offsets = Enum.map(entries, & &1.offset)
+    offsets = for %{offset: offset} when offset != nil <- entries, do: offset
     assert offsets == Enum.sort(offsets), "offsets out of order: #{inspect(offsets)}"
     :ok
   end
@@ -1202,6 +1318,37 @@ defmodule PropertyDamage.Test.LogFixtures do
 
   @doc false
   def line_module, do: Module.concat([PropertyDamage, Log, Line])
+
+  @doc false
+  def gap_module, do: Module.concat([PropertyDamage, Log, Gap])
+
+  @doc false
+  # A log line as `PropertyDamage.Log.capture/1` returns it. `at` is its
+  # timestamp, in milliseconds.
+  def line(message, opts \\ []) do
+    %PropertyDamage.Log.Line{
+      message: message,
+      tags: Keyword.get(opts, :tags, []),
+      file: "setup.exs",
+      line: 1,
+      timestamp: Keyword.get(opts, :at, System.monotonic_time(:millisecond)),
+      attempt: 1
+    }
+  end
+
+  @doc false
+  # Setup lines far earlier than any run's events, so one that entered a
+  # target's offset origin would show as a large offset there. Given out of
+  # timestamp order on purpose.
+  def setup_lines do
+    base = System.monotonic_time(:millisecond) - 3_600_000
+
+    [
+      line("seeded 3 accounts", tags: [:seed], at: base + 1_250),
+      line("opening the ledger", at: base),
+      line(%{alice: 100, bob: 0}, tags: [:seed, :rows], at: base + 30)
+    ]
+  end
 
   @doc false
   # The exception `fun` raises; fails the test when it returns.

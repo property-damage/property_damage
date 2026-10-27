@@ -165,6 +165,8 @@ defmodule PropertyDamage.Scheduler do
   root.
   """
 
+  alias PropertyDamage.Log.Cap
+
   alias PropertyDamage.{
     Comparison,
     Failure,
@@ -260,6 +262,9 @@ defmodule PropertyDamage.Scheduler do
     * `:mint_epoch` - the mint epoch every target's run uses for client-minted
       values (DR-034); optional, default `0`, the exploration run's epoch
     * `:stutter_config`, `:check_mode` - passed to every variant (optional)
+    * `:keep_attempts` - how many of a step's last settle or stutter attempts
+      keep their log lines besides the first attempt's, passed to every
+      variant (optional, default 3, DR-054)
     * `:setup_commands`, `:teardown_commands` - the sequence's setup and
       teardown commands, run by every variant before root 0 and after the
       final boundary (optional, default `[]`)
@@ -320,6 +325,7 @@ defmodule PropertyDamage.Scheduler do
       mint_epoch: Keyword.get(opts, :mint_epoch, 0),
       stutter_config: Keyword.get(opts, :stutter_config),
       check_mode: Keyword.get(opts, :check_mode, :halt),
+      keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts()),
       registry: Keyword.get(opts, :placeholder_registry) || PlaceholderRegistry.build(commands),
       variants: Keyword.get(opts, :variants)
     }
@@ -402,6 +408,7 @@ defmodule PropertyDamage.Scheduler do
         run_nonce: config.run_nonce,
         stutter_config: config.stutter_config,
         check_mode: config.check_mode,
+        keep_attempts: config.keep_attempts,
         measure_latency: config.measure_latency,
         mint_epoch: config.mint_epoch
       )

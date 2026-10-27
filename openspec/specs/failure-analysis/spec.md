@@ -496,3 +496,30 @@ The `:terminal` and `:markdown` reports SHALL print every log line of the report
 #### Scenario: A shrunk report shows the reported run's lines only
 - **WHEN** a failure is shrunk
 - **THEN** each listed step SHALL show the lines of its one execution in the reported run, and no line of a shrink attempt
+
+### Requirement: Setup Lines and Gaps in the Printed Report (DR-054, DR-055, DR-056)
+
+A report built with `setup_log:` (the lines `PropertyDamage.Log.capture/1` returned) SHALL print them once, in a section whose heading starts with `Setup`, right after Failure and before Minimal Reproduction, whatever the number of targets. The section SHALL be present exactly when the report's `setup_log` is not empty. Its first body line SHALL say that the lines are shared by every run; each following line SHALL be a log line in the form of the target listings, at the event column, in timestamp order (stable), with offsets counted from the earliest setup line. A setup line SHALL never enter a target's offset origin. Function and value messages SHALL follow the rules of the listings. The `:markdown` report SHALL carry the section's plain body in one fence. `shrink_further/2` SHALL keep the given report's `setup_log` on the report it returns. `FailureReport.setup_log` SHALL be set on every report `PropertyDamage.run/1` builds, `only: [replay: path]` included. The `:json` and `:compact` formats SHALL NOT print setup lines.
+
+Where a step's retry cap dropped attempts (see the execution-engine requirement "Log Lines Keep a Step's First and Last Attempts"), the listing SHALL print each gap in its place among the step's lines as `... N attempts omitted (M lines)`, at the event column with no offset and no badge, with comma thousands separators and the singular `1 attempt` and `1 line`; faint when colored; the markdown report SHALL print the plain text. A step whose omitted attempts logged nothing SHALL show no gap.
+
+#### Scenario: The Setup section sits between Failure and the reproduction
+- **WHEN** a run with `setup_log: lines` fails, with one target or with two that diverge
+- **THEN** the report SHALL print one Setup section, right after Failure, whose first body line says the lines are shared by every run and whose other lines are the setup lines in the log line form
+
+#### Scenario: No lines, no section
+- **WHEN** a run has no `setup_log:` or `setup_log: []`
+- **THEN** the report SHALL print no Setup section
+
+#### Scenario: A setup line does not move a target's offsets
+- **WHEN** a setup line carries a timestamp far earlier than any event
+- **THEN** the offsets of the target listings SHALL be those of the same report without setup lines
+
+#### Scenario: A replay prints the Setup section
+- **WHEN** `only: [replay: path]` runs with `setup_log: lines`
+- **THEN** the report SHALL print the Setup section
+
+#### Scenario: A gap prints in its place
+- **WHEN** a step's cap dropped 296 attempts that wrote 1,184 lines
+- **THEN** the listing SHALL print `... 296 attempts omitted (1,184 lines)` between the first attempt's lines and the kept ones
+

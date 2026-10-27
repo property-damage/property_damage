@@ -131,6 +131,8 @@ defmodule PropertyDamage do
   See the individual module documentation for detailed information on each component.
   """
 
+  alias PropertyDamage.Log.Cap
+
   alias PropertyDamage.{
     Comparison,
     Coverage,
@@ -231,6 +233,13 @@ defmodule PropertyDamage do
   - `:stutter` - Keyword list for idempotency testing (see below)
   - `:check_mode` - How a failing check is handled: `:halt` (default),
     `:record`, `:log` or `:disabled`
+  - `:setup_log` - The lines `PropertyDamage.Log.capture/1` returned for work
+    done before the run, such as seeding the system (default `[]`). The report
+    prints them once, in a Setup section before the reproduction, labeled as
+    shared by every run.
+  - `:log` - `[keep_attempts: n]`: how many of a step's last settle or stutter
+    attempts keep their log lines besides the first attempt (default `3`).
+    The report prints each gap as `... N attempts omitted (M lines)`.
   - `:concurrency` - How the targets reach each command boundary: `:serial`
     (default) steps one target at a time in target order; `:parallel` steps
     every target at once
@@ -503,6 +512,8 @@ defmodule PropertyDamage do
       branching: opts[:branching],
       stutter: opts[:stutter],
       stutter_config: Stutter.parse_config(opts[:stutter]),
+      keep_attempts: keep_attempts(opts),
+      setup_log: opts[:setup_log],
       check_mode: opts[:check_mode],
       seed_library: seed_library,
       coverage: opts[:coverage],
@@ -772,6 +783,14 @@ defmodule PropertyDamage do
   # `with_reference: false`) has no first target to copy: it runs the
   # choices computed for it on the full `targets:`, which every later
   # realization carries, as a `:random` target carries its own.
+  # How many of a step's last settle or stutter attempts keep their log lines
+  # (`log: [keep_attempts: n]`).
+  defp keep_attempts(opts) do
+    opts
+    |> Keyword.get(:log, [])
+    |> Keyword.get(:keep_attempts, Cap.default_keep_attempts())
+  end
+
   defp executed_targets([%{expansion: :reference} = alone | rest]),
     do: [%{alone | expansion: :random} | rest]
 
@@ -857,6 +876,7 @@ defmodule PropertyDamage do
       targets: ctx.target_entries,
       concurrency: ctx.concurrency,
       compare: ctx.compare,
+      setup_log: ctx.setup_log,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
       check_fires: acc.fires,
@@ -1004,6 +1024,7 @@ defmodule PropertyDamage do
         compare: ctx.compare,
         measure_latency: ctx.measure_latency,
         stutter_config: ctx.stutter_config,
+        keep_attempts: ctx.keep_attempts,
         check_mode: ctx.check_mode
       )
 
@@ -1055,6 +1076,7 @@ defmodule PropertyDamage do
         event_queue: event_queue,
         mock_registry: mock_registry,
         stutter_config: ctx.stutter_config,
+        keep_attempts: ctx.keep_attempts,
         # Explicit stutter RNG base (DR-029): per-run seed so stutter
         # decisions are decoupled from run count and seed-library replay
         # drift, yet reproduce on the same campaign seed.
@@ -1617,6 +1639,7 @@ defmodule PropertyDamage do
             # them with stutter forced on (probability 1.0), so they minimize to
             # the offending command rather than being skipped.
             stutter_config: ctx.stutter_config,
+            keep_attempts: ctx.keep_attempts,
             # The run's effective seed: every attempt runs as run 0 of it, so
             # the per-target RNG and the stutter base track the original run.
             rng_seed: found.run_seed,
@@ -1706,6 +1729,7 @@ defmodule PropertyDamage do
         concurrency: ctx.concurrency,
         compare: ctx.compare,
         stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
+        keep_attempts: ctx.keep_attempts,
         check_mode: ctx.check_mode
       )
 
@@ -1735,6 +1759,7 @@ defmodule PropertyDamage do
           event_queue: event_queue,
           mock_registry: mock_registry,
           stutter_config: repro_stutter_config(found.failure.reason, ctx.stutter_config),
+          keep_attempts: ctx.keep_attempts,
           rng_seed: found.run_seed,
           run_nonce: ctx.run_nonce,
           mint_epoch: epoch,
@@ -1862,6 +1887,7 @@ defmodule PropertyDamage do
       targets: ctx.target_entries,
       concurrency: ctx.concurrency,
       compare: ctx.compare,
+      setup_log: ctx.setup_log,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
       check_mode: ctx.check_mode,
@@ -2163,6 +2189,7 @@ defmodule PropertyDamage do
       compare: shrink_further_compare(report, opts),
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
+      keep_attempts: Cap.default_keep_attempts(),
       # A `:record` failure re-shrinks under `:record`, as the run found it.
       check_mode: report.check_mode || :halt
     }
@@ -2199,6 +2226,7 @@ defmodule PropertyDamage do
         # A stutter failure re-shrinks with stutter forced on (DR-029), as in
         # the run's own failure path.
         stutter_config: ctx.stutter_config,
+        keep_attempts: ctx.keep_attempts,
         check_mode: ctx.check_mode,
         config:
           ShrinkerConfig.new(
@@ -2263,6 +2291,8 @@ defmodule PropertyDamage do
               |> merge_fires(counts.fires),
             run_check_fires: counts.fires,
             other_failures: Enum.map(other_failures, &other_failure/1),
+            # The report's own setup lines stay, as the caller gave them.
+            setup_log: report.setup_log,
             stutter: ctx.stutter,
             max_commands: report.max_commands,
             check_mode: ctx.check_mode,

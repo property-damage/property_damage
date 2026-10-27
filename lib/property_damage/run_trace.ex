@@ -57,7 +57,8 @@ defmodule PropertyDamage.RunTrace do
   - `logs` — the log lines the run's user code wrote (DR-054), by the step
     they belong to: a `Sequence.Position` for a command, `:adapter_setup` and
     `:adapter_teardown` for the adapter's `setup/1` and `teardown/1`, each list
-    in the order written (`PropertyDamage.Log`). Lines never enter
+    in the order written (`PropertyDamage.Log`), a `PropertyDamage.Log.Gap` in
+    the place of the settle or stutter attempts the retry cap dropped. Lines never enter
     `event_log`. They live only in memory: only the trace of a reported run
     keeps them, `PropertyDamage.Persistence` saves a trace with `logs: %{}`
     and loads every trace with `logs: %{}`, so a trace read from a file shows

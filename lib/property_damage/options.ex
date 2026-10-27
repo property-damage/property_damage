@@ -532,6 +532,38 @@ defmodule PropertyDamage.Options do
       - `:log` - Log failures as warnings and continue
       """
     ],
+    setup_log: [
+      type: {:custom, __MODULE__, :validate_setup_log, []},
+      default: [],
+      doc: """
+      The lines `PropertyDamage.Log.capture/1` returned for work done before the
+      run, such as seeding the system (DR-054). The failure report prints them
+      once, in a Setup section between Failure and Minimal Reproduction,
+      labeled as shared by every run. Nothing else carries them: a saved
+      report or trace and a replay artifact hold none, so `setup_log:` is
+      given again to any run that should print them. Default `[]`, which
+      prints no section.
+      """
+    ],
+    log: [
+      type: :keyword_list,
+      default: [],
+      doc: "Options for the log lines of the failure report (DR-054).",
+      keys: [
+        keep_attempts: [
+          type: :pos_integer,
+          default: 3,
+          doc: """
+          How many of a step's last settle or stutter attempts keep their log
+          lines, besides the first attempt, whose lines are always kept. When
+          a newer attempt pushes an older one out, the run drops that attempt's
+          lines and counts them, so memory stays bounded; the report prints
+          each gap as `... N attempts omitted (M lines)`. Whole attempts only:
+          the cap never cuts a line or a value.
+          """
+        ]
+      ]
+    ],
 
     # Nested - Branching
     branching: [
@@ -817,6 +849,24 @@ defmodule PropertyDamage.Options do
     do: only_error("`with_reference:` must be true or false, got: #{inspect(other)}")
 
   defp only_error(message), do: {:error, "`only:` " <> message}
+
+  @doc false
+  # `setup_log:` option type: the list `PropertyDamage.Log.capture/1` returns.
+  def validate_setup_log(lines) when is_list(lines) do
+    if Enum.all?(lines, &is_struct(&1, PropertyDamage.Log.Line)) do
+      {:ok, lines}
+    else
+      setup_log_error(lines)
+    end
+  end
+
+  def validate_setup_log(other), do: setup_log_error(other)
+
+  defp setup_log_error(other) do
+    {:error,
+     "`setup_log:` takes the lines `PropertyDamage.Log.capture/1` returns, a list of " <>
+       "%PropertyDamage.Log.Line{} structs, got: #{inspect(other, limit: 5)}"}
+  end
 
   @doc false
   # `replay_dir:` option type: a directory path, or `false`.

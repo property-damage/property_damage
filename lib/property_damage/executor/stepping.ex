@@ -88,6 +88,7 @@ defmodule PropertyDamage.Executor.Stepping do
   alias PropertyDamage.Executor
   alias PropertyDamage.Executor.{Events, Finalization, Settle}
   alias PropertyDamage.Failure
+  alias PropertyDamage.Log.Cap
   alias PropertyDamage.MockServiceRegistry
   alias PropertyDamage.{Placeholder, PlaceholderRegistry}
   alias PropertyDamage.ResourcePoller
@@ -137,6 +138,8 @@ defmodule PropertyDamage.Executor.Stepping do
       (default `nil`; see `PropertyDamage.Executor.State`)
     * `:telemetry` - the context `step/4` emits command and check telemetry
       with (see `PropertyDamage.Telemetry`); default `nil`, which emits none
+    * `:keep_attempts` - how many of a step's last settle or stutter attempts
+      keep their log lines, besides the first attempt's (default 3, DR-054)
   """
   @spec init_state(module(), keyword()) :: map()
   def init_state(model, opts \\ []) do
@@ -154,7 +157,11 @@ defmodule PropertyDamage.Executor.Stepping do
         Keyword.get(opts, :telemetry)
       )
 
-    %{state | on_resource_poller_start: Keyword.get(opts, :on_resource_poller_start)}
+    %{
+      state
+      | on_resource_poller_start: Keyword.get(opts, :on_resource_poller_start),
+        keep_attempts: Keyword.get(opts, :keep_attempts, Cap.default_keep_attempts())
+    }
   end
 
   @typedoc """
@@ -335,21 +342,26 @@ defmodule PropertyDamage.Executor.Stepping do
     # The command's log lines (DR-054) go into a sink of its own and are kept
     # under its position, whatever it answered.
     {result, lines} =
-      PropertyDamage.Log.collect(fn sink ->
-        runtime_for = fn attempt -> %{runtime | log: PropertyDamage.Log.writer(sink, attempt)} end
+      PropertyDamage.Log.collect(
+        fn sink ->
+          runtime_for = fn attempt ->
+            %{runtime | log: PropertyDamage.Log.writer(sink, attempt)}
+          end
 
-        try do
-          Settle.execute_with_settle(
-            resolved,
-            ctx.adapter,
-            ctx.adapter_context,
-            runtime_for,
-            spec
-          )
-        rescue
-          exception -> {:raised, exception, __STACKTRACE__}
-        end
-      end)
+          try do
+            Settle.execute_with_settle(
+              resolved,
+              ctx.adapter,
+              ctx.adapter_context,
+              runtime_for,
+              spec
+            )
+          rescue
+            exception -> {:raised, exception, __STACKTRACE__}
+          end
+        end,
+        keep_attempts: Map.get(state, :keep_attempts) || Cap.default_keep_attempts()
+      )
 
     state = %{state | logs: PropertyDamage.Log.append(state.logs, position, lines)}
 

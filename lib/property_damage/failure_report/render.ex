@@ -150,6 +150,11 @@ defmodule PropertyDamage.FailureReport.Render do
       " " <> paint(tags, [:cyan], color and tags != "") <> hanging(text, width)
   end
 
+  # The attempts the retry cap dropped (DR-054 decision 13), at the event
+  # column, with no offset and no badge.
+  defp line({:gap, gap}, _column, color),
+    do: String.duplicate(" ", @event_indent) <> paint(gap_text(gap), [:faint], color)
+
   defp line({:note, text}, _column, color), do: "  " <> paint(text, [:faint], color)
 
   defp line({:projection, name, applied}, _column, color) do
@@ -177,6 +182,22 @@ defmodule PropertyDamage.FailureReport.Render do
   defp line({:comment, text}, _column, color), do: paint("# " <> text, [:faint], color)
   defp line({:code, text}, _column, color), do: paint(text, [:green], color)
   defp line({:text, text}, _column, _color), do: text
+
+  defp gap_text(%{attempts: attempts, lines: lines}) do
+    "... #{count(attempts, "attempt")} omitted (#{count(lines, "line")})"
+  end
+
+  defp count(1, noun), do: "1 #{noun}"
+  defp count(n, noun), do: "#{delimit(n)} #{noun}s"
+
+  # Thousands separated by commas: 1184 prints as 1,184.
+  defp delimit(n) do
+    n
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.replace(~r/(\d{3})(?=\d)/, "\\1,")
+    |> String.reverse()
+  end
 
   defp tags_text([]), do: ""
   defp tags_text(tags), do: "[" <> Enum.map_join(tags, " ", &Atom.to_string/1) <> "] "

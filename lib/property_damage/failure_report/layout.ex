@@ -21,6 +21,8 @@ defmodule PropertyDamage.FailureReport.Layout do
   #   * `{:log, %{offset_ms:, tags:, message:}}` - a log line (DR-054) under its
   #     step or under an adapter note; `message` is `{:text, string}` or
   #     `{:value, term}`, a function message already called
+  #   * `{:gap, %{attempts:, lines:}}` - the attempts the retry cap dropped from
+  #     a step (DR-054 decision 13), in their place among the step's log lines
   #   * `{:note, text}` - a line of a listing that is not a step
   #   * `{:projection, name, last_applied}` - a projection's header line
   #   * `{:attribute, marker, key, value}` - a projection attribute, `marker`
@@ -30,6 +32,8 @@ defmodule PropertyDamage.FailureReport.Layout do
   #
   # `parts` is a list of strings and `{:value, term}`; the renderer inspects
   # each value, so it alone decides on syntax colors.
+
+  alias PropertyDamage.Log.{Gap, Line}
 
   alias PropertyDamage.{
     ComparisonMismatch,
@@ -70,6 +74,7 @@ defmodule PropertyDamage.FailureReport.Layout do
     sections =
       [
         failure_section(report, focus),
+        setup_section(report),
         reproduction_listing(report, variant, focus),
         projections_section(report, variant, focus),
         reproduction_section(report)
@@ -103,7 +108,7 @@ defmodule PropertyDamage.FailureReport.Layout do
 
     timestamps =
       Enum.map(log, & &1.timestamp) ++
-        for {_key, lines} <- logs, line <- lines, do: line.timestamp
+        for {_key, lines} <- logs, %Line{} = line <- lines, do: line.timestamp
 
     %{
       trace: trace,
@@ -605,6 +610,27 @@ defmodule PropertyDamage.FailureReport.Layout do
     do: "stopped at its #{budget} budget, so the reproduction may not be minimal"
 
   # ==========================================================================
+  # Setup
+  # ==========================================================================
+
+  # The lines a test captured before the run (DR-054 decision 8), printed once
+  # whatever the number of targets, right after Failure. They are shared by
+  # every run, so they belong to no target: their offsets count from the
+  # earliest of them and they never enter a target's offset origin.
+  defp setup_section(%FailureReport{setup_log: [_ | _] = lines}) do
+    start = lines |> Enum.map(& &1.timestamp) |> Enum.min()
+
+    %Section{
+      heading: "Setup",
+      lines: [
+        {:note, "Logged before the run, shared by every run"} | entry_lines([], lines, start)
+      ]
+    }
+  end
+
+  defp setup_section(_report), do: nil
+
+  # ==========================================================================
   # Minimal Reproduction
   # ==========================================================================
 
@@ -686,6 +712,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       {:event, entry} -> {entry.timestamp, 1}
     end)
     |> Enum.map(fn
+      {:log, %Gap{} = gap} -> {:gap, %{attempts: gap.attempts, lines: gap.lines}}
       {:log, line} -> log_line(line, start)
       {:event, entry} -> event_line(entry, start)
     end)
