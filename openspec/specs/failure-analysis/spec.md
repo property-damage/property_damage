@@ -4,7 +4,7 @@
 
 Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes with seed variations, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
 
-Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact)
+Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers)
 
 ## Requirements
 
@@ -254,19 +254,55 @@ The system SHALL produce structured failure reports containing location (run num
 - **AND** `FailureReport.event_entries_at/2` SHALL delegate to `RunTrace.event_entries_at/2`, returning the log entries for a command addressed by either its flattened index or its `%Sequence.Position{}`
 - **AND** `steps/1` / `failure_step/1` SHALL be the ONLY structural accessors for the failing command and its entries: the report SHALL NOT carry materialized `command_at_failure` / `events_at_failure` fields (removed), and every renderer, exporter, and forensic analyzer SHALL obtain the failing command/events via the step interface (which resolves them branch-aware) rather than by re-walking `shrunk_sequence` / `event_log` / `failed_at_index`; in particular the event timeline's per-command provenance view (source badges + branch) SHALL be served from `steps/1` `entries` rather than a private `event_log` walk
 
+### Requirement: Printed Failure Report Layout (DR-055, DR-056)
+
+The `:terminal` and `:markdown` formats SHALL print one layout, built once from the report as plain data and printed by one renderer per format. The terminal report SHALL print a banner (`BUG DETECTED!`, or `TEST CODE ERROR` for a failure in test code) whose lines all have one width with and without color, then `Seed: <seed>`, then the sections `Failure`, `Minimal Reproduction (N roots)`, `Projections at <label>` (only when a compared side has state) and `Reproduction`, in that order. It SHALL NOT print Run Number, Command Index, Timestamp, State Transition, Event Log, Boundary Comparisons, Shrinking Statistics or Original Sequence. The markdown report SHALL open with `# BUG DETECTED!` or `# TEST CODE ERROR`, then the seed, then the terminal's `## ` headings in the same order, each section's body in one fenced block whose text equals the terminal body without color (`diff` for Projections, `elixir` for Reproduction). `Formatter.format/3` SHALL read `:color` for the terminal format and no other layout option. The `:json` and `:compact` formats SHALL NOT change.
+
+#### Scenario: One label per step in every section
+
+- **WHEN** a report is printed
+- **THEN** every listed command SHALL carry the label `Sequence.Position.label/2` gives it: `[i]` for a root, `[i.j]` for a leaf listed under root `[i]` (never the root's generated id), `[branch b.i]`, `[setup i]`, `[teardown i]`, and for a suffix command its reading-order index
+- **AND** the Failure section's `At` field, every line marked `►` and the Projections heading SHALL carry the failing step's label, and every `►` line SHALL end with `◄── diverged`, `◄── did not converge` or `◄── failed`
+- **AND** a failure tied to no step SHALL print no `►` and no `At` field
+
+#### Scenario: A comparison failure lists both sides
+
+- **WHEN** the report's kind is `:diverged` or `:did_not_converge`
+- **THEN** Minimal Reproduction SHALL list the reference under `Reference: target "<name>"` and the failing variant under `Variant: target "<name>"`, each with its own events, and the root at the failing boundary SHALL be marked in both, also when the variant ran it as leaves
+- **AND** the Failure section SHALL print both values, the `using:` relation as written (`==` without one) and the time waited against the bound (`still differing after N ms (bound M ms)`, or `still pending`)
+- **AND** it SHALL print `Mismatch` only when the relation failed with a reason
+- **AND** the Projections `-` and `+` sides SHALL be the reference's and the variant's states cut at the failing boundary (DR-040), so that nothing either side folded after the boundary shows
+
+#### Scenario: Events sit under their step
+
+- **WHEN** a listed step has events
+- **THEN** they SHALL print under it in timestamp order, each with its offset from the earliest timestamp of that target's event log and with `event` or the source badge of its source
+- **AND** entries tied to no command SHALL print after the listing under `Not tied to a command`
+
+#### Scenario: Values print in full
+
+- **WHEN** a command, an event, a Failure value or a projection attribute is printed
+- **THEN** it SHALL print through one `inspect/2` call with no element or string limit, and a projection SHALL print one attribute per line, equal attributes once and differing ones as a `-` line then a `+` line
+
+#### Scenario: Reproduction binds the targets once
+
+- **WHEN** the report's `targets` is not empty
+- **THEN** Reproduction SHALL print `targets = [...]` once and every call SHALL name `targets: targets`
+- **AND** when a target holds a pid, a reference, a port or a function, a line under the binding SHALL name each place by its path (`config.server`) and say to rebuild the list as the test does
+
 ### Requirement: Failure Report Replay Fields and Footer (DR-050)
 
-`FailureReport` SHALL carry `run` (the campaign run the failure happened in, counted from 1), `replay` (the replay artifact term, `{:refused, where}` or `nil`), `replay_path` (the file or `nil`) and `replay_status` (`:written`, `:disabled`, `{:write_failed, reason}`, `:refused`, `:unavailable`, `:reproduced`, `:not_reproduced` or `nil`). The printed report SHALL end with, in this order: the reproduction command (`reproduction_command/1`, the seed path, unchanged); "Regenerate the failing variant:" and the `PropertyDamage.Expansion.for/5` call for the failing target (`expansion_command/1`); and "Replay the shrunk failure:" ("Replay the unshrunk failure:" when no shrink step ran) and the `only: [replay: path]` call (`replay_command/1`), which SHALL name a non-default `compare: [converge_within: ms]` and `check_mode:` as `reproduction_command/1` does. That call SHALL be the last code line of the report. When there is no file, the last lines SHALL say why: `replay_dir: false`, a refusal naming the target, the root, the leaf and the field path, or the write error. `targets_source/1` SHALL print each target's `expansion:` when it is not `:random`, so that a pasted call runs the targets as the failing run did.
+`FailureReport` SHALL carry `run` (the campaign run the failure happened in, counted from 1), `replay` (the replay artifact term, `{:refused, where}` or `nil`), `replay_path` (the file or `nil`) and `replay_status` (`:written`, `:disabled`, `{:write_failed, reason}`, `:refused`, `:unavailable`, `:reproduced`, `:not_reproduced` or `nil`). The printed report SHALL end with, in this order: the reproduction command (`reproduction_command/1`, the seed path); the comment `# Regenerate the failing variant:` and the `PropertyDamage.Expansion.for/5` call for the failing target (`expansion_command/1`); and the comment `# Replay the shrunk failure:` (`# Replay the unshrunk failure:` when no shrink step ran) and the `only: [replay: path]` call (`replay_command/1`); when the report has targets, each call SHALL name `targets: targets`, bound once above it (DR-055, DR-056), in place of the list. The replay call SHALL name a non-default `compare: [converge_within: ms]` and `check_mode:` as `reproduction_command/1` does. That call SHALL be the last code line of the report. When there is no file, the last lines SHALL say why: `replay_dir: false`, a refusal naming the target, the root, the leaf and the field path, or the write error. `targets_source/1` SHALL print each target's `expansion:` when it is not `:random`, so that a pasted call runs the targets as the failing run did.
 
 #### Scenario: The footer ends with the replay call
 - **WHEN** a failing run writes an artifact
-- **THEN** the report's last code line SHALL be `PropertyDamage.run(model: M, targets: ..., only: [replay: "<path>"])`
+- **THEN** the report's last code line SHALL be `PropertyDamage.run(model: M, targets: targets, only: [replay: "<path>"])`
 - **AND** the regenerate call SHALL come before the replay label
 
 #### Scenario: A pasted call keeps each target's expansion mode
 - **GIVEN** a failing run with a target on `expansion: :reference`
-- **WHEN** the report prints a call that holds `targets:`
-- **THEN** the `targets:` source SHALL include `expansion: :reference` for that target
+- **WHEN** the report prints the `targets = [...]` binding
+- **THEN** the binding SHALL include `expansion: :reference` for that target
 
 #### Scenario: No artifact says why
 - **WHEN** a run fails with `replay_dir: false`

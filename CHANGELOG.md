@@ -423,6 +423,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (DR-055, DR-056): the terminal and markdown reports print one
+  layout.** A report opens with a banner of one width (`BUG DETECTED!` or
+  `TEST CODE ERROR`) and `Seed: <seed>`, then four sections. Failure names the
+  failure, the step and the fields of its kind in one aligned column; a
+  comparison prints both values, the relation and the wait against the bound,
+  and `Mismatch` only for a relation's own reason. Minimal Reproduction counts
+  roots, lists the reference and the variant of a comparison failure, and
+  prints each step's events under it with an offset. Projections prints full
+  states attribute by attribute, reference against variant at the failing
+  boundary or before against after the failing step. Reproduction binds
+  `targets = [...]` once, every call names `targets: targets`, and a line
+  names each pid, reference, port or function the list holds. Every step has
+  one label in every section (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`,
+  `[branch b.i]`), from the new `Sequence.Position.label/2`. The markdown
+  report is the terminal text without color, each section's body in a fenced
+  block. Run Number, Command Index, Timestamp, State Transition, Event Log,
+  Boundary Comparisons, Shrinking Statistics and Original Sequence are no
+  longer printed; the JSON format keeps every field. `Formatter.format/3`
+  no longer reads `:show_event_log`, `:show_state`, `:show_original`,
+  `:max_events` or `:max_commands`: every step and every event prints.
+
 - **BREAKING (DR-051): `using:` names the relation, and `@compare` is a plain
   attribute.** `use PropertyDamage.Model.Projection` no longer replaces
   `Kernel.@/1`: `@compare` is read like `@check` and `@eventually`, so a

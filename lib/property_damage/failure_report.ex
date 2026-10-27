@@ -31,6 +31,17 @@ defmodule PropertyDamage.FailureReport do
 
       IO.inspect(report, pretty: true)
 
+  The printed report (DR-055, DR-056) opens with a banner and the seed, then
+  has four sections. Failure names the failure, the step it happened at and
+  the fields of its kind, in one aligned column. Minimal Reproduction lists
+  every step with its label (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`,
+  `[branch b.i]`) and its events under it, and lists both sides of a
+  comparison failure. Projections shows the projection state attribute by
+  attribute, before against after the failing step, or the reference against
+  the variant at the failing boundary. Reproduction binds `targets` once and
+  ends with the calls that rerun the failure. The same layout prints as
+  markdown, and a report also prints as JSON or as one compact line.
+
   A plain `inspect/1` prints a one-line summary. To turn a report into a test,
   a script or a notebook, see `PropertyDamage.Export`; to save it, see
   `PropertyDamage.save_failure/3`.
@@ -125,7 +136,9 @@ defmodule PropertyDamage.FailureReport do
   The printed report ends with three calls: `reproduction_command/1` (the
   seed, before shrinking), `expansion_command/1` (the failing target's
   sequence, regenerated) and, last, `replay_command/1`, which runs the
-  artifact with `only: [replay: path]`.
+  artifact with `only: [replay: path]`. The report binds the targets once
+  (`targets = [...]`), and each printed call names `targets: targets` in
+  place of the list these functions return.
 
   Every path that executes the failure again reads what each target ran
   from `replay` (or, when the report has no term, from the choices its trace

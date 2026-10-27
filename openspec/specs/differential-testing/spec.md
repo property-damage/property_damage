@@ -63,7 +63,7 @@ The framework SHALL compare the targets of a run only through the boundary obser
 
 - **WHEN** a boundary observation diverges at the convergence bound
 - **THEN** the `:diverged` failure (`PropertyDamage.Failure.Divergence`) SHALL carry the observation's `using:` term as written (`{PropertyDamage.Equivalence, :within, [0.01]}`), `nil` when the values were compared under `==`
-- **AND** the failure report SHALL print the term beside the two values
+- **AND** the failure report SHALL print the term on its `Compared` line, under the two values (DR-056)
 - **AND** the persistence format version SHALL stay 15 while 15 is unreleased
 
 #### Scenario: A raise is a check failure
@@ -112,6 +112,7 @@ Vocabulary: *settle* is one system catching up with itself per adapter call (the
 
 - **WHEN** no side is pending and the sides still differ when the bound expires
 - **THEN** the framework SHALL report a failure of kind `:diverged` carrying the key, the root, the reference value, the variant value and the mismatch
+- **AND** the failure SHALL carry `waited_ms`, the time the comparison waited at the boundary, and `within_ms`, the bound it waited against, and the report SHALL state both (DR-055, DR-056)
 
 #### Scenario: A probe root is re-read
 
@@ -143,7 +144,7 @@ Vocabulary: *settle* is one system catching up with itself per adapter call (the
 
 ### Requirement: Boundary Counters (DR-046)
 
-For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the reporter SHALL print them. A shrunk failure report SHALL carry the counts of the reproduction of its shrunk sequence, from `run/1` and from `shrink_further/2`.
+For every `@compare` key the framework SHALL count `compared_at` (the boundaries at which the key was compared), `waited_at` (the boundaries at which it did not agree at some evaluation) and `waited_ms` (the time spent waiting there). `{:ok, stats}` and a failure report SHALL carry them as `compare_counts`, keyed by `{projection, function}`, and the JSON export of a report SHALL hold them; the printed report SHALL show the wait of the failing observation only (DR-055). A shrunk failure report SHALL carry the counts of the reproduction of its shrunk sequence, from `run/1` and from `shrink_further/2`.
 
 #### Scenario: Counters of a passing run
 
