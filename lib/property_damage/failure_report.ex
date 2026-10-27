@@ -449,8 +449,10 @@ defmodule PropertyDamage.FailureReport do
   - `:shrink_iterations` - Number of shrink attempts
   - `:shrink_time_ms` - Time spent shrinking
   - `:shrink_stop` - Why the shrinker stopped (default `:done`)
+  - `:logs` - The log lines of the run the report describes, by step
+    (`RunTrace.logs`, DR-054); default `%{}`
   - `:reference_result` - The reference target's finished result of the
-    reported run (`event_log`, `executed`, `command_fold_ordinals`); for
+    reported run (`event_log`, `executed`, `command_fold_ordinals`, `logs`); for
     `:diverged` and `:did_not_converge` it becomes `reference_trace` and
     `reference_state_at_failure` (default `nil`)
   - `:model` - Model module
@@ -551,7 +553,8 @@ defmodule PropertyDamage.FailureReport do
         command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
         linearization: Keyword.get(opts, :linearization),
         expansion: expansion_choices(Keyword.get(opts, :expansion)),
-        outcome: {:fail, failure_reason}
+        outcome: {:fail, failure_reason},
+        logs: Keyword.get(opts, :logs, %{})
       )
 
     kind = Keyword.get_lazy(opts, :kind, fn -> kind_of(failure_reason) end)
@@ -621,7 +624,8 @@ defmodule PropertyDamage.FailureReport do
         event_log: Map.get(result, :event_log, []),
         command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
         linearization: nil,
-        outcome: :pass
+        outcome: :pass,
+        logs: Map.get(result, :logs, %{})
     }
   end
 
@@ -1213,6 +1217,7 @@ defmodule PropertyDamage.FailureReport do
     RunTrace.build_steps(plan, trace.event_log, trace.command_labels, report.failed_at_index,
       branch_id: report.branch_id,
       executed: trace.executed,
+      logs: Map.get(trace, :logs, %{}),
       choices: traced_choices(report)
     )
   end
@@ -1244,6 +1249,7 @@ defmodule PropertyDamage.FailureReport do
       ) do
     RunTrace.build_steps(plan, trace.event_log, trace.command_labels, nil,
       executed: trace.executed,
+      logs: Map.get(trace, :logs, %{}),
       choices: choices_of(trace, (reference_variant(report.targets) || %{})[:name])
     )
   end

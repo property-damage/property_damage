@@ -1851,6 +1851,9 @@ defmodule PropertyDamage do
       projections: Map.get(result, :projections, %{}),
       projections_before: Map.get(result, :projections_before),
       command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+      # The reported run's log lines (DR-054); a target whose setup/1 failed
+      # has no result, and its failure carries that setup's lines.
+      logs: Map.get(result, :logs) || Map.get(failure, :logs, %{}),
       linearization: Map.get(result, :linearization),
       stacktrace: failure.stacktrace,
       model: ctx.model,
@@ -2262,6 +2265,7 @@ defmodule PropertyDamage do
             max_commands: report.max_commands,
             check_mode: ctx.check_mode,
             linearization: Map.get(result, :linearization),
+            logs: Map.get(result, :logs, %{}),
             stacktrace: failure.stacktrace,
             expansion: shrink_result.expansion,
             expansion_counts: recount(report, shrink_result.expansion, failure.root)
@@ -2682,6 +2686,74 @@ defmodule PropertyDamage do
   end
 
   # ============================================================================
+  # Log Lines
+  # ============================================================================
+
+  @doc """
+  Writes one log line for the failure report (DR-054).
+
+  A line is shown only in a failure report, under the step whose code wrote
+  it, in timestamp order with that step's events, as its offset from the
+  target's run start, its tags and its message:
+
+      +0.12s log   [http url] POST /transfers
+
+  PropertyDamage never prints a line during a run and never forwards one to
+  Elixir's `Logger`. Call it behind `require PropertyDamage`; the call site's
+  file and line are recorded.
+
+  ## Message
+
+    * a string is stored as written and printed as written;
+    * any other value is stored as it was at the call and printed with
+      `inspect/2` when the report is formatted;
+    * a 0-arity function is called each time the report is formatted, after
+      the run ended, and its result printed by the two rules above. A function
+      that reads state that can change (an `Agent`, an ETS table) sees the
+      value at the end of the run; one that raises prints
+      `(log line raised: ...)`.
+
+  The macro never wraps a message in a function on its own.
+
+  ## Options
+
+    * `:tags` - a literal list of atoms, printed in brackets before the
+      message. It is the only option; any other option, a tag that is not an
+      atom, or options that are not a literal keyword list is a compile error.
+
+  ## Scope
+
+  The call needs a scope: code PropertyDamage runs at an execution point (an
+  adapter callback, a command, a nemesis or mock handler), or a process
+  started from it through `Task`. Anywhere else it raises
+  `PropertyDamage.Log.NoScopeError`; a process the adapter did not start
+  through `Task` logs with `PropertyDamage.Runtime.log/3`. See
+  `PropertyDamage.Log`.
+
+  Remove secrets before the call: every line reaches the printed report.
+
+  ## Example
+
+      require PropertyDamage
+
+      def execute(%Transfer{amount: amount}, %{client: client}, _runtime) do
+        PropertyDamage.log("POST /transfers", tags: [:http, :url])
+        PropertyDamage.log(%{amount: amount}, tags: [:http, :body])
+        {status, body} = MyApp.Client.post(client, "/transfers", %{amount: amount})
+        PropertyDamage.log(fn -> Jason.decode!(body) end, tags: [:http, :response])
+        {:ok, [%Transferred{amount: amount, status: status}]}
+      end
+  """
+  defmacro log(message, opts \\ []) do
+    tags = PropertyDamage.Log.__tags__!(opts, __CALLER__)
+    location = {__CALLER__.file, __CALLER__.line}
+
+    quote do
+      PropertyDamage.Log.__log__(unquote(message), unquote(tags), unquote(location))
+    end
+  end
+
+  # ============================================================================
   # Model-Free Execution (Static Regression Tests)
   # ============================================================================
 
@@ -2771,7 +2843,12 @@ defmodule PropertyDamage do
     {:ok, event_queue} = EventQueue.start_link()
 
     try do
-      case RunServices.setup_injectors(injectors, config, event_queue) do
+      {set_up, _lines} =
+        PropertyDamage.Log.inline(fn ->
+          RunServices.setup_injectors(injectors, config, event_queue)
+        end)
+
+      case set_up do
         {:ok, injector_contexts} ->
           sequence = Sequence.linear(commands)
           execute_with_injectors(sequence, adapter, config, event_queue, injector_contexts)
@@ -2787,8 +2864,14 @@ defmodule PropertyDamage do
 
   # Sets the adapter up and runs the sequence once the injectors are up, then
   # tears down the adapter and the injectors.
+  #
+  # Setup and teardown run in a scope of their own, and each command logs into
+  # a sink of its own (`Executor.execute_raw/3`); this call builds no failure
+  # report, so every log line is dropped (DR-054).
   defp execute_with_injectors(sequence, adapter, config, event_queue, injector_contexts) do
-    case adapter.setup(config) do
+    {set_up, _lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
+
+    case set_up do
       {:ok, adapter_context} ->
         context = %{adapter_context: adapter_context, event_queue: event_queue}
 
@@ -2796,14 +2879,16 @@ defmodule PropertyDamage do
           Executor.execute_raw(sequence, adapter, context)
         after
           # Cleanup. The event queue is stopped by the caller's `after`.
-          adapter.teardown(adapter_context)
-          RunServices.teardown_injectors(injector_contexts)
+          PropertyDamage.Log.inline(fn ->
+            adapter.teardown(adapter_context)
+            RunServices.teardown_injectors(injector_contexts)
+          end)
         end
 
       {:error, reason} ->
         # Cleanup injectors on setup failure; the event queue is stopped by the
         # caller's `after`.
-        RunServices.teardown_injectors(injector_contexts)
+        PropertyDamage.Log.inline(fn -> RunServices.teardown_injectors(injector_contexts) end)
         {:error, Failure.setup_failed(reason)}
     end
   end

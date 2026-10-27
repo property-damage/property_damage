@@ -65,7 +65,16 @@ defmodule PropertyDamage.Executor.Nemesis do
       active_faults: Map.get(state, :active_faults, %{})
     }
 
-    case nemesis_module.inject(resolved_command, nemesis_context) do
+    # inject/2 runs in this process as an execution point of its own; its log
+    # lines are kept under the nemesis command's position (DR-054).
+    {injected, lines} =
+      PropertyDamage.Log.inline(fn ->
+        nemesis_module.inject(resolved_command, nemesis_context)
+      end)
+
+    state = keep_lines(state, state.current_position, lines)
+
+    case injected do
       {:ok, events} = outcome ->
         case fold_injected_fault(
                events,
@@ -140,6 +149,8 @@ defmodule PropertyDamage.Executor.Nemesis do
       if Nemesis.auto_restores?(command) do
         Map.put(active_faults, {nemesis_module, index}, %{
           command: command,
+          # The restore's log lines go under the injecting command (DR-054).
+          position: state.current_position,
           started_at: System.monotonic_time(:millisecond),
           duration_ms: Nemesis.get_duration_ms(command)
         })
@@ -283,12 +294,19 @@ defmodule PropertyDamage.Executor.Nemesis do
         active_faults: Map.get(acc, :active_faults, %{})
       }
 
-      result =
-        try do
-          nemesis_module.restore(fault.command, nemesis_context)
-        rescue
-          e -> {:error, {:restore_raised, e}}
-        end
+      # restore/2 is an execution point of its own. Its log lines go under
+      # the nemesis command that injected the fault, where its events go
+      # (DR-054), whether it lifts on its own or at the end of the run.
+      {result, lines} =
+        PropertyDamage.Log.inline(fn ->
+          try do
+            nemesis_module.restore(fault.command, nemesis_context)
+          rescue
+            e -> {:error, {:restore_raised, e}}
+          end
+        end)
+
+      acc = keep_lines(acc, Map.get(fault, :position) || Map.get(acc, :current_position), lines)
 
       case result do
         {:ok, events} ->
@@ -324,6 +342,9 @@ defmodule PropertyDamage.Executor.Nemesis do
       end
     end)
   end
+
+  defp keep_lines(state, key, lines),
+    do: Map.put(state, :logs, PropertyDamage.Log.append(Map.get(state, :logs, %{}), key, lines))
 
   defp drop_active_fault(state, key) do
     faults = state |> Map.get(:active_faults, %{}) |> Map.delete(key)

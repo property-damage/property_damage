@@ -8,34 +8,32 @@ defmodule PropertyDamage.Runtime.RunServices do
   # `PropertyDamage.Variant` all do this, so the wiring lives here once and all
   # of them observe the same setup and teardown calls.
 
-  alias PropertyDamage.{EventQueue, MockServiceRegistry}
+  alias PropertyDamage.{EventQueue, Log, MockServiceRegistry}
 
   @doc false
   # Starts an event queue with the target's injectors and mocks for the linear
   # engine, runs `fun` with the queue and the mock registry, and releases all
   # of them again. The queue's stop is guaranteed by the outer `after`, so a
   # raise in injector or mock setup cannot leak it; the injectors are torn
-  # down by the middle `after`, so a mock setup that raises cannot leak them
-  # either. An injector setup that fails or raises returns `{:error, reason}`
-  # without calling `fun`, the shape `PropertyDamage.Executor.run/4` gives
-  # when the adapter's setup fails.
+  # down even when a mock setup or `fun` raises. An injector setup that fails
+  # or raises returns `{:error, reason}` without calling `fun`, the shape
+  # `PropertyDamage.Executor.run/4` gives when the adapter's setup fails.
+  #
+  # Injector and mock setup and teardown are execution points (DR-054). When
+  # `fun` returns `{:ok, result}` with a `logs` map, the lines their setup
+  # wrote go before the adapter's own under `:adapter_setup`, and the lines
+  # their teardown wrote after them under `:adapter_teardown`; any other
+  # result drops them.
   def with_services(target, fun) do
     {:ok, event_queue} = EventQueue.start_link()
 
     try do
-      case setup_injectors(target.injectors, target.config, event_queue) do
-        {:ok, injector_contexts} ->
-          try do
-            {mock_registry, mock_contexts} = setup_mocks(target.mocks, event_queue)
+      {set_up, setup_lines} =
+        Log.inline(fn -> setup_injectors(target.injectors, target.config, event_queue) end)
 
-            try do
-              fun.(event_queue, mock_registry)
-            after
-              teardown_mocks(mock_registry, mock_contexts)
-            end
-          after
-            teardown_injectors(injector_contexts)
-          end
+      case set_up do
+        {:ok, injector_contexts} ->
+          with_injectors(target, injector_contexts, event_queue, setup_lines, fun)
 
         {:error, reason} ->
           {:error, reason}
@@ -44,6 +42,51 @@ defmodule PropertyDamage.Runtime.RunServices do
       EventQueue.stop(event_queue)
     end
   end
+
+  defp with_injectors(target, injector_contexts, event_queue, setup_lines, fun) do
+    {{mock_registry, mock_contexts}, mock_lines} =
+      try do
+        Log.inline(fn -> setup_mocks(target.mocks, event_queue) end)
+      catch
+        kind, reason ->
+          Log.inline(fn -> teardown_injectors(injector_contexts) end)
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+
+    tear_down = fn ->
+      Log.inline(fn ->
+        try do
+          teardown_mocks(mock_registry, mock_contexts)
+        after
+          teardown_injectors(injector_contexts)
+        end
+      end)
+    end
+
+    result =
+      try do
+        fun.(event_queue, mock_registry)
+      catch
+        kind, reason ->
+          tear_down.()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+
+    {_torn_down, teardown_lines} = tear_down.()
+    with_service_lines(result, setup_lines ++ mock_lines, teardown_lines)
+  end
+
+  defp with_service_lines({:ok, %{logs: logs} = result}, setup_lines, teardown_lines) do
+    logs =
+      logs
+      |> Map.update(:adapter_setup, setup_lines, &(setup_lines ++ &1))
+      |> Log.append(:adapter_teardown, teardown_lines)
+      |> Map.reject(fn {_key, lines} -> lines == [] end)
+
+    {:ok, %{result | logs: logs}}
+  end
+
+  defp with_service_lines(result, _setup_lines, _teardown_lines), do: result
 
   @doc false
   # Call setup/1 on each injector with the target's config merged with the

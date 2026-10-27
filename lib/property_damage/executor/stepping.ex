@@ -330,18 +330,31 @@ defmodule PropertyDamage.Executor.Stepping do
   defp execute_teardown(command, resolved, offset, state, ctx) do
     spec = if is_struct(command), do: Map.get(state.command_specs, command.__struct__)
     runtime = Executor.inject_unavailable_runtime("in a teardown command")
+    position = Position.teardown(offset)
 
-    result =
-      try do
-        Settle.execute_with_settle(resolved, ctx.adapter, ctx.adapter_context, runtime, spec)
-      rescue
-        exception -> {:raised, exception, __STACKTRACE__}
-      end
+    # The command's log lines (DR-054) go into a sink of its own and are kept
+    # under its position, whatever it answered.
+    {result, lines} =
+      PropertyDamage.Log.collect(fn sink ->
+        runtime_for = fn attempt -> %{runtime | log: PropertyDamage.Log.writer(sink, attempt)} end
+
+        try do
+          Settle.execute_with_settle(
+            resolved,
+            ctx.adapter,
+            ctx.adapter_context,
+            runtime_for,
+            spec
+          )
+        rescue
+          exception -> {:raised, exception, __STACKTRACE__}
+        end
+      end)
+
+    state = %{state | logs: PropertyDamage.Log.append(state.logs, position, lines)}
 
     case result do
       {tag, events} when tag in [:ok, :settled] and is_list(events) ->
-        position = Position.teardown(offset)
-
         entries =
           Enum.map(events, fn event ->
             Entry.attribute(

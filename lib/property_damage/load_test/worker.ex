@@ -104,8 +104,12 @@ defmodule PropertyDamage.LoadTest.Worker do
     check_mode = Keyword.get(opts, :check_mode, :disabled)
     run_nonce = Keyword.get(opts, :run_nonce)
 
-    # Setup adapter ONCE - this context will be reused for all sequences
-    case target.adapter.setup(target.config) do
+    # Setup adapter ONCE - this context will be reused for all sequences. It
+    # runs in a scope of its own; a load test builds no failure report, so
+    # its log lines are dropped (DR-054).
+    {set_up, _lines} = PropertyDamage.Log.inline(fn -> target.adapter.setup(target.config) end)
+
+    case set_up do
       {:ok, adapter_context} ->
         state = %__MODULE__{
           worker_id: worker_id,
@@ -157,7 +161,7 @@ defmodule PropertyDamage.LoadTest.Worker do
   def terminate(_reason, state) do
     # Teardown adapter context on worker shutdown
     if state.adapter_context do
-      state.target.adapter.teardown(state.adapter_context)
+      PropertyDamage.Log.inline(fn -> state.target.adapter.teardown(state.adapter_context) end)
     end
 
     :ok

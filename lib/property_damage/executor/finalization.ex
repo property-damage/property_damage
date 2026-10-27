@@ -70,7 +70,8 @@ defmodule PropertyDamage.Executor.Finalization do
       linearization: linearization,
       check_failures: check_failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -245,7 +246,8 @@ defmodule PropertyDamage.Executor.Finalization do
               linearization: linearization,
               check_failures: all_failures,
               check_counters: teardown_counters,
-              command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+              command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+              logs: Map.get(state, :logs, %{})
             }
         end
     end
@@ -269,7 +271,8 @@ defmodule PropertyDamage.Executor.Finalization do
       linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -299,7 +302,8 @@ defmodule PropertyDamage.Executor.Finalization do
       linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 
@@ -328,7 +332,8 @@ defmodule PropertyDamage.Executor.Finalization do
       linearization: linearization,
       check_failures: failures,
       check_counters: Map.get(state, :check_counters, %{}),
-      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{})
+      command_fold_ordinals: Map.get(state, :command_fold_ordinals, %{}),
+      logs: Map.get(state, :logs, %{})
     }
   end
 

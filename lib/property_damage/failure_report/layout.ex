@@ -18,6 +18,9 @@ defmodule PropertyDamage.FailureReport.Layout do
   #     note:, outcome:}`; `outcome` is nil, or the word printed after `◄──`
   #     on the failing step, which also carries `►`
   #   * `{:event, %{offset_ms:, source:, event:}}` - an event under its step
+  #   * `{:log, %{offset_ms:, tags:, message:}}` - a log line (DR-054) under its
+  #     step or under an adapter note; `message` is `{:text, string}` or
+  #     `{:value, term}`, a function message already called
   #   * `{:note, text}` - a line of a listing that is not a step
   #   * `{:projection, name, last_applied}` - a projection's header line
   #   * `{:attribute, marker, key, value}` - a projection attribute, `marker`
@@ -84,27 +87,36 @@ defmodule PropertyDamage.FailureReport.Layout do
   # ==========================================================================
 
   # A target's side of the run: the items of its listing (setup commands,
-  # roots with their leaves, teardown commands), the entries tied to no
-  # command, and the start its event offsets count from.
+  # roots with their leaves, teardown commands), the log lines of its
+  # adapter's setup/1 and teardown/1, the entries tied to no command, and the
+  # start its offsets count from: the earliest timestamp among its events and
+  # its log lines, so no line prints a negative offset.
   defp side(report, trace, name, steps) do
     plan = trace && trace.plan
     log = (trace && trace.event_log) || []
+    logs = (trace && Map.get(trace, :logs)) || %{}
 
     items =
-      phase_items(:setup, report.setup_commands, log) ++
+      phase_items(:setup, report.setup_commands, log, logs) ++
         root_items(plan, steps, choices(trace, name)) ++
-        phase_items(:teardown, report.teardown_commands, log)
+        phase_items(:teardown, report.teardown_commands, log, logs)
+
+    timestamps =
+      Enum.map(log, & &1.timestamp) ++
+        for {_key, lines} <- logs, line <- lines, do: line.timestamp
 
     %{
       trace: trace,
       items: items,
+      adapter_setup: Map.get(logs, :adapter_setup, []),
+      adapter_teardown: Map.get(logs, :adapter_teardown, []),
       untied: if(trace, do: RunTrace.async_entries(trace), else: []),
       missing?: false,
-      start: log |> Enum.map(& &1.timestamp) |> Enum.min(fn -> nil end)
+      start: Enum.min(timestamps, fn -> nil end)
     }
   end
 
-  defp phase_items(phase, commands, log) do
+  defp phase_items(phase, commands, log, logs) do
     for {command, offset} <- Enum.with_index(commands) do
       position = %Position{section: phase, offset: offset}
 
@@ -114,6 +126,7 @@ defmodule PropertyDamage.FailureReport.Layout do
         label: Position.label(position),
         command: command,
         entries: Enum.filter(log, &(&1.phase == phase and &1.command_index == offset)),
+        logs: Map.get(logs, position, []),
         root: nil,
         failed?: false,
         note: nil
@@ -158,6 +171,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       label: Position.label(step.position, root),
       command: step.command,
       entries: step.entries,
+      logs: step.logs,
       root: root,
       failed?: step.failed?,
       note: comment(step.label)
@@ -171,6 +185,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       label: Position.label(position, index),
       command: command,
       entries: [],
+      logs: [],
       root: index,
       failed?: false,
       note: note
@@ -622,13 +637,19 @@ defmodule PropertyDamage.FailureReport.Layout do
     %{side(report, trace, reference_name(report), steps) | untied: [], missing?: true}
   end
 
-  defp listing(%{items: []} = side, _focus, _kind),
-    do: [{:note, "(no command ran)"} | untied_lines(side)]
+  # The adapter's setup/1 lines lead the listing and its teardown/1 lines end
+  # it, each under a note and only when there are some (DR-054).
+  defp listing(%{items: []} = side, _focus, _kind) do
+    adapter_lines(side.adapter_setup, "adapter setup/1", side.start) ++
+      [{:note, "(no command ran)"}] ++
+      adapter_lines(side.adapter_teardown, "adapter teardown/1", side.start) ++
+      untied_lines(side)
+  end
 
   defp listing(side, focus, kind) do
     steps =
       Enum.flat_map(side.items, fn item ->
-        [{:step, step_line(item, focus, kind)} | event_lines(item.entries, side.start)]
+        [{:step, step_line(item, focus, kind)} | entry_lines(item.entries, item.logs, side.start)]
       end)
 
     missing =
@@ -636,8 +657,14 @@ defmodule PropertyDamage.FailureReport.Layout do
         do: [{:note, "(this report holds no events of the reference)"}],
         else: []
 
-    steps ++ missing ++ untied_lines(side)
+    adapter_lines(side.adapter_setup, "adapter setup/1", side.start) ++
+      steps ++
+      adapter_lines(side.adapter_teardown, "adapter teardown/1", side.start) ++
+      missing ++ untied_lines(side)
   end
+
+  defp adapter_lines([], _note, _start), do: []
+  defp adapter_lines(lines, note, start), do: [{:note, note} | entry_lines([], lines, start)]
 
   defp step_line(item, focus, kind) do
     %{
@@ -649,18 +676,57 @@ defmodule PropertyDamage.FailureReport.Layout do
     }
   end
 
-  defp event_lines(entries, start) do
-    entries
-    |> Enum.sort_by(& &1.timestamp)
-    |> Enum.map(fn entry ->
-      {:event,
-       %{
-         offset_ms: entry.timestamp - (start || entry.timestamp),
-         source: entry.source,
-         event: entry.event
-       }}
+  # A step's events and log lines in timestamp order, stable; on an equal
+  # millisecond a line prints before an event, because a line is written
+  # while the command runs and its events are recorded when it returns.
+  defp entry_lines(entries, lines, start) do
+    (Enum.map(lines, &{:log, &1}) ++ Enum.map(entries, &{:event, &1}))
+    |> Enum.sort_by(fn
+      {:log, line} -> {line.timestamp, 0}
+      {:event, entry} -> {entry.timestamp, 1}
+    end)
+    |> Enum.map(fn
+      {:log, line} -> log_line(line, start)
+      {:event, entry} -> event_line(entry, start)
     end)
   end
+
+  defp event_lines(entries, start), do: entry_lines(entries, [], start)
+
+  defp event_line(entry, start) do
+    {:event,
+     %{
+       offset_ms: entry.timestamp - (start || entry.timestamp),
+       source: entry.source,
+       event: entry.event
+     }}
+  end
+
+  defp log_line(line, start) do
+    {:log,
+     %{
+       offset_ms: line.timestamp - (start || line.timestamp),
+       tags: line.tags,
+       message: log_message(line.message)
+     }}
+  end
+
+  # A string prints as written and any other value through the renderer's
+  # inspect. A function is called now, when the report is formatted, and its
+  # result is shown by those two rules; one that raises, throws or exits
+  # prints a marker instead (DR-054 decision 3).
+  defp log_message(message) when is_function(message, 0) do
+    message.() |> shown()
+  rescue
+    exception -> {:text, "(log line raised: #{Exception.message(exception)})"}
+  catch
+    kind, reason -> {:text, "(log line raised: #{Exception.format_banner(kind, reason)})"}
+  end
+
+  defp log_message(message), do: shown(message)
+
+  defp shown(message) when is_binary(message), do: {:text, message}
+  defp shown(message), do: {:value, message}
 
   defp untied_lines(%{untied: []}), do: []
 

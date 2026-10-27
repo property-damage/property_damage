@@ -266,7 +266,11 @@ defmodule PropertyDamage.Replay do
 
     {:ok, event_queue} = EventQueue.start_link()
 
-    case adapter.setup(config) do
+    # The adapter's setup/1 runs in a scope of its own; a stepping session
+    # builds no failure report, so its log lines are dropped (DR-054).
+    {set_up, _lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
+
+    case set_up do
       {:ok, adapter_context} ->
         exec_state =
           Stepping.init_state(model,
@@ -485,11 +489,13 @@ defmodule PropertyDamage.Replay do
     EventQueue.stop(session.event_queue)
 
     if session.adapter && session.adapter_context do
-      try do
-        session.adapter.teardown(session.adapter_context)
-      rescue
-        _ -> :ok
-      end
+      PropertyDamage.Log.inline(fn ->
+        try do
+          session.adapter.teardown(session.adapter_context)
+        rescue
+          _ -> :ok
+        end
+      end)
     end
   end
 

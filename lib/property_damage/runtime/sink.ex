@@ -27,12 +27,20 @@ defmodule PropertyDamage.Runtime.Sink do
   not inside the Agent, so a projection `apply/2` that raises a transition-invariant
   violation propagates into the adapter exactly as before; the sink only stores the
   already-computed result via `update_ctx/2`.
+
+  ## Log lines
+
+  The sink also holds the log lines the command writes (DR-054):
+  `PropertyDamage.log/2` and `PropertyDamage.Runtime.log/3` add each line at the
+  call with `add_line/2`, a synchronous call, so a line written before a
+  timeout kills the command's `Task` is still here when the engine reads the
+  lines back with `lines/1`.
   """
 
   @type ctx :: map()
 
   @spec start_link() :: {:ok, pid()}
-  def start_link, do: Agent.start_link(fn -> %{ctx: nil, pollers: []} end)
+  def start_link, do: Agent.start_link(fn -> %{ctx: nil, pollers: [], lines: []} end)
 
   @spec stop(pid()) :: :ok
   def stop(pid), do: Agent.stop(pid)
@@ -62,4 +70,12 @@ defmodule PropertyDamage.Runtime.Sink do
   @doc "All resource pollers started during this command (newest-first)."
   @spec get_pollers(pid()) :: [term()]
   def get_pollers(pid), do: Agent.get(pid, & &1.pollers)
+
+  @doc "Add one log line (DR-054)."
+  @spec add_line(pid(), PropertyDamage.Log.Line.t()) :: :ok
+  def add_line(pid, line), do: Agent.update(pid, fn s -> %{s | lines: [line | s.lines]} end)
+
+  @doc "The log lines written into this sink, in the order they were written."
+  @spec lines(pid()) :: [PropertyDamage.Log.Line.t()]
+  def lines(pid), do: Agent.get(pid, &Enum.reverse(&1.lines))
 end

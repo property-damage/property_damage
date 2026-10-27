@@ -130,7 +130,8 @@ defmodule PropertyDamage.Executor do
           linearization: [struct()] | nil,
           check_failures: [map()] | nil,
           check_counters: map(),
-          command_fold_ordinals: %{term() => non_neg_integer()}
+          command_fold_ordinals: %{term() => non_neg_integer()},
+          logs: PropertyDamage.Log.logs()
         }
 
   @doc """
@@ -189,6 +190,23 @@ defmodule PropertyDamage.Executor do
 
   def run(%Sequence{} = sequence, model, adapter, opts) do
     config = Keyword.get(opts, :config, %{})
+
+    # The adapter's setup/1 and teardown/1 are execution points of their own;
+    # their log lines are kept under :adapter_setup and :adapter_teardown
+    # (DR-054). A setup/1 that fails reports no lines on this path.
+    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
+
+    with {:ok, adapter_context} <- setup_result do
+      run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts)
+    end
+  end
+
+  # Backwards compatibility: accept list of commands as linear sequence
+  def run(commands, model, adapter, opts) when is_list(commands) do
+    run(Sequence.linear(commands), model, adapter, opts)
+  end
+
+  defp run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts) do
     event_queue = Keyword.get(opts, :event_queue)
     stutter_config = Keyword.get(opts, :stutter_config)
     mock_registry = Keyword.get(opts, :mock_registry)
@@ -200,7 +218,7 @@ defmodule PropertyDamage.Executor do
     mint = {Keyword.get(opts, :run_nonce), Keyword.get(opts, :mint_epoch, 0)}
     telemetry = Keyword.get(opts, :telemetry)
 
-    with {:ok, adapter_context} <- adapter.setup(config) do
+    result =
       try do
         env = %{
           model: model,
@@ -215,31 +233,40 @@ defmodule PropertyDamage.Executor do
           mint: mint,
           telemetry: telemetry,
           setup_commands: Keyword.get(opts, :setup_commands, []),
-          teardown_commands: Keyword.get(opts, :teardown_commands, [])
+          teardown_commands: Keyword.get(opts, :teardown_commands, []),
+          logs: PropertyDamage.Log.append(%{}, :adapter_setup, setup_lines)
         }
 
-        {:ok, execute_run(sequence, env)}
-      after
-        safe_teardown(adapter, adapter_context)
+        execute_run(sequence, env)
+      catch
+        kind, reason ->
+          safe_teardown(adapter, adapter_context)
+          :erlang.raise(kind, reason, __STACKTRACE__)
       end
-    end
-  end
 
-  # Backwards compatibility: accept list of commands as linear sequence
-  def run(commands, model, adapter, opts) when is_list(commands) do
-    run(Sequence.linear(commands), model, adapter, opts)
+    teardown_lines = safe_teardown(adapter, adapter_context)
+
+    {:ok,
+     %{result | logs: PropertyDamage.Log.append(result.logs, :adapter_teardown, teardown_lines)}}
   end
 
   # Adapter teardown is best-effort (DR-027): a raising teardown logs a warning
   # but never fails the run, so a cleanup hiccup cannot mask the actual result
-  # (or, during shrinking, perturb the failure being minimized).
+  # (or, during shrinking, perturb the failure being minimized). It runs as an
+  # execution point of its own and returns the log lines it wrote (DR-054).
   # Shared with PropertyDamage.Variant.
   @doc false
   def safe_teardown(adapter, user_context) do
+    {:ok, lines} = PropertyDamage.Log.inline(fn -> try_teardown(adapter, user_context) end)
+    lines
+  end
+
+  defp try_teardown(adapter, user_context) do
     require Logger
 
     try do
       adapter.teardown(user_context)
+      :ok
     rescue
       e ->
         Logger.warning(
@@ -371,6 +398,9 @@ defmodule PropertyDamage.Executor do
         env.telemetry
       )
 
+    # The adapter setup/1's log lines, when the run set the adapter up itself.
+    initial_state = %{initial_state | logs: Map.get(env, :logs, %{})}
+
     ctx = %PropertyDamage.Executor.Stepping.Context{
       model: env.model,
       adapter: env.adapter,
@@ -389,8 +419,13 @@ defmodule PropertyDamage.Executor do
       end
 
     result = finalize_or_tear_down(ended, linearization, env, ctx)
-    {_state, entries} = Phases.run_teardown(env.teardown_commands, ended_state(ended), ctx)
-    %{result | event_log: result.event_log ++ entries}
+    {state, entries} = Phases.run_teardown(env.teardown_commands, ended_state(ended), ctx)
+    # The teardown commands' log lines join the result's (DR-054).
+    %{
+      result
+      | event_log: result.event_log ++ entries,
+        logs: PropertyDamage.Log.merge(result.logs, state.logs)
+    }
   end
 
   # A raise, throw or exit during finalization still runs the teardown
@@ -760,7 +795,9 @@ defmodule PropertyDamage.Executor do
             # an adapter can reach a mocked third party's handle_request/2 during
             # execute/3 (WP-C5); the framework flushes what the mock pushes after
             # the command (source: :mock, step 7.5 below).
-            mock_registry: mock_registry
+            mock_registry: mock_registry,
+            # DR-054: the first attempt's log lines go into the same sink.
+            log: PropertyDamage.Log.writer(sink, 1)
           }
         end
 
@@ -773,8 +810,14 @@ defmodule PropertyDamage.Executor do
 
         # The adapter's wall-clock, every settle attempt and the waits between
         # them included, is timed here and nothing after it answered.
-        execute_fn = fn runtime ->
+        # Each settle attempt gets the runtime with its own attempt number on
+        # the lines it logs (DR-054), all written into the one sink.
+        execute_fn = fn runtime, sink ->
           started = System.monotonic_time(:microsecond)
+
+          runtime_for = fn attempt ->
+            %{runtime | log: PropertyDamage.Log.writer(sink, attempt)}
+          end
 
           result =
             try do
@@ -782,7 +825,7 @@ defmodule PropertyDamage.Executor do
                 resolved_command,
                 adapter,
                 adapter_context,
-                runtime,
+                runtime_for,
                 command_spec
               )
             rescue
@@ -794,15 +837,20 @@ defmodule PropertyDamage.Executor do
           {result, System.monotonic_time(:microsecond) - started}
         end
 
-        # The window drains the accumulated injection context and any resource
-        # pollers started during execution, then stops the sink (even if the
-        # adapter raises).
-        {{result, execute_us}, final_injection_ctx, started_resource_pollers} =
-          Runtime.InjectionWindow.run(initial_ctx, build_runtime, execute_fn)
+        # The window drains the accumulated injection context, any resource
+        # pollers started during execution and the log lines written, then
+        # stops the sink (even if the adapter raises). The lines move under
+        # the command's position on every outcome path below (DR-054).
+        {{result, execute_us}, final_injection_ctx, started_resource_pollers, lines} =
+          Runtime.InjectionWindow.run_logged(initial_ctx, build_runtime, execute_fn)
 
         started_resource_pollers = drop_timed_out_pollers(result, started_resource_pollers)
 
-        state = %{state | last_execute_us: execute_us}
+        state = %{
+          state
+          | last_execute_us: execute_us,
+            logs: PropertyDamage.Log.append(state.logs, state.current_position, lines)
+        }
 
         # Use injection context state as base (already has injected events applied)
         base_projections = final_injection_ctx.projections
@@ -1108,23 +1156,30 @@ defmodule PropertyDamage.Executor do
                async_failures
              ) do
           {:ok, check_counters, updated_failures} ->
-            # 9. Execute stutter retries if configured
-            case PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
-                   command,
-                   resolved_command,
-                   events,
-                   index,
-                   event_log,
-                   state,
-                   adapter,
-                   adapter_context
-                 ) do
+            # 9. Execute stutter retries if configured. Their log lines join
+            #    the command's, each with its attempt number (DR-054).
+            {stutter_outcome, stutter_lines} =
+              PropertyDamage.Executor.Stutter.maybe_execute_stutter_retries(
+                command,
+                resolved_command,
+                events,
+                index,
+                event_log,
+                state,
+                adapter,
+                adapter_context
+              )
+
+            logs = PropertyDamage.Log.append(state.logs, state.current_position, stutter_lines)
+
+            case stutter_outcome do
               {:ok, final_event_log} ->
                 new_state =
                   pack.(%{
                     event_log: final_event_log,
                     check_counters: check_counters,
-                    check_failures: updated_failures
+                    check_failures: updated_failures,
+                    logs: logs
                   })
 
                 # Spawn pollers for any @eventually checks triggered by these events
@@ -1140,7 +1195,8 @@ defmodule PropertyDamage.Executor do
                 failed_state =
                   pack.(%{
                     check_counters: check_counters,
-                    check_failures: updated_failures
+                    check_failures: updated_failures,
+                    logs: logs
                   })
 
                 {:error, Failure.idempotency_violation(violation), failed_state}
@@ -1149,7 +1205,8 @@ defmodule PropertyDamage.Executor do
                 failed_state =
                   pack.(%{
                     check_counters: check_counters,
-                    check_failures: updated_failures
+                    check_failures: updated_failures,
+                    logs: logs
                   })
 
                 {:error, Failure.stutter_execution_failed(details), failed_state}
@@ -2067,8 +2124,16 @@ defmodule PropertyDamage.Executor do
             inject_unavailable_runtime("in Executor.execute_raw/3 (no event queue configured)")
           end
 
-        # Execute via adapter (bounded by adapter.timeout/1, DR-032)
-        case Timeout.execute(adapter, resolved_command, adapter_context, runtime) do
+        # Execute via adapter (bounded by adapter.timeout/1, DR-032). The
+        # command logs into a sink of its own; raw mode builds no report, so
+        # its lines are dropped (DR-054).
+        {result, _lines} =
+          PropertyDamage.Log.collect(fn sink ->
+            runtime = %{runtime | log: PropertyDamage.Log.writer(sink, 1)}
+            Timeout.execute(adapter, resolved_command, adapter_context, runtime)
+          end)
+
+        case result do
           {:ok, events} ->
             # Capture external() values this command produced, keyed by its linear
             # position, so later commands resolve them (DR-021).

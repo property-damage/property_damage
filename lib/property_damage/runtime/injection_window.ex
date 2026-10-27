@@ -55,13 +55,36 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
         when result: var
   def run(initial_ctx, build_runtime, execute_fn)
       when is_function(build_runtime, 1) and is_function(execute_fn, 1) do
+    {result, final_ctx, pollers, _lines} =
+      run_logged(initial_ctx, build_runtime, fn runtime, _sink -> execute_fn.(runtime) end)
+
+    {result, final_ctx, pollers}
+  end
+
+  @doc """
+  Like `run/3`, and also returns the log lines written into the sink (DR-054).
+
+  `execute_fn` is given the runtime and the sink, so a caller that hands the
+  adapter a runtime per attempt can build each attempt's `log` function over
+  the same sink (`PropertyDamage.Log`). Returns
+  `{result, final_ctx, pollers, lines}`, the lines in the order written. The
+  lines are read before the sink stops, so a line written before a timeout
+  killed the adapter's `Task` is among them; one written after is dropped.
+  """
+  @spec run_logged(map(), (pid() -> Runtime.t()), (Runtime.t(), pid() -> result)) ::
+          {result, map() | nil, [term()], [PropertyDamage.Log.Line.t()]}
+        when result: var
+  def run_logged(initial_ctx, build_runtime, execute_fn)
+      when is_function(build_runtime, 1) and is_function(execute_fn, 2) do
     {:ok, sink} = Runtime.Sink.start_link()
 
     try do
       Runtime.Sink.put_ctx(sink, initial_ctx)
       runtime = build_runtime.(sink)
-      result = execute_fn.(runtime)
-      {result, Runtime.Sink.get_ctx(sink), Runtime.Sink.get_pollers(sink)}
+      result = execute_fn.(runtime, sink)
+
+      {result, Runtime.Sink.get_ctx(sink), Runtime.Sink.get_pollers(sink),
+       Runtime.Sink.lines(sink)}
     after
       Runtime.Sink.stop(sink)
     end
@@ -76,6 +99,11 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
   `poller_error`, then returns `{result, injected_events}` where `injected_events`
   is in injection order. This is the lean counterpart to `run/3`, which the engine
   uses when its `inject` must fold projections in real time.
+
+  The runtime's `log` writes into the sink, and the calling process holds it as
+  its scope while `execute_fn` runs, so `PropertyDamage.log/2` works in the
+  adapter and in a `Task` the caller starts for it. The path has no report to
+  carry the lines, so they are dropped when the window closes.
   """
   @spec run_accumulating((Runtime.t() -> result), String.t()) :: {result, [term()]}
         when result: var
@@ -85,11 +113,16 @@ defmodule PropertyDamage.Runtime.InjectionWindow do
         inject: fn event ->
           Runtime.Sink.update_ctx(sink, fn ctx -> %{ctx | events: [event | ctx.events]} end)
         end,
-        start_poller: fn _opts -> raise ArgumentError, poller_error end
+        start_poller: fn _opts -> raise ArgumentError, poller_error end,
+        log: PropertyDamage.Log.writer(sink, 1)
       }
     end
 
-    {result, final_ctx, _pollers} = run(%{events: []}, build_runtime, execute_fn)
+    scoped = fn runtime ->
+      PropertyDamage.Log.with_scope(runtime.log, fn -> execute_fn.(runtime) end)
+    end
+
+    {result, final_ctx, _pollers} = run(%{events: []}, build_runtime, scoped)
     {result, Enum.reverse(final_ctx.events)}
   end
 end

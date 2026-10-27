@@ -428,7 +428,7 @@ defmodule PropertyDamage.Persistence do
     encode_payload(%{
       format_version: @version,
       kind: :failure_report,
-      report: report,
+      report: without_logs(report),
       metadata: build_metadata(dependency_versions(report))
     })
   end
@@ -437,10 +437,23 @@ defmodule PropertyDamage.Persistence do
     encode_payload(%{
       format_version: @version,
       kind: :run_trace,
-      trace: trace,
+      trace: without_logs(trace),
       metadata: build_metadata(dependency_versions(trace))
     })
   end
+
+  # Log lines live only in memory (DR-054 decision 9): a file is committed, and
+  # a line its author forgot to redact would be published. Every trace is
+  # saved with `logs: %{}` and loaded with `logs: %{}`, a file saved before
+  # the field existed included, so the format and its version do not change.
+  defp without_logs(%FailureReport{} = report) do
+    report
+    |> backfill_key(:trace, &without_logs/1)
+    |> backfill_key(:reference_trace, &without_logs/1)
+  end
+
+  defp without_logs(%RunTrace{} = trace), do: Map.put(trace, :logs, %{})
+  defp without_logs(other), do: other
 
   defp encode_payload(payload) do
     term_binary = :erlang.term_to_binary(payload, [:compressed])
@@ -506,7 +519,8 @@ defmodule PropertyDamage.Persistence do
 
       case payload[:kind] do
         :run_trace ->
-          {:ok, payload.trace, metadata_warnings ++ check_trace_drift(payload.trace)}
+          trace = without_logs(payload.trace)
+          {:ok, trace, metadata_warnings ++ check_trace_drift(trace)}
 
         _ ->
           report_payload(payload.report, metadata_warnings)
@@ -553,7 +567,7 @@ defmodule PropertyDamage.Persistence do
   defp report_payload(report, warnings) when is_map(report) do
     case Enum.find(@required_fields, &(not is_map_key(report, &1))) do
       nil ->
-        report = backfill_added_fields(report)
+        report = report |> backfill_added_fields() |> without_logs()
         {:ok, report, warnings ++ check_struct_drift(report)}
 
       field ->

@@ -29,6 +29,9 @@ defmodule PropertyDamage.ErrorOrigin do
   - `FunctionClauseError` in projection.apply/2 or command callbacks
   - Missing required callbacks
   - Module compilation errors
+  - `PropertyDamage.Log.NoScopeError`: `PropertyDamage.log/2` called where no
+    scope is open, raised in `execute/3` or the exit reason of a call into a
+    process that raised it (DR-054)
 
   ### Ambiguous
 
@@ -281,19 +284,49 @@ defmodule PropertyDamage.ErrorOrigin do
   # Adapter-error detail classification
   # ============================================================================
 
-  defp classify_adapter_error(%UndefinedFunctionError{} = error, stacktrace) do
+  # A log call with no scope (DR-054) is test code, whether `execute/3` raised
+  # it or a process it called raised it and the call exited with it.
+  defp classify_adapter_error(reason, stacktrace) do
+    case no_scope_error(reason) do
+      nil -> classify_adapter_detail(reason, stacktrace)
+      error -> classify_no_scope_error(error)
+    end
+  end
+
+  defp classify_no_scope_error(error) do
+    %{
+      origin: :test_code_error,
+      details: %{
+        reason: "PropertyDamage.log/2 was called where no scope is open",
+        evidence: %{error: error, hint: Exception.message(error)},
+        confidence: :high
+      }
+    }
+  end
+
+  # The `NoScopeError` inside an adapter error's detail: the exception itself,
+  # or one held by an exit reason (a `GenServer.call` into a process that
+  # raised it exits with `{{exception, stacktrace}, call}`).
+  defp no_scope_error(%PropertyDamage.Log.NoScopeError{} = error), do: error
+
+  defp no_scope_error(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.find_value(&no_scope_error/1)
+
+  defp no_scope_error(_other), do: nil
+
+  defp classify_adapter_detail(%UndefinedFunctionError{} = error, stacktrace) do
     classify_undefined_function_error(error, stacktrace, :adapter_error)
   end
 
-  defp classify_adapter_error(%FunctionClauseError{} = error, stacktrace) do
+  defp classify_adapter_detail(%FunctionClauseError{} = error, stacktrace) do
     classify_function_clause_error(error, stacktrace, :adapter_error)
   end
 
-  defp classify_adapter_error(%ArgumentError{} = error, stacktrace) do
+  defp classify_adapter_detail(%ArgumentError{} = error, stacktrace) do
     classify_argument_error(error, stacktrace, :adapter_error)
   end
 
-  defp classify_adapter_error(%KeyError{} = e, _stacktrace) do
+  defp classify_adapter_detail(%KeyError{} = e, _stacktrace) do
     # KeyError during adapter execution - likely test code error
     %{
       origin: :test_code_error,
@@ -305,11 +338,11 @@ defmodule PropertyDamage.ErrorOrigin do
     }
   end
 
-  defp classify_adapter_error(reason, stacktrace) when is_exception(reason) do
+  defp classify_adapter_detail(reason, stacktrace) when is_exception(reason) do
     classify_generic_exception(reason, stacktrace)
   end
 
-  defp classify_adapter_error(reason, _stacktrace) do
+  defp classify_adapter_detail(reason, _stacktrace) do
     %{
       origin: :unknown,
       details: %{

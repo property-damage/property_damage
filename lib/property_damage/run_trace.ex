@@ -54,6 +54,14 @@ defmodule PropertyDamage.RunTrace do
     the leaves were realized with); `nil` otherwise. The steps of a root a
     target ran as leaves are its leaves (see `build_steps/5`).
   - `outcome` — `:pass` or `{:fail, reason}`.
+  - `logs` — the log lines the run's user code wrote (DR-054), by the step
+    they belong to: a `Sequence.Position` for a command, `:adapter_setup` and
+    `:adapter_teardown` for the adapter's `setup/1` and `teardown/1`, each list
+    in the order written (`PropertyDamage.Log`). Lines never enter
+    `event_log`. They live only in memory: only the trace of a reported run
+    keeps them, `PropertyDamage.Persistence` saves a trace with `logs: %{}`
+    and loads every trace with `logs: %{}`, so a trace read from a file shows
+    none until a replay runs the failure again.
   """
 
   alias PropertyDamage.EventLog.Entry
@@ -84,7 +92,8 @@ defmodule PropertyDamage.RunTrace do
           command_fold_ordinals: %{Sequence.Position.t() => non_neg_integer()},
           linearization: [{non_neg_integer(), non_neg_integer(), struct()}] | nil,
           expansion: %{String.t() => [map()]} | nil,
-          outcome: outcome() | nil
+          outcome: outcome() | nil,
+          logs: PropertyDamage.Log.logs()
         }
 
   defstruct seed: nil,
@@ -104,7 +113,8 @@ defmodule PropertyDamage.RunTrace do
             command_fold_ordinals: %{},
             linearization: nil,
             expansion: nil,
-            outcome: nil
+            outcome: nil,
+            logs: %{}
 
   @doc """
   Build a `RunTrace` from its constituent pieces.
@@ -148,7 +158,8 @@ defmodule PropertyDamage.RunTrace do
       command_fold_ordinals: Keyword.get(opts, :command_fold_ordinals, %{}),
       linearization: Keyword.get(opts, :linearization),
       expansion: Keyword.get(opts, :expansion),
-      outcome: Keyword.get(opts, :outcome)
+      outcome: Keyword.get(opts, :outcome),
+      logs: Keyword.get(opts, :logs, %{})
     }
   end
 
@@ -366,7 +377,10 @@ defmodule PropertyDamage.RunTrace do
   def steps(%__MODULE__{plan: nil}), do: []
 
   def steps(%__MODULE__{plan: %Sequence{} = plan} = trace) do
-    build_steps(plan, trace.event_log, trace.command_labels, nil, executed: trace.executed)
+    build_steps(plan, trace.event_log, trace.command_labels, nil,
+      executed: trace.executed,
+      logs: trace.logs
+    )
   end
 
   @doc """
@@ -384,6 +398,8 @@ defmodule PropertyDamage.RunTrace do
       the failing command's position (defaults to `nil`).
     * `:executed` - a `%{Position => command}` map of concrete resolved commands
       (defaults to `%{}`, i.e. `executed_command` is `nil` on every step).
+    * `:logs` - the run's log lines by key (`RunTrace.logs`); each step takes
+      the lines kept under its position (defaults to `%{}`, no lines).
     * `:choices` - what the traced target ran at each root of a linear
       sequence, as the run's expansion choices record it (defaults to `nil`,
       every root ran as itself). A root the target ran as an expansion's
@@ -401,6 +417,7 @@ defmodule PropertyDamage.RunTrace do
   def build_steps(%Sequence{} = sequence, event_log, command_labels, failed_at_index, opts \\ []) do
     branch_id = Keyword.get(opts, :branch_id)
     executed = Keyword.get(opts, :executed, %{})
+    logs = Keyword.get(opts, :logs, %{})
     leaves = leaf_choices(sequence, Keyword.get(opts, :choices))
 
     # Group the command-attributed log entries by the position of the command
@@ -437,13 +454,14 @@ defmodule PropertyDamage.RunTrace do
         command: command,
         executed_command: Map.get(executed, position),
         entries: Map.get(entries_by_position, position, []),
+        logs: Map.get(logs, position, []),
         label: Map.get(command_labels, flattened_index),
         failed?: failed_position != nil and position == failed_position
       }
 
       case Map.get(leaves, position) do
         nil -> [root_step]
-        choice -> leaf_steps(root_step, choice, executed)
+        choice -> leaf_steps(root_step, choice, executed, logs)
       end
     end)
     |> renumber(leaves)
@@ -461,7 +479,7 @@ defmodule PropertyDamage.RunTrace do
   # One step per leaf of `choice`, each with the entries its leaf produced; an
   # entry of the root no leaf claims (an event drained after the leaves)
   # belongs to the last leaf.
-  defp leaf_steps(root_step, choice, executed) do
+  defp leaf_steps(root_step, choice, executed, logs) do
     last = length(choice.commands) - 1
     by_leaf = Enum.group_by(root_step.entries, &(&1.leaf_index || last))
 
@@ -484,6 +502,7 @@ defmodule PropertyDamage.RunTrace do
         command: command,
         executed_command: Map.get(executed, position),
         entries: Map.get(by_leaf, leaf, []),
+        logs: Map.get(logs, position, []),
         label: nil,
         failed?: leaf == failing
       }
