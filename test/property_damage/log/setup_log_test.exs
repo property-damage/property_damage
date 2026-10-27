@@ -141,6 +141,21 @@ defmodule PropertyDamage.Log.SetupLogTest do
     end
   end
 
+  describe "shrink_further/2" do
+    test "keeps the setup lines of the report it was given" do
+      lines = F.setup_lines()
+      targets = [F.target("alice", quiet())]
+      extra = [setup_log: lines, max_commands: 12, max_runs: 20, seed: 7]
+      report = F.report!(F.CapModel, targets, extra)
+      assert length(report.trace.plan.prefix) == 12, "control: the report is not shrunk"
+
+      assert {:ok, further} = PropertyDamage.shrink_further(report)
+      assert length(further.trace.plan.prefix) < 12, "control: it shrank"
+      assert further.setup_log == lines
+      assert F.plain(further) =~ "## Setup"
+    end
+  end
+
   describe "the replay path" do
     test "only: [replay: path] with setup_log: prints the Setup section", %{dir: dir} do
       targets = [F.target("alice", quiet(%{fail_at: 1}))]

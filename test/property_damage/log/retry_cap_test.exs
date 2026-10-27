@@ -71,6 +71,13 @@ defmodule PropertyDamage.Log.RetryCapTest do
                report |> step_zero() |> F.shown_logs() |> Enum.filter(&is_tuple/1)
     end
 
+    test "colored output holds the same gap text, and markdown carries it in the fence" do
+      assert report = spin_report(5)
+
+      assert F.strip_ansi(F.colored(report)) == F.plain(report)
+      assert F.markdown(report) =~ "        ... 1 attempt omitted (2 lines)\n"
+    end
+
     test "the trace holds the gap in its place among the step's lines" do
       assert report = spin_report(5)
       lines = F.trace_lines(report.trace, Position.prefix(0))
