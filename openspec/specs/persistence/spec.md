@@ -291,7 +291,7 @@ A `RunTrace` SHALL be serializable to and loadable from disk independently of a 
 
 ### Requirement: Log Lines Live Only in Memory (DR-054)
 
-A run's log lines SHALL be dropped when the run ends, unless the run is the one a failure report describes. `Persistence.save/3` and `Persistence.save_trace/3` SHALL write every `RunTrace` they hold (a report's `trace` and `reference_trace`) with `logs: %{}`, and `Persistence.load/1` and `Persistence.load_trace/1` SHALL return every trace with `logs: %{}`, a version-15 file saved before the field existed included. The format version SHALL stay 15. A replay artifact, an export and every other file PropertyDamage writes SHALL carry no line text.
+A run's log lines SHALL be dropped when the run ends, unless the run is the one a failure report describes. `Persistence.save/3` and `Persistence.save_trace/3` SHALL write every `RunTrace` they hold (a report's `trace` and `reference_trace`) with `logs: %{}`, and `Persistence.load/1` and `Persistence.load_trace/1` SHALL return every trace with `logs: %{}`, a version-15 file saved before the field existed included. `Persistence.save/3` SHALL write a report with `setup_log: []`, and `Persistence.load/1` SHALL return every report with `setup_log: []`, a version-15 file saved before the field existed included. The format version SHALL stay 15. A replay artifact, an export and every other file PropertyDamage writes SHALL carry no line text, setup lines included.
 
 #### Scenario: A saved report holds no line
 - **WHEN** a report whose traces hold log lines is saved and loaded again
@@ -300,6 +300,10 @@ A run's log lines SHALL be dropped when the run ends, unless the run is the one 
 #### Scenario: A file saved before the field existed loads
 - **WHEN** a version-15 report file whose traces lack `logs` is loaded
 - **THEN** each trace SHALL have `logs: %{}` and the report SHALL print in the terminal and markdown formats
+
+#### Scenario: A saved report holds no setup line
+- **WHEN** a report built with `setup_log:` is saved and loaded again
+- **THEN** the file SHALL not contain the lines' text, and the loaded report SHALL have `setup_log: []`
 
 #### Scenario: A replay artifact holds no line
 - **WHEN** a run that logged writes its replay artifact

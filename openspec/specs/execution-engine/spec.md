@@ -967,10 +967,52 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 - **WHEN** `execute/3` logs and then hangs past the adapter's `timeout/1`
 - **THEN** every line written before the timeout killed the `Task` SHALL be kept under the timed-out step
 
-#### Scenario: Every attempt keeps its lines
+#### Scenario: Each attempt records its number
 - **WHEN** a settle or stutter retry executes a command several times
-- **THEN** every attempt's lines SHALL be kept, each recording its attempt number (1 for the first execution)
+- **THEN** each line SHALL record the attempt that wrote it (1 for the first execution, then one more for each settle retry; a stutter retry numbers from 2)
+- **AND** the step SHALL keep the lines the retry cap lets it keep (see "Log Lines Keep a Step's First and Last Attempts")
 
 #### Scenario: Lines leave the event log and the projections unchanged
 - **WHEN** an adapter logs during a run
 - **THEN** the event log, the projections and every check SHALL be what a run of the same adapter without log calls produces
+
+### Requirement: Log.capture/1 Scopes Code Outside a Run (DR-054)
+
+`PropertyDamage.Log.capture(fun)`, with `fun` a 0-arity function, SHALL run `fun` in the calling process under a scope of its own and return `{result, lines}`: `fun`'s result and the `PropertyDamage.Log.Line` structs it logged, in the order written, each with attempt 1. The same `$callers` lookup as for a run's scopes SHALL apply, so a `Task` (or a `Task` inside a `Task`) started inside `fun` logs into the capture. A nested `capture/1` SHALL collect into the innermost one and the outer one SHALL get none of its lines. A `capture/1` inside an execution point SHALL keep its lines out of the step. An error, throw or exit in `fun` SHALL propagate and the lines written before it SHALL be dropped. A call after the capture returned, from a process it left running, SHALL raise `PropertyDamage.Log.NoScopeError`. An argument that is not a 0-arity function SHALL raise `ArgumentError`.
+
+#### Scenario: The lines come back in order
+- **WHEN** `fun` logs a string with a tag and then a map
+- **THEN** `capture/1` SHALL return `fun`'s result and both lines in that order, each a `PropertyDamage.Log.Line` with attempt 1
+
+#### Scenario: A nested capture keeps its own lines
+- **WHEN** a `capture/1` runs inside another and logs
+- **THEN** the inner call SHALL return the line and the outer call SHALL not hold it
+
+#### Scenario: A late call finds no scope
+- **WHEN** a process started inside `fun` calls `PropertyDamage.log/2` after the capture returned
+- **THEN** the call SHALL raise `PropertyDamage.Log.NoScopeError`
+
+### Requirement: Log Lines Keep a Step's First and Last Attempts (DR-054)
+
+For each step, the run SHALL keep the log lines of the first execution of its command and of the last `keep_attempts` executions after it (default 3). The executions of a step SHALL be ordered as they ran: the command's own settle attempts, then its stutter retries; the cap SHALL key an execution by which execution wrote it, not by the line's `attempt` number alone, because settle and stutter numbers overlap. The `Runtime.Sink` SHALL apply the cap as lines arrive: when a line of a newer execution arrives with the last executions full, it SHALL drop the oldest of them and count the execution and its lines. A line that arrives for an execution already dropped SHALL be counted and not kept. The cap SHALL drop whole executions and SHALL never cut a line or a value. At any moment the sink and the kept list SHALL hold the lines of at most `keep_attempts + 1` executions of a step. The stutter retries SHALL write into a sink that continues the step's kept lines. One `PropertyDamage.Log.Gap` (`attempts`, `lines`, `timestamp`) SHALL stand in the step's lines between the first execution's lines and the kept ones when the cap dropped at least one line; an execution that logged nothing SHALL leave no gap. Events SHALL never be dropped by the cap. The lines of `PropertyDamage.Log.capture/1`, of an adapter's `setup/1` and `teardown/1` and of every other point that has no attempts SHALL never be capped. `log: [keep_attempts: n]` of `PropertyDamage.run/1` SHALL change the number of last executions kept and SHALL be a positive integer; a zero, a negative, a non-integer or an unknown key under `log:` SHALL raise `NimbleOptions.ValidationError`. The option SHALL reach every execution of the run that keeps lines (exploration, shrink attempts, the reproduction, a replay), on every target.
+
+#### Scenario: Five attempts omit the second
+- **WHEN** a settle runs five attempts that each log two lines, under the default
+- **THEN** the step SHALL keep attempt 1 and attempts 3 to 5 and hold a gap of 1 attempt and 2 lines between them
+
+#### Scenario: Three hundred attempts
+- **WHEN** a settle runs 300 attempts under the default
+- **THEN** the step SHALL keep attempt 1 and attempts 298 to 300, and the gap SHALL count 296 attempts
+- **AND** under `log: [keep_attempts: 5]` the step SHALL keep attempt 1 and attempts 296 to 300, and the gap SHALL count 294 attempts
+
+#### Scenario: The sink stays bounded
+- **WHEN** 1,000 attempts of several lines each are written into one sink
+- **THEN** after every write the sink SHALL hold the lines of at most four attempts (`keep_attempts + 1` with `log: [keep_attempts: n]`)
+
+#### Scenario: A stutter retry is an attempt of the step
+- **WHEN** a command settles in four attempts and a stutter retry follows, under `log: [keep_attempts: 2]`
+- **THEN** the step SHALL keep the first settle attempt, the last settle attempt and the retry, and the gap SHALL count the two settle attempts between
+
+#### Scenario: A line is never cut
+- **WHEN** the first attempt logged a value that prints over several lines and a gap follows it
+- **THEN** the value SHALL stay whole before the gap, and the line after the gap SHALL be the first line of a kept attempt

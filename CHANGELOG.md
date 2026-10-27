@@ -32,6 +32,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `:compact` formats are unchanged.
   - `benches/cachex_bench` logs its cache calls.
 
+- **`PropertyDamage.Log.capture/1` and `setup_log:` give work before the run a
+  place in the report (DR-054).** `Log.capture(fun)` runs `fun` as a scope and
+  returns `{result, lines}`. A test passes the lines to the run as
+  `setup_log: lines`, and the failure report prints them once, in a Setup
+  section between Failure and Minimal Reproduction, labeled as shared by every
+  run. The section is absent without `setup_log:`.
+  - `capture/1` follows the rules of a run's scopes: a `Task` started inside
+    logs into it, a nested capture keeps its own lines, and a call after the
+    capture returned raises `PropertyDamage.Log.NoScopeError`.
+  - `setup_log:` takes only the lines `capture/1` returns, and
+    `FailureReport.setup_log` holds them. They live only in memory: a saved
+    report holds `[]`, and so does a loaded one. The persistence version stays
+    15. The `:json` and `:compact` formats are unchanged.
+
+- **A retried command keeps its first and last attempts in the report
+  (DR-054).** A settle or stutter retry that runs a command hundreds of times
+  used to keep every attempt's log lines. Now a step keeps the lines of its
+  first attempt and of its last three, and the report prints the attempts in
+  between as `... 296 attempts omitted (1,184 lines)`. The sink drops an
+  older attempt's lines as soon as a newer one pushes it out, so memory stays
+  bounded. The cap drops whole attempts and never cuts a line.
+  - `log: [keep_attempts: n]` changes the number of last attempts kept
+    (a positive integer, default 3).
+  - A step's stutter retries count as further attempts of the same step.
+  - `RunTrace.Step.logs` holds a `PropertyDamage.Log.Gap` in the place of the
+    dropped attempts.
+
 - **A divergence records how long it waited (DR-055).** `Failure.Divergence`
   gains `waited_ms`, how long the comparison waited at the boundary, and
   `within_ms`, the convergence bound it waited against, as
