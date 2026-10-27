@@ -76,6 +76,49 @@ defmodule PropertyDamage.RunTraceStateTimelineTest do
     end
   end
 
+  describe "faithful timeline (linear) with expansion leaves" do
+    test "a root's boundary includes the folds of its leaf commands and nothing of a later root's" do
+      # Root 1 ran as two leaf commands, positioned by the root's generation
+      # index (3), not its place in the shrunk plan. The leaves fold after the
+      # root's own fold and have no events, so only the leaf folds themselves
+      # can carry the boundary past the root's own fold.
+      trace =
+        RunTrace.new(
+          model: Model,
+          plan: Sequence.linear([%Cmd{op: :r0}, %Cmd{op: :r1}, %Cmd{op: :r2}]),
+          expansion: %{
+            "a" => [
+              %{root: 1, root_id: 3, leaves?: true, commands: [%Cmd{op: :l0}, %Cmd{op: :l1}]}
+            ]
+          },
+          executed: %{
+            Position.prefix(0) => %Cmd{op: :r0},
+            Position.prefix(1) => %Cmd{op: :r1},
+            Position.leaf(3, 0) => %Cmd{op: :l0},
+            Position.leaf(3, 1) => %Cmd{op: :l1},
+            Position.prefix(2) => %Cmd{op: :r2}
+          },
+          command_fold_ordinals: %{
+            Position.prefix(0) => 0,
+            Position.prefix(1) => 1,
+            Position.leaf(3, 0) => 2,
+            Position.leaf(3, 1) => 3,
+            Position.prefix(2) => 4
+          },
+          event_log: [],
+          outcome: :pass
+        )
+
+      assert RunTrace.state_at(trace, Position.prefix(0))[Log] == %{log: [{:cmd, :r0}]}
+
+      assert RunTrace.state_at(trace, Position.prefix(1))[Log] ==
+               %{log: [{:cmd, :r0}, {:cmd, :r1}, {:cmd, :l0}, {:cmd, :l1}]}
+
+      assert RunTrace.state_before(trace, Position.prefix(2))[Log] ==
+               %{log: [{:cmd, :r0}, {:cmd, :r1}, {:cmd, :l0}, {:cmd, :l1}]}
+    end
+  end
+
   describe "faithful timeline (branching) recovers the verified linearization order" do
     test "the merged state folds branches in linearization order, not branch order" do
       plan =
