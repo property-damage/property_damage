@@ -168,12 +168,14 @@ The system SHALL produce user-facing banners and hints based on error origin cla
 #### Scenario: SUT error banner
 
 - **WHEN** a failure is classified as `:sut_error`
-- **THEN** the report SHALL include a banner indicating the likely SUT bug and the violated invariant name
+- **THEN** the printed report SHALL open with the banner `BUG DETECTED!` (DR-055)
+- **AND** the Failure section SHALL name the violated invariant in its `Invariant` field when its name differs from the check's, and the check in its `Check` field
 
 #### Scenario: Test code error banner
 
 - **WHEN** a failure is classified as `:test_code_error`
-- **THEN** the report SHALL include a banner indicating a likely test configuration issue with the specific module and callback involved
+- **THEN** the printed report SHALL open with the banner `TEST CODE ERROR` and a line saying the system under test is not at fault (DR-055)
+- **AND** the Failure section SHALL say what went wrong in its `What went wrong` field, and name the module and callback involved in its `Hint` or `Location` field when the classification found them
 
 ### Requirement: Invariant Suggestions
 
@@ -264,6 +266,7 @@ The `:terminal` and `:markdown` formats SHALL print one layout, built once from 
 - **THEN** every listed command SHALL carry the label `Sequence.Position.label/2` gives it: `[i]` for a root, `[i.j]` for a leaf listed under root `[i]` (never the root's generated id), `[branch b.i]`, `[setup i]`, `[teardown i]`, and for a suffix command its reading-order index
 - **AND** the Failure section's `At` field, every line marked `►` and the Projections heading SHALL carry the failing step's label, and every `►` line SHALL end with `◄── diverged`, `◄── did not converge` or `◄── failed`
 - **AND** a failure tied to no step SHALL print no `►` and no `At` field
+- **AND** a command that prints over several lines SHALL start on the line after its label, so the notes and the `◄──` mark end the label's line and never split the printed value
 
 #### Scenario: A comparison failure lists both sides
 
@@ -288,7 +291,7 @@ The `:terminal` and `:markdown` formats SHALL print one layout, built once from 
 
 - **WHEN** the report's `targets` is not empty
 - **THEN** Reproduction SHALL print `targets = [...]` once and every call SHALL name `targets: targets`
-- **AND** when a target holds a pid, a reference, a port or a function, a line under the binding SHALL name each place by its path (`config.server`) and say to rebuild the list as the test does
+- **AND** when a target holds a pid, a reference, a port or a function, also inside a list or a tuple, a line under the binding SHALL name each place by its path (`config.server`, a list or tuple element by its index) and say to rebuild the list as the test does
 
 ### Requirement: Failure Report Replay Fields and Footer (DR-050)
 

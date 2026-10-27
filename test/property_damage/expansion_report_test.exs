@@ -133,7 +133,7 @@ defmodule PropertyDamage.ExpansionReportTest do
       assert variant =~ ~r/^► \[#{root}\] .*  as Refund\[1\]  ◄── diverged$/m
 
       assert variant =~
-               ~r/^    \[#{root}\.0\] %.*Credit\{.*\n(.*\n)*    \[#{root}\.1\] %.*Credit\{/m
+               ~r/^    \[#{root}\.0\]\n\s+%.*Credit\{\n(.*\n)*    \[#{root}\.1\]\n\s+%.*Credit\{/m
     end
 
     @tag :tmp_dir
@@ -172,7 +172,8 @@ defmodule PropertyDamage.ExpansionReportTest do
       # The report labels the leaf under the root it belongs to.
       formatted = Formatter.format(report, :terminal, color: false)
       assert formatted =~ ~r/^At\s+\[#{root}\.1\] %.*Credit\{/m
-      assert formatted =~ ~r/^►\s+\[#{root}\.1\] %.*Credit\{.*◄── failed$/m
+      # A command printed over several lines starts under its marked label.
+      assert formatted =~ ~r/^►\s+\[#{root}\.1\]  ◄── failed\n\s+%.*Credit\{$/m
     end
 
     test "progress printing names the leaf" do

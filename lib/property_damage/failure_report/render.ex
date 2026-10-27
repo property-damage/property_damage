@@ -108,15 +108,15 @@ defmodule PropertyDamage.FailureReport.Render do
     width = String.length(lead <> indent <> step.label <> " ")
     tint = if marked?, do: [:red], else: [:faint]
 
-    [first | rest] = String.split(value(step.command, color, width), "\n")
+    label = paint(lead, [:red], color and marked?) <> indent <> paint(step.label, tint, color)
+    notes = note(step.note, color) <> mark(step.outcome, color)
 
-    head =
-      paint(lead, [:red], color and marked?) <>
-        indent <>
-        paint(step.label, tint, color) <>
-        " " <> first <> note(step.note, color) <> mark(step.outcome, color)
-
-    Enum.join([head | Enum.map(rest, &(String.duplicate(" ", width) <> &1))], "\n")
+    # A command that prints over several lines starts under its label, so the
+    # notes and the mark end the label's line and never split the value.
+    case String.split(value(step.command, color, width), "\n") do
+      [single] -> label <> " " <> single <> notes
+      lines -> Enum.join([label <> notes | Enum.map(lines, &indent(&1, width))], "\n")
+    end
   end
 
   defp line({:event, event}, _column, color) do

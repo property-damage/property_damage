@@ -120,7 +120,8 @@ defmodule PropertyDamage.Sequence.Position do
   renumber: a leaf of the root printed as `[0]` is `[0.1]`, never `[2.1]`. A
   suffix command needs it too: a suffix command is labeled by its reading-order
   index, which follows the prefix and every branch command, so its label never
-  equals a prefix command's. The other sections ignore `root`.
+  equals a prefix command's. Without `root`, a leaf or suffix position raises
+  an `ArgumentError`. The other sections ignore `root`.
 
       iex> alias PropertyDamage.Sequence.Position
       iex> Position.label(Position.prefix(1))
@@ -147,4 +148,9 @@ defmodule PropertyDamage.Sequence.Position do
 
   def label(%__MODULE__{section: {:leaf, _id}, offset: j}, root) when is_integer(root),
     do: "[#{root}.#{j}]"
+
+  def label(%__MODULE__{} = position, nil) do
+    raise ArgumentError,
+          "the label of #{describe(position)} needs the reading-order index of its root"
+  end
 end

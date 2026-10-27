@@ -200,7 +200,8 @@ The budget SHALL be judged once, at campaign end, on the aggregates of the measu
 #### Scenario: An absolute bound
 
 - **WHEN** a target's `p95` exceeds `max: {n, unit}`
-- **THEN** the report SHALL have kind `:latency_exceeded`, name the target, the statistic, the measured value and the limit
+- **THEN** the report SHALL have kind `:latency_exceeded`, name the target in `variant`, and carry the statistic, the measured value and the limit
+- **AND** the printed Failure section SHALL show the statistic, the bound, the limit and the measured value, and a `Target` field only in a run of several targets (DR-056)
 - **AND** this SHALL hold for the reference and for a run with one target
 
 #### Scenario: A ratio bound
@@ -452,6 +453,7 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 - **WHEN** a run ends with failures in more than one variant
 - **THEN** `report.other_failures` SHALL list each failure other than the primary with its variant, its root and its `%Failure{}`
 - **AND** the terminal, markdown and JSON formats SHALL show them
+- **AND** the terminal and markdown formats SHALL print one `Other failure` field per failure, naming its kind, name and target once and its root only when it has one; a comparison failure SHALL print its two values as an `Also differed` line does, and no `left:`/`right:` text (DR-056)
 
 ### Requirement: Per-Target Injectors, Mocks and Pollers in Multi-Target Runs (DR-044)
 

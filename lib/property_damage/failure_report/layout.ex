@@ -326,7 +326,7 @@ defmodule PropertyDamage.FailureReport.Layout do
     case type do
       %Failure.Divergence{} -> divergence_fields(report, type)
       %Failure.Convergence{} -> convergence_fields(report, type)
-      %Failure.Latency{} -> latency_fields(report, type)
+      %Failure.Latency{} -> latency_fields(type)
       %Failure.Setup{} -> setup_fields(report, type)
       %Failure.Check{kind: :idempotency_violation} -> idempotency_fields(report)
       %Failure.Check{kind: :poll_timeout} -> poll_timeout_fields(report)
@@ -408,9 +408,8 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp mismatch_fields(other), do: [{"Mismatch", [{:value, other}]}]
 
-  defp latency_fields(report, latency) do
+  defp latency_fields(latency) do
     [
-      {"Target", [inspect(variant_name(report))]},
       {"Statistic", [to_string(latency.statistic)]},
       {"Bound", [to_string(latency.bound)]},
       {"Limit", [{:value, latency.limit}]},
@@ -526,27 +525,57 @@ defmodule PropertyDamage.FailureReport.Layout do
             []
         end
 
-      {"Other failure", [other_failure_text(other) | nested]}
+      {"Other failure", other_failure_parts(report, other) ++ nested}
     end
   end
 
   defp other_failure_fields(_report), do: []
 
-  defp other_failure_text(%{variant: variant, root: root, failure: failure}) do
+  # Kind, name, target and root once. A comparison failure then prints its
+  # values as an `Also differed` line does, and a relation's own reason as
+  # `Mismatch` would; any other failure its message.
+  defp other_failure_parts(report, %{variant: variant, failure: failure} = other) do
     name =
       case Failure.name(failure) do
         nil -> ""
         name -> " " <> FailureReport.format_name(name)
       end
 
-    message =
-      case FailureReport.failure_message(failure) do
-        nil -> ""
-        message -> ": " <> String.trim_trailing(message)
-      end
+    head =
+      "#{kind_text(failure)}#{name} in target #{inspect(variant.name)} (index #{variant.index})" <>
+        root_text(other.root)
 
-    "#{kind_text(failure)}#{name} in target #{inspect(variant.name)} (index #{variant.index}) " <>
-      "at root #{inspect(root)}#{message}"
+    case failure do
+      %Failure{type: %Failure.Divergence{} = divergence} ->
+        [head, "  "] ++
+          side_value(reference_name(report), divergence.reference_value) ++
+          ["  "] ++
+          side_value(variant.name, divergence.variant_value) ++
+          nested_mismatch(divergence.mismatch)
+
+      %Failure{type: %Failure.Convergence{reason: reason}} ->
+        [head, "  ", inspect(variant.name), " still pending: ", {:value, reason}]
+
+      _other ->
+        [head <> message_text(failure)]
+    end
+  end
+
+  defp root_text(nil), do: ""
+  defp root_text(root), do: " at root #{root}"
+
+  defp nested_mismatch(mismatch) do
+    case mismatch_fields(mismatch) do
+      [{"Mismatch", parts}] -> ["\nmismatch: " | parts]
+      [] -> []
+    end
+  end
+
+  defp message_text(failure) do
+    case FailureReport.failure_message(failure) do
+      nil -> ""
+      message -> ": " <> String.trim_trailing(message)
+    end
   end
 
   defp shrink_fields(%FailureReport{shrink_stop: :max_iterations}),
@@ -868,6 +897,8 @@ defmodule PropertyDamage.FailureReport.Layout do
     |> Enum.with_index()
     |> Enum.flat_map(fn {value, index} -> opaque_in(value, [index | path]) end)
   end
+
+  defp opaque_in(tuple, path) when is_tuple(tuple), do: opaque_in(Tuple.to_list(tuple), path)
 
   defp opaque_in(_value, _path), do: []
 

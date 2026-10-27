@@ -65,6 +65,8 @@ DR-055 also leaves these questions open:
      the label equals `failed_at_index` for a failure in the suffix, as it does
      in the prefix. No suffix label equals a prefix label.
 
+   A leaf or suffix position given no root index raises an `ArgumentError`.
+
    `Position.describe/1` keeps its prose for its other callers.
 
 3. **One failing step carries one label everywhere.** For `:diverged` and
@@ -83,7 +85,9 @@ DR-055 also leaves these questions open:
    names its entry (`as Refund[1]`); a root that ran as itself in place of an
    entry says `as itself (identity, by shrinking)` or
    `as itself (identity, forced)`. A command's `label/2` text follows as
-   `# label`.
+   `# label`. A command that prints over several lines starts on the line
+   after its label, so the notes and the `◄──` mark end the label's line and
+   never split the printed value.
 
 5. **Events print under their step, with an offset from the target's run
    start.** The run start is the earliest timestamp in that target's own event
@@ -131,6 +135,11 @@ DR-055 also leaves these questions open:
      then says `at the bound (M ms)`.
    - `Mismatch` prints only the reason a relation failed with: a
      `ComparisonMismatch` holding a message, or another exception.
+   - An `Other failure` line names the failure's kind, name and target once,
+     and its root when it has one. A divergence then prints the two values as
+     an `Also differed` line does, followed by its relation's reason under the
+     rule for `Mismatch`; a failure to converge prints the pending value; any
+     other failure prints its message.
    - Every value starts at one column, two spaces past the longest label, and
      the lines after a value's first continue at that column.
 
@@ -155,10 +164,11 @@ DR-055 also leaves these questions open:
 10. **Reproduction binds the targets once.** When `targets` is not empty, the
     section opens with `targets = <targets_source/1>`. Every call prints
     `targets: targets` in place of the list. A pid, reference, port or function
-    found in an entry's options, in a map that is not a struct, or in a list is
-    named by its path (`config.recorder`, a list element by its index) on one
-    comment line under the binding, which says to rebuild the list as the test
-    does.
+    found in an entry's options, in a map that is not a struct, in a list or in
+    a tuple is named by its path (`config.recorder`; a list or tuple element by
+    its index, so a keyword pair's value in `opts:` is `config.opts.0.1`) on
+    one comment line under the binding, which says to rebuild the list as the
+    test does.
 
 11. **`Formatter.format/3` keeps its signature.** The terminal format reads
     `:color` only and the markdown format reads no option. `:show_event_log`,
