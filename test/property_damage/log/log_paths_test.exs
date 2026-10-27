@@ -123,6 +123,37 @@ defmodule PropertyDamage.Log.PathsTest do
     assert "mock saw act 1" in P.log_messages(F.block(lines, "[1]"))
   end
 
+  test "a scope reads the same from one dictionary key and from the whole dictionary" do
+    # The whole-dictionary read is the fallback where the one-key read is
+    # missing (OTP before 26.2); both reads must agree on every process.
+    parent = self()
+    writer = fn _message, _opts -> :ok end
+
+    holder =
+      spawn(fn ->
+        PropertyDamage.Log.with_scope(writer, fn ->
+          send(parent, :scoped)
+          receive do: (:done -> :ok)
+        end)
+      end)
+
+    bare = spawn(fn -> receive do: (:done -> :ok) end)
+    dead = spawn(fn -> :ok end)
+    assert_receive :scoped
+    ref = Process.monitor(dead)
+    assert_receive {:DOWN, ^ref, :process, ^dead, _reason}
+
+    assert {^writer, alive} = PropertyDamage.Log.scope_in(holder, :dictionary)
+    assert bare in alive
+    assert PropertyDamage.Log.scope_in(holder, :key) == {writer, alive}
+    assert PropertyDamage.Log.scope_in(bare, :dictionary) == nil
+    assert PropertyDamage.Log.scope_in(bare, :key) == nil
+    assert PropertyDamage.Log.scope_in(dead, :dictionary) == :dead
+    assert PropertyDamage.Log.scope_in(dead, :key) == :dead
+
+    for pid <- [holder, bare], do: send(pid, :done)
+  end
+
   test "a binary message that is not valid UTF-8 prints through inspect" do
     script = %{0 => [{:value, <<255, 254, 0>>}]}
     report = F.report!(F.Model, [F.target("alice", %{quiet: true, fail_at: 1, script: script})])

@@ -32,6 +32,14 @@ defmodule PropertyDamage.Log do
   scope, and its line never lands under a later step. A call that finds no
   scope raises `PropertyDamage.Log.NoScopeError`.
 
+  Some points run in a process that outlives them: an adapter's `setup/1`
+  and `teardown/1`, injector and mock setup and teardown, and a nemesis's
+  `inject/2` and `restore/2`. Such a point records the processes alive when
+  it opens, and admits a `$callers` chain only when the process directly
+  below its holder in that chain started while the point ran. A `Task` that
+  `setup/1` starts and awaits logs under `setup/1`; a process that `setup/1`
+  leaves running finds no scope during `teardown/1`.
+
   A process that is neither the executing one nor started through `Task`
   (a `GenServer`, for example) logs through the runtime it was handed, with
   `PropertyDamage.Runtime.log/3`. Both forms write to the same place.
@@ -175,26 +183,74 @@ defmodule PropertyDamage.Log do
     end
   end
 
+  # A scope, as a process holds it in its dictionary: a writer alone when the
+  # process lives only as long as the scope (the per-command Task), or the
+  # writer with the processes alive when the scope opened when the process
+  # outlives it (an inline execution point).
+  @typep scope :: writer() | {writer(), [pid()]}
+
   @doc false
   # The scope the calling process finds: its own, else the first process of
-  # its `$callers` that holds one. A dead process ends the walk.
+  # its `$callers` that holds one. A dead process ends the walk, and so does
+  # an inline scope the chain does not belong to (`admit/2`).
   @spec lookup() :: writer() | nil
   def lookup do
     case Process.get(@scope_key) do
-      nil -> lookup_callers(Process.get(:"$callers", []))
-      writer -> writer
+      nil -> lookup_callers(self(), Process.get(:"$callers", []))
+      scope -> writer_of(scope)
     end
   end
 
-  defp lookup_callers([pid | rest]) when is_pid(pid) and node(pid) == node() do
+  # `below` is the process the walk came from: the caller `pid` started it,
+  # or started the process that started it.
+  defp lookup_callers(below, [pid | rest]) when is_pid(pid) and node(pid) == node() do
+    case scope_in(pid) do
+      :dead -> nil
+      nil -> lookup_callers(pid, rest)
+      scope -> admit(scope, below)
+    end
+  end
+
+  defp lookup_callers(_below, _callers), do: nil
+
+  # A process outlives an inline scope's code, so a process it started for
+  # one execution point can still run during a later one. The inline scope
+  # admits the chain only when the process directly below its holder was
+  # started after the scope opened, by the code of this point.
+  defp admit({writer, alive_at_open}, below),
+    do: if(:lists.member(below, alive_at_open), do: nil, else: writer)
+
+  defp admit(writer, _below), do: writer
+
+  defp writer_of({writer, _alive_at_open}), do: writer
+  defp writer_of(writer), do: writer
+
+  @doc false
+  # The scope `pid` holds: nil when it holds none, `:dead` when it has
+  # exited. `:key` reads the one dictionary key, which needs OTP 26.2 or
+  # later, and falls back to `:dictionary`, which reads the whole dictionary.
+  @spec scope_in(pid(), :key | :dictionary) :: scope() | nil | :dead
+  def scope_in(pid, read \\ :key)
+
+  def scope_in(pid, :key) do
     case :erlang.process_info(pid, {:dictionary, @scope_key}) do
-      :undefined -> nil
-      {{:dictionary, @scope_key}, :undefined} -> lookup_callers(rest)
-      {{:dictionary, @scope_key}, writer} -> writer
+      :undefined -> :dead
+      {{:dictionary, @scope_key}, :undefined} -> nil
+      {{:dictionary, @scope_key}, scope} -> scope
+    end
+  rescue
+    ArgumentError -> scope_in(pid, :dictionary)
+  end
+
+  def scope_in(pid, :dictionary) do
+    case Process.info(pid, :dictionary) do
+      nil -> :dead
+      {:dictionary, dictionary} -> dictionary |> List.keyfind(@scope_key, 0) |> scope_entry()
     end
   end
 
-  defp lookup_callers(_callers), do: nil
+  defp scope_entry({@scope_key, scope}), do: scope
+  defp scope_entry(nil), do: nil
 
   @doc false
   # Makes `writer` the calling process's scope for the rest of its life (the
@@ -209,12 +265,14 @@ defmodule PropertyDamage.Log do
 
   @doc false
   # Runs `fun` with `writer` as the calling process's scope, then restores
-  # the scope it had before.
+  # the scope it had before. The scope records the processes alive when it
+  # opens: a process among them is not one this code started, and finds no
+  # scope here (`admit/2`).
   @spec with_scope(writer() | nil, (-> result)) :: result when result: var
   def with_scope(nil, fun), do: fun.()
 
   def with_scope(writer, fun) do
-    previous = Process.put(@scope_key, writer)
+    previous = Process.put(@scope_key, {writer, Process.list()})
 
     try do
       fun.()
