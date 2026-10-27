@@ -50,6 +50,10 @@ defmodule PropertyDamage.PersistenceReferenceFieldsTest do
       Compare.define_model!(model, [projection])
     end
 
+    # Modules load on first use, so an atom the file holds (a module, a
+    # struct field) may not exist yet in this VM: load every module first.
+    Enum.each(Application.spec(:property_damage, :modules), &Code.ensure_loaded!/1)
+
     :ok
   end
 
