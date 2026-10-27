@@ -82,10 +82,22 @@ defmodule CachexBench.ReplayTest do
   test "the report ends with the paste-ready replay call" do
     assert {:error, report} = run(replay_dir: tmp_dir!())
 
-    last = report |> Formatter.format(:terminal, color: false) |> String.trim_trailing()
-    last = last |> String.split("\n") |> List.last()
+    lines = report |> Formatter.format(:terminal, color: false) |> String.trim_trailing()
+    lines = String.split(lines, "\n")
+    last = List.last(lines)
 
-    assert last == FailureReport.replay_command(report)
+    # The report binds `targets` once and the replay call uses the binding, so
+    # the last line is `replay_command/1` with its target list swapped for it.
+    list = FailureReport.targets_source(report)
+
+    assert last ==
+             String.replace(
+               FailureReport.replay_command(report),
+               "targets: #{list}",
+               "targets: targets"
+             )
+
+    assert "targets = #{list}" in lines
     assert last =~ ~s(only: [replay: "#{report.replay_path}"])
   end
 
