@@ -66,10 +66,11 @@ defmodule PropertyDamage.Persistence do
   @removed_fields []
 
   # Fields whose absence on a loaded report is expected format evolution (not
-  # struct drift). Empty for the same reason as @removed_fields: only
-  # current-version files load, and such a file legitimately lacking a current
+  # struct drift). Version-15 files saved before the reference side of a
+  # comparison failure and the shrink stop existed lack these three; the loader
+  # backfills each with nil (see `backfill_added_fields/1`). Any other absent
   # field is a genuine shape change worth a warning.
-  @added_fields []
+  @added_fields [:reference_trace, :reference_state_at_failure, :shrink_stop]
 
   # Upper bound on the term size we are willing to reconstruct from a file.
   # Compressed external term format declares its uncompressed size in the
@@ -547,12 +548,24 @@ defmodule PropertyDamage.Persistence do
 
   defp report_payload(report, warnings) when is_map(report) do
     case Enum.find(@required_fields, &(not is_map_key(report, &1))) do
-      nil -> {:ok, report, warnings ++ check_struct_drift(report)}
-      field -> {:error, {:missing_field, field}}
+      nil ->
+        report = backfill_added_fields(report)
+        {:ok, report, warnings ++ check_struct_drift(report)}
+
+      field ->
+        {:error, {:missing_field, field}}
     end
   end
 
   defp report_payload(report, warnings), do: {:ok, report, warnings ++ check_struct_drift(report)}
+
+  # A report saved before an added field existed holds no key for it, so a dot
+  # access would raise. The key is given the value nil.
+  defp backfill_added_fields(report) when is_struct(report, FailureReport) do
+    Enum.reduce(@added_fields, report, &Map.put_new(&2, &1, nil))
+  end
+
+  defp backfill_added_fields(report), do: report
 
   # Shared decode envelope: verify checksum + size bound, then hand the safely
   # decoded payload to `fun`. Post-checksum ArgumentError means unknown/unloadable

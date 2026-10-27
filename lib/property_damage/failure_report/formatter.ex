@@ -1201,12 +1201,17 @@ defmodule PropertyDamage.FailureReport.Formatter do
         "original_commands" => Sequence.command_count(report.original_sequence),
         "shrunk_commands" => Sequence.command_count(FailureReport.shrunk_sequence(report)),
         "iterations" => report.shrink_iterations,
-        "time_ms" => report.shrink_time_ms
+        "time_ms" => report.shrink_time_ms,
+        "stop" => report.shrink_stop && to_string(report.shrink_stop)
       },
       "sequence" =>
         serialize_sequence(FailureReport.shrunk_sequence(report), report.command_labels),
       "reproduction" => FailureReport.reproduction_command(report),
-      "other_failures" => Enum.map(report.other_failures, &serialize_other_failure/1)
+      "other_failures" => Enum.map(report.other_failures, &serialize_other_failure/1),
+      "reference_trace" => serialize_reference_trace(report),
+      "reference_projections" =>
+        report.reference_state_at_failure &&
+          serialize_projections(report.reference_state_at_failure)
     }
 
     # Add optional sections
@@ -1236,6 +1241,24 @@ defmodule PropertyDamage.FailureReport.Formatter do
       end
 
     Jason.encode!(data, pretty: indent > 0)
+  end
+
+  # The reference target's trace of the reported run; null when the report has
+  # none. Its sequence is the plan both targets ran.
+  defp serialize_reference_trace(%{reference_trace: nil}), do: nil
+
+  defp serialize_reference_trace(%{reference_trace: trace} = report) do
+    %{
+      "target" => reference_name(report),
+      "seed" => trace.seed,
+      "run_number" => trace.run_number,
+      "mint_epoch" => trace.mint_epoch,
+      "plan_source" => trace.plan_source && to_string(trace.plan_source),
+      "plan_fingerprint" => trace.plan_fingerprint,
+      "sequence" =>
+        serialize_sequence(FailureReport.shrunk_sequence(report), report.command_labels),
+      "event_log" => serialize_event_log(FailureReport.reference_event_log(report))
+    }
   end
 
   defp serialize_sequence(sequence, command_labels) do
