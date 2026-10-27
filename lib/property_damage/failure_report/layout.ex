@@ -14,13 +14,16 @@ defmodule PropertyDamage.FailureReport.Layout do
   #   * `{:field, label, parts}` - a labeled field of the Failure section;
   #     the renderer lines up the values of one section in one column
   #   * `{:header, text}` - the header of a listing (`Reference: target "a"`)
-  #   * `{:step, step}` - a command of a listing, `%{depth:, label:, command:,
-  #     note:, outcome:}`; `outcome` is nil, or the word printed after `◄──`
-  #     on the failing step, which also carries `►`
+  #   * `{:step, step}` - a command of a listing, `%{depth:, label:, root:,
+  #     command:, note:, outcome:}`; `outcome` is nil, or the word printed after
+  #     `◄──` on the failing step, which also carries `►`; `root` is the index
+  #     of the root it belongs to, nil for a setup or teardown command
   #   * `{:event, %{offset_ms:, source:, event:}}` - an event under its step
-  #   * `{:log, %{offset_ms:, tags:, message:}}` - a log line (DR-054) under its
-  #     step or under an adapter note; `message` is `{:text, string}` or
-  #     `{:value, term}`, a function message already called
+  #   * `{:log, %{offset_ms:, tags:, message:, file:, line:, attempt:}}` - a log
+  #     line (DR-054) under its step or under an adapter note; `message` is
+  #     `{:text, string}` or `{:value, term}`, a function message already
+  #     called. A tag filter (`PropertyDamage.Log.Filter`) removes the lines it
+  #     hides before this point, so no renderer sees one
   #   * `{:gap, %{attempts:, lines:}}` - the attempts the retry cap dropped from
   #     a step (DR-054 decision 13), in their place among the step's log lines
   #   * `{:note, text}` - a line of a listing that is not a step
@@ -33,7 +36,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   # `parts` is a list of strings and `{:value, term}`; the renderer inspects
   # each value, so it alone decides on syntax colors.
 
-  alias PropertyDamage.Log.{Gap, Line}
+  alias PropertyDamage.Log.{Filter, Gap, Line}
 
   alias PropertyDamage.{
     ComparisonMismatch,
@@ -55,33 +58,67 @@ defmodule PropertyDamage.FailureReport.Layout do
     defstruct [:heading, :fence, lines: []]
   end
 
-  defstruct [:banner, :seed, sections: []]
+  # `logs` is what the `:json` format carries of the log lines (see
+  # `logs_data/4`), built from the same lines the sections hold.
+  defstruct [:banner, :seed, :logs, sections: []]
 
   @type t :: %__MODULE__{
           banner: :bug_detected | :test_code_error,
           seed: integer() | nil,
-          sections: [%Section{}]
+          sections: [%Section{}],
+          logs: map() | nil
         }
 
   @default_converge_within 5_000
 
+  # The notes that head the adapter's setup/1 and teardown/1 lines.
+  @adapter_setup_note "adapter setup/1"
+  @adapter_teardown_note "adapter teardown/1"
+
+  # `opts` holds the `log:` filter a caller gives for this one formatting
+  # (`PropertyDamage.Log.Filter.resolve/2` decides what applies). A filter
+  # hides whole log lines here and nowhere else: every origin below counts
+  # from all of a target's lines, so a hidden line moves no other offset.
   @doc false
-  @spec build(FailureReport.t()) :: t()
-  def build(%FailureReport{} = report) do
-    variant = side(report, report.trace, variant_name(report), FailureReport.steps(report))
+  @spec build(FailureReport.t(), keyword()) :: t()
+  def build(%FailureReport{} = report, opts \\ []) do
+    filter = Filter.resolve(report.log_filter, opts)
+    unknown = Filter.unknown(filter, known_tags(report))
+
+    variant =
+      side(report, report.trace, variant_name(report), FailureReport.steps(report), filter)
+
     focus = focus(report, variant.items)
+    {listing_section, targets} = reproduction_listing(report, variant, focus)
+    setup = setup_section(report, filter)
 
     sections =
       [
-        failure_section(report, focus),
-        setup_section(report),
-        reproduction_listing(report, variant, focus),
+        failure_section(report, focus, filter, unknown),
+        setup && setup.section,
+        listing_section,
         projections_section(report, variant, focus),
         reproduction_section(report)
       ]
       |> Enum.reject(&is_nil/1)
 
-    %__MODULE__{banner: banner(report), seed: report.seed, sections: sections}
+    logs = %{
+      filter: filter,
+      unknown: unknown,
+      setup: (setup && setup.lines) || [],
+      target: targets.target,
+      reference: targets.reference
+    }
+
+    %__MODULE__{banner: banner(report), seed: report.seed, sections: sections, logs: logs}
+  end
+
+  # Every tag of every line the report holds, before any filter.
+  defp known_tags(report) do
+    traces = Enum.reject([report.trace, report.reference_trace], &is_nil/1)
+    traced = for trace <- traces, lines <- Map.values(Map.get(trace, :logs) || %{}), do: lines
+
+    MapSet.new(Filter.tag_names((report.setup_log || []) ++ List.flatten(traced)))
   end
 
   defp banner(%FailureReport{error_origin: :test_code_error}), do: :test_code_error
@@ -96,7 +133,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   # adapter's setup/1 and teardown/1, the entries tied to no command, and the
   # start its offsets count from: the earliest timestamp among its events and
   # its log lines, so no line prints a negative offset.
-  defp side(report, trace, name, steps) do
+  defp side(report, trace, name, steps, filter) do
     plan = trace && trace.plan
     log = (trace && trace.event_log) || []
     logs = (trace && Map.get(trace, :logs)) || %{}
@@ -117,6 +154,7 @@ defmodule PropertyDamage.FailureReport.Layout do
       adapter_teardown: Map.get(logs, :adapter_teardown, []),
       untied: if(trace, do: RunTrace.async_entries(trace), else: []),
       missing?: false,
+      filter: filter,
       start: Enum.min(timestamps, fn -> nil end)
     }
   end
@@ -270,7 +308,7 @@ defmodule PropertyDamage.FailureReport.Layout do
   # Failure
   # ==========================================================================
 
-  defp failure_section(report, focus) do
+  defp failure_section(report, focus, filter, unknown) do
     fields =
       [{"Failure", [kind_text(report.failure_reason)]}] ++
         name_fields(report) ++
@@ -280,7 +318,8 @@ defmodule PropertyDamage.FailureReport.Layout do
         origin_fields(report) ++
         also_differed_fields(report) ++
         other_failure_fields(report) ++
-        shrink_fields(report)
+        shrink_fields(report) ++
+        log_filter_fields(filter, unknown)
 
     %Section{
       heading: "Failure",
@@ -606,6 +645,16 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp shrink_fields(_report), do: []
 
+  # The tag filter the report applied and where it came from, then the listed
+  # tags no line carries: two fields at the end of the Failure section, and
+  # none without a filter (DR-054 decision 11).
+  defp log_filter_fields(nil, _unknown), do: []
+
+  defp log_filter_fields(filter, unknown) do
+    [{"Log filter", [Filter.describe(filter)]}] ++
+      if unknown == [], do: [], else: [{"Log warning", [Filter.describe_unknown(unknown)]}]
+  end
+
   defp shrink_text(budget),
     do: "stopped at its #{budget} budget, so the reproduction may not be minimal"
 
@@ -617,65 +666,126 @@ defmodule PropertyDamage.FailureReport.Layout do
   # whatever the number of targets, right after Failure. They are shared by
   # every run, so they belong to no target: their offsets count from the
   # earliest of them and they never enter a target's offset origin.
-  defp setup_section(%FailureReport{setup_log: [_ | _] = lines}) do
+  defp setup_section(%FailureReport{setup_log: [_ | _] = lines}, filter) do
     start = lines |> Enum.map(& &1.timestamp) |> Enum.min()
 
-    %Section{
-      heading: "Setup",
-      lines: [
-        {:note, "Logged before the run, shared by every run"} | entry_lines([], lines, start)
-      ]
-    }
+    case entry_lines([], lines, start, filter) do
+      [] ->
+        nil
+
+      shown ->
+        %{
+          lines: shown,
+          section: %Section{
+            heading: "Setup",
+            lines: [{:note, "Logged before the run, shared by every run"} | shown]
+          }
+        }
+    end
   end
 
-  defp setup_section(_report), do: nil
+  defp setup_section(_report, _filter), do: nil
 
   # ==========================================================================
   # Minimal Reproduction
   # ==========================================================================
 
+  # The section, and the log lines each target's listing shows, which the
+  # `:json` format carries: `%{target:, reference:}`, the reference nil for a
+  # report that lists one target.
   defp reproduction_listing(report, variant, focus) do
-    lines =
+    {lines, targets} =
       if report.kind in [:diverged, :did_not_converge] do
-        reference = reference_side(report)
+        reference = reference_side(report, variant.filter)
+        reference_lines = listing(reference, focus, report.kind)
+        variant_lines = listing(variant, focus, report.kind)
 
-        [{:header, ~s(Reference: target "#{reference_name(report)}")}] ++
-          listing(reference, focus, report.kind) ++
-          [:blank, {:header, ~s(Variant: target "#{variant_name(report)}")}] ++
-          listing(variant, focus, report.kind)
+        lines =
+          [{:header, ~s(Reference: target "#{reference_name(report)}")}] ++
+            reference_lines ++
+            [:blank, {:header, ~s(Variant: target "#{variant_name(report)}")}] ++
+            variant_lines
+
+        {lines,
+         %{
+           target: target_logs(variant_name(report), variant_lines),
+           reference: target_logs(reference_name(report), reference_lines)
+         }}
       else
-        listing(variant, focus, report.kind)
+        lines = listing(variant, focus, report.kind)
+        {lines, %{target: target_logs(variant_name(report), lines), reference: nil}}
       end
 
-    %Section{heading: "Minimal Reproduction (#{roots_text(report)})", lines: lines}
+    {%Section{heading: "Minimal Reproduction (#{roots_text(report)})", lines: lines}, targets}
   end
+
+  # The log lines of one target's listing, read from the lines the listing
+  # printed: the adapter's setup/1 and teardown/1 lines, and each step's lines
+  # and gaps in report order. Nothing is filtered here; the listing already was.
+  defp target_logs(name, lines) do
+    {adapter_setup, steps, adapter_teardown, _where} =
+      Enum.reduce(lines, {[], [], [], :none}, &collect_logs/2)
+
+    %{
+      name: name,
+      adapter_setup: Enum.reverse(adapter_setup),
+      adapter_teardown: Enum.reverse(adapter_teardown),
+      steps: steps |> Enum.map(&%{&1 | lines: Enum.reverse(&1.lines)}) |> Enum.reverse()
+    }
+  end
+
+  defp collect_logs({:step, step}, {setup, steps, teardown, _where}),
+    do: {setup, [%{label: step.label, root: step.root, lines: []} | steps], teardown, :step}
+
+  defp collect_logs({:note, @adapter_setup_note}, {setup, steps, teardown, _where}),
+    do: {setup, steps, teardown, :setup}
+
+  defp collect_logs({:note, @adapter_teardown_note}, {setup, steps, teardown, _where}),
+    do: {setup, steps, teardown, :teardown}
+
+  defp collect_logs({kind, _line} = entry, {setup, steps, teardown, where})
+       when kind in [:log, :gap] do
+    case where do
+      :setup -> {[entry | setup], steps, teardown, where}
+      :teardown -> {setup, steps, [entry | teardown], where}
+      :step -> {setup, add_to_first(steps, entry), teardown, where}
+    end
+  end
+
+  defp collect_logs({:event, _event}, acc), do: acc
+  defp collect_logs(_other, {setup, steps, teardown, _where}), do: {setup, steps, teardown, :none}
+
+  defp add_to_first([step | rest], entry), do: [%{step | lines: [entry | step.lines]} | rest]
 
   # The reference's side; a report saved before it kept the reference's
   # trace lists the roots alone.
-  defp reference_side(%FailureReport{reference_trace: %RunTrace{} = trace} = report),
-    do: side(report, trace, reference_name(report), FailureReport.reference_steps(report))
+  defp reference_side(%FailureReport{reference_trace: %RunTrace{} = trace} = report, filter),
+    do: side(report, trace, reference_name(report), FailureReport.reference_steps(report), filter)
 
-  defp reference_side(%FailureReport{} = report) do
+  defp reference_side(%FailureReport{} = report, filter) do
     plan = FailureReport.shrunk_sequence(report)
     steps = if plan, do: RunTrace.build_steps(plan, [], %{}, nil), else: []
     trace = %RunTrace{plan: plan}
 
-    %{side(report, trace, reference_name(report), steps) | untied: [], missing?: true}
+    %{side(report, trace, reference_name(report), steps, filter) | untied: [], missing?: true}
   end
 
   # The adapter's setup/1 lines lead the listing and its teardown/1 lines end
   # it, each under a note and only when there are some (DR-054).
   defp listing(%{items: []} = side, _focus, _kind) do
-    adapter_lines(side.adapter_setup, "adapter setup/1", side.start) ++
+    adapter_lines(side.adapter_setup, @adapter_setup_note, side) ++
       [{:note, "(no command ran)"}] ++
-      adapter_lines(side.adapter_teardown, "adapter teardown/1", side.start) ++
+      adapter_lines(side.adapter_teardown, @adapter_teardown_note, side) ++
       untied_lines(side)
   end
 
   defp listing(side, focus, kind) do
     steps =
       Enum.flat_map(side.items, fn item ->
-        [{:step, step_line(item, focus, kind)} | entry_lines(item.entries, item.logs, side.start)]
+        [
+          {:step, step_line(item, focus, kind)}
+          | entry_lines(item.entries, item.logs, side.start, side.filter)
+        ]
       end)
 
     missing =
@@ -683,19 +793,25 @@ defmodule PropertyDamage.FailureReport.Layout do
         do: [{:note, "(this report holds no events of the reference)"}],
         else: []
 
-    adapter_lines(side.adapter_setup, "adapter setup/1", side.start) ++
+    adapter_lines(side.adapter_setup, @adapter_setup_note, side) ++
       steps ++
-      adapter_lines(side.adapter_teardown, "adapter teardown/1", side.start) ++
+      adapter_lines(side.adapter_teardown, @adapter_teardown_note, side) ++
       missing ++ untied_lines(side)
   end
 
-  defp adapter_lines([], _note, _start), do: []
-  defp adapter_lines(lines, note, start), do: [{:note, note} | entry_lines([], lines, start)]
+  # The note prints only when the filter leaves a line under it.
+  defp adapter_lines(lines, note, side) do
+    case entry_lines([], lines, side.start, side.filter) do
+      [] -> []
+      shown -> [{:note, note} | shown]
+    end
+  end
 
   defp step_line(item, focus, kind) do
     %{
       depth: if(item.kind == :leaf, do: 1, else: 0),
       label: item.label,
+      root: item.root,
       command: item.command,
       note: item.note,
       outcome: if(focus && focus.match.(item), do: outcome(kind))
@@ -705,8 +821,9 @@ defmodule PropertyDamage.FailureReport.Layout do
   # A step's events and log lines in timestamp order, stable; on an equal
   # millisecond a line prints before an event, because a line is written
   # while the command runs and its events are recorded when it returns.
-  defp entry_lines(entries, lines, start) do
-    (Enum.map(lines, &{:log, &1}) ++ Enum.map(entries, &{:event, &1}))
+  defp entry_lines(entries, lines, start, filter) do
+    ((lines |> Enum.filter(&Filter.shown?(&1, filter)) |> Enum.map(&{:log, &1})) ++
+       Enum.map(entries, &{:event, &1}))
     |> Enum.sort_by(fn
       {:log, line} -> {line.timestamp, 0}
       {:event, entry} -> {entry.timestamp, 1}
@@ -718,7 +835,7 @@ defmodule PropertyDamage.FailureReport.Layout do
     end)
   end
 
-  defp event_lines(entries, start), do: entry_lines(entries, [], start)
+  defp event_lines(entries, start), do: entry_lines(entries, [], start, nil)
 
   defp event_line(entry, start) do
     {:event,
@@ -734,7 +851,10 @@ defmodule PropertyDamage.FailureReport.Layout do
      %{
        offset_ms: line.timestamp - (start || line.timestamp),
        tags: line.tags,
-       message: log_message(line.message)
+       message: log_message(line.message),
+       file: line.file,
+       line: line.line,
+       attempt: line.attempt
      }}
   end
 

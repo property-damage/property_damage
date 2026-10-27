@@ -446,10 +446,12 @@ defmodule PropertyDamage.Persistence do
   # a line its author forgot to redact would be published. Every trace is
   # saved with `logs: %{}` and loaded with `logs: %{}`, and a report with
   # `setup_log: []`, a file saved before either field existed included, so the
-  # format and its version do not change.
+  # format and its version do not change. The report's tag filter
+  # (`log_filter`) is a view of the run and is dropped the same way.
   defp without_logs(%FailureReport{} = report) do
     report
     |> Map.put(:setup_log, [])
+    |> Map.put(:log_filter, nil)
     |> backfill_key(:trace, &without_logs/1)
     |> backfill_key(:reference_trace, &without_logs/1)
   end

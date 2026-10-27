@@ -32,6 +32,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `:compact` formats are unchanged.
   - `benches/cachex_bench` logs its cache calls.
 
+- **Tag filters and `PD_LOG` for the log lines of the failure report
+  (DR-054).** A report that prints every line of a chatty adapter buries the
+  few that matter. `log: [only: tags, except: tags]` on `PropertyDamage.run/1`,
+  and on the new `PropertyDamage.ExUnit.format_failure/2`, hides whole lines by
+  tag; the environment variable `PD_LOG`, for example
+  `PD_LOG="only:http,seed except:body"`, sets the same filter without a code
+  change.
+  - `only:` shows the lines that carry a listed tag, `except:` hides them and
+    wins, and a line with no tag always shows. A shown line prints exactly as
+    before and no offset moves. A retry-cap gap always shows, with its counts.
+    The setup lines and the adapter `setup/1` and `teardown/1` lines follow the
+    same rule, and a section or note with no line left disappears.
+  - The report prints the filter and its source (`log:` or `PD_LOG`) as a
+    `Log filter` field of the Failure section, and a `Log warning` field names
+    a listed tag that no line carries. A report with no filter prints neither.
+  - `PD_LOG` replaces the in-code filter and never merges with it. It is read
+    only when a report is formatted, so a run, its shrink and its replay
+    artifact are the same with and without it. A value that does not parse
+    raises an `ArgumentError` that shows the syntax.
+  - `FailureReport.log_filter` holds the run's filter, so `format_failure/1`
+    prints it. It lives only in memory: a saved report holds none, and the
+    persistence version stays 15.
+  - The `:json` format gains a `logs` key with the lines the terminal shows
+    (filter and source, unknown tags, setup lines, and per target and step the
+    lines and gaps). Every other key is unchanged, and `:compact` ignores
+    filters.
+  - A filter hides lines from one reader and protects no secret: the code that
+    logs redacts.
+
 - **`PropertyDamage.Log.capture/1` and `setup_log:` give work before the run a
   place in the report (DR-054).** `Log.capture(fun)` runs `fun` as a scope and
   returns `{result, lines}`. A test passes the lines to the run as

@@ -291,7 +291,7 @@ A `RunTrace` SHALL be serializable to and loadable from disk independently of a 
 
 ### Requirement: Log Lines Live Only in Memory (DR-054)
 
-A run's log lines SHALL be dropped when the run ends, unless the run is the one a failure report describes. `Persistence.save/3` and `Persistence.save_trace/3` SHALL write every `RunTrace` they hold (a report's `trace` and `reference_trace`) with `logs: %{}`, and `Persistence.load/1` and `Persistence.load_trace/1` SHALL return every trace with `logs: %{}`, a version-15 file saved before the field existed included. `Persistence.save/3` SHALL write a report with `setup_log: []`, and `Persistence.load/1` SHALL return every report with `setup_log: []`, a version-15 file saved before the field existed included. The format version SHALL stay 15. A replay artifact, an export and every other file PropertyDamage writes SHALL carry no line text, setup lines included.
+A run's log lines SHALL be dropped when the run ends, unless the run is the one a failure report describes. `Persistence.save/3` and `Persistence.save_trace/3` SHALL write every `RunTrace` they hold (a report's `trace` and `reference_trace`) with `logs: %{}`, and `Persistence.load/1` and `Persistence.load_trace/1` SHALL return every trace with `logs: %{}`, a version-15 file saved before the field existed included. `Persistence.save/3` SHALL write a report with `setup_log: []`, and `Persistence.load/1` SHALL return every report with `setup_log: []`, a version-15 file saved before the field existed included. `Persistence.save/3` SHALL also write a report with `log_filter: nil`, and `Persistence.load/1` SHALL return every report with `log_filter: nil` (the tag filter of the failure report is a view of it and lives only in memory). The format version SHALL stay 15. A replay artifact, an export and every other file PropertyDamage writes SHALL carry no line text, setup lines included.
 
 #### Scenario: A saved report holds no line
 - **WHEN** a report whose traces hold log lines is saved and loaded again
@@ -304,6 +304,10 @@ A run's log lines SHALL be dropped when the run ends, unless the run is the one 
 #### Scenario: A saved report holds no setup line
 - **WHEN** a report built with `setup_log:` is saved and loaded again
 - **THEN** the file SHALL not contain the lines' text, and the loaded report SHALL have `setup_log: []`
+
+#### Scenario: A saved report holds no tag filter
+- **WHEN** a report built with `log: [only: [:http]]` is saved and loaded again
+- **THEN** the loaded report SHALL have `log_filter: nil`, the file SHALL hold no filter and the format version SHALL be 15
 
 #### Scenario: A replay artifact holds no line
 - **WHEN** a run that logged writes its replay artifact

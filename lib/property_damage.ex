@@ -131,7 +131,7 @@ defmodule PropertyDamage do
   See the individual module documentation for detailed information on each component.
   """
 
-  alias PropertyDamage.Log.Cap
+  alias PropertyDamage.Log.{Cap, Filter}
 
   alias PropertyDamage.{
     Comparison,
@@ -237,9 +237,18 @@ defmodule PropertyDamage do
     done before the run, such as seeding the system (default `[]`). The report
     prints them once, in a Setup section before the reproduction, labeled as
     shared by every run.
-  - `:log` - `[keep_attempts: n]`: how many of a step's last settle or stutter
-    attempts keep their log lines besides the first attempt (default `3`).
-    The report prints each gap as `... N attempts omitted (M lines)`.
+  - `:log` - `[keep_attempts: n, only: tags, except: tags]`. `keep_attempts`
+    is how many of a step's last settle or stutter attempts keep their log
+    lines besides the first attempt (default `3`); the report prints each gap
+    as `... N attempts omitted (M lines)`. `only:` and `except:` are
+    non-empty lists of tag atoms that hide whole log lines from the printed
+    report: `only:` shows the lines that carry a listed tag, `except:` hides
+    them and wins, and a line with no tag always shows. The report prints the
+    filter and warns about a listed tag no line carries. A filter hides lines
+    from one reader and protects no secret (redact in the code that logs);
+    the environment variable `PD_LOG`, for example
+    `PD_LOG="only:http,seed except:body"`, replaces it. See
+    `PropertyDamage.Log.Filter`.
   - `:concurrency` - How the targets reach each command boundary: `:serial`
     (default) steps one target at a time in target order; `:parallel` steps
     every target at once
@@ -513,6 +522,7 @@ defmodule PropertyDamage do
       stutter: opts[:stutter],
       stutter_config: Stutter.parse_config(opts[:stutter]),
       keep_attempts: keep_attempts(opts),
+      log_filter: Filter.from_option(opts[:log]),
       setup_log: opts[:setup_log],
       check_mode: opts[:check_mode],
       seed_library: seed_library,
@@ -877,6 +887,7 @@ defmodule PropertyDamage do
       concurrency: ctx.concurrency,
       compare: ctx.compare,
       setup_log: ctx.setup_log,
+      log_filter: ctx.log_filter,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
       check_fires: acc.fires,
@@ -1888,6 +1899,7 @@ defmodule PropertyDamage do
       concurrency: ctx.concurrency,
       compare: ctx.compare,
       setup_log: ctx.setup_log,
+      log_filter: ctx.log_filter,
       stutter: ctx.stutter,
       max_commands: ctx.max_commands,
       check_mode: ctx.check_mode,
@@ -2293,6 +2305,7 @@ defmodule PropertyDamage do
             other_failures: Enum.map(other_failures, &other_failure/1),
             # The report's own setup lines stay, as the caller gave them.
             setup_log: report.setup_log,
+            log_filter: report.log_filter,
             stutter: ctx.stutter,
             max_commands: report.max_commands,
             check_mode: ctx.check_mode,
