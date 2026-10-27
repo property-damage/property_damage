@@ -950,7 +950,7 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 
 #### Scenario: A process an inline point left running finds no later point
 - **WHEN** a point that runs in a process outliving it (the adapter's `setup/1` or `teardown/1`, injector and mock setup and teardown, a nemesis's `inject/2` or `restore/2`, a mock's `on_command/2` or `on_event/2`) starts a process and leaves it running, and that process calls `PropertyDamage.log/2` during a later such point of the same holder
-- **THEN** the call SHALL raise `PropertyDamage.Log.NoScopeError`: the point records the processes alive when it opens, and admits a `$callers` chain only when the process directly below its holder in the chain was not among them
+- **THEN** the call SHALL raise `PropertyDamage.Log.NoScopeError`: the point admits a `$callers` chain only when the process directly below its holder in the chain was started by the holder while the point ran (the point marks its holder's `$callers` with a token of its own while it runs, and a process started then carries the token)
 - **AND** a `Task` the point starts while it runs SHALL log under that point
 
 #### Scenario: A call with no scope raises

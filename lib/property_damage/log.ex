@@ -38,9 +38,10 @@ defmodule PropertyDamage.Log do
   Some points run in a process that outlives them: an adapter's `setup/1`
   and `teardown/1`, injector and mock setup and teardown, a nemesis's
   `inject/2` and `restore/2`, and a mock's `on_command/2` and `on_event/2`.
-  Such a point records the processes alive when
-  it opens, and admits a `$callers` chain only when the process directly
-  below its holder in that chain started while the point ran. A `Task` that
+  Such a point admits a `$callers` chain only when the process directly
+  below its holder in that chain was started by the holder while the point
+  ran: the point marks its holder's `$callers` with a token of its own while
+  it runs, and a process started then carries the token. A `Task` that
   `setup/1` starts and awaits logs under `setup/1`; a process that `setup/1`
   leaves running finds no scope during `teardown/1`.
 
@@ -189,9 +190,9 @@ defmodule PropertyDamage.Log do
 
   # A scope, as a process holds it in its dictionary: a writer alone when the
   # process lives only as long as the scope (the per-command Task), or the
-  # writer with the processes alive when the scope opened when the process
-  # outlives it (an inline execution point).
-  @typep scope :: writer() | {writer(), [pid()]}
+  # writer with the scope's token when the process outlives it (an inline
+  # execution point; see `with_scope/2`).
+  @typep scope :: writer() | {writer(), pid()}
 
   @doc false
   # The scope the calling process finds: its own, else the first process of
@@ -200,31 +201,30 @@ defmodule PropertyDamage.Log do
   @spec lookup() :: writer() | nil
   def lookup do
     case Process.get(@scope_key) do
-      nil -> lookup_callers(self(), Process.get(:"$callers", []))
+      nil -> lookup_callers(Process.get(:"$callers", []))
       scope -> writer_of(scope)
     end
   end
 
-  # `below` is the process the walk came from: the caller `pid` started it,
-  # or started the process that started it.
-  defp lookup_callers(below, [pid | rest]) when is_pid(pid) and node(pid) == node() do
+  defp lookup_callers([pid | rest]) when is_pid(pid) and node(pid) == node() do
     case scope_in(pid) do
       :dead -> nil
-      nil -> lookup_callers(pid, rest)
-      scope -> admit(scope, below)
+      nil -> lookup_callers(rest)
+      scope -> admit(scope, rest)
     end
   end
 
-  defp lookup_callers(_below, _callers), do: nil
+  defp lookup_callers(_callers), do: nil
 
   # A process outlives an inline scope's code, so a process it started for
-  # one execution point can still run during a later one. The inline scope
-  # admits the chain only when the process directly below its holder was
-  # started after the scope opened, by the code of this point.
-  defp admit({writer, alive_at_open}, below),
-    do: if(:lists.member(below, alive_at_open), do: nil, else: writer)
-
-  defp admit(writer, _below), do: writer
+  # one execution point can still run during a later one. While an inline
+  # scope is open, its holder's `$callers` starts with the scope's token, so
+  # a process the holder starts during the point carries the token right
+  # after the holder in its own `$callers`, and a process started before the
+  # point opened does not. The scope admits only a chain that carries it.
+  defp admit({writer, token}, [token | _rest]), do: writer
+  defp admit({_writer, _token}, _rest), do: nil
+  defp admit(writer, _rest), do: writer
 
   defp writer_of({writer, _alive_at_open}), do: writer
   defp writer_of(writer), do: writer
@@ -269,19 +269,25 @@ defmodule PropertyDamage.Log do
 
   @doc false
   # Runs `fun` with `writer` as the calling process's scope, then restores
-  # the scope it had before. The scope records the processes alive when it
-  # opens: a process among them is not one this code started, and finds no
-  # scope here (`admit/2`).
+  # the scope and the `$callers` it had before. The scope gets a token of its
+  # own, a pid no other scope holds, put first in the calling process's
+  # `$callers` while `fun` runs, so the processes `fun` starts carry it
+  # (`admit/2`). The token only has to be unique, so it is a process that
+  # exits at once; a dead pid in `$callers` ends a lookup that reaches it.
   @spec with_scope(writer() | nil, (-> result)) :: result when result: var
   def with_scope(nil, fun), do: fun.()
 
   def with_scope(writer, fun) do
-    previous = Process.put(@scope_key, {writer, Process.list()})
+    token = spawn(fn -> :ok end)
+    previous = Process.put(@scope_key, {writer, token})
+    callers = Process.get(:"$callers")
+    Process.put(:"$callers", [token | callers || []])
 
     try do
       fun.()
     after
       if previous, do: Process.put(@scope_key, previous), else: Process.delete(@scope_key)
+      if callers, do: Process.put(:"$callers", callers), else: Process.delete(:"$callers")
     end
   end
 

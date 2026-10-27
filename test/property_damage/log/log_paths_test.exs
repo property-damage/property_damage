@@ -143,9 +143,9 @@ defmodule PropertyDamage.Log.PathsTest do
     ref = Process.monitor(dead)
     assert_receive {:DOWN, ^ref, :process, ^dead, _reason}
 
-    assert {^writer, alive} = PropertyDamage.Log.scope_in(holder, :dictionary)
-    assert bare in alive
-    assert PropertyDamage.Log.scope_in(holder, :key) == {writer, alive}
+    assert {^writer, token} = PropertyDamage.Log.scope_in(holder, :dictionary)
+    assert is_pid(token)
+    assert PropertyDamage.Log.scope_in(holder, :key) == {writer, token}
     assert PropertyDamage.Log.scope_in(bare, :dictionary) == nil
     assert PropertyDamage.Log.scope_in(bare, :key) == nil
     assert PropertyDamage.Log.scope_in(dead, :dictionary) == :dead
