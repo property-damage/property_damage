@@ -104,9 +104,12 @@ Three constraints shape any answer.
    the final report drops them too. Lines are never written to a replay
    artifact (DR-050), a saved trace or any other file. Those files get
    committed, and a line the caller forgot to redact would be published. The
-   report's own output (terminal, markdown, JSON) carries them. Saved traces
-   store `logs` as empty, and the persistence version is bumped for the new
-   field.
+   report's own output (terminal, markdown, JSON) carries them. Saving a trace
+   drops its `logs` field, and loading one sets `logs` to an empty map, so the
+   saved format does not change, the persistence version stays, and traces
+   saved before this record still load. A report built from a saved trace or
+   a replay artifact therefore shows no log lines until a replay runs the
+   failure again.
 
 10. **The caller redacts.** PropertyDamage cannot find a secret inside a
     string it did not build, so the code that calls `PropertyDamage.log/2`
