@@ -73,9 +73,20 @@ defmodule PropertyDamage.ShrinkStopTest do
   end
 
   test "a shrink that runs out of both budgets stops :max_iterations" do
-    # Both budgets exceeded: the iteration cap wins.
-    report = shrunk!(Config.new(max_iterations: 1, max_time_ms: 1))
+    # Both budgets exceeded: the iteration cap wins. The one attempt the cap
+    # allows waits out a 1000 ms convergence bound, so it also uses up the
+    # 300 ms time budget, however late it starts within that budget.
+    config = Config.new(max_iterations: 1, max_time_ms: 300)
 
+    assert {:error, %FailureReport{kind: :diverged} = report} =
+             R.run(ledger(), diverging(),
+               shrink: true,
+               shrinker_config: config,
+               compare: [converge_within: 1_000]
+             )
+
+    assert report.shrink_iterations == 1, "control: the iteration cap was reached"
+    assert report.shrink_time_ms >= 300, "control: the time budget was used up too"
     assert stop(report) == :max_iterations
   end
 end
