@@ -530,7 +530,9 @@ defmodule PropertyDamage.Executor do
 
   # Restore any still-active faults at sequence end so none leak past the run.
   # On success the restore events flow into the reported state; on failure it is
-  # best-effort environment cleanup and the failed state is reported unchanged.
+  # best-effort environment cleanup and the failed state is reported unchanged,
+  # except for the log lines restore/2 wrote, which stay under the injecting
+  # step (DR-054).
   # Shared with PropertyDamage.Executor.Branching (prefix/suffix end). DR-029.
   @doc false
   def restore_remaining_faults(
@@ -538,14 +540,14 @@ defmodule PropertyDamage.Executor do
         adapter_context,
         event_queue
       ) do
-    _ =
+    restored =
       PropertyDamage.Executor.Nemesis.restore_all_faults(
         failed_state,
         adapter_context,
         event_queue
       )
 
-    {:failed, index, reason, failed_state}
+    {:failed, index, reason, Map.put(failed_state, :logs, Map.get(restored, :logs, %{}))}
   end
 
   def restore_remaining_faults(state, adapter_context, event_queue) do

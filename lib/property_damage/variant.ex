@@ -222,8 +222,9 @@ defmodule PropertyDamage.Variant do
   Returns `:ok`, or `{:error, reason}` when `setup/1` returned `{:error, reason}`
   (any other non-`{:ok, _}` return is the reason itself), or
   `{:error, {:raised, exception}}` when setup raised. After an error the
-  queue, injectors and mocks are released again, the adapter's `teardown/1` is
-  not called, and the variant only accepts `stop/1`.
+  queue, injectors and mocks are released, once (a later `release/1` or
+  `stop/1` releases nothing again), the adapter's `teardown/1` is not called,
+  and the variant only accepts `release/1` and `stop/1`.
   """
   @spec setup(pid()) :: :ok | {:error, term()}
   def setup(pid), do: GenServer.call(pid, :setup, :infinity)
@@ -581,10 +582,12 @@ defmodule PropertyDamage.Variant do
         state = keep_lines(state, :adapter_setup, lines)
         {:ok, build_ready_state(state, adapter_context)}
 
+      # The services are released here, once: `release/1` and `stop/1`
+      # release nothing again.
       {:error, reason, state} ->
         state = keep_lines(state, :adapter_setup, lines)
         {:ok, released} = PropertyDamage.Log.inline(fn -> release_services(state) end)
-        {:error, reason, keep_lines(state, :adapter_teardown, released)}
+        {:error, reason, %{keep_lines(state, :adapter_teardown, released) | released: true}}
     end
   end
 
@@ -1152,7 +1155,15 @@ defmodule PropertyDamage.Variant do
 
   # Every line the variant holds: its steps' and its adapter's.
   defp logs(%{exec: nil} = state), do: state.logs
-  defp logs(state), do: Map.merge(state.exec.logs, state.logs)
+  defp logs(state), do: Map.merge(step_logs(state), state.logs)
+
+  # A finished run's result also holds the lines its finalization wrote (the
+  # end-of-run restore/2 of a fault still active), which the executor state
+  # does not.
+  defp step_logs(%{result: %{logs: logs}, exec: exec}),
+    do: PropertyDamage.Log.merge(logs, exec.logs)
+
+  defp step_logs(%{exec: exec}), do: exec.logs
 
   defp stop_pollers(exec) do
     for poller <- exec.active_pollers, do: best_effort(fn -> StatePoller.stop(poller) end)
