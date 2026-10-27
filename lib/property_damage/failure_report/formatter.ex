@@ -15,20 +15,37 @@ defmodule PropertyDamage.FailureReport.Formatter do
   banner and the seed, then the Failure, Minimal Reproduction, Projections and
   Reproduction sections, with every step and every event in full. The
   markdown format is the terminal text without color, each section's body in
-  a fenced block. The JSON format keeps every field of the report.
+  a fenced block. The JSON format keeps every field of the report and adds a
+  `logs` key (see below).
 
   ## Options
 
   - `:color` - Use ANSI colors in the terminal format (default: true)
   - `:indent` - Indentation for JSON (default: 2)
+  - `:log` - `[only: tags, except: tags]`, a tag filter for the log lines
+    (`PropertyDamage.Log.Filter`) that replaces the report's own, for
+    `:terminal`, `:markdown` and `:json`. The environment variable `PD_LOG`,
+    when set and non-blank, replaces both. `:compact` ignores filters.
+
+  ## The JSON `logs` key
+
+  `logs` holds the log lines the terminal shows, after the same filter:
+  `filter` (`only`, `except` and `source`, `"log_option"` or `"PD_LOG"`; null
+  without a filter), `unknown_tags`, the `setup` lines once, and for the
+  failing `target` and, when the report has one, the `reference`: its `name`,
+  the `adapter_setup` and `adapter_teardown` lines and each `steps` entry's
+  `label`, `root` and `lines`. A line is `{"kind": "line", "message", "tags",
+  "file", "line", "offset_ms", "attempt"}`, its message as plain text; a gap is
+  `{"kind": "gap", "attempts", "lines"}`. A hidden line is in none of these.
+  The JSON output is not the persistence format.
   """
   @spec format(FailureReport.t(), format(), keyword()) :: String.t()
   def format(report, format \\ :terminal, opts \\ [])
 
   def format(report, :terminal, opts),
-    do: report |> Layout.build() |> Render.terminal(Keyword.get(opts, :color, true))
+    do: report |> Layout.build(opts) |> Render.terminal(Keyword.get(opts, :color, true))
 
-  def format(report, :markdown, _opts), do: report |> Layout.build() |> Render.markdown()
+  def format(report, :markdown, opts), do: report |> Layout.build(opts) |> Render.markdown()
   def format(report, :json, opts), do: format_json(report, opts)
   def format(report, :compact, _opts), do: format_compact(report)
 
@@ -90,7 +107,8 @@ defmodule PropertyDamage.FailureReport.Formatter do
       "reference_trace" => serialize_reference_trace(report),
       "reference_projections" =>
         report.reference_state_at_failure &&
-          serialize_projections(report.reference_state_at_failure)
+          serialize_projections(report.reference_state_at_failure),
+      "logs" => serialize_logs(Layout.build(report, opts).logs)
     }
 
     # Add optional sections
@@ -121,6 +139,63 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
     Jason.encode!(data, pretty: indent > 0)
   end
+
+  # The log lines the layout shows, after its filter.
+  defp serialize_logs(logs) do
+    %{
+      "filter" => serialize_filter(logs.filter),
+      "unknown_tags" => logs.unknown,
+      "setup" => Enum.map(logs.setup, &serialize_log_entry/1),
+      "target" => serialize_target_logs(logs.target),
+      "reference" => logs.reference && serialize_target_logs(logs.reference)
+    }
+  end
+
+  defp serialize_filter(nil), do: nil
+
+  defp serialize_filter(%{only: only, except: except, source: source}) do
+    %{
+      "only" => only,
+      "except" => except,
+      "source" => if(source == :env, do: "PD_LOG", else: "log_option")
+    }
+  end
+
+  defp serialize_target_logs(target) do
+    %{
+      "name" => target.name,
+      "adapter_setup" => Enum.map(target.adapter_setup, &serialize_log_entry/1),
+      "adapter_teardown" => Enum.map(target.adapter_teardown, &serialize_log_entry/1),
+      "steps" =>
+        for step <- target.steps do
+          %{
+            "label" => step.label,
+            "root" => step.root,
+            "lines" => Enum.map(step.lines, &serialize_log_entry/1)
+          }
+        end
+    }
+  end
+
+  defp serialize_log_entry({:gap, gap}),
+    do: %{"kind" => "gap", "attempts" => gap.attempts, "lines" => gap.lines}
+
+  defp serialize_log_entry({:log, line}) do
+    %{
+      "kind" => "line",
+      "message" => log_text(line.message),
+      "tags" => Enum.map(line.tags, &to_string/1),
+      "file" => line.file,
+      "line" => line.line,
+      "offset_ms" => line.offset_ms,
+      "attempt" => line.attempt
+    }
+  end
+
+  defp log_text({:text, text}), do: text
+
+  defp log_text({:value, term}),
+    do: inspect(term, pretty: true, limit: :infinity, printable_limit: :infinity)
 
   # The reference target's trace of the reported run; null when the report has
   # none. Its sequence is the plan both targets ran.

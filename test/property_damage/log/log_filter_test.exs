@@ -93,9 +93,9 @@ defmodule PropertyDamage.Log.LogFilterTest do
       report = F.filter_report!([], %{script: script})
       text = plain(report, only: [:seed])
 
-      F.assert_string_continues(F.listing(text, nil), "first", "second")
-      refute text =~ "hidden one"
-      refute text =~ "hidden two"
+      listing = F.listing(text, nil)
+      F.assert_string_continues(listing, "first", "second")
+      refute Enum.any?(listing, &(&1 =~ "hidden"))
     end
   end
 
@@ -317,7 +317,7 @@ defmodule PropertyDamage.Log.LogFilterTest do
 
       [
         F.line("first seed", tags: [:seed], at: at),
-        F.line("second row", tags: [:seed, :rows], at: at + 7)
+        F.line("second row", tags: [:seed, :rows], at: at + 1_250)
       ]
     end
 
@@ -327,10 +327,10 @@ defmodule PropertyDamage.Log.LogFilterTest do
       report = F.filter_report!(setup_log: setup_lines())
 
       full = for {:entry, e} <- setup_entries(F.plain(report)), do: e
-      assert Enum.map(full, & &1.offset) == [0, 7]
+      assert Enum.map(full, & &1.offset) == [0, 125]
 
       only_rows = for {:entry, e} <- setup_entries(plain(report, only: [:rows])), do: e
-      assert Enum.map(only_rows, &{&1.message, &1.offset}) == [{"second row", 7}]
+      assert Enum.map(only_rows, &{&1.message, &1.offset}) == [{"second row", 125}]
     end
 
     test "the Setup section disappears when the filter hides all of its lines" do

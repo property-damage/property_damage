@@ -548,7 +548,8 @@ defmodule PropertyDamage.Options do
     log: [
       type: :keyword_list,
       default: [],
-      doc: "Options for the log lines of the failure report (DR-054).",
+      doc:
+        "Options for the log lines of the failure report (DR-054): the retry cap and a tag filter.",
       keys: [
         keep_attempts: [
           type: :pos_integer,
@@ -559,7 +560,28 @@ defmodule PropertyDamage.Options do
           a newer attempt pushes an older one out, the run drops that attempt's
           lines and counts them, so memory stays bounded; the report prints
           each gap as `... N attempts omitted (M lines)`. Whole attempts only:
-          the cap never cuts a line or a value.
+          the cap never cuts a line or a value. A filter never changes what the
+          run keeps.
+          """
+        ],
+        only: [
+          type: {:custom, PropertyDamage.Log.Filter, :validate_tags, []},
+          doc: """
+          A non-empty list of tag atoms. The failure report shows the log lines
+          that carry any listed tag, and every line that has no tag, and hides
+          the rest. A filter hides whole lines only. The report prints the
+          filter and names a listed tag that no line carries. The environment
+          variable `PD_LOG` replaces it. It hides lines from one reader and
+          protects no secret: redact in the code that logs.
+          """
+        ],
+        except: [
+          type: {:custom, PropertyDamage.Log.Filter, :validate_tags, []},
+          doc: """
+          A non-empty list of tag atoms. The failure report hides the log lines
+          that carry any listed tag, also when `only:` lists another of their
+          tags. A line with no tag is always shown. Like `only:`, it hides
+          whole lines, is replaced by `PD_LOG`, and protects no secret.
           """
         ]
       ]

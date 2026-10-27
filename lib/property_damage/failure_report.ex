@@ -175,6 +175,13 @@ defmodule PropertyDamage.FailureReport do
   every log line they live only in memory: a saved report holds `[]`, and so
   does a loaded one.
 
+  `log_filter` holds the run's `log: [only:, except:]` tag filter
+  (`PropertyDamage.Log.Filter`), or `nil` for none. Every report
+  `PropertyDamage.run/1` builds has it, and `PropertyDamage.shrink_further/2`
+  keeps it, so `PropertyDamage.ExUnit.format_failure/1` prints a run's filter.
+  It is a view of the report and lives only in memory: a saved report holds
+  `nil`, and so does a loaded one.
+
   `shrink_stop` records why the shrinker stopped: `:done` when it finished
   inside its budget or never ran (`shrink: false`, a setup failure, a latency
   report), `:max_iterations` or `:max_time` when a budget ran out first (the
@@ -284,6 +291,11 @@ defmodule PropertyDamage.FailureReport do
           # before the run (`setup_log:`); memory only, `[]` in a saved or
           # loaded report.
           setup_log: [PropertyDamage.Log.Line.t()],
+
+          # The run's `log: [only:, except:]` tag filter, nil for none
+          # (`PropertyDamage.Log.Filter`); memory only, nil in a saved or
+          # loaded report.
+          log_filter: PropertyDamage.Log.Filter.t() | nil,
 
           # The reference target's trace of the same run, and its projection
           # state at the failing boundary, for `:diverged` and
@@ -410,6 +422,7 @@ defmodule PropertyDamage.FailureReport do
             latency: false,
             metrics: nil,
             setup_log: [],
+            log_filter: nil,
             trace: nil,
             reference_trace: nil,
             reference_state_at_failure: nil,
@@ -465,6 +478,7 @@ defmodule PropertyDamage.FailureReport do
   - `:shrink_stop` - Why the shrinker stopped (default `:done`)
   - `:logs` - The log lines of the run the report describes, by step
     (`RunTrace.logs`, DR-054); default `%{}`
+  - `:log_filter` - The run's `log: [only:, except:]` tag filter; default `nil`
   - `:setup_log` - The lines `PropertyDamage.Log.capture/1` returned for work
     done before the run (`setup_log:` of `PropertyDamage.run/1`); default `[]`
   - `:reference_result` - The reference target's finished result of the
@@ -595,6 +609,7 @@ defmodule PropertyDamage.FailureReport do
       latency: Keyword.get(opts, :latency, false),
       metrics: Keyword.get(opts, :metrics),
       setup_log: Keyword.get(opts, :setup_log, []),
+      log_filter: Keyword.get(opts, :log_filter),
       trace: trace,
       reference_trace: reference_trace,
       reference_state_at_failure: reference_state(reference_trace, failed_at_index),

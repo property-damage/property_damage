@@ -53,6 +53,17 @@ defmodule PropertyDamage.Log do
   scope from `capture/1`, and its lines reach the report through the run's
   `setup_log:` option.
 
+  ## Redaction and tag filters
+
+  The caller redacts. A line holds its message as given, and the failure
+  report prints it as given, so a secret in a message reaches the report. A
+  tag filter (`log: [only: tags, except: tags]` on `PropertyDamage.run/1`,
+  `PropertyDamage.ExUnit.format_failure/2`, or the environment variable
+  `PD_LOG`; see `PropertyDamage.Log.Filter`) hides whole lines from one reader
+  of one printed report. It does not protect a secret: the hidden line is
+  still in the report in memory, and a filter changes nothing a run keeps.
+  Keep a secret out of the message, in the code that logs.
+
   ## Storage
 
   A line goes, at the call and synchronously, into the command's

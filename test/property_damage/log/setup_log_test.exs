@@ -3,7 +3,8 @@ defmodule PropertyDamage.Log.SetupLogTest do
   # run, printed once in a Setup section between Failure and Minimal
   # Reproduction, labeled as shared by every run. The option takes only the
   # lines `PropertyDamage.Log.capture/1` returns. The lines live in memory:
-  # no saved report, replay artifact or JSON/compact output carries one.
+  # no saved report, replay artifact or compact output carries one, and the
+  # JSON output holds them under `logs` only.
   use ExUnit.Case, async: false
 
   alias PropertyDamage.FailureReport.Formatter
@@ -220,11 +221,13 @@ defmodule PropertyDamage.Log.SetupLogTest do
       for file <- files, do: refute(File.read!(file) =~ F.sentinel(), "#{file} holds it")
     end
 
-    test "the JSON and compact output hold no setup line" do
+    test "the JSON holds the setup lines under logs only, and compact holds none" do
       report = check_report(setup_log: sentinel_lines())
       assert F.plain(report) =~ F.sentinel(), "control: the report prints the sentinel"
 
-      refute Formatter.format(report, :json) =~ F.sentinel()
+      json = report |> Formatter.format(:json) |> Jason.decode!()
+      assert Jason.encode!(json["logs"]["setup"]) =~ F.sentinel()
+      refute json |> Map.delete("logs") |> Jason.encode!() =~ F.sentinel()
       refute Formatter.format(report, :compact) =~ F.sentinel()
     end
   end

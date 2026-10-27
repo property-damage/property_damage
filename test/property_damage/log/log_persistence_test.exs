@@ -2,9 +2,10 @@ defmodule PropertyDamage.Log.PersistenceTest do
   # Log lines live only in memory (DR-054 decision 9): a saved report or
   # trace drops them and loads with `logs: %{}`, the format version stays
   # 15, a version-15 file saved before the field existed still loads and
-  # prints, and no replay artifact or `:json`/`:compact` output carries a
-  # line. Every run here logs a sentinel that its config holds only in
-  # parts, so a file holding the whole sentinel got it from a line.
+  # prints, and no replay artifact or `:compact` output carries a line (the
+  # `:json` output prints them under `logs`, in memory only). Every run here
+  # logs a sentinel that its config holds only in parts, so a file holding the
+  # whole sentinel got it from a line.
   use ExUnit.Case, async: false
 
   alias PropertyDamage.FailureReport.Formatter
@@ -124,8 +125,11 @@ defmodule PropertyDamage.Log.PersistenceTest do
     assert is_binary(Formatter.format(report, :markdown))
   end
 
-  test "a replay artifact, the JSON and the compact output carry no line", %{dir: dir} do
-    # Replay artifacts are free of line text; :json and :compact print none.
+  test "a replay artifact and the compact output carry no line, the JSON only under logs", %{
+    dir: dir
+  } do
+    # Replay artifacts are free of line text; :json prints it under `logs`
+    # alone and :compact prints none.
     F.compile!()
     config = %{quiet: true, script: sentinel_script(), fail_at: 1}
     report = F.report!(F.Model, [F.target("alice", config)], replay_dir: dir)
@@ -139,7 +143,9 @@ defmodule PropertyDamage.Log.PersistenceTest do
         File.regular?(file),
         do: refute(File.read!(file) =~ F.sentinel(), "#{file} holds the sentinel")
 
-    refute Formatter.format(report, :json) =~ F.sentinel()
+    json = report |> Formatter.format(:json) |> Jason.decode!()
+    assert Jason.encode!(json["logs"]) =~ F.sentinel(), "control: logs carries the sentinel"
+    refute json |> Map.delete("logs") |> Jason.encode!() =~ F.sentinel()
     refute Formatter.format(report, :compact) =~ F.sentinel()
   end
 

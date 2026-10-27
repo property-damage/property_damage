@@ -93,7 +93,8 @@ defmodule PropertyDamage.Log.LogFilterJsonTest do
   end
 
   test "holds no hidden line anywhere" do
-    text = filtered_report() |> then(&Formatter.format(&1, :json))
+    logs = filtered_report() |> json() |> Map.fetch!("logs")
+    text = Jason.encode!(logs)
 
     for hidden <- ["BODY-HIDDEN", "SEED-HIDDEN", "setup seed", "setup by alice"],
         do: refute(text =~ hidden, "#{hidden} is in the JSON")

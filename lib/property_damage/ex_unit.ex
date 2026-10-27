@@ -176,16 +176,32 @@ defmodule PropertyDamage.ExUnit do
   Format a failure report for ExUnit output.
 
   Produces human-readable output with all relevant information for
-  debugging and reproducing the failure.
+  debugging and reproducing the failure. A report that `PropertyDamage.run/1`
+  built with a `log: [only:, except:]` tag filter prints that filter.
+
+  ## Options
+
+  - `:log` - `[only: tags, except: tags]`: a tag filter for the report's log
+    lines that replaces the one the run gave (`PropertyDamage.Log.Filter`).
+    `only:` shows the lines that carry a listed tag, `except:` hides them and
+    wins, and a line with no tag always shows. It hides lines from one reader
+    and protects no secret. Any other key, `keep_attempts:` included, raises
+    `ArgumentError`: it cannot change a report that is already built.
+
+  The environment variable `PD_LOG`, for example
+  `PD_LOG="only:http,seed except:body"`, replaces either filter when set and
+  non-blank.
   """
-  @spec format_failure(FailureReport.t()) :: String.t()
-  def format_failure(%FailureReport{} = report) do
+  @spec format_failure(FailureReport.t(), keyword()) :: String.t()
+  def format_failure(report, opts \\ [])
+
+  def format_failure(%FailureReport{} = report, opts) do
     # Use the proper formatter for rich output
-    FailureReport.Formatter.format(report, :terminal, color: true)
+    FailureReport.Formatter.format(report, :terminal, Keyword.put(opts, :color, true))
   end
 
   # Legacy support for old map-based reports
-  def format_failure(report) when is_map(report) do
+  def format_failure(report, _opts) when is_map(report) do
     # Check if this is the old format
     if Map.has_key?(report, :original_commands) do
       format_legacy_failure(report)
