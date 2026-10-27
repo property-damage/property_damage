@@ -712,7 +712,8 @@ defmodule PropertyDamage.FailureReport.Layout do
   end
 
   # A string prints as written and any other value through the renderer's
-  # inspect. A function is called now, when the report is formatted, and its
+  # inspect; a binary that is not valid UTF-8 counts as a value, so the
+  # report stays valid UTF-8. A function is called now, when the report is formatted, and its
   # result is shown by those two rules; one that raises, throws or exits
   # prints a marker instead (DR-054 decision 3).
   defp log_message(message) when is_function(message, 0) do
@@ -725,7 +726,10 @@ defmodule PropertyDamage.FailureReport.Layout do
 
   defp log_message(message), do: shown(message)
 
-  defp shown(message) when is_binary(message), do: {:text, message}
+  defp shown(message) when is_binary(message) do
+    if String.valid?(message), do: {:text, message}, else: {:value, message}
+  end
+
   defp shown(message), do: {:value, message}
 
   defp untied_lines(%{untied: []}), do: []
