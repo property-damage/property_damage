@@ -133,6 +133,33 @@ defmodule PropertyDamage.FailureReport do
   `PropertyDamage.Analysis.isolate_trigger/2` and the exports. They work for
   every target the report records, leaves included.
 
+  ## The reference side of a comparison failure
+
+  For `:diverged` and `:did_not_converge`, the report also keeps what the
+  reference target did in the reported run, so a reader can set both sides
+  side by side:
+
+    * `reference_trace` - the reference target's `PropertyDamage.RunTrace` of
+      the reported run. `trace` and `reference_trace` always come from the
+      same run: the shrunk reproduction when the shrinker reproduced the
+      failure, else the original run.
+    * `reference_state_at_failure` - the reference's projection state at the
+      failing boundary, `%{projection_module => state}` like
+      `state_at_failure`. It holds every fold up to the last one attributed to
+      the failing root, the folds of the leaf commands that root ran included,
+      and nothing applied after the boundary: not the events of the teardown
+      commands, and not what the run folded while it finalized.
+
+  Every other kind leaves both fields `nil`. `reference_steps/1` and
+  `reference_event_log/1` read the reference's trace the way `steps/1` and
+  `event_log/1` read the failing target's, which they keep meaning.
+
+  `shrink_stop` records why the shrinker stopped: `:done` when it finished
+  inside its budget or never ran (`shrink: false`, a setup failure, a latency
+  report), `:max_iterations` or `:max_time` when a budget ran out first (the
+  iteration cap wins when both did), in which case the reproduction may not be
+  minimal. It is `nil` on a report saved before the field existed.
+
   `compare_counts` holds, per boundary observation `{projection, function}`,
   how many boundaries the failing run compared it at, how many it waited at,
   and the total time it waited (`%{compared_at:, waited_at:, waited_ms:}`),
@@ -232,6 +259,13 @@ defmodule PropertyDamage.FailureReport do
           # `shrunk_sequence/1` and `event_log/1` are accessors over it.
           trace: RunTrace.t(),
 
+          # The reference target's trace of the same run, and its projection
+          # state at the failing boundary, for `:diverged` and
+          # `:did_not_converge`; nil for every other kind (see "The reference
+          # side of a comparison failure").
+          reference_trace: RunTrace.t() | nil,
+          reference_state_at_failure: %{atom() => any()} | nil,
+
           # The setup and teardown commands of the reported sequence (the
           # shrunk one when it reproduced, else the original), with concrete
           # arguments and placeholders symbolic.
@@ -261,6 +295,7 @@ defmodule PropertyDamage.FailureReport do
           # Shrinking stats
           shrink_iterations: non_neg_integer(),
           shrink_time_ms: non_neg_integer(),
+          shrink_stop: PropertyDamage.Shrinker.stop_reason() | nil,
 
           # Metadata
           model: module() | nil,
@@ -349,6 +384,8 @@ defmodule PropertyDamage.FailureReport do
             latency: false,
             metrics: nil,
             trace: nil,
+            reference_trace: nil,
+            reference_state_at_failure: nil,
             setup_commands: [],
             teardown_commands: [],
             original_sequence: nil,
@@ -360,6 +397,7 @@ defmodule PropertyDamage.FailureReport do
             branch_events: nil,
             shrink_iterations: 0,
             shrink_time_ms: 0,
+            shrink_stop: :done,
             model: nil,
             timestamp: nil,
             error_origin: nil,
@@ -397,6 +435,11 @@ defmodule PropertyDamage.FailureReport do
   - `:projections_before` - Projection states before failing command
   - `:shrink_iterations` - Number of shrink attempts
   - `:shrink_time_ms` - Time spent shrinking
+  - `:shrink_stop` - Why the shrinker stopped (default `:done`)
+  - `:reference_result` - The reference target's finished result of the
+    reported run (`event_log`, `executed`, `command_fold_ordinals`); for
+    `:diverged` and `:did_not_converge` it becomes `reference_trace` and
+    `reference_state_at_failure` (default `nil`)
   - `:model` - Model module
   - `:targets` - The run's `targets:` entries (normalized to `{adapter, options}`
     form), the reference first (default `[]`)
@@ -500,6 +543,9 @@ defmodule PropertyDamage.FailureReport do
 
     kind = Keyword.get_lazy(opts, :kind, fn -> kind_of(failure_reason) end)
 
+    reference_trace =
+      reference_trace(kind, Keyword.get(opts, :reference_result), trace)
+
     %__MODULE__{
       seed: seed,
       run_number: run_number,
@@ -517,6 +563,8 @@ defmodule PropertyDamage.FailureReport do
       latency: Keyword.get(opts, :latency, false),
       metrics: Keyword.get(opts, :metrics),
       trace: trace,
+      reference_trace: reference_trace,
+      reference_state_at_failure: reference_state(reference_trace, failed_at_index),
       setup_commands: Sequence.setup_commands(shrunk_sequence),
       teardown_commands: Sequence.teardown_commands(shrunk_sequence),
       original_sequence: original_sequence,
@@ -528,6 +576,7 @@ defmodule PropertyDamage.FailureReport do
       branch_events: branch_events,
       shrink_iterations: Keyword.get(opts, :shrink_iterations, 0),
       shrink_time_ms: Keyword.get(opts, :shrink_time_ms, 0),
+      shrink_stop: Keyword.get(opts, :shrink_stop, :done),
       model: Keyword.get(opts, :model),
       timestamp: timestamp,
       error_origin: classification.origin,
@@ -547,6 +596,30 @@ defmodule PropertyDamage.FailureReport do
       command_labels: command_labels
     }
   end
+
+  # The reference target's trace of the run `trace` describes: the same plan,
+  # seed, nonce, epoch and expansion choices, with the reference's own events,
+  # executed commands and fold ordinals. Only a comparison failure has one.
+  defp reference_trace(kind, %{} = result, %RunTrace{} = trace)
+       when kind in [:diverged, :did_not_converge] do
+    %RunTrace{
+      trace
+      | executed: Map.get(result, :executed, %{}),
+        event_log: Map.get(result, :event_log, []),
+        command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+        linearization: nil,
+        outcome: :pass
+    }
+  end
+
+  defp reference_trace(_kind, _result, _trace), do: nil
+
+  # The reference's state at the failing boundary, derived from its trace
+  # (DR-040) so that nothing folded after the boundary is in it.
+  defp reference_state(%RunTrace{} = trace, failed_at_index) when is_integer(failed_at_index),
+    do: RunTrace.state_at(trace, Sequence.Position.prefix(failed_at_index))
+
+  defp reference_state(_trace, _failed_at_index), do: nil
 
   # The last root the failing run executed: none before a setup failure, the
   # failing root, or every root for a failure at the end of the run.
@@ -1133,13 +1206,44 @@ defmodule PropertyDamage.FailureReport do
 
   # The trace records the failing target's execution: its steps are what that
   # target ran at each root.
-  defp traced_choices(%__MODULE__{trace: %RunTrace{expansion: expansion}} = report)
-       when is_map(expansion) do
-    name = (report.variant || reference_variant(report.targets) || %{})[:name]
-    Map.get(expansion, name)
+  defp traced_choices(%__MODULE__{} = report),
+    do:
+      choices_of(
+        report.trace,
+        (report.variant || reference_variant(report.targets) || %{})[:name]
+      )
+
+  defp choices_of(%RunTrace{expansion: expansion}, name) when is_map(expansion),
+    do: Map.get(expansion, name)
+
+  defp choices_of(_trace, _name), do: nil
+
+  @doc """
+  The steps of the reference target's run, for a comparison failure.
+
+  The same `PropertyDamage.RunTrace.Step` shape as `steps/1`, over
+  `reference_trace` with the reference's own expansion choices. `[]` when the
+  report has no reference trace.
+  """
+  @spec reference_steps(t()) :: [Step.t()]
+  def reference_steps(
+        %__MODULE__{reference_trace: %RunTrace{plan: %Sequence{} = plan} = trace} = report
+      ) do
+    RunTrace.build_steps(plan, trace.event_log, trace.command_labels, nil,
+      executed: trace.executed,
+      choices: choices_of(trace, (reference_variant(report.targets) || %{})[:name])
+    )
   end
 
-  defp traced_choices(_report), do: nil
+  def reference_steps(%__MODULE__{}), do: []
+
+  @doc """
+  The reference target's event log of the reported run, as `event_log/1` gives
+  the failing target's. `[]` when the report has no reference trace.
+  """
+  @spec reference_event_log(t()) :: [Entry.t()]
+  def reference_event_log(%__MODULE__{reference_trace: %RunTrace{event_log: log}}), do: log
+  def reference_event_log(%__MODULE__{}), do: []
 
   @doc """
   The `EventLog.Entry` structs observed for a single command, addressed by

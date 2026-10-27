@@ -211,8 +211,17 @@ defmodule PropertyDamage.Shrinker do
           expansion: map() | nil,
           iterations: non_neg_integer(),
           time_ms: non_neg_integer(),
-          cycles: non_neg_integer()
+          cycles: non_neg_integer(),
+          stop: stop_reason()
         }
+
+  @typedoc """
+  Why the shrinker stopped: `:done` when it finished inside its budget,
+  `:max_iterations` or `:max_time` when that budget ran out first. When both
+  ran out, or the last cycle ended exactly at the iteration cap,
+  `:max_iterations` wins; a budget stop does not claim minimality.
+  """
+  @type stop_reason :: :done | :max_iterations | :max_time
 
   @doc """
   Extract a failure signature from a failure reason and the index of the target
@@ -370,7 +379,7 @@ defmodule PropertyDamage.Shrinker do
   for it (`expansion`, nil for a branching sequence), the number of
   candidates tried (`iterations`), the time spent, and the number of shrink
   cycles run (`cycles`; the last one adopted nothing unless the budget ran
-  out).
+  out) and why it stopped (`stop`, see `t:stop_reason/0`).
   """
   @spec shrink(Sequence.t() | [struct()], keyword()) :: shrink_result()
   def shrink(sequence_or_commands, opts)
@@ -453,7 +462,8 @@ defmodule PropertyDamage.Shrinker do
       expansion: carried_expansion(shrunk, shrink_state.positions, shrink_state),
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time,
-      cycles: shrink_state.cycles
+      cycles: shrink_state.cycles,
+      stop: stop_reason(shrink_state, end_time)
     }
   end
 
@@ -919,7 +929,8 @@ defmodule PropertyDamage.Shrinker do
       iterations: shrink_state.iterations,
       time_ms: end_time - shrink_state.start_time,
       # The branching strategies run once each.
-      cycles: 0
+      cycles: 0,
+      stop: stop_reason(shrink_state, end_time)
     }
   end
 
@@ -1788,6 +1799,16 @@ defmodule PropertyDamage.Shrinker do
 
     state.iterations >= state.config.max_iterations or
       elapsed >= state.config.max_time_ms
+  end
+
+  # Which budget, if any, ended the shrink at time `now`. The iteration cap is
+  # checked first, so it wins when both ran out.
+  defp stop_reason(state, now) do
+    cond do
+      state.iterations >= state.config.max_iterations -> :max_iterations
+      now - state.start_time >= state.config.max_time_ms -> :max_time
+      true -> :done
+    end
   end
 
   # The config with what is left of the state's iteration and time budget.

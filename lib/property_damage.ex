@@ -1085,7 +1085,8 @@ defmodule PropertyDamage do
       compare_counts: outcome.compare_counts,
       failure: outcome.failure,
       other_failures: outcome.other_failures,
-      result: Enum.at(outcome.results, outcome.failure.variant.index)
+      result: Enum.at(outcome.results, outcome.failure.variant.index),
+      reference_result: Enum.at(outcome.results, 0)
     }
   end
 
@@ -1121,7 +1122,8 @@ defmodule PropertyDamage do
       compare_counts: Comparison.zero_counts(ctx.model),
       failure: failure,
       other_failures: [],
-      result: result
+      result: result,
+      reference_result: nil
     }
   end
 
@@ -1596,7 +1598,7 @@ defmodule PropertyDamage do
     # non-resettable SUT. Epoch 0 was the exploration run.
     mint_epoch_counter = :atomics.new(1, signed: false)
 
-    {shrunk_sequence, shrunk_expansion, shrink_iterations, shrink_time_ms} =
+    {shrunk_sequence, shrunk_expansion, shrink_iterations, shrink_time_ms, shrink_stop} =
       if ctx.shrink do
         shrink_result =
           Shrinker.shrink(found.sequence,
@@ -1624,12 +1626,12 @@ defmodule PropertyDamage do
           )
 
         {shrink_result.sequence, shrink_result.expansion, shrink_result.iterations,
-         shrink_result.time_ms}
+         shrink_result.time_ms, shrink_result.stop}
       else
-        {found.sequence, found.expansion, 0, 0}
+        {found.sequence, found.expansion, 0, 0, :done}
       end
 
-    shrink = %{iterations: shrink_iterations, time_ms: shrink_time_ms}
+    shrink = %{iterations: shrink_iterations, time_ms: shrink_time_ms, stop: shrink_stop}
 
     # Re-execute the shrunk sequence to get fresh state (the original result has
     # state from before shrinking). The reproduction is a fresh SUT execution:
@@ -1652,6 +1654,7 @@ defmodule PropertyDamage do
             Map.merge(found, %{
               failure: failure,
               result: result,
+              reference_result: counts.reference_result,
               other_failures: other_failures,
               expansion: expansion,
               original_root: found.failure.root,
@@ -1753,7 +1756,8 @@ defmodule PropertyDamage do
 
         counts = %{
           compare_counts: Comparison.zero_counts(ctx.model),
-          fires: project_fires(Map.get(result, :check_counters, %{}))
+          fires: project_fires(Map.get(result, :check_counters, %{})),
+          reference_result: nil
         }
 
         if same_failure?(failure, found.failure),
@@ -1777,7 +1781,11 @@ defmodule PropertyDamage do
         _no_reference -> %{}
       end
 
-    %{compare_counts: outcome.compare_counts, fires: fires}
+    %{
+      compare_counts: outcome.compare_counts,
+      fires: fires,
+      reference_result: Enum.at(outcome.results, 0)
+    }
   end
 
   # What every target runs when the shrunk sequence is reproduced: the
@@ -1803,7 +1811,7 @@ defmodule PropertyDamage do
   defp failure_report(ctx, found, how) do
     {shrunk_sequence, plan_source, mint_epoch, shrink} =
       case how do
-        :found -> {found.sequence, :generated, 0, %{iterations: 0, time_ms: 0}}
+        :found -> {found.sequence, :generated, 0, %{iterations: 0, time_ms: 0, stop: :done}}
         {:fallback, shrink} -> {found.sequence, :generated, 0, shrink}
         # Without shrinking the reproduced sequence is the generated one.
         {:shrunk, sequence, epoch, shrink} -> {sequence, plan_source(ctx), epoch, shrink}
@@ -1837,6 +1845,8 @@ defmodule PropertyDamage do
       variant: failure.variant,
       shrink_iterations: shrink.iterations,
       shrink_time_ms: shrink.time_ms,
+      shrink_stop: shrink.stop,
+      reference_result: Map.get(found, :reference_result),
       event_log: Map.get(result, :event_log, []),
       projections: Map.get(result, :projections, %{}),
       projections_before: Map.get(result, :projections_before),
@@ -2222,6 +2232,8 @@ defmodule PropertyDamage do
             variant: failure.variant,
             shrink_iterations: report.shrink_iterations + shrink_result.iterations,
             shrink_time_ms: report.shrink_time_ms + elapsed,
+            shrink_stop: shrink_result.stop,
+            reference_result: counts.reference_result,
             event_log: Map.get(result, :event_log, []),
             executed: Map.get(result, :executed, %{}),
             # A further-shrunk report only reaches here on a genuine
