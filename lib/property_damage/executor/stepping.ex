@@ -465,8 +465,9 @@ defmodule PropertyDamage.Executor.Stepping do
         state.await_matchers
       )
 
-    # A mock event pushed after the last step's own flush belongs to that step.
-    {projections, event_log, fold_counter} =
+    # A mock event pushed after the last step's own flush belongs to that step,
+    # and so do the lines the mocks' on_event/2 writes (DR-054).
+    {projections, event_log, fold_counter, mock_lines} =
       Events.process_mock_events(
         state.mock_registry,
         state.last_command_index,
@@ -484,7 +485,8 @@ defmodule PropertyDamage.Executor.Stepping do
       state
       | projections: projections,
         event_log: event_log,
-        fold_counter: fold_counter
+        fold_counter: fold_counter,
+        logs: PropertyDamage.Log.append(state.logs, state.current_position, mock_lines)
     }
 
     case Executor.check_async(

@@ -21,9 +21,12 @@ defmodule PropertyDamage.Log do
   Every call needs a scope. The engine opens one before it runs user code at
   an execution point: an adapter's `setup/1`, each setup command, each root
   and each leaf, each settle or stutter attempt, a nemesis's `inject/2` and
-  `restore/2`, mock setup, each teardown command and an adapter's
-  `teardown/1`. The scope is held by the process that runs the code (the
-  per-command `Task` for `execute/3`) and removed when that code returns.
+  `restore/2`, mock setup, a mock's `on_command/2` and `on_event/2`, each
+  teardown command and an adapter's `teardown/1`. A mock's `on_command/2`
+  and `on_event/2` run under a scope of the command they are told of, so
+  their lines print under that command's step. The scope is held by the
+  process that runs the code (the per-command `Task` for `execute/3`, the
+  mock registry for a mock's callbacks) and removed when that code returns.
 
   `PropertyDamage.log/2` looks for a scope in the calling process, then in
   each process of its `$callers` list, so a `Task` the adapter starts logs to
@@ -33,8 +36,9 @@ defmodule PropertyDamage.Log do
   scope raises `PropertyDamage.Log.NoScopeError`.
 
   Some points run in a process that outlives them: an adapter's `setup/1`
-  and `teardown/1`, injector and mock setup and teardown, and a nemesis's
-  `inject/2` and `restore/2`. Such a point records the processes alive when
+  and `teardown/1`, injector and mock setup and teardown, a nemesis's
+  `inject/2` and `restore/2`, and a mock's `on_command/2` and `on_event/2`.
+  Such a point records the processes alive when
   it opens, and admits a `$callers` chain only when the process directly
   below its holder in that chain started while the point ran. A `Task` that
   `setup/1` starts and awaits logs under `setup/1`; a process that `setup/1`

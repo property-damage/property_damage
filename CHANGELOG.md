@@ -18,10 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `tags:` is the only option, a literal list of atoms.
   - Every phase that runs user code is a scope: the adapter's `setup/1` and
     `teardown/1`, every command, every settle and stutter attempt, a
-    nemesis's `inject/2` and `restore/2`, and injector and mock setup. A
-    `Task` the adapter starts logs to its step. A call outside any scope
-    raises `PropertyDamage.Log.NoScopeError`, which the report classifies as
-    a test code error.
+    nemesis's `inject/2` and `restore/2`, injector and mock setup, and a
+    mock's `on_command/2` and `on_event/2`, whose lines go under the command
+    they are told of. A `Task` the adapter starts logs to its step; a
+    process that `setup/1` leaves running does not log under `teardown/1`.
+    A call outside any scope raises `PropertyDamage.Log.NoScopeError`, which
+    the report classifies as a test code error.
   - `PropertyDamage.Runtime.log/3` writes to the same place from a process
     that has no scope, such as a `GenServer`.
   - A timeout that kills `execute/3` loses no line written before it.
@@ -459,6 +461,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`PropertyDamage.Variant.release/1` (DR-054).** It releases what `stop/1`
   releases, without exiting, and returns the variant's log lines; the
   scheduler puts them on each target's result.
+- **`MockServiceRegistry.notify_command/3` and `notify_event/3` (DR-054).**
+  An optional third argument is the scope the mocks' callbacks run under.
 
 - **BREAKING (DR-055, DR-056): the terminal and markdown reports print one
   layout.** A report opens with a banner of one width (`BUG DETECTED!` or

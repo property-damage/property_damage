@@ -757,6 +757,23 @@ defmodule PropertyDamage.Executor do
     end
   end
 
+  # The mocks' on_command/2 runs under a scope of its own; its lines go under
+  # the command's step (DR-054).
+  defp notify_mocks(state, nil, _command), do: state
+
+  defp notify_mocks(state, mock_registry, command) do
+    {_notified, lines} =
+      PropertyDamage.Log.collect(fn sink ->
+        MockServiceRegistry.notify_command(
+          mock_registry,
+          command,
+          PropertyDamage.Log.writer(sink, 1)
+        )
+      end)
+
+    %{state | logs: PropertyDamage.Log.append(state.logs, state.current_position, lines)}
+  end
+
   # Execute a regular (non-nemesis) command
   defp execute_regular_command(
          command,
@@ -769,9 +786,7 @@ defmodule PropertyDamage.Executor do
          mock_registry
        ) do
     # 0. Notify mock registry of command (before execution)
-    if mock_registry do
-      MockServiceRegistry.notify_command(mock_registry, command)
-    end
+    state = notify_mocks(state, mock_registry, command)
 
     placeholder_registry = state.placeholder_registry
 
@@ -1100,8 +1115,9 @@ defmodule PropertyDamage.Executor do
         state.await_matchers
       )
 
-    # 7.5. Flush and process mock-injected events
-    {projections, event_log, fold_counter} =
+    # 7.5. Flush and process mock-injected events; the mocks' on_event/2
+    # lines go under this command's step (DR-054).
+    {projections, event_log, fold_counter, mock_lines} =
       Events.process_mock_events(
         mock_registry,
         index,
@@ -1110,6 +1126,11 @@ defmodule PropertyDamage.Executor do
         state.branch_id,
         fold_counter
       )
+
+    state = %{
+      state
+      | logs: PropertyDamage.Log.append(state.logs, state.current_position, mock_lines)
+    }
 
     # 7.6. Update mock projections
     if mock_registry do

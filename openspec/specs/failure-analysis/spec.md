@@ -486,7 +486,12 @@ The `:terminal` and `:markdown` reports SHALL print every log line of the report
 
 #### Scenario: A setup failure shows the adapter's setup lines
 - **WHEN** the adapter's `setup/1` logs and then fails
-- **THEN** the `:setup_failed` report SHALL print the line under the `adapter setup/1` note
+- **THEN** the `:setup_failed` report SHALL print the line under the `adapter setup/1` note, on the lockstep and the branching path alike
+- **AND** the lines of the target's injector and mock setup and teardown SHALL print once each, under the `adapter setup/1` and `adapter teardown/1` notes
+
+#### Scenario: A fault lifted at the end of a failed run shows its restore line
+- **WHEN** a nemesis fault is still active when the run fails, and its `restore/2` logs at the end of the run
+- **THEN** the report SHALL print that line under the nemesis step that injected the fault
 
 #### Scenario: A shrunk report shows the reported run's lines only
 - **WHEN** a failure is shrunk
