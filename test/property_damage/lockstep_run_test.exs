@@ -253,7 +253,9 @@ defmodule PropertyDamage.LockstepRunTest do
                  :reference_value,
                  :root,
                  :using,
-                 :variant_value
+                 :variant_value,
+                 :waited_ms,
+                 :within_ms
                ]
 
       # The observation compares under ==, so no using: term is recorded.

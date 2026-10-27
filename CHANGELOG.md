@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A divergence records how long it waited (DR-055).** `Failure.Divergence`
+  gains `waited_ms`, how long the comparison waited at the boundary, and
+  `within_ms`, the convergence bound it waited against, as
+  `Failure.Convergence` already had. The report prints both, so a reader can
+  tell a real disagreement from a bound set too tight. A version-15 file saved
+  before the fields existed loads with each of them `nil`; the persistence
+  format stays at version 15.
 - **`PropertyDamage.Equivalence.within/3`, a tolerance (DR-051).**
   `@compare using: {PropertyDamage.Equivalence, :within, [0.01]}` agrees when
   two numbers differ by at most `0.01`, at every depth of maps, lists and

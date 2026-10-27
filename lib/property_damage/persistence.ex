@@ -72,6 +72,10 @@ defmodule PropertyDamage.Persistence do
   # field is a genuine shape change worth a warning.
   @added_fields [:reference_trace, :reference_state_at_failure, :shrink_stop]
 
+  # The same for a divergence (`%Failure.Divergence{}`) saved before it recorded
+  # how long the comparison waited and the bound it waited against.
+  @added_divergence_fields [:waited_ms, :within_ms]
+
   # Upper bound on the term size we are willing to reconstruct from a file.
   # Compressed external term format declares its uncompressed size in the
   # header; a hostile file can claim a multi-gigabyte expansion from a few
@@ -562,10 +566,44 @@ defmodule PropertyDamage.Persistence do
   # A report saved before an added field existed holds no key for it, so a dot
   # access would raise. The key is given the value nil.
   defp backfill_added_fields(report) when is_struct(report, FailureReport) do
-    Enum.reduce(@added_fields, report, &Map.put_new(&2, &1, nil))
+    @added_fields
+    |> Enum.reduce(report, &Map.put_new(&2, &1, nil))
+    |> backfill_key(:failure_reason, &backfill_divergence/1)
+    |> backfill_key(:other_failures, &backfill_others/1)
   end
 
   defp backfill_added_fields(report), do: report
+
+  # A divergence, and the divergences listed beside it, saved before the wait
+  # fields existed get each of them as nil.
+  defp backfill_divergence(%Failure{type: %Failure.Divergence{} = type} = failure) do
+    type = Enum.reduce(@added_divergence_fields, type, &Map.put_new(&2, &1, nil))
+    %{failure | type: backfill_other_keys(type)}
+  end
+
+  defp backfill_divergence(%Failure{type: %Failure.Convergence{} = type} = failure),
+    do: %{failure | type: backfill_other_keys(type)}
+
+  defp backfill_divergence(failure), do: failure
+
+  defp backfill_other_keys(%{other_keys: others} = type),
+    do: %{type | other_keys: backfill_others(others)}
+
+  defp backfill_other_keys(type), do: type
+
+  # A drifted shape may lack the key altogether; the drift check reports it.
+  defp backfill_key(report, key, fun) when is_map_key(report, key),
+    do: Map.update!(report, key, fun)
+
+  defp backfill_key(report, _key, _fun), do: report
+
+  defp backfill_others(others) when is_list(others), do: Enum.map(others, &backfill_other/1)
+  defp backfill_others(others), do: others
+
+  defp backfill_other(%{failure: failure} = other),
+    do: %{other | failure: backfill_divergence(failure)}
+
+  defp backfill_other(other), do: other
 
   # Shared decode envelope: verify checksum + size bound, then hand the safely
   # decoded payload to `fun`. Post-checksum ArgumentError means unknown/unloadable
