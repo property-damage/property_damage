@@ -700,10 +700,10 @@ defmodule PropertyDamage.RunTrace do
         items |> Enum.sort_by(& &1.ordinal) |> fold_in_order(init)
 
       not branched?(plan) or section == :prefix ->
-        cutoff = boundary_ordinal(items, position, boundary)
+        cutoff = boundary_ordinal(items, position, boundary, leaf_roots(trace))
 
         items
-        |> Enum.filter(&section_in?(&1.position, sections_for(section, plan)))
+        |> Enum.filter(&(section_in?(&1.position, sections_for(section, plan)) or leaf?(&1)))
         |> keep_below(cutoff, boundary)
         |> fold_in_order(init)
 
@@ -805,10 +805,14 @@ defmodule PropertyDamage.RunTrace do
     command_items ++ entry_items
   end
 
-  defp boundary_ordinal(items, position, boundary) do
+  # The fold ordinals a step's boundary is made of: its own folds and, for a
+  # root, the folds of the leaf commands it ran.
+  defp boundary_ordinal(items, position, boundary, leaf_roots \\ %{}) do
     ordinals =
       items
-      |> Enum.filter(&(&1.position == position))
+      |> Enum.filter(
+        &(&1.position == position or leaf_owner(&1.position, leaf_roots) == position)
+      )
       |> Enum.map(& &1.ordinal)
 
     case {boundary, ordinals} do
@@ -817,6 +821,29 @@ defmodule PropertyDamage.RunTrace do
       {:at, _} -> Enum.max(ordinals)
     end
   end
+
+  defp leaf?(%{position: %Sequence.Position{section: {:leaf, _}}}), do: true
+  defp leaf?(_item), do: false
+
+  # The root a leaf position belongs to, as its prefix position.
+  defp leaf_owner(%Sequence.Position{section: {:leaf, root_id}}, leaf_roots) do
+    Sequence.Position.prefix(Map.get(leaf_roots, root_id, root_id))
+  end
+
+  defp leaf_owner(_position, _leaf_roots), do: nil
+
+  # Leaf positions carry the root's generation index (`root_id`), which
+  # differs from its place in the plan once shrinking dropped a root. Every
+  # target's choices pair the two the same way.
+  defp leaf_roots(%__MODULE__{expansion: expansion}) when is_map(expansion) do
+    for {_target, choices} <- expansion,
+        is_list(choices),
+        %{root: root, root_id: root_id} <- choices,
+        into: %{},
+        do: {root_id, root}
+  end
+
+  defp leaf_roots(_trace), do: %{}
 
   defp keep_below(_items, nil, _boundary), do: []
 
