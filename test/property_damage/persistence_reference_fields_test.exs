@@ -4,7 +4,7 @@ defmodule PropertyDamage.PersistenceReferenceFieldsTest do
   # those fields existed still loads, with each of them nil (DR-055).
   use ExUnit.Case, async: true
 
-  alias PropertyDamage.{FailureReport, Persistence, RunTrace}
+  alias PropertyDamage.{Failure, FailureReport, Persistence, RunTrace}
   alias PropertyDamage.Test.Compare
   alias PropertyDamage.Test.ReferenceReport, as: R
   alias PropertyDamage.Test.TmpPath
@@ -105,5 +105,16 @@ defmodule PropertyDamage.PersistenceReferenceFieldsTest do
     assert report.kind == :diverged
     assert report.variant == %{index: 1, name: "b"}
     assert %RunTrace{} = report.trace
+  end
+
+  test "a version-15 divergence saved before the wait fields loads with each of them nil" do
+    # The divergence in the file predates waited_ms and within_ms.
+    {report, _warnings} = load(@fixture)
+    assert %Failure.Divergence{} = divergence = report.failure_reason.type
+
+    for field <- [:waited_ms, :within_ms] do
+      assert Map.has_key?(divergence, field), "the loaded divergence lacks #{inspect(field)}"
+      assert Map.fetch!(divergence, field) == nil
+    end
   end
 end
