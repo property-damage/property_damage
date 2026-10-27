@@ -1038,9 +1038,10 @@ defmodule PropertyDamage do
           handle_failure(ctx, Map.put(found, :fires_before, fires_before))
         end
 
-      # Executor.run returns {:error, reason} when the adapter's setup/1
-      # fails: a setup failure of the one target, never shrunk.
-      {:error, _reason} = run_result ->
+      # Executor.run_logged returns {:error, reason, logs} when the adapter's
+      # setup/1 fails: a setup failure of the one target, never shrunk, that
+      # keeps the lines its setup wrote (DR-054).
+      {:error, _reason, _logs} = run_result ->
         handle_failure(ctx, branching_found(ctx, run, run_result, acc.fires))
     end
   end
@@ -1049,7 +1050,7 @@ defmodule PropertyDamage do
     target = ctx.target
 
     RunServices.with_services(target, fn event_queue, mock_registry ->
-      Executor.run(run.sequence, ctx.model, target.adapter,
+      Executor.run_logged(run.sequence, ctx.model, target.adapter,
         config: target.config,
         event_queue: event_queue,
         mock_registry: mock_registry,
@@ -1102,13 +1103,14 @@ defmodule PropertyDamage do
              stacktrace: result.stacktrace
            }, result}
 
-        {:error, reason} ->
+        {:error, reason, logs} ->
           {%{
              kind: :setup_failed,
              variant: variant_of(ctx.target),
              root: nil,
              reason: Failure.setup_failed(reason),
-             stacktrace: nil
+             stacktrace: nil,
+             logs: logs
            }, nil}
       end
 

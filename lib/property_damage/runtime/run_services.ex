@@ -20,10 +20,11 @@ defmodule PropertyDamage.Runtime.RunServices do
   # `PropertyDamage.Executor.run/4` gives when the adapter's setup fails.
   #
   # Injector and mock setup and teardown are execution points (DR-054). When
-  # `fun` returns `{:ok, result}` with a `logs` map, the lines their setup
-  # wrote go before the adapter's own under `:adapter_setup`, and the lines
-  # their teardown wrote after them under `:adapter_teardown`; any other
-  # result drops them.
+  # `fun` returns `{:ok, result}` with a `logs` map, or
+  # `{:error, reason, logs}` (`PropertyDamage.Executor.run_logged/4` after a
+  # failed adapter setup), the lines their setup wrote go before the
+  # adapter's own under `:adapter_setup`, and the lines their teardown wrote
+  # after them under `:adapter_teardown`; any other result drops them.
   def with_services(target, fun) do
     {:ok, event_queue} = EventQueue.start_link()
 
@@ -76,17 +77,20 @@ defmodule PropertyDamage.Runtime.RunServices do
     with_service_lines(result, setup_lines ++ mock_lines, teardown_lines)
   end
 
-  defp with_service_lines({:ok, %{logs: logs} = result}, setup_lines, teardown_lines) do
-    logs =
-      logs
-      |> Map.update(:adapter_setup, setup_lines, &(setup_lines ++ &1))
-      |> Log.append(:adapter_teardown, teardown_lines)
-      |> Map.reject(fn {_key, lines} -> lines == [] end)
+  defp with_service_lines({:ok, %{logs: logs} = result}, setup_lines, teardown_lines),
+    do: {:ok, %{result | logs: service_lines(logs, setup_lines, teardown_lines)}}
 
-    {:ok, %{result | logs: logs}}
-  end
+  defp with_service_lines({:error, reason, logs}, setup_lines, teardown_lines),
+    do: {:error, reason, service_lines(logs, setup_lines, teardown_lines)}
 
   defp with_service_lines(result, _setup_lines, _teardown_lines), do: result
+
+  defp service_lines(logs, setup_lines, teardown_lines) do
+    logs
+    |> Map.update(:adapter_setup, setup_lines, &(setup_lines ++ &1))
+    |> Log.append(:adapter_teardown, teardown_lines)
+    |> Map.reject(fn {_key, lines} -> lines == [] end)
+  end
 
   @doc false
   # Call setup/1 on each injector with the target's config merged with the

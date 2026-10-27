@@ -189,21 +189,58 @@ defmodule PropertyDamage.Executor do
   def run(sequence_or_commands, model, adapter, opts \\ [])
 
   def run(%Sequence{} = sequence, model, adapter, opts) do
-    config = Keyword.get(opts, :config, %{})
-
-    # The adapter's setup/1 and teardown/1 are execution points of their own;
-    # their log lines are kept under :adapter_setup and :adapter_teardown
-    # (DR-054). A setup/1 that fails reports no lines on this path.
-    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
-
-    with {:ok, adapter_context} <- setup_result do
-      run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts)
+    case set_up_and_run(sequence, model, adapter, opts) do
+      {:not_set_up, setup_result, _setup_lines} -> setup_result
+      ran -> ran
     end
   end
 
   # Backwards compatibility: accept list of commands as linear sequence
   def run(commands, model, adapter, opts) when is_list(commands) do
     run(Sequence.linear(commands), model, adapter, opts)
+  end
+
+  @doc false
+  # `run/4`, except that a failed adapter setup/1 returns
+  # `{:error, reason, logs}`: the lines that setup wrote, under
+  # `:adapter_setup` (DR-054). The branching path of `PropertyDamage.run/1`
+  # puts them on its setup failure.
+  @spec run_logged(Sequence.t() | list(), module(), module(), keyword()) ::
+          {:ok, result()} | {:error, term(), PropertyDamage.Log.logs()} | term()
+  def run_logged(sequence_or_commands, model, adapter, opts \\ [])
+
+  def run_logged(%Sequence{} = sequence, model, adapter, opts) do
+    case set_up_and_run(sequence, model, adapter, opts) do
+      {:not_set_up, {:error, reason}, setup_lines} ->
+        {:error, reason, PropertyDamage.Log.append(%{}, :adapter_setup, setup_lines)}
+
+      {:not_set_up, setup_result, _setup_lines} ->
+        setup_result
+
+      ran ->
+        ran
+    end
+  end
+
+  def run_logged(commands, model, adapter, opts) when is_list(commands) do
+    run_logged(Sequence.linear(commands), model, adapter, opts)
+  end
+
+  # The adapter's setup/1 and teardown/1 are execution points of their own;
+  # their log lines are kept under :adapter_setup and :adapter_teardown
+  # (DR-054). A setup/1 that does not answer `{:ok, context}` comes back as
+  # `{:not_set_up, its answer, its lines}`.
+  defp set_up_and_run(sequence, model, adapter, opts) do
+    config = Keyword.get(opts, :config, %{})
+    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
+
+    case setup_result do
+      {:ok, adapter_context} ->
+        run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts)
+
+      not_set_up ->
+        {:not_set_up, not_set_up, setup_lines}
+    end
   end
 
   defp run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts) do
