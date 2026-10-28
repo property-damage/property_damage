@@ -181,6 +181,11 @@ Read it through its fields and accessors:
 - **reference_trace** / **reference_state_at_failure** - for `:diverged` and `:did_not_converge`, the reference target's run and its state at the failing boundary (`nil` for every other kind)
 - **setup_log** / **log_filter** - the lines `setup_log:` carried and the run's log filter (see the [log lines guide](log_lines.md))
 
+"Reading the report" above reads the report of seed 20. The steps below use
+`failure`, the report of your own run, and a run without `seed:` picks a random
+seed, so your report differs from the walkthrough. If you use the bank example,
+pass `seed: 20` to `PropertyDamage.run/1` to get the same report.
+
 ### The `%Failure{}` reason
 
 `report.failure_reason` is a `%PropertyDamage.Failure{}` — one structured type
@@ -250,10 +255,11 @@ end
 
 Every failure writes a replay artifact: a file named
 `<model>_seed<seed>.replay.exs` in the `replay_dir:` directory (default
-`property_damage_replays`; `replay_dir: false` writes nothing). A file another
-failure of the same seed wrote (under other `targets:`, say) is kept: the new
-one is named `<model>_seed<seed>_2.replay.exs`, and the report prints the path
-it wrote. The report ends
+`property_damage_replays`; `replay_dir: false` writes nothing). `<model>` is the
+last segment of the model's module name, so `MyApp.Model` gives
+`Model_seed20.replay.exs`. A file another failure of the same seed wrote (under
+other `targets:`, say) is kept: the new one is named
+`<model>_seed<seed>_2.replay.exs`, and the report prints the path it wrote. The report ends
 with a paste-ready call that runs the shrunk failure again without generating
 anything:
 
@@ -349,8 +355,10 @@ beside `replay:`.
 
 ## Step 2: Understand the Shrunk Sequence
 
-The shrunk sequence is the minimal reproduction. Every command in it is
-necessary for the failure:
+The shrinker stops when it cannot remove any single command without losing the
+failure. So no one command of the shrunk sequence can be dropped, but a shorter
+sequence that also fails may exist: the bank example's shrunk sequence ranges
+from 2 to 14 commands, depending on the seed. Print it:
 
 ```elixir
 # Print the shrunk sequence (a %PropertyDamage.Sequence{}; flatten with to_list/1)
@@ -362,17 +370,13 @@ PropertyDamage.FailureReport.shrunk_sequence(failure)
 end)
 ```
 
-Example output:
-
-```
-[0] CreateAccount{currency: "USD", initial_balance: 1000}
-[1] CreateAuthorization{account_ref: @0, amount: 500}
-[2] CreateCapture{authorization_ref: @1, amount: 600}
-```
+The output has one line per command: its index, then the command as Elixir
+prints it, for example `[0] %MyApp.Deposit{account: "alice", amount: 5}`.
 
 ## Step 3: Explain the Sequence
 
-Use `explain/1` to understand why each command matters:
+Use `explain/1` to see which command triggered the failure and which commands
+it depends on:
 
 ```elixir
 # explain/1 returns a map; format it for printing
@@ -380,24 +384,13 @@ explanation = PropertyDamage.explain(failure)
 IO.puts(PropertyDamage.Analysis.format_explanation(explanation))
 ```
 
-Output:
-
-```
-Command Analysis:
-
-[0] CreateAccount{currency: "USD", initial_balance: 1000}
-    Required: Creates the account referenced by later commands
-    State change: Adds account with $10.00 balance
-
-[1] CreateAuthorization{account_ref: @0, amount: 500}
-    Required: Creates authorization referenced by capture
-    State change: Holds $5.00 on account
-
-[2] CreateCapture{authorization_ref: @1, amount: 600}
-    Fails because: Capture exceeds authorization amount
-    Expected: Capture should fail or be limited to $5.00
-    Actual: Capture of $6.00 succeeded
-```
+`format_explanation/1` prints a `FAILURE ANALYSIS` header with a summary (the
+number of commands and the command that triggered the failure), then a
+`COMMAND BREAKDOWN` section with one entry per command: its index, its name, a
+marker (`← FAILURE TRIGGER` or `← DEPENDENCY`, or none), and a line giving the
+reason. A `DEPENDENCY CHAIN` section follows when the failing command depends on
+earlier ones. The text comes from the analysis of the command structs, so it
+names commands and roles, not what they mean in your domain.
 
 ## Step 4: Step-by-Step Replay
 
@@ -448,8 +441,9 @@ Enum.each(steps, fn step ->
 end)
 ```
 
-If the failure was saved to a `.pd` file, you can replay it from the shell
-without writing any code:
+If the failure was saved to a `.pd` file (see
+[Step 8](#step-8-save-for-later) for `PropertyDamage.save_failure/2`), you can
+replay it from the shell without writing any code:
 
 ```bash
 mix pd.replay failures/the-failure.pd --verbose
@@ -466,7 +460,9 @@ needs to treat as "skip".
 ### Finding the commit that introduced the bug
 
 When you know a failure is new but not where it crept in, `mix pd.bisect` drives
-`git bisect` for you, replaying the saved failure at each candidate commit:
+`git bisect` for you, replaying the saved failure (a `.pd` file, see
+[Step 8](#step-8-save-for-later)) at each candidate commit. It needs a project
+in a git repository and exits 1 outside one:
 
 ```bash
 mix pd.bisect failures/the-failure.pd --good v0.1.0 [--bad HEAD]
@@ -667,6 +663,7 @@ Create a regression test:
 
 ```elixir
 test_code = PropertyDamage.Export.to_exunit(failure)
+File.mkdir_p!("test/regression")
 File.write!("test/regression/capture_overflow_test.exs", test_code)
 ```
 
@@ -674,6 +671,7 @@ File.write!("test/regression/capture_overflow_test.exs", test_code)
 
 ```elixir
 # Curl script for API testing (script/livebook exports need a :base_url)
+File.mkdir_p!("debug")
 script = PropertyDamage.Export.to_script(failure, :curl, base_url: "http://localhost:4000")
 File.write!("debug/reproduce.sh", script)
 
@@ -695,8 +693,12 @@ File.write!("debug/failure_analysis.livemd", notebook)
 
 ```elixir
 {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
-# => "failures/capture_overflow_20240115_143022.pd"
+# => "failures/20261028T002141-check_failed-never_negative-seed20.pd"
 ```
+
+The directory is created when missing. The name is the report's UTC timestamp
+(`YYYYMMDDTHHMMSS`), its failure kind, its check name and its seed. Pass
+`filename:` to choose another name.
 
 ### Replay the failing seed first while you fix it
 
@@ -851,8 +853,9 @@ If the shrunk sequence is still large:
 )
 ```
 
-If the failure was saved to a `.pd` file, re-shrink it from the shell without
-writing any code:
+If the failure was saved to a `.pd` file (see
+[Step 8](#step-8-save-for-later)), re-shrink it from the shell without writing
+any code:
 
 ```bash
 mix pd.reshrink failures/the-failure.pd --strategy exhaustive

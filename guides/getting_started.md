@@ -352,14 +352,10 @@ checks) use step-by-step replay; see the
 
 ## Understanding Results
 
-When tests pass:
-
-```
-Run 1/100: 23 commands, PASSED
-Run 2/100: 18 commands, PASSED
-...
-100/100 runs passed!
-```
+When tests pass, `PropertyDamage.run/1` returns `{:ok, stats}` and prints
+nothing. `stats.runs` is the number of runs and `stats.seed` the seed they
+started from. Add `verbose: true` to print a summary and one progress line per
+run.
 
 When tests fail, `PropertyDamage.run/1` returns `{:error, report}`, and the
 report prints the shrunk failure, its events, the state it left and the calls
