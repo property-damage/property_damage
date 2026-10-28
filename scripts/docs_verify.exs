@@ -14,6 +14,10 @@
 #     elixir scripts/docs_verify.exs                 # full corpus + notebook
 #     elixir scripts/docs_verify.exs guides/quickstart.md [more paths...]
 #
+# A line `<!-- pd-doc-verify: include <guide> <path> -->` in a document runs, at that
+# point, the elixir fence of <guide> that carries `<!-- pd-example: <path> -->`, so a
+# guide can run its steps on another guide's example project.
+#
 # Exit status is 0 only if every runnable fence passed.
 #
 # Every mix/shell subprocess this gate spawns runs with HEX_HOME pointed at the
@@ -48,7 +52,7 @@ defmodule DocsVerify.CLI do
     IO.puts("consumer template: #{cache} (#{template_dir})")
     IO.puts("running #{length(docs)} document(s)\n")
 
-    opts = [hex_home: hex_home, run_root: run_root]
+    opts = [hex_home: hex_home, run_root: run_root, root: root]
 
     results =
       Enum.map(docs, fn doc ->

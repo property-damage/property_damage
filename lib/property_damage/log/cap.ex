@@ -17,13 +17,24 @@ defmodule PropertyDamage.Log.Cap do
   # execution that writes none is not counted.
   #
   # Lines held at any moment belong to at most `keep + 1` executions.
+  #
+  # `dropped` holds the keys of the executions the gap counts, so each
+  # dropped execution counts once: when a newer one pushes it out, or when it
+  # writes its first line after it can no longer be kept. A cap built from a
+  # returned list starts with none, because the list does not say which
+  # executions its gap counts.
 
   alias PropertyDamage.Log.{Gap, Line}
 
   @default_keep_attempts 3
   @first {0, 1}
 
-  defstruct keep: @default_keep_attempts, phase: :command, first: [], tail: [], gap: nil
+  defstruct keep: @default_keep_attempts,
+            phase: :command,
+            first: [],
+            tail: [],
+            gap: nil,
+            dropped: MapSet.new()
 
   # `first` and the lines of each `tail` entry are newest first; `tail` is
   # newest execution first.
@@ -32,7 +43,8 @@ defmodule PropertyDamage.Log.Cap do
           phase: :command | :stutter,
           first: [Line.t()],
           tail: [{{0 | 1, pos_integer()}, [Line.t()]}],
-          gap: Gap.t() | nil
+          gap: Gap.t() | nil,
+          dropped: MapSet.t({0 | 1, pos_integer()})
         }
 
   @doc "How many of a step's last executions are kept unless `log: [keep_attempts: n]` says otherwise."
@@ -76,7 +88,7 @@ defmodule PropertyDamage.Log.Cap do
       List.keymember?(cap.tail, key, 0) -> append(cap, key, line)
       newest?(cap, key) -> push(cap, key, line)
       length(cap.tail) < cap.keep -> insert(cap, key, line)
-      true -> omit(cap, line)
+      true -> omit(cap, key, line)
     end
   end
 
@@ -115,8 +127,14 @@ defmodule PropertyDamage.Log.Cap do
     tail = [{key, [line]} | cap.tail]
 
     if length(tail) > cap.keep do
-      {_key, dropped} = List.last(tail)
-      %{cap | tail: Enum.drop(tail, -1), gap: add_to_gap(cap.gap, 1, dropped)}
+      {dropped_key, dropped} = List.last(tail)
+
+      %{
+        cap
+        | tail: Enum.drop(tail, -1),
+          gap: add_to_gap(cap.gap, 1, dropped),
+          dropped: MapSet.put(cap.dropped, dropped_key)
+      }
     else
       %{cap | tail: tail}
     end
@@ -128,8 +146,17 @@ defmodule PropertyDamage.Log.Cap do
     %{cap | tail: Enum.sort_by([{key, [line]} | cap.tail], &elem(&1, 0), :desc)}
   end
 
-  # A line of an execution that is no longer kept (or never was).
-  defp omit(cap, line), do: %{cap | gap: add_to_gap(cap.gap, if(cap.gap, do: 0, else: 1), [line])}
+  # A line of an execution that is no longer kept (or never was). The
+  # execution counts as an attempt unless the gap already counts it.
+  defp omit(cap, key, line) do
+    attempts = if MapSet.member?(cap.dropped, key), do: 0, else: 1
+
+    %{
+      cap
+      | gap: add_to_gap(cap.gap, attempts, [line]),
+        dropped: MapSet.put(cap.dropped, key)
+    }
+  end
 
   defp add_to_gap(gap, attempts, lines) do
     earliest = lines |> Enum.map(& &1.timestamp) |> Enum.min()

@@ -177,6 +177,18 @@ defmodule PropertyDamage.Executor.Finalization do
               combined_failures
             )
 
+          {:failed, failure, command_index, state, failures} ->
+            {normalized, stacktrace} = extract_stacktrace(failure)
+
+            async_failure_result(
+              state,
+              normalized,
+              stacktrace,
+              command_index,
+              linearization,
+              Enum.reverse(failures) ++ resource_failures
+            )
+
           {:ok, state, failures} ->
             finalize_after_settle(
               state,
@@ -411,6 +423,7 @@ defmodule PropertyDamage.Executor.Finalization do
         Map.get(state, :branch_id),
         fold_counter
       )
+      |> Executor.Events.folded_or_raise!()
 
     logs =
       PropertyDamage.Log.append(
@@ -443,6 +456,26 @@ defmodule PropertyDamage.Executor.Finalization do
       {:halt, name, reason, command_index, counters} ->
         {:halt, name, reason, command_index, %{state | check_counters: counters}, failures}
     end
+  rescue
+    # A mock's on_event/2 that raised fails the last command, whose events
+    # the mock was told of, and its lines stay under that command. A
+    # projection that rejected a mock event raises on, as before.
+    e in Executor.Events.MockEventsError ->
+      case e.error do
+        {:projection, exception, stacktrace} ->
+          reraise exception, stacktrace
+
+        error ->
+          logs =
+            PropertyDamage.Log.append(
+              Map.get(state, :logs, %{}),
+              Map.get(state, :current_position),
+              e.lines
+            )
+
+          {:failed, Executor.mock_events_failure(error), Map.get(state, :last_command_index),
+           Map.put(state, :logs, logs), failures}
+      end
   end
 
   # ============================================================================

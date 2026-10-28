@@ -95,6 +95,48 @@ defmodule PropertyDamage.Test.LogPathFixtures do
     def to_event(_payload), do: :skip
   end
 
+  defmodule RefusingInjector do
+    @moduledoc false
+    # An injector whose setup/1 logs, then refuses to start.
+    use PropertyDamage.Adapter.Injector
+    require PropertyDamage
+
+    @emits []
+
+    @impl true
+    def setup(_config) do
+      PropertyDamage.log("refusing injector setup")
+      {:error, :injector_down}
+    end
+
+    @impl true
+    def teardown(_context), do: :ok
+
+    @impl true
+    def to_event(_payload), do: :skip
+  end
+
+  defmodule RaisingSetupAdapter do
+    @moduledoc false
+    # An adapter whose setup/1 logs, then raises.
+    use PropertyDamage.Adapter
+    require PropertyDamage
+
+    alias PropertyDamage.Test.LogFixtures, as: F
+
+    @impl true
+    def setup(_config) do
+      PropertyDamage.log("setup about to raise")
+      raise "setup refused"
+    end
+
+    @impl true
+    def execute(command, ctx, _runtime), do: F.answer(command, ctx)
+
+    @impl true
+    def teardown(_ctx), do: :ok
+  end
+
   defmodule Fault do
     @moduledoc false
     # An auto-restoring nemesis that logs in inject/2 and restore/2; its
@@ -237,6 +279,12 @@ defmodule PropertyDamage.Test.LogPathFixtures do
   def injected_target(name, config) do
     {F.log_adapter(),
      name: name, config: Map.merge(%{name: name}, config), injectors: [LoggingInjector]}
+  end
+
+  @doc false
+  # A target of `adapter` named alice with `injectors` around it.
+  def serviced_target(adapter, injectors, config \\ %{}) do
+    {adapter, name: "alice", config: Map.merge(%{name: "alice"}, config), injectors: injectors}
   end
 
   @doc false

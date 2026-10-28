@@ -191,8 +191,8 @@ defmodule PropertyDamage.ReportFooterTest do
                ~r/^► \[0\] %.*Refund\{amount: 10\}  as itself \(identity, by shrinking\)/m
 
       assert variant =~ ~r/^► \[0\] %.*Refund\{amount: 10\}  as Refund\[1\]/m
-      assert variant =~ ~r/^    \[0\.0\] %.*Credit\{/m
-      assert variant =~ ~r/^    \[0\.1\] %.*Credit\{/m
+      assert variant =~ ~r/^    \[0\.0\](\n\s+| )%.*Credit\{/m
+      assert variant =~ ~r/^    \[0\.1\](\n\s+| )%.*Credit\{/m
     end
   end
 

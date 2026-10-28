@@ -84,7 +84,8 @@ defmodule PropertyDamage.Log do
   the failure report prints it as `... 296 attempts omitted (1,184 lines)`. The
   cap drops whole attempts and never cuts a line or a value. The stutter
   retries of a command count as further attempts of the same step, after its
-  settle attempts. `log: [keep_attempts: n]` on `PropertyDamage.run/1` changes
+  settle attempts. `log: [keep_attempts: n]` on `PropertyDamage.run/1`,
+  `PropertyDamage.shrink_further/2` or `PropertyDamage.Replay.start/2` changes
   the number of last attempts kept. Lines of `capture/1`, of an adapter's
   `setup/1` and `teardown/1` and of the other points that have no attempts are
   never capped.

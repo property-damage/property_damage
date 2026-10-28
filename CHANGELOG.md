@@ -1146,6 +1146,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Settle.settle/2` takes a `:sleep` option, and the backoff tests use it.**
+  The linear-backoff test measured wall-clock gaps against a floor and failed
+  on a loaded runner, because the last sleep is clipped to the time left before
+  the deadline. `:sleep` is a one-arity function (default `&Process.sleep/1`)
+  that settle sleeps with, so the tests assert the order and count of recorded
+  sleeps, including the clipped final one.
+
+- **`Persistence.export_json/1` writes the reference side of a comparison
+  failure.** The export left out the reference target's trace, its projection
+  state at the failing boundary and why the shrinker stopped, which the
+  `:json` format already carried. The export now writes `reference_trace`,
+  `reference_state_at_failure` and `shrink_stop` in the same shape, each
+  `null` for a report that has none. The entry for the reference fields under
+  Added is unchanged.
+
+- **`Persistence.load/1` loads a valid file in a fresh VM.** The safe decode
+  refuses an atom the VM has not seen, so a saved report that names a module
+  not yet loaded returned `{:error, :unsafe_terms}`. On that refusal `load/1`
+  now loads the modules of the loaded applications and decodes once more, still
+  without creating atoms from the file. A file that names a module of no loaded
+  application still returns `{:error, :unsafe_terms}`.
+
+- **A mock's `on_command/2` or `on_event/2` that raises fails its step.** The
+  registry turned the raise into an error that the engine discarded, so the
+  run went on as if the mock had answered. The step the mock was told of now
+  fails as an adapter error whose detail is `{module, callback, reason}`, as
+  a raising `execute/3` does. `MockServiceRegistry` keeps its
+  `{:error, _}` answer.
+- **A projection that rejects a mock event keeps the mocks' lines.** The
+  lines a mock's `on_event/2` wrote before a projection rejected the event
+  were dropped with the step; they now print under that step.
+- **A branching run reports a failed target setup as the lockstep path does.**
+  An injector that refused to start crashed the branching path with a
+  `CaseClauseError`, and an adapter `setup/1` that raised propagated out of
+  `PropertyDamage.run/1`. Both are now `:setup_failed` reports carrying the
+  same detail and the same `adapter setup/1` and `adapter teardown/1` log
+  lines as a run on the lockstep path, the lines of the injectors set up
+  before the failing one included.
+- **`shrink_further/2` and `Replay.start/2` take `log: [keep_attempts: n]`.**
+  A re-shrink always kept the default three last attempts of a retried step,
+  because the report does not record the run's `log:` option and
+  `shrink_further/2` ignored one; `Replay.start/2` and `Replay.run/2` refused
+  the option. Both now take it, validated as `PropertyDamage.run/1` validates
+  it.
+- **The retry cap's gap counts an attempt that logs late.** When an attempt
+  the cap could no longer keep wrote its first line after the gap already
+  existed, the gap added its lines but not the attempt, so the report could
+  print fewer attempts omitted than were dropped. Each dropped attempt now
+  counts once, whether a newer attempt pushed it out or it logged late.
 - **An `@eventually` function that returns no predicate fails at its step.**
   The poller took the function's return as its predicate without checking it,
   so a function that answered the question itself (a boolean) raised
@@ -1332,6 +1381,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A pasted reproduction command keeps each target's non-default `expansion:`.**
   `FailureReport.targets_source/1` left it out, so the pasted command re-ran a
   `:reference` or `:identity` target as `:random`, which is a different sequence.
+- **`RunTrace.state_at/2` and `FailureReport.verify_projections/1` work at a
+  leaf.** Both raised `FunctionClauseError` for a failure at a leaf of an
+  expanded root. The state at a leaf is now the prefix as it stood when the
+  root began plus the folds of that root's leaves through this leaf.
+- **A latency-budget report lists the failing target's events and log lines.**
+  The report carried an empty trace, so its listing showed neither. It now
+  holds the failing target's result of the last run, which is replaced on
+  every run. It stays unshrunk and not localized to a command.
+- **A report without targets prints no Regenerate call.** The layout printed
+  `nil` as the target name in the `Expansion.for` call. A report that records
+  no target has no name to regenerate with, so `expansion_command/1` returns
+  `nil` and the Reproduction section omits the `# Regenerate the failing
+  variant:` comment and call.
+- **The Projections legend names only the sides that have state.** A report
+  saved before the reference's state was recorded printed `+` lines only, yet
+  its heading still named the reference. The heading now names a side only
+  when it has state (`- before, + after` and the reference and variant form
+  are unchanged when both sides do).
+- **`inspect/2` of a report names the error behind its one-line summary.**
+  When formatting the report failed (an invalid `PD_LOG` is the common case),
+  the summary fell back silently, so the syntax error never showed. `inspect/2`
+  still never raises; the summary now ends with the message of the error it
+  replaced.
+- **`Analysis.explain/1` no longer calls a kept command a shrinking issue.**
+  A command that no placeholder links to the failing command (a deposit that
+  only supplies a balance) read `Unknown role - may indicate shrinking issue`,
+  which two readers took for an error. Its reason now says the shrinker kept
+  it because removing it lost the failure. The role stays `:unknown`, and the
+  moduledoc states that roles come from placeholders alone.
+- **The `:json` format builds only the listing to produce `logs`.** It ran the
+  whole layout, so a report whose Failure section could not be built also
+  failed as JSON. `Layout.logs/2` builds the sides and the listing items the
+  `logs` key is made of, and `Layout.build/2` reads the same data. The keys
+  are unchanged.
+- **`Formatter.format(report, :json)` holds `compare_counts`.** The persistence
+  export held the per-observation counts and the `:json` format did not. The
+  key has the export's shape: the failure-name strings (`Projection.function`)
+  map to the counts.
+- **The debugging guide runs on the bank example.** Its walkthrough fences
+  (run, replay, explain, step through, isolate, diagram, export, save) were
+  placeholders the documentation gate could not execute. They now run against
+  the bank of the log lines guide, so the gate catches their rot. The guide
+  also states what a replay that reproduces the failure returns:
+  `{:error, report}`, like a failing run. The documentation gate gained an
+  `include` marker for this (`<!-- pd-doc-verify: include <guide> <path> -->`).
+- **`scripts/regen_report_excerpts.exs` regenerates and checks the report
+  excerpts in the guides, and CI runs it.** `--check` fails on a stale
+  excerpt and `--write` splices the regenerated one. CI also runs the
+  documentation gate on the guides that carry runnable fences.
 
 ## [0.2.0] - 2026-06-25
 

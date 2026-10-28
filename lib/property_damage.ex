@@ -863,9 +863,11 @@ defmodule PropertyDamage do
 
   # The budget is judged once, after every run passed, so the report is not
   # localized to a command and nothing is shrunk or re-executed. It records the
-  # last run's sequence, seed and number.
+  # last run's sequence, seed and number, and the failing target's result of
+  # that run (each run replaces the previous one, so one run stays in memory).
   defp latency_report(ctx, acc, metrics, [{target, failure} | rest]) do
     last = acc.last_run
+    result = Enum.at(last.results, target.index) || %{}
 
     FailureReport.new(
       seed: last.run_seed,
@@ -877,6 +879,10 @@ defmodule PropertyDamage do
       run_nonce: ctx.run_nonce,
       mint_epoch: 0,
       failed_at_index: nil,
+      executed: Map.get(result, :executed, %{}),
+      event_log: Map.get(result, :event_log, []),
+      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+      logs: Map.get(result, :logs, %{}),
       failure_reason: failure,
       kind: :latency_exceeded,
       variant: variant_of(target),
@@ -995,7 +1001,10 @@ defmodule PropertyDamage do
            | total_commands: acc.total_commands + Sequence.command_count(run.sequence),
              setup_commands: acc.setup_commands + length(run.sequence.setup),
              teardown_commands: acc.teardown_commands + length(run.sequence.teardown),
-             last_run: Map.take(run, [:sequence, :run_seed, :run_number])
+             last_run:
+               run
+               |> Map.take([:sequence, :run_seed, :run_number])
+               |> Map.put(:results, if(ctx.measure_latency, do: outcome.results, else: []))
          }}
 
       _failure ->
@@ -1081,7 +1090,7 @@ defmodule PropertyDamage do
   defp execute_branching(ctx, run) do
     target = ctx.target
 
-    RunServices.with_services(target, fn event_queue, mock_registry ->
+    RunServices.with_services_logged(target, fn event_queue, mock_registry ->
       Executor.run_logged(run.sequence, ctx.model, target.adapter,
         config: target.config,
         event_queue: event_queue,
@@ -2119,6 +2128,10 @@ defmodule PropertyDamage do
     (default: the report's `concurrency`)
   - `:compare` - `[converge_within: ms]`, as on `PropertyDamage.run/1`
     (default: the report's `compare`)
+  - `:log` - `[keep_attempts: n]`, as on `PropertyDamage.run/1`: how many of a
+    step's last settle or stutter attempts keep their log lines in the new
+    report (default 3). The report does not record the run's value, so a run
+    given another value passes it here again.
 
   The re-shrink also uses the report's `stutter` configuration: a stutter
   failure re-runs with stutter forced on, as the run's own shrink does.
@@ -2201,7 +2214,7 @@ defmodule PropertyDamage do
       compare: shrink_further_compare(report, opts),
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
-      keep_attempts: Cap.default_keep_attempts(),
+      keep_attempts: Options.keep_attempts!(opts),
       # A `:record` failure re-shrinks under `:record`, as the run found it.
       check_mode: report.check_mode || :halt
     }

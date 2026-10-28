@@ -163,6 +163,9 @@ defmodule PropertyDamage.Replay do
     `config:`); see
     `PropertyDamage.Target`
   - `:stop_on_failure` - Stop at first failure (default: true)
+  - `:log` - `[keep_attempts: n]`, as on `PropertyDamage.run/1`: how many of a
+    step's last settle or stutter attempts keep their log lines in the
+    session's executor state (default 3, DR-054)
   - `:stutter_config` - Stutter config to apply during replay (not stored in the report)
   - `:external_markers` - External markers to apply during replay (not stored in the report)
 
@@ -283,7 +286,8 @@ defmodule PropertyDamage.Replay do
             # Seed the placeholder registry from the failing sequence (DR-021),
             # so replaying a failure whose commands consume `external()` values
             # resolves them instead of raising "Unknown placeholder".
-            placeholder_registry: registry
+            placeholder_registry: registry,
+            keep_attempts: opts[:log][:keep_attempts]
           )
 
         session = %__MODULE__{

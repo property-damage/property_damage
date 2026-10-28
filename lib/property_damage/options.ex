@@ -325,6 +325,43 @@ defmodule PropertyDamage.Options do
   # PropertyDamage.run/1 Schema
   # ============================================================================
 
+  # The retry cap on a step's log lines (DR-054 decision 13): `log:
+  # [keep_attempts: n]` on `run/1`, `shrink_further/2` and `Replay.start/2`.
+  @keep_attempts_option [
+    type: :pos_integer,
+    default: 3,
+    doc: """
+    How many of a step's last settle or stutter attempts keep their log
+    lines, besides the first attempt, whose lines are always kept. When
+    a newer attempt pushes an older one out, the run drops that attempt's
+    lines and counts them, so memory stays bounded; the report prints
+    each gap as `... N attempts omitted (M lines)`. Whole attempts only:
+    the cap never cuts a line or a value. A filter never changes what the
+    run keeps.
+    """
+  ]
+
+  @keep_attempts_log_option [
+    type: :keyword_list,
+    default: [],
+    doc: "Options for the log lines a step keeps (DR-054): the retry cap.",
+    keys: [keep_attempts: @keep_attempts_option]
+  ]
+
+  @keep_attempts_log_schema NimbleOptions.new!(log: @keep_attempts_log_option)
+
+  @doc """
+  Validates the `log: [keep_attempts: n]` option of
+  `PropertyDamage.shrink_further/2`, as `run/1` validates it, and returns `n`
+  (3 when absent). Other options in `opts` are not looked at. Raises
+  `NimbleOptions.ValidationError` on an invalid value.
+  """
+  @spec keep_attempts!(keyword()) :: pos_integer()
+  def keep_attempts!(opts) do
+    log = Keyword.get(opts, :log, [])
+    NimbleOptions.validate!([log: log], @keep_attempts_log_schema)[:log][:keep_attempts]
+  end
+
   @run_schema_definition [
     # Required
     model: [
@@ -551,19 +588,7 @@ defmodule PropertyDamage.Options do
       doc:
         "Options for the log lines of the failure report (DR-054): the retry cap and a tag filter.",
       keys: [
-        keep_attempts: [
-          type: :pos_integer,
-          default: 3,
-          doc: """
-          How many of a step's last settle or stutter attempts keep their log
-          lines, besides the first attempt, whose lines are always kept. When
-          a newer attempt pushes an older one out, the run drops that attempt's
-          lines and counts them, so memory stays bounded; the report prints
-          each gap as `... N attempts omitted (M lines)`. Whole attempts only:
-          the cap never cuts a line or a value. A filter never changes what the
-          run keeps.
-          """
-        ],
+        keep_attempts: @keep_attempts_option,
         only: [
           type: {:custom, PropertyDamage.Log.Filter, :validate_tags, []},
           doc: """
@@ -1481,7 +1506,8 @@ defmodule PropertyDamage.Options do
       type: :boolean,
       default: true,
       doc: "Include projection states in step results."
-    ]
+    ],
+    log: @keep_attempts_log_option
   ]
 
   @replay_schema NimbleOptions.new!(@replay_schema_definition)

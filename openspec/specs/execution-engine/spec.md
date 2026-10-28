@@ -235,6 +235,12 @@ The system SHALL support mock service adapters that stand in for third-party ser
 - **WHEN** events are pushed into the registry after a command's own flush (after the command returned, before the next command or the end of the run)
 - **THEN** the boundary drain (`Stepping.drain/2`) and the finalization SHALL flush and fold them, attributed to the command that ran last
 
+#### Scenario: A mock callback that raises fails its step
+- **WHEN** a mock's `on_command/2` or `on_event/2` raises, exits or throws
+- **THEN** the step the mock was told of SHALL fail as an `:adapter_error` whose detail is the registry's `{module, callback, reason}`, the shape a raising `execute/3` gets, so the report names the mock and the callback; an `on_command/2` that raised SHALL fail the step before the adapter's `execute/3` is called, and an `on_event/2` told of an event the boundary drain or the finalization flushed SHALL fail the command that ran last
+- **AND** `MockServiceRegistry.notify_command/3` and `notify_event/3` SHALL keep answering `{:error, {module, callback, reason}}` and stay up
+- **AND** when a projection rejects a mock event folded after a command, the lines the mocks' `on_event/2` wrote before it SHALL stay under that command's step
+
 ### Requirement: Checks on Asynchronously-Observed Events
 
 The executor SHALL evaluate `@check every:` checks on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, mock-service events, and nemesis events, as well as events folded during the finalize-time drains (the `@eventually` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-check dispatch **incrementally**: one event at a time, on the state produced by folding that event, with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Check mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.
@@ -976,6 +982,10 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 - **WHEN** an adapter logs during a run
 - **THEN** the event log, the projections and every check SHALL be what a run of the same adapter without log calls produces
 
+#### Scenario: A failed target setup keeps its lines on the branching path
+- **WHEN** a branching run's target fails its setup, because an injector refuses to start after another one started or because the adapter's `setup/1` raises
+- **THEN** the run SHALL report `:setup_failed` with the detail, the `adapter setup/1` lines and the `adapter teardown/1` lines a run of the same target on the lockstep path reports, and SHALL NOT raise
+
 ### Requirement: Log.capture/1 Scopes Code Outside a Run (DR-054)
 
 `PropertyDamage.Log.capture(fun)`, with `fun` a 0-arity function, SHALL run `fun` in the calling process under a scope of its own and return `{result, lines}`: `fun`'s result and the `PropertyDamage.Log.Line` structs it logged, in the order written, each with attempt 1. The same `$callers` lookup as for a run's scopes SHALL apply, so a `Task` (or a `Task` inside a `Task`) started inside `fun` logs into the capture. A nested `capture/1` SHALL collect into the innermost one and the outer one SHALL get none of its lines. A `capture/1` inside an execution point SHALL keep its lines out of the step. An error, throw or exit in `fun` SHALL propagate and the lines written before it SHALL be dropped. A call after the capture returned, from a process it left running, SHALL raise `PropertyDamage.Log.NoScopeError`. An argument that is not a 0-arity function SHALL raise `ArgumentError`.
@@ -994,7 +1004,7 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 
 ### Requirement: Log Lines Keep a Step's First and Last Attempts (DR-054)
 
-For each step, the run SHALL keep the log lines of the first execution of its command and of the last `keep_attempts` executions after it (default 3). The executions of a step SHALL be ordered as they ran: the command's own settle attempts, then its stutter retries; the cap SHALL key an execution by which execution wrote it, not by the line's `attempt` number alone, because settle and stutter numbers overlap. The `Runtime.Sink` SHALL apply the cap as lines arrive: when a line of a newer execution arrives with the last executions full, it SHALL drop the oldest of them and count the execution and its lines. A line that arrives for an execution already dropped SHALL be counted and not kept. The cap SHALL drop whole executions and SHALL never cut a line or a value. At any moment the sink and the kept list SHALL hold the lines of at most `keep_attempts + 1` executions of a step. The stutter retries SHALL write into a sink that continues the step's kept lines. One `PropertyDamage.Log.Gap` (`attempts`, `lines`, `timestamp`) SHALL stand in the step's lines between the first execution's lines and the kept ones when the cap dropped at least one line; an execution that logged nothing SHALL leave no gap. Events SHALL never be dropped by the cap. The lines of `PropertyDamage.Log.capture/1`, of an adapter's `setup/1` and `teardown/1` and of every other point that has no attempts SHALL never be capped. `log: [keep_attempts: n]` of `PropertyDamage.run/1` SHALL change the number of last executions kept and SHALL be a positive integer; a zero, a negative, a non-integer or an unknown key under `log:` (`only:` and `except:` are the tag filters of the printed report and never change which lines a run keeps) SHALL raise `NimbleOptions.ValidationError`. The option SHALL reach every execution of the run that keeps lines (exploration, shrink attempts, the reproduction, a replay), on every target.
+For each step, the run SHALL keep the log lines of the first execution of its command and of the last `keep_attempts` executions after it (default 3). The executions of a step SHALL be ordered as they ran: the command's own settle attempts, then its stutter retries; the cap SHALL key an execution by which execution wrote it, not by the line's `attempt` number alone, because settle and stutter numbers overlap. The `Runtime.Sink` SHALL apply the cap as lines arrive: when a line of a newer execution arrives with the last executions full, it SHALL drop the oldest of them and count the execution and its lines. A line that arrives for an execution the cap no longer keeps SHALL be counted and not kept, and the gap SHALL count each dropped execution once, whether a newer execution pushed it out or its first line arrived after the cap could no longer keep it. The cap SHALL drop whole executions and SHALL never cut a line or a value. At any moment the sink and the kept list SHALL hold the lines of at most `keep_attempts + 1` executions of a step. The stutter retries SHALL write into a sink that continues the step's kept lines. One `PropertyDamage.Log.Gap` (`attempts`, `lines`, `timestamp`) SHALL stand in the step's lines between the first execution's lines and the kept ones when the cap dropped at least one line; an execution that logged nothing SHALL leave no gap. Events SHALL never be dropped by the cap. The lines of `PropertyDamage.Log.capture/1`, of an adapter's `setup/1` and `teardown/1` and of every other point that has no attempts SHALL never be capped. `log: [keep_attempts: n]` of `PropertyDamage.run/1`, of `PropertyDamage.shrink_further/2` and of `PropertyDamage.Replay.start/2` and `run/2` SHALL change the number of last executions kept and SHALL be a positive integer; a zero, a negative, a non-integer or an unknown key under `log:` (`only:` and `except:` are the tag filters of the printed report and never change which lines a run keeps) SHALL raise `NimbleOptions.ValidationError`. The option SHALL reach every execution of the run that keeps lines (exploration, shrink attempts, the reproduction, a replay), on every target. A report SHALL NOT record the run's value, so `shrink_further/2` SHALL use its own option, default 3, and SHALL validate it as `run/1` does.
 
 #### Scenario: Five attempts omit the second
 - **WHEN** a settle runs five attempts that each log two lines, under the default
@@ -1004,10 +1014,15 @@ For each step, the run SHALL keep the log lines of the first execution of its co
 - **WHEN** a settle runs 300 attempts under the default
 - **THEN** the step SHALL keep attempt 1 and attempts 298 to 300, and the gap SHALL count 296 attempts
 - **AND** under `log: [keep_attempts: 5]` the step SHALL keep attempt 1 and attempts 296 to 300, and the gap SHALL count 294 attempts
+- **AND** `shrink_further(report, log: [keep_attempts: 5])` and a `Replay.start(report, log: [keep_attempts: 5])` session SHALL keep the same attempts of that step
 
 #### Scenario: The sink stays bounded
 - **WHEN** 1,000 attempts of several lines each are written into one sink
 - **THEN** after every write the sink SHALL hold the lines of at most four attempts (`keep_attempts + 1` with `log: [keep_attempts: n]`)
+
+#### Scenario: A late writer counts as an attempt
+- **WHEN** under `log: [keep_attempts: 1]` executions 1, 3 and 4 log, so execution 3 is pushed into the gap, and execution 2 then logs its first line
+- **THEN** the gap SHALL count 2 attempts and 2 lines
 
 #### Scenario: A stutter retry is an attempt of the step
 - **WHEN** a command settles in four attempts and a stutter retry follows, under `log: [keep_attempts: 2]`

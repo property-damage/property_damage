@@ -211,4 +211,55 @@ defmodule PropertyDamage.Log.RetryCapTest do
       end
     end
   end
+
+  # The cases `run/1` refuses, for the paths that take `log: [keep_attempts: n]`
+  # after a run.
+  @refused [keep_attempts: 0, keep_attempts: -2, keep_attempts: 2.5, keep_attempts: "3"]
+
+  defp assert_refused(fun) do
+    for {key, value} <- @refused do
+      error = assert_raise NimbleOptions.ValidationError, fn -> fun.([{key, value}]) end
+      message = Exception.message(error)
+      assert message =~ "keep_attempts", "#{inspect(value)}: #{message}"
+      refute message =~ "unknown options [:log]", "#{inspect(value)}: #{message}"
+    end
+  end
+
+  describe "shrink_further/2 takes log: [keep_attempts: n]" do
+    test "the further-shrunk report keeps the first and the last n attempts" do
+      report = spin_report(300)
+
+      assert {:ok, smaller} = PropertyDamage.shrink_further(report, log: [keep_attempts: 5])
+      refute smaller == report
+
+      assert F.shown_logs(step_zero(smaller)) ==
+               attempt_lines(1..1) ++
+                 [{:gap, "... 294 attempts omitted (588 lines)"}] ++ attempt_lines(296..300)
+    end
+
+    test "refuses the values run/1 refuses" do
+      report = spin_report(2)
+      assert_refused(&PropertyDamage.shrink_further(report, log: &1))
+    end
+  end
+
+  describe "Replay.start/2 takes log: [keep_attempts: n]" do
+    test "the session keeps the first and the last n attempts of a step" do
+      report = spin_report(300)
+
+      assert {:ok, session} = PropertyDamage.Replay.start(report, log: [keep_attempts: 5])
+      assert {:ok, session, _step} = PropertyDamage.Replay.step(session)
+
+      lines = Map.fetch!(session.exec_state.logs, Position.prefix(0))
+      PropertyDamage.Replay.stop(session)
+
+      assert [gap] = Enum.filter(lines, &is_struct(&1, F.gap_module()))
+      assert {F.field(gap, :attempts), F.field(gap, :lines)} == {294, 588}
+    end
+
+    test "refuses the values run/1 refuses" do
+      report = spin_report(2)
+      assert_refused(&PropertyDamage.Replay.start(report, log: &1))
+    end
+  end
 end

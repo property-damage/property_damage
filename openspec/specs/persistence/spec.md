@@ -99,7 +99,15 @@ The system SHALL include version metadata in persisted files and warn when loadi
 
 - **WHEN** `export_json/1` writes a report
 - **THEN** it SHALL write `kind`, `variant`, `targets`, `compare`, `compare_counts` and `other_failures`
+- **AND** it SHALL write `reference_trace`, `reference_state_at_failure` and `shrink_stop` as the `:json` format writes `reference_trace`, `reference_projections` and the shrinking `stop`, each `null` when the report has none
 - **AND** it SHALL NOT write `adapter` or `equivalence`
+
+#### Scenario: Loading in a VM that has not loaded the saved modules
+
+- **GIVEN** a valid file naming a module of a loaded application that this VM has not loaded
+- **WHEN** `load/1` reads it
+- **THEN** it SHALL load the modules of the loaded applications and decode the file once more with `:safe`, and return the report
+- **AND** a file naming a module of no loaded application SHALL return `{:error, :unsafe_terms}`
 
 > Version `15` is now current and versions `1`-`14` are refused. The step from `14` adds the report's `check_mode`, `campaign`, `original_failed_at_index` and `run_check_fires`, and refuses a report lacking `run`, `replay`, `replay_path` or `check_mode`. It supersedes the version `14` requirement of DR-050, whose step from `13` added the report's `run`, `replay`, `replay_path` and `replay_status`, and the entry value `:identity`. It also carries forward the earlier supersessions of the tolerant-loading / trace-synthesis rules.
 

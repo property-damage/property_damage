@@ -76,6 +76,47 @@ defmodule PropertyDamage.RunTraceStateTimelineTest do
     end
   end
 
+  describe "faithful timeline (linear) with a late poller fold" do
+    # The failing root's own poller delivers an event while the run finalizes,
+    # after the root's command fold and its own events. The event is attributed
+    # to that root, so the root's boundary includes it: the post-step state
+    # equals the state the run ended with.
+    defp late_fold_trace do
+      RunTrace.new(
+        model: Model,
+        plan: Sequence.linear([%Cmd{op: :c0}, %Cmd{op: :c1}]),
+        executed: %{Position.prefix(0) => %Cmd{op: :c0}, Position.prefix(1) => %Cmd{op: :c1}},
+        command_fold_ordinals: %{Position.prefix(0) => 0, Position.prefix(1) => 2},
+        event_log: [
+          %Entry{command_index: 0, event: %Ev{tag: :e0}, source: :command, fold_index: 1},
+          %Entry{command_index: 1, event: %Ev{tag: :e1}, source: :command, fold_index: 3},
+          %Entry{
+            command_index: 1,
+            event: %Ev{tag: :late},
+            source: :resource_poller,
+            fold_index: 4
+          }
+        ],
+        outcome: :pass
+      )
+    end
+
+    test "the failing root's post-step state includes the fold its poller delivered late" do
+      trace = late_fold_trace()
+
+      assert RunTrace.state_at(trace, Position.prefix(1))[Log] ==
+               %{log: [{:cmd, :c0}, :e0, {:cmd, :c1}, :e1, :late]}
+
+      assert [_, {_, last}] = RunTrace.state_timeline(trace)
+      assert last[Log].log == [{:cmd, :c0}, :e0, {:cmd, :c1}, :e1, :late]
+    end
+
+    test "the late fold stays out of the state before the failing root" do
+      assert RunTrace.state_before(late_fold_trace(), Position.prefix(1))[Log] ==
+               %{log: [{:cmd, :c0}, :e0]}
+    end
+  end
+
   describe "faithful timeline (linear) with expansion leaves" do
     test "a root's boundary includes the folds of its leaf commands and nothing of a later root's" do
       # Root 1 ran as two leaf commands, positioned by the root's generation

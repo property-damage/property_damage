@@ -22,6 +22,7 @@ defmodule DocsVerify.DocRunner do
   def run(doc_path, template_dir, ebin_paths, opts) do
     hex_home = Keyword.fetch!(opts, :hex_home)
     run_root = Keyword.fetch!(opts, :run_root)
+    root = Keyword.get(opts, :root)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
     fences = FenceParser.parse_file(doc_path)
@@ -39,7 +40,8 @@ defmodule DocsVerify.DocRunner do
         dir: doc_dir,
         ebin: ebin_paths,
         env: env,
-        timeout: timeout
+        timeout: timeout,
+        root: root
       }
 
       {result, state} = execute(tagged, state, doc_path)
@@ -104,10 +106,40 @@ defmodule DocsVerify.DocRunner do
     end
   end
 
+  # An include fence evaluates the elixir fence of another guide that holds the
+  # named project file, so a guide can run on that guide's example project.
+  defp dispatch(%{lang: "include", content: content} = fence, state) do
+    [guide, path] = String.split(content, " ")
+
+    case included_fence(state.root, guide, path) do
+      {:ok, source} ->
+        dispatch(%{fence | lang: "elixir", content: source.content}, state)
+
+      {:error, message} ->
+        {:gate_error, message, state}
+    end
+  end
+
   defp dispatch(%{lang: lang}, state) do
     {:gate_error,
      "runnable marker sits above a non-executable fence (language #{inspect(lang)}); " <>
        "only bash, sh, and elixir fences may be tagged runnable", state}
+  end
+
+  defp included_fence(nil, guide, _path),
+    do: {:error, "include of #{guide} needs the repo root, which this run did not pass"}
+
+  defp included_fence(root, guide, path) do
+    full = Path.expand(guide, root)
+
+    with true <- File.regular?(full) || {:error, "included guide #{guide} does not exist"},
+         %{} = fence <-
+           full
+           |> FenceParser.parse_file()
+           |> Enum.find(&(&1.lang == "elixir" and &1.example == path)) ||
+             {:error, "#{guide} has no elixir fence for project file #{path}"} do
+      {:ok, fence}
+    end
   end
 
   defp ensure_shell(%{shell: nil} = state),

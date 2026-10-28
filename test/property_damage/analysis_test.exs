@@ -173,4 +173,36 @@ defmodule PropertyDamage.AnalysisTest do
       assert explanation.failure.command_index == nil
     end
   end
+
+  describe "format_explanation/1 of a command that only sets up state" do
+    # A shrunk sequence [Decoy, Consumer] where no placeholder
+    # links Decoy to the failing Consumer: the shrinker kept Decoy because
+    # removing it lost the failure, so the explanation must not call it a defect.
+    setup do
+      seq = Sequence.linear([%Decoy{}, %Consumer{}])
+
+      report =
+        FailureReport.new(
+          seed: 1,
+          run_number: 1,
+          original_sequence: seq,
+          shrunk_sequence: seq,
+          failed_at_index: 1,
+          failure_reason: Failure.check_failed(:TestCheck, "boom")
+        )
+
+      %{text: report |> Analysis.explain() |> Analysis.format_explanation()}
+    end
+
+    test "says the shrinker kept it and does not suggest a shrinking issue", %{text: text} do
+      refute text =~ "shrinking issue"
+      refute text =~ "Unknown role"
+      assert text =~ "[0] Decoy"
+      assert text =~ "Kept by shrinking: removing it lost the failure"
+    end
+
+    test "still marks the failing command as the trigger", %{text: text} do
+      assert text =~ "[1] Consumer ← FAILURE TRIGGER"
+    end
+  end
 end

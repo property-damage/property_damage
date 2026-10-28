@@ -15,8 +15,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
   banner and the seed, then the Failure, Minimal Reproduction, Projections and
   Reproduction sections, with every step and every event in full. The
   markdown format is the terminal text without color, each section's body in
-  a fenced block. The JSON format keeps every field of the report and adds a
-  `logs` key (see below).
+  a fenced block. The JSON format keeps every field of the report, holds the
+  `compare_counts` the persistence export holds, and adds a `logs` key (see
+  below).
 
   ## Options
 
@@ -104,11 +105,15 @@ defmodule PropertyDamage.FailureReport.Formatter do
         serialize_sequence(FailureReport.shrunk_sequence(report), report.command_labels),
       "reproduction" => FailureReport.reproduction_command(report),
       "other_failures" => Enum.map(report.other_failures, &serialize_other_failure/1),
+      "compare_counts" =>
+        Map.new(report.compare_counts, fn {key, counts} ->
+          {FailureReport.format_name(key), counts}
+        end),
       "reference_trace" => serialize_reference_trace(report),
       "reference_projections" =>
         report.reference_state_at_failure &&
           serialize_projections(report.reference_state_at_failure),
-      "logs" => serialize_logs(Layout.build(report, opts).logs)
+      "logs" => serialize_logs(Layout.logs(report, opts))
     }
 
     # Add optional sections
@@ -196,6 +201,26 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   defp log_text({:value, term}),
     do: inspect(term, pretty: true, limit: :infinity, printable_limit: :infinity)
+
+  @doc """
+  The reference side of a comparison failure as the `:json` format writes it:
+  `trace`, `projections` and `stop`, each nil when the report has none.
+  `Persistence.export_json/1` writes the same values.
+  """
+  @spec reference_json(FailureReport.t()) :: %{
+          trace: map() | nil,
+          projections: map() | nil,
+          stop: String.t() | nil
+        }
+  def reference_json(report) do
+    %{
+      trace: serialize_reference_trace(report),
+      projections:
+        report.reference_state_at_failure &&
+          serialize_projections(report.reference_state_at_failure),
+      stop: report.shrink_stop && to_string(report.shrink_stop)
+    }
+  end
 
   # The reference target's trace of the reported run; null when the report has
   # none. Its sequence is the plan both targets ran.

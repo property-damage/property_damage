@@ -5,6 +5,7 @@ defmodule PropertyDamage.CompareCountersTest do
   use ExUnit.Case, async: true
 
   alias PropertyDamage.{Failure, Persistence}
+  alias PropertyDamage.FailureReport.Formatter
   alias PropertyDamage.Test.Compare
 
   @ns inspect(__MODULE__)
@@ -136,6 +137,15 @@ defmodule PropertyDamage.CompareCountersTest do
 
     assert Compare.text(report) =~
              ~r/^Compared\s+using ==, still differing after \d+ ms \(bound 300 ms\)$/m
+  end
+
+  test "the :json format holds the same compare_counts as the export", ctx do
+    report = failed_report(ctx)
+    exported = report |> Persistence.export_json() |> Jason.decode!()
+    formatted = report |> Formatter.format(:json) |> Jason.decode!()
+
+    assert map_size(exported["compare_counts"]) == 3, "control: three observations are counted"
+    assert Map.fetch!(formatted, "compare_counts") == exported["compare_counts"]
   end
 
   @tag :tmp_dir

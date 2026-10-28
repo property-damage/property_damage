@@ -82,6 +82,39 @@ defmodule PropertyDamage.FailureReport.Layout do
   @doc false
   @spec build(FailureReport.t(), keyword()) :: t()
   def build(%FailureReport{} = report, opts \\ []) do
+    listing = listing_data(report, opts)
+    %{filter: filter, unknown: unknown, variant: variant, focus: focus, setup: setup} = listing
+
+    sections =
+      [
+        failure_section(report, focus, filter, unknown),
+        setup && setup.section,
+        listing.section,
+        projections_section(report, variant, focus),
+        reproduction_section(report)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    %__MODULE__{
+      banner: banner(report),
+      seed: report.seed,
+      sections: sections,
+      logs: logs_of(listing)
+    }
+  end
+
+  # The `logs` map of `build/2` (what the `:json` format carries) without
+  # the Failure, Projections and Reproduction sections, so a report whose
+  # messages cannot be built still yields its log lines. `build/2` reads the
+  # same data, so the two cannot drift.
+  @doc false
+  @spec logs(FailureReport.t(), keyword()) :: map()
+  def logs(%FailureReport{} = report, opts \\ []), do: report |> listing_data(opts) |> logs_of()
+
+  # The data of the listing and the log lines: the filter, the side of the
+  # failing target, the failing step, the Setup lines and the Minimal
+  # Reproduction section with the log lines of each target it lists.
+  defp listing_data(report, opts) do
     filter = Filter.resolve(report.log_filter, opts)
     unknown = Filter.unknown(filter, known_tags(report))
 
@@ -89,28 +122,27 @@ defmodule PropertyDamage.FailureReport.Layout do
       side(report, report.trace, variant_name(report), FailureReport.steps(report), filter)
 
     focus = focus(report, variant.items)
-    {listing_section, targets} = reproduction_listing(report, variant, focus)
-    setup = setup_section(report, filter)
+    {section, targets} = reproduction_listing(report, variant, focus)
 
-    sections =
-      [
-        failure_section(report, focus, filter, unknown),
-        setup && setup.section,
-        listing_section,
-        projections_section(report, variant, focus),
-        reproduction_section(report)
-      ]
-      |> Enum.reject(&is_nil/1)
+    %{
+      filter: filter,
+      unknown: unknown,
+      variant: variant,
+      focus: focus,
+      section: section,
+      targets: targets,
+      setup: setup_section(report, filter)
+    }
+  end
 
-    logs = %{
+  defp logs_of(%{filter: filter, unknown: unknown, targets: targets, setup: setup}) do
+    %{
       filter: filter,
       unknown: unknown,
       setup: (setup && setup.lines) || [],
       target: targets.target,
       reference: targets.reference
     }
-
-    %__MODULE__{banner: banner(report), seed: report.seed, sections: sections, logs: logs}
   end
 
   # Every tag of every line the report holds, before any filter.
@@ -899,9 +931,10 @@ defmodule PropertyDamage.FailureReport.Layout do
   # ==========================================================================
 
   defp projections_section(report, variant, focus) do
-    {minus, plus, legend} = compared_states(report)
+    {minus, plus, legend_parts} = compared_states(report)
 
     if state?(minus) or state?(plus) do
+      legend = legend(legend_parts, minus, plus)
       at = if focus, do: focus.label, else: "the failure"
       applied = last_applied(variant, focus)
 
@@ -927,12 +960,21 @@ defmodule PropertyDamage.FailureReport.Layout do
   # and after the failing step.
   defp compared_states(%FailureReport{kind: kind} = report)
        when kind in [:diverged, :did_not_converge] do
-    legend = ~s(- reference "#{reference_name(report)}", + variant "#{variant_name(report)}")
+    legend =
+      {~s(- reference "#{reference_name(report)}"), ~s(+ variant "#{variant_name(report)}")}
+
     {report.reference_state_at_failure, variant_cut(report), legend}
   end
 
   defp compared_states(report),
-    do: {report.state_before_failure, report.state_at_failure, "- before, + after"}
+    do: {report.state_before_failure, report.state_at_failure, {"- before", "+ after"}}
+
+  # The legend names a side only when that side has state.
+  defp legend({minus_text, plus_text}, minus, plus) do
+    [{minus, minus_text}, {plus, plus_text}]
+    |> Enum.filter(fn {state, _text} -> state?(state) end)
+    |> Enum.map_join(", ", fn {_state, text} -> text end)
+  end
 
   defp variant_cut(%FailureReport{trace: %RunTrace{} = trace, failed_at_index: root})
        when is_integer(root),
@@ -1053,15 +1095,26 @@ defmodule PropertyDamage.FailureReport.Layout do
         [
           {:comment, "Rerun from the seed:"},
           {:code, bind(FailureReport.reproduction_command(report), report)},
-          :blank,
-          {:comment, "Regenerate the failing variant:"},
-          {:code, bind(FailureReport.expansion_command(report), report)},
-          :blank,
+          :blank
+        ] ++
+        regenerate_lines(report) ++
+        [
           {:comment, replay_label},
           replay
         ]
 
     %Section{heading: "Reproduction", fence: "elixir", lines: lines}
+  end
+
+  # A report that records no target has no name to regenerate with.
+  defp regenerate_lines(report) do
+    case FailureReport.expansion_command(report) do
+      nil ->
+        []
+
+      call ->
+        [{:comment, "Regenerate the failing variant:"}, {:code, bind(call, report)}, :blank]
+    end
   end
 
   # `targets = [...]` once, and a line naming each place in it that holds a

@@ -207,13 +207,15 @@ defmodule PropertyDamage.Executor do
   # `run/4`, except that a failed adapter setup/1 returns
   # `{:error, reason, logs}`: the lines that setup wrote, under
   # `:adapter_setup` (DR-054). The branching path of `PropertyDamage.run/1`
-  # puts them on its setup failure.
+  # puts them on its setup failure. A setup/1 that raises, exits or throws
+  # fails the same way, with the exception (or `{kind, reason}`) as the
+  # reason, as `PropertyDamage.Variant` reports it on the lockstep path.
   @spec run_logged(Sequence.t() | list(), module(), module(), keyword()) ::
           {:ok, result()} | {:error, term(), PropertyDamage.Log.logs()} | term()
   def run_logged(sequence_or_commands, model, adapter, opts \\ [])
 
   def run_logged(%Sequence{} = sequence, model, adapter, opts) do
-    case set_up_and_run(sequence, model, adapter, opts) do
+    case set_up_and_run(sequence, model, adapter, opts, &guarded_setup/2) do
       {:not_set_up, {:error, reason}, setup_lines} ->
         {:error, reason, PropertyDamage.Log.append(%{}, :adapter_setup, setup_lines)}
 
@@ -233,9 +235,9 @@ defmodule PropertyDamage.Executor do
   # their log lines are kept under :adapter_setup and :adapter_teardown
   # (DR-054). A setup/1 that does not answer `{:ok, context}` comes back as
   # `{:not_set_up, its answer, its lines}`.
-  defp set_up_and_run(sequence, model, adapter, opts) do
+  defp set_up_and_run(sequence, model, adapter, opts, setup \\ & &1.setup(&2)) do
     config = Keyword.get(opts, :config, %{})
-    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
+    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> setup.(adapter, config) end)
 
     case setup_result do
       {:ok, adapter_context} ->
@@ -244,6 +246,16 @@ defmodule PropertyDamage.Executor do
       not_set_up ->
         {:not_set_up, not_set_up, setup_lines}
     end
+  end
+
+  # The adapter's setup/1, with a raise, exit or throw turned into an error,
+  # so the lines it wrote before stay with the setup failure.
+  defp guarded_setup(adapter, config) do
+    adapter.setup(config)
+  rescue
+    exception -> {:error, exception}
+  catch
+    kind, reason -> {:error, {kind, reason}}
   end
 
   defp run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts) do
@@ -766,11 +778,12 @@ defmodule PropertyDamage.Executor do
   end
 
   # The mocks' on_command/2 runs under a scope of its own; its lines go under
-  # the command's step (DR-054).
-  defp notify_mocks(state, nil, _command), do: state
+  # the command's step (DR-054). A callback that raised, exited or threw comes
+  # back as the registry's `{:error, {module, :on_command, reason}}`.
+  defp notify_mocks(state, nil, _command), do: {:ok, state}
 
   defp notify_mocks(state, mock_registry, command) do
-    {_notified, lines} =
+    {notified, lines} =
       PropertyDamage.Log.collect(fn sink ->
         MockServiceRegistry.notify_command(
           mock_registry,
@@ -779,10 +792,18 @@ defmodule PropertyDamage.Executor do
         )
       end)
 
-    %{state | logs: PropertyDamage.Log.append(state.logs, state.current_position, lines)}
+    state = %{state | logs: PropertyDamage.Log.append(state.logs, state.current_position, lines)}
+
+    case notified do
+      :ok -> {:ok, state}
+      {:error, reason} -> {:error, reason, state}
+    end
   end
 
-  # Execute a regular (non-nemesis) command
+  # Execute a regular (non-nemesis) command. The mocks are told of it first;
+  # a mock's on_command/2 that raised fails the step before the adapter is
+  # called, as an adapter error whose detail names the mock and the callback,
+  # the shape a raising execute/3 gets.
   defp execute_regular_command(
          command,
          index,
@@ -793,9 +814,34 @@ defmodule PropertyDamage.Executor do
          event_queue,
          mock_registry
        ) do
-    # 0. Notify mock registry of command (before execution)
-    state = notify_mocks(state, mock_registry, command)
+    case notify_mocks(state, mock_registry, command) do
+      {:ok, state} ->
+        execute_notified_command(
+          command,
+          index,
+          state,
+          model,
+          adapter,
+          adapter_context,
+          event_queue,
+          mock_registry
+        )
 
+      {:error, reason, state} ->
+        {:error, Failure.adapter_error(reason), state, :not_called}
+    end
+  end
+
+  defp execute_notified_command(
+         command,
+         index,
+         state,
+         model,
+         adapter,
+         adapter_context,
+         event_queue,
+         mock_registry
+       ) do
     placeholder_registry = state.placeholder_registry
 
     # 1. Resolve placeholders and mint markers in the command (DR-021/DR-034).
@@ -1041,7 +1087,25 @@ defmodule PropertyDamage.Executor do
     e in PropertyDamage.ProjectionError ->
       {:error, Failure.projection_violation(e.projection, e.original), event_ctx.state,
        {:ok, events}}
+
+    # A mock event the mocks or the projections refused; the lines the mocks'
+    # on_event/2 wrote stay under the step (DR-054).
+    e in Events.MockEventsError ->
+      state = event_ctx.state
+      logs = PropertyDamage.Log.append(state.logs, state.current_position, e.lines)
+      {:error, mock_events_failure(e.error), %{state | logs: logs}, {:ok, events}}
   end
+
+  @doc false
+  # The failure of a step whose mock events could not be folded
+  # (`Events.process_mock_events/6`): a mock's on_event/2 that raised is an
+  # adapter error naming the mock and the callback, as for on_command/2; a
+  # projection that rejected a mock event is a projection violation.
+  @spec mock_events_failure(term()) :: Failure.t()
+  def mock_events_failure({:mock_callback, reason}), do: Failure.adapter_error(reason)
+
+  def mock_events_failure({:projection, e, _stacktrace}),
+    do: Failure.projection_violation(e.projection, e.original)
 
   # Shared post-events pipeline for both command success arms: {:ok, events} from
   # sync commands and {:settled, events} from probe/async commands that settled
@@ -1131,14 +1195,9 @@ defmodule PropertyDamage.Executor do
     # 7.5. Flush and process mock-injected events; the mocks' on_event/2
     # lines go under this command's step (DR-054).
     {projections, event_log, fold_counter, mock_lines} =
-      Events.process_mock_events(
-        mock_registry,
-        index,
-        event_log,
-        projections,
-        state.branch_id,
-        fold_counter
-      )
+      mock_registry
+      |> Events.process_mock_events(index, event_log, projections, state.branch_id, fold_counter)
+      |> Events.folded_or_raise!()
 
     state = %{
       state
