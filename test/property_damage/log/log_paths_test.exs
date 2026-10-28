@@ -87,6 +87,61 @@ defmodule PropertyDamage.Log.PathsTest do
              ["injector teardown by alice"]
   end
 
+  describe "a failed target setup on the branching path reports as on the lockstep path" do
+    @branching [
+      branching: [branch_probability: 1.0, max_branches: 2, min_prefix_length: 1],
+      max_commands: 4
+    ]
+
+    # The parts of a setup failure's report that must agree on both paths.
+    defp setup_failure(report) do
+      lines = listing(report)
+
+      %{
+        kind: report.kind,
+        detail: report.failure_reason.type.detail,
+        setup: P.log_messages(F.note_block(lines, "adapter setup/1") || []),
+        teardown: P.log_messages(F.note_block(lines, "adapter teardown/1") || [])
+      }
+    end
+
+    test "when an injector refuses to start after another one started" do
+      target =
+        P.serviced_target(F.log_adapter(), [P.LoggingInjector, P.RefusingInjector], %{
+          setup_log: true
+        })
+
+      lockstep = setup_failure(F.report!(F.Model, [target]))
+
+      assert lockstep == %{
+               kind: :setup_failed,
+               detail: :injector_down,
+               setup: [
+                 "injector setup by alice",
+                 "refusing injector setup",
+                 "injector teardown by alice"
+               ],
+               teardown: []
+             }
+
+      assert setup_failure(F.report!(F.Model, [target], @branching)) == lockstep
+    end
+
+    test "when the adapter's setup/1 raises" do
+      target = P.serviced_target(P.RaisingSetupAdapter, [P.LoggingInjector])
+      lockstep = setup_failure(F.report!(F.Model, [target]))
+
+      assert %{
+               kind: :setup_failed,
+               detail: %RuntimeError{message: "setup refused"},
+               setup: ["injector setup by alice", "setup about to raise"],
+               teardown: ["injector teardown by alice"]
+             } = lockstep
+
+      assert setup_failure(F.report!(F.Model, [target], @branching)) == lockstep
+    end
+  end
+
   describe "a nemesis fault still active when the run fails" do
     test "prints its end-of-run restore/2 line under the injecting step" do
       target = F.target("alice", %{quiet: true, fail_at: 1})
