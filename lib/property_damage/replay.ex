@@ -76,19 +76,16 @@ defmodule PropertyDamage.Replay do
     `{:error, :branching_replay_unsupported}` for a branching `shrunk_sequence`.
     Inspect a branching failure via the `FailureReport` fields or re-run it
     through `PropertyDamage.Executor.run/4`.
-  - **Stutter config is not stored in the report.** The `FailureReport` records
-    the model, adapter, and sequence, but not the `stutter:` config a run was
-    given. If the original run used stutter and you want it re-applied during
-    replay, pass it via `opts` (`:stutter_config`). It is deliberately not
-    persisted yet: stutter is not seed-deterministic (decisions consume the
-    process `:rand` stream at execution time), so persisting the config alone
-    would not make replay reproduce *which* commands stuttered, and the
-    `using:` predicate, a function, cannot survive the `[:safe]` term decode
-    used by `PropertyDamage.Persistence`. Persisting it belongs with the determinism
-    hardening that introduces a generation-time stutter plan; see that item in
-    the project's fix checklist. (`external_markers` is not a gap: real runs
-    never set it, and external paths are derived from the event struct
-    definitions, which are reachable from the persisted model.)
+  - **Replay does not apply stutter.** The `FailureReport` records the run's
+    normalized `stutter:` option, but no replay option re-applies it, and
+    `start/2` and `run/2` reject a `stutter_config:` option. Stutter is not
+    seed-deterministic (its decisions consume the process `:rand` stream at
+    execution time), so a replay could not reproduce which commands
+    stuttered. `PropertyDamage.shrink_further/2` does re-apply the report's
+    `stutter:` option.
+  - **`external()` markers are not a replay option.** Replay rejects an
+    `external_markers:` option, and external paths come from the event struct
+    definitions, which are reachable from the persisted model.
   """
 
   alias PropertyDamage.{
@@ -163,11 +160,11 @@ defmodule PropertyDamage.Replay do
     `config:`); see
     `PropertyDamage.Target`
   - `:stop_on_failure` - Stop at first failure (default: true)
+  - `:include_projections` - Accepted, and no code reads it: every step
+    carries its projection states (default: true)
   - `:log` - `[keep_attempts: n]`, as on `PropertyDamage.run/1`: how many of a
     step's last settle or stutter attempts keep their log lines in the
     session's executor state (default 3, DR-054)
-  - `:stutter_config` - Stutter config to apply during replay (not stored in the report)
-  - `:external_markers` - External markers to apply during replay (not stored in the report)
 
   ## Returns
 

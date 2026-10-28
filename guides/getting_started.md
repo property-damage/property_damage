@@ -360,7 +360,9 @@ run.
 When tests fail, `PropertyDamage.run/1` returns `{:error, report}`, and the
 report prints the shrunk failure, its events, the state it left and the calls
 that reproduce it. [Reading the report](debugging_failures.md#reading-the-report)
-walks through a real one.
+walks through a real one. To put your own lines in it, such as the requests an
+adapter sends, call `PropertyDamage.log/2`; see the
+[log lines guide](log_lines.md).
 
 ## Next Steps
 
