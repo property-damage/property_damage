@@ -620,6 +620,15 @@ end
 
 `PropertyDamage.ExUnit.format_failure/2` prints the report with color.
 
+Work done once in `setup_all` is shared by every run and every shrink attempt
+the test makes. State it creates, such as accounts, balances or rows, carries
+over from one run to the next, so a minimal reproduction can print a balance
+that only earlier runs explain. State that each run must start fresh belongs in
+the adapter's `setup/1` and `teardown/1`, as the `MyApp.Adapter` in
+[Write the system, the adapter and the model](#2-write-the-system-the-adapter-and-the-model)
+starts and stops a `MyApp.Bank` for every run. Keep in `setup_all` only what
+no run changes, like the token here.
+
 ## Filtering by tag
 
 Tags are the only display filter. A run, a replay call and
