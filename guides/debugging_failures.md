@@ -392,10 +392,12 @@ number of commands and the command that triggered the failure), then a
 marker (`← FAILURE TRIGGER` or `← DEPENDENCY`, or none), and a line giving the
 reason. A `DEPENDENCY CHAIN` section follows when the failing command depends on
 earlier ones. The text comes from the analysis of the command structs, so it
-names commands and roles, not what they mean in your domain. A command it cannot
-place, such as a deposit that only supplies a balance, reads `Unknown role -
-may indicate shrinking issue`; that label alone does not mean the shrink went
-wrong.
+names commands and roles, not what they mean in your domain. It infers a role
+from the placeholders alone. A command no placeholder links to the failing
+command, such as a deposit that only supplies a balance, has no marker and
+reads `Kept by shrinking: removing it lost the failure; it may set up state the
+failing command reads`. It stays out of the `DEPENDENCY CHAIN`, because the
+analysis does not infer dependencies through state.
 
 ## Step 4: Step-by-Step Replay
 

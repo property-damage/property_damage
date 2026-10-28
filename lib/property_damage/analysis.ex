@@ -11,6 +11,17 @@ defmodule PropertyDamage.Analysis do
   - **Trigger Isolation**: Find the minimal change that eliminates the failure
   - **Test Generation**: Generate reproducible test code from failures
 
+  ## Roles
+
+  `explain/1` infers a command's role from the placeholders alone. The failing
+  command is the `:trigger`. A command that produces a value the failing
+  command consumes, directly or through other placeholders, is a
+  `:dependency`. Any other command has the role `:unknown`: no placeholder
+  links it to the failure. When the failure is localized, the shrinker kept it
+  because removing it lost the failure, so it may set up state the failing
+  command reads (a deposit that only supplies a balance). `explain/1` does not
+  infer that dependency, so such a command stays out of the dependency chain.
+
   ## Usage
 
       {:error, failure} = PropertyDamage.run(model: M, targets: [A])
@@ -191,8 +202,11 @@ defmodule PropertyDamage.Analysis do
           {:unknown, "Failure not localized to a specific command"}
 
         true ->
-          # Not an ancestor and not the trigger - shouldn't be in shrunk sequence
-          {:unknown, "Unknown role - may indicate shrinking issue"}
+          # No placeholder links it to the failing command, yet the shrinker
+          # kept it: removing it lost the failure, so it may set up state the
+          # failing command reads.
+          {:unknown,
+           "Kept by shrinking: removing it lost the failure; it may set up state the failing command reads"}
       end
 
     refs = extract_refs(cmd)

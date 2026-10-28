@@ -1377,6 +1377,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the summary fell back silently, so the syntax error never showed. `inspect/2`
   still never raises; the summary now ends with the message of the error it
   replaced.
+- **`Analysis.explain/1` no longer calls a kept command a shrinking issue.**
+  A command that no placeholder links to the failing command (a deposit that
+  only supplies a balance) read `Unknown role - may indicate shrinking issue`,
+  which two readers took for an error. Its reason now says the shrinker kept
+  it because removing it lost the failure. The role stays `:unknown`, and the
+  moduledoc states that roles come from placeholders alone.
 
 ## [0.2.0] - 2026-06-25
 
