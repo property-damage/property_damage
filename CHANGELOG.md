@@ -1392,6 +1392,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   export held the per-observation counts and the `:json` format did not. The
   key has the export's shape: the failure-name strings (`Projection.function`)
   map to the counts.
+- **The debugging guide runs on the bank example.** Its walkthrough fences
+  (run, replay, explain, step through, isolate, diagram, export, save) were
+  placeholders the documentation gate could not execute. They now run against
+  the bank of the log lines guide, so the gate catches their rot. The guide
+  also states what a replay that reproduces the failure returns:
+  `{:error, report}`, like a failing run. The documentation gate gained an
+  `include` marker for this (`<!-- pd-doc-verify: include <guide> <path> -->`).
+- **`scripts/regen_report_excerpts.exs` regenerates and checks the report
+  excerpts in the guides, and CI runs it.** `--check` fails on a stale
+  excerpt and `--write` splices the regenerated one. CI also runs the
+  documentation gate on the guides that carry runnable fences.
 
 ## [0.2.0] - 2026-06-25
 

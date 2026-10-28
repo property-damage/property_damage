@@ -156,13 +156,22 @@ variant's at the failing boundary. For a real report, see the excerpt in the
 
 ## The Failure Report
 
-The report is a `%PropertyDamage.FailureReport{}`. A failing run returns it:
+The report is a `%PropertyDamage.FailureReport{}`. A failing run returns it.
 
+The steps below run on the bank of the [log lines guide](log_lines.md#2-write-the-system-the-adapter-and-the-model):
+create its `lib/my_app.ex` first. The fences that use `MyApp.Model` and
+`MyApp.Adapter` run in order against that bank. A fence that names `MyModel`,
+`MyAdapter` or another `My` module has no bank equivalent here: replace the
+name with your own module.
+
+<!-- pd-doc-verify: include guides/log_lines.md lib/my_app.ex -->
+<!-- pd-doc-verify: runnable -->
 ```elixir
 {:error, failure} = PropertyDamage.run(
-  model: MyModel,
-  targets: [MyAdapter],
-  max_runs: 100
+  model: MyApp.Model,
+  targets: [MyApp.Adapter],
+  max_runs: 50,
+  seed: 20
 )
 
 IO.inspect(failure, pretty: true)
@@ -181,10 +190,10 @@ Read it through its fields and accessors:
 - **reference_trace** / **reference_state_at_failure** - for `:diverged` and `:did_not_converge`, the reference target's run and its state at the failing boundary (`nil` for every other kind)
 - **setup_log** / **log_filter** - the lines `setup_log:` carried and the run's log filter (see the [log lines guide](log_lines.md))
 
-"Reading the report" above reads the report of seed 20. The steps below use
-`failure`, the report of your own run, and a run without `seed:` picks a random
-seed, so your report differs from the walkthrough. If you use the bank example,
-pass `seed: 20` to `PropertyDamage.run/1` to get the same report.
+"Reading the report" above reads the report of seed 20, and the run above
+produces it. The steps below use `failure`, the report of that run. A run
+without `seed:` picks a random seed, so your own report differs from the
+walkthrough.
 
 ### The `%Failure{}` reason
 
@@ -270,8 +279,26 @@ PropertyDamage.run(model: MyModel, targets: [MyAdapter], only: [replay: "propert
 
 Every target executes the commands the file records, so the replay needs the
 same `targets:` the report printed. `shrink:` defaults to false under
-`only: [replay: path]`. A replay that does not fail the way the file records
-returns stats with `:replay` set to `:not_reproduced`.
+`only: [replay: path]`. A replay that reproduces the failure returns
+`{:error, report}`, the same shape as a failing run. A replay that does not
+fail the way the file records returns `{:ok, stats}` with `stats.replay` set to
+`:not_reproduced`. The bank's replay file is
+`property_damage_replays/Model_seed20.replay.exs`:
+
+<!-- pd-doc-verify: runnable -->
+```elixir
+{:error, replayed} =
+  PropertyDamage.run(
+    model: MyApp.Model,
+    targets: [MyApp.Adapter],
+    only: [replay: "property_damage_replays/Model_seed20.replay.exs"]
+  )
+
+# The replay fails the same way as the original run.
+true =
+  PropertyDamage.FailureReport.failure_type(replayed) ==
+    PropertyDamage.FailureReport.failure_type(failure)
+```
 
 The artifact is one Elixir literal term, so you can read it and edit an
 argument before you run it again. This is the start of a real one:
@@ -309,11 +336,12 @@ seed.
 
 To run the same failure from its seed instead, use the seed:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Run with the same seed
-result = PropertyDamage.run(
-  model: MyModel,
-  targets: [MyAdapter],
+{:error, rerun} = PropertyDamage.run(
+  model: MyApp.Model,
+  targets: [MyApp.Adapter],
   seed: failure.seed,
   max_runs: 1
 )
@@ -330,11 +358,15 @@ With several targets, each target may run its own expansion of a root. To see
 the sequence one target ran before shrinking, regenerate it. Nothing runs, and
 no adapter is touched:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # run is 1-based; failure.seed is the seed the failing run generated from.
+# The bank has one target, named "Adapter" after its adapter module.
 {:ok, %{sequence: sequence}} =
-  PropertyDamage.Expansion.for(MyModel, failure.seed, 1, "second")
+  PropertyDamage.Expansion.for(MyApp.Model, failure.seed, 1, "Adapter")
 ```
+
+With several targets, name the one you want: `"second"` in the examples below.
 
 The last argument is the target's name. A target given without `name:` is named
 after the last segment of its adapter module (`"Adapter"` for `MyApp.Adapter`),
@@ -362,6 +394,7 @@ failure. So no one command of the shrunk sequence can be dropped, but a shorter
 sequence that also fails may exist: the bank example's shrunk sequence ranges
 from 2 to 14 commands, depending on the seed. Print it:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Print the shrunk sequence (a %PropertyDamage.Sequence{}; flatten with to_list/1)
 PropertyDamage.FailureReport.shrunk_sequence(failure)
@@ -380,6 +413,7 @@ prints it, for example `[0] %MyApp.Deposit{account: "alice", amount: 5}`.
 Use `explain/1` to see which command triggered the failure and which commands
 it depends on:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # explain/1 returns a map; format it for printing
 explanation = PropertyDamage.explain(failure)
@@ -403,6 +437,7 @@ analysis does not infer dependencies through state.
 
 Replay the sequence step by step to observe state changes:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # replay/2 returns {:ok, [step]}; each step is
 # %{index, command, command_name, events, projections, projections_before, result}
@@ -436,6 +471,7 @@ with three shapes:
 
 So the failing step is the one whose `result` is not `:ok`:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 {:ok, steps} = PropertyDamage.replay(failure)
 
@@ -493,6 +529,7 @@ not offered.
 
 Find the specific field/value that causes the failure:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 {:ok, trigger} = PropertyDamage.isolate_trigger(failure)
 
@@ -506,6 +543,7 @@ IO.puts("Trigger: #{inspect(trigger)}")
 
 Generate visual diagrams of the failing sequence:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Mermaid diagram
 diagram = PropertyDamage.Diagram.from_failure_report(failure, :mermaid)
@@ -625,6 +663,7 @@ A failure report keeps two authoritative state snapshots
 state is **derived** from the run — nothing is captured per command. Ask a
 `RunTrace` (a report embeds one as `failure.trace`) for the state at any step:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 alias PropertyDamage.RunTrace
 
@@ -649,8 +688,9 @@ what the run actually had. `verify_projections/1` catches exactly that — it
 re-derives the state at the failing step and compares it to the runtime
 snapshot:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
-PropertyDamage.FailureReport.verify_projections(failure)
+:ok = PropertyDamage.FailureReport.verify_projections(failure)
 #=> :ok
 #=> {:non_pure_projections, [MyApp.ImpureProjection]}
 ```
@@ -668,6 +708,7 @@ names any projection that disagrees with itself. See the
 
 Create a regression test:
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 test_code = PropertyDamage.Export.to_exunit(failure)
 File.mkdir_p!("test/regression")
@@ -676,6 +717,7 @@ File.write!("test/regression/capture_overflow_test.exs", test_code)
 
 ### Generate Reproduction Script
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 # Curl script for API testing (script/livebook exports need a :base_url)
 File.mkdir_p!("debug")
@@ -689,6 +731,7 @@ File.write!("debug/reproduce.exs", script)
 
 ### Generate Livebook
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 notebook = PropertyDamage.Export.to_livebook(failure, base_url: "http://localhost:4000")
 File.write!("debug/failure_analysis.livemd", notebook)
@@ -698,6 +741,7 @@ File.write!("debug/failure_analysis.livemd", notebook)
 
 ### Persist the Failure
 
+<!-- pd-doc-verify: runnable -->
 ```elixir
 {:ok, path} = PropertyDamage.save_failure(failure, "failures/")
 # => "failures/20261028T002141-check_failed-never_negative-seed20.pd"
@@ -721,7 +765,8 @@ PropertyDamage.run(model: M, targets: [A], seed_library: "seeds.json")
 
 ## Step 9: Verify the Fix
 
-After fixing the bug:
+After fixing the bug (these fences need your fixed system, so the guide does not
+run them against the planted-bug bank):
 
 ```elixir
 # Run with the same seed - should pass now
