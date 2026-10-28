@@ -267,6 +267,10 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
   }
   function leadingSpaces(l) { return l.length - l.replace(/^ +/, "").length; }
 
+  // A timed entry: `log`, `event` for a command's event, or the three-letter badge of another
+  // event source (POL for a resource poller, INJ for an injector, ??? for an unknown one).
+  var ENTRY = /^( +)\+(\d+(?:\.\d+)?)s (log|event|[A-Z]{3}|\?\?\?)( +)(.*)$/;
+
   // Walks the lines of a block that holds steps and timed entries (Minimal Reproduction, Setup).
   function parseSteps(lines) {
     var targets = [], T = null, root = null, step = null, entry = null, pendingCmd = null, captions = [], blanks = 0;
@@ -278,16 +282,16 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
     lines.forEach(function (l) {
       // a blank line belongs to the message only if the message continues after it
       if (!l.trim()) { if (entry) blanks++; return; }
-      var cont = entry && leadingSpaces(l) >= entry.base && !/^ +\+\d+(?:\.\d+)?s (log|event) /.test(l);
+      var cont = entry && leadingSpaces(l) >= entry.base && !ENTRY.test(l);
       if (cont) for (; blanks > 0; blanks--) entry.lines.push("");
       blanks = 0;
       var tm = /^(Reference|Variant): target "(.*)"\s*$/.exec(l);
       if (tm) { T = { name: tm[2], role: tm[1].toLowerCase(), steps: [] }; targets.push(T); root = step = entry = pendingCmd = null; return; }
-      var em = /^( +)\+(\d+(?:\.\d+)?)s (log|event)( +)(.*)$/.exec(l);
+      var em = ENTRY.exec(l);
       if (em) {
         pendingCmd = null;
         var col = em[1].length + 1 + em[2].length + 1 + 1 + em[3].length + em[4].length;
-        var msg = em[5], e = { kind: em[3], t: parseFloat(em[2]), lines: [msg], base: col, tags: [] };
+        var msg = em[5], e = { kind: em[3] === "log" ? "log" : "event", source: em[3] === "log" || em[3] === "event" ? null : em[3], t: parseFloat(em[2]), lines: [msg], base: col, tags: [] };
         if (e.kind === "log") {
           var tg = /^\[([^\]]*)\] ?([\s\S]*)$/.exec(msg);
           if (tg) { e.tags = tg[1].split(/\s+/).filter(Boolean); e.lines = [tg[2]]; e.base = col + tg[1].length + 3; }
@@ -562,7 +566,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
         bd: "×" + it.total };
     }
     var e = it.entries[0];
-    if (it.type === "event") return { kd: "event", lb: "◆ " + esc(evLabel(e)), raw: evLabel(e) };
+    if (it.type === "event") return { kd: e.source || "event", lb: "◆ " + esc(evLabel(e)), raw: evLabel(e) };
     if (it.type === "omitted") return { kd: "omitted", lb: esc(e.lines[0]), raw: e.lines[0] };
     return { kd: e.tag === "(untagged)" ? "log" : e.tag, lb: esc(e.first) + (e.lines.length > 1 ? ' <span class="chipv">(+' + (e.lines.length - 1) + " lines)</span>" : ""), raw: e.first };
   }
@@ -597,7 +601,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
     if (!shown.length) return '<div class="empty">Every line here is hidden by the tag chips.</div>';
     return '<div class="rawlog">' + shown.map(function (e, i) {
       var k = key + ":" + i;
-      return '<div class="rl' + (S.rawOpen[k] ? " open" : "") + '" data-raw="' + esc(k) + '" title="click to unfold or fold"><span class="tm sub">' + fmtT(e.t) + '</span><span class="tg">' + (e.kind === "event" ? "event" : "[" + esc(e.tag) + "]") + '</span><span class="tx">' + (e.text ? esc(e.text) : '<span class="empty">(empty)</span>') + "</span></div>";
+      return '<div class="rl' + (S.rawOpen[k] ? " open" : "") + '" data-raw="' + esc(k) + '" title="click to unfold or fold"><span class="tm sub">' + fmtT(e.t) + '</span><span class="tg">' + (e.kind === "event" ? esc(e.source || "event") : "[" + esc(e.tag) + "]") + '</span><span class="tx">' + (e.text ? esc(e.text) : '<span class="empty">(empty)</span>') + "</span></div>";
     }).join("") + "</div>";
   }
   // The detail is the entry's lines after its summary. A line "label:" at the left edge,
