@@ -1168,6 +1168,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without creating atoms from the file. A file that names a module of no loaded
   application still returns `{:error, :unsafe_terms}`.
 
+- **The retry cap's gap counts an attempt that logs late.** When an attempt
+  the cap could no longer keep wrote its first line after the gap already
+  existed, the gap added its lines but not the attempt, so the report could
+  print fewer attempts omitted than were dropped. Each dropped attempt now
+  counts once, whether a newer attempt pushed it out or it logged late.
 - **An `@eventually` function that returns no predicate fails at its step.**
   The poller took the function's return as its predicate without checking it,
   so a function that answered the question itself (a boolean) raised
