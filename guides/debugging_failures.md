@@ -336,7 +336,9 @@ no adapter is touched:
   PropertyDamage.Expansion.for(MyModel, failure.seed, 1, "second")
 ```
 
-Pass `targets:` when a target does not run `:random`, because the pick then
+The last argument is the target's name. A target given without `name:` is named
+after the last segment of its adapter module (`"Adapter"` for `MyApp.Adapter`),
+as the report's Reproduction section prints it. Pass `targets:` when a target does not run `:random`, because the pick then
 depends on the reference. To run part of a campaign, use `only:`:
 
 ```elixir
@@ -390,7 +392,10 @@ number of commands and the command that triggered the failure), then a
 marker (`← FAILURE TRIGGER` or `← DEPENDENCY`, or none), and a line giving the
 reason. A `DEPENDENCY CHAIN` section follows when the failing command depends on
 earlier ones. The text comes from the analysis of the command structs, so it
-names commands and roles, not what they mean in your domain.
+names commands and roles, not what they mean in your domain. A command it cannot
+place, such as a deposit that only supplies a balance, reads `Unknown role -
+may indicate shrinking issue`; that label alone does not mean the shrink went
+wrong.
 
 ## Step 4: Step-by-Step Replay
 

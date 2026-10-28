@@ -657,6 +657,9 @@ PD_LOG="only:http,seed except:body" mix test
 - If the value does not parse, `format_failure/2` and a failing
   `property_damage` test raise an `ArgumentError` that shows the expected
   syntax.
+  `IO.inspect(report, pretty: true)` does not raise: it prints a one-line
+  summary in place of the report. If you see that summary, call
+  `PropertyDamage.ExUnit.format_failure/1` on the report to see the error.
 
 ### A finished report
 
