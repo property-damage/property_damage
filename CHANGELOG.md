@@ -1388,6 +1388,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed as JSON. `Layout.logs/2` builds the sides and the listing items the
   `logs` key is made of, and `Layout.build/2` reads the same data. The keys
   are unchanged.
+- **`Formatter.format(report, :json)` holds `compare_counts`.** The persistence
+  export held the per-observation counts and the `:json` format did not. The
+  key has the export's shape: the failure-name strings (`Projection.function`)
+  map to the counts.
 
 ## [0.2.0] - 2026-06-25
 

@@ -15,8 +15,9 @@ defmodule PropertyDamage.FailureReport.Formatter do
   banner and the seed, then the Failure, Minimal Reproduction, Projections and
   Reproduction sections, with every step and every event in full. The
   markdown format is the terminal text without color, each section's body in
-  a fenced block. The JSON format keeps every field of the report and adds a
-  `logs` key (see below).
+  a fenced block. The JSON format keeps every field of the report, holds the
+  `compare_counts` the persistence export holds, and adds a `logs` key (see
+  below).
 
   ## Options
 
@@ -104,6 +105,10 @@ defmodule PropertyDamage.FailureReport.Formatter do
         serialize_sequence(FailureReport.shrunk_sequence(report), report.command_labels),
       "reproduction" => FailureReport.reproduction_command(report),
       "other_failures" => Enum.map(report.other_failures, &serialize_other_failure/1),
+      "compare_counts" =>
+        Map.new(report.compare_counts, fn {key, counts} ->
+          {FailureReport.format_name(key), counts}
+        end),
       "reference_trace" => serialize_reference_trace(report),
       "reference_projections" =>
         report.reference_state_at_failure &&
