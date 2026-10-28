@@ -108,7 +108,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
       "reference_projections" =>
         report.reference_state_at_failure &&
           serialize_projections(report.reference_state_at_failure),
-      "logs" => serialize_logs(Layout.build(report, opts).logs)
+      "logs" => serialize_logs(Layout.logs(report, opts))
     }
 
     # Add optional sections

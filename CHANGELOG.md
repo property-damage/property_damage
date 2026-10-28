@@ -1383,6 +1383,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which two readers took for an error. Its reason now says the shrinker kept
   it because removing it lost the failure. The role stays `:unknown`, and the
   moduledoc states that roles come from placeholders alone.
+- **The `:json` format builds only the listing to produce `logs`.** It ran the
+  whole layout, so a report whose Failure section could not be built also
+  failed as JSON. `Layout.logs/2` builds the sides and the listing items the
+  `logs` key is made of, and `Layout.build/2` reads the same data. The keys
+  are unchanged.
 
 ## [0.2.0] - 2026-06-25
 

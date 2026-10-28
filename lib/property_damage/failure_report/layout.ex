@@ -82,6 +82,39 @@ defmodule PropertyDamage.FailureReport.Layout do
   @doc false
   @spec build(FailureReport.t(), keyword()) :: t()
   def build(%FailureReport{} = report, opts \\ []) do
+    listing = listing_data(report, opts)
+    %{filter: filter, unknown: unknown, variant: variant, focus: focus, setup: setup} = listing
+
+    sections =
+      [
+        failure_section(report, focus, filter, unknown),
+        setup && setup.section,
+        listing.section,
+        projections_section(report, variant, focus),
+        reproduction_section(report)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    %__MODULE__{
+      banner: banner(report),
+      seed: report.seed,
+      sections: sections,
+      logs: logs_of(listing)
+    }
+  end
+
+  # The `logs` map of `build/2` (what the `:json` format carries) without
+  # the Failure, Projections and Reproduction sections, so a report whose
+  # messages cannot be built still yields its log lines. `build/2` reads the
+  # same data, so the two cannot drift.
+  @doc false
+  @spec logs(FailureReport.t(), keyword()) :: map()
+  def logs(%FailureReport{} = report, opts \\ []), do: report |> listing_data(opts) |> logs_of()
+
+  # The data of the listing and the log lines: the filter, the side of the
+  # failing target, the failing step, the Setup lines and the Minimal
+  # Reproduction section with the log lines of each target it lists.
+  defp listing_data(report, opts) do
     filter = Filter.resolve(report.log_filter, opts)
     unknown = Filter.unknown(filter, known_tags(report))
 
@@ -89,28 +122,27 @@ defmodule PropertyDamage.FailureReport.Layout do
       side(report, report.trace, variant_name(report), FailureReport.steps(report), filter)
 
     focus = focus(report, variant.items)
-    {listing_section, targets} = reproduction_listing(report, variant, focus)
-    setup = setup_section(report, filter)
+    {section, targets} = reproduction_listing(report, variant, focus)
 
-    sections =
-      [
-        failure_section(report, focus, filter, unknown),
-        setup && setup.section,
-        listing_section,
-        projections_section(report, variant, focus),
-        reproduction_section(report)
-      ]
-      |> Enum.reject(&is_nil/1)
+    %{
+      filter: filter,
+      unknown: unknown,
+      variant: variant,
+      focus: focus,
+      section: section,
+      targets: targets,
+      setup: setup_section(report, filter)
+    }
+  end
 
-    logs = %{
+  defp logs_of(%{filter: filter, unknown: unknown, targets: targets, setup: setup}) do
+    %{
       filter: filter,
       unknown: unknown,
       setup: (setup && setup.lines) || [],
       target: targets.target,
       reference: targets.reference
     }
-
-    %__MODULE__{banner: banner(report), seed: report.seed, sections: sections, logs: logs}
   end
 
   # Every tag of every line the report holds, before any filter.
