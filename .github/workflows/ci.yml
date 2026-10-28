@@ -61,6 +61,39 @@ jobs:
 
       - run: mix test
 
+  # Runs the documentation gate (every runnable fence, in a consumer project
+  # that depends on this checkout) and checks that each failure-report excerpt
+  # in the guides still matches a fresh run. Both scripts read every guide and
+  # skip the ones without markers.
+  docs:
+    name: Documentation gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          # The verified toolchain pair (.tool-versions / lint entry above).
+          elixir-version: "1.20"
+          otp-version: "27"
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: mix-1.20-27-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-1.20-27-
+
+      - run: mix deps.get
+
+      - name: Documentation-verification gate (runnable fences + notebook)
+        run: elixir scripts/docs_verify.exs
+
+      - name: Report excerpts match a fresh run
+        run: elixir scripts/regen_report_excerpts.exs --check
+
   package:
     name: Hex package contents
     runs-on: ubuntu-24.04
