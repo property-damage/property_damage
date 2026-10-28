@@ -427,7 +427,7 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 - **WHEN** the reference fails at root `r` under `concurrency: :serial`
 - **THEN** no variant after it in target order SHALL execute root `r`
 
-### Requirement: Failure Report Is the Result (DR-045, DR-046)
+### Requirement: Failure Report Is the Result (DR-045, DR-046, DR-055, DR-056)
 
 `PropertyDamage.run/1` SHALL return `{:ok, stats}` or `{:error, %PropertyDamage.FailureReport{}}`. `stats` SHALL carry `runs`, `total_commands`, `seed`, `targets` (a list of `%{index, name}`), `check_fires`, `compare_counts`, `coverage` when requested, and `metrics` keyed by target name under `latency:`. The failure report SHALL carry `kind`, `variant`, `targets` (the run's entries as `PropertyDamage.Target.to_entry/1` gives them), `concurrency`, `compare` (`[converge_within: ms]`), `compare_counts`, `other_failures`, `latency` (the option as given), `metrics` (per target name, `nil` when `latency:` is off), `stutter` and `max_commands`, and SHALL NOT carry `adapter` or `equivalence`. A setup failure (the adapter's `setup/1`, a setup command, or an unresolved `external()`) SHALL return a `:setup_failed` report whose `failed_at_index` is `nil` (DR-048). The report SHALL also carry `setup_commands` and `teardown_commands`, and `stats` SHALL count setup and teardown commands separately from `total_commands`. There SHALL be no `Differential.Result`.
 
@@ -447,6 +447,13 @@ An adapter that raises or answers `{:error, _}` at a root SHALL be an `:executio
 - **THEN** the report SHALL record `compare`, `stutter`, `max_commands` and `check_mode`
 - **AND** `FailureReport.reproduction_command/1` SHALL print `compare: [converge_within: ms]`, `stutter:`, `max_commands:` and a `check_mode:` other than `:halt`
 - **AND** `shrink_further/2`, `mix pd.reshrink` and `PropertyDamage.Replay` SHALL run the failure again under the report's `check_mode`
+
+#### Scenario: A comparison failure keeps the reference's side (DR-055, DR-056)
+
+- **WHEN** a run ends with a failure of kind `:diverged` or `:did_not_converge`
+- **THEN** the report SHALL carry `reference_trace`, the reference target's `RunTrace` of the reported run, and `reference_state_at_failure`, the reference's projection state at the failing boundary, both taken from the result the scheduler already holds, with no further capture
+- **AND** a report of any other kind SHALL leave both `nil`
+- **AND** the printed report SHALL list the reference and the failing variant side by side and compare their states at that boundary
 
 #### Scenario: Other failures are listed
 
