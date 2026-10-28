@@ -1146,6 +1146,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `PropertyDamage.Replay` docs list the options the schema accepts.**
+  They listed `:stutter_config` and `:external_markers`, which `run/2` and
+  `start/2` reject. The docs now list `:targets`, `:stop_on_failure`,
+  `:include_projections` and `:log`, and the Limitations note says replay
+  does not apply stutter.
+
 - **`Settle.settle/2` takes a `:sleep` option, and the backoff tests use it.**
   The linear-backoff test measured wall-clock gaps against a floor and failed
   on a loaded runner, because the last sleep is clipped to the time left before
