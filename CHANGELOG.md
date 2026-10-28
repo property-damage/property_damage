@@ -28,8 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     that has no scope, such as a `GenServer`.
   - A timeout that kills `execute/3` loses no line written before it.
   - Lines live only in memory: only the reported run keeps them, and no saved
-    report, saved trace or replay artifact holds one. The `:json` and
-    `:compact` formats are unchanged.
+    report, saved trace or replay artifact holds one. The `:compact` format is
+    unchanged, and the `:json` format gains a `logs` key (see the tag filters
+    entry below).
   - `benches/cachex_bench` logs its cache calls.
 
 - **Tag filters and `PD_LOG` for the log lines of the failure report
@@ -73,7 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `setup_log:` takes only the lines `capture/1` returns, and
     `FailureReport.setup_log` holds them. They live only in memory: a saved
     report holds `[]`, and so does a loaded one. The persistence version stays
-    15. The `:json` and `:compact` formats are unchanged.
+    15. The `:json` format lists the setup lines in its `logs` key, and
+    `:compact` is unchanged.
 
 - **A retried command keeps its first and last attempts in the report
   (DR-054).** A settle or stutter retry that runs a command hundreds of times
@@ -88,13 +90,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `RunTrace.Step.logs` holds a `PropertyDamage.Log.Gap` in the place of the
     dropped attempts.
 
-- **A divergence records how long it waited (DR-055).** `Failure.Divergence`
+- **A divergence records how long it waited (DR-055, DR-056).** `Failure.Divergence`
   gains `waited_ms`, how long the comparison waited at the boundary, and
   `within_ms`, the convergence bound it waited against, as
   `Failure.Convergence` already had. The report prints both, so a reader can
   tell a real disagreement from a bound set too tight. A version-15 file saved
   before the fields existed loads with each of them `nil`; the persistence
   format stays at version 15.
+
+- **The report keeps the reference's side of a comparison failure and why the
+  shrinker stopped (DR-055).** For `:diverged` and `:did_not_converge`,
+  `FailureReport` gains `reference_trace`, the reference target's `RunTrace` of
+  the reported run, and `reference_state_at_failure`, its projection state at
+  the failing boundary; `reference_steps/1` and `reference_event_log/1` read
+  the trace as `steps/1` and `event_log/1` read the failing target's. Every
+  other kind leaves both `nil`. A new `shrink_stop` field records why the
+  shrinker stopped (`:done`, `:max_iterations` or `:max_time`), and the Failure
+  section warns when a budget ran out. A report saved before the fields
+  existed loads with each of them `nil`; the persistence format stays at
+  version 15. The `:json` format gains `reference_trace` and
+  `reference_projections`.
+
 - **`PropertyDamage.Equivalence.within/3`, a tolerance (DR-051).**
   `@compare using: {PropertyDamage.Equivalence, :within, [0.01]}` agrees when
   two numbers differ by at most `0.01`, at every depth of maps, lists and
@@ -522,7 +538,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING (DR-055, DR-056): the terminal and markdown reports print one
   layout.** A report opens with a banner of one width (`BUG DETECTED!` or
-  `TEST CODE ERROR`) and `Seed: <seed>`, then four sections. Failure names the
+  `TEST CODE ERROR`) and `Seed: <seed>`, then four sections, with Setup
+  (DR-054) before Minimal Reproduction when the run was given `setup_log:`.
+  Failure replaces Failure Location and What Failed, and names the
   failure, the step and the fields of its kind in one aligned column; a
   comparison prints both values, the relation and the wait against the bound,
   and `Mismatch` only for a relation's own reason. Minimal Reproduction counts
@@ -535,9 +553,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one label in every section (`[i]`, `[i.j]`, `[setup i]`, `[teardown i]`,
   `[branch b.i]`), from the new `Sequence.Position.label/2`. The markdown
   report is the terminal text without color, each section's body in a fenced
-  block. Run Number, Command Index, Timestamp, State Transition, Event Log,
-  Boundary Comparisons, Shrinking Statistics and Original Sequence are no
-  longer printed; the JSON format keeps every field. `Formatter.format/3`
+  block. Anyone who parses the terminal output must change: Failure Location,
+  What Failed, Run Number, Command Index, Timestamp, State Transition, Event
+  Log, Boundary Comparisons, Shrinking Statistics and Original Sequence are no
+  longer printed. The JSON format keeps every field. `Formatter.format/3`
   no longer reads `:show_event_log`, `:show_state`, `:show_original`,
   `:max_events` or `:max_commands`: every step and every event prints.
 
