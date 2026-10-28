@@ -24,7 +24,8 @@ mix new bank_logs
 cd bank_logs
 ```
 
-Add the library to the `deps` in `mix.exs`, then fetch it:
+Replace the `deps` function in `mix.exs` (its commented example lines
+included) with this one:
 
 ```elixir
 defp deps do
@@ -34,12 +35,13 @@ defp deps do
 end
 ```
 
+To use a local checkout of PropertyDamage instead, write
+`{:property_damage, path: "/path/to/property_damage"}` in place of the
+version. Then fetch it:
+
 ```bash
 mix deps.get
 ```
-
-(To use a local checkout of PropertyDamage instead, write
-`{:property_damage, path: "/path/to/property_damage"}`.)
 
 ### 2. Write the system, the adapter and the model
 
@@ -222,7 +224,10 @@ IO.inspect(report, pretty: true)
 mix run bug.exs
 ```
 
-The run fails, shrinks the failure to two commands and prints the report:
+With seed 20, the run fails, shrinks the failure to two commands and prints
+the report. Another seed finds the bug in another run, and its shrunk
+reproduction may keep more commands, though none of them can be dropped alone
+without losing the failure:
 
 <!-- pd-report-excerpt: mix run bug.exs; seed 20 -->
 ```text
