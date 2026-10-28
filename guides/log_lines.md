@@ -589,7 +589,9 @@ The Setup section takes the same tag filter as every other line, here the
 keeps its own lines, and the outer one gets none of them. A raise inside the
 function propagates, and the lines written before it are dropped.
 
-In an ExUnit test, capture in `setup_all` and pass the lines to the run:
+In an ExUnit test, capture in `setup_all` and pass the lines to the run. Save
+this as `test/bank_test.exs` and run `mix test`; with the planted bug, the
+test fails and prints the report:
 
 ```elixir
 defmodule MyApp.BankTest do
