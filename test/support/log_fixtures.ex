@@ -840,7 +840,9 @@ defmodule PropertyDamage.Test.LogFixtures do
   end
 
   @doc false
-  # One run, unshrunk, with no replay artifact and no validation.
+  # One run, unshrunk, with no replay artifact and no validation. Under
+  # `only: [replay: path]` the run takes its seed from the artifact, so none
+  # is passed.
   def run(model, targets, extra \\ []) do
     [
       model: model,
@@ -854,7 +856,20 @@ defmodule PropertyDamage.Test.LogFixtures do
       compare: [converge_within: 50]
     ]
     |> Keyword.merge(extra)
+    |> drop_default_seed_for_replay(extra)
     |> PropertyDamage.run()
+  end
+
+  defp drop_default_seed_for_replay(opts, extra) do
+    case Keyword.get(opts, :only) do
+      only when is_list(only) ->
+        if Keyword.has_key?(only, :replay) and not Keyword.has_key?(extra, :seed),
+          do: Keyword.delete(opts, :seed),
+          else: opts
+
+      _ ->
+        opts
+    end
   end
 
   @doc false
