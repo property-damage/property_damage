@@ -65,32 +65,8 @@ defmodule PropertyDamage.ExUnit do
 
   ## Example Failure Output
 
-      1) property system maintains invariants
-
-         BUG DETECTED!
-
-         Seed: 12345
-
-         ## Failure
-
-         Failure  check failed
-         Check    quantity_limit
-         At       [0] %CreateItem{quantity: 101}
-         Message  Quantity 101 exceeds limit
-
-         ## Minimal Reproduction (1 root)
-
-         ► [0] %CreateItem{quantity: 101}  ◄── failed
-
-         ## Projections at [0]   (- before, + after)
-         ...
-
-         ## Reproduction
-
-         targets = [MyApp.TestAdapter]
-         ...
-
-  See the Debugging Failures guide for a full report, read section by section.
+  The [Debugging Failures](debugging_failures.md#reading-the-report) guide shows a
+  real report and reads it section by section.
   """
 
   @doc """

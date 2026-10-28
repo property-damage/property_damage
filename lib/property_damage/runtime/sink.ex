@@ -44,8 +44,8 @@ defmodule PropertyDamage.Runtime.Sink do
   `lines/1` returns the kept lines in order, the gap between the first
   attempt's lines and the others.
 
-  `start_link/1` takes `keep_attempts:` (default 3, the default of
-  `log: [keep_attempts:]` in `PropertyDamage.run/1`). The stutter retries of a
+  `start_link/1` takes `keep_attempts:`, which defaults to the default of
+  `log: [keep_attempts:]` in `PropertyDamage.run/1`. The stutter retries of a
   command run after its own sink closed, and write into a sink that continues
   the step's kept lines: `lines:` seeds it with the list `lines/1` returned for
   the step, and `phase: :stutter` keys its attempts apart from the command's,
