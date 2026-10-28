@@ -1358,6 +1358,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaf.** Both raised `FunctionClauseError` for a failure at a leaf of an
   expanded root. The state at a leaf is now the prefix as it stood when the
   root began plus the folds of that root's leaves through this leaf.
+- **A latency-budget report lists the failing target's events and log lines.**
+  The report carried an empty trace, so its listing showed neither. It now
+  holds the failing target's result of the last run, which is replaced on
+  every run. It stays unshrunk and not localized to a command.
 
 ## [0.2.0] - 2026-06-25
 

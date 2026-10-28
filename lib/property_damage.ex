@@ -863,9 +863,11 @@ defmodule PropertyDamage do
 
   # The budget is judged once, after every run passed, so the report is not
   # localized to a command and nothing is shrunk or re-executed. It records the
-  # last run's sequence, seed and number.
+  # last run's sequence, seed and number, and the failing target's result of
+  # that run (each run replaces the previous one, so one run stays in memory).
   defp latency_report(ctx, acc, metrics, [{target, failure} | rest]) do
     last = acc.last_run
+    result = Enum.at(last.results, target.index) || %{}
 
     FailureReport.new(
       seed: last.run_seed,
@@ -877,6 +879,10 @@ defmodule PropertyDamage do
       run_nonce: ctx.run_nonce,
       mint_epoch: 0,
       failed_at_index: nil,
+      executed: Map.get(result, :executed, %{}),
+      event_log: Map.get(result, :event_log, []),
+      command_fold_ordinals: Map.get(result, :command_fold_ordinals, %{}),
+      logs: Map.get(result, :logs, %{}),
       failure_reason: failure,
       kind: :latency_exceeded,
       variant: variant_of(target),
@@ -995,7 +1001,10 @@ defmodule PropertyDamage do
            | total_commands: acc.total_commands + Sequence.command_count(run.sequence),
              setup_commands: acc.setup_commands + length(run.sequence.setup),
              teardown_commands: acc.teardown_commands + length(run.sequence.teardown),
-             last_run: Map.take(run, [:sequence, :run_seed, :run_number])
+             last_run:
+               run
+               |> Map.take([:sequence, :run_seed, :run_number])
+               |> Map.put(:results, if(ctx.measure_latency, do: outcome.results, else: []))
          }}
 
       _failure ->
