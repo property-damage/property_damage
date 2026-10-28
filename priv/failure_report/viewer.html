@@ -1,0 +1,1085 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__PD_TITLE__</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1f23; --muted: #5d636e; --line: #dfe1e5;
+  --accent: #2f5bd3; --bad: #c62f2f; --bad-bg: #fdecec; --ok: #1f7a4a; --ok-bg: #e7f5ee;
+  --warn: #8a5a00; --ref: #2f5bd3; --var: #8d3fc7; --code-bg: #f0f1f3;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b; --panel: #1d2026; --ink: #e6e8ec; --muted: #9aa1ad; --line: #30343c;
+    --accent: #7ea2ff; --bad: #ff7b7b; --bad-bg: #3a1f22; --ok: #6fd3a0; --ok-bg: #18322a;
+    --warn: #e0b45c; --ref: #7ea2ff; --var: #c79bff; --code-bg: #262a31;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171b; --panel: #1d2026; --ink: #e6e8ec; --muted: #9aa1ad; --line: #30343c;
+  --accent: #7ea2ff; --bad: #ff7b7b; --bad-bg: #3a1f22; --ok: #6fd3a0; --ok-bg: #18322a;
+  --warn: #e0b45c; --ref: #7ea2ff; --var: #c79bff; --code-bg: #262a31;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 80px; }
+.stateline { font: 12px var(--mono); color: var(--muted); padding: 8px 0; border-bottom: 1px dashed var(--line); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+header.top { padding: 14px 0 6px; }
+h1 { font-size: 20px; margin: 4px 0 6px; }
+h2 { font-size: 16px; margin: 0; }
+h3 { font-size: 14px; margin: 0 0 8px; }
+.sub { color: var(--muted); font-size: 13px; }
+nav.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 10px 0 16px; }
+nav.tabs a { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); text-decoration: none; font-size: 13px; background: var(--panel); }
+nav.tabs a.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+code, .mono { font-family: var(--mono); font-size: 13px; }
+code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; word-break: break-word; }
+a { color: var(--accent); }
+.tag-ann { display: inline-block; font: 10px var(--mono); color: var(--warn); border: 1px dashed var(--warn); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: middle; white-space: nowrap; }
+.tgt-ref { color: var(--ref); font-weight: 600; }
+.tgt-var { color: var(--var); font-weight: 600; }
+.bad { color: var(--bad); }
+.ok { color: var(--ok); }
+button { font: 13px var(--sans); padding: 5px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+.btnrow { display: flex; gap: 8px; margin: 0 0 14px; flex-wrap: wrap; align-items: center; }
+.scroll { overflow-x: auto; max-width: 100%; }
+pre { margin: 0; }
+pre.code { font: 12px/1.45 var(--mono); background: var(--code-bg); padding: 8px 10px; border-radius: 6px; overflow-x: auto; max-width: 100%; }
+pre.wrapcode { white-space: pre-wrap; word-break: break-all; }
+
+/* explore */
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+.chip { font: 12px var(--mono); padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; color: var(--ink); }
+.chip .c { color: var(--muted); margin-left: 4px; }
+.chip.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chip:not(.on) { opacity: .55; text-decoration: line-through; }
+.tn { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; min-width: 0; }
+.tn:hover { background: var(--code-bg); }
+.tn .tw { width: 14px; flex: none; color: var(--muted); text-align: center; }
+.tn .lb { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.tn .bd { flex: none; font-size: 10.5px; padding: 0 5px; border-radius: 999px; background: var(--code-bg); color: var(--warn); border: 1px solid var(--line); }
+.tn .tm { flex: none; color: var(--muted); font-size: 11px; }
+.tn.fail .lb { color: var(--bad); }
+.tn.k-target.ref .lb { color: var(--ref); font-weight: 700; }
+.tn.k-target.var .lb { color: var(--var); font-weight: 700; }
+.tn.k-event .lb { color: var(--ok); }
+.tn.k-log .lb { color: var(--muted); }
+.tn.sel { background: var(--accent); }
+.tn.sel .lb, .tn.sel .tm, .tn.sel .tw { color: var(--bg) !important; }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+.crumbs { font: 12px var(--mono); color: var(--muted); margin-bottom: 8px; word-break: break-word; }
+.crumbs a { cursor: pointer; text-decoration: none; }
+.subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 10px 0; flex-wrap: wrap; }
+.subtabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 6px 10px; color: var(--muted); }
+.subtabs button.on { border-bottom-color: var(--accent); color: var(--ink); font-weight: 600; }
+.strip { display: flex; gap: 3px; flex-wrap: wrap; margin: 8px 0 4px; }
+.cell { width: 30px; height: 30px; border-radius: 5px; border: 1px solid var(--line); font: 11px var(--mono); display: grid; place-items: center; cursor: pointer; color: var(--ink); padding: 0; }
+.cell.ph-pend-0 { background: color-mix(in srgb, var(--warn) 18%, var(--panel)); }
+.cell.ph-pend-1 { background: color-mix(in srgb, var(--warn) 36%, var(--panel)); }
+.cell.ph-pend-2 { background: color-mix(in srgb, var(--warn) 58%, var(--panel)); }
+.cell.ph-done { background: color-mix(in srgb, var(--ok) 45%, var(--panel)); }
+.cell.edge { border-color: var(--ink); border-width: 2px; }
+.cell.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.legend { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px; border: 1px solid var(--line); }
+.diff { font: 12px/1.5 var(--mono); background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+.diff .a { color: var(--ok); }
+.diff .r { color: var(--bad); }
+.diff .m { color: var(--warn); }
+.rawlog { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.rl { display: grid; grid-template-columns: 52px 110px minmax(0, 1fr); gap: 6px; font: 12px var(--mono); padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.rl:hover { background: var(--code-bg); }
+.rl .tg { color: var(--accent); }
+.rl .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl.open .tx { white-space: pre-wrap; word-break: break-all; }
+.empty { color: var(--muted); font-style: italic; font-size: 13px; }
+.hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.blk { font: 600 12px var(--mono); color: var(--muted); margin: 8px 0 3px; }
+.jbar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 2px 0 4px; }
+.jbar button { font: 11px var(--mono); padding: 1px 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.jbar button.on { color: var(--accent); border-color: var(--accent); }
+.jbar .jsep { font-size: 11px; color: var(--muted); margin-left: 8px; }
+.ftree { font: 12px/1.5 var(--mono); background: var(--panel); border-radius: 6px; padding: 6px 10px 6px 1.6em; max-height: 420px; overflow: auto; }
+.ftree .fa { position: relative; display: inline-block; width: 0; }
+.ftree .fa .ftog { position: absolute; right: 0.15em; top: -1.1em; height: 1.5em; }
+.ftree .fl { display: flex; align-items: flex-start; }
+.ftree .ft { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.ftree .ft:empty::before { content: "\200b"; }
+.ftree .fsum { color: var(--muted); white-space: pre; user-select: none; }
+.ftree .fn.closed > .fc, .ftree .fn:not(.closed) > .fl .fsum { display: none; }
+.ftog { width: 1.3em; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; text-align: center; user-select: none; }
+.ftog:hover { color: var(--accent); }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--code-bg); }
+
+/* reproduce */
+.snip { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+.snip .sh { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.copied { color: var(--ok); font-size: 12px; }
+
+@media (max-width: 640px) {
+  h1 { font-size: 18px; }
+  .rl { grid-template-columns: 44px minmax(0, 1fr); }
+  .rl .tg { display: none; }
+}
+
+/* I: report-only run */
+table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.t th, table.t td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; font-family: var(--mono); }
+table.t th { font-size: 11.5px; color: var(--muted); font-weight: 600; font-family: var(--sans); }
+table.t td.flag { color: var(--bad); font-weight: 700; }
+.projtbl td.chg { color: var(--bad); font-weight: 600; }
+.wrap { max-width: none; }
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; font: 12.5px var(--mono); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+.facts .k { color: var(--muted); }
+.facts .v { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.rgrid { display: grid; gap: 8px 12px; align-items: start; }
+.rgrid .hd { font-size: 13px; font-weight: 600; padding-bottom: 4px; border-bottom: 3px solid var(--line); min-width: 0; }
+.rgrid .hd.c0 { border-color: var(--ref); }
+.rgrid .hd.c1 { border-color: var(--var); }
+.c0 .tname, .tname.c0 { color: var(--ref); font-weight: 600; }
+.c1 .tname, .tname.c1 { color: var(--var); font-weight: 600; }
+.cmpwrap { grid-column: 1 / -1; min-width: 0; }
+details.cmp { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin: 0 0 4px; }
+details.cmp summary { cursor: pointer; font: 600 13px var(--sans); }
+details.cmp summary .sub { font-weight: 400; font-size: 12px; }
+.crow { margin-top: 8px; border-left: 3px solid transparent; padding-left: 8px; }
+.crow.on { border-left-color: var(--accent); }
+.crow .ch { font: 12.5px var(--mono); margin-bottom: 2px; }
+table.t th.own, table.t td.own { background: var(--code-bg); }
+.rband { grid-column: 1 / -1; font: 12.5px var(--mono); color: var(--muted); padding: 12px 0 0; border-top: 1px dashed var(--line); min-width: 0; }
+.rband .rh { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.rband b { color: var(--ink); overflow-wrap: anywhere; }
+.rband.mark b, .rband.mark .mk { color: var(--bad); }
+.rband .facts { margin: 6px 0 0; border-color: var(--bad); }
+.col { display: flex; flex-direction: column; gap: 8px; min-width: 0; border: 0; padding: 0; }
+.ebox { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); min-width: 0; }
+.ebox.mark { border-color: var(--bad); }
+.ebox .lh { font: 12.5px var(--mono); font-weight: 600; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ebox .ls { font-size: 12px; color: var(--muted); margin: 2px 0 2px; }
+.setupbox { grid-column: 1 / -1; }
+.steps { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.st { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 12px 56px minmax(40px, max-content) minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 3px 6px; border-radius: 5px; font: 12.5px var(--mono); cursor: pointer; border: 1px solid transparent; min-width: 0; }
+.st:hover { background: var(--code-bg); }
+.st:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.st .cv { color: var(--muted); font-size: 10px; }
+.st .tt { color: var(--muted); }
+.st .kd { font-size: 10.5px; color: var(--muted); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st .lb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st .lb .chipv { color: var(--muted); }
+.st .bd { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--code-bg); color: var(--warn); white-space: nowrap; }
+.st.k-event .lb { font-weight: 600; }
+.st.k-omitted { cursor: default; font-style: italic; color: var(--muted); }
+.st.hot .lb { color: var(--bad); }
+.st.open { background: var(--code-bg); border-radius: 5px 5px 0 0; }
+.st.sel { border-color: var(--accent); }
+.st.cp { border: 1px dashed var(--accent); }
+.det { margin: 0 0 8px 0; padding: 8px 10px 10px 18px; border-left: 3px solid var(--accent); background: var(--code-bg); border-radius: 0 0 6px 6px; min-width: 0; font-size: 13px; }
+.det pre.code { max-height: 420px; overflow: auto; background: var(--panel); }
+.det .scroll { background: var(--panel); max-height: 420px; overflow: auto; }
+.det .kv { background: var(--panel); padding: 6px 8px; border-radius: 6px; }
+.cpbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; margin: 0 0 8px; padding: 5px 8px; background: var(--panel); border-radius: 6px; }
+.cpbar a { cursor: pointer; }
+.cell.ph0 { background: var(--panel); }
+.cell.ph1 { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+.cell.ph2 { background: color-mix(in srgb, var(--accent) 32%, var(--panel)); }
+.cell.ph3 { background: color-mix(in srgb, var(--accent) 48%, var(--panel)); }
+.cell.gap { cursor: default; width: auto; padding: 0 6px; border-style: dashed; color: var(--muted); background: transparent; }
+.runbar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 13px; margin: 6px 0 0; }
+.runhint { font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
+.nocp { font-size: 12px; color: var(--muted); font-style: italic; }
+.projmod { margin-bottom: 10px; }
+.projmod h4 { margin: 0 0 4px; font: 600 12.5px var(--mono); overflow-wrap: anywhere; }
+.projtbl tr.same td { color: var(--muted); }
+details.sec { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
+details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.err { color: var(--bad); font-size: 13px; }
+@media (max-width: 760px) {
+  .rgrid { grid-template-columns: minmax(0, 1fr) !important; }
+  .rgrid .hd { display: none; }
+  .col::before { content: attr(data-t); font-size: 12px; font-weight: 600; }
+  .col.c0::before { color: var(--ref); }
+  .col.c1::before { color: var(--var); }
+  .st { grid-template-columns: 10px 46px minmax(0, 1fr) auto; }
+  .st .kd { display: none; }
+  .det { padding-left: 10px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stateline"><span id="stateline"></span><span><button id="theme" type="button" style="font-size:11px;padding:1px 8px">theme</button></span></div>
+  <header class="top">
+    <div class="sub mono" id="kicker"></div>
+    <h1 id="headline"></h1>
+  </header>
+  <main id="view"><p class="sub">Loading…</p></main>
+</div>
+<script type="application/json" id="pd-report">__PD_REPORT_JSON__</script>
+<script>
+(function () {
+  "use strict";
+  // Everything below is derived from the report text alone. The page knows the layout
+  // PropertyDamage prints (sections, step lines, timed log and event entries, the
+  // "... N omitted" marker) and nothing about the system under test, its domain or protocol.
+  var DOT = " · ";
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function fmtT(t) { return t == null ? "" : "+" + Number(t).toFixed(2) + "s"; }
+
+  // ---------- parsing ----------
+  function splitTop(body) {
+    var out = [], depth = 0, cur = "", inStr = false;
+    for (var i = 0; i < body.length; i++) {
+      var ch = body[i];
+      if (inStr) { cur += ch; if (ch === "\\") { cur += body[++i] || ""; } else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') { inStr = true; cur += ch; continue; }
+      if ("([{".indexOf(ch) >= 0) depth++;
+      if (")]}".indexOf(ch) >= 0) depth--;
+      if (ch === "," && depth === 0) { out.push(cur); cur = ""; continue; }
+      cur += ch;
+    }
+    if (cur.trim()) out.push(cur);
+    return out;
+  }
+  // An inspected struct: %Module{key: value, ...}. Returns null for anything else.
+  function parseStruct(s) {
+    var m = /^%([A-Za-z0-9_.]+)\{([\s\S]*)\}\s*$/.exec(String(s).trim());
+    if (!m) return null;
+    var fields = [];
+    splitTop(m[2]).forEach(function (p) {
+      var f = /^\s*([a-z_][A-Za-z0-9_?!]*): ([\s\S]*)$/.exec(p);
+      if (f) fields.push([f[1], f[2].replace(/\s*\n\s*/g, " ").trim()]);
+    });
+    return { module: m[1], fields: fields };
+  }
+  function balanced(s) {
+    var d = 0, inStr = false;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i];
+      if (inStr) { if (ch === "\\") i++; else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') inStr = true; else if ("([{".indexOf(ch) >= 0) d++; else if (")]}".indexOf(ch) >= 0) d--;
+    }
+    return d <= 0;
+  }
+  function leadingSpaces(l) { return l.length - l.replace(/^ +/, "").length; }
+
+  // Walks the lines of a block that holds steps and timed entries (Minimal Reproduction, Setup).
+  function parseSteps(lines) {
+    var targets = [], T = null, root = null, step = null, entry = null, pendingCmd = null, captions = [], blanks = 0;
+    function ensureT() { if (!T) { T = { name: null, role: "only", steps: [] }; targets.push(T); } return T; }
+    function ensureStep() {
+      if (!step) { step = { label: "", depth: 0, cmd: "", marker: null, as: null, entries: [], children: [], pseudo: true }; ensureT().steps.push(step); root = step; }
+      return step;
+    }
+    lines.forEach(function (l) {
+      // a blank line belongs to the message only if the message continues after it
+      if (!l.trim()) { if (entry) blanks++; return; }
+      var cont = entry && leadingSpaces(l) >= entry.base && !/^ +\+\d+(?:\.\d+)?s (log|event) /.test(l);
+      if (cont) for (; blanks > 0; blanks--) entry.lines.push("");
+      blanks = 0;
+      var tm = /^(Reference|Variant): target "(.*)"\s*$/.exec(l);
+      if (tm) { T = { name: tm[2], role: tm[1].toLowerCase(), steps: [] }; targets.push(T); root = step = entry = pendingCmd = null; return; }
+      var em = /^( +)\+(\d+(?:\.\d+)?)s (log|event)( +)(.*)$/.exec(l);
+      if (em) {
+        pendingCmd = null;
+        var col = em[1].length + 1 + em[2].length + 1 + 1 + em[3].length + em[4].length;
+        var msg = em[5], e = { kind: em[3], t: parseFloat(em[2]), lines: [msg], base: col, tags: [] };
+        if (e.kind === "log") {
+          var tg = /^\[([^\]]*)\] ?([\s\S]*)$/.exec(msg);
+          if (tg) { e.tags = tg[1].split(/\s+/).filter(Boolean); e.lines = [tg[2]]; e.base = col + tg[1].length + 3; }
+        }
+        ensureStep().entries.push(e); entry = e; return;
+      }
+      var om = /^ +\.\.\. ([\d,]+) (.+?) omitted(?: \(([\d,]+) lines?\))?\s*$/.exec(l);
+      if (om) { ensureStep().entries.push({ kind: "omitted", count: parseInt(om[1].replace(/,/g, ""), 10), unit: om[2], lineCount: om[3] || "", lines: [l.trim()] }); entry = null; return; }
+      var bi = l.indexOf("["), sm = /^(►)?( *)\[([^\]]+)\](.*)$/.exec(l);
+      if (sm && bi <= 6) {
+        var rest = sm[4], mk = /\s+◄── (.+?)\s*$/.exec(rest);
+        if (mk) rest = rest.slice(0, mk.index);
+        var as = /\s+as (\S+)\s*$/.exec(rest);
+        if (as) rest = rest.slice(0, as.index);
+        var s = { label: sm[3], depth: bi <= 2 ? 0 : 1, cmd: rest.trim(), marker: mk ? mk[1] : null, as: as ? as[1] : null, entries: [], children: [], arrow: !!sm[1] };
+        if (s.depth === 0 || !root) { ensureT().steps.push(s); root = s; } else root.children.push(s);
+        step = s; entry = null;
+        pendingCmd = !s.cmd || !balanced(s.cmd) ? s : null;
+        return;
+      }
+      if (pendingCmd) { pendingCmd.cmd += (pendingCmd.cmd ? "\n" : "") + l.trim(); if (balanced(pendingCmd.cmd)) pendingCmd = null; return; }
+      if (entry) { entry.lines.push(l.slice(Math.min(entry.base, leadingSpaces(l)))); return; }
+      captions.push(l.trim());
+    });
+    targets.forEach(function (t) {
+      t.steps.forEach(function (r) {
+        r.entries.forEach(finishEntry);
+        r.children.forEach(function (c) { c.entries.forEach(finishEntry); });
+      });
+    });
+    return { targets: targets, captions: captions };
+  }
+  function finishEntry(e) {
+    e.text = (e.lines || []).join("\n");
+    e.first = (e.lines || [""])[0];
+    e.tag = e.tags && e.tags.length ? e.tags.join(" ") : (e.kind === "event" ? "event" : e.kind === "omitted" ? "omitted" : "(untagged)");
+    if (e.kind === "event") e.struct = parseStruct(e.text);
+  }
+
+  function parseReport(text) {
+    var lines = text.replace(/\r/g, "").replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+    var R = { seed: null, failure: [], setup: null, targets: [], projection: null, reproduction: "", other: [], trailing: [] };
+    var start = 0;
+    for (var i = 0; i < lines.length; i++) if (/BUG DETECTED/.test(lines[i])) { start = i; break; }
+    var secs = [], cur = null;
+    for (var j = start; j < lines.length; j++) {
+      var l = lines[j], sm = /^Seed: (.*)$/.exec(l), hm = /^## (.*)$/.exec(l);
+      if (sm && R.seed == null && !cur) { R.seed = sm[1].trim(); continue; }
+      if (hm) { cur = { title: hm[1].trim(), lines: [] }; secs.push(cur); continue; }
+      if (cur) cur.lines.push(l);
+    }
+    if (!secs.length) throw new Error("No '## ' sections found: this does not look like a PropertyDamage failure report.");
+    secs.forEach(function (s) {
+      if (s.title === "Failure") {
+        s.lines.forEach(function (l) {
+          if (!l.trim()) return;
+          var m = /^(\S.*?)\s{2,}(\S.*)$/.exec(l);
+          if (m) R.failure.push({ k: m[1], v: m[2] });
+          else if (R.failure.length) R.failure[R.failure.length - 1].v += "\n" + l.trim();
+        });
+      } else if (s.title === "Setup") {
+        var p = parseSteps(s.lines), st = p.targets[0] && p.targets[0].steps[0];
+        R.setup = { caption: p.captions.join(" "), entries: st ? st.entries : [] };
+      } else if (/^Minimal Reproduction/.test(s.title) || /Reproduction \(/.test(s.title)) {
+        R.reproTitle = s.title;
+        R.targets = parseSteps(s.lines).targets;
+      } else if (/^Projections/.test(s.title)) {
+        R.projection = parseProjection(s);
+      } else if (s.title === "Reproduction") {
+        var body = [], tail = false;
+        s.lines.forEach(function (l) {
+          // the test runner's own output can follow the report in a captured log
+          if (!tail && (/^\.+$/.test(l.trim()) && l.trim()) || /^Finished in /.test(l)) tail = true;
+          (tail ? R.trailing : body).push(l);
+        });
+        R.reproduction = body.join("\n").trim();
+      } else {
+        R.other.push({ title: s.title, text: s.lines.join("\n").trim() });
+      }
+    });
+    if (!R.targets.length) R.targets = [{ name: null, role: "only", steps: [] }];
+    R.targets.forEach(function (t, ti) { if (!t.name) t.name = R.targets.length > 1 ? "target " + (ti + 1) : "run"; });
+    return R;
+  }
+  function parseProjection(s) {
+    var P = { title: s.title, at: null, minus: "before", plus: "after", modules: [] };
+    var at = /at \[([^\]]+)\]/.exec(s.title); if (at) P.at = at[1];
+    var lg = /\(- (.*?), \+ (.*)\)\s*$/.exec(s.title); if (lg) { P.minus = lg[1]; P.plus = lg[2]; }
+    var mod = null, last = null;
+    s.lines.forEach(function (l) {
+      if (!l.trim()) return;
+      var mm = /^(\S+)\s+last applied: (.*)$/.exec(l);
+      if (mm) { mod = { name: mm[1], last: mm[2], fields: [] }; P.modules.push(mod); last = null; return; }
+      var fm = /^ {2}([-+]) ([^:]+?): ?(.*)$/.exec(l), um = /^ {4}([^:\s][^:]*?): ?(.*)$/.exec(l);
+      if (mod && fm) {
+        var f = mod.fields.filter(function (x) { return x.name === fm[2]; })[0];
+        if (!f) { f = { name: fm[2] }; mod.fields.push(f); }
+        f[fm[1] === "-" ? "minus" : "plus"] = fm[3]; last = [f, fm[1] === "-" ? "minus" : "plus"]; return;
+      }
+      if (mod && um) { var g = { name: um[1], same: um[2] }; mod.fields.push(g); last = [g, "same"]; return; }
+      if (last) last[0][last[1]] += "\n" + l.trim();
+    });
+    return P;
+  }
+
+  // ---------- items ----------
+  // Every entry is one item. A log entry's first line is its summary and the lines after it
+  // are its detail, so nothing here groups lines by tag, transport or content.
+  function toItems(entries) {
+    return entries.map(function (e) { return { type: e.kind === "event" ? "event" : e.kind === "omitted" ? "omitted" : "line", entries: [e] }; });
+  }
+  // Matching a line across targets ignores numbers and long hex ids, which differ between targets.
+  // Collapsing repeats does not: only identical summaries collapse.
+  function norm(s) {
+    return String(s).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>")
+      .replace(/\b(?=[0-9a-f]*\d)[0-9a-f]{12,}\b/gi, "<id>").replace(/\d+(?:\.\d+)?/g, "#");
+  }
+  function shapeKey(it) {
+    if (it.type === "event") return "E|" + (it.entries[0].struct ? it.entries[0].struct.module : norm(it.entries[0].first));
+    if (it.type === "repeat") return "X|" + it.reps[0].map(shapeKey).join("§");
+    return "L|" + it.entries[0].tag + "|" + norm(it.entries[0].first);
+  }
+  function sameKey(it) { return it.entries[0].kind + "|" + it.entries[0].tag + "|" + it.entries[0].first; }
+  function rawContent(items) { return items.map(function (it) { return it.entries.map(function (e) { return e.tag + "\u0001" + e.text; }).join("\u0002"); }).join("\u0003"); }
+  // Consecutive log entries with the same tags and the same summary collapse into one repeat item.
+  // A "... N omitted" marker between repetitions counts towards them.
+  function collate(items) {
+    var out = [], i = 0;
+    while (i < items.length) {
+      var best = null;
+      for (var p = 1; p <= 1 && i + p <= items.length; p++) {
+        var win = items.slice(i, i + p);
+        if (win.some(function (x) { return x.type === "omitted" || x.type === "event"; })) break;
+        var key = win.map(sameKey).join("§"), reps = [win], gaps = [], j = i + p;
+        for (;;) {
+          if (j < items.length && items[j].type === "omitted") {
+            var nx = items.slice(j + 1, j + 1 + p);
+            if (nx.length === p && nx.map(sameKey).join("§") === key) { gaps.push({ after: reps.length, entry: items[j].entries[0] }); j += 1; continue; }
+            break;
+          }
+          var w = items.slice(j, j + p);
+          if (w.length === p && w.map(sameKey).join("§") === key) { reps.push(w); j += p; } else break;
+        }
+        if (reps.length >= 2 && (!best || j - i > best.cover)) best = { p: p, reps: reps, gaps: gaps, cover: j - i };
+      }
+      if (best) {
+        var rep = { type: "repeat", period: best.p, reps: best.reps, gaps: best.gaps, entries: [] };
+        best.reps.forEach(function (r) { r.forEach(function (x) { rep.entries = rep.entries.concat(x.entries); }); });
+        rep.omitted = best.gaps.reduce(function (s, g) { return s + g.entry.count; }, 0);
+        rep.total = best.reps.length + rep.omitted;
+        // attempt numbers count the omitted repetitions; phases change where the detail changes
+        var n = 0, prevN = null, ph = -1;
+        rep.meta = best.reps.map(function (r, k) {
+          best.gaps.forEach(function (g) { if (g.after === k) n += g.entry.count; });
+          n++;
+          var nc = rawContent(r);
+          if (nc !== prevN) { ph++; prevN = nc; }
+          return { n: n, phase: ph, changed: k > 0 && rawContent(r) !== rawContent(best.reps[k - 1]), phaseStart: k === 0 || rep.meta === undefined };
+        });
+        rep.meta.forEach(function (m, k) { m.phaseStart = k === 0 || m.phase !== rep.meta[k - 1].phase; });
+        rep.phases = ph + 1;
+        out.push(rep); i += best.cover;
+      } else { out.push(items[i]); i++; }
+    }
+    return out;
+  }
+
+  // ---------- model ----------
+  var R = null, NODES = {}, TAGS = [], TAGCOUNT = {}, CMDPREFIX = "", EVPREFIX = "", SRC = "";
+  var S = { tags: {}, open: {}, linked: false, sel: null, rawOpen: {}, pay: {}, cmpOpen: {}, cmpFocus: null };
+
+  function commonPrefix(mods) {
+    mods = mods.filter(Boolean);
+    if (!mods.length) return "";
+    var parts = mods.map(function (m) { return m.split("."); }), n = 0;
+    for (;;) {
+      var seg = parts[0][n];
+      if (seg == null || parts.some(function (p) { return p[n] !== seg || p.length <= n + 1; })) break;
+      n++;
+    }
+    return n ? parts[0].slice(0, n).join(".") + "." : "";
+  }
+  function shortMod(m, prefix) { return prefix && m.indexOf(prefix) === 0 ? m.slice(prefix.length) : m; }
+  function shortCmd(text) {
+    var m = /^%([A-Za-z0-9_.]+)\{/.exec(text || "");
+    return m ? shortMod(m[1], CMDPREFIX) + text.slice(m[0].length - 1) : text;
+  }
+  function cmdModule(step) { var m = /^%([A-Za-z0-9_.]+)\{/.exec(step.cmd || ""); return m ? m[1] : step.cmd; }
+  function evLabel(e) {
+    if (!e.struct) return e.text.replace(/\s*\n\s*/g, " ");
+    return shortMod(e.struct.module, EVPREFIX) + " " + e.struct.fields.map(function (f) { return f[0] + ": " + f[1]; }).join(", ");
+  }
+
+  function build(text, name) {
+    R = parseReport(text); SRC = name;
+    NODES = {}; TAGCOUNT = {}; TAGS = []; S.open = {}; S.sel = null; S.cmpOpen = {}; S.cmpFocus = null;
+    var cmds = [], evs = [];
+    function countE(e) {
+      if (e.kind === "omitted") return;
+      if (!(e.tag in TAGCOUNT)) { TAGCOUNT[e.tag] = 0; TAGS.push(e.tag); }
+      TAGCOUNT[e.tag]++;
+      if (e.struct) evs.push(e.struct.module);
+    }
+    function addItems(ownerId, entries, ctx) {
+      entries.forEach(countE);
+      var items = collate(toItems(entries));
+      return items.map(function (it, k) {
+        var id = ownerId + "|i" + k;
+        NODES[id] = { id: id, kind: "item", item: it, owner: ownerId, ti: ctx.ti, root: ctx.root, exec: ctx.exec };
+        return id;
+      });
+    }
+    if (R.setup) R.setup.items = addItems("setup", R.setup.entries, { ti: null });
+    R.targets.forEach(function (t, ti) {
+      t.steps.forEach(function (r) {
+        cmds.push(cmdModule(r));
+        r.children.forEach(function (c) { cmds.push(cmdModule(c)); });
+        var execs = r.children.length ? r.children : [r];
+        if (r.children.length && r.entries.length) execs = [r].concat(r.children);
+        r.execs = execs.map(function (x) {
+          var id = "t" + ti + "|" + x.label;
+          NODES[id] = { id: id, kind: "exec", step: x, ti: ti, root: r };
+          x.id = id;
+          x.items = addItems(id, x.entries, { ti: ti, root: r, exec: x });
+          return x;
+        });
+      });
+    });
+    TAGS.sort(function (a, b) { return (a === "event") - (b === "event") || TAGCOUNT[b] - TAGCOUNT[a]; });
+    TAGS.forEach(function (t) { if (!(t in S.tags)) S.tags[t] = true; });
+    CMDPREFIX = commonPrefix(cmds.filter(function (m) { return /\./.test(m); }));
+    EVPREFIX = commonPrefix(evs);
+    buildCmp();
+  }
+
+  // ---------- matching across targets ----------
+  function rootByLabel(ti, label) { return R.targets[ti].steps.filter(function (s) { return s.label === label; })[0] || null; }
+  function counterpart(id, tj) {
+    var n = NODES[id];
+    if (!n || n.ti == null || tj === n.ti) return null;
+    var oroot = rootByLabel(tj, n.root.label);
+    if (!oroot) return null;
+    var exec = n.kind === "exec" ? n.step : n.exec;
+    var mod = cmdModule(exec);
+    var mine = n.root.execs.filter(function (x) { return cmdModule(x) === mod; });
+    var theirs = oroot.execs.filter(function (x) { return cmdModule(x) === mod; });
+    var oexec = theirs[mine.indexOf(exec)];
+    if (!oexec) return null;
+    if (n.kind === "exec") return oexec.id;
+    var key = shapeKey(n.item);
+    var a = exec.items.filter(function (i) { return shapeKey(NODES[i].item) === key; });
+    var b = oexec.items.filter(function (i) { return shapeKey(NODES[i].item) === key; });
+    return b[a.indexOf(id)] || null;
+  }
+  function others(ti) { var o = []; R.targets.forEach(function (_, j) { if (j !== ti) o.push(j); }); return o; }
+  function isMarked(n) { return !!(n.root && (n.root.marker || (n.exec && n.exec.marker))); }
+
+  // ---------- visibility ----------
+  function entryVisible(e) { return e.kind === "omitted" || S.tags[e.tag] !== false; }
+  function itemVisible(it) {
+    if (it.type === "repeat") return it.reps[0].some(itemVisible);
+    return it.entries.some(entryVisible);
+  }
+
+  // ---------- step lines ----------
+  function firstVisible(it) { return it.entries.filter(entryVisible)[0] || it.entries[0]; }
+  function stepLine(it) {
+    if (it.type === "repeat") {
+      var L = stepLine(it.reps[it.reps.length - 1][0]);
+      var changes = it.meta.filter(function (m) { return m.phaseStart && m.n > 1; }).map(function (m) { return "#" + m.n; });
+      return { kd: L.kd, lb: esc(it.reps[it.reps.length - 1][0].entries[0].first) + "  " + (changes.length ? '<span class="chipv">detail changes at ' + esc(changes.join(", ")) + "</span>" : '<span class="chipv">same detail each time</span>'), raw: L.raw,
+        bd: "×" + it.total };
+    }
+    var e = it.entries[0];
+    if (it.type === "event") return { kd: "event", lb: "◆ " + esc(evLabel(e)), raw: evLabel(e) };
+    if (it.type === "omitted") return { kd: "omitted", lb: esc(e.lines[0]), raw: e.lines[0] };
+    return { kd: e.tag === "(untagged)" ? "log" : e.tag, lb: esc(e.first) + (e.lines.length > 1 ? ' <span class="chipv">(+' + (e.lines.length - 1) + " lines)</span>" : ""), raw: e.first };
+  }
+  function itemT(it) { var e = it.entries.filter(function (x) { return x.t != null; }); return e.length ? e[0].t : null; }
+  function itemTEnd(it) { var e = it.entries.filter(function (x) { return x.t != null; }); return e.length ? e[e.length - 1].t : null; }
+  function evHot(n) {
+    if (n.item.type !== "event" || !isMarked(n)) return false;
+    var mine = n.item.entries[0].struct;
+    return others(n.ti).some(function (tj) {
+      var c = counterpart(n.id, tj); if (!c || !mine) return false;
+      var o = NODES[c].item.entries[0].struct; if (!o) return false;
+      return mine.fields.some(function (f) { var g = o.fields.filter(function (x) { return x[0] === f[0]; })[0]; return !g || g[1] !== f[1]; });
+    });
+  }
+
+  // ---------- details ----------
+  function textDiff(a, b) {
+    if (a === b) return null;
+    var rows = [];
+    var la = a.split("\n"), lb = b.split("\n");
+    lb.forEach(function (l) { if (la.indexOf(l) < 0) rows.push(["a", l.trim()]); });
+    la.forEach(function (l) { if (lb.indexOf(l) < 0) rows.push(["r", l.trim()]); });
+    return rows;
+  }
+  function diffHtml(rows) {
+    var lim = 60;
+    return '<div class="diff">' + rows.slice(0, lim).map(function (r) { return '<div class="' + r[0] + '">' + { a: "+ ", r: "- ", m: "~ " }[r[0]] + esc(r[1]) + "</div>"; }).join("") +
+      (rows.length > lim ? '<div class="m">… ' + (rows.length - lim) + " more</div>" : "") + "</div>";
+  }
+  function rawLines(entries, key) {
+    var shown = entries.filter(entryVisible);
+    if (!shown.length) return '<div class="empty">Every line here is hidden by the tag chips.</div>';
+    return '<div class="rawlog">' + shown.map(function (e, i) {
+      var k = key + ":" + i;
+      return '<div class="rl' + (S.rawOpen[k] ? " open" : "") + '" data-raw="' + esc(k) + '" title="click to unfold or fold"><span class="tm sub">' + fmtT(e.t) + '</span><span class="tg">' + (e.kind === "event" ? "event" : "[" + esc(e.tag) + "]") + '</span><span class="tx">' + (e.text ? esc(e.text) : '<span class="empty">(empty)</span>') + "</span></div>";
+    }).join("") + "</div>";
+  }
+  // The detail is the entry's lines after its summary. A line "label:" at the left edge,
+  // followed by indented lines, starts a labeled block; each block is formatted on its own.
+  function detailBlocks(lines) {
+    var body = lines.slice(1), ind = Math.min.apply(null, body.filter(function (l) { return l.trim(); }).map(leadingSpaces).concat([1e9]));
+    body = body.map(function (l) { return l.slice(Math.min(ind, leadingSpaces(l))); });
+    var blocks = [], cur = null;
+    body.forEach(function (l) {
+      var m = /^([A-Za-z][\w .-]{0,30}):\s*$/.exec(l);
+      if (m) { cur = { label: m[1], lines: [] }; blocks.push(cur); return; }
+      if (!cur) { cur = { label: null, lines: [] }; blocks.push(cur); }
+      cur.lines.push(l);
+    });
+    blocks.forEach(function (b) {
+      var bi = Math.min.apply(null, b.lines.filter(function (l) { return l.trim(); }).map(leadingSpaces).concat([1e9]));
+      b.text = b.lines.map(function (l) { return l.slice(Math.min(bi, leadingSpaces(l))); }).join("\n").replace(/\s+$/, "");
+    });
+    return blocks;
+  }
+  function itemBody(it, key, st) {
+    var e0 = it.entries[0];
+    if (it.type === "event") return eventBody(e0, key);
+    var h = '<div class="sub" style="margin-bottom:4px">' + fmtT(e0.t) + DOT + "[" + esc(e0.tag) + "]</div>";
+    if (e0.lines.length < 2) return h + payload(e0.text, key + "#0");
+    return h + detailBlocks(e0.lines).map(function (b, bi) {
+      return (b.label ? '<div class="blk">' + esc(b.label) + "</div>" : "") + payload(b.text, key + "#" + bi);
+    }).join("");
+  }
+
+  // ---------- folding ----------
+  // Text shows exactly as logged; nothing is parsed or reflowed. A line followed by deeper
+  // indented lines folds them, so pretty-printed JSON, YAML, XML or Elixir terms fold by their
+  // own layout and flat text (CSV, prose) gets no toggles. Everything starts unfolded.
+  // Fold state lives in S.pay under the block's key, so it survives re-renders.
+  function indentOf(l) { var m = /^[ \t]*/.exec(l)[0]; return m.replace(/\t/g, "    ").length; }
+  function foldPlan(lines) {
+    var ends = {}, depth = {}, stack = [];
+    lines.forEach(function (l, i) {
+      if (!l.trim()) return;
+      var d = indentOf(l);
+      while (stack.length && d <= stack[stack.length - 1].ind) stack.pop();
+      depth[i] = stack.length;
+      stack.push({ ind: d, i: i });
+    });
+    // a line folds when the next non-blank line is deeper; the fold runs to the last deeper line
+    lines.forEach(function (l, i) {
+      if (!l.trim()) return;
+      var d = indentOf(l), j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      if (j >= lines.length || indentOf(lines[j]) <= d) return;
+      var last = j;
+      for (var k = j; k < lines.length; k++) {
+        if (!lines[k].trim()) continue;
+        if (indentOf(lines[k]) <= d) break;
+        last = k;
+      }
+      ends[i] = last;
+    });
+    return { ends: ends, depth: depth };
+  }
+  function verbatim(s) {
+    return String(s).trim() ? '<pre class="code wrapcode">' + esc(s) + "</pre>" : '<div class="empty">(empty)</div>';
+  }
+  function payload(text, pk) {
+    var lines = String(text).split("\n"), plan = foldPlan(lines), heads = Object.keys(plan.ends).map(Number);
+    if (!heads.length) return verbatim(text);
+    var ps = S.pay[pk] || (S.pay[pk] = { level: Infinity, fold: {} });
+    var maxD = Math.max.apply(null, heads.map(function (i) { return plan.depth[i]; })) + 1;
+    var clean = !Object.keys(ps.fold).length;
+    var bar = '<div class="jbar" data-pk="' + esc(pk) + '"><span class="jsep">fold to</span>' +
+      range(1, Math.min(maxD, 4)).map(function (d) { return '<button type="button" data-jact="lv" data-lv="' + d + '" class="' + (clean && ps.level === d ? "on" : "") + '">level ' + d + "</button>"; }).join("") +
+      '<button type="button" data-jact="lv" data-lv="all" class="' + (clean && ps.level === Infinity ? "on" : "") + '">unfold all</button></div>';
+    // the toggle hangs just left of the line's first character, so the text keeps its columns
+    function lineHtml(i, tog) {
+      var ws = /^[ \t]*/.exec(lines[i])[0];
+      return '<div class="fl"><span class="ft">' + esc(ws) + (tog ? '<span class="fa">' + tog + "</span>" : "") + esc(lines[i].slice(ws.length)) + "</span></div>";
+    }
+    function run(a, b) {
+      var h = "";
+      for (var i = a; i < b; i++) {
+        if (!(i in plan.ends)) { h += lineHtml(i, ""); continue; }
+        var end = plan.ends[i], closed = i in ps.fold ? ps.fold[i] : plan.depth[i] >= ps.level, n = end - i;
+        h += '<div class="fn' + (closed ? " closed" : "") + '">' +
+          lineHtml(i, '<button type="button" class="ftog" data-fi="' + i + '" aria-expanded="' + !closed + '" title="fold or unfold">' + (closed ? "▸" : "▾") + "</button>").replace("</span></div>", '</span><span class="fsum">  … ' + n + (n === 1 ? " line" : " lines") + "</span></div>") +
+          '<div class="fc">' + run(i + 1, end + 1) + "</div></div>";
+        i = end;
+      }
+      return h;
+    }
+    return bar + '<div class="ftree" data-pk="' + esc(pk) + '">' + run(0, lines.length) + "</div>";
+  }
+  function range(a, b) { var r = []; for (var i = a; i <= b; i++) r.push(i); return r; }
+  function eventBody(e, key) {
+    var n = NODES[key.split("@")[0]], st = e.struct;
+    if (!st) return payload(e.text, key + "#ev");
+    var row = n && EVROW[n.id], N = R.targets.length;
+    var h = '<div class="sub" style="margin-bottom:4px">' + fmtT(e.t) + DOT + esc(st.module) + "</div>";
+    h += '<div class="scroll"><table class="t"><thead><tr><th>field</th><th>value</th></tr></thead><tbody>' +
+      st.fields.map(function (f) { return "<tr><td>" + esc(f[0]) + "</td><td>" + esc(f[1]) + "</td></tr>"; }).join("") + "</tbody></table></div>";
+    if (row) h += '<div class="hint"><a data-cmp-go="' + esc(n.id) + '">Compare with the other target' + (N > 2 ? "s" : "") + " ↓</a>" + (row.differs ? DOT + "values differ" : DOT + "same values") + "</div>";
+    else if (n && n.ti != null && N > 1) h += '<div class="hint">No matching event in the other target' + (N > 2 ? "s" : "") + ".</div>";
+    return h;
+  }
+
+  // ---------- events compared across targets ----------
+  // Events pair across targets by command, event type and order of occurrence (counterpart()).
+  // Each step lists its paired events once, below its columns, one value column per target in
+  // target order. Differences are flagged only at a step the report marks.
+  var CMP = {}, EVROW = {};
+  function evStruct(id) { return id ? NODES[id].item.entries[0].struct : null; }
+  function buildCmp() {
+    CMP = {}; EVROW = {};
+    if (R.targets.length < 2) return;
+    var taken = {};
+    R.targets.forEach(function (t, ti) {
+      t.steps.forEach(function (r) {
+        r.execs.forEach(function (x) {
+          x.items.forEach(function (id) {
+            var n = NODES[id];
+            if (n.item.type !== "event" || taken[id] || !evStruct(id)) return;
+            var row = { ids: {}, label: r.label };
+            row.ids[ti] = id;
+            others(ti).forEach(function (tj) { var c = counterpart(id, tj); if (c && !taken[c] && evStruct(c)) row.ids[tj] = c; });
+            if (Object.keys(row.ids).length < 2) return;
+            var list = CMP[r.label] || (CMP[r.label] = []);
+            row.key = "cmp|" + r.label + "|" + list.length;
+            row.names = [];
+            Object.keys(row.ids).forEach(function (k) { taken[row.ids[k]] = true; EVROW[row.ids[k]] = row; evStruct(row.ids[k]).fields.forEach(function (f) { if (row.names.indexOf(f[0]) < 0) row.names.push(f[0]); }); });
+            row.diffs = row.names.filter(function (nm) {
+              var vals = Object.keys(row.ids).map(function (k) { var g = evStruct(row.ids[k]).fields.filter(function (f) { return f[0] === nm; })[0]; return g ? g[1] : undefined; });
+              return vals.some(function (v) { return v !== vals[0]; });
+            });
+            row.differs = row.diffs.length > 0;
+            list.push(row);
+          });
+        });
+      });
+    });
+  }
+  function cmpHtml(lab, marked) {
+    var rows = CMP[lab];
+    if (!rows || !rows.length) return "";
+    var open = lab in S.cmpOpen ? S.cmpOpen[lab] : marked, nd = rows.filter(function (r) { return r.differs; }).length;
+    var h = '<details class="cmp" data-cmp="' + esc(lab) + '"' + (open ? " open" : "") + "><summary>Events compared across targets " +
+      '<span class="sub">' + rows.length + " paired" + DOT + nd + " with differing values" + DOT + "paired by command, event type and order of occurrence" +
+      (marked ? DOT + "red: differs, at the step the report marks" : DOT + "differences not flagged: the report does not mark this step") + "</span></summary>";
+    rows.forEach(function (row) {
+      var focus = S.cmpFocus && S.cmpFocus.key === row.key ? S.cmpFocus.ti : null;
+      var structs = R.targets.map(function (_, ti) { return evStruct(row.ids[ti]); });
+      var mod = structs.filter(Boolean)[0];
+      h += '<div class="crow" data-row="' + esc(row.key) + '"><div class="ch">◆ ' + esc(shortMod(mod.module, EVPREFIX)) + "</div>" +
+        '<div class="scroll"><table class="t"><thead><tr><th>field</th>' + R.targets.map(function (t, ti) {
+          return '<th class="tname c' + Math.min(ti, 1) + (focus === ti ? " own" : "") + '">' + (row.ids[ti] ? '<a data-go="' + esc(row.ids[ti]) + '" title="show this event in its column">' + esc(t.name) + "</a>" : esc(t.name) + " (none)") + "</th>";
+        }).join("") + "</tr></thead><tbody>" +
+        row.names.map(function (nm) {
+          var hot = marked && row.diffs.indexOf(nm) >= 0;
+          return "<tr><td>" + esc(nm) + "</td>" + structs.map(function (st, ti) {
+            var g = st && st.fields.filter(function (f) { return f[0] === nm; })[0];
+            return '<td class="' + (hot ? "flag" : "") + (focus === ti ? " own" : "") + '">' + (st ? esc(g ? g[1] : "—") : "") + "</td>";
+          }).join("") + "</tr>";
+        }).join("") + "</tbody></table></div></div>";
+    });
+    return h + "</details>";
+  }
+  function showCmp(id) {
+    var row = EVROW[id];
+    if (!row) return;
+    S.cmpOpen[row.label] = true; S.cmpFocus = { key: row.key, ti: NODES[id].ti };
+    render();
+    var el = view.querySelector('.crow[data-row="' + CSS.escape(row.key) + '"]');
+    if (el) { paintRow(); el.scrollIntoView({ block: "center" }); }
+  }
+  // The comparison row of the selected event, or of the last "compare" link followed, is marked.
+  function paintRow() {
+    view.querySelectorAll(".crow.on").forEach(function (x) { x.classList.remove("on"); });
+    var row = (S.sel && EVROW[S.sel]) || (S.cmpFocus && { key: S.cmpFocus.key });
+    var el = row && view.querySelector('.crow[data-row="' + CSS.escape(row.key) + '"]');
+    if (el) el.classList.add("on");
+  }
+  function repeatBody(it, id, st) {
+    var a = st.attempt == null ? it.reps.length - 1 : st.attempt, h = "";
+    h += '<div class="strip">';
+    it.reps.forEach(function (r, k) {
+      it.gaps.filter(function (g) { return g.after === k; }).forEach(function (g) { h += '<span class="cell gap" title="' + esc(g.entry.lines[0]) + '">… ' + g.entry.count + "</span>"; });
+      var m = it.meta[k];
+      h += '<button type="button" class="cell ph' + (m.phase % 4) + (m.phaseStart && k > 0 ? " edge" : "") + (k === a ? " on" : "") + '" data-att="' + k + '" data-key="' + esc(id) + '" title="repetition ' + m.n + DOT + fmtT(itemT(r[0])) + '">' + m.n + "</button>";
+    });
+    h += "</div>";
+    h += '<div class="legend"><span>' + it.total + " repetitions of the same summary" +
+      (it.omitted ? ", " + it.omitted + " of them omitted by the report" : "") + DOT + fmtT(itemT(it)) + " to " + fmtT(itemTEnd(it)) + ".</span>" +
+      "<span>Every repetition has the same summary. A thick border marks where the detail changed; shading groups repetitions with the same detail.</span></div>";
+    var m = it.meta[a], r = it.reps[a];
+    h += '<h3 style="margin-top:10px">Repetition ' + m.n + " of " + it.total + ' <span class="sub">' + fmtT(itemT(r[0])) + "</span></h3>";
+    if (a > 0) {
+      var prev = it.reps[a - 1], rows = [];
+      r.forEach(function (x, xi) {
+        x.entries.forEach(function (e, ei) {
+          var pe = prev[xi] && prev[xi].entries[ei];
+          if (!pe) return;
+          // compare block by block, so a JSON block diffs field by field
+          var pb = detailBlocks(pe.lines), eb = detailBlocks(e.lines);
+          eb.forEach(function (blk, bi) {
+            var o = pb.filter(function (x) { return x.label === blk.label; })[0] || pb[bi];
+            var d = o ? textDiff(o.text, blk.text) : null;
+            if (d && d.length) { rows.push(["m", blk.label || "[" + e.tag + "]"]); rows = rows.concat(d); }
+          });
+        });
+      });
+      h += '<div class="sub" style="margin-bottom:4px">Changed from the repetition shown before it (' + it.meta[a - 1].n + "):</div>" +
+        (rows.length ? diffHtml(rows) : '<div class="empty">identical apart from timing</div>');
+    }
+    r.forEach(function (x, xi) {
+      if (r.length > 1) h += '<div class="sub" style="margin-top:8px">' + esc(stepLine(x).raw) + "</div>";
+      h += itemBody(x, id + "@" + a + "." + xi, st);
+    });
+    return h;
+  }
+  function cpBar(id) {
+    var n = NODES[id];
+    if (!n || n.ti == null || R.targets.length < 2) return "";
+    return '<div class="cpbar">' + others(n.ti).map(function (tj) {
+      var c = counterpart(id, tj), t = R.targets[tj];
+      return c ? "⇄ Same step in " + '<span class="tname c' + Math.min(tj, 1) + '">' + esc(t.name) + '</span>: <a data-go="' + esc(c) + '">' + esc(stepLine(NODES[c].item).raw.slice(0, 70)) + "</a>"
+        : '⇄ <span class="tname c' + Math.min(tj, 1) + '">' + esc(t.name) + "</span> has no matching step";
+    }).join("<br>") + "</div>";
+  }
+  function detailHtml(id) {
+    var n = NODES[id], it = n.item, st = S.open[id];
+    return cpBar(id) + (it.type === "repeat" ? repeatBody(it, id, st) : itemBody(it, id, st));
+  }
+
+  // ---------- render ----------
+  var view = document.getElementById("view");
+  function stepRows(ids) {
+    var vis = ids.filter(function (i) { return itemVisible(NODES[i].item); });
+    if (!ids.length) return '<div class="nocp">no entries in the report</div>';
+    if (!vis.length) return '<div class="nocp">every entry is hidden by the tag chips</div>';
+    return '<div class="steps">' + vis.map(function (c) {
+      var n = NODES[c], it = n.item, L = stepLine(it), open = !!S.open[c], om = it.type === "omitted";
+      return '<button type="button" class="st k-' + it.type + (evHot(n) ? " hot" : "") + (open ? " open" : "") + '" data-id="' + esc(c) + '"' + (om ? " disabled" : "") + ' aria-expanded="' + open + '" title="' + esc(L.raw) + '">' +
+        '<span class="cv">' + (om ? "" : open ? "▾" : "▸") + '</span><span class="tt">' + fmtT(itemT(it)) + '</span><span class="kd">' + esc(L.kd) + '</span><span class="lb">' + L.lb + "</span>" +
+        (L.bd ? '<span class="bd">' + esc(L.bd) + "</span>" : "<span></span>") + "</button>" +
+        (open ? '<div class="det" data-det="' + esc(c) + '">' + detailHtml(c) + "</div>" : "");
+    }).join("") + "</div>";
+  }
+  function failFacts(skip) {
+    return R.failure.filter(function (f) { return skip.indexOf(f.k) < 0; }).map(function (f) { return '<span class="k">' + esc(f.k) + '</span><span class="v">' + esc(f.v) + "</span>"; }).join("");
+  }
+  function execBox(x, ti) {
+    var label = x.pseudo ? "" : "[" + x.label + "] ";
+    var stats = x.items.length + " line" + (x.items.length === 1 ? "" : "s");
+    var reps = x.items.filter(function (i) { return NODES[i].item.type === "repeat"; });
+    if (reps.length) stats += DOT + reps.length + " repeated line" + (reps.length > 1 ? "s" : "") + " collated";
+    return '<div class="ebox' + (x.marker ? " mark" : "") + '"><div class="lh">' + esc(label + shortCmd(x.cmd)) + (x.marker ? ' <span class="bad">◄ ' + esc(x.marker) + "</span>" : "") + '</div><div class="ls">' + stats + "</div>" + stepRows(x.items) + "</div>";
+  }
+  function setHash() {
+    var ids = Object.keys(S.open);
+    history.replaceState(null, "", ids.length ? "#/run?open=" + ids.map(encodeURIComponent).join(",") : location.pathname + location.search);
+  }
+  function render() {
+    var y = window.scrollY, N = R.targets.length;
+    document.getElementById("stateline").textContent = SRC;
+    var fk = R.failure.filter(function (f) { return f.k === "Failure"; })[0];
+    document.getElementById("kicker").textContent = "PropertyDamage failure report" + (R.seed ? DOT + "seed " + R.seed : "") + DOT + N + " target" + (N > 1 ? "s" : "") + (R.reproTitle ? DOT + R.reproTitle : "");
+    document.getElementById("headline").textContent = fk ? "Failure: " + fk.v : "Failure report";
+    var h = '<div class="facts">' + failFacts([]) + "</div>";
+    h += '<div class="chips" id="chips"><span class="sub">Tags:</span>' + TAGS.map(function (t) {
+      return '<button type="button" class="chip' + (S.tags[t] ? " on" : "") + '" data-tag="' + esc(t) + '">' + esc(t) + '<span class="c">' + TAGCOUNT[t] + "</span></button>";
+    }).join("") + '<button type="button" class="chip on" id="tagsall">all</button><button type="button" class="chip on" id="tagsnone">none</button></div>';
+    h += '<div class="runbar">' + (N > 1 ? '<label><input type="checkbox" id="linked"' + (S.linked ? " checked" : "") + "> unfold the matching step in the other target" + (N > 2 ? "s" : "") + " too</label>" : "") +
+      '<button type="button" id="foldall">Fold all</button></div>';
+    h += '<div class="runhint">Click a line to unfold everything the report recorded for it; click again to fold it. Consecutive lines with the same summary collapse into one (×N); the detail of each stays one click away. ' +
+      "<kbd>↑</kbd> <kbd>↓</kbd> walk a target through every step" + DOT + "<kbd>Enter</kbd> unfold" + (N > 1 ? DOT + "<kbd>←</kbd> <kbd>→</kbd> same line in the previous or next target" : "") + ".</div>";
+    var cols = "repeat(" + N + ", minmax(0, 1fr))";
+    var g = '<div class="rgrid" style="grid-template-columns:' + cols + '">' + R.targets.map(function (t, ti) {
+      return '<div class="hd c' + Math.min(ti, 1) + '"><span class="tname">' + esc(t.name) + '</span> <span class="sub">' + esc(t.role === "only" ? "" : t.role) + "</span></div>";
+    }).join("");
+    if (R.setup) {
+      g += '<div class="rband"><div class="rh"><b>setup</b><span>' + esc(R.setup.caption || "") + "</span></div></div>" +
+        '<div class="ebox setupbox">' + stepRows(R.setup.items) + "</div>";
+    }
+    var labels = [];
+    R.targets.forEach(function (t) { t.steps.forEach(function (s) { if (labels.indexOf(s.label) < 0) labels.push(s.label); }); });
+    labels.forEach(function (lab) {
+      var roots = R.targets.map(function (_, ti) { return rootByLabel(ti, lab); });
+      var any = roots.filter(Boolean)[0];
+      var marked = roots.some(function (r) { return r && (r.marker || r.children.some(function (c) { return c.marker; })); });
+      var mk = roots.map(function (r) { return r && r.marker; }).filter(Boolean)[0] || (marked ? "marked" : "");
+      var asTxt = roots.map(function (r, ti) { return r && r.as ? '<span><span class="tname c' + Math.min(ti, 1) + '">' + esc(R.targets[ti].name) + "</span> ran it as " + esc(r.as) + "</span>" : ""; }).join("");
+      g += '<div class="rband' + (marked ? " mark" : "") + '"><div class="rh"><b>' + (any.pseudo ? "" : "[" + esc(lab) + "] ") + esc(shortCmd(any.cmd)) + "</b>" + asTxt +
+        (mk ? '<span class="mk">◄ ' + esc(mk) + "</span>" : "") + "</div>" +
+        (marked ? '<div class="facts">' + failFacts(["Failure"]) + "</div>" : "") + "</div>";
+      roots.forEach(function (r, ti) {
+        g += '<div class="col c' + Math.min(ti, 1) + '" data-col="' + ti + '" data-root="' + esc(lab) + '" data-t="' + esc(R.targets[ti].name) + '">' + (r ? r.execs.map(function (x) { return execBox(x, ti); }).join("") : '<div class="nocp">no such step in this target</div>') + "</div>";
+      });
+      var cmp = cmpHtml(lab, marked);
+      if (cmp) g += '<div class="cmpwrap">' + cmp + "</div>";
+    });
+    g += "</div>";
+    if (R.projection) g += projHtml(R.projection);
+    R.other.forEach(function (o) { g += '<details class="sec"><summary>' + esc(o.title) + "</summary>" + payload(o.text, "sec:" + o.title) + "</details>"; });
+    if (R.reproduction) g += '<details class="sec"><summary>Reproduction</summary><pre class="code wrapcode" style="margin-top:8px">' + esc(R.reproduction) + "</pre></details>";
+    view.innerHTML = h + g;
+    wire();
+    paintSel();
+    window.scrollTo(0, y);
+  }
+  function projHtml(P) {
+    var h = '<details class="sec" open><summary>' + esc(P.title) + "</summary>";
+    P.modules.forEach(function (m) {
+      h += '<div class="projmod" style="margin-top:8px"><h4>' + esc(m.name) + ' <span class="sub">last applied: ' + esc(m.last) + "</span></h4>";
+      if (!m.fields.length) { h += '<div class="nocp">no fields</div></div>'; return; }
+      h += '<div class="scroll"><table class="t projtbl"><thead><tr><th>field</th><th>' + esc(P.minus) + "</th><th>" + esc(P.plus) + "</th></tr></thead><tbody>" +
+        m.fields.map(function (f) {
+          if (f.same != null) return '<tr class="same"><td>' + esc(f.name) + "</td><td>" + esc(f.same) + "</td><td>" + esc(f.same) + "</td></tr>";
+          return "<tr><td>" + esc(f.name) + "</td><td>" + esc(f.minus == null ? "—" : f.minus) + '</td><td class="chg">' + esc(f.plus == null ? "—" : f.plus) + "</td></tr>";
+        }).join("") + "</tbody></table></div></div>";
+    });
+    return h + "</details>";
+  }
+  function wire() {
+    view.querySelectorAll("#chips .chip[data-tag]").forEach(function (b) { b.onclick = function () { var t = b.getAttribute("data-tag"); S.tags[t] = !S.tags[t]; render(); }; });
+    document.getElementById("tagsall").onclick = function () { TAGS.forEach(function (t) { S.tags[t] = true; }); render(); };
+    document.getElementById("tagsnone").onclick = function () { TAGS.forEach(function (t) { S.tags[t] = false; }); render(); };
+    var lk = document.getElementById("linked"); if (lk) lk.onchange = function () { S.linked = lk.checked; };
+    document.getElementById("foldall").onclick = function () { S.open = {}; setHash(); render(); };
+    var grid = view.querySelector(".rgrid");
+    // toggle does not bubble; a capturing listener still sees it
+    grid.addEventListener("toggle", function (e) {
+      var d = e.target;
+      if (d.classList && d.classList.contains("cmp")) S.cmpOpen[d.getAttribute("data-cmp")] = d.open;
+    }, true);
+    grid.addEventListener("click", function (e) {
+      var cg = e.target.closest("[data-cmp-go]");
+      if (cg) { e.preventDefault(); showCmp(cg.getAttribute("data-cmp-go")); return; }
+      var go = e.target.closest("[data-go]");
+      if (go) { e.preventDefault(); openStep(go.getAttribute("data-go")); return; }
+      var tb = e.target.closest("[data-tab]");
+      if (tb) { var k = tb.getAttribute("data-key").split("@")[0]; S.open[k].tab = tb.getAttribute("data-tab"); refresh(k); return; }
+      var at = e.target.closest("[data-att]");
+      if (at) { var k2 = at.getAttribute("data-key"); S.open[k2].attempt = +at.getAttribute("data-att"); refresh(k2); return; }
+      var rw = e.target.closest("[data-raw]");
+      if (rw) { var rk = rw.getAttribute("data-raw"); S.rawOpen[rk] = !S.rawOpen[rk]; rw.classList.toggle("open"); return; }
+      var jt = e.target.closest("[data-fi]");
+      if (jt) {
+        var pk = jt.closest(".ftree").getAttribute("data-pk"), ps = S.pay[pk], node = jt.closest(".fn");
+        var closed = !node.classList.contains("closed");
+        ps.fold[jt.getAttribute("data-fi")] = closed;
+        node.classList.toggle("closed", closed); jt.textContent = closed ? "▸" : "▾"; jt.setAttribute("aria-expanded", String(!closed));
+        refreshBar(pk);
+        return;
+      }
+      var ja = e.target.closest("[data-jact]");
+      if (ja) {
+        var pk2 = ja.parentNode.getAttribute("data-pk"), ps2 = S.pay[pk2], act = ja.getAttribute("data-jact");
+        if (act === "lv") { ps2.fold = {}; ps2.level = ja.getAttribute("data-lv") === "all" ? Infinity : +ja.getAttribute("data-lv"); }
+        refresh(ja.closest(".det").getAttribute("data-det"));
+        return;
+      }
+      if (e.target.closest(".det")) return;
+      var st = e.target.closest(".st");
+      if (st && !st.disabled) toggle(st.getAttribute("data-id"));
+    });
+  }
+  // A hand fold leaves the tree off every preset level, so the level buttons lose their mark.
+  function refreshBar(pk) {
+    var bar = view.querySelector('.jbar[data-pk="' + CSS.escape(pk) + '"]');
+    if (bar) bar.querySelectorAll("[data-lv]").forEach(function (b) { b.classList.remove("on"); });
+  }
+  function refresh(id) {
+    var el = view.querySelector('.det[data-det="' + CSS.escape(id) + '"]');
+    if (el) el.innerHTML = detailHtml(id);
+  }
+  function toggle(id) {
+    var n = NODES[id], cps = S.linked && n.ti != null ? others(n.ti).map(function (tj) { return counterpart(id, tj); }).filter(Boolean) : [];
+    if (S.open[id]) { delete S.open[id]; cps.forEach(function (c) { delete S.open[c]; }); }
+    else { S.open[id] = {}; cps.forEach(function (c) { if (!S.open[c]) S.open[c] = {}; }); }
+    S.sel = id; setHash(); render(); focusStep(id);
+  }
+  function openStep(id) {
+    if (!NODES[id]) return;
+    if (!S.open[id]) S.open[id] = {};
+    S.sel = id; setHash(); render(); focusStep(id, true);
+  }
+  function focusStep(id, scroll) {
+    var b = view.querySelector('.st[data-id="' + CSS.escape(id) + '"]');
+    if (!b) return;
+    b.focus({ preventScroll: true });
+    var r = b.getBoundingClientRect();
+    if (scroll || r.top < 0 || r.bottom > window.innerHeight) b.scrollIntoView({ block: "start" });
+  }
+  function paintSel() {
+    paintRow();
+    view.querySelectorAll(".st.sel, .st.cp").forEach(function (x) { x.classList.remove("sel", "cp"); });
+    if (!S.sel || !NODES[S.sel]) return;
+    var b = view.querySelector('.st[data-id="' + CSS.escape(S.sel) + '"]'); if (b) b.classList.add("sel");
+    var n = NODES[S.sel];
+    if (n.ti != null) others(n.ti).forEach(function (tj) { var c = counterpart(S.sel, tj); var cb = c && view.querySelector('.st[data-id="' + CSS.escape(c) + '"]'); if (cb) cb.classList.add("cp"); });
+  }
+  // Up and Down walk one target's lines through setup and every step; Left and Right move to
+  // the same line in the neighboring target. Keys act only when a line (or nothing) has focus,
+  // so the controls inside an unfolded detail keep their own keyboard behavior.
+  function walkList(ti) {
+    var sel = '.setupbox .st:not([disabled]), .col[data-col="' + ti + '"] .st:not([disabled])';
+    return Array.prototype.map.call(view.querySelectorAll(sel), function (b) { return b.getAttribute("data-id"); });
+  }
+  function blockOf(id) { var b = view.querySelector('.st[data-id="' + CSS.escape(id) + '"]'); return b && b.closest(".col, .setupbox"); }
+  // On entering another step, bring its header into view with the line.
+  function revealBlock(id) {
+    var blk = blockOf(id), head = blk && blk.classList.contains("col") ? blk.previousElementSibling : null;
+    while (head && !head.classList.contains("rband")) head = head.previousElementSibling;
+    var b = view.querySelector('.st[data-id="' + CSS.escape(id) + '"]');
+    if (head && head.getBoundingClientRect().top < 0) head.scrollIntoView({ block: "start" });
+    var r = b.getBoundingClientRect();
+    if (r.top < 0 || r.bottom > window.innerHeight) b.scrollIntoView({ block: "nearest" });
+  }
+  function moveTo(id, crossed) {
+    S.sel = id; paintSel(); focusStep(id);
+    if (crossed) revealBlock(id);
+  }
+  document.addEventListener("keydown", function (e) {
+    if (!R || e.altKey || e.ctrlKey || e.metaKey) return;
+    var t = e.target;
+    var onLine = t && t.classList && t.classList.contains("st");
+    if (!onLine && t && t !== document.body && t !== document.documentElement) return;
+    var cur = onLine ? t.getAttribute("data-id") : S.sel;
+    var n = cur && NODES[cur];
+    if (n && n.ti != null) S.lastCol = n.ti;
+    if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && n && n.ti != null && R.targets.length > 1) {
+      e.preventDefault();
+      var N = R.targets.length, tj = (n.ti + (e.key === "ArrowRight" ? 1 : N - 1)) % N;
+      var c = counterpart(cur, tj);
+      var crossed = false;
+      if (!c) {
+        // no matching line: land on the first line of the next step that target has lines for
+        var cols = Array.prototype.slice.call(view.querySelectorAll('.col[data-col="' + tj + '"]'));
+        var at = cols.map(function (x) { return x.getAttribute("data-root"); }).indexOf(n.root.label);
+        for (var k = at + 1; k < cols.length && !c; k++) {
+          var first = cols[k].querySelector(".st:not([disabled])");
+          c = first && first.getAttribute("data-id");
+        }
+        crossed = !!c;
+      }
+      if (c) moveTo(c, crossed);
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    var ti = n && n.ti != null ? n.ti : S.lastCol || 0;
+    var list = walkList(ti);
+    if (!list.length) return;
+    e.preventDefault();
+    var i = list.indexOf(cur), j = i < 0 ? 0 : e.key === "ArrowDown" ? Math.min(i + 1, list.length - 1) : Math.max(i - 1, 0);
+    if (j === i) return;
+    moveTo(list[j], i >= 0 && blockOf(list[j]) !== blockOf(cur));
+  });
+
+  // ---------- loading ----------
+  function load(text, name, openIds) {
+    try {
+      build(text, name);
+      (openIds || []).forEach(function (id) { if (NODES[id]) S.open[id] = {}; });
+      render(); setHash();
+    } catch (err) {
+      view.innerHTML = '<p class="err">Could not read ' + esc(name) + ": " + esc(err.message) + "</p>";
+      console.warn(err);
+    }
+  }
+  function fromHash() {
+    var q = (location.hash.split("?")[1] || ""), P = {};
+    q.split("&").forEach(function (kv) { if (!kv) return; var p = kv.split("="); P[p[0]] = decodeURIComponent(p[1] || ""); });
+    return P;
+  }
+  // The report text is embedded as a JSON string, so no character in it can end the script.
+  document.getElementById("theme").onclick = function () {
+    var r = document.documentElement, cur = r.getAttribute("data-theme");
+    var dark = cur ? cur === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    r.setAttribute("data-theme", dark ? "light" : "dark");
+  };
+  var P0 = fromHash();
+  load(JSON.parse(document.getElementById("pd-report").textContent), document.title, (P0.open || "").split(",").filter(Boolean));
+})();
+</script>
+</body>
+</html>

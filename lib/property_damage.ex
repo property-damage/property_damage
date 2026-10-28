@@ -237,6 +237,10 @@ defmodule PropertyDamage do
     done before the run, such as seeding the system (default `[]`). The report
     prints them once, in a Setup section before the reproduction, labeled as
     shared by every run.
+  - `:report_html` - A directory a failing run writes its report into as an
+    HTML page, beside an `index.html` that browses every page there (default
+    `false`). The environment variable `PD_REPORT_HTML` replaces it. See
+    `PropertyDamage.FailureReport.HTML`.
   - `:log` - `[keep_attempts: n, only: tags, except: tags]`. `keep_attempts`
     is how many of a step's last settle or stutter attempts keep their log
     lines besides the first attempt (default `3`); the report prints each gap
@@ -512,6 +516,7 @@ defmodule PropertyDamage do
       first_run: first_run(opts[:only]),
       replay: replay,
       replay_dir: opts[:replay_dir],
+      report_html: FailureReport.HTML.dir(opts[:report_html]),
       seed: seed,
       run_nonce: run_nonce,
       shrink: opts[:shrink],
@@ -1951,6 +1956,7 @@ defmodule PropertyDamage do
   # Announces a failure report and returns it as the run's result.
   defp report_failure(ctx, failure_report) do
     failure_report = with_replay(ctx, failure_report)
+    write_html(ctx, failure_report)
 
     # Terminal failure notification (DR-022): the verbose consumer renders this
     # as the failure summary. The authoritative result is the returned report.
@@ -2033,6 +2039,24 @@ defmodule PropertyDamage do
       {:error, reason} -> %{report | replay_status: {:write_failed, reason}}
     end
   end
+
+  # The report's HTML page, when the run names a directory for it. A page that
+  # cannot be written costs a warning, never the report.
+  defp write_html(%{report_html: dir}, report) when is_binary(dir) do
+    case FailureReport.HTML.write(report, dir) do
+      {:ok, _path} ->
+        :ok
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "could not write the failure report's HTML page into #{dir}: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp write_html(_ctx, _report), do: :ok
 
   # A replay run's shrink found a failure with fewer roots than the artifact.
   defp smaller?(report, term, replayed),

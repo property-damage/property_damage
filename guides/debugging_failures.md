@@ -539,6 +539,39 @@ IO.puts("Trigger: #{inspect(trigger)}")
 
 ## Step 6: Visual Debugging
 
+### The report in a browser
+
+`PropertyDamage.FailureReport.HTML` turns a report into one HTML page that
+opens from disk and loads nothing from the network. It shows one column per
+target. Each step unfolds to its log lines and events. Repeated log lines
+collapse into one, and the detail under a log line folds by its indentation.
+Below each step, the step's events are compared across targets.
+
+```elixir
+{:error, report} = PropertyDamage.run(model: MyModel, targets: targets)
+File.write!("failure.html", PropertyDamage.FailureReport.HTML.render(report))
+```
+
+To get a page for every failing run without touching the tests, name a
+directory when running the suite:
+
+```bash
+PD_REPORT_HTML=_build/pd_reports mix test
+open _build/pd_reports/index.html
+```
+
+Each failing run writes its page into that directory. The run option
+`report_html: "_build/pd_reports"` does the same for one run. `index.html`
+shows one report at a time; its arrow buttons, and the left and right arrow
+keys, move between them.
+When several test processes write into one directory, run
+`PropertyDamage.FailureReport.HTML.write_index/1` once they finish, so the
+index lists every page.
+
+The page holds the same text `PropertyDamage.ExUnit.format_failure/2` prints,
+with the same tag filter, and log lines in it are written to disk: keep the
+directory out of git.
+
 ### Sequence Diagrams
 
 Generate visual diagrams of the failing sequence:
