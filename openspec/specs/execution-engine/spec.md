@@ -976,6 +976,10 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 - **WHEN** an adapter logs during a run
 - **THEN** the event log, the projections and every check SHALL be what a run of the same adapter without log calls produces
 
+#### Scenario: A failed target setup keeps its lines on the branching path
+- **WHEN** a branching run's target fails its setup, because an injector refuses to start after another one started or because the adapter's `setup/1` raises
+- **THEN** the run SHALL report `:setup_failed` with the detail, the `adapter setup/1` lines and the `adapter teardown/1` lines a run of the same target on the lockstep path reports, and SHALL NOT raise
+
 ### Requirement: Log.capture/1 Scopes Code Outside a Run (DR-054)
 
 `PropertyDamage.Log.capture(fun)`, with `fun` a 0-arity function, SHALL run `fun` in the calling process under a scope of its own and return `{result, lines}`: `fun`'s result and the `PropertyDamage.Log.Line` structs it logged, in the order written, each with attempt 1. The same `$callers` lookup as for a run's scopes SHALL apply, so a `Task` (or a `Task` inside a `Task`) started inside `fun` logs into the capture. A nested `capture/1` SHALL collect into the innermost one and the outer one SHALL get none of its lines. A `capture/1` inside an execution point SHALL keep its lines out of the step. An error, throw or exit in `fun` SHALL propagate and the lines written before it SHALL be dropped. A call after the capture returned, from a process it left running, SHALL raise `PropertyDamage.Log.NoScopeError`. An argument that is not a 0-arity function SHALL raise `ArgumentError`.

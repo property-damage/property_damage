@@ -1168,6 +1168,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without creating atoms from the file. A file that names a module of no loaded
   application still returns `{:error, :unsafe_terms}`.
 
+- **A branching run reports a failed target setup as the lockstep path does.**
+  An injector that refused to start crashed the branching path with a
+  `CaseClauseError`, and an adapter `setup/1` that raised propagated out of
+  `PropertyDamage.run/1`. Both are now `:setup_failed` reports carrying the
+  same detail and the same `adapter setup/1` and `adapter teardown/1` log
+  lines as a run on the lockstep path, the lines of the injectors set up
+  before the failing one included.
 - **`shrink_further/2` and `Replay.start/2` take `log: [keep_attempts: n]`.**
   A re-shrink always kept the default three last attempts of a retried step,
   because the report does not record the run's `log:` option and

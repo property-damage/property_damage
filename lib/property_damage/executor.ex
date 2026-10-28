@@ -207,13 +207,15 @@ defmodule PropertyDamage.Executor do
   # `run/4`, except that a failed adapter setup/1 returns
   # `{:error, reason, logs}`: the lines that setup wrote, under
   # `:adapter_setup` (DR-054). The branching path of `PropertyDamage.run/1`
-  # puts them on its setup failure.
+  # puts them on its setup failure. A setup/1 that raises, exits or throws
+  # fails the same way, with the exception (or `{kind, reason}`) as the
+  # reason, as `PropertyDamage.Variant` reports it on the lockstep path.
   @spec run_logged(Sequence.t() | list(), module(), module(), keyword()) ::
           {:ok, result()} | {:error, term(), PropertyDamage.Log.logs()} | term()
   def run_logged(sequence_or_commands, model, adapter, opts \\ [])
 
   def run_logged(%Sequence{} = sequence, model, adapter, opts) do
-    case set_up_and_run(sequence, model, adapter, opts) do
+    case set_up_and_run(sequence, model, adapter, opts, &guarded_setup/2) do
       {:not_set_up, {:error, reason}, setup_lines} ->
         {:error, reason, PropertyDamage.Log.append(%{}, :adapter_setup, setup_lines)}
 
@@ -233,9 +235,9 @@ defmodule PropertyDamage.Executor do
   # their log lines are kept under :adapter_setup and :adapter_teardown
   # (DR-054). A setup/1 that does not answer `{:ok, context}` comes back as
   # `{:not_set_up, its answer, its lines}`.
-  defp set_up_and_run(sequence, model, adapter, opts) do
+  defp set_up_and_run(sequence, model, adapter, opts, setup \\ & &1.setup(&2)) do
     config = Keyword.get(opts, :config, %{})
-    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> adapter.setup(config) end)
+    {setup_result, setup_lines} = PropertyDamage.Log.inline(fn -> setup.(adapter, config) end)
 
     case setup_result do
       {:ok, adapter_context} ->
@@ -244,6 +246,16 @@ defmodule PropertyDamage.Executor do
       not_set_up ->
         {:not_set_up, not_set_up, setup_lines}
     end
+  end
+
+  # The adapter's setup/1, with a raise, exit or throw turned into an error,
+  # so the lines it wrote before stay with the setup failure.
+  defp guarded_setup(adapter, config) do
+    adapter.setup(config)
+  rescue
+    exception -> {:error, exception}
+  catch
+    kind, reason -> {:error, {kind, reason}}
   end
 
   defp run_set_up(sequence, model, adapter, adapter_context, setup_lines, opts) do

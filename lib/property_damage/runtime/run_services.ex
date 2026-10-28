@@ -17,7 +17,8 @@ defmodule PropertyDamage.Runtime.RunServices do
   # raise in injector or mock setup cannot leak it; the injectors are torn
   # down even when a mock setup or `fun` raises. An injector setup that fails
   # or raises returns `{:error, reason}` without calling `fun`, the shape
-  # `PropertyDamage.Executor.run/4` gives when the adapter's setup fails.
+  # `PropertyDamage.Executor.run/4` gives when the adapter's setup fails;
+  # `with_services_logged/2` returns the shape `run_logged/4` gives.
   #
   # Injector and mock setup and teardown are execution points (DR-054). When
   # `fun` returns `{:ok, result}` with a `logs` map, or
@@ -25,18 +26,30 @@ defmodule PropertyDamage.Runtime.RunServices do
   # failed adapter setup), the lines their setup wrote go before the
   # adapter's own under `:adapter_setup`, and the lines their teardown wrote
   # after them under `:adapter_teardown`; any other result drops them.
-  def with_services(target, fun) do
+  def with_services(target, fun), do: services(target, fun, false)
+
+  @doc false
+  # `with_services/2` for a `fun` that calls `Executor.run_logged/4`: an
+  # injector setup that fails or raises returns `{:error, reason, logs}`, the
+  # lines the injectors wrote, the teardown of those already set up included,
+  # under `:adapter_setup`, as `PropertyDamage.Variant` keeps them.
+  def with_services_logged(target, fun), do: services(target, fun, true)
+
+  defp services(target, fun, logged) do
     {:ok, event_queue} = EventQueue.start_link()
 
     try do
       {set_up, setup_lines} =
         Log.inline(fn -> setup_injectors(target.injectors, target.config, event_queue) end)
 
-      case set_up do
-        {:ok, injector_contexts} ->
+      case {set_up, logged} do
+        {{:ok, injector_contexts}, _logged} ->
           with_injectors(target, injector_contexts, event_queue, setup_lines, fun)
 
-        {:error, reason} ->
+        {{:error, reason}, true} ->
+          {:error, reason, Log.append(%{}, :adapter_setup, setup_lines)}
+
+        {{:error, reason}, false} ->
           {:error, reason}
       end
     after

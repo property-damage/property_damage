@@ -1090,7 +1090,7 @@ defmodule PropertyDamage do
   defp execute_branching(ctx, run) do
     target = ctx.target
 
-    RunServices.with_services(target, fn event_queue, mock_registry ->
+    RunServices.with_services_logged(target, fn event_queue, mock_registry ->
       Executor.run_logged(run.sequence, ctx.model, target.adapter,
         config: target.config,
         event_queue: event_queue,
