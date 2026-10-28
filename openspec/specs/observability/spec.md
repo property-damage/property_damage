@@ -133,6 +133,20 @@ The system SHALL expose the catalog of invariants a model verifies and report wh
 - **WHEN** `PropertyDamage.check_catalog(model)` is called
 - **THEN** the system SHALL return every invariant the model verifies, unioned across its projections and keyed by `{projection, id}` so two projections MAY reuse an `id` for distinct invariants
 
+### Requirement: Log Lines Reach Only the Failure Report (DR-054)
+
+A line written with `PropertyDamage.log/2` or `PropertyDamage.Runtime.log/3` SHALL be kept for the failure report and SHALL go nowhere else. The system SHALL NOT forward a line to `Logger`, SHALL NOT print one during a run, and SHALL NOT give a line a level. A run that passes SHALL print none of its lines.
+
+#### Scenario: A passing run prints no line
+
+- **WHEN** an adapter logs a line in every command and the run passes
+- **THEN** no line SHALL reach the console, a `Logger` backend or the progress reporter
+
+#### Scenario: A failing run prints lines only in its report
+
+- **WHEN** the same run fails
+- **THEN** the lines of the reported run SHALL appear in the failure report under the steps that wrote them, and nowhere else
+
 ### Requirement: Progress Reporting
 
 The system SHALL report progress for long-running operations (`PropertyDamage.run/1`, `PropertyDamage.Mutation.run/1` and the load-test runner) through a single derived projection: a `%PropertyDamage.Progress{}` value fanned out to zero or more consumers. The projection SHALL be a view of authoritative state, never its source; an operation's return value remains the source of truth, and a terminal `*Result` payload carries a copy of it for consumers.

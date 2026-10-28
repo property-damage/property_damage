@@ -60,6 +60,7 @@ defmodule PropertyDamage.MixProject do
         "guides/writing_invariants.md",
         "guides/coverage_and_catalogs.md",
         "guides/debugging_failures.md",
+        "guides/log_lines.md",
         "guides/async_and_eventual_consistency.md",
         "guides/resource_polling.md",
         "guides/idempotency_testing.md",

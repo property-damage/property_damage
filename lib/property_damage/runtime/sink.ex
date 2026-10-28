@@ -36,17 +36,16 @@ defmodule PropertyDamage.Runtime.Sink do
   timeout kills the command's `Task` is still here when the engine reads the
   lines back with `lines/1`.
 
-  The sink applies the retry cap as the lines arrive (`PropertyDamage.Log.Cap`):
-  it keeps the lines of the command's first attempt and of its last
-  `keep_attempts` attempts, and drops the lines of an older attempt as soon as
+  The sink applies the retry cap as the lines arrive: it keeps the lines of the
+  command's first attempt and of its last `keep_attempts` attempts, and drops the lines of an older attempt as soon as
   a newer one pushes it out, counting them in one `PropertyDamage.Log.Gap`.
   So a 1,000-attempt settle never holds the lines of more than
   `keep_attempts + 1` attempts. `attempts_held/1` reports how many it holds.
   `lines/1` returns the kept lines in order, the gap between the first
   attempt's lines and the others.
 
-  `start_link/1` takes `keep_attempts:` (default
-  `PropertyDamage.Log.Cap.default_keep_attempts/0`). The stutter retries of a
+  `start_link/1` takes `keep_attempts:`, which defaults to the default of
+  `log: [keep_attempts:]` in `PropertyDamage.run/1`. The stutter retries of a
   command run after its own sink closed, and write into a sink that continues
   the step's kept lines: `lines:` seeds it with the list `lines/1` returned for
   the step, and `phase: :stutter` keys its attempts apart from the command's,

@@ -352,31 +352,15 @@ checks) use step-by-step replay; see the
 
 ## Understanding Results
 
-When tests pass:
+When tests pass, `PropertyDamage.run/1` returns `{:ok, stats}` and prints
+nothing. `stats.runs` is the number of runs and `stats.seed` the seed they
+started from. Add `verbose: true` to print a summary and one progress line per
+run.
 
-```
-Run 1/100: 23 commands, PASSED
-Run 2/100: 18 commands, PASSED
-...
-100/100 runs passed!
-```
-
-When tests fail:
-
-```
-Run 42/100: 31 commands, FAILED!
-
-Shrinking...
-Minimal failing sequence (3 commands):
-  [0] CreateUser{email: "test@example.com", name: "Alice"}
-      => user_id: "user_123"
-  [1] CreateUser{email: "test@example.com", name: "Bob"}
-      => FAILED: duplicate email
-
-Invariant violated: UserInvariants.emails_unique
-
-Seed: 987654321 (use this to reproduce)
-```
+When tests fail, `PropertyDamage.run/1` returns `{:error, report}`, and the
+report prints the shrunk failure, its events, the state it left and the calls
+that reproduce it. [Reading the report](debugging_failures.md#reading-the-report)
+walks through a real one.
 
 ## Next Steps
 

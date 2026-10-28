@@ -334,6 +334,15 @@ end
 Stutter map (when present): `%{attempt: 2, is_retry: true, idempotency_key: "abc" | nil}`.
 Prefer `PropertyDamage.Runtime.stuttering?(runtime)` to detect a retry.
 
+### Log Lines (see the [log lines guide](log_lines.md))
+
+- `require PropertyDamage`: add it to a module before it calls `PropertyDamage.log/2`, which is a macro.
+- `PropertyDamage.log(message, tags: [:http])`: record a line for the failure report under the step that ran it; `tags:` is optional and a line without tags always prints.
+- `PropertyDamage.Log.capture/1` plus `setup_log: lines`: pass the lines of work done before the run; the report prints them once in a Setup section.
+- `log: [only: [:http], except: [:body]]`: show only the lines with a listed tag, or hide the lines with one; `except:` wins.
+- `log: [keep_attempts: 3]`: how many of a retried command's last attempts keep their lines, besides the first (default 3).
+- `PD_LOG="only:http except:body"`: replace the run's filter for one invocation, without a code change.
+
 ## Nemesis Template
 
 ```elixir
@@ -404,6 +413,10 @@ PropertyDamage.run(
 
   # Callbacks
   on_failure: fn report -> IO.inspect(report) end,
+
+  # Failure report log lines
+  setup_log: lines,          # lines of PropertyDamage.Log.capture/1, printed once as Setup
+  log: [only: [:http], except: [:body], keep_attempts: 3], # tag filter and retry cap
 
   # Regression
   regression: [

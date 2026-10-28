@@ -50,29 +50,23 @@ defmodule PropertyDamage.ExUnit do
 
   ## Failure Formatting
 
-  When a property test fails, the output includes:
+  When a property test fails, the test's failure message is the failure report
+  (`PropertyDamage.FailureReport`, DR-055, DR-056), printed with ANSI color. It
+  has these parts, in order:
 
-  1. The seed for reproducing the failure
-  2. The original command sequence
-  3. The shrunk (minimal) command sequence
-  4. The failure reason
-  5. Instructions for reproducing with the same seed
+  1. A banner and the seed
+  2. Failure: the kind, the failing step and the fields of its kind
+  3. Setup: the lines of work done before the run, when the run was given
+     `setup_log:`
+  4. Minimal Reproduction: the shrunk steps, each with its events and log
+     lines, the failing step marked
+  5. Projections: the state before and after the failing step
+  6. Reproduction: the calls that rerun and replay the failure
 
   ## Example Failure Output
 
-      1) property system maintains invariants
-         Failure with seed: 12345
-
-         Original sequence (5 commands):
-           [%CreateItem{...}, %ViewItem{...}, ...]
-
-         Shrunk sequence (2 commands):
-           [%CreateItem{quantity: 101}]
-
-         Failed at command #0:
-           #PropertyDamage.Failure<check_failed :quantity_limit "Quantity 101 exceeds limit">
-
-         Reproduce with: seed: 12345
+  The [Debugging Failures](debugging_failures.md#reading-the-report) guide shows a
+  real report and reads it section by section.
   """
 
   @doc """

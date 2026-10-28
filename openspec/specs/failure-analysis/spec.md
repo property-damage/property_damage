@@ -4,7 +4,7 @@
 
 Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes with seed variations, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
 
-Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers)
+Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers)
 
 ## Requirements
 
@@ -214,7 +214,7 @@ The system SHALL analyze a model's commands, events, and projections to suggest 
 
 ### Requirement: Structured Failure Reports
 
-The system SHALL produce structured failure reports containing location (run number, command index, seed), original and shrunk command sequences, projection states before and at failure, the complete event trail, and the structured failure reason. The shrunk sequence and event trail are served through the report's embedded `RunTrace` (DR-033); `shrunk_sequence/1` and `event_log/1` are accessors over the trace, not struct fields.
+The system SHALL produce structured failure reports containing location (run number, command index, seed), original and shrunk command sequences, projection states before and at failure, the complete event trail, and the structured failure reason. The shrunk sequence and event trail are served through the report's embedded `RunTrace` (DR-033); `shrunk_sequence/1` and `event_log/1` are accessors over the trace, not struct fields. A report of kind `:diverged` or `:did_not_converge` SHALL also carry `reference_trace` (the reference target's `RunTrace` of the reported run) and `reference_state_at_failure` (the reference's projection state at the failing boundary, cut as DR-040 defines), and every other kind SHALL leave both `nil` (DR-055). Every report SHALL carry `shrink_stop`: `:done` when the shrinker finished inside its budget or never ran, `:max_iterations` or `:max_time` when a budget ran out first (DR-055).
 
 #### Scenario: Report creation
 
@@ -225,6 +225,7 @@ The system SHALL produce structured failure reports containing location (run num
 
 - **WHEN** a report is formatted
 - **THEN** the system SHALL support `:terminal`, `:markdown`, `:json`, and `:compact` output formats
+- **AND** the `:json` format SHALL keep every field of the report, the sections the printed formats dropped included (DR-055)
 
 #### Scenario: Report with error origin
 
@@ -258,7 +259,7 @@ The system SHALL produce structured failure reports containing location (run num
 
 ### Requirement: Printed Failure Report Layout (DR-055, DR-056)
 
-The `:terminal` and `:markdown` formats SHALL print one layout, built once from the report as plain data and printed by one renderer per format. The terminal report SHALL print a banner (`BUG DETECTED!`, or `TEST CODE ERROR` for a failure in test code) whose lines all have one width with and without color, then `Seed: <seed>`, then the sections `Failure`, `Minimal Reproduction (N roots)`, `Projections at <label>` (only when a compared side has state) and `Reproduction`, in that order. It SHALL NOT print Run Number, Command Index, Timestamp, State Transition, Event Log, Boundary Comparisons, Shrinking Statistics or Original Sequence. The markdown report SHALL open with `# BUG DETECTED!` or `# TEST CODE ERROR`, then the seed, then the terminal's `## ` headings in the same order, each section's body in one fenced block whose text equals the terminal body without color (`diff` for Projections, `elixir` for Reproduction). `Formatter.format/3` SHALL read `:color` for the terminal format and no other layout option. The `:json` and `:compact` formats SHALL NOT change.
+The `:terminal` and `:markdown` formats SHALL print one layout, built once from the report as plain data and printed by one renderer per format. The terminal report SHALL print a banner (`BUG DETECTED!`, or `TEST CODE ERROR` for a failure in test code) whose lines all have one width with and without color, then `Seed: <seed>`, then the sections `Failure`, `Minimal Reproduction (N roots)`, `Projections at <label>` (only when a compared side has state) and `Reproduction`, in that order. It SHALL NOT print Run Number, Command Index, Timestamp, State Transition, Event Log, Boundary Comparisons, Shrinking Statistics or Original Sequence. The markdown report SHALL open with `# BUG DETECTED!` or `# TEST CODE ERROR`, then the seed, then the terminal's `## ` headings in the same order, each section's body in one fenced block whose text equals the terminal body without color (`diff` for Projections, `elixir` for Reproduction). `Formatter.format/3` SHALL read `:color` for the terminal format and no other layout option. The `:json` format SHALL keep every field it carried before this layout and SHALL gain `reference_trace` and `reference_projections` for a comparison failure (DR-055) and the `logs` key (DR-054); the `:compact` format SHALL NOT change.
 
 #### Scenario: One label per step in every section
 
@@ -286,6 +287,12 @@ The `:terminal` and `:markdown` formats SHALL print one layout, built once from 
 
 - **WHEN** a command, an event, a Failure value or a projection attribute is printed
 - **THEN** it SHALL print through one `inspect/2` call with no element or string limit, and a projection SHALL print one attribute per line, equal attributes once and differing ones as a `-` line then a `+` line
+
+#### Scenario: A shrinker that ran out of budget says so (DR-055)
+
+- **WHEN** the report's `shrink_stop` is `:max_iterations` or `:max_time`
+- **THEN** the Failure section SHALL print a `Shrink` field that says the shrinker stopped at its iteration (or time) budget, so the reproduction may not be minimal
+- **AND** a report whose `shrink_stop` is `:done` or `nil` SHALL print no `Shrink` field
 
 #### Scenario: Reproduction binds the targets once
 
