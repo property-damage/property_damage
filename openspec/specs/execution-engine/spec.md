@@ -952,7 +952,8 @@ The counts SHALL sum over the targets that pick (`expansion: :random`), and a li
 #### Scenario: A Task the adapter starts logs to its step
 - **WHEN** `execute/3` starts a `Task` (or a `Task` inside a `Task`) that calls `PropertyDamage.log/2`
 - **THEN** the call SHALL find the scope in the first live process of its `$callers` that holds one, and the line SHALL be kept under the step that started the `Task`, once
-- **AND** a dead process in `$callers` SHALL end the lookup, so a process left running by a step that has ended never writes under a later step
+- **AND** a dead process in `$callers` SHALL NOT end the lookup, so a process whose parent `Task` exited while the step runs SHALL still log under that step
+- **AND** a process left running by a step that has ended SHALL find no scope and SHALL never write under a later step: the per-command `Task` that held the step's scope has exited, and an inline point admits only a chain that carries its token
 
 #### Scenario: A process an inline point left running finds no later point
 - **WHEN** a point that runs in a process outliving it (the adapter's `setup/1` or `teardown/1`, injector and mock setup and teardown, a nemesis's `inject/2` or `restore/2`, a mock's `on_command/2` or `on_event/2`) starts a process and leaves it running, and that process calls `PropertyDamage.log/2` during a later such point of the same holder

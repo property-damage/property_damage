@@ -30,10 +30,11 @@ defmodule PropertyDamage.Log do
 
   `PropertyDamage.log/2` looks for a scope in the calling process, then in
   each process of its `$callers` list, so a `Task` the adapter starts logs to
-  the step that started it. The walk ends at the first process that is no
-  longer alive: a process left running by a step that has ended finds no
-  scope, and its line never lands under a later step. A call that finds no
-  scope raises `PropertyDamage.Log.NoScopeError`.
+  the step that started it, also when the `Task` between them has exited
+  while the step runs. The per-command `Task` that runs `execute/3` holds the
+  step's scope and exits when the step ends, so a process left running by a
+  step that has ended finds no scope, and its line never lands under a later
+  step. A call that finds no scope raises `PropertyDamage.Log.NoScopeError`.
 
   Some points run in a process that outlives them: an adapter's `setup/1`
   and `teardown/1`, injector and mock setup and teardown, a nemesis's
@@ -230,8 +231,16 @@ defmodule PropertyDamage.Log do
 
   @doc false
   # The scope the calling process finds: its own, else the first process of
-  # its `$callers` that holds one. A dead process ends the walk, and so does
-  # an inline scope the chain does not belong to (`admit/2`).
+  # its `$callers` that holds one. An inline scope the chain does not belong
+  # to ends the walk (`admit/2`).
+  #
+  # A dead process does not end the walk: it may be a process that started
+  # the caller and exited while the caller's step still runs. A scope found
+  # past it admits the caller only while it is open and only for a chain that
+  # descends from its opening: the per-command Task holds its scope for its
+  # whole life and exits when its step ends, and an inline scope admits only
+  # a chain that carries its token. So a process a finished step left running
+  # never finds a later step's scope.
   @spec lookup() :: writer() | nil
   def lookup do
     case Process.get(@scope_key) do
@@ -242,7 +251,7 @@ defmodule PropertyDamage.Log do
 
   defp lookup_callers([pid | rest]) when is_pid(pid) and node(pid) == node() do
     case scope_in(pid) do
-      :dead -> nil
+      :dead -> lookup_callers(rest)
       nil -> lookup_callers(rest)
       scope -> admit(scope, rest)
     end
@@ -307,7 +316,7 @@ defmodule PropertyDamage.Log do
   # own, a pid no other scope holds, put first in the calling process's
   # `$callers` while `fun` runs, so the processes `fun` starts carry it
   # (`admit/2`). The token only has to be unique, so it is a process that
-  # exits at once; a dead pid in `$callers` ends a lookup that reaches it.
+  # exits at once.
   @spec with_scope(writer() | nil, (-> result)) :: result when result: var
   def with_scope(nil, fun), do: fun.()
 
