@@ -15,7 +15,7 @@ defmodule GiteaBench.ApiAdapter do
   use PropertyDamage.Adapter
 
   alias GiteaBench.Events.SessionOpened
-  alias GiteaBench.Gitea
+  alias GiteaBench.{Gitea, WebhookInjector}
 
   alias GiteaBench.Commands.{
     AddLabelToIssue,
@@ -39,26 +39,32 @@ defmodule GiteaBench.ApiAdapter do
   def teardown(_ctx), do: :ok
 
   @impl true
-  def execute(%Login{}, %{client: client, login_password: password}, _runtime) do
+  def execute(command, ctx, runtime) do
+    # A webhook Gitea delivers while this command runs is logged under its step.
+    WebhookInjector.attach(runtime)
+    perform(command, ctx)
+  end
+
+  defp perform(%Login{}, %{client: client, login_password: password}) do
     case Gitea.verify_login(client, client.admin_user, password) do
       :ok -> {:ok, [%SessionOpened{user: client.admin_user}]}
       {:error, status} -> {:error, {:login_failed, status}}
     end
   end
 
-  def execute(%CreateUser{login: login, email: email}, %{client: client}, _runtime) do
+  defp perform(%CreateUser{login: login, email: email}, %{client: client}) do
     with :ok <- Gitea.create_user(client, login, email) do
       {:ok, [Gitea.user_event(client, login)]}
     end
   end
 
-  def execute(%CreateRepo{owner: owner, name: name}, %{client: client}, _runtime) do
+  defp perform(%CreateRepo{owner: owner, name: name}, %{client: client}) do
     with :ok <- Gitea.create_repo(client, owner, name) do
       {:ok, [Gitea.repo_event(client, owner, name)]}
     end
   end
 
-  def execute(%CreateIssue{repo: full_name, title: title}, %{client: client}, _runtime) do
+  defp perform(%CreateIssue{repo: full_name, title: title}, %{client: client}) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
 
     with {:ok, number} <- Gitea.create_issue(client, owner, repo, title) do
@@ -66,11 +72,10 @@ defmodule GiteaBench.ApiAdapter do
     end
   end
 
-  def execute(
-        %CreateLabel{repo: full_name, name: name, color: color},
-        %{client: client},
-        _runtime
-      ) do
+  defp perform(
+         %CreateLabel{repo: full_name, name: name, color: color},
+         %{client: client}
+       ) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
 
     with :ok <- Gitea.create_label(client, owner, repo, name, color) do
@@ -78,13 +83,12 @@ defmodule GiteaBench.ApiAdapter do
     end
   end
 
-  def execute(
-        %AddLabelToIssue{assignment: %{repo: full_name, number: number, label: label}},
-        %{
-          client: client
-        },
-        _runtime
-      ) do
+  defp perform(
+         %AddLabelToIssue{assignment: %{repo: full_name, number: number, label: label}},
+         %{
+           client: client
+         }
+       ) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
 
     with :ok <- Gitea.assign_label(client, owner, repo, number, label) do
@@ -92,11 +96,10 @@ defmodule GiteaBench.ApiAdapter do
     end
   end
 
-  def execute(
-        %CloseIssue{target: %{repo: full_name, number: number}},
-        %{client: client},
-        _runtime
-      ) do
+  defp perform(
+         %CloseIssue{target: %{repo: full_name, number: number}},
+         %{client: client}
+       ) do
     {owner, repo} = GiteaBench.split_full_name(full_name)
 
     with :ok <- Gitea.close_issue(client, owner, repo, number) do

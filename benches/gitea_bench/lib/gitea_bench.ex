@@ -24,4 +24,18 @@ defmodule GiteaBench do
     [owner, name] = String.split(full_name, "/", parts: 2)
     {owner, name}
   end
+
+  @doc """
+  One log entry's text: the summary line, then each `{label, text}` detail as a
+  `label:` line with the text indented by two spaces below it. A detail with no
+  text is left out.
+  """
+  def log_entry(summary, details \\ []) do
+    blocks =
+      for {label, text} <- details, text not in [nil, ""] do
+        "\n#{label}:\n" <> (text |> String.split("\n") |> Enum.map_join("\n", &("  " <> &1)))
+      end
+
+    IO.iodata_to_binary([summary | blocks])
+  end
 end

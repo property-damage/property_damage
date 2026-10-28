@@ -230,22 +230,26 @@ defmodule ObanBench.JobRefs.Adapter do
 
   @impl true
   def execute(%EnqueueJob{}, _ctx, _runtime) do
-    {:ok, job} = Oban.insert(JobRefs.ScheduledWorker.new(%{}, schedule_in: JobRefs.schedule_in()))
+    {:ok, job} =
+      ObanBench.DB.insert_job(
+        JobRefs.ScheduledWorker.new(%{}, schedule_in: JobRefs.schedule_in())
+      )
+
     {:ok, [%JobEnqueued{job_id: job.id}]}
   end
 
   def execute(%CancelJob{job_ref: job_id}, _ctx, _runtime) do
     cancel(job_id)
-    {:ok, [%JobCancelled{job_ref: job_id, state: ObanBench.DB.job_state(job_id)}]}
+    {:ok, [%JobCancelled{job_ref: job_id, state: ObanBench.DB.logged_job_state(job_id)}]}
   end
 
   def execute(%ReadJobState{job_ref: job_id}, _ctx, _runtime) do
-    {:ok, [%JobObserved{job_ref: job_id, state: ObanBench.DB.job_state(job_id)}]}
+    {:ok, [%JobObserved{job_ref: job_id, state: ObanBench.DB.logged_job_state(job_id)}]}
   end
 
   @doc "The real cancel. Overridden by the seeded-bug adapter to expose a defect."
   def cancel(job_id) do
-    Oban.cancel_job(job_id)
+    ObanBench.DB.cancel_job(job_id)
     :ok
   end
 end

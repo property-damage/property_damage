@@ -47,6 +47,7 @@ defmodule OpenapiBench.Idempotency.Adapter do
   so the SUT can dedupe retries unless the `idempotency_bug` flag is seeded.
   """
   use PropertyDamage.Adapter
+  require PropertyDamage
 
   alias OpenapiBench.Idempotency.Commands.CreateValue
   alias OpenapiBench.Idempotency.Events.ValueCreated
@@ -55,9 +56,12 @@ defmodule OpenapiBench.Idempotency.Adapter do
   # of this target's `config:` (`:bug`, `:idempotency_bug`; default false).
   @impl true
   def setup(config) do
-    OpenapiBench.Server.reset(
-      Map.get(config, :bug, false),
-      Map.get(config, :idempotency_bug, false)
+    bug = Map.get(config, :bug, false)
+    idempotency_bug = Map.get(config, :idempotency_bug, false)
+    OpenapiBench.Server.reset(bug, idempotency_bug)
+
+    PropertyDamage.log("reset -> ok  bug=#{bug} idempotency_bug=#{idempotency_bug}",
+      tags: [:sut]
     )
 
     {:ok, Map.put_new(config, :base_url, OpenapiBench.Server.base_url())}
@@ -77,20 +81,73 @@ defmodule OpenapiBench.Idempotency.Adapter do
     end
   end
 
+  # Sends one request and logs it as one entry: the summary line, then the
+  # idempotency key and the bodies as sent and received, pretty-printed by
+  # whitespace only. The key changes every run, so it stays out of the summary.
   defp post_json(url, body, headers) do
     Application.ensure_all_started(:inets)
+    req_body = Jason.encode!(body)
 
     req_headers =
       Enum.map([{"content-type", "application/json"} | headers], fn {k, v} ->
         {to_charlist(k), to_charlist(v)}
       end)
 
-    request = {String.to_charlist(url), req_headers, ~c"application/json", Jason.encode!(body)}
+    request = {String.to_charlist(url), req_headers, ~c"application/json", req_body}
 
     case :httpc.request(:post, request, [], body_format: :binary) do
-      {:ok, {{_, status, _}, _resp_headers, resp_body}} -> {:ok, status, decode(resp_body)}
-      {:error, reason} -> {:error, reason}
+      {:ok, {{_, status, _}, _resp_headers, resp_body}} ->
+        response = decode(resp_body)
+
+        log_call(
+          url,
+          headers,
+          req_body,
+          "#{status} #{outcome(response)}",
+          block("response", json(resp_body))
+        )
+
+        {:ok, status, response}
+
+      {:error, reason} ->
+        log_call(url, headers, req_body, "error", block("error", inspect(reason, pretty: true)))
+        {:error, reason}
     end
+  end
+
+  defp log_call(url, headers, req_body, outcome, detail) do
+    key =
+      case List.keyfind(headers, "Idempotency-Key", 0) do
+        {_, key} -> block("idempotency-key", key)
+        nil -> ""
+      end
+
+    PropertyDamage.log(
+      "POST #{URI.parse(url).path} -> #{outcome}\n#{key}#{block("request", json(req_body))}#{detail}"
+      |> String.trim_trailing(),
+      tags: [:http]
+    )
+  end
+
+  # The API answers an error as {"error": reason} and a create with its id.
+  defp outcome(%{"error" => error}), do: error
+  defp outcome(%{"id" => id}), do: "ok  id=#{id}"
+  defp outcome(_response), do: "ok"
+
+  # Reformats JSON text by whitespace only, so numbers keep the text the
+  # server sent; text that is not JSON is logged as it came.
+  defp json(text) do
+    case Jason.decode(text) do
+      {:ok, _} -> Jason.Formatter.pretty_print(text)
+      {:error, _} -> text
+    end
+  end
+
+  defp block(_label, ""), do: ""
+
+  defp block(label, text) do
+    indented = text |> String.split("\n") |> Enum.map_join("\n", &("  " <> &1))
+    "#{label}:\n#{indented}\n"
   end
 
   defp decode(""), do: nil

@@ -68,7 +68,7 @@ defmodule RedisBench.ParallelLinearizationTest do
     def setup(_config) do
       {:ok, conn} = Conn.start_direct()
       key = Conn.run_key()
-      {:ok, raw} = Redix.command(conn, ["GET", key])
+      {:ok, raw} = Conn.command(conn, ["GET", key])
       {:ok, %{conn: conn, key: key, snapshot: to_int(raw)}}
     end
 
@@ -81,12 +81,12 @@ defmodule RedisBench.ParallelLinearizationTest do
     @impl true
     def execute(%GetThenSet{}, %{conn: conn, key: key, snapshot: snapshot}, _runtime) do
       to = snapshot + 1
-      {:ok, _} = Redix.command(conn, ["SET", key, Integer.to_string(to)])
+      {:ok, _} = Conn.command(conn, ["SET", key, Integer.to_string(to)])
       {:ok, [%Written{from: snapshot, to: to}]}
     end
 
     def execute(%ReadValue{}, %{conn: conn, key: key}, _runtime) do
-      {:ok, raw} = Redix.command(conn, ["GET", key])
+      {:ok, raw} = Conn.command(conn, ["GET", key])
       {:ok, [%ValueRead{value: to_int(raw)}]}
     end
 

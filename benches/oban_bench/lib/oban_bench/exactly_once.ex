@@ -47,8 +47,10 @@ defmodule ObanBench.ExactlyOnce do
   """
   def enqueue(base, key, worker_mod, ctx, runtime) do
     name = "#{ctx.run_id}:#{base}"
-    {:ok, job} = Oban.insert(worker_mod.new(%{"counter" => name, "key" => "#{key}"}))
+    {:ok, job} = ObanBench.DB.insert_job(worker_mod.new(%{"counter" => name, "key" => "#{key}"}))
 
+    # The poller runs in a process with no log scope, so it reads through the
+    # unlogged helpers; what it sees reaches the report as Incremented events.
     runtime.start_poller.(
       poll_fn: fn -> {ObanBench.DB.job_state(job.id), ObanBench.DB.value(name)} end,
       interval_ms: 20,
