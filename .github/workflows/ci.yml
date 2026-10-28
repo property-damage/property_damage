@@ -47,6 +47,9 @@ jobs:
 
       - run: mix compile --warnings-as-errors
 
+      # The dev compile skips test/support, so compile the test environment too.
+      - run: MIX_ENV=test mix compile --warnings-as-errors
+
       - if: matrix.lint
         run: mix format --check-formatted
 
