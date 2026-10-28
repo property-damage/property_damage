@@ -1168,6 +1168,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without creating atoms from the file. A file that names a module of no loaded
   application still returns `{:error, :unsafe_terms}`.
 
+- **A process whose parent exited still logs under its running step.** The
+  scope lookup ended at the first process in `$callers` that had exited, so
+  a process started by a `Task` that `execute/3` started raised
+  `PropertyDamage.Log.NoScopeError` once that `Task` returned, although the
+  step was still running. The lookup now walks past an exited process. A
+  process left running by a step that has ended still finds no scope.
 - **A mock's `on_command/2` or `on_event/2` that raises fails its step.** The
   registry turned the raise into an error that the engine discarded, so the
   run went on as if the mock had answered. The step the mock was told of now

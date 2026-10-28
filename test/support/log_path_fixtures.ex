@@ -129,6 +129,67 @@ defmodule PropertyDamage.Test.LogPathFixtures do
     end
   end
 
+  defmodule LeftoverAdapter do
+    @moduledoc false
+    # Act 0's execute/3 starts a process and leaves it running; Act 1's asks
+    # it to log and reports to `:test_pid` whether the call raised.
+    use PropertyDamage.Adapter
+    require PropertyDamage
+
+    alias PropertyDamage.Test.LogFixtures, as: F
+
+    @impl true
+    def setup(config) do
+      {:ok, box} = Agent.start(fn -> nil end)
+      {:ok, Map.put(config, :box, box)}
+    end
+
+    @impl true
+    def execute(%F.Act{n: 0} = command, ctx, _runtime) do
+      {:ok, leftover} = Task.start(fn -> loop() end)
+      Agent.update(ctx.box, fn _ -> leftover end)
+      F.answer(command, ctx)
+    end
+
+    def execute(%F.Act{n: 1} = command, ctx, _runtime) do
+      leftover = Agent.get(ctx.box, & &1)
+      send(leftover, {:log, self()})
+
+      receive do
+        {:leftover, outcome} -> send(ctx.test_pid, {:leftover, outcome})
+      end
+
+      F.answer(command, ctx)
+    end
+
+    def execute(command, ctx, _runtime), do: F.answer(command, ctx)
+
+    @impl true
+    def teardown(ctx) do
+      if leftover = Agent.get(ctx.box, & &1), do: send(leftover, :stop)
+      Agent.stop(ctx.box)
+      :ok
+    end
+
+    defp loop do
+      receive do
+        {:log, from} ->
+          send(from, {:leftover, attempt()})
+          loop()
+
+        :stop ->
+          :ok
+      end
+    end
+
+    defp attempt do
+      PropertyDamage.log("logged by a process step 0 left running")
+      :logged
+    rescue
+      PropertyDamage.Log.NoScopeError -> :no_scope
+    end
+  end
+
   defmodule LoggingInjector do
     @moduledoc false
     # An injector that logs in setup/1 and teardown/1 and emits nothing.

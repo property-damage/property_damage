@@ -406,9 +406,11 @@ one before it runs your code at an execution point, which is any of these:
 `PropertyDamage.log/2` looks for a scope in the calling process first, then in
 each process of the caller's `$callers` list. A `Task` started from
 `execute/3` therefore logs to the step that started it, because `Task` puts
-its parent in `$callers`. The lookup stops at the first process in that list
-that is no longer alive. So a process left running by a step that has ended
-finds no scope, and its line never lands under a later step.
+its parent in `$callers`. That holds also when a `Task` between them has
+exited while the step runs. The step's scope lives in the process that runs
+`execute/3`, which exits when the step ends. So a process left running by a
+step that has ended finds no scope, and its line never lands under a later
+step.
 
 A call that finds no scope raises `PropertyDamage.Log.NoScopeError`. Inside
 `execute/3` the raise becomes an adapter error, and the report classifies it
