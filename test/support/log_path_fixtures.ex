@@ -71,6 +71,64 @@ defmodule PropertyDamage.Test.LogPathFixtures do
     end
   end
 
+  defmodule OrphanTaskAdapter do
+    @moduledoc false
+    # For Act 0, execute/3 starts a Task that starts a second process and
+    # exits; the second process logs once its parent is gone, while the step
+    # still waits for it, and reports to `:test_pid` whether the call raised.
+    use PropertyDamage.Adapter
+    require PropertyDamage
+
+    alias PropertyDamage.Test.LogFixtures, as: F
+
+    @impl true
+    def setup(config), do: {:ok, config}
+
+    @impl true
+    def execute(%F.Act{n: 0} = command, ctx, _runtime) do
+      step = self()
+
+      parent =
+        Task.async(fn ->
+          {:ok, child} =
+            Task.start(fn ->
+              receive do
+                :go -> send(step, {:orphan, attempt("logged after its parent exited")})
+              end
+            end)
+
+          child
+        end)
+
+      child = Task.await(parent)
+      gone = Process.monitor(parent.pid)
+
+      receive do
+        {:DOWN, ^gone, :process, _pid, _reason} -> send(child, :go)
+      end
+
+      receive do
+        {:orphan, outcome} -> send(ctx.test_pid, {:orphan, outcome})
+      after
+        5_000 -> send(ctx.test_pid, {:orphan, :silent})
+      end
+
+      F.answer(command, ctx)
+    end
+
+    def execute(command, ctx, _runtime), do: F.answer(command, ctx)
+
+    @impl true
+    def teardown(_ctx), do: :ok
+
+    defp attempt(message) do
+      PropertyDamage.log(message)
+      :logged
+    rescue
+      PropertyDamage.Log.NoScopeError -> :no_scope
+    end
+  end
+
   defmodule LoggingInjector do
     @moduledoc false
     # An injector that logs in setup/1 and teardown/1 and emits nothing.

@@ -50,6 +50,14 @@ defmodule PropertyDamage.Log.PathsTest do
     end
   end
 
+  test "a process whose parent exited still logs under the step that is running" do
+    target = F.target("alice", %{test_pid: self(), fail_at: 1}, P.OrphanTaskAdapter)
+    report = F.report!(F.Model, [target])
+
+    assert_received {:orphan, :logged}
+    assert P.log_messages(F.block(listing(report), "[0]")) == ["logged after its parent exited"]
+  end
+
   test "a failed adapter setup/1 on the lockstep path tears the injector down once" do
     target = P.injected_target("alice", %{setup_log: true, fail_setup: true})
     report = F.report!(F.Model, [target])
