@@ -144,6 +144,10 @@ PropertyDamage.run(
 )
 ```
 
+A failing run returns `{:error, report}` and prints the failure report. To add
+your own lines to that report, call `PropertyDamage.log/2` from an adapter or
+a command; see the [log lines guide](log_lines.md).
+
 ## Placeholder Flow
 
 Server-generated IDs are modeled with placeholders: stand-in values created

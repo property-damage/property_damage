@@ -259,6 +259,10 @@ test_code = PropertyDamage.generate_test(failure, format: :exunit)
 File.write!("test/regression_test.exs", test_code)
 ```
 
+A failure report can also carry your own lines, such as the requests an adapter
+sends: call `PropertyDamage.log/2`, as the [log lines guide](guides/log_lines.md)
+shows.
+
 ### Interactive Shrinking
 
 If the initial shrinking didn't produce a minimal sequence:
@@ -1436,7 +1440,8 @@ The full set of guides (getting started, writing commands and invariants,
 debugging, chaos engineering, differential and dual-transport testing, and more)
 is browsable in the `guides/` directory and rendered on
 [HexDocs](https://hexdocs.pm/property_damage). New here? Start with
-[Getting Started](guides/getting_started.md).
+[Getting Started](guides/getting_started.md). To add your own lines to the
+failure report, see the [log lines guide](guides/log_lines.md).
 
 ## Agent Skills
 
