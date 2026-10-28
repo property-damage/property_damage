@@ -1354,6 +1354,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A pasted reproduction command keeps each target's non-default `expansion:`.**
   `FailureReport.targets_source/1` left it out, so the pasted command re-ran a
   `:reference` or `:identity` target as `:random`, which is a different sequence.
+- **`RunTrace.state_at/2` and `FailureReport.verify_projections/1` work at a
+  leaf.** Both raised `FunctionClauseError` for a failure at a leaf of an
+  expanded root. The state at a leaf is now the prefix as it stood when the
+  root began plus the folds of that root's leaves through this leaf.
 
 ## [0.2.0] - 2026-06-25
 

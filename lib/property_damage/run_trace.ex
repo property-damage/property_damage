@@ -586,7 +586,9 @@ defmodule PropertyDamage.RunTrace do
   Faithful projection state immediately AFTER the step at `position`.
 
   Folds every recorded item (command folds + folded event-log entries) up to and
-  including this step's own folds, in true fold order. `position` may be a
+  including this step's own folds, in true fold order. For a leaf of an expanded
+  root, that is the state the prefix had when the root began (every fold of an
+  earlier step) plus the folds of the root's leaves through this leaf. `position` may be a
   `%Sequence.Position{}` or a flattened (reading-order) index. Returns a
   `%{projection_module => state}` map, or `%{}` for a trace with no plan/model.
   """
@@ -719,7 +721,7 @@ defmodule PropertyDamage.RunTrace do
       section == :teardown ->
         items |> Enum.sort_by(& &1.ordinal) |> fold_in_order(init)
 
-      not branched?(plan) or section == :prefix ->
+      not branched?(plan) or section == :prefix or match?({:leaf, _}, section) ->
         cutoff = boundary_ordinal(items, position, boundary, leaf_roots(trace))
 
         items
@@ -749,7 +751,7 @@ defmodule PropertyDamage.RunTrace do
   # For a linear plan, every position is in the prefix section, so we fold the
   # whole item stream by ordinal; branched-plan prefix positions likewise only
   # ever see prefix items (branch/suffix ordinals are strictly higher).
-  defp sections_for(:prefix, plan) do
+  defp sections_for(section, plan) when section == :prefix or elem(section, 0) == :leaf do
     if branched?(plan), do: [:setup, :prefix], else: [:setup, :prefix, :suffix, nil]
   end
 

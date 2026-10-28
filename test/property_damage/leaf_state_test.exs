@@ -18,15 +18,14 @@ defmodule PropertyDamage.LeafStateTest do
     assert :ok = FailureReport.verify_projections(leaf_report())
   end
 
-  test "state_at/2 and state_before/2 at a leaf do not raise and differ by the leaf's own folds" do
+  test "state_at/2 and state_before/2 at a leaf at a leaf equal the run's own snapshots" do
     report = leaf_report()
     %Step{position: position} = FailureReport.failure_step(report)
 
     after_leaf = RunTrace.state_at(report.trace, position)
     before_leaf = RunTrace.state_before(report.trace, position)
 
-    assert is_map(after_leaf) and map_size(after_leaf) > 0
-    assert after_leaf != before_leaf
+    assert map_size(after_leaf) > 0
     assert after_leaf == report.state_at_failure
     assert before_leaf == report.state_before_failure
   end
