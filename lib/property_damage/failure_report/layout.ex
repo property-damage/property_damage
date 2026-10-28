@@ -899,9 +899,10 @@ defmodule PropertyDamage.FailureReport.Layout do
   # ==========================================================================
 
   defp projections_section(report, variant, focus) do
-    {minus, plus, legend} = compared_states(report)
+    {minus, plus, legend_parts} = compared_states(report)
 
     if state?(minus) or state?(plus) do
+      legend = legend(legend_parts, minus, plus)
       at = if focus, do: focus.label, else: "the failure"
       applied = last_applied(variant, focus)
 
@@ -927,12 +928,21 @@ defmodule PropertyDamage.FailureReport.Layout do
   # and after the failing step.
   defp compared_states(%FailureReport{kind: kind} = report)
        when kind in [:diverged, :did_not_converge] do
-    legend = ~s(- reference "#{reference_name(report)}", + variant "#{variant_name(report)}")
+    legend =
+      {~s(- reference "#{reference_name(report)}"), ~s(+ variant "#{variant_name(report)}")}
+
     {report.reference_state_at_failure, variant_cut(report), legend}
   end
 
   defp compared_states(report),
-    do: {report.state_before_failure, report.state_at_failure, "- before, + after"}
+    do: {report.state_before_failure, report.state_at_failure, {"- before", "+ after"}}
+
+  # The legend names a side only when that side has state.
+  defp legend({minus_text, plus_text}, minus, plus) do
+    [{minus, minus_text}, {plus, plus_text}]
+    |> Enum.filter(fn {state, _text} -> state?(state) end)
+    |> Enum.map_join(", ", fn {_state, text} -> text end)
+  end
 
   defp variant_cut(%FailureReport{trace: %RunTrace{} = trace, failed_at_index: root})
        when is_integer(root),

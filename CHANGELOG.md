@@ -1367,6 +1367,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no target has no name to regenerate with, so `expansion_command/1` returns
   `nil` and the Reproduction section omits the `# Regenerate the failing
   variant:` comment and call.
+- **The Projections legend names only the sides that have state.** A report
+  saved before the reference's state was recorded printed `+` lines only, yet
+  its heading still named the reference. The heading now names a side only
+  when it has state (`- before, + after` and the reference and variant form
+  are unchanged when both sides do).
 
 ## [0.2.0] - 2026-06-25
 
