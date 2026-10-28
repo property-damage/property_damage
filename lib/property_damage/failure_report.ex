@@ -1603,19 +1603,21 @@ defimpl Inspect, for: PropertyDamage.FailureReport do
       Inspect.Algebra.concat(["#FailureReport<", compact, ">"])
     end
   rescue
-    _ -> fallback(report)
+    error -> fallback(report, Exception.message(error))
   catch
-    _, _ -> fallback(report)
+    kind, value -> fallback(report, Exception.format_banner(kind, value))
   end
 
-  defp fallback(report) do
+  # The summary names the error it replaced, on one line.
+  defp fallback(report, error) do
     type = PropertyDamage.FailureReport.failure_type(report)
 
     Inspect.Algebra.concat([
       "#FailureReport<",
       "seed: #{inspect(report.seed)}, ",
       "type: #{inspect(type)}, ",
-      "failed_at: #{inspect(report.failed_at_index)}",
+      "failed_at: #{inspect(report.failed_at_index)}, ",
+      "error: #{String.replace(error, ~r/\s*\n\s*/, " ")}",
       ">"
     ])
   end

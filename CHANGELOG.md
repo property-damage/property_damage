@@ -1372,6 +1372,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its heading still named the reference. The heading now names a side only
   when it has state (`- before, + after` and the reference and variant form
   are unchanged when both sides do).
+- **`inspect/2` of a report names the error behind its one-line summary.**
+  When formatting the report failed (an invalid `PD_LOG` is the common case),
+  the summary fell back silently, so the syntax error never showed. `inspect/2`
+  still never raises; the summary now ends with the message of the error it
+  replaced.
 
 ## [0.2.0] - 2026-06-25
 

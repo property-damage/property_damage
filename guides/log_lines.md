@@ -660,8 +660,8 @@ PD_LOG="only:http,seed except:body" mix test
   `property_damage` test raise an `ArgumentError` that shows the expected
   syntax.
   `IO.inspect(report, pretty: true)` does not raise: it prints a one-line
-  summary in place of the report. If you see that summary, call
-  `PropertyDamage.ExUnit.format_failure/1` on the report to see the error.
+  summary in place of the report, and the summary ends with the error it
+  replaced, here the `PD_LOG` syntax message.
 
 ### A finished report
 
