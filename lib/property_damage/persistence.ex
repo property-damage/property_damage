@@ -53,6 +53,7 @@ defmodule PropertyDamage.Persistence do
   """
 
   alias PropertyDamage.{Failure, FailureReport, RunTrace, Sequence}
+  alias PropertyDamage.FailureReport.Formatter
 
   @version 15
   @extension ".pd"
@@ -144,6 +145,12 @@ defmodule PropertyDamage.Persistence do
   - `{:ok, report}` - Successfully loaded FailureReport with no version warnings
   - `{:ok, report, warnings}` - Loaded with version compatibility warnings
   - `{:error, reason}` - File not found, corrupted, incompatible version, etc.
+
+  The file is decoded without creating atoms, so a module it names must be
+  known to the VM. When the first decode refuses an unknown atom, `load/1`
+  loads the modules of every loaded application and decodes once more; a file
+  that names a module of no loaded application returns
+  `{:error, :unsafe_terms}`.
 
   Version warnings indicate that the saved test may not reproduce correctly
   due to changes in PropertyDamage or dependency versions. Warnings include:
@@ -337,11 +344,18 @@ defmodule PropertyDamage.Persistence do
   @doc """
   Export a failure to JSON format for external tools.
 
+  A comparison failure's reference side is written as `reference_trace`,
+  `reference_state_at_failure` and `shrink_stop`, in the shape the `:json`
+  format gives `reference_trace`, `reference_projections` and the shrinking
+  `stop`; each is `null` when the report has none.
+
   Note: JSON export is lossy - some Elixir-specific data may be simplified.
   Use `save/3` for lossless storage.
   """
   @spec export_json(FailureReport.t()) :: String.t()
   def export_json(%FailureReport{} = report) do
+    reference = Formatter.reference_json(report)
+
     %{
       version: @version,
       seed: report.seed,
@@ -367,6 +381,9 @@ defmodule PropertyDamage.Persistence do
       setup_commands: Enum.map(report.setup_commands, &inspect/1),
       teardown_commands: Enum.map(report.teardown_commands, &inspect/1),
       original_command_count: length(Sequence.to_list(report.original_sequence)),
+      reference_trace: reference.trace,
+      reference_state_at_failure: reference.projections,
+      shrink_stop: reference.stop,
       reproduction_command: FailureReport.reproduction_command(report)
     }
     |> Jason.encode!(pretty: true)
@@ -635,18 +652,42 @@ defmodule PropertyDamage.Persistence do
         {:error, :term_too_large}
 
       true ->
-        try do
-          case :erlang.binary_to_term(term_binary, [:safe]) do
-            payload when is_map(payload) -> fun.(payload)
-            # A validly-encoded but non-map payload cannot carry a PD envelope;
-            # reject it with the same shape unloadable terms get rather than
-            # letting payload access crash the loader.
-            _ -> {:error, :unsafe_terms}
-          end
-        rescue
-          ArgumentError -> {:error, :unsafe_terms}
+        case safe_decode(term_binary) do
+          {:ok, payload} when is_map(payload) -> fun.(payload)
+          # A validly-encoded but non-map payload cannot carry a PD envelope;
+          # reject it with the same shape unloadable terms get rather than
+          # letting payload access crash the loader.
+          {:ok, _other} -> {:error, :unsafe_terms}
+          :error -> {:error, :unsafe_terms}
         end
     end
+  end
+
+  # `:safe` decoding refuses an atom the VM has not seen, and a module's atoms
+  # exist only once the module is loaded. In a fresh VM that refuses a valid
+  # file, so on the first refusal the modules of every loaded application are
+  # loaded and the decode runs once more, still `:safe`: the file's bytes
+  # create no atom.
+  defp safe_decode(term_binary) do
+    {:ok, :erlang.binary_to_term(term_binary, [:safe])}
+  rescue
+    ArgumentError ->
+      load_application_modules()
+
+      try do
+        {:ok, :erlang.binary_to_term(term_binary, [:safe])}
+      rescue
+        ArgumentError -> :error
+      end
+  end
+
+  defp load_application_modules do
+    for {app, _description, _vsn} <- :application.loaded_applications(),
+        module <- Application.spec(app, :modules) || [] do
+      Code.ensure_loaded(module)
+    end
+
+    :ok
   end
 
   # The external term format declares its uncompressed size in the header for

@@ -197,6 +197,26 @@ defmodule PropertyDamage.FailureReport.Formatter do
   defp log_text({:value, term}),
     do: inspect(term, pretty: true, limit: :infinity, printable_limit: :infinity)
 
+  @doc """
+  The reference side of a comparison failure as the `:json` format writes it:
+  `trace`, `projections` and `stop`, each nil when the report has none.
+  `Persistence.export_json/1` writes the same values.
+  """
+  @spec reference_json(FailureReport.t()) :: %{
+          trace: map() | nil,
+          projections: map() | nil,
+          stop: String.t() | nil
+        }
+  def reference_json(report) do
+    %{
+      trace: serialize_reference_trace(report),
+      projections:
+        report.reference_state_at_failure &&
+          serialize_projections(report.reference_state_at_failure),
+      stop: report.shrink_stop && to_string(report.shrink_stop)
+    }
+  end
+
   # The reference target's trace of the reported run; null when the report has
   # none. Its sequence is the plan both targets ran.
   defp serialize_reference_trace(%{reference_trace: nil}), do: nil

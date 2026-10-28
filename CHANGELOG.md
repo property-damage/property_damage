@@ -1152,6 +1152,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the deadline. `:sleep` is a one-arity function (default `&Process.sleep/1`)
   that settle sleeps with, so the tests assert the order and count of recorded
   sleeps, including the clipped final one.
+
+- **`Persistence.export_json/1` writes the reference side of a comparison
+  failure.** The export left out the reference target's trace, its projection
+  state at the failing boundary and why the shrinker stopped, which the
+  `:json` format already carried. The export now writes `reference_trace`,
+  `reference_state_at_failure` and `shrink_stop` in the same shape, each
+  `null` for a report that has none. The entry for the reference fields under
+  Added is unchanged.
+
+- **`Persistence.load/1` loads a valid file in a fresh VM.** The safe decode
+  refuses an atom the VM has not seen, so a saved report that names a module
+  not yet loaded returned `{:error, :unsafe_terms}`. On that refusal `load/1`
+  now loads the modules of the loaded applications and decodes once more, still
+  without creating atoms from the file. A file that names a module of no loaded
+  application still returns `{:error, :unsafe_terms}`.
+
 - **An `@eventually` function that returns no predicate fails at its step.**
   The poller took the function's return as its predicate without checking it,
   so a function that answered the question itself (a boolean) raised
