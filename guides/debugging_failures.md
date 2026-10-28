@@ -3,9 +3,160 @@
 When PropertyDamage finds a failing sequence, it provides powerful tools for
 understanding and fixing the bug. This guide covers the debugging workflow.
 
+## Reading the report
+
+A failed run prints a report. This section reads one section by section. The
+example is the bank of the [log lines guide](log_lines.md): an in-memory bank
+with a planted bug, run with `mix run bug.exs` and seed 20. Its adapter logs
+each request and answer with `PropertyDamage.log/2`, which is why the listing
+below shows `log` lines beside the events.
+
+<!-- pd-report-excerpt: the bank example of log_lines.md: mix run bug.exs; seed 20 -->
+```text
+#FailureReport<
+╔══════════════════════════════════════════════════════════════════════╗
+║                            BUG DETECTED!                             ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Seed: 20
+
+## Failure
+
+Failure  check failed
+Check    never_negative
+At       [1] %MyApp.Withdraw{account: "alice", amount: 5}
+Message  check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
+
+## Minimal Reproduction (2 roots)
+
+  [0] %MyApp.Deposit{account: "alice", amount: 5}
+        +0.00s log   [http url] POST /accounts/alice/deposit
+        +0.00s log   [http headers] %{"authorization" => "[REDACTED]"}
+        +0.00s log   [http body] %{"amount" => 5}
+        +0.00s log   [http status] -> 200
+        +0.00s log   [http response] %{"balance" => 5}
+        +0.00s event %MyApp.BalanceChanged{account: "alice", balance: 5}
+► [1] %MyApp.Withdraw{account: "alice", amount: 5}  ◄── failed
+        +0.00s log   [http url] POST /accounts/alice/withdraw
+        +0.00s log   [http headers] %{"authorization" => "[REDACTED]"}
+        +0.00s log   [http body] %{"amount" => 5}
+        +0.00s log   [http status] -> 200
+        +0.00s log   [http response] %{"balance" => -1}
+        +0.00s event %MyApp.BalanceChanged{account: "alice", balance: -1}
+
+## Projections at [1]   (- before, + after)
+
+MyApp.Balances   last applied: BalanceChanged
+  - "alice" => 5
+  + "alice" => -1
+
+## Reproduction
+
+targets = [MyApp.Adapter]
+
+# Rerun from the seed:
+PropertyDamage.run(model: MyApp.Model, targets: targets, seed: 20, max_runs: 1)
+
+# Regenerate the failing variant:
+PropertyDamage.Expansion.for(MyApp.Model, 20, 1, "Adapter")
+
+# Replay the shrunk failure:
+PropertyDamage.run(model: MyApp.Model, targets: targets, only: [replay: "property_damage_replays/Model_seed20.replay.exs"])
+>
+```
+
+`IO.inspect(report, pretty: true)` prints the report like this, wrapped in
+`#FailureReport<` and `>`, without color. A failure in a
+`property_damage` ExUnit test prints the same layout through
+`PropertyDamage.ExUnit.format_failure/2`, with ANSI color. Only that one prints
+color; the text is the same either way. Plain `inspect(report)`, without
+`pretty: true`, prints a one-line summary.
+
+### Banner and seed
+
+The banner says `BUG DETECTED!`. A failure in the test's own code says
+`TEST CODE ERROR` and adds a hint. The line under it, `Seed: 20`, is the seed
+the failing run generated from, so the failing run is run 1 of that seed.
+
+### Failure
+
+The Failure section holds labeled fields in one aligned column. `Failure` names
+the kind in words, and `Check` (or `Observation`, for a comparison) names what
+failed. `At` is the step label and the command where it happened. The fields
+after those depend on the kind: a poll timeout adds its predicate, an
+idempotency violation adds one line per attempt, a latency budget adds the
+statistic, bound and measured value. A run with other failures adds one
+`Other failure` line each. A shrinker that ran out of time or iterations adds a
+`Shrink` line that warns the reproduction may not be minimal. A run with a log
+filter adds a `Log filter` line (see the [log lines guide](log_lines.md#filtering-by-tag)).
+
+### Setup
+
+A Setup section appears between Failure and Minimal Reproduction when the run
+was given `setup_log:`. It holds the lines a test captured while it prepared
+the system, before the run started. See
+[Work done before the run](log_lines.md#work-done-before-the-run).
+
+### Minimal Reproduction
+
+The heading counts roots: `(2 roots)`. Each step has one label, used in every
+section of the report:
+
+| Label | Step |
+|-------|------|
+| `[i]` | root `i`, counted from 0 in reading order |
+| `[i.j]` | leaf `j` of root `i`, listed under that root |
+| `[setup i]`, `[teardown i]` | a setup or teardown command |
+| `[branch b.i]` | command `i` of branch `b` in a branching run |
+
+`►` marks the failing step and `◄── failed` names the outcome (`diverged` and
+`did not converge` for comparison failures). Under each step, the events the
+command produced and the log lines its code wrote print in the order they
+happened. Each line starts with its offset from the start of the target's run
+(`+0.00s`), then `log` or `event`. A log line shows its tags in brackets. An
+event from another source keeps a badge for it (`NEM` for a nemesis, `POL` for
+a resource poller, and so on). Entries tied to no command print after the
+listing under "Not tied to a command". For log lines, see the
+[log lines guide](log_lines.md).
+
+### Projections
+
+The heading names the failing step: `Projections at [1]`. Each projection
+prints the event it folded last, then every attribute on its own line, in full.
+An attribute that did not change prints once. One that changed prints a `-`
+line and a `+` line. For most failures the two sides are the state before and
+after the failing step. Here, `alice` held 5 before the withdrawal and -1 after
+it.
+
+### Reproduction
+
+The section binds `targets = [...]` once, then prints three calls, each
+passing `targets: targets`:
+
+1. Rerun from the seed: generates the failing run again, then fails and
+   shrinks again.
+2. Regenerate the failing variant: `PropertyDamage.Expansion.for/5` returns the
+   sequence one target ran before shrinking, without running anything.
+3. Replay the shrunk failure: runs the replay artifact the failure wrote.
+   Step 1 below explains it.
+
+When `targets` holds a value no source code can rebuild (a pid, a reference, a
+port or a function), a line under the binding says where it sits and tells you
+to rebuild the list as your test does. None of the three calls carries the
+run's `log:` filter: add it back if you want the same lines.
+
+### A comparison failure
+
+A divergence between two targets prints the same sections, with two changes.
+Minimal Reproduction lists two sides, each under its own header
+(`Reference: target "left"` and `Variant: target "right"`), and marks the
+failing root in both. Projections compares the reference's state with the
+variant's at the failing boundary. For a real report, see the excerpt in the
+[path equivalence guide](path_equivalence_testing.md#4-plant-a-bug-and-watch-it-fail).
+
 ## The Failure Report
 
-When a test fails, PropertyDamage returns a failure report:
+The report is a `%PropertyDamage.FailureReport{}`. A failing run returns it:
 
 ```elixir
 {:error, failure} = PropertyDamage.run(
@@ -14,17 +165,21 @@ When a test fails, PropertyDamage returns a failure report:
   max_runs: 100
 )
 
-IO.inspect(failure, label: "Failure")
+IO.inspect(failure, pretty: true)
 ```
 
-The report includes:
+Read it through its fields and accessors:
+
 - **seed** - Random seed for reproducibility
 - **original_sequence** - Full command sequence that failed
 - **shrunk_sequence(failure)** - Minimal reproduction (after shrinking), read via the accessor `PropertyDamage.FailureReport.shrunk_sequence/1` (it is not a struct field)
-- **shrink_iterations** / **shrink_time_ms** - How much shrinking it took
+- **shrink_iterations** / **shrink_time_ms** / **shrink_stop** - How much shrinking it took, and why it stopped (`:done`, `:max_iterations` or `:max_time`)
 - **failure_reason** - a `%PropertyDamage.Failure{}` describing what failed (see below)
 - **`FailureReport.check_name/1`** / **`failure_message/1`** - accessors over `failure_reason`: which check failed and a human-readable description
-- **state_at_failure** - Model state when failure occurred
+- **state_before_failure** / **state_at_failure** - Projection state before and after the failing step
+- **`FailureReport.steps/1`**, **`failure_step/1`**, **`failure_index/1`** - the run as a list of steps, the failing step, and its reading-order index
+- **reference_trace** / **reference_state_at_failure** - for `:diverged` and `:did_not_converge`, the reference target's run and its state at the failing boundary (`nil` for every other kind)
+- **setup_log** / **log_filter** - the lines `setup_log:` carried and the run's log filter (see the [log lines guide](log_lines.md))
 
 ### The `%Failure{}` reason
 
