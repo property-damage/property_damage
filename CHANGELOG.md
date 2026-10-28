@@ -1168,6 +1168,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without creating atoms from the file. A file that names a module of no loaded
   application still returns `{:error, :unsafe_terms}`.
 
+- **A mock's `on_command/2` or `on_event/2` that raises fails its step.** The
+  registry turned the raise into an error that the engine discarded, so the
+  run went on as if the mock had answered. The step the mock was told of now
+  fails as an adapter error whose detail is `{module, callback, reason}`, as
+  a raising `execute/3` does. `MockServiceRegistry` keeps its
+  `{:error, _}` answer.
+- **A projection that rejects a mock event keeps the mocks' lines.** The
+  lines a mock's `on_event/2` wrote before a projection rejected the event
+  were dropped with the step; they now print under that step.
 - **A branching run reports a failed target setup as the lockstep path does.**
   An injector that refused to start crashed the branching path with a
   `CaseClauseError`, and an adapter `setup/1` that raised propagated out of

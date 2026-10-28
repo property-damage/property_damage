@@ -235,6 +235,12 @@ The system SHALL support mock service adapters that stand in for third-party ser
 - **WHEN** events are pushed into the registry after a command's own flush (after the command returned, before the next command or the end of the run)
 - **THEN** the boundary drain (`Stepping.drain/2`) and the finalization SHALL flush and fold them, attributed to the command that ran last
 
+#### Scenario: A mock callback that raises fails its step
+- **WHEN** a mock's `on_command/2` or `on_event/2` raises, exits or throws
+- **THEN** the step the mock was told of SHALL fail as an `:adapter_error` whose detail is the registry's `{module, callback, reason}`, the shape a raising `execute/3` gets, so the report names the mock and the callback; an `on_command/2` that raised SHALL fail the step before the adapter's `execute/3` is called, and an `on_event/2` told of an event the boundary drain or the finalization flushed SHALL fail the command that ran last
+- **AND** `MockServiceRegistry.notify_command/3` and `notify_event/3` SHALL keep answering `{:error, {module, callback, reason}}` and stay up
+- **AND** when a projection rejects a mock event folded after a command, the lines the mocks' `on_event/2` wrote before it SHALL stay under that command's step
+
 ### Requirement: Checks on Asynchronously-Observed Events
 
 The executor SHALL evaluate `@check every:` checks on every observed event, including events observed asynchronously rather than returned by a command (DR-025): resource-poller and injector-adapter events drained from the shared event queue, mock-service events, and nemesis events, as well as events folded during the finalize-time drains (the `@eventually` await drain and the settled-state drain). Each asynchronously-observed event SHALL be folded into projection state and then evaluated against the synchronous-check dispatch **incrementally**: one event at a time, on the state produced by folding that event, with the per-event counters (`:step`, `:event`, and the event module) advancing as for a command's own event. Check mode (DR-014) SHALL be honored, including halting mid-drain under `:halt`.

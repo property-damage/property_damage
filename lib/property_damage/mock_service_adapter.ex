@@ -233,7 +233,9 @@ defmodule PropertyDamage.MockServiceAdapter do
 
   ## Returns
 
-  Updated mock state.
+  Updated mock state. A callback that raises, exits or throws fails the step
+  of `command` before the adapter executes it, as an adapter error whose
+  detail is `{module, :on_command, reason}`.
   """
   @callback on_command(command :: struct(), state :: map()) :: map()
 
@@ -250,7 +252,9 @@ defmodule PropertyDamage.MockServiceAdapter do
 
   ## Returns
 
-  Updated mock state.
+  Updated mock state. A callback that raises, exits or throws fails the step
+  the event belongs to, as an adapter error whose detail is
+  `{module, :on_event, reason}`.
   """
   @callback on_event(event :: struct(), state :: map()) :: map()
 

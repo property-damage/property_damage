@@ -460,7 +460,9 @@ defmodule PropertyDamage.Executor.Stepping do
 
   Returns `{:ok, state}`, or `{:error, %PropertyDamage.Failure{}, failed_state}`
   when a check fails on a drained event; the failed state records the
-  offending event's command index as the place a full run would report.
+  offending event's command index as the place a full run would report. A
+  mock's `on_event/2` that raises on a drained mock event fails the same way,
+  as an adapter error at the last step's command index.
   """
   @spec drain(map(), Context.t()) :: {:ok, map()} | {:error, Failure.t(), map()}
   def drain(state, %Context{} = ctx) do
@@ -488,6 +490,7 @@ defmodule PropertyDamage.Executor.Stepping do
         state.branch_id,
         fold_counter
       )
+      |> Events.folded_or_raise!()
 
     if state.mock_registry do
       MockServiceRegistry.update_projections(state.mock_registry, projections)
@@ -519,6 +522,21 @@ defmodule PropertyDamage.Executor.Stepping do
         failed = %{drained | check_counters: counters, async_failed_index: command_index}
         {:error, Failure.check_failed(name, reason), failed}
     end
+  rescue
+    # A mock's on_event/2 that raised fails the last step, whose events the
+    # mock was told of, and its lines stay under that step. A projection
+    # that rejected a mock event raises on, as before.
+    e in Events.MockEventsError ->
+      case e.error do
+        {:projection, exception, stacktrace} ->
+          reraise exception, stacktrace
+
+        error ->
+          logs = PropertyDamage.Log.append(state.logs, state.current_position, e.lines)
+
+          {:error, Executor.mock_events_failure(error),
+           %{state | logs: logs, async_failed_index: state.last_command_index}}
+      end
   end
 
   @doc """
