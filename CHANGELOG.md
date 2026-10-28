@@ -1362,6 +1362,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The report carried an empty trace, so its listing showed neither. It now
   holds the failing target's result of the last run, which is replaced on
   every run. It stays unshrunk and not localized to a command.
+- **A report without targets prints no Regenerate call.** The layout printed
+  `nil` as the target name in the `Expansion.for` call. A report that records
+  no target has no name to regenerate with, so `expansion_command/1` returns
+  `nil` and the Reproduction section omits the `# Regenerate the failing
+  variant:` comment and call.
 
 ## [0.2.0] - 2026-06-25
 

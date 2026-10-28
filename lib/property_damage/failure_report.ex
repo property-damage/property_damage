@@ -1168,11 +1168,19 @@ defmodule PropertyDamage.FailureReport do
   It names `targets:` when the failing target does not run `:random` or the
   reference does not (the sequence then depends on another target's mode),
   and `max_commands:` when the run did not use the default.
-  """
-  @spec expansion_command(t()) :: String.t()
-  def expansion_command(%__MODULE__{model: model, seed: seed} = report) do
-    name = (report.variant || reference_variant(report.targets) || %{})[:name]
 
+  Returns `nil` for a report that records no target: it has no name to
+  regenerate with.
+  """
+  @spec expansion_command(t()) :: String.t() | nil
+  def expansion_command(%__MODULE__{} = report) do
+    case (report.variant || reference_variant(report.targets) || %{})[:name] do
+      nil -> nil
+      name -> expansion_call(report, name)
+    end
+  end
+
+  defp expansion_call(%__MODULE__{model: model, seed: seed} = report, name) do
     options =
       [
         names_targets?(report, name) && "targets: #{targets_source(report)}",

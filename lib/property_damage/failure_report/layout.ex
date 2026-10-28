@@ -1053,15 +1053,26 @@ defmodule PropertyDamage.FailureReport.Layout do
         [
           {:comment, "Rerun from the seed:"},
           {:code, bind(FailureReport.reproduction_command(report), report)},
-          :blank,
-          {:comment, "Regenerate the failing variant:"},
-          {:code, bind(FailureReport.expansion_command(report), report)},
-          :blank,
+          :blank
+        ] ++
+        regenerate_lines(report) ++
+        [
           {:comment, replay_label},
           replay
         ]
 
     %Section{heading: "Reproduction", fence: "elixir", lines: lines}
+  end
+
+  # A report that records no target has no name to regenerate with.
+  defp regenerate_lines(report) do
+    case FailureReport.expansion_command(report) do
+      nil ->
+        []
+
+      call ->
+        [{:comment, "Regenerate the failing variant:"}, {:code, bind(call, report)}, :blank]
+    end
   end
 
   # `targets = [...]` once, and a line naming each place in it that holds a
