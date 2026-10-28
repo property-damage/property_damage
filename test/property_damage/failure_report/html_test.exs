@@ -26,13 +26,18 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
     do: F.report!(F.Model, [F.target("alice", %{quiet: true, fail_at: 1})], extra)
 
   defp embedded_text(html) do
-    [_, json] = Regex.run(~r{<script type="application/json" id="pd-report">(.*?)</script>}s, html)
+    [_, json] =
+      Regex.run(~r{<script type="application/json" id="pd-report">(.*?)</script>}s, html)
+
     Jason.decode!(json)
   end
 
   defp index_entries(dir) do
     html = File.read!(Path.join(dir, "index.html"))
-    [_, json] = Regex.run(~r{<script type="application/json" id="pd-reports">(.*?)</script>}s, html)
+
+    [_, json] =
+      Regex.run(~r{<script type="application/json" id="pd-reports">(.*?)</script>}s, html)
+
     Jason.decode!(json)
   end
 
@@ -45,12 +50,13 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
       refute embedded_text(html) =~ "\e["
     end
 
-    test "names the model, the failing target, the kind and the seed in the title" do
+    test "names the model, the failing target and its adapter, the kind and the seed in the title" do
       report = check_report()
       [_, title] = Regex.run(~r{<title>(.*?)</title>}, HTML.render(report))
 
       assert title =~ inspect(report.model)
-      assert title =~ "alice"
+      {adapter, _entry} = hd(report.targets)
+      assert title =~ "#{adapter |> Module.split() |> List.last()}.alice"
       assert title =~ to_string(report.kind)
       assert title =~ "seed #{report.seed}"
     end

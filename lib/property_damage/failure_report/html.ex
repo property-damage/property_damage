@@ -117,7 +117,7 @@ defmodule PropertyDamage.FailureReport.HTML do
   defp title(%FailureReport{} = report) do
     [
       report.model && inspect(report.model),
-      report.variant && report.variant.name,
+      target(report),
       report.kind && to_string(report.kind),
       report.seed && "seed #{report.seed}"
     ]
@@ -125,11 +125,27 @@ defmodule PropertyDamage.FailureReport.HTML do
     |> Enum.join(" · ")
   end
 
+  # The failing target's name, after its adapter when the name does not say
+  # it: two suites can run one model under one target name against different
+  # adapters, such as a mock and the real system.
+  defp target(%FailureReport{variant: nil}), do: nil
+
+  defp target(%FailureReport{variant: %{index: index, name: name}, targets: targets}) do
+    case Enum.at(targets || [], index) do
+      {adapter, _entry} when is_atom(adapter) ->
+        short = adapter |> Module.split() |> List.last()
+        if short == name, do: name, else: "#{short}.#{name}"
+
+      _ ->
+        name
+    end
+  end
+
   defp file_name(%FailureReport{} = report) do
     stem =
       [
         report.model && inspect(report.model),
-        report.variant && report.variant.name,
+        target(report),
         report.kind && to_string(report.kind),
         report.seed && "seed#{report.seed}"
       ]
