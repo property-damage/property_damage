@@ -139,6 +139,9 @@ defmodule PropertyDamage.Settle do
   - `:timeout_ms` - Maximum time to wait (default: 2000)
   - `:interval_ms` - Time between retries (default: 300)
   - `:backoff` - Backoff strategy, `:linear` or `:exponential` (default: `:linear`)
+  - `:sleep` - One-arity function (milliseconds) that settle sleeps with
+    between attempts (default: `&Process.sleep/1`). Tests inject a recorder to
+    assert the order and count of sleeps without measuring wall-clock time.
 
   ## Returns
 
@@ -160,13 +163,14 @@ defmodule PropertyDamage.Settle do
     timeout_ms = Keyword.get(config, :timeout_ms)
     interval_ms = Keyword.get(config, :interval_ms)
     backoff = Keyword.get(config, :backoff)
+    sleep = Keyword.get(config, :sleep, &Process.sleep/1)
 
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 
-    do_settle(fun, deadline, interval_ms, backoff)
+    do_settle(fun, deadline, interval_ms, backoff, sleep)
   end
 
-  defp do_settle(fun, deadline, interval_ms, backoff) do
+  defp do_settle(fun, deadline, interval_ms, backoff, sleep) do
     # Attempt first, THEN decide whether to retry. This guarantees the function
     # runs at least once (e.g. with timeout_ms: 0) and that a final attempt is
     # made at the deadline rather than bailing out just before it.
@@ -187,7 +191,7 @@ defmodule PropertyDamage.Settle do
           sleep_time = min(interval_ms, remaining)
 
           if sleep_time > 0 do
-            Process.sleep(sleep_time)
+            sleep.(sleep_time)
           end
 
           next_interval =
@@ -196,7 +200,7 @@ defmodule PropertyDamage.Settle do
               :linear -> interval_ms
             end
 
-          do_settle(fun, deadline, next_interval, backoff)
+          do_settle(fun, deadline, next_interval, backoff, sleep)
         end
 
       {:error, reason} ->

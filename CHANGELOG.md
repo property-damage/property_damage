@@ -1146,6 +1146,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Settle.settle/2` takes a `:sleep` option, and the backoff tests use it.**
+  The linear-backoff test measured wall-clock gaps against a floor and failed
+  on a loaded runner, because the last sleep is clipped to the time left before
+  the deadline. `:sleep` is a one-arity function (default `&Process.sleep/1`)
+  that settle sleeps with, so the tests assert the order and count of recorded
+  sleeps, including the clipped final one.
 - **An `@eventually` function that returns no predicate fails at its step.**
   The poller took the function's return as its predicate without checking it,
   so a function that answered the question itself (a boolean) raised
