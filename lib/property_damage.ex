@@ -2128,6 +2128,10 @@ defmodule PropertyDamage do
     (default: the report's `concurrency`)
   - `:compare` - `[converge_within: ms]`, as on `PropertyDamage.run/1`
     (default: the report's `compare`)
+  - `:log` - `[keep_attempts: n]`, as on `PropertyDamage.run/1`: how many of a
+    step's last settle or stutter attempts keep their log lines in the new
+    report (default 3). The report does not record the run's value, so a run
+    given another value passes it here again.
 
   The re-shrink also uses the report's `stutter` configuration: a stutter
   failure re-runs with stutter forced on, as the run's own shrink does.
@@ -2210,7 +2214,7 @@ defmodule PropertyDamage do
       compare: shrink_further_compare(report, opts),
       stutter: report.stutter,
       stutter_config: Stutter.parse_config(report.stutter),
-      keep_attempts: Cap.default_keep_attempts(),
+      keep_attempts: Options.keep_attempts!(opts),
       # A `:record` failure re-shrinks under `:record`, as the run found it.
       check_mode: report.check_mode || :halt
     }

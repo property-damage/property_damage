@@ -1168,6 +1168,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without creating atoms from the file. A file that names a module of no loaded
   application still returns `{:error, :unsafe_terms}`.
 
+- **`shrink_further/2` and `Replay.start/2` take `log: [keep_attempts: n]`.**
+  A re-shrink always kept the default three last attempts of a retried step,
+  because the report does not record the run's `log:` option and
+  `shrink_further/2` ignored one; `Replay.start/2` and `Replay.run/2` refused
+  the option. Both now take it, validated as `PropertyDamage.run/1` validates
+  it.
 - **The retry cap's gap counts an attempt that logs late.** When an attempt
   the cap could no longer keep wrote its first line after the gap already
   existed, the gap added its lines but not the attempt, so the report could

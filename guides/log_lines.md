@@ -712,6 +712,9 @@ logged two lines per attempt:
 
 `log: [keep_attempts: n]` on the run keeps the last `n` attempts instead of
 three. The cap drops whole attempts and never cuts a line or a value.
+`PropertyDamage.shrink_further/2` and `PropertyDamage.Replay.start/2` take the
+same option. A report does not record the run's value, so pass it again to
+`shrink_further/2` when the run had one.
 
 PropertyDamage knows an attempt only from the lines it writes. "The last
 three attempts" therefore means the last three attempts that logged a line.
