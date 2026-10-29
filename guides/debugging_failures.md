@@ -562,8 +562,9 @@ open _build/pd_reports/index.html
 
 Each failing run writes its page into that directory. The run option
 `report_html: "_build/pd_reports"` does the same for one run. `index.html`
-shows one report at a time; its arrow buttons, and the left and right arrow
-keys, move between them.
+shows one report at a time; its arrow buttons move between them. The left and
+right arrow keys do the same while the index page has focus, but a browser may
+keep the key presses inside the report frame, so use the buttons.
 When several test processes write into one directory, run
 `PropertyDamage.FailureReport.HTML.write_index/1` once they finish, so the
 index lists every page.

@@ -53,9 +53,9 @@ cannot be written? How are several pages browsed?
    and the environment variable `PD_REPORT_HTML` choose it. When
    `PD_REPORT_HTML` is set and not blank, it replaces the option; a blank
    value counts as unset. A failing run writes its page into that directory.
-   A file error while writing the page, such as a directory that cannot be
-   created, costs one logged warning, never the report: the run returns its
-   report unchanged.
+   An error while rendering or writing the page, such as a directory that
+   cannot be created or an invalid `PD_LOG`, costs one logged warning, never
+   the report: the run returns its report unchanged.
 
 4. **One page per failing run, named after what failed.** The file name joins
    the model, the failing target, the failure kind and the seed
@@ -74,8 +74,10 @@ cannot be written? How are several pages browsed?
    separate processes that write into one directory call it afterwards, since
    two writers can each list the directory before the other's page lands. The
    index is built from `priv/failure_report/index.html`. It shows one report
-   at a time in a frame, with buttons and the left and right arrow keys to
-   move between them.
+   at a time in a frame, with buttons to move between them. The left and
+   right arrow keys also move between reports while the index page has focus;
+   a browser may keep the key presses inside the report frame, so the buttons
+   are the dependable way.
 
 6. **The viewer and the index template ship in the Hex package.** Both sit
    under `priv/failure_report/`, and the package `files` list names `priv`.
@@ -92,8 +94,9 @@ cannot be written? How are several pages browsed?
 - The viewer parses text, so a change to the printed layout can break a
   reading aid without breaking any terminal output. The viewer refuses text
   with no `## ` sections.
-- A file error in the page writer cannot hide the failure report: the page
-  is written after the report is built, and the error costs a warning.
+- An error in the page writer cannot hide the failure report: the page is
+  written after the report is built, and any error while rendering or
+  writing it costs one warning.
 - Pages accumulate in the directory until someone removes them. The index
   lists every page present, so a stale page from an earlier run shows up
   until it is deleted.

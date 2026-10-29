@@ -572,7 +572,7 @@ The `:json` format SHALL gain a top-level `logs` key built from the same layout 
 
 ### Requirement: HTML Failure Report (DR-057)
 
-A failing run SHALL write its failure report as one HTML page into a directory when the run option `report_html: dir` (default `false`, which writes no page) or the environment variable `PD_REPORT_HTML` names one (DR-057). When `PD_REPORT_HTML` is set and not blank, it SHALL replace the option; a blank value SHALL count as unset. The directory SHALL be created when missing. A file error while writing the page SHALL cost one logged warning and SHALL NOT change the report (DR-057). A value of `report_html:` that is neither a string nor `false` SHALL raise `NimbleOptions.ValidationError`.
+A failing run SHALL write its failure report as one HTML page into a directory when the run option `report_html: dir` (default `false`, which writes no page) or the environment variable `PD_REPORT_HTML` names one (DR-057). When `PD_REPORT_HTML` is set and not blank, it SHALL replace the option; a blank value SHALL count as unset. The directory SHALL be created when missing. An error while rendering or writing the page SHALL cost one logged warning and SHALL NOT change the report (DR-057). A value of `report_html:` that is neither a string nor `false` SHALL raise `NimbleOptions.ValidationError`.
 
 `PropertyDamage.FailureReport.HTML.render/1` SHALL return one page that holds the terminal report text without color, as built by `Formatter.format/3` for `:terminal`, and the viewer that reads it. The text SHALL follow the layout of the printed report and apply the same log tag filter (DR-054, DR-057), so the page body SHALL carry nothing the terminal text does not carry. The page SHALL load nothing from the network (DR-057).
 
@@ -597,6 +597,10 @@ The page SHALL be named after the model, the failing target, the failure kind an
 #### Scenario: An unwritable directory costs a warning
 - **WHEN** the run fails and the directory in `report_html:` cannot be created
 - **THEN** the run SHALL log one warning and SHALL return its report unchanged (DR-057)
+
+#### Scenario: An invalid log filter value costs a warning
+- **WHEN** the run fails with `report_html:` naming a directory and `PD_LOG` holds a value that does not parse
+- **THEN** the run SHALL log one warning naming the directory and SHALL return its report unchanged (DR-054, DR-057)
 
 #### Scenario: The index lists the pages present
 - **WHEN** a directory holds two report pages and a file that is not a report page, and `HTML.write_index/1` runs on it

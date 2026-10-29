@@ -2040,23 +2040,25 @@ defmodule PropertyDamage do
     end
   end
 
-  # The report's HTML page, when the run names a directory for it. A page that
-  # cannot be written costs a warning, never the report.
+  # The report's HTML page, when the run names a directory for it. An error
+  # while rendering or writing the page costs one logged warning, never the
+  # report.
   defp write_html(%{report_html: dir}, report) when is_binary(dir) do
     case FailureReport.HTML.write(report, dir) do
-      {:ok, _path} ->
-        :ok
-
-      {:error, reason} ->
-        require Logger
-
-        Logger.warning(
-          "could not write the failure report's HTML page into #{dir}: #{inspect(reason)}"
-        )
+      {:ok, _path} -> :ok
+      {:error, reason} -> warn_html(dir, inspect(reason))
     end
+  rescue
+    exception -> warn_html(dir, Exception.message(exception))
   end
 
   defp write_html(_ctx, _report), do: :ok
+
+  defp warn_html(dir, reason) do
+    require Logger
+
+    Logger.warning("could not write the failure report's HTML page into #{dir}: #{reason}")
+  end
 
   # A replay run's shrink found a failure with fewer roots than the artifact.
   defp smaller?(report, term, replayed),

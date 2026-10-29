@@ -137,6 +137,25 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
       assert log =~ "could not write the failure report's HTML page"
     end
 
+    test "an invalid PD_LOG costs a warning, not the report", %{dir: dir} do
+      previous = System.get_env("PD_LOG")
+      System.put_env("PD_LOG", "only")
+
+      on_exit(fn ->
+        if previous,
+          do: System.put_env("PD_LOG", previous),
+          else: System.delete_env("PD_LOG")
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert %PropertyDamage.FailureReport{} = check_report(report_html: dir)
+        end)
+
+      assert log =~ "could not write the failure report's HTML page into #{dir}"
+      assert length(String.split(log, "could not write the failure report's HTML page")) == 2
+    end
+
     test "anything but a path or false is an option error" do
       assert_raise NimbleOptions.ValidationError, ~r/report_html/, fn ->
         F.run(F.Model, [F.target("alice")], report_html: :yes)

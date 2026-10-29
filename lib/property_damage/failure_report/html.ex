@@ -23,10 +23,11 @@ defmodule PropertyDamage.FailureReport.HTML do
 
   ## The index page
 
-  `index.html` shows one report at a time, with buttons and the left and
-  right arrow keys to move between them. Inside a report with several
-  targets, the arrow keys first move the selected line between targets, so
-  the buttons stay the way to change reports there. `write_index/1` rebuilds
+  `index.html` shows one report at a time, with buttons to move between
+  them. The left and right arrow keys also move between reports while the
+  index page has focus; a browser may keep the key presses inside the report
+  frame, so the buttons are the dependable way. Inside a report with several
+  targets, the arrow keys first move the selected line between targets. `write_index/1` rebuilds
   the index from the pages in the directory; call it after runs in separate
   processes write into one directory, since two writers can each list the
   directory before the other's page lands.
