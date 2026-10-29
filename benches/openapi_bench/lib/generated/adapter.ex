@@ -21,6 +21,7 @@ defmodule OpenapiBench.Generated.Adapter do
   """
 
   use PropertyDamage.Adapter
+  require PropertyDamage
 
   # Req is optional: the adapter prefers it when present and falls back to
   # :httpc. Suppress the undefined-module warning so the generated code
@@ -38,9 +39,12 @@ defmodule OpenapiBench.Generated.Adapter do
   def setup(config) do
     base_url = Map.get(config, :base_url, "http://localhost:4010")
 
-    OpenapiBench.Server.reset(
-      Map.get(config, :bug, false),
-      Map.get(config, :idempotency_bug, false)
+    bug = Map.get(config, :bug, false)
+    idempotency_bug = Map.get(config, :idempotency_bug, false)
+    OpenapiBench.Server.reset(bug, idempotency_bug)
+
+    PropertyDamage.log("reset -> ok  bug=#{bug} idempotency_bug=#{idempotency_bug}",
+      tags: [:sut]
     )
 
     {:ok, Map.put(config, :base_url, base_url)}
@@ -60,7 +64,7 @@ defmodule OpenapiBench.Generated.Adapter do
     # PropertyDamage expects {:ok, [event structs]}. Map every completed HTTP
     # response (any status) to events via the command's events/3; reserve
     # {:error, _} for transport failures so a 404/409 can be an observation.
-    case http_request(:get, full_url, body, headers) do
+    case http_request(:get, full_url, body, headers, path_ids(cmd)) do
       {:ok, status, response} -> {:ok, cmd.__struct__.events(cmd, status, response)}
       {:error, reason} -> {:error, reason}
     end
@@ -77,7 +81,7 @@ defmodule OpenapiBench.Generated.Adapter do
     # PropertyDamage expects {:ok, [event structs]}. Map every completed HTTP
     # response (any status) to events via the command's events/3; reserve
     # {:error, _} for transport failures so a 404/409 can be an observation.
-    case http_request(:put, full_url, body, headers) do
+    case http_request(:put, full_url, body, headers, path_ids(cmd)) do
       {:ok, status, response} -> {:ok, cmd.__struct__.events(cmd, status, response)}
       {:error, reason} -> {:error, reason}
     end
@@ -168,18 +172,85 @@ defmodule OpenapiBench.Generated.Adapter do
     |> Map.new()
   end
 
-  defp http_request(method, url, body, headers) do
+  # Sends one request and logs it as one entry: the summary line, then the
+  # request and response bodies as sent and received, pretty-printed by
+  # whitespace only. Headers stay out of the entry.
+  defp http_request(method, url, body, headers, ids) do
     # Using Req if available, otherwise fall back to :httpc
-    if Code.ensure_loaded?(Req) do
-      req_request(method, url, body, headers)
-    else
-      httpc_request(method, url, body, headers)
+    result =
+      if Code.ensure_loaded?(Req) do
+        req_request(method, url, body, headers)
+      else
+        httpc_request(method, url, body, headers)
+      end
+
+    log_call(method, url, body, result, ids)
+
+    case result do
+      {:ok, status, raw} -> {:ok, status, decode_body(raw)}
+      {:error, reason} -> {:error, reason}
     end
   end
 
+  defp log_call(method, url, body, result, ids) do
+    request = if body == %{}, do: "", else: block("request", json(Jason.encode!(body)))
+
+    {outcome, detail} =
+      case result do
+        {:ok, status, raw} ->
+          {"#{status} #{outcome(raw)}", block("response", json(raw))}
+
+        {:error, reason} ->
+          {"error", block("error", inspect(reason, pretty: true))}
+      end
+
+    method = method |> Atom.to_string() |> String.upcase()
+
+    PropertyDamage.log(
+      "#{method} #{URI.parse(url).path} -> #{outcome}#{ids}\n#{request}#{detail}"
+      |> String.trim_trailing(),
+      tags: [:http]
+    )
+  end
+
+  # The API answers an error as {"error": reason}; any other body is a success.
+  defp outcome(raw) do
+    case Jason.decode(raw) do
+      {:ok, %{"error" => error}} -> error
+      _ -> "ok"
+    end
+  end
+
+  defp path_ids(cmd) do
+    if function_exported?(cmd.__struct__, :__path_params__, 0) do
+      Enum.map_join(cmd.__struct__.__path_params__(), fn param ->
+        "  #{param}=#{Map.get(cmd, param)}"
+      end)
+    else
+      ""
+    end
+  end
+
+  # Reformats JSON text by whitespace only, so numbers keep the text the
+  # server sent; text that is not JSON is logged as it came.
+  defp json(text) do
+    case Jason.decode(text) do
+      {:ok, _} -> Jason.Formatter.pretty_print(text)
+      {:error, _} -> text
+    end
+  end
+
+  defp block(_label, ""), do: ""
+
+  defp block(label, text) do
+    indented = text |> String.split("\n") |> Enum.map_join("\n", &("  " <> &1))
+    "#{label}:\n#{indented}\n"
+  end
+
   defp req_request(method, url, body, headers) do
+    # Keep the body as received; http_request/5 logs it and then decodes it.
     opts =
-      [method: method, url: url, headers: headers]
+      [method: method, url: url, headers: headers, decode_body: false]
       |> maybe_add_body(method, body)
 
     case Req.request(opts) do
@@ -215,7 +286,7 @@ defmodule OpenapiBench.Generated.Adapter do
 
     case :httpc.request(method, request, [], body_format: :binary) do
       {:ok, {{_, status, _}, _, resp_body}} ->
-        {:ok, status, decode_body(resp_body)}
+        {:ok, status, resp_body}
 
       {:error, reason} ->
         {:error, reason}

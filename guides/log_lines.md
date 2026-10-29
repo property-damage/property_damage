@@ -392,6 +392,48 @@ The macro never wraps a message in a function on its own. A run that passes
 never formats a value and never calls a function, so logging large terms
 costs little on a passing run.
 
+## One entry per interaction
+
+A failure report reads best when an adapter writes one line for each
+interaction with the system under test: an HTTP request, a published message,
+a query. The adapter decides what one interaction is, so nothing here depends
+on the transport.
+
+1. **Summary first:** the line's first row names the action, then the
+   outcome, then the identifiers: `GET /orders/42 -> 200 PAID  id=42`. A
+   reader who sees only a truncated first row still sees the outcome.
+2. **Nothing that changes between identical calls in the summary:** no
+   timings, attempt counters or timestamps. Two polls that got the same answer
+   then print the same summary, and the HTML page collates them.
+3. **Detail as labeled blocks:** after the summary, a `label:` row at the
+   left edge, then the content indented below it. Format the content before
+   the call, the way it should be read; nothing downstream reformats it. Use
+   formatters that change only whitespace, such as
+   `Jason.Formatter.pretty_print/1` for JSON text or
+   `inspect(term, pretty: true)`. Decoding and re-encoding JSON changes values:
+   `0.0540` becomes `0.054`.
+4. **Log what explains a failure:** request and response bodies, yes; transport
+   headers, usually not. Redact secrets in the code that logs.
+
+```elixir
+defp log_call(method, path, request, status, response) do
+  PropertyDamage.log(
+    """
+    #{method} #{path} -> #{status} #{outcome(response)}
+    #{block("request", request)}#{block("response", response)}\
+    """,
+    tags: [:http]
+  )
+end
+
+defp block(_label, body) when body in [nil, ""], do: ""
+defp block(label, body), do: "#{label}:\n" <> indent(Jason.Formatter.pretty_print(body)) <> "\n"
+```
+
+The entry is written after the call returns. A call that raises, or hangs
+until the step times out, leaves no entry; the Failure section still names the
+step and the error.
+
 ## Scopes
 
 Every call needs a scope: a place for the line to land. PropertyDamage opens
@@ -753,6 +795,12 @@ So a report loaded from a file shows no lines. To see them again, run the
 replay call from the report's Reproduction section; it runs the failure again
 and collects new lines. A replay that does not reproduce the failure shows no
 lines for it.
+
+The one exception is the report's HTML page, which you ask for by naming a
+directory (`report_html:` or `PD_REPORT_HTML`, see
+[Debugging Failures](debugging_failures.md#the-report-in-a-browser)). The page
+holds the lines the printed report shows. Point it at a directory git ignores,
+such as one under `_build`.
 
 ## Next steps
 

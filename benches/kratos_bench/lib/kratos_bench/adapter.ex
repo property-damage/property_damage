@@ -69,9 +69,9 @@ defmodule KratosBench.Adapter do
   end
 
   @impl true
-  def execute(%RegisterAccept{} = cmd, ctx, _runtime), do: register(cmd, ctx)
-  def execute(%RegisterReject{} = cmd, ctx, _runtime), do: register(cmd, ctx)
-  def execute(%RegisterModify{} = cmd, ctx, _runtime), do: register(cmd, ctx)
+  def execute(%RegisterAccept{} = cmd, ctx, runtime), do: register(cmd, ctx, runtime)
+  def execute(%RegisterReject{} = cmd, ctx, runtime), do: register(cmd, ctx, runtime)
+  def execute(%RegisterModify{} = cmd, ctx, runtime), do: register(cmd, ctx, runtime)
 
   def execute(%ListIdentities{}, %{client: client}, _runtime) do
     {:ok, [%IdentitiesListed{identities: Kratos.list_identities(client)}]}
@@ -93,10 +93,18 @@ defmodule KratosBench.Adapter do
 
   # Notify the mock of the command (it picks accept/reject/modify), submit the
   # registration (which triggers the mock's web_hook synchronously), then flush
-  # the events the mock injected into the registry.
-  defp register(cmd, %{client: client, registry: registry, password: password}) do
+  # the events the mock injected into the registry. The mock's listener runs
+  # outside the step, so it logs the web_hook through the step's runtime.
+  defp register(cmd, %{client: client, registry: registry, password: password}, runtime) do
     :ok = MockServiceRegistry.notify_command(registry, cmd)
-    _ = Kratos.register(client, cmd.email, password)
+    RegistrationMock.Hub.put(runtime: runtime)
+
+    try do
+      _ = Kratos.register(client, cmd.email, password)
+    after
+      RegistrationMock.Hub.put(runtime: nil)
+    end
+
     {:ok, MockServiceRegistry.flush_events(registry)}
   end
 

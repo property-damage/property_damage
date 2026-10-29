@@ -26,7 +26,7 @@ defmodule RedisBench.Adapter do
 
   @impl true
   def execute(%Increment{}, %{conn: conn, key: key}, _runtime) do
-    {:ok, to} = Redix.command(conn, ["INCR", key])
+    {:ok, to} = Conn.command(conn, ["INCR", key])
     {:ok, [%Incremented{from: to - 1, to: to}]}
   end
 
@@ -37,15 +37,15 @@ defmodule RedisBench.Adapter do
     # therefore always linearizable. (A lost update requires an adapter that
     # reports a stale read; see the parallel_linearization test's
     # LostUpdateAdapter.)
-    {:ok, raw} = Redix.command(conn, ["GET", key])
+    {:ok, raw} = Conn.command(conn, ["GET", key])
     from = to_int(raw)
     to = from + 1
-    {:ok, _} = Redix.command(conn, ["SET", key, Integer.to_string(to)])
+    {:ok, _} = Conn.command(conn, ["SET", key, Integer.to_string(to)])
     {:ok, [%Written{from: from, to: to}]}
   end
 
   def execute(%ReadValue{}, %{conn: conn, key: key}, _runtime) do
-    {:ok, raw} = Redix.command(conn, ["GET", key])
+    {:ok, raw} = Conn.command(conn, ["GET", key])
     {:ok, [%ValueRead{value: to_int(raw)}]}
   end
 

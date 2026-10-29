@@ -241,7 +241,7 @@ defmodule ObanBench.Compare.Adapter do
   end
 
   def execute(%ReadCounter{counter: base}, ctx, _runtime) do
-    value = ObanBench.DB.value("#{ctx.run_id}:#{base}")
+    value = ObanBench.DB.logged_value("#{ctx.run_id}:#{base}")
 
     case ctx do
       %{test_pid: pid} when is_pid(pid) -> send(pid, {:read, Map.get(ctx, :name), base, value})

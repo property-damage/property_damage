@@ -29,8 +29,11 @@ defmodule RedisBench.Conn do
       can add toxics on the proxy and observe the SUT degrade.
 
   Each connection is owned by one PropertyDamage run's adapter context and
-  closed in `teardown/1`.
+  closed in `teardown/1`. Adapters send their commands through `command/3`,
+  so the failure report shows each command and its reply under its step.
   """
+
+  require PropertyDamage
 
   @doc "Open a Redix connection straight to Redis."
   def start_direct do
@@ -43,6 +46,24 @@ defmodule RedisBench.Conn do
     port = Application.fetch_env!(:redis_bench, :redis_proxy_port)
     Redix.start_link(host: host, port: port)
   end
+
+  @doc """
+  Send one Redis command over `conn` and log it with its reply, tagged `:redis`.
+
+  Returns what `Redix.command/3` returns. The log line reads like
+  `INCR pd:1:2 -> 7`, so repeated reads of one value print the same line. It
+  needs a log scope, so call it from an adapter callback, not from plain test
+  code.
+  """
+  def command(conn, args, opts \\ []) do
+    result = Redix.command(conn, args, opts)
+    PropertyDamage.log("#{Enum.join(args, " ")} -> #{reply(result)}", tags: [:redis])
+    result
+  end
+
+  defp reply({:ok, value}), do: inspect(value)
+  defp reply({:error, %Redix.ConnectionError{reason: reason}}), do: "error #{inspect(reason)}"
+  defp reply({:error, %Redix.Error{message: message}}), do: "error " <> message
 
   @doc """
   A run key namespace unique across the whole Redis lifetime.

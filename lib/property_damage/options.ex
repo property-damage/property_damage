@@ -453,6 +453,17 @@ defmodule PropertyDamage.Options do
       runs it.
       """
     ],
+    report_html: [
+      type: {:or, [:string, {:in, [false]}]},
+      default: false,
+      doc: """
+      A directory a failing run writes its report into as one HTML page,
+      created when missing, and where it rebuilds `index.html`, a page that
+      browses every report page in the directory. `false` writes none. The
+      environment variable `PD_REPORT_HTML`, when set and not blank, replaces
+      it. See `PropertyDamage.FailureReport.HTML`.
+      """
+    ],
     coverage: [
       type: :boolean,
       default: false,

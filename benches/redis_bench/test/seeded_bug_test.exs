@@ -35,7 +35,7 @@ defmodule RedisBench.SeededBugTest do
 
     @impl true
     def execute(%Increment{}, %{conn: conn, key: key}, _runtime) do
-      {:ok, to} = Redix.command(conn, ["INCR", key])
+      {:ok, to} = Conn.command(conn, ["INCR", key])
       {:ok, [%Incremented{from: to - 1, to: to}]}
     end
 

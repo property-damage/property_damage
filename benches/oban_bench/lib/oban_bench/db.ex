@@ -1,5 +1,15 @@
 defmodule ObanBench.DB do
-  @moduledoc "Small DB helpers shared by the worker, adapter and pollers."
+  @moduledoc """
+  Small DB helpers shared by the worker, adapter and pollers.
+
+  The `logged_*` helpers and `insert_job/1` and `cancel_job/1` log each call
+  and its answer under the calling step (`PropertyDamage.log/2`), so a failure
+  report shows what each command did to the database. They need a log scope,
+  so only adapter callbacks call them. The worker and the resource pollers run
+  in processes that have no scope and call the plain helpers.
+  """
+
+  require PropertyDamage
 
   alias ObanBench.Repo
 
@@ -42,4 +52,67 @@ defmodule ObanBench.DB do
       %{rows: []} -> nil
     end
   end
+
+  @doc "`value/1`, logged under the calling step."
+  def logged_value(name) do
+    value = value(name)
+    log_read("counter value", value, "name=#{name}")
+    value
+  end
+
+  @doc "`job_state/1`, logged under the calling step."
+  def logged_job_state(job_id) do
+    state = job_state(job_id)
+    log_read("job state", state, "id=#{job_id}")
+    state
+  end
+
+  # The line carries the value read and nothing that changes between polls,
+  # so a probe that re-reads an unchanged value prints identical lines.
+  defp log_read(what, value, id) do
+    PropertyDamage.log("query #{what} -> #{inspect(value)}  #{id}", tags: [:sql])
+  end
+
+  @doc """
+  Insert an Oban job from `changeset` and log the outcome under the calling step.
+
+  Returns what `Oban.insert/1` returns. A job that Oban's `unique` option
+  deduplicated logs as `conflict`, with the id of the job it matched.
+  """
+  def insert_job(changeset) do
+    result = Oban.insert(changeset)
+
+    case result do
+      {:ok, job} ->
+        outcome = if job.conflict?, do: "conflict", else: "ok"
+
+        details =
+          [queue: job.queue, state: job.state, args: job.args, max_attempts: job.max_attempts] ++
+            if job.state == "scheduled", do: [scheduled_at: job.scheduled_at], else: []
+
+        PropertyDamage.log(
+          "insert #{job.worker} job -> #{outcome}  id=#{job.id}\njob:\n" <>
+            indent(inspect(details, pretty: true)),
+          tags: [:oban]
+        )
+
+      {:error, reason} ->
+        PropertyDamage.log(
+          "insert #{changeset.changes[:worker]} job -> error\nerror:\n" <>
+            indent(inspect(reason, pretty: true)),
+          tags: [:oban]
+        )
+    end
+
+    result
+  end
+
+  @doc "Cancel the Oban job `job_id` and log the call under the calling step."
+  def cancel_job(job_id) do
+    result = Oban.cancel_job(job_id)
+    PropertyDamage.log("cancel job -> #{inspect(result)}  id=#{job_id}", tags: [:oban])
+    result
+  end
+
+  defp indent(text), do: text |> String.split("\n") |> Enum.map_join("\n", &("  " <> &1))
 end
