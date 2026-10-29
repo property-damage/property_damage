@@ -27,10 +27,11 @@ defmodule PropertyDamage.FailureReport.HTML do
   them. The left and right arrow keys also move between reports while the
   index page has focus; a browser may keep the key presses inside the report
   frame, so the buttons are the dependable way. Inside a report with several
-  targets, the arrow keys first move the selected line between targets. `write_index/1` rebuilds
-  the index from the pages in the directory; call it after runs in separate
-  processes write into one directory, since two writers can each list the
-  directory before the other's page lands.
+  targets, the arrow keys first move the selected line between targets.
+
+  `write_index/1` rebuilds the index from the pages in the directory; call it
+  after runs in separate processes write into one directory, since two
+  writers can each list the directory before the other's page lands.
   """
 
   alias PropertyDamage.FailureReport
