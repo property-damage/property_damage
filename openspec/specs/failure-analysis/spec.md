@@ -4,7 +4,7 @@
 
 Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes with seed variations, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
 
-Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers)
+Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-057 (HTML Failure Report)
 
 ## Requirements
 
@@ -569,3 +569,35 @@ The `:json` format SHALL gain a top-level `logs` key built from the same layout 
 #### Scenario: A saved report holds no filter
 - **WHEN** a report built with `log: [only: [:http]]` is saved and loaded again
 - **THEN** the loaded report SHALL have `log_filter: nil` and the file SHALL be version 15
+
+### Requirement: HTML Failure Report (DR-057)
+
+A failing run SHALL write its failure report as one HTML page into a directory when the run option `report_html: dir` (default `false`, which writes no page) or the environment variable `PD_REPORT_HTML` names one (DR-057). When `PD_REPORT_HTML` is set and not blank, it SHALL replace the option; a blank value SHALL count as unset. The directory SHALL be created when missing. A file error while writing the page SHALL cost one logged warning and SHALL NOT change the report (DR-057). A value of `report_html:` that is neither a string nor `false` SHALL raise `NimbleOptions.ValidationError`.
+
+`PropertyDamage.FailureReport.HTML.render/1` SHALL return one page that holds the terminal report text without color, as built by `Formatter.format/3` for `:terminal`, and the viewer that reads it. The text SHALL follow the layout of the printed report and apply the same log tag filter (DR-054, DR-057), so the page body SHALL carry nothing the terminal text does not carry. The page SHALL load nothing from the network (DR-057).
+
+The page SHALL be named after the model, the failing target, the failure kind and the seed, so a later failure with the same four replaces it, and SHALL be written by a rename of a temporary file in the same directory (DR-057). `HTML.write/2` SHALL rebuild `index.html` in the directory after each page, and `HTML.write_index/1` SHALL rebuild it from the report pages present, in file name order, leaving out any page whose title cannot be read (DR-057).
+
+#### Scenario: PD_REPORT_HTML replaces report_html:
+- **WHEN** the run gives `report_html: "dir_a"`, `PD_REPORT_HTML="dir_b"` is set and the run fails
+- **THEN** the page SHALL be written into `dir_b` and none into `dir_a` (DR-057)
+
+#### Scenario: A blank PD_REPORT_HTML is unset
+- **WHEN** the run gives `report_html: "dir_a"`, `PD_REPORT_HTML` is whitespace only and the run fails
+- **THEN** the page SHALL be written into `dir_a` (DR-057)
+
+#### Scenario: The page carries the terminal text without color
+- **WHEN** a report is rendered with `HTML.render/1`
+- **THEN** the page SHALL embed the text `Formatter.format(report, :terminal, color: false)` returns, as data a script reads, and SHALL reference no resource outside the file (DR-057)
+
+#### Scenario: The report tag filter applies to the page
+- **WHEN** the report holds `log_filter` `only: [:http]` or `PD_LOG` is set
+- **THEN** the embedded text SHALL hide the same lines the terminal report hides (DR-054, DR-057)
+
+#### Scenario: An unwritable directory costs a warning
+- **WHEN** the run fails and the directory in `report_html:` cannot be created
+- **THEN** the run SHALL log one warning and SHALL return its report unchanged (DR-057)
+
+#### Scenario: The index lists the pages present
+- **WHEN** a directory holds two report pages and a file that is not a report page, and `HTML.write_index/1` runs on it
+- **THEN** `index.html` SHALL list the two pages in file name order and not the other file (DR-057)

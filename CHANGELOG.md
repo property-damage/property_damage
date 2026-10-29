@@ -9,13 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The failure report as an HTML page.** `PropertyDamage.FailureReport.HTML`
-  renders a report as one self-contained page: a column per target, steps
-  that unfold to their log lines and events, repeated lines collated, log
-  detail folded by indentation, and each step's events compared across
-  targets. The run option `report_html: dir`, or `PD_REPORT_HTML=dir` for a
-  whole suite, writes a failing run's page into `dir` beside an `index.html`
-  that steps through every page there.
+- **The failure report as an HTML page (DR-057).**
+  `PropertyDamage.FailureReport.HTML` renders a report as one self-contained
+  page that holds the terminal text, so the page and the terminal cannot
+  disagree. A viewer in the page adds a column per target, steps that unfold
+  to their log lines and events, repeated lines collated, log detail folded
+  by indentation, and each step's events compared across targets. The run
+  option `report_html: dir`, or `PD_REPORT_HTML=dir` for a whole suite,
+  writes a failing run's page into `dir` beside an `index.html` that steps
+  through every page there. The viewer and the index template ship in the
+  Hex package under `priv/`.
 - **One entry per interaction (guide).** `guides/log_lines.md` describes the
   log entry shape the HTML page reads best: a summary row, then labeled,
   indented blocks.
