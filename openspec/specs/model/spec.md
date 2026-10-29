@@ -22,6 +22,24 @@ Models SHALL implement two required callbacks: `commands/0` returning a list of 
 - **THEN** it returns a single projection module
 - **AND** this projection's state drives command filtering, selection, and simulation
 
+### Requirement: Declaring a Model
+
+A model SHALL be declared with `use PropertyDamage.Model`, which sets the `PropertyDamage.Model` behaviour. `use PropertyDamage.Model` SHALL reject any option at compile time. A module that declares `@behaviour PropertyDamage.Model` directly SHALL still be accepted as a model.
+
+#### Scenario: Use sets the behaviour
+- **WHEN** a module declares `use PropertyDamage.Model`
+- **THEN** `PropertyDamage.Model` is listed among the module's behaviours
+
+#### Scenario: Use with options is rejected
+- **WHEN** a module declares `use PropertyDamage.Model, foo: 1`
+- **THEN** compilation raises an `ArgumentError` that names `use PropertyDamage.Model`
+- **AND** the message says the macro takes no options
+
+#### Scenario: Bare behaviour declaration still runs
+- **WHEN** a module declares `@behaviour PropertyDamage.Model` directly and implements the required callbacks
+- **THEN** the framework accepts the module as a model
+- **AND** a run against it behaves as for a module declared with `use PropertyDamage.Model`
+
 ### Requirement: Command Specification Formats
 
 Models SHALL accept commands as a bare module, as `{Module, opts}` with a keyword list, or as a map with a `:command` key. All formats SHALL be normalized to a consistent internal representation of `{weight, module, spec}` tuples.

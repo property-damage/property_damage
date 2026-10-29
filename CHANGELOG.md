@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`use PropertyDamage.Model`.** A model is now declared with
+  `use PropertyDamage.Model`, which sets the `PropertyDamage.Model`
+  behaviour. The macro takes no options and raises `ArgumentError` if given
+  one. `mix pd.gen.model` and `mix pd.scaffold` emit it. A module that
+  declares `@behaviour PropertyDamage.Model` directly still compiles and
+  runs.
 - **The failure report as an HTML page (DR-057).**
   `PropertyDamage.FailureReport.HTML` renders a report as one self-contained
   page that holds the terminal text, so the page and the terminal cannot

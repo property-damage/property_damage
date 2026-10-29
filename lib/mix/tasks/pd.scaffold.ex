@@ -97,7 +97,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
 
   ```elixir
   defmodule MyAppTest.Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     def commands do
       [
@@ -1365,7 +1365,7 @@ defmodule Mix.Tasks.Pd.Scaffold do
       Generated from OpenAPI spec. Customize command weights and add projections/checks.
       \"\"\"
 
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       alias #{namespace}.Commands
       # alias #{namespace}.Events

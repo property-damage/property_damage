@@ -688,7 +688,8 @@ defmodule Mix.Tasks.Pd.ScaffoldTest do
       code = generate_model(operations, "PetStore")
 
       assert code =~ "defmodule PetStore.Model do"
-      assert code =~ "@behaviour PropertyDamage.Model"
+      assert code =~ "use PropertyDamage.Model"
+      refute code =~ "@behaviour #{inspect(PropertyDamage.Model)}"
       assert code =~ "def commands do"
       # GET has weight 5
       assert code =~ "{Commands.ListPets, weight: 5}"

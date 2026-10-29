@@ -2,6 +2,10 @@ defmodule PropertyDamage.Model do
   @moduledoc """
   Behaviour for models in stateful property-based testing.
 
+  Declare a model with `use PropertyDamage.Model`, which sets this behaviour.
+  A module that declares `@behaviour PropertyDamage.Model` directly is still a
+  model and still runs.
+
   A model ties together all the components needed for testing: which commands
   can be generated, which projections track state and checks, and the
   setup and teardown commands every run executes around its roots.
@@ -207,6 +211,23 @@ defmodule PropertyDamage.Model do
 
   If not implemented, the framework runs until `max_commands` is reached.
   """
+
+  @doc """
+  Declares the using module as a model by setting the `PropertyDamage.Model`
+  behaviour.
+
+  Takes no options; any option raises `ArgumentError` at compile time.
+  """
+  defmacro __using__(opts) do
+    if opts != [] do
+      raise ArgumentError,
+            "use PropertyDamage.Model takes no options, got: #{Macro.to_string(opts)}"
+    end
+
+    quote do
+      @behaviour PropertyDamage.Model
+    end
+  end
 
   @typedoc """
   Command specification options.
