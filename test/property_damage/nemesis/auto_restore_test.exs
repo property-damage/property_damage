@@ -103,7 +103,7 @@ defmodule PropertyDamage.Nemesis.AutoRestoreTest do
 
   defmodule Model do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [NoOp]
     @impl true

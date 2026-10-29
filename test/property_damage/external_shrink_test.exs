@@ -57,7 +57,7 @@ defmodule PropertyDamage.ExternalShrinkTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Create, AsyncCreate, Noise, Use]
     @impl true

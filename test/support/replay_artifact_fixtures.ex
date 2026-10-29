@@ -252,7 +252,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
 
   defmodule ExternalModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ReplayFixtures, as: R
 
@@ -279,7 +279,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
 
   defmodule CheckModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ReplayFixtures, as: R
 
@@ -308,7 +308,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
       ] do
     defmodule Module.concat(__MODULE__, name) do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       alias PropertyDamage.Test.ReplayFixtures, as: R
 
@@ -333,7 +333,7 @@ defmodule PropertyDamage.Test.ReplayFixtures do
     @moduledoc false
     # An Open (whose event carries an external() id) rewrites to one Open
     # with the same label: an entry whose one leaf is the root itself.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ReplayFixtures, as: R
 

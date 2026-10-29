@@ -291,7 +291,7 @@ defmodule PropertyDamage.Test.LogFixtures do
   defmodule Model do
     @moduledoc false
     # Act roots, compared on Tally and checked by Guard.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{PropertyDamage.Test.LogFixtures.Act, overrides: &number/1}]
@@ -309,7 +309,7 @@ defmodule PropertyDamage.Test.LogFixtures do
   defmodule CapModel do
     @moduledoc false
     # Act roots checked by Cap.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{PropertyDamage.Test.LogFixtures.Act, overrides: &number/1}]
@@ -326,7 +326,7 @@ defmodule PropertyDamage.Test.LogFixtures do
   defmodule ProbeModel do
     @moduledoc false
     # Root 0 is a Probe, every later root an Act.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.LogFixtures.{Act, Probe}
 
@@ -350,7 +350,7 @@ defmodule PropertyDamage.Test.LogFixtures do
   defmodule SpinModel do
     @moduledoc false
     # Root 0 is a Spin, every later root an Act.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.LogFixtures.{Act, Spin}
 
@@ -376,7 +376,7 @@ defmodule PropertyDamage.Test.LogFixtures do
     # One setup command (Prepare), Split roots that always run as two Part
     # leaves, and one teardown command (Tidy). Guard fails on the first
     # Split's second part.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.LogFixtures
     alias PropertyDamage.Test.LogFixtures.{Part, Prepare, Split, Tidy}
@@ -709,7 +709,7 @@ defmodule PropertyDamage.Test.LogFixtures do
 
   defmodule PropertyDamage.Test.LogFixtures.ScopelessModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: PropertyDamage.Test.LogFixtures.Model.commands()

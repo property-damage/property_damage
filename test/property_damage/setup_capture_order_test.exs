@@ -54,7 +54,7 @@ defmodule PropertyDamage.SetupCaptureOrderTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Use, overrides: fn state -> %{id: state.id} end}]

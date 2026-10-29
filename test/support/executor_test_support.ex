@@ -33,8 +33,8 @@ defmodule PropertyDamage.Test.ExecutorModel do
   @moduledoc """
   Simple model for executor tests.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
@@ -76,8 +76,8 @@ defmodule PropertyDamage.Test.FailingModel do
   @moduledoc """
   Model with failing check projection for testing check failures.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.ItemCreated
@@ -164,7 +164,7 @@ defmodule PropertyDamage.Test.SimpleModel do
   @moduledoc """
   Simple model without extra projections for ref resolution tests.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.ModelState
@@ -230,7 +230,7 @@ defmodule PropertyDamage.Test.MultiCheckModel do
   @moduledoc """
   Model with multiple checks for testing failure equivalence.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Projections.{ModelState, MultiCheckProjection}
@@ -256,8 +256,8 @@ defmodule PropertyDamage.Test.ProbeModel do
   This model allows testing that probe commands are prioritized for removal
   during shrinking (see DR-008).
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ProbeItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
@@ -393,8 +393,8 @@ defmodule PropertyDamage.Test.LinkModel do
   simulator so the shrinker's validity check (`Sequence.Validator.valid_sequence?/2`)
   has something to simulate.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.Link
   alias PropertyDamage.Test.Events.LinkAdded

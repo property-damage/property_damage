@@ -19,7 +19,7 @@ defmodule PropertyDamage.LinearizationTest do
 
   # Test model
   defmodule TestModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     def commands, do: []
     def command_sequence_projection, do: TestProjection
@@ -140,8 +140,8 @@ defmodule PropertyDamage.LinearizationTest do
   end
 
   defmodule CounterModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: []
@@ -183,8 +183,8 @@ defmodule PropertyDamage.LinearizationTest do
   end
 
   defmodule CheckedCounterModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: []
@@ -371,8 +371,8 @@ defmodule PropertyDamage.LinearizationTest do
 
     test "treats nil predicted fields as wildcards" do
       defmodule NilSimModel do
-        @behaviour PropertyDamage.Model
         @behaviour PropertyDamage.Model.Simulator
+        use PropertyDamage.Model
 
         @impl PropertyDamage.Model
         def commands, do: []

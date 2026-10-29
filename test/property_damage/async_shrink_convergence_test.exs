@@ -56,7 +56,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump, Noise]
     @impl true
@@ -186,7 +186,7 @@ defmodule PropertyDamage.AsyncShrinkConvergenceTest do
   end
 
   defmodule CommandScopedModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump, Noise]
     @impl true

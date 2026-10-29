@@ -54,7 +54,7 @@ defmodule PropertyDamage.StutterShrinkTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Noop, Charge]
     @impl true

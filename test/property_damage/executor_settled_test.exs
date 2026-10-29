@@ -77,8 +77,8 @@ defmodule PropertyDamage.ExecutorSettledTest do
   # Model wiring the probe command to the same FailingCheck (@check every: 1,
   # fails once cumulative quantity exceeds 100) the sync FailingModel uses.
   defmodule SettledModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Events.ItemCreated
 

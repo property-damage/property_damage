@@ -101,8 +101,8 @@ The Model wires this command with state:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyTest.OrderModel do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias MyTest.Commands.{CreateOrder, ViewOrder}
   alias MyTest.Events.{OrderViewed, OrderNotFound}
@@ -229,8 +229,8 @@ and return themselves (or a delegate module) via `simulator/0`:
 
 ```elixir
 defmodule MyTest.OrderModel do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   def commands, do: [CreateOrder, CancelOrder]
   def command_sequence_projection, do: MyTest.OrderProjection
@@ -362,8 +362,8 @@ defmodule Notes.Session do
 end
 
 defmodule Notes.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Notes.Commands.{AddNote, CreateUser, Login}
   alias Notes.Events.{LoggedIn, NoteAdded, UserCreated}
@@ -647,8 +647,8 @@ defmodule Counter.Totals do
 end
 
 defmodule Counter.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Counter.Commands.Incr
   alias Counter.Events.Incremented
@@ -882,8 +882,8 @@ Factor wiring functions into a helper module:
 
 ```elixir
 defmodule MyTest.OrderModel do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias MyTest.CommandWiring
   alias MyTest.Simulation

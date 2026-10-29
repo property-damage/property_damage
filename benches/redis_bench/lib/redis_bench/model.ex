@@ -56,7 +56,7 @@ end
 
 defmodule RedisBench.Model do
   @moduledoc "Ties the register commands and the consistency projection together."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias RedisBench.Commands.{Increment, ReadValue}
 
@@ -91,7 +91,7 @@ defmodule RedisBench.RmwModel do
   checker refutes it. `Increment` is deliberately excluded here: it is atomic
   (`INCR`) and belongs to the atomic control (`RedisBench.Model`).
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias RedisBench.Commands.{GetThenSet, ReadValue}
 

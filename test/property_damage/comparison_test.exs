@@ -238,7 +238,7 @@ defmodule PropertyDamage.ComparisonTest do
   end
 
   defmodule LatencyModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [TestCommand]
@@ -264,8 +264,8 @@ defmodule PropertyDamage.ComparisonTest do
   end
 
   defmodule TestModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [TestCommand]

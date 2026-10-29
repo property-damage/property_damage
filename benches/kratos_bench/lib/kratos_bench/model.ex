@@ -11,7 +11,7 @@ defmodule KratosBench.Model do
   success" advice.
   """
 
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias KratosBench.Commands.{
     DeleteIdentity,

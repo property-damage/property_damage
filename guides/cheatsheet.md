@@ -49,7 +49,7 @@ end
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   @impl true
   def commands do

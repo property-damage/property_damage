@@ -78,8 +78,8 @@ defmodule PropertyDamage.CheckVerdictTest do
     end
 
     defmodule model do
-      @behaviour PropertyDamage.Model
       @behaviour PropertyDamage.Model.Simulator
+      use PropertyDamage.Model
 
       @impl PropertyDamage.Model
       def commands, do: [Tick]

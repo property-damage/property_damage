@@ -23,7 +23,7 @@ defmodule PropertyDamage.LatencyBudgetTest do
   defmodule MixedModel do
     @moduledoc false
     # Two root command modules, so `by_command` has two entries.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [PropertyDamage.Test.Lockstep.Step, PropertyDamage.Test.Lockstep.ProbeStep]

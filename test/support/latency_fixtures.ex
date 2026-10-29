@@ -30,7 +30,7 @@ defmodule PropertyDamage.Test.LatencyFixtures do
 
   defmodule SlowFoldModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Step]

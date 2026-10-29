@@ -31,7 +31,7 @@ defmodule PropertyDamage.PlaceholderTransportTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: []
     @impl true

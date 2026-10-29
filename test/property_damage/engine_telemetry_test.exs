@@ -25,7 +25,7 @@ defmodule PropertyDamage.EngineTelemetryTest do
   # Draws the failing value 13 often enough for a campaign to find its first
   # failure after run 0.
   defmodule LateFailureModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do

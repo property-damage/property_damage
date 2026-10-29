@@ -84,7 +84,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
   defmodule FailingModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Bump]
@@ -95,7 +95,7 @@ defmodule Mix.Tasks.Pd.ReplayTest do
 
   defmodule FixedModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Bump]

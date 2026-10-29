@@ -36,7 +36,7 @@ defmodule PropertyDamage.VariantLifecycleTest do
 
   defmodule SlowProbeModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [SlowProbe]
@@ -97,7 +97,7 @@ defmodule PropertyDamage.VariantLifecycleTest do
 
   defmodule LateModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Deliver]

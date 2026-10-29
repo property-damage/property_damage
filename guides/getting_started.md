@@ -180,7 +180,7 @@ The model ties everything together:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias MyApp.Commands.CreateUser
   alias MyApp.Projections.{ModelState, UserInvariants}

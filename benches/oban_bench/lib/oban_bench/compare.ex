@@ -155,7 +155,7 @@ end
 
 defmodule ObanBench.Compare.Model do
   @moduledoc "Increments only, compared through `ObanBench.Compare.Counters.counters/2`."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias ObanBench.Commands.Increment
 
@@ -180,7 +180,7 @@ defmodule ObanBench.Compare.ReadModel do
   Nothing is compared at the `Increment` root, so the first read can run before
   the job has landed.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias ObanBench.Commands.Increment
   alias ObanBench.Compare.Commands.ReadCounter

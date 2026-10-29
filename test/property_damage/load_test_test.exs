@@ -460,8 +460,8 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   defmodule WorkerTestModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [WorkerTestCommand]
@@ -566,8 +566,8 @@ defmodule PropertyDamage.LoadTestTest do
   end
 
   defmodule OrderingModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands, do: [PropertyDamage.LoadTestTest.OrderingCommand]
@@ -959,8 +959,8 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     defmodule MockModel do
-      @behaviour PropertyDamage.Model
       @behaviour PropertyDamage.Model.Simulator
+      use PropertyDamage.Model
 
       @impl PropertyDamage.Model
       def commands, do: [MockCommand]
@@ -1270,7 +1270,7 @@ defmodule PropertyDamage.LoadTestTest do
     end
 
     defmodule MockModelWithChecks do
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [{MockCommand, weight: 1}]

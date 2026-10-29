@@ -135,7 +135,7 @@ end
 
 defmodule Counter.Model do
   @moduledoc "`Add n` may run as itself or as `Add 1` then `Add (n - 1)`."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias Counter.Add
 

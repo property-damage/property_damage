@@ -314,7 +314,7 @@ defmodule PropertyDamage.Test.LogPathFixtures do
     @moduledoc false
     # Root 0 injects a fault the next sweep lifts, root 1 one only the end of
     # the run lifts, every later root is an Act checked by Guard.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.LogFixtures.Act
     alias PropertyDamage.Test.LogPathFixtures.Fault

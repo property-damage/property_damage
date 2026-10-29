@@ -30,7 +30,7 @@ defmodule PropertyDamage.LifecycleValidationTest do
       quote do
         defmodule unquote(module) do
           @moduledoc false
-          @behaviour PropertyDamage.Model
+          use PropertyDamage.Model
           def commands, do: unquote(support).act_roots()
           def command_sequence_projection, do: unquote(SetupCommands.World)
           def check_projections, do: [unquote(SetupCommands.Fixture)]

@@ -76,8 +76,8 @@ defmodule PropertyDamage.ExternalE2ETest do
   end
 
   defmodule PlainModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Create, Use]
     @impl true
@@ -90,8 +90,8 @@ defmodule PropertyDamage.ExternalE2ETest do
   end
 
   defmodule RoutingModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands do
       [

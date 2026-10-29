@@ -185,7 +185,7 @@ end
 
 defmodule MyApp.Model do
   @moduledoc "Deposits and withdrawals on two accounts."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   @impl true
   def commands, do: [MyApp.Deposit, MyApp.Withdraw]

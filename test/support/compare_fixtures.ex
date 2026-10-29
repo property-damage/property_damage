@@ -135,7 +135,7 @@ defmodule PropertyDamage.Test.Compare do
       quote do
         defmodule unquote(module) do
           @moduledoc false
-          @behaviour PropertyDamage.Model
+          use PropertyDamage.Model
 
           @impl true
           def commands, do: unquote(support).commands(unquote(Macro.escape(commands)))
@@ -155,7 +155,7 @@ defmodule PropertyDamage.Test.Compare do
   defmodule PayModel do
     @moduledoc false
     # Pay commands only and no @compare on any projection.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Compare
 
@@ -169,7 +169,7 @@ defmodule PropertyDamage.Test.Compare do
   defmodule PlainModel do
     @moduledoc false
     # A check projection, and no @compare on any projection.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Compare
 
@@ -186,7 +186,7 @@ defmodule PropertyDamage.Test.Compare do
   defmodule AcceptableModel do
     @moduledoc false
     # Lists Pay with the stutter key `acceptable_retry_events:`.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Pay, acceptable_retry_events: [Paid]}]

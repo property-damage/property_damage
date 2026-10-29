@@ -181,7 +181,7 @@ defmodule ObanBench.JobRefs.Model do
   and two gated consumers (`CancelJob`, `ReadJobState`) each route one produced
   id from state via `Generator.external_from/2`.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias ObanBench.JobRefs.Commands.{CancelJob, EnqueueJob, ReadJobState}
   alias PropertyDamage.Generator

@@ -207,7 +207,7 @@ defmodule PropertyDamage.Test.ReportLayout do
 
     defmodule Model do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       alias PropertyDamage.Test.ReportLayout.Eventual
 
@@ -268,7 +268,7 @@ defmodule PropertyDamage.Test.ReportLayout do
 
     defmodule Model do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [PropertyDamage.Test.ReportLayout.Branch.Tick]

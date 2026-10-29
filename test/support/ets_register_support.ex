@@ -119,7 +119,7 @@ end
 
 defmodule PropertyDamage.Test.EtsRegister.Model do
   @moduledoc "Ties the register commands and the consistency projection together."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.EtsRegister.Commands.{Increment, ReadValue}
 

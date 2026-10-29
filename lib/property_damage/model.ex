@@ -54,7 +54,7 @@ defmodule PropertyDamage.Model do
   ## Example
 
       defmodule MyTest.OrderModel do
-        @behaviour PropertyDamage.Model
+        use PropertyDamage.Model
 
         alias MyTest.Commands.{CreateOrder, ViewOrder, CancelOrder}
         alias MyTest.Projections.{ModelState, OrderBalances}
@@ -142,8 +142,8 @@ defmodule PropertyDamage.Model do
   For inline implementation, have the model implement both behaviours:
 
       defmodule MyModel do
-        @behaviour PropertyDamage.Model
         @behaviour PropertyDamage.Model.Simulator
+        use PropertyDamage.Model
 
         def simulator, do: __MODULE__
 

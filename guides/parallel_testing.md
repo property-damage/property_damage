@@ -204,7 +204,7 @@ Two branches both deposit to and withdraw from a shared account:
 
 ```elixir
 defmodule AccountModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   def commands do
     [

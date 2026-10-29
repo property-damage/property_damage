@@ -31,8 +31,8 @@ defmodule PropertyDamage.MintTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Send]
     @impl true
@@ -209,8 +209,8 @@ defmodule PropertyDamage.MintTest do
     end
 
     defmodule PlainModel do
-      @behaviour PropertyDamage.Model
       @behaviour PropertyDamage.Model.Simulator
+      use PropertyDamage.Model
       @impl true
       def commands, do: [Plain]
       @impl true

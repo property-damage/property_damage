@@ -123,7 +123,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
 
   # A Flip diverges once two Noise commands ran before it.
   defmodule DivergeModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Noise, weight: 3}, Flip]
@@ -138,7 +138,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   # DivergeModel with one setup command, which every run, shrink attempt and
   # reproduction executes first in every target.
   defmodule CountedDivergeModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Noise, weight: 3}, Flip]
@@ -156,7 +156,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   # A Flip diverges whenever it runs; without an Arm before it, it fails
   # ArmGuard first, in the reference target.
   defmodule ArmedModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Noise, weight: 2}, Arm, Flip]
@@ -171,7 +171,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   # Under the `:split` skew, an armed Flip diverges and an unarmed Ping
   # diverges: removing the Arm moves the divergence to another command.
   defmodule SplitModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Noise, weight: 2}, Arm, Ping, Flip]
@@ -196,7 +196,7 @@ defmodule PropertyDamage.LockstepShrinkTest do
   end
 
   defmodule DivideModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Noise, weight: 3}, Flip]

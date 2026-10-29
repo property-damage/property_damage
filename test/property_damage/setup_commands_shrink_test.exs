@@ -91,7 +91,7 @@ defmodule PropertyDamage.SetupCommandsShrinkTest do
   end
 
   defmodule CountedModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Noise, weight: 3}, Flip]

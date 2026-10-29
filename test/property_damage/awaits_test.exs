@@ -118,7 +118,7 @@ defmodule PropertyDamage.AwaitsTest do
   end
 
   defmodule IssueModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [CloseIssue]
     @impl true
@@ -245,7 +245,7 @@ defmodule PropertyDamage.AwaitsTest do
   end
 
   defmodule LaterDeliveryModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [CloseIssue]
     @impl true
@@ -326,7 +326,7 @@ defmodule PropertyDamage.AwaitsTest do
   end
 
   defmodule OverlapModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [CloseIssue, CloseAnyIssue]
     @impl true

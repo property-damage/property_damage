@@ -27,7 +27,7 @@ defmodule PropertyDamage.ResourcePollerLeakTest do
   end
 
   defmodule PollerModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [PollerCmd]
     @impl true
@@ -106,7 +106,7 @@ defmodule PropertyDamage.ResourcePollerLeakTest do
   end
 
   defmodule BranchModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [BranchStartPoller, BranchFail]
     @impl true
