@@ -16,7 +16,10 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
 
     on_exit(fn ->
       File.rm_rf(dir)
-      if previous, do: System.put_env("PD_REPORT_HTML", previous)
+
+      if previous,
+        do: System.put_env("PD_REPORT_HTML", previous),
+        else: System.delete_env("PD_REPORT_HTML")
     end)
 
     {:ok, dir: dir}
