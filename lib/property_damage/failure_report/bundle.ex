@@ -89,7 +89,10 @@ defmodule PropertyDamage.FailureReport.Bundle do
   reports the `@doc` line, so `from` is the first clause at or after the
   reported line. `to` is the line before the next function definition of the
   module, private ones included, and the last definition runs to the line
-  before the module's closing `end`. A function the file does not define at
+  before the module's closing `end`; a module written as `defmodule M, do: ...`
+  has no `end`, so its last definition runs to the last line the module's
+  expression reaches. A module whose syntax tree has an unexpected shape gives
+  no ranges, so its functions get a `null` id. A function the file does not define at
   the top level of its module (one a macro injects, or one generated in a
   loop) has `null` for both, as has every function of an
   unreadable file.
@@ -367,7 +370,8 @@ defmodule PropertyDamage.FailureReport.Bundle do
       |> Enum.filter(fn {module, _role} -> is_atom(module) and not is_nil(module) end)
       |> Enum.uniq_by(&elem(&1, 0))
 
-    adapter_files = adapter_files(unique)
+    adapters = for target <- targets, adapter = adapter_of(report, target.name), do: adapter
+    adapter_files = adapter_files(adapters)
     built = Enum.map(unique, fn {module, role} -> module_entry(module, role, adapter_files) end)
 
     missing = built |> Enum.flat_map(& &1.missing) |> Enum.uniq()
@@ -376,10 +380,12 @@ defmodule PropertyDamage.FailureReport.Bundle do
     {Enum.map(built, & &1.entry), missing, redacted}
   end
 
-  # The source files that define an adapter of the bundle. Every module
-  # defined in one of them shows the same text.
-  defp adapter_files(modules) do
-    for {module, :adapter} <- modules,
+  # The source files that define the adapter of a listed target, whatever
+  # role the module is listed under. Every module defined in one of them
+  # shows the same text.
+  defp adapter_files(adapters) do
+    for module <- adapters,
+        is_atom(module),
         {:ok, %{file: file}} when is_binary(file) <- [Docs.fetch(module)],
         into: MapSet.new(),
         do: file
@@ -547,13 +553,13 @@ defmodule PropertyDamage.FailureReport.Bundle do
   # module's `end`. A file that does not parse gives no ranges.
   defp ranges(text, module) do
     with {:ok, ast} <- Code.string_to_quoted(text, token_metadata: true),
-         {body, end_line} <- find_module(ast, module, []) do
+         {body, limit} <- find_module(ast, module, []) do
       clauses = for expr <- block(body), clause <- clause(expr), do: clause
       starts = Enum.map(clauses, &elem(&1, 0))
 
       clauses
       |> Enum.map(fn {start, keys} ->
-        stop = (Enum.find(starts, &(&1 > start)) || end_line) - 1
+        stop = (Enum.find(starts, &(&1 > start)) || limit) - 1
         {keys, {start, stop}}
       end)
       |> Enum.flat_map(fn {keys, range} -> Enum.map(keys, &{&1, range}) end)
@@ -562,6 +568,9 @@ defmodule PropertyDamage.FailureReport.Bundle do
     else
       _unreadable -> %{}
     end
+  rescue
+    # An unexpected shape gives no ranges: the page is still written.
+    _shape -> %{}
   end
 
   defp block({:__block__, _meta, expressions}), do: expressions
@@ -590,13 +599,15 @@ defmodule PropertyDamage.FailureReport.Bundle do
   defp head_key({name, _meta, nil}) when is_atom(name), do: {name, 0, 0}
   defp head_key(_head), do: nil
 
-  # The body and the `end` line of the `defmodule` that defines `module`,
-  # found at any depth; a nested module takes the name of its parents.
+  # The body of the `defmodule` that defines `module` and the first line
+  # after it, found at any depth; a nested module takes the name of its
+  # parents. A module written as `defmodule M, do: ...` has no `end`: it
+  # stops after the last line its expression reaches.
   defp find_module({:defmodule, meta, [{:__aliases__, _, parts}, [do: body]]}, module, parents) do
     name = module_parts(parts, parents)
 
     if Module.concat(name) == module,
-      do: {body, meta[:end][:line]},
+      do: {body, after_module(meta, body)},
       else: find_module(body, module, name)
   end
 
@@ -610,6 +621,26 @@ defmodule PropertyDamage.FailureReport.Bundle do
     do: find_module([left, right], module, parents)
 
   defp find_module(_other, _module, _parents), do: nil
+
+  defp after_module(meta, body) do
+    case meta[:end][:line] do
+      nil -> last_line(body) + 1
+      end_line -> end_line
+    end
+  end
+
+  defp last_line(body) do
+    {_ast, last} =
+      Macro.prewalk(body, 0, fn
+        {_form, meta, _args} = node, last when is_list(meta) ->
+          {node, max(last, meta[:line] || 0)}
+
+        node, last ->
+          {node, last}
+      end)
+
+    last
+  end
 
   defp module_parts([{:__MODULE__, _, _} | rest], parents), do: parents ++ rest
   defp module_parts(parts, parents), do: parents ++ parts
