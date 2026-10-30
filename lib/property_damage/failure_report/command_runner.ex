@@ -22,8 +22,8 @@ defmodule PropertyDamage.FailureReport.CommandRunner do
   #     is killed first. `force_fallback: true` takes this path on any system.
   #
   # A helper process owns the port and the temp files and watches the caller.
-  # When the caller dies, however it dies, the helper kills the command and
-  # removes the files.
+  # The helper removes the files before it sends the result. When the caller
+  # dies, however it dies, the helper kills the command and removes the files.
 
   @tmp_prefix "pd_explain_"
 
@@ -66,11 +66,16 @@ defmodule PropertyDamage.FailureReport.CommandRunner do
 
     case make_dir() do
       {:ok, dir} ->
-        try do
-          send(caller, {ref, supervise(caller_monitor, dir, command, input, timeout_ms, opts)})
-        after
-          File.rm_rf(dir)
-        end
+        # Clean up before the result is sent: a caller that halts the VM right
+        # after `run/4` returns would otherwise kill this process first.
+        result =
+          try do
+            supervise(caller_monitor, dir, command, input, timeout_ms, opts)
+          after
+            File.rm_rf(dir)
+          end
+
+        send(caller, {ref, result})
 
       {:error, reason} ->
         send(caller, {ref, {:error, "cannot run the command (#{:file.format_error(reason)})"}})
