@@ -124,6 +124,26 @@ defmodule PropertyDamage.FailureReport.Explanation do
   end
 
   @doc """
+  Checks that every earlier `pd-explanation` tag of the page can be removed.
+
+  A tag is malformed when no `</script>` follows its opener, or when another
+  script opener comes before that `</script>`. `embed/3` cannot tell where such
+  a tag ends, so the page needs a hand edit first.
+  """
+  @spec check_earlier(binary(), String.t()) :: :ok | {:error, [String.t()]}
+  def check_earlier(html, page) do
+    if Enum.any?(:binary.matches(html, @explanation_open), &malformed?(html, &1)) do
+      {:error,
+       [
+         "#{page}: an earlier explanation in this page is malformed; " <>
+           "remove its pd-explanation tag by hand"
+       ]}
+    else
+      :ok
+    end
+  end
+
+  @doc """
   Checks the text of an explanation against the page's bundle.
 
   Returns the explanation (the three parts, without a `bundle_hash`) or every
@@ -210,7 +230,8 @@ defmodule PropertyDamage.FailureReport.Explanation do
     shown =
       case Map.get(data, "format") do
         nil -> "missing"
-        format when is_integer(format) or is_binary(format) -> to_string(format)
+        format when is_integer(format) -> to_string(format)
+        format when is_binary(format) -> show(format)
         other -> inspect(other)
       end
 
@@ -219,6 +240,13 @@ defmodule PropertyDamage.FailureReport.Explanation do
        "#{page}: bundle format #{shown} is not supported; " <>
          "this version reads formats: #{Enum.join(@supported_formats, ", ")}"
      ]}
+  end
+
+  # A value from the input goes into an error line as is, unless it holds a
+  # control character that could break the line or forge another one; then it
+  # prints quoted and escaped.
+  defp show(text) when is_binary(text) do
+    if String.match?(text, ~r/[\x00-\x1f\x7f]/), do: inspect(text), else: text
   end
 
   defp sha256(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
@@ -241,6 +269,16 @@ defmodule PropertyDamage.FailureReport.Explanation do
           []
       end
     end)
+  end
+
+  defp malformed?(html, {start, length}) do
+    body_start = start + length
+    rest = binary_part(html, body_start, byte_size(html) - body_start)
+
+    case :binary.match(rest, @script_close) do
+      {close, _length} -> :binary.match(binary_part(rest, 0, close), "<script") != :nomatch
+      :nomatch -> true
+    end
   end
 
   defp remove_explanations(html) do
@@ -289,7 +327,7 @@ defmodule PropertyDamage.FailureReport.Explanation do
     unknown =
       for key <- Map.keys(map),
           key not in ["bundle_hash" | @parts],
-          do: "schema: unknown key #{key}"
+          do: "schema: unknown key #{show(key)}"
 
     unknown ++
       Enum.flat_map(@parts, &part_lines(map, &1)) ++ hash_shape_lines(map) ++ order_lines(map)
@@ -316,7 +354,9 @@ defmodule PropertyDamage.FailureReport.Explanation do
     known = Enum.map(spec, &elem(&1, 0))
 
     unknown =
-      for key <- Map.keys(entry), key not in known, do: "schema: #{path}: unknown key #{key}"
+      for key <- Map.keys(entry),
+          key not in known,
+          do: "schema: #{path}: unknown key #{show(key)}"
 
     unknown ++
       Enum.flat_map(spec, fn {key, shape} ->
@@ -393,7 +433,7 @@ defmodule PropertyDamage.FailureReport.Explanation do
   # --- hash ------------------------------------------------------------------
 
   defp hash_lines(%{"bundle_hash" => given}, hash) when is_binary(given) and given != hash,
-    do: ["bundle hash mismatch: explanation #{given}, page #{hash}"]
+    do: ["bundle hash mismatch: explanation #{show(given)}, page #{hash}"]
 
   defp hash_lines(_map, _hash), do: []
 
@@ -457,7 +497,7 @@ defmodule PropertyDamage.FailureReport.Explanation do
 
   defp check_id(id, :evidence, %{gaps: gaps} = index) do
     if MapSet.member?(gaps, id),
-      do: {:error, "#{id}: a missing description is not evidence"},
+      do: {:error, "#{show(id)}: a missing description is not evidence"},
       else: check_id(id, :cite, index)
   end
 
@@ -473,9 +513,10 @@ defmodule PropertyDamage.FailureReport.Explanation do
 
       if 1 <= first and first <= last and last <= lines,
         do: :ok,
-        else: {:error, "source:#{module}:#{from}-#{to}: lines #{from}-#{to} outside 1-#{lines}"}
+        else:
+          {:error, "source:#{show(module)}:#{from}-#{to}: lines #{from}-#{to} outside 1-#{lines}"}
     else
-      _not_a_known_range -> {:error, "#{id}: not in this page"}
+      _not_a_known_range -> {:error, "#{show(id)}: not in this page"}
     end
   end
 end

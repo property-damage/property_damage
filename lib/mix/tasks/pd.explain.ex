@@ -31,7 +31,9 @@ defmodule Mix.Tasks.Pd.Explain do
 
   With `--prompt`, the task prints the instructions, a newline, the bundle and a
   newline to standard output, and nothing else. It writes nothing. Pipe it to
-  the model of your choice.
+  the model of your choice. Mix compiles the project before any task runs, so on
+  a first run its compile messages come before the prompt; run `mix compile`
+  first, or set `MIX_QUIET=1`, when the output must hold the prompt alone.
 
   With `--apply FILE` (or `--apply -` for standard input), the task reads an
   explanation as JSON and checks it against the page. It reports every problem it
@@ -176,7 +178,8 @@ defmodule Mix.Tasks.Pd.Explain do
   end
 
   defp apply_explanation(page, html, bundle, file) do
-    with {:ok, text} <- read_explanation(file),
+    with :ok <- Explanation.check_earlier(html, page) |> lines_error(),
+         {:ok, text} <- read_explanation(file),
          {:ok, explanation} <- Explanation.validate(text, bundle) |> lines_error(),
          :ok <- replace(page, Explanation.embed(html, bundle, explanation)) do
       succeed(
