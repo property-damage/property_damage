@@ -591,9 +591,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file of the modules behind it, and an id for each thing a reader may cite.
   `PropertyDamage.FailureReport.Bundle.build/2` returns the same map. The
   index page carries no bundle, and the page's viewer does not read it.
-  Source text of an adapter has each double-quoted literal replaced by
-  `"[REDACTED]"` on a line that names a secret, password, token or key, and
-  the bundle counts the replacements; a source file that cannot be read is
+  Source text of every module in a file that holds an adapter has each
+  double-quoted literal replaced by `"[REDACTED]"` on a line that names a
+  secret, password, token or key, and the bundle counts the replacements; a source file that cannot be read is
   named under `missing_sources`. `use PropertyDamage.Adapter` now captures the
   adapter's docs like the other `use` macros, so a `def` or `defp` written
   before it is a compile error: move the `use` above it.

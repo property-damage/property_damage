@@ -27,7 +27,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
   | `modules` | list | one map per module behind the failure (see below) |
   | `ids` | list | every id the bundle declares, once each, in a stable order |
   | `missing_sources` | list | the paths of source files that could not be read |
-  | `redactions` | map | `count` of literals replaced in adapter sources, and the `rule` applied |
+  | `redactions` | map | `count` of literals replaced in the sources of the modules in adapter files, and the `rule` applied |
 
   ### Listing
 
@@ -108,9 +108,14 @@ defmodule PropertyDamage.FailureReport.Bundle do
 
   ### Redaction
 
-  The source of an adapter passes through
-  `PropertyDamage.FailureReport.Bundle.Redaction`, which replaces secret-shaped
-  string literals. No other module's source is scanned.
+  The source of every module whose `file` is the file of an adapter in the
+  bundle passes through `PropertyDamage.FailureReport.Bundle.Redaction`, which
+  replaces secret-shaped string literals. A file shows the same text through
+  each module defined in it, so a model above an adapter in one file is
+  redacted too. Each module's `redactions` counts its own replacements and
+  the top-level count sums them, so a literal in a shared file counts once
+  per module that shows the file. The source of a module in a file no adapter
+  shares is not scanned.
   """
 
   alias PropertyDamage.{Docs, Failure, FailureReport, Target}
@@ -356,16 +361,27 @@ defmodule PropertyDamage.FailureReport.Bundle do
         ) ++
         for(target <- targets, adapter = adapter_of(report, target.name), do: {adapter, :adapter})
 
-    built =
+    unique =
       listed
       |> Enum.filter(fn {module, _role} -> is_atom(module) and not is_nil(module) end)
       |> Enum.uniq_by(&elem(&1, 0))
-      |> Enum.map(fn {module, role} -> module_entry(module, role) end)
+
+    adapter_files = adapter_files(unique)
+    built = Enum.map(unique, fn {module, role} -> module_entry(module, role, adapter_files) end)
 
     missing = built |> Enum.flat_map(& &1.missing) |> Enum.uniq()
     redacted = built |> Enum.map(& &1.entry["redactions"]) |> Enum.sum()
 
     {Enum.map(built, & &1.entry), missing, redacted}
+  end
+
+  # The source files that define an adapter of the bundle. Every module
+  # defined in one of them shows the same text.
+  defp adapter_files(modules) do
+    for {module, :adapter} <- modules,
+        {:ok, %{file: file}} when is_binary(file) <- [Docs.fetch(module)],
+        into: MapSet.new(),
+        do: file
   end
 
   defp struct_module(%module{}), do: module
@@ -401,11 +417,11 @@ defmodule PropertyDamage.FailureReport.Bundle do
 
   defp exported(_model, _function), do: nil
 
-  defp module_entry(module, role) do
+  defp module_entry(module, role, adapter_files) do
     base = %{"module" => inspect(module), "role" => to_string(role)}
 
     case Docs.fetch(module) do
-      {:ok, docs} -> entry_from_docs(base, module, role, docs)
+      {:ok, docs} -> entry_from_docs(base, module, adapter_files, docs)
       :unavailable -> unavailable(base)
     end
   end
@@ -425,9 +441,9 @@ defmodule PropertyDamage.FailureReport.Bundle do
     %{entry: entry, missing: []}
   end
 
-  defp entry_from_docs(base, module, role, %{file: file} = docs) do
+  defp entry_from_docs(base, module, adapter_files, %{file: file} = docs) do
     {text, missing} = read(file)
-    {source, redactions} = source_of(text, file, role)
+    {source, redactions} = source_of(text, file, adapter_files)
     ranges = if text, do: ranges(text, module), else: %{}
 
     entry =
@@ -453,10 +469,12 @@ defmodule PropertyDamage.FailureReport.Bundle do
     end
   end
 
-  defp source_of(nil, nil, _role), do: {nil, 0}
-  defp source_of(nil, file, _role), do: {%{"missing" => file}, 0}
-  defp source_of(text, _file, :adapter), do: Redaction.redact(text)
-  defp source_of(text, _file, _role), do: {text, 0}
+  defp source_of(nil, nil, _adapter_files), do: {nil, 0}
+  defp source_of(nil, file, _adapter_files), do: {%{"missing" => file}, 0}
+
+  defp source_of(text, file, adapter_files) do
+    if MapSet.member?(adapter_files, file), do: Redaction.redact(text), else: {text, 0}
+  end
 
   # A module without a source file has no source to show, whatever docs it
   # has.

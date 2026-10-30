@@ -1,8 +1,8 @@
 defmodule PropertyDamage.FailureReport.Bundle.Redaction do
   @moduledoc """
-  Replaces secret-shaped string literals in the source of an adapter, so the
-  JSON bundle of a failure page does not carry a password or a token that the
-  adapter uses to reach the system under test.
+  Replaces secret-shaped string literals in the source of a file that holds an
+  adapter, so the JSON bundle of a failure page does not carry a password or a
+  token that the adapter uses to reach the system under test.
 
   `redact/1` works by line. On every line that names a secret, it replaces
   each double-quoted string literal with `"[REDACTED]"` and counts the
@@ -30,7 +30,7 @@ defmodule PropertyDamage.FailureReport.Bundle.Redaction do
   @replacement ~S("[REDACTED]")
   @identifier ~r/\A[A-Za-z_][A-Za-z0-9_]*[?!]?/
 
-  @rule "On every line of an adapter's source that names a secret, password, token or key, " <>
+  @rule "In a source file that holds an adapter, on every line that names a secret, password, token or key, " <>
           "each double-quoted string literal is replaced by \"[REDACTED]\"; " <>
           "heredocs, sigils and charlists are not scanned."
 

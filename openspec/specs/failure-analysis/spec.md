@@ -695,7 +695,7 @@ Every page `PropertyDamage.FailureReport.HTML.render/1` returns SHALL carry exac
 
 The bundle SHALL name the failure's fields, the context items, the steps and events of each target's listing, and the sections by id, and SHALL NOT copy the text the page prints for any of them. `ids` SHALL list every id the bundle declares once. An id SHALL be `failure:<label>`, `context:<label>`, `step:<target>:<label>`, `entry:<target>:<label>:<n>`, `section:<title>` or `source:<Module>.<function>/<arity>`, with the text as the page prints it; from its second occurrence in one section, a repeated label SHALL carry an ordinal suffix (`:2`). Entries SHALL count the events under a step after the log filter, and the lines under the adapter's `setup/1` and `teardown/1` notes and the events tied to no command SHALL be counted per target and filed under no step.
 
-The bundle SHALL hold, for the model, its projections, the commands and events of the listed steps and the adapter of each target, the moduledoc, the source file path, the full source text, how the docs were read (`captured`, `beam` or `unavailable`) and, per function, its doc and the lines it spans. A function SHALL start at its first clause and end the line before the next function definition of the module, or before the module's closing `end`. A source file that cannot be read SHALL give `{"missing": path}` as the source, null ranges, and an entry in `missing_sources`. The source of an adapter SHALL have each double-quoted string literal on a line that names a secret, password, token or key replaced by `"[REDACTED]"`, and the bundle SHALL count the replacements and state the rule; the source of any other module SHALL NOT be scanned.
+The bundle SHALL hold, for the model, its projections, the commands and events of the listed steps and the adapter of each target, the moduledoc, the source file path, the full source text, how the docs were read (`captured`, `beam` or `unavailable`) and, per function, its doc and the lines it spans. A function SHALL start at its first clause and end the line before the next function definition of the module, or before the module's closing `end`. A source file that cannot be read SHALL give `{"missing": path}` as the source, null ranges, and an entry in `missing_sources`. The source of every module whose file is the file of an adapter in the bundle SHALL have each double-quoted string literal on a line that names a secret, password, token or key replaced by `"[REDACTED]"`; each such module SHALL count its own replacements, and the bundle SHALL sum them and state the rule; the source of a module in a file no adapter shares SHALL NOT be scanned.
 
 #### Scenario: One bundle per page
 - **WHEN** a report is rendered with `HTML.render/1` or written with `HTML.write/2`
@@ -723,4 +723,8 @@ The bundle SHALL hold, for the model, its projections, the commands and events o
 
 #### Scenario: A secret literal in an adapter is replaced
 - **WHEN** an adapter's source holds `@api_token "alice-token"`
-- **THEN** the bundle's source SHALL hold `@api_token "[REDACTED]"`, the count SHALL be at least 1, and a model's source with the same line SHALL stay as written (DR-058)
+- **THEN** the bundle's source SHALL hold `@api_token "[REDACTED]"`, the count SHALL be at least 1, and a model's source with the same line SHALL stay as written when its file holds no adapter (DR-058)
+
+#### Scenario: A module that shares a file with an adapter is redacted too
+- **WHEN** a model above an adapter in one file holds `password: "alice-pass"`
+- **THEN** the source of the model and the source of the adapter SHALL hold `"[REDACTED]"` and not the literal, each module's count SHALL be at least 1, and the bundle's count SHALL equal the sum of the module counts (DR-058)
