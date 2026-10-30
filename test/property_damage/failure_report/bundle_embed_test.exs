@@ -1,8 +1,8 @@
 defmodule PropertyDamage.FailureReport.BundleEmbedTest do
   # How the page carries the bundle: in a second script tag of its own, safe
   # against text that would close the tag, written with every page and with
-  # no index page, never read by the viewer's script, and intact for text
-  # outside ASCII.
+  # no index page, read by the viewer's script only to show a page's
+  # explanation, and intact for text outside ASCII.
   use ExUnit.Case, async: false
 
   alias PropertyDamage.FailureReport.HTML
@@ -149,14 +149,30 @@ defmodule PropertyDamage.FailureReport.BundleEmbedTest do
   end
 
   describe "the viewer" do
-    test "names the bundle in its tag line and nowhere else" do
+    test "holds the bundle tag on exactly one line, the tag line" do
       viewer = File.read!(@viewer)
       lines = String.split(viewer, "\n")
 
-      named = Enum.filter(lines, &String.contains?(&1, "pd-bundle"))
+      named = Enum.filter(lines, &String.contains?(&1, ~s(id="pd-bundle")))
       assert [tag_line] = named
       assert String.starts_with?(tag_line, @tag_open)
       assert String.contains?(tag_line, "</script>")
+    end
+
+    # The script names the bundle only inside explain/1, and calls explain/1
+    # only when the page has an explanation tag, so a page without one never
+    # reads its bundle.
+    test "reads the bundle only on the explanation path" do
+      [_markup, script] = @viewer |> File.read!() |> String.split("<script>\n", parts: 2)
+      [before, rest] = String.split(script, "\n  function explain(", parts: 2)
+      [body, after_body] = String.split(rest, "\n  }\n", parts: 2)
+      outside = before <> after_body
+
+      assert body =~ ~s{document.getElementById("pd-bundle")}
+      assert not String.contains?(outside, "pd-bundle")
+      assert outside =~ ~s{var XTAG = document.getElementById("pd-explanation");}
+      assert Regex.scan(~r/\bexplain\(/, outside) == [["explain("]]
+      assert outside =~ "if (XTAG) explain(XTAG);"
     end
 
     test "carries the tag on the line after the report tag" do

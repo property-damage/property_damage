@@ -73,6 +73,18 @@ defmodule PropertyDamage.FailureReport.HTMLTest do
       assert Jason.decode!(json) == text
       refute HTML.render(report) =~ "__PD_"
     end
+
+    test "the viewer opens an explanation with a fixed line, and a page without one shows none" do
+      html = HTML.render(check_report())
+      [markup, viewer] = String.split(html, "<script>\n", parts: 2)
+
+      assert viewer =~
+               "Hypotheses ranked by a language model from this run; each claim links to its evidence."
+
+      assert viewer =~ ~s{if (XTAG) explain(XTAG);}
+      assert not String.contains?(markup, ~s(id="pd-explanation"))
+      assert not String.contains?(markup, "Hypotheses ranked")
+    end
   end
 
   describe "write/2" do
