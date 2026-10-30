@@ -46,7 +46,10 @@ defmodule PropertyDamage.Expansion do
   # the leaves are realized again without a draw. A caller that knows the
   # commands a target ran (a replay artifact) passes them with
   # `recorded/4`, and the walk simulates them again at their positions without
-  # calling the expansion function or any generator.
+  # drawing or calling any generator. An entry is a list of leaves, or
+  # `{list, opts}` with `weight:` and `doc:`; the choice a target makes at a root
+  # carries the `doc:` of the entry it ran. The record holds no doc, so the walk
+  # calls the expansion function once per recorded root to read it.
 
   alias PropertyDamage.{
     Comparison,
@@ -59,6 +62,11 @@ defmodule PropertyDamage.Expansion do
   }
 
   alias PropertyDamage.Sequence.Position
+
+  # One entry an expansion function returned for a root: its sequence of
+  # leaves, its weight (`weight:`, default 1), its index in the list and its
+  # `doc:` (nil when the entry has none).
+  @typep entry :: {[term()], pos_integer(), non_neg_integer(), String.t() | nil}
 
   @typedoc """
   What a target ran at one root.
@@ -73,6 +81,8 @@ defmodule PropertyDamage.Expansion do
       replaced a listed entry by the root, or the entry realized was one leaf
       equal to its root
     * `index` - the entry's index in the list the function returned, or nil
+    * `doc` - the `doc:` of the entry the target ran, nil when the entry has
+      none or when no listed entry ran
     * `commands` - the commands executed for the root, in order
     * `leaves?` - true when `commands` are leaves at leaf positions; false when
       the root ran as itself at its own position (the identity included)
@@ -93,6 +103,7 @@ defmodule PropertyDamage.Expansion do
           required(:module) => module(),
           required(:entry) => String.t() | nil | :forced | :identity,
           required(:index) => non_neg_integer() | nil,
+          required(:doc) => String.t() | nil,
           required(:commands) => [struct()],
           required(:leaves?) => boolean(),
           required(:seed_key) => term() | nil,
@@ -105,8 +116,8 @@ defmodule PropertyDamage.Expansion do
   @typedoc false
   # Every target's concrete sequence for one run, keyed by target name: its
   # choices in root order and the placeholder registry its commands resolve
-  # against. `warnings` lists the `when:` and `weight:` options found on
-  # leaves, which a run ignores.
+  # against. `warnings` lists the `when:`, `weight:` and `doc:` options found
+  # on leaves, which a run ignores.
   @type t :: %{
           variants: %{String.t() => %{choices: [choice()], registry: PlaceholderRegistry.t()}},
           warnings: [String.t()]
@@ -627,13 +638,19 @@ defmodule PropertyDamage.Expansion do
         as_itself(walk, base, entry, nil)
 
       %{leaves?: false} ->
-        as_itself(walk, base, carried.entry, carried.index)
+        as_itself(
+          walk,
+          base,
+          carried.entry,
+          carried.index,
+          identity_doc(walk, base, carried.index)
+        )
 
       %{index: index, seed_key: seed_key} ->
-        sequence = carried_sequence(walk, base, index)
+        entry = carried_entry(walk, base, index)
         fields = Map.get(carried, :fields, %{})
 
-        case realize(walk, base, {sequence, 1, index}, seed_key, fields) do
+        case realize(walk, base, entry, seed_key, fields) do
           {:ok, realized} -> realized
           :withdrawn -> as_itself(walk, base, :forced, nil)
         end
@@ -643,15 +660,17 @@ defmodule PropertyDamage.Expansion do
   defp choose(walk, name, :random, fun, base, _carried), do: draw(walk, name, fun, base)
 
   # The carried entry, from the list the function returns for the root and
-  # state of this walk. A function that no longer returns that entry (for a
-  # root whose arguments a shrink simplified, say) cannot run it: the walk
+  # state of this walk: its sequence and its doc come from that list, never
+  # from the choice carried. A function that no longer returns that entry (for
+  # a root whose arguments a shrink simplified, say) cannot run it: the walk
   # fails as a generation error, which makes a shrink candidate invalid.
-  defp carried_sequence(walk, base, index) do
+  @spec carried_entry(map(), map(), non_neg_integer()) :: entry()
+  defp carried_entry(walk, base, index) do
     entries = entries!(walk, base, Map.fetch!(walk.functions, base.root_command.__struct__))
 
     case Enum.at(entries, index) do
-      {sequence, _weight, ^index} ->
-        sequence
+      {_sequence, _weight, ^index, _doc} = entry ->
+        entry
 
       nil ->
         raise ArgumentError,
@@ -661,7 +680,46 @@ defmodule PropertyDamage.Expansion do
     end
   end
 
-  defp as_itself(walk, base, entry, index) do
+  # The doc of the entry the function lists at `index` for this root and state,
+  # nil for no index, for a root without a function, or when the list has no
+  # entry there.
+  @spec listed_doc(map(), map(), non_neg_integer() | nil) :: String.t() | nil
+  defp listed_doc(_walk, _base, nil), do: nil
+
+  defp listed_doc(walk, base, index) do
+    case Map.fetch(walk.functions, base.root_command.__struct__) do
+      {:ok, fun} ->
+        case Enum.at(entries!(walk, base, fun), index) do
+          {_sequence, _weight, _index, doc} -> doc
+          nil -> nil
+        end
+
+      :error ->
+        nil
+    end
+  end
+
+  # The doc of the entry at `index`, when that entry is the listed identity (the
+  # root alone). A root run as itself under a listed key has no entry to
+  # realize, and the list may have shifted since the key was recorded: an entry
+  # that is no longer the identity gives no doc to a root that ran as itself.
+  @spec identity_doc(map(), map(), non_neg_integer() | nil) :: String.t() | nil
+  defp identity_doc(_walk, _base, nil), do: nil
+
+  defp identity_doc(walk, base, index) do
+    case Map.fetch(walk.functions, base.root_command.__struct__) do
+      {:ok, fun} ->
+        case Enum.at(entries!(walk, base, fun), index) do
+          {[root], _weight, _index, doc} when root == base.root_command -> doc
+          _other -> nil
+        end
+
+      :error ->
+        nil
+    end
+  end
+
+  defp as_itself(walk, base, entry, index, doc \\ nil) do
     state =
       Generator.simulate_root(
         walk.model,
@@ -677,6 +735,7 @@ defmodule PropertyDamage.Expansion do
       module: base.root_command.__struct__,
       entry: entry,
       index: index,
+      doc: doc,
       commands: [base.root_command],
       leaves?: false,
       seed_key: nil,
@@ -692,13 +751,14 @@ defmodule PropertyDamage.Expansion do
   defp to_identity(walk, base, fun) do
     listed =
       Enum.find_value(entries!(walk, base, fun), fn
-        {[root], _weight, index} when root == base.root_command -> index
+        {[root], _weight, index, doc} when root == base.root_command -> {index, doc}
         _entry -> nil
       end)
 
-    if listed,
-      do: as_itself(walk, base, key(base, listed), listed),
-      else: as_itself(walk, base, :identity, nil)
+    case listed do
+      {index, doc} -> as_itself(walk, base, key(base, index), index, doc)
+      nil -> as_itself(walk, base, :identity, nil)
+    end
   end
 
   # What the first target realized at this root, copied: the same entry and
@@ -708,18 +768,17 @@ defmodule PropertyDamage.Expansion do
   # whose precondition fails here runs the root as itself, forced.
   defp follow_reference(walk, fun, base, %{leaves?: false} = reference) do
     entry = if is_nil(reference.entry) and fun != nil, do: :identity, else: reference.entry
-    as_itself(walk, base, entry, reference.index)
+    as_itself(walk, base, entry, reference.index, identity_doc(walk, base, reference.index))
   end
 
   defp follow_reference(walk, _fun, base, reference) do
-    if reference.index, do: carried_sequence(walk, base, reference.index)
+    doc = if reference.index, do: walk |> carried_entry(base, reference.index) |> elem(3)
 
     case replay_leaves(
            walk,
            nil,
            base,
-           reference.entry,
-           reference.index,
+           {reference.entry, reference.index, doc},
            reference.commands,
            true
          ) do
@@ -733,22 +792,33 @@ defmodule PropertyDamage.Expansion do
   end
 
   # A recorded choice: the root as itself, or the recorded leaves simulated
-  # again at their leaf positions. No expansion function or generator runs.
+  # again at their leaf positions. No generator runs and nothing is drawn. The
+  # record holds no doc: the expansion function is called once for the root,
+  # in the state this walk reached, and the doc is the one of the entry at the
+  # recorded index.
   defp replay_recorded(walk, name, base, %{entry: entry, commands: commands}) do
     index = entry_index(entry)
 
     # A root run as itself records the root alone (a listed identity keeps
     # its key, as `realize/5` keeps it).
     if commands == [base.root_command],
-      do: as_itself(walk, base, entry, index),
-      else: replay_leaves(walk, name, base, entry, index, commands, false)
+      do: as_itself(walk, base, entry, index, identity_doc(walk, base, index)),
+      else:
+        replay_leaves(
+          walk,
+          name,
+          base,
+          {entry, index, listed_doc(walk, base, index)},
+          commands,
+          false
+        )
   end
 
   # The leaves `commands` simulated again at their leaf positions. The choice
   # keeps every leaf's fields, so a later realization of the same entry gives
   # each leaf these values wherever its `overrides:` do not set them. With
   # `check?`, a leaf whose precondition fails withdraws the entry.
-  defp replay_leaves(walk, name, base, entry, index, commands, check?) do
+  defp replay_leaves(walk, name, base, listed, commands, check?) do
     commands
     |> Enum.with_index()
     |> Enum.reduce_while({[], base.state, []}, fn {command, leaf}, {done, state, minted} ->
@@ -768,11 +838,11 @@ defmodule PropertyDamage.Expansion do
         :withdrawn
 
       {done, state, minted} ->
-        replayed_choice(walk, name, base, {entry, index}, done, {state, minted})
+        replayed_choice(walk, name, base, listed, done, {state, minted})
     end
   end
 
-  defp replayed_choice(walk, name, base, {entry, index}, done, {state, minted}) do
+  defp replayed_choice(walk, name, base, {entry, index, doc}, done, {state, minted}) do
     aliases = aliases!(walk, base, entry, done, minted)
     state = as_root_state(walk, base, done, aliases, state)
 
@@ -782,6 +852,7 @@ defmodule PropertyDamage.Expansion do
       module: base.root_command.__struct__,
       entry: entry,
       index: index,
+      doc: doc,
       commands: Enum.map(done, & &1.command),
       leaves?: true,
       seed_key: seed_key(walk.run_seed, name, base.root_id),
@@ -820,7 +891,7 @@ defmodule PropertyDamage.Expansion do
 
   # The entries the function returned at the root, as `{key, leaf modules}`.
   defp offered(base, entries) do
-    for {sequence, _weight, index} <- entries do
+    for {sequence, _weight, index, _doc} <- entries do
       {key(base, index), Enum.map(sequence, &spec_module/1)}
     end
   end
@@ -842,7 +913,8 @@ defmodule PropertyDamage.Expansion do
     end
   end
 
-  defp pick_by_weight([{_sequence, weight, _index} = entry | rest], n) do
+  @spec pick_by_weight([entry(), ...], pos_integer()) :: entry()
+  defp pick_by_weight([{_sequence, weight, _index, _doc} = entry | rest], n) do
     if n <= weight, do: entry, else: pick_by_weight(rest, n - weight)
   end
 
@@ -862,7 +934,8 @@ defmodule PropertyDamage.Expansion do
     seed
   end
 
-  # The entries `fun` returns for the root, as `{sequence, weight, index}`.
+  # The entries `fun` returns for the root, as `{sequence, weight, index, doc}`.
+  @spec entries!(map(), map(), function()) :: [entry()]
   defp entries!(walk, base, fun) do
     case call_function!(base, fun) do
       entries when is_list(entries) ->
@@ -907,24 +980,40 @@ defmodule PropertyDamage.Expansion do
   # A throw or an exit from user code, named by its kind for a generation error.
   defp escaped(kind, value), do: "escaped with " <> inspect({kind, value})
 
-  defp entry!(_walk, _base, sequence, index) when is_list(sequence), do: {sequence, 1, index}
+  @spec entry!(map(), map(), term(), non_neg_integer()) :: entry()
+  defp entry!(_walk, _base, sequence, index) when is_list(sequence), do: {sequence, 1, index, nil}
 
   defp entry!(_walk, base, {sequence, opts}, index) when is_list(sequence) and is_list(opts) do
-    case Keyword.fetch(opts, :weight) do
-      {:ok, weight} when is_integer(weight) and weight > 0 and length(opts) == 1 ->
-        {sequence, weight, index}
+    case entry_options(opts) do
+      {:ok, weight, doc} ->
+        {sequence, weight, index, doc}
 
-      _other ->
+      :error ->
         raise ArgumentError,
               "expansions/0: #{key(base, index)} (root #{base.root}) has options " <>
-                "#{inspect(opts)}; an expansion takes only `weight:`, a positive integer"
+                "#{inspect(opts)}; an expansion takes `weight:`, a positive integer, " <>
+                "and `doc:`, a string, each at most once"
     end
   end
 
   defp entry!(_walk, base, other, index) do
     raise ArgumentError,
           "expansions/0: #{key(base, index)} (root #{base.root}) must be a list of commands " <>
-            "or `{list, weight: n}`, got: #{inspect(other, limit: 8)}"
+            "or `{list, weight: n, doc: text}`, got: #{inspect(other, limit: 8)}"
+  end
+
+  # The weight and the doc of an entry's options: a non-empty keyword list of
+  # `weight:` (a positive integer) and `doc:` (a string), each at most once.
+  defp entry_options(opts) do
+    with true <- Keyword.keyword?(opts) and opts != [],
+         keys = Keyword.keys(opts),
+         true <- keys == Enum.uniq(keys) and keys -- [:weight, :doc] == [],
+         weight when is_integer(weight) and weight > 0 <- Keyword.get(opts, :weight, 1),
+         doc when is_binary(doc) or doc == :none <- Keyword.get(opts, :doc, :none) do
+      {:ok, weight, if(doc == :none, do: nil, else: doc)}
+    else
+      _invalid -> :error
+    end
   end
 
   # ==========================================================================
@@ -935,12 +1024,13 @@ defmodule PropertyDamage.Expansion do
   # replace what the leaf's generator gives the fields its `overrides:` do not
   # set. Returns `{:ok, {choice, state, minted, aliases, warnings}}`, or
   # `:withdrawn` when a leaf fails its precondition.
-  defp realize(walk, base, {[root], _weight, index}, _seed_key, _fields)
+  @spec realize(map(), map(), entry(), term(), map()) :: {:ok, tuple()} | :withdrawn
+  defp realize(walk, base, {[root], _weight, index, doc}, _seed_key, _fields)
        when is_struct(root) and root == base.root_command do
-    {:ok, as_itself(walk, base, key(base, index), index)}
+    {:ok, as_itself(walk, base, key(base, index), index, doc)}
   end
 
-  defp realize(walk, base, {sequence, _weight, index}, seed_key, fields) do
+  defp realize(walk, base, {sequence, _weight, index, doc}, seed_key, fields) do
     key = key(base, index)
 
     sequence
@@ -981,6 +1071,7 @@ defmodule PropertyDamage.Expansion do
           module: base.root_command.__struct__,
           entry: key,
           index: index,
+          doc: doc,
           commands: Enum.map(done, & &1.command),
           leaves?: true,
           seed_key: seed_key,
@@ -1042,9 +1133,10 @@ defmodule PropertyDamage.Expansion do
   defp leaf_message(_error, spec),
     do: "expected `Module` or `{Module, opts}`, got: #{inspect(spec, limit: 8)}"
 
-  # `when:` and `weight:` on a leaf are ignored: every leaf of an expansion runs.
+  # `when:`, `weight:` and `doc:` on a leaf are ignored: every leaf of an
+  # expansion runs, and the entry carries the doc.
   defp ignored_options(base, key, {module, opts}, leaf) when is_list(opts) do
-    for option <- [:when, :weight], Keyword.has_key?(opts, option) do
+    for option <- [:when, :weight, :doc], Keyword.has_key?(opts, option) do
       "expansions/0: #{key} (#{inspect(base.root_command.__struct__)}) leaf #{leaf} " <>
         "#{inspect(module)} sets #{option}: ignored in a sequence"
     end
@@ -1270,7 +1362,7 @@ defmodule PropertyDamage.Expansion do
   #   forced      the root modules forced to identity at every root a target
   #               chose at
   #   leaves      the leaf modules realized
-  #   warnings    the `when:` and `weight:` options found on leaves
+  #   warnings    the `when:`, `weight:` and `doc:` options found on leaves
   #
   # Raises `ArgumentError` for a generation error, as a run does.
   @spec sample(module(), [PropertyDamage.Target.t()], [integer()], keyword()) :: map()
@@ -1360,6 +1452,7 @@ defmodule PropertyDamage.Expansion do
           module: root.__struct__,
           entry: nil,
           index: nil,
+          doc: nil,
           commands: [root],
           leaves?: false,
           seed_key: nil,

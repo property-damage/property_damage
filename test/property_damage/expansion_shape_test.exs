@@ -297,10 +297,12 @@ defmodule PropertyDamage.ExpansionShapeTest do
       end
     end
 
-    test "declares command_spec, sequence, identity and choices(item)" do
+    test "declares command_spec, sequence, identity, choices(item) and expansion_choices" do
       types = type_strings()
 
-      for key <- [{:command_spec, 0}, {:sequence, 0}, {:identity, 0}, {:choices, 1}] do
+      keys = [{:command_spec, 0}, {:sequence, 0}, {:identity, 0}, {:choices, 1}]
+
+      for key <- keys ++ [{:expansion_choices, 0}] do
         assert Map.has_key?(types, key), "missing @type #{inspect(key)}"
       end
 
@@ -308,6 +310,14 @@ defmodule PropertyDamage.ExpansionShapeTest do
       refute command_spec =~ "pos_integer"
       assert command_spec =~ "command_opts()"
       assert Map.fetch!(types, {:sequence, 0}) =~ "[command_spec()]"
+
+      refute Map.fetch!(types, {:choices, 1}) =~ "doc:"
+
+      expansion_choices = Map.fetch!(types, {:expansion_choices, 0})
+      assert expansion_choices =~ "sequence()"
+      assert expansion_choices =~ "identity()"
+      assert expansion_choices =~ "weight: pos_integer()"
+      assert expansion_choices =~ "doc: String.t()"
     end
 
     test "types commands/0, setup_each/0, teardown_each/0 and expansions/0 with them" do
@@ -318,9 +328,7 @@ defmodule PropertyDamage.ExpansionShapeTest do
       assert Map.fetch!(callbacks, {:teardown_each, 0}) =~ "sequence()"
 
       expansions = Map.fetch!(callbacks, {:expansions, 0})
-      assert expansions =~ "choices("
-      assert expansions =~ "sequence()"
-      assert expansions =~ "identity()"
+      assert expansions =~ "expansion_choices()"
     end
 
     test "expansions/0 is optional" do

@@ -562,6 +562,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `expansion_command/1`. The printed report ends with the reproduction command,
   "Regenerate the failing variant:" and "Replay the shrunk failure:", whose
   `only: [replay: path]` call is the last line.
+- **`doc:` on an expansion entry.** An entry of an `expansions/0` function
+  can be `{list, doc: "text"}` or `{list, weight: n, doc: "text"}`, where the
+  `doc:` describes the whole route. Every choice in
+  `PropertyDamage.Expansion.choice()` has the new key `doc`, the doc of the
+  entry the target ran (`nil` when the entry has none or no listed entry
+  ran). The doc stays with the entry through shrinking and replay. Any other
+  option is an `ArgumentError` that names `weight:` and `doc:`; `doc:` on a
+  leaf is warned about and ignored. Report files saved before the key load
+  with `doc` as `nil`.
 
 ### Changed
 

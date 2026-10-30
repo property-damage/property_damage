@@ -249,7 +249,7 @@ A model MAY implement `expansions/0`, returning `[{Root, fun}]` with one pair pe
 
 ### Requirement: Expansion Types and Order (DR-049)
 
-`PropertyDamage.Model` SHALL define the types `command_spec` (`module | {module, opts}`), `sequence` (a list of command specs that run in order, every entry), `identity` (a list holding the root struct) and `choices(item)` (a list from which one item is picked by weight). `commands/0` SHALL return `choices(command_spec)`, `setup_each/0` and `teardown_each/0` SHALL return `sequence`, and `expansions/0` SHALL return pairs of a root module and a function from a root struct and a state to `choices(sequence | identity)`. The order of `commands/0` SHALL carry no meaning. The order of the list that an expansion function returns SHALL be the shrink preference, simplest first, and the documentation of `expansions/0` SHALL say so.
+`PropertyDamage.Model` SHALL define the types `command_spec` (`module | {module, opts}`), `sequence` (a list of command specs that run in order, every entry), `identity` (a list holding the root struct), `choices(item)` (a list from which one item is picked by weight) and `expansion_choices` (a list of sequences or the identity, each alone or with the options `weight:` and `doc:`). `commands/0` SHALL return `choices(command_spec)`, `setup_each/0` and `teardown_each/0` SHALL return `sequence`, and `expansions/0` SHALL return pairs of a root module and a function from a root struct and a state to `expansion_choices`. The order of `commands/0` SHALL carry no meaning. The order of the list that an expansion function returns SHALL be the shrink preference, simplest first, and the documentation of `expansions/0` SHALL say so.
 
 #### Scenario: Weights default to 1
 - **WHEN** an entry has no `weight:`
