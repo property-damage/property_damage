@@ -196,7 +196,7 @@ table.t th.own, table.t td.own { background: var(--code-bg); }
 .projmod h4 { margin: 0 0 4px; font: 600 12.5px var(--mono); overflow-wrap: anywhere; }
 .projtbl tr.same td { color: var(--muted); }
 details.sec { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
-details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
 .err { color: var(--bad); font-size: 13px; }
 @media (max-width: 760px) {
   .rgrid { grid-template-columns: minmax(0, 1fr) !important; }
@@ -292,24 +292,32 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 
   // A timed entry: `log`, `event` for a command's event, or the three-letter badge of another
   // event source (POL for a resource poller, INJ for an injector, ??? for an unknown one).
+  // The note the renderer prints above the lines the adapter's setup/1 logged.
+  var ADAPTER_SETUP_NOTE = "adapter setup/1";
   var ENTRY = /^( +)\+(\d+(?:\.\d+)?)s (log|event|[A-Z]{3}|\?\?\?)( +)(.*)$/;
 
   // Walks the lines of a block that holds steps and timed entries (Minimal Reproduction, Setup).
   function parseSteps(lines) {
-    var targets = [], T = null, root = null, step = null, entry = null, pendingCmd = null, captions = [], blanks = 0;
+    var targets = [], T = null, root = null, step = null, entry = null, pendingCmd = null, captions = [], blanks = 0, adapterNote = null;
     function ensureT() { if (!T) { T = { name: null, role: "only", steps: [] }; targets.push(T); } return T; }
     function ensureStep() {
-      if (!step) { step = { label: "", depth: 0, cmd: "", marker: null, as: null, entries: [], children: [], pseudo: true }; ensureT().steps.push(step); root = step; }
+      if (!step) { step = { label: "", depth: 0, cmd: "", marker: null, as: null, entries: [], children: [], pseudo: true, title: adapterNote }; adapterNote = null; ensureT().steps.push(step); root = step; }
       return step;
     }
     lines.forEach(function (l) {
       // a blank line belongs to the message only if the message continues after it
       if (!l.trim()) { if (entry) blanks++; return; }
-      var cont = entry && leadingSpaces(l) >= entry.base && !ENTRY.test(l);
-      if (cont) for (; blanks > 0; blanks--) entry.lines.push("");
+      // the renderer indents every later line of an entry to the column of its message, so a
+      // line at or past that column continues the entry even when it reads like a timed entry
+      var cont = entry && leadingSpaces(l) >= entry.base;
+      if (cont) {
+        for (; blanks > 0; blanks--) entry.lines.push("");
+        entry.lines.push(l.slice(entry.base));
+        return;
+      }
       blanks = 0;
       var tm = /^(Reference|Variant): target "(.*)"\s*$/.exec(l);
-      if (tm) { T = { name: tm[2], role: tm[1].toLowerCase(), steps: [] }; targets.push(T); root = step = entry = pendingCmd = null; return; }
+      if (tm) { T = { name: tm[2], role: tm[1].toLowerCase(), steps: [] }; targets.push(T); root = step = entry = pendingCmd = adapterNote = null; return; }
       var em = ENTRY.exec(l);
       if (em) {
         pendingCmd = null;
@@ -337,6 +345,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
       }
       if (pendingCmd) { pendingCmd.cmd += (pendingCmd.cmd ? "\n" : "") + l.trim(); if (balanced(pendingCmd.cmd)) pendingCmd = null; return; }
       if (entry) { entry.lines.push(l.slice(Math.min(entry.base, leadingSpaces(l)))); return; }
+      if (l.trim() === ADAPTER_SETUP_NOTE) adapterNote = ADAPTER_SETUP_NOTE;
       captions.push(l.trim());
     });
     targets.forEach(function (t) {
@@ -905,7 +914,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
     h += '<div class="runhint">Click a line to unfold everything the report recorded for it; click again to fold it. Consecutive lines with the same summary collapse into one (×N); the detail of each stays one click away. ' +
       "<kbd>↑</kbd> <kbd>↓</kbd> walk a target through every step" + DOT + "<kbd>Enter</kbd> unfold" + (N > 1 ? DOT + "<kbd>←</kbd> <kbd>→</kbd> same line in the previous or next target" : "") + ".</div>";
     var cols = "repeat(" + N + ", minmax(0, 1fr))";
-    var g = (R.checks != null ? '<details class="sec" open data-section="what-this-checks"><summary>What this checks</summary><pre class="code" style="margin-top:8px">' + esc(R.checks) + "</pre></details>" : "") + '<div class="rgrid" style="grid-template-columns:' + cols + '">' + R.targets.map(function (t, ti) {
+    var g = (R.checks != null ? '<details class="sec" open data-section="what-this-checks"><summary>What this checks</summary><pre class="code wrapcode" style="margin-top:8px">' + esc(R.checks) + "</pre></details>" : "") + '<div class="rgrid" style="grid-template-columns:' + cols + '">' + R.targets.map(function (t, ti) {
       return '<div class="hd c' + Math.min(ti, 1) + '"><span class="tname">' + esc(t.name) + '</span> <span class="sub">' + esc(t.role === "only" ? "" : t.role) + "</span></div>";
     }).join("");
     if (R.setup) {
@@ -920,7 +929,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
       var marked = roots.some(function (r) { return r && (r.marker || r.children.some(function (c) { return c.marker; })); });
       var mk = roots.map(function (r) { return r && r.marker; }).filter(Boolean)[0] || (marked ? "marked" : "");
       var asTxt = roots.map(function (r, ti) { return r && r.as ? '<span><span class="tname c' + Math.min(ti, 1) + '">' + esc(R.targets[ti].name) + "</span> ran it as " + esc(r.as) + "</span>" : ""; }).join("");
-      g += '<div class="rband' + (marked ? " mark" : "") + '"><div class="rh"><b>' + (any.pseudo ? "" : "[" + esc(lab) + "] ") + esc(shortCmd(any.cmd)) + "</b>" + asTxt +
+      g += '<div class="rband' + (marked ? " mark" : "") + '"><div class="rh"><b>' + (any.pseudo ? esc(any.title || "") : "[" + esc(lab) + "] ") + esc(shortCmd(any.cmd)) + "</b>" + asTxt +
         (mk ? '<span class="mk">◄ ' + esc(mk) + "</span>" : "") + "</div>" +
         (marked ? '<div class="facts">' + failFacts(["Failure"]) + "</div>" : "") + "</div>";
       roots.forEach(function (r, ti) {
