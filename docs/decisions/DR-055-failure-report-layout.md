@@ -147,7 +147,8 @@ DR-054 adds log lines tied to steps, and the layout has to give them a place.
 
 ## Example
 
-A divergence between two targets of a ledger model, without color:
+A divergence between two targets of a ledger model, without color. The text below was
+regenerated from a real run when DR-058 added the "What this checks" section:
 
 ```
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -159,56 +160,75 @@ Seed: 1234
 ## Failure
 
 Failure        diverged
-Observation    MyApp.Projections.Balances.balance_of_bob
-At             [1] ReadBalances {}
-Reference      "direct"  100
-Variant        "split"   99
-Compared       using ==, still differing after 1001 ms (bound 1000 ms)
-Also differed  MyApp.Projections.Balances.fees  "direct" 0  "split" 1
+Observation    MyApp.Balances.balance_of_bob
+At             [0] %MyApp.Transfer{amount: 1}
+Reference      "direct"  1
+Variant        "split"  0
+Compared       using ==, still differing after 51 ms (bound 50 ms)
+Also differed  MyApp.Balances.fees  "direct"  0  "split"  2
 
-## Minimal Reproduction (2 roots)
+## What this checks
+
+  Diverged      Two targets ran the same plan separately and disagreed. They may
+                have taken different but equivalent paths, and an observation
+                settled to different values in the reference target and in the
+                variant target. Either the system treats equivalent histories
+                differently, or the test's claim that the paths are equivalent
+                is wrong.
+
+  Model         MyApp.Model
+                The MyApp ledger model.
+
+  Observation   MyApp.Balances.balance_of_bob/2
+                The balance of bob after the transfer.
+
+                Every route to the same transfer must leave bob with the same amount.
+
+  Also differed MyApp.Balances.fees/2
+                The fees alice paid for the transfer.
+
+  Projection    MyApp.Balances
+                Keeps the balance of bob.
+
+  Path          "split" ran Transfer as steps [0.0],[0.1]
+                send the amount in two halves
+
+  Command       MyApp.Transfer
+                Moves money from alice to bob.
+
+## Minimal Reproduction (1 root)
 
 Reference: target "direct"
-  [0] Transfer {from: :alice, to: :bob, amount: 100}
-        +0.00s [http url]   POST /transfers
-        +0.21s event        Transferred {amount: 100}
-► [1] ReadBalances {}                                      ◄── diverged
-        +0.23s [http url]   GET /balances
-        +0.30s event        BalancesRead {bob: 100}
+► [0] %MyApp.Transfer{amount: 1}  ◄── diverged
+        +0.00s event %MyApp.Transferred{amount: 1, fee: 0}
 
 Variant: target "split"
-  [0] Transfer {from: :alice, to: :bob, amount: 100}  as Transfer[1]
-    [0.0] Transfer {from: :alice, to: :bob, amount: 60}
-        +0.00s [http url]   POST /transfers
-        +0.19s event        Transferred {amount: 60}
-    [0.1] Transfer {from: :alice, to: :bob, amount: 40}
-        +0.20s [http url]   POST /transfers
-        +0.41s event        Transferred {amount: 39}
-► [1] ReadBalances {}                                      ◄── diverged
-        +0.43s [http url]   GET /balances
-        +0.50s event        BalancesRead {bob: 99}
+► [0] %MyApp.Transfer{amount: 1}  as Transfer[1]  ◄── diverged
+    [0.0] %MyApp.Part{amount: 0, last: false}
+        +0.00s event %MyApp.Transferred{amount: 0, fee: 1}
+    [0.1] %MyApp.Part{amount: 1, last: true}
+        +0.00s event %MyApp.Transferred{amount: 0, fee: 1}
 
-## Projections at [1]   (- reference "direct", + variant "split")
+## Projections at [0]   (- reference "direct", + variant "split")
 
-Balances   last applied: BalancesRead
-  - balance_of_bob: 100
-  + balance_of_bob: 99
+MyApp.Balances   last applied: Transferred
+  - bob: 1
+  + bob: 0
   - fees: 0
-  + fees: 1
+  + fees: 2
 
 ## Reproduction
 
-targets = [{MyApp.Adapter, name: "direct", expansion: :identity, config: %{server: #PID<0.213.0>}}, {MyApp.Adapter, name: "split", config: %{server: #PID<0.213.0>}}]
-  targets holds a pid at config.server; rebuild the list as the test does.
+targets = [{MyApp.Adapter, name: "direct", expansion: :identity}, {MyApp.Adapter, name: "split", config: %{lossy: true}}]
 
-Rerun from the seed:
-PropertyDamage.run(model: MyApp.Model, targets: targets, max_commands: 4, seed: 1234, max_runs: 1)
+# Rerun from the seed:
+PropertyDamage.run(model: MyApp.Model, targets: targets, compare: [converge_within: 50], max_commands: 1, seed: 1234, max_runs: 1)
 
-Regenerate the failing variant:
-PropertyDamage.Expansion.for(MyApp.Model, 1234, 1, "split", targets: targets, max_commands: 4)
+# Regenerate the failing variant:
+PropertyDamage.Expansion.for(MyApp.Model, 1234, 1, "split", targets: targets, max_commands: 1)
 
-Replay the shrunk failure:
-PropertyDamage.run(model: MyApp.Model, targets: targets, only: [replay: "property_damage_replays/Model_seed1234.replay.exs"])
+# Replay the shrunk failure:
+PropertyDamage.run(model: MyApp.Model, targets: targets, compare: [converge_within: 50], only: [replay: "property_damage_replays/Model_seed1234.replay.exs"])
 ```
 
 ## Consequences
