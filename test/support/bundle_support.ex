@@ -360,16 +360,18 @@ defmodule PropertyDamage.Test.BundleSupport do
   The `source:` ids `Docs.fetch/1` implies for the module of a bundle entry.
 
   A function that a macro injects has no line in the file to cite, so it
-  gets no id. This reads the definitions straight from the file with a
-  regex: a function whose name no `def`-like line of a readable file names
-  is left out. When the file cannot be read, every function keeps its id.
+  gets no id. This reads the definitions straight from the file with
+  regexes: it finds the module's `defmodule` line and the `end` at the same
+  indentation, and leaves out a function whose name no `def`-like line one
+  level inside that block names. When the file cannot be read, every
+  function keeps its id.
   """
   def source_ids(%{"module" => name} = entry) do
     module = Module.concat([name])
 
     case Docs.fetch(module) do
       {:ok, %{functions: functions}} ->
-        defined? = defined_in(entry["file"])
+        defined? = defined_in(entry["file"], module)
 
         for {{function, arity}, _doc} <- functions,
             defined?.(function),
@@ -380,20 +382,40 @@ defmodule PropertyDamage.Test.BundleSupport do
     end
   end
 
-  defp defined_in(file) do
+  @definition "(def|defp|defmacro|defmacrop|defdelegate|defguard|defguardp)"
+
+  defp defined_in(file, module) do
     case is_binary(file) && File.read(file) do
       {:ok, text} ->
+        {indent, body} = module_block(text, module)
+
         fn function ->
           name = Regex.escape(to_string(function))
-
-          Regex.match?(
-            ~r/^\s*(def|defp|defmacro|defmacrop|defdelegate|defguard|defguardp)\s+#{name}(\(|\s|,|$)/m,
-            text
-          )
+          Regex.match?(~r/^#{indent}#{@definition}\s+#{name}(\(|\s|,|$)/m, body)
         end
 
       _unreadable ->
         fn _function -> true end
+    end
+  end
+
+  # The lines of the module's `defmodule` block and the indentation of its
+  # top-level definitions; the whole file at any indentation when the block
+  # is not found.
+  defp module_block(text, module) do
+    last = module |> Module.split() |> List.last() |> Regex.escape()
+    lines = String.split(text, "\n")
+    opening = ~r/^(\s*)defmodule ([\w.]+\.)?#{last} do\s*$/
+
+    case Enum.find_index(lines, &Regex.match?(opening, &1)) do
+      nil ->
+        {"\\s*", text}
+
+      start ->
+        [_, indent | _] = Regex.run(opening, Enum.at(lines, start))
+        block = Enum.drop(lines, start + 1)
+        stop = Enum.find_index(block, &(&1 == indent <> "end")) || length(block)
+        {Regex.escape(indent <> "  "), block |> Enum.take(stop) |> Enum.join("\n")}
     end
   end
 
