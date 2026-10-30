@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Docs and source path of a declared module.** A model, projection or
+  command declared with `use` keeps its own docs and the path of its source
+  file, and `PropertyDamage.Docs.fetch/1` returns them. This also works for a
+  module compiled from a script, where `Code.fetch_docs/1` finds nothing.
+  Private functions are included; macros and `__`-prefixed names are not.
+  A `def` or `defp` written before `use PropertyDamage.Model`,
+  `use PropertyDamage.Model.Projection` or `use PropertyDamage.Command` is now
+  a compile error, because its docs could not be captured. So is one that
+  another `use` placed above defines, such as the defaults of `use GenServer`,
+  even when the module overrides that function later: move the
+  PropertyDamage `use` above it. A macro, or a function whose name
+  starts with `__`, may come first. The captured moduledoc is the one set by
+  the end of the module body or by a `@before_compile` registered before
+  `use`; a `@before_compile` registered after `use` that sets only
+  `@moduledoc` is not seen. To capture it, set `@moduledoc` in the module
+  body, or register that callback before `use`.
 - **The meaning of a failure kind.** `PropertyDamage.Failure.Explain.meaning/1`
   returns a plain-words text for each kind of `PropertyDamage.Failure.kind()`
   and raises `FunctionClauseError` for any other value.

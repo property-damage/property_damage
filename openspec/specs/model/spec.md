@@ -399,3 +399,47 @@ The framework SHALL resolve command specs by calling `command_spec/1` when avail
 - **WHEN** a command module does not export `command_spec/1`
 - **THEN** the framework builds a spec from the framework defaults
 - **AND** merges Model-provided overrides on top of the default-derived spec
+
+### Requirement: Declared Docs Capture
+
+A module that invokes `use PropertyDamage.Model` SHALL keep its own docs and the path of its source file, and `PropertyDamage.Docs.fetch/1` SHALL return them, also when the module was compiled from a script. The captured map SHALL include private functions and SHALL NOT include macros or names that start with `__`. The map SHALL hold docs, lines and the file path, never source text. `use PropertyDamage.Model` MUST come before every `def` and `defp` of the module whose name does not start with `__`, including those that another `use` defines; a function defined earlier SHALL be a `CompileError` at the line of the `use`, even when the module overrides that function later. The captured moduledoc SHALL be the one set by the end of the module body or by a `@before_compile` registered before `use`; a `@before_compile` registered after `use` that sets only `@moduledoc` is not seen, and a module that needs it captured MUST set `@moduledoc` in the module body or register that callback before `use`. When the beam no longer holds the captured map and has no docs chunk, `PropertyDamage.Docs.fetch/1` SHALL return `:unavailable` and SHALL NOT raise.
+
+#### Scenario: A module compiled from a script keeps its docs
+- **GIVEN** a model module that invokes `use PropertyDamage.Model` and is compiled from a script
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with that module
+- **THEN** it returns `{:ok, docs}` with the moduledoc, the absolute path of the script, and the doc and first-clause line of each function
+- **AND** `Code.fetch_docs/1` finds no docs for the same module
+
+#### Scenario: Hidden and missing docs read differently
+- **GIVEN** a model with one function marked `@doc false` and one function with no `@doc`
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with the module
+- **THEN** the hidden function reads `doc: false` and the undocumented function reads `doc: nil`
+
+#### Scenario: A function written before use is a compile error
+- **GIVEN** a module that defines a function before it invokes `use PropertyDamage.Model`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of the `use`
+- **AND** the message names each such function as `name/arity`
+
+#### Scenario: A function that another use defines before use is a compile error
+- **GIVEN** a module that invokes `use GenServer` before it invokes `use PropertyDamage.Model`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of `use PropertyDamage.Model`
+- **AND** the message names each default that `use GenServer` defines, such as `child_spec/1`, as `name/arity`
+
+#### Scenario: A function that another use defines stays a compile error when the module overrides it
+- **GIVEN** a module that invokes `use GenServer` before it invokes `use PropertyDamage.Model`
+- **AND** the module overrides every default that `use GenServer` defines after `use PropertyDamage.Model`
+- **WHEN** the module is compiled
+- **THEN** compilation fails with a `CompileError` at the line of `use PropertyDamage.Model`
+- **AND** the message names each overridden default, such as `child_spec/1`, as `name/arity`
+
+#### Scenario: A macro or a `__`-prefixed function before use compiles
+- **GIVEN** a module that defines a macro and a function whose name starts with `__` before it invokes `use PropertyDamage.Model`
+- **WHEN** the module is compiled
+- **THEN** compilation succeeds and the captured map holds neither of them
+
+#### Scenario: A beam stripped of its attributes has no docs
+- **GIVEN** a module that invokes `use PropertyDamage.Model`, compiled from a script, whose beam is stripped with `:beam_lib.strip/1`
+- **WHEN** a caller invokes `PropertyDamage.Docs.fetch/1` with that module
+- **THEN** it returns `:unavailable` without raising

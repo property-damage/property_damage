@@ -214,7 +214,8 @@ defmodule PropertyDamage.Model do
 
   @doc """
   Declares the using module as a model by setting the `PropertyDamage.Model`
-  behaviour.
+  behaviour. The model keeps its docs and source path, readable with
+  `PropertyDamage.Docs.fetch/1`.
 
   Takes no options; any option raises `ArgumentError` at compile time.
   """
@@ -226,6 +227,8 @@ defmodule PropertyDamage.Model do
 
     quote do
       @behaviour PropertyDamage.Model
+      require PropertyDamage.Docs
+      PropertyDamage.Docs.hook(PropertyDamage.Model)
     end
   end
 
