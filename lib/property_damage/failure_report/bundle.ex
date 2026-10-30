@@ -66,7 +66,10 @@ defmodule PropertyDamage.FailureReport.Bundle do
   The model, then its projections (`check_projections/0`,
   `command_sequence_projection/0` and the projection of a failed check), then
   the commands of every listed step, the event structs of every entry and the
-  adapter of every target, each module once, in that order. A module is
+  adapter of every target, each module once, in that order. Each adapter is
+  followed by the modules its `delegate_execution` calls name in `to:`
+  (depth first, role `adapter`), as `__pd_sub_adapters__/0` of the adapter
+  reports them; a bare `@behaviour` adapter has none. A module is
   `{module, role, moduledoc, file, lines, source, resolution, functions,
   redactions}`:
 
@@ -112,7 +115,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
 
   ### Redaction
 
-  The source of every module whose `file` is the file of an adapter in the
+  The source of every module whose `file` is the file of an adapter (a sub-adapter too) in the
   bundle passes through `PropertyDamage.FailureReport.Bundle.Redaction`, which
   replaces secret-shaped string literals. A file shows the same text through
   each module defined in it, so a model above an adapter in one file is
@@ -353,6 +356,12 @@ defmodule PropertyDamage.FailureReport.Bundle do
   defp modules(report, targets) do
     steps = for target <- targets, step <- target.steps, do: step
 
+    adapters =
+      for target <- targets,
+          adapter = adapter_of(report, target.name),
+          module <- adapter_tree(adapter, []),
+          do: module
+
     listed =
       [{report.model, :model}] ++
         Enum.map(projections(report), &{&1, :projection}) ++
@@ -363,14 +372,13 @@ defmodule PropertyDamage.FailureReport.Bundle do
           module = struct_module(event),
           do: {module, :event}
         ) ++
-        for(target <- targets, adapter = adapter_of(report, target.name), do: {adapter, :adapter})
+        Enum.map(adapters, &{&1, :adapter})
 
     unique =
       listed
       |> Enum.filter(fn {module, _role} -> is_atom(module) and not is_nil(module) end)
       |> Enum.uniq_by(&elem(&1, 0))
 
-    adapters = for target <- targets, adapter = adapter_of(report, target.name), do: adapter
     adapter_files = adapter_files(adapters)
     built = Enum.map(unique, fn {module, role} -> module_entry(module, role, adapter_files) end)
 
@@ -378,6 +386,23 @@ defmodule PropertyDamage.FailureReport.Bundle do
     redacted = built |> Enum.map(& &1.entry["redactions"]) |> Enum.sum()
 
     {Enum.map(built, & &1.entry), missing, redacted}
+  end
+
+  # The adapter followed by the modules its `delegate_execution` calls name,
+  # depth first, each once. An adapter without `__pd_sub_adapters__/0` (a
+  # bare `@behaviour`) has none.
+  defp adapter_tree(adapter, seen) do
+    if adapter in seen or not is_atom(adapter) or is_nil(adapter) do
+      []
+    else
+      [adapter | sub_adapters(adapter) |> Enum.flat_map(&adapter_tree(&1, [adapter | seen]))]
+    end
+  end
+
+  defp sub_adapters(adapter) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :__pd_sub_adapters__, 0),
+      do: adapter.__pd_sub_adapters__(),
+      else: []
   end
 
   # The source files that define the adapter of a listed target, whatever

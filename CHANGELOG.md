@@ -589,6 +589,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tag with the id `pd-bundle`, a machine-readable copy of the failure's
   structure (fields, steps, events and sections), the docs and the source
   file of the modules behind it, and an id for each thing a reader may cite.
+  The modules include the sub-adapters an adapter names in
+  `delegate_execution/1` (`to:`), after the adapter that delegates to them.
   `PropertyDamage.FailureReport.Bundle.build/2` returns the same map. The
   index page carries no bundle, and the page's viewer does not read it.
   Source text of every module in a file that holds an adapter has each
