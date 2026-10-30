@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The meaning of a failure kind.** `PropertyDamage.Failure.Explain.meaning/1`
+  returns a plain-words text for each kind of `PropertyDamage.Failure.kind()`
+  and raises `FunctionClauseError` for any other value.
 - **The projection of a failed check.** A `:check_failed` or `:poll_timeout`
   failure records the projection module that defines the check, in the new
   `projection` field of `PropertyDamage.Failure.Check`. The Failure section

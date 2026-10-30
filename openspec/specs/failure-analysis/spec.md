@@ -64,6 +64,22 @@ before the field existed SHALL load with `projection` as `nil`.
 - **WHEN** a failure report file holds a `Failure.Check` without a `projection` key
 - **THEN** loading it SHALL succeed and the loaded failure's `projection` SHALL be `nil`
 
+### Requirement: Every Failure Kind Has a Meaning
+
+`PropertyDamage.Failure.Explain.meaning/1` SHALL return a text for every kind of
+the `PropertyDamage.Failure.kind()` type, in plain words, as a string. It SHALL
+raise `FunctionClauseError` for a value that is not a kind.
+
+#### Scenario: A kind has a meaning
+
+- **WHEN** `Failure.Explain.meaning/1` is called with any kind of the `Failure.kind()` type
+- **THEN** it SHALL return a non-empty string
+
+#### Scenario: A value that is not a kind
+
+- **WHEN** `Failure.Explain.meaning/1` is called with an atom that is not a kind
+- **THEN** it SHALL raise `FunctionClauseError`
+
 ### Requirement: Failure Fingerprinting
 
 The system SHALL extract comparable features from each failure report, producing a fingerprint that captures the failure type, check name, triggering command type, command shape, event types, sequence length, sequence shape, state keys, error category, and error pattern.
