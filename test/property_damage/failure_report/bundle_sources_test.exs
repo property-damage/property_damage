@@ -249,15 +249,20 @@ defmodule PropertyDamage.FailureReport.BundleSourcesTest do
       assert entry["functions"] != []
 
       for function <- entry["functions"] do
-        assert function["from"] == nil, function["id"]
-        assert function["to"] == nil, function["id"]
+        assert function["from"] == nil, function["name"]
+        assert function["to"] == nil, function["name"]
       end
     end
 
-    test "keeps the ids of the functions", %{system: system, report: report} do
+    test "gives the functions no source id, and keeps their names", %{
+      system: system,
+      report: report
+    } do
       bundle = B.build(report)
+      commands = bundle |> B.module_entry(system.model) |> B.function_entry(:commands, 0)
 
-      assert "source:#{inspect(system.model)}.commands/0" in bundle["ids"]
+      assert commands["id"] == nil
+      refute "source:#{inspect(system.model)}.commands/0" in bundle["ids"]
     end
 
     test "lists the path under missing_sources, once", %{system: system, report: report} do

@@ -359,12 +359,12 @@ defmodule PropertyDamage.Test.BundleSupport do
   @doc """
   The `source:` ids `Docs.fetch/1` implies for the module of a bundle entry.
 
-  A function that a macro injects has no line in the file to cite, so it
-  gets no id. This reads the definitions straight from the file with
-  regexes: it finds the module's `defmodule` line and the `end` at the same
-  indentation, and leaves out a function whose name no `def`-like line one
-  level inside that block names. When the file cannot be read, every
-  function keeps its id.
+  A function without lines in the file to cite gets no id: one that a macro
+  injects, and every function of a module whose file is missing, cannot be
+  read or was never written (`"nofile"`). This reads the definitions
+  straight from the file with regexes: it finds the module's `defmodule`
+  line and the `end` at the same indentation, and leaves out a function
+  whose name no `def`-like line one level inside that block names.
   """
   def source_ids(%{"module" => name} = entry) do
     module = Module.concat([name])
@@ -395,7 +395,7 @@ defmodule PropertyDamage.Test.BundleSupport do
         end
 
       _unreadable ->
-        fn _function -> true end
+        fn _function -> false end
     end
   end
 
