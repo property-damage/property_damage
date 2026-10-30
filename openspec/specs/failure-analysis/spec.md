@@ -730,8 +730,8 @@ The bundle SHALL hold, for the model, its projections, the commands and events o
 - **THEN** the source of the model and the source of the adapter SHALL hold `"[REDACTED]"` and not the literal, each module's count SHALL be at least 1, and the bundle's count SHALL equal the sum of the module counts (DR-058)
 
 #### Scenario: The rule reads one line at a time
-- **WHEN** an adapter's source holds `@api_key "alice-key"`, a heredoc that holds a token, and `@base_url "http://internal.example"`
-- **THEN** the bundle's source SHALL hold `@api_key "[REDACTED]"` and SHALL hold the heredoc and the `@base_url` literal as written, and the bundle's `redactions` SHALL name the rule it applied (DR-058)
+- **WHEN** an adapter's source holds `@api_token "alice-token"`, a heredoc that holds a token, and `@base_url "http://internal.example"`
+- **THEN** the bundle's source SHALL hold `@api_token "[REDACTED]"` and SHALL hold the heredoc and the `@base_url` literal as written, and the bundle's `redactions` SHALL name the rule it applied (DR-058)
 
 ### Requirement: Explaining a Failure Page (DR-058)
 
@@ -756,12 +756,24 @@ With `--with CMD`, the task SHALL run `CMD` with `sh -c`, send it the text `--pr
 - **THEN** the task SHALL print a line that names the id on standard error, SHALL exit with 1 and SHALL leave the page byte for byte as it was (DR-058)
 
 #### Scenario: A hypothesis ranked above a likelier one
-- **WHEN** the hypothesis ranked 2 is `likely` and the hypothesis ranked 1 is `possible`
-- **THEN** the explanation SHALL fail the checks (DR-058)
+- **WHEN** the hypothesis ranked 1 is `possible`, the one ranked 2 is `likely` and the one ranked 3 is `unlikely`
+- **THEN** the task SHALL report that the likelihood of `hypotheses[1]` is higher than that of `hypotheses[0]`, SHALL exit with 1 and SHALL leave the page untouched (DR-058)
 
-#### Scenario: A source range inside the module
-- **WHEN** an explanation cites `source:MyApp.Balances:3-5` and the bundle holds the source of `MyApp.Balances` with 10 lines
-- **THEN** the citation SHALL resolve, and with `source:MyApp.Balances:3-50` it SHALL NOT (DR-058)
+#### Scenario: Ranks that do not run 1 to n
+- **WHEN** an explanation has three hypotheses with the ranks 1, 2 and 2
+- **THEN** the task SHALL report that the ranks must run 1 to 3 in order, each once (DR-058)
+
+#### Scenario: A source range at the edges of the module
+- **WHEN** an explanation cites `source:MyApp.Ledger:1-64`, `source:MyApp.Ledger:64-64` and `source:MyApp.Ledger:1-1`, and the bundle holds the source of `MyApp.Ledger` with 64 lines
+- **THEN** every citation SHALL resolve (DR-058)
+
+#### Scenario: A source range outside the module
+- **WHEN** an explanation cites `source:MyApp.Ledger:60-70` or `source:MyApp.Ledger:0-5` and the bundle holds 64 lines of `MyApp.Ledger`
+- **THEN** the task SHALL print one line for each citation that names the range and `outside 1-64`, and SHALL leave the page untouched (DR-058)
+
+#### Scenario: A source range that runs backward
+- **WHEN** an explanation cites `source:MyApp.Ledger:5-3`
+- **THEN** the citation SHALL NOT resolve, because a range SHALL satisfy `1 <= from <= to <= lines` (DR-058)
 
 #### Scenario: A retry carries the errors
 - **WHEN** the first answer of a `--with` command fails the checks and `--attempts` allows another
@@ -795,22 +807,10 @@ A passing explanation SHALL go into the page in a script tag of type `applicatio
 
 A page without a `pd-explanation` tag SHALL run none of the explanation code and SHALL look as before (DR-058). A page with one SHALL open on an Explanation tab next to a Run tab, and the Run tab SHALL show the failure report as before. The Explanation tab SHALL list the summary, the hypotheses and the talking points. A hypothesis SHALL print its rank and likelihood in its heading, then its claim, its evidence and its next steps. Every cited id SHALL resolve through the ids and the modules of the bundle, never through the page's text. A citation that resolves to an element of the Run view SHALL be a button that switches to the Run tab, unfolds what hides the element, scrolls to it and highlights it, with at most one element highlighted at a time. A `source:` citation that resolves SHALL be a button that unfolds the cited lines, with their line numbers, under the citation and folds them on a second click. A citation that does not resolve SHALL show its id followed by `(not in this page)` and SHALL do nothing when clicked. On the Explanation tab the arrow keys SHALL scroll the page and SHALL NOT move the Run view's selection.
 
-#### Scenario: A page with an explanation opens on it
-- **WHEN** a page with a valid `pd-explanation` tag loads
-- **THEN** the Explanation tab SHALL be selected and show a heading `Hypothesis 1 (likely)` for a hypothesis of rank 1 and likelihood `likely` (DR-058)
-
-#### Scenario: A citation highlights its evidence
-- **WHEN** the reader clicks a citation of a step id the Run view shows
-- **THEN** the Run tab SHALL be selected, the step SHALL be open and carry the highlight (DR-058)
-
-#### Scenario: A source citation unfolds its lines
-- **WHEN** the reader clicks a resolved `source:` citation
-- **THEN** the cited lines SHALL show under it with their line numbers, and a second click SHALL fold them (DR-058)
-
-#### Scenario: An unresolvable citation
-- **WHEN** an explanation cites an id the bundle does not hold
-- **THEN** the citation SHALL show as `<id> (not in this page)` and SHALL NOT be a button (DR-058)
+#### Scenario: The viewer starts the explanation only for a page with the tag
+- **WHEN** the viewer script runs
+- **THEN** it SHALL call its explanation code only when the page has a `pd-explanation` tag, SHALL read the `pd-bundle` tag only inside that code, and SHALL print the line `Hypotheses ranked by a language model from this run; each claim links to its evidence.` on the Explanation tab (DR-058)
 
 #### Scenario: A page without an explanation
-- **WHEN** a page has no `pd-explanation` tag
-- **THEN** the page SHALL show no tab bar (DR-058)
+- **WHEN** the report renders a page without an explanation
+- **THEN** the page markup SHALL hold no `pd-explanation` tag and none of the explanation line (DR-058)
