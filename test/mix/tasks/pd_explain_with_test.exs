@@ -108,6 +108,17 @@ defmodule Mix.Tasks.Pd.ExplainWithTest do
     Application.put_env(:property_damage, :explain_with, value)
   end
 
+  # Puts a directory first on the PATH whose `sh` is dash, or /bin/sh where
+  # dash is missing.
+  defp use_minimal_sh(dir) do
+    bin = Path.join(dir, "bin")
+    File.mkdir_p!(bin)
+    File.ln_s!(System.find_executable("dash") || "/bin/sh", Path.join(bin, "sh"))
+    previous = System.get_env("PATH")
+    on_exit(fn -> System.put_env("PATH", previous) end)
+    System.put_env("PATH", bin <> ":" <> previous)
+  end
+
   defp valid_pretty, do: E.explanation_fixture("valid.json") |> Jason.encode!(pretty: true)
 
   # --- the answer is applied -------------------------------------------------
@@ -603,6 +614,23 @@ defmodule Mix.Tasks.Pd.ExplainWithTest do
 
       assert_gone(all)
       assert tmp_leftovers() == before_files
+    end
+
+    # The kill sends its signals through `sh`. On many Linux systems `sh` is
+    # dash, whose `kill` accepts less syntax than the bash `kill`, so this test
+    # puts dash first on the PATH where it exists.
+    @tag :tmp_dir
+    test "the timeout kill works when sh is a minimal POSIX shell", %{tmp_dir: dir} do
+      use_minimal_sh(dir)
+      cmd = fake_cmd(dir, @hang)
+
+      for opts <- [[], [force_fallback: true]] do
+        assert {:timeout, _} = E.runner().run(cmd, "x", 500, opts)
+      end
+
+      all = pids(dir)
+      assert length(all) == 4
+      assert_gone(all)
     end
   end
 
