@@ -208,6 +208,28 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
   .st .kd { display: none; }
   .det { padding-left: 10px; }
 }
+/* explanation: present only on a page that carries one */
+.xtabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin: 4px 0 14px; }
+.xtabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 6px 12px; color: var(--muted); font-size: 14px; }
+.xtabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--ink); font-weight: 600; }
+.xpane { max-width: 860px; min-width: 0; line-height: 1.55; }
+.xlead { border: 1px dashed var(--warn); color: var(--warn); border-radius: 8px; padding: 6px 10px; font-size: 13px; margin: 0 0 14px; }
+.xpane h2 { margin: 20px 0 6px; }
+.xpane p { margin: 4px 0; overflow-wrap: anywhere; }
+.xpane li { overflow-wrap: anywhere; }
+.xitem { margin: 0 0 12px; min-width: 0; }
+.xhyp { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; min-width: 0; }
+.xhyp h3 { font-size: 15px; margin: 0 0 4px; }
+.xhyp ul { margin: 2px 0 4px; padding-left: 20px; }
+.xlbl { font-size: 13px; font-weight: 600; margin-top: 8px; }
+.xcites { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; margin-top: 4px; min-width: 0; }
+.xcite { font: 11.5px var(--mono); color: var(--accent); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+.xcite.xnone { color: var(--muted); border-style: dashed; }
+.xcode { flex-basis: 100%; min-width: 0; max-width: 100%; overflow-x: auto; font: 12px/1.45 var(--mono); background: var(--code-bg); border-radius: 6px; padding: 6px 0; }
+.xcode .xl { display: flex; white-space: pre; }
+.xcode .xn { flex: none; width: 4.5em; padding-right: 10px; text-align: right; color: var(--muted); user-select: none; }
+.xcode .xt { padding-right: 10px; }
+.xhl { outline: 3px solid var(--accent); outline-offset: 2px; }
 </style>
 </head>
 <body>
@@ -1089,6 +1111,179 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
   };
   var P0 = fromHash();
   load(JSON.parse(document.getElementById("pd-report").textContent), document.title, (P0.open || "").split(",").filter(Boolean));
+
+  // ---------- explanation ----------
+  // A page may carry an explanation of its failure in a pd-explanation tag, written from the
+  // page's bundle. Such a page opens on an Explanation tab next to the Run tab. Each
+  // citation resolves through the bundle's ids and maps, never through the page text, to the
+  // element the Run view rendered for it. A page without the tag runs none of this.
+  var XTAG = document.getElementById("pd-explanation");
+  if (XTAG) explain(XTAG);
+
+  function explain(tag) {
+    var X, bundle = {};
+    try { X = JSON.parse(tag.textContent).explanation; } catch (err) { console.warn(err); return; }
+    if (!X || typeof X !== "object") return;
+    try { bundle = JSON.parse(document.getElementById("pd-bundle").textContent) || {}; } catch (err) { console.warn(err); }
+    var IDS = Object.create(null);
+    list(bundle.ids).forEach(function (id) { if (typeof id === "string") IDS[id] = true; });
+    var bar = document.createElement("div"), pane = document.createElement("section"), cur = null, scrollAt = { explanation: 0, run: 0 };
+    bar.id = "pd-tabs"; bar.className = "xtabs"; bar.setAttribute("role", "tablist");
+    bar.innerHTML = '<button type="button" role="tab" data-view="explanation">Explanation</button><button type="button" role="tab" data-view="run">Run</button>';
+    pane.id = "pd-explanation-view"; pane.className = "xpane"; pane.setAttribute("role", "tabpanel");
+    pane.innerHTML = '<p class="xlead">Hypotheses ranked by a language model from this run; each claim links to its evidence.</p>' +
+      "<h2>Summary</h2>" + list(X.summary).map(claim).join("") +
+      "<h2>Hypotheses</h2>" + list(X.hypotheses).map(function (y) {
+        y = y || {};
+        return '<div class="xhyp"><h3>Hypothesis ' + esc(y.rank) + " (" + esc(y.likelihood) + ")</h3><p>" + esc(y.claim) + "</p>" +
+          '<div class="xlbl">Evidence</div>' + cites(y.evidence) +
+          '<div class="xlbl">Next steps</div><ul>' + list(y.next_steps).map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ul></div>";
+      }).join("") +
+      "<h2>Talking points</h2>" + list(X.talking_points).map(claim).join("");
+    view.parentNode.insertBefore(bar, view);
+    view.parentNode.insertBefore(pane, view);
+    bar.addEventListener("click", function (e) { var b = e.target.closest("[data-view]"); if (b) show(b.getAttribute("data-view")); });
+    pane.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-ref]");
+      if (!b) return;
+      var id = b.getAttribute("data-ref");
+      if (b.classList.contains("xsrc")) toggleSource(b, id);
+      else cite(id);
+    });
+    // The Run view's arrow keys walk its lines; on the Explanation tab they scroll the page.
+    window.addEventListener("keydown", function (e) { if (cur === "explanation" && /^Arrow/.test(e.key)) e.stopPropagation(); }, true);
+    show("explanation");
+
+    function list(x) { return Array.isArray(x) ? x : []; }
+    function claim(c) { c = c || {}; return '<div class="xitem"><p>' + esc(c.text) + "</p>" + cites(c.cites) + "</div>"; }
+    function cites(ids) {
+      return '<div class="xcites">' + list(ids).map(function (id) {
+        id = String(id);
+        if (/^source:/.test(id) ? sourceOf(id) : IDS[id] && locate(id))
+          return '<button type="button" class="xcite' + (/^source:/.test(id) ? ' xsrc" aria-expanded="false" title="show the cited lines"' : '" title="show in the run"') + ' data-ref="' + esc(id) + '">' + esc(id) + "</button>";
+        return '<span class="xcite xnone" data-ref-none="' + esc(id) + '">' + esc(id) + " (not in this page)</span>";
+      }).join("") + "</div>";
+    }
+    function show(v) {
+      if (v === cur) return;
+      if (cur) scrollAt[cur] = window.scrollY;
+      cur = v;
+      pane.style.display = v === "explanation" ? "" : "none";
+      view.style.display = v === "run" ? "" : "none";
+      bar.querySelectorAll("[data-view]").forEach(function (b) { b.setAttribute("aria-selected", String(b.getAttribute("data-view") === v)); });
+      window.scrollTo(0, scrollAt[v]);
+    }
+
+    // A function id reads its lines from the function's from/to; a range id
+    // source:<Module>:<from>-<to> is split at its last colon and bounded by the module's lines.
+    function sourceOf(id) {
+      var hit = null;
+      if (IDS[id]) list(bundle.modules).forEach(function (m) { list(m && m.functions).forEach(function (f) { if (!hit && f && f.id === id) hit = { m: m, from: f.from, to: f.to }; }); });
+      if (!hit) {
+        var rest = id.slice("source:".length), at = rest.lastIndexOf(":"), r = /^([0-9]+)-([0-9]+)$/.exec(rest.slice(at + 1));
+        if (at <= 0 || !r) return null;
+        list(bundle.modules).forEach(function (m) { if (!hit && m && m.module === rest.slice(0, at)) hit = { m: m, from: +r[1], to: +r[2] }; });
+        if (!hit || !(typeof hit.m.lines === "number" && hit.to <= hit.m.lines)) return null;
+      }
+      if (typeof hit.m.source !== "string" || typeof hit.from !== "number" || typeof hit.to !== "number" || !(hit.from >= 1 && hit.from <= hit.to)) return null;
+      var lines = hit.m.source.split("\n");
+      return hit.to <= lines.length ? { from: hit.from, to: hit.to, lines: lines } : null;
+    }
+    function toggleSource(b, id) {
+      var next = b.nextElementSibling;
+      if (next && next.classList.contains("xcode")) { next.parentNode.removeChild(next); b.setAttribute("aria-expanded", "false"); return; }
+      var s = sourceOf(id), h = "";
+      if (!s) return;
+      for (var k = s.from; k <= s.to; k++) h += '<div class="xl"><span class="xn">' + k + '</span><span class="xt">' + esc(s.lines[k - 1]) + "</span></div>";
+      var blk = document.createElement("div");
+      blk.className = "xcode"; blk.setAttribute("data-src-of", id); blk.innerHTML = h;
+      b.parentNode.insertBefore(blk, b.nextSibling);
+      b.setAttribute("aria-expanded", "true");
+    }
+
+    function indexById(xs, id) { for (var i = 0; i < xs.length; i++) if (xs[i] && xs[i].id === id) return i; return -1; }
+    // The element the Run view rendered for an id: {open, el}, where open() unfolds what hides it
+    // and el() finds it; null when the view rendered nothing for it.
+    function locate(id) {
+      if (!R || !R.targets) return null;
+      var fields = list(bundle.failure && bundle.failure.fields), fi = indexById(fields, id);
+      if (fi >= 0) {
+        // the viewer's own reading of the Failure section must line up with the bundle's fields
+        if (R.failure.length !== fields.length || R.failure[fi].k !== fields[fi].label) return null;
+        return { el: function () { return view.querySelectorAll(":scope > .facts > .v")[fi] || null; } };
+      }
+      if (indexById(list(bundle.context), id) >= 0) return R.checks == null ? null : { el: function () { return sec(0); } };
+      var secs = list(bundle.sections), si = indexById(secs, id);
+      if (si >= 0) return section(String(secs[si].title), secs.slice(0, si));
+      var L = list(bundle.listing);
+      for (var ti = 0; ti < L.length; ti++) {
+        var steps = list(L[ti] && L[ti].steps);
+        for (var k = 0; k < steps.length; k++) {
+          var ei = steps[k] ? indexById(list(steps[k].entries), id) : -1;
+          if (steps[k] && (steps[k].id === id || ei >= 0)) return step(L, ti, steps[k], ei >= 0 ? steps[k].entries[ei] : null);
+        }
+      }
+      return null;
+    }
+    // The top-level sections of the Run view, in order: What this checks, the projections, the
+    // other sections, Reproduction. The k-th one, opened.
+    function sec(k) {
+      var d = view.querySelectorAll(":scope > details.sec")[k];
+      if (d) d.open = true;
+      return d || null;
+    }
+    function section(title, before) {
+      var first = R.checks != null ? 1 : 0, proj = R.projection ? 1 : 0;
+      if (title === "Failure") return { el: function () { return view.querySelector(":scope > .facts"); } };
+      if (title === "What this checks") return R.checks == null ? null : { el: function () { return sec(0); } };
+      if (title === R.reproTitle) return { el: function () { return view.querySelector(":scope > .rgrid"); } };
+      if (title === "Setup") return R.setup ? { el: function () { return view.querySelector(".setupbox"); } } : null;
+      if (R.projection && title === R.projection.title) return { el: function () { return sec(first); } };
+      if (title === "Reproduction") return R.reproduction ? { el: function () { return sec(first + proj + R.other.length); } } : null;
+      var nth = before.filter(function (s) { return s && String(s.title) === title; }).length, seen = -1, at = -1;
+      R.other.forEach(function (o, j) { if (o.title === title && ++seen === nth) at = j; });
+      return at < 0 ? null : { el: function () { return sec(first + proj + at); } };
+    }
+    // A step or an entry of the listing's target ti. One target maps to the view's single target
+    // whatever its name; several must name the view's targets in order.
+    function step(L, ti, st, entry) {
+      var xti = L.length === 1 && R.targets.length === 1 ? 0 : L.length === R.targets.length && L[ti].name === R.targets[ti].name ? ti : -1;
+      var lm = /^\[(.*)\]$/.exec(String(st.label)), root = null, x = null;
+      if (xti < 0 || !lm) return null;
+      R.targets[xti].steps.forEach(function (r) {
+        if (x || r.pseudo) return;
+        if (r.label === lm[1]) { root = r; x = r; return; }
+        r.children.forEach(function (c) { if (!x && c.label === lm[1]) { root = r; x = c; } });
+      });
+      if (!x) return null;
+      function col() { return view.querySelector('.col[data-col="' + xti + '"][data-root="' + CSS.escape(root.label) + '"]'); }
+      var ex = root.execs.indexOf(x);
+      if (!entry) return { el: x === root ? col : function () { var c = col(); return c && ex >= 0 ? c.querySelectorAll(":scope > .ebox")[ex] || null : null; } };
+      // n counts the step's events from 1; log lines are not entries, and events never collate
+      var events = ex < 0 ? [] : x.entries.filter(function (e) { return e.kind === "event"; });
+      var e = events.length === list(st.entries).length ? events[entry.n - 1] : null;
+      var item = e && x.items.filter(function (i) { return NODES[i].item.entries[0] === e; })[0];
+      if (!item) return null;
+      return {
+        open: function () { if (S.tags[e.tag] === false) S.tags[e.tag] = true; openStep(item); },
+        el: function () { return view.querySelector('.st[data-id="' + CSS.escape(item) + '"]'); }
+      };
+    }
+    // Shows the cited element in the Run view: unfolds it, scrolls to it and marks it. One
+    // element carries data-cite at a time.
+    function cite(id) {
+      var loc = locate(id);
+      if (!loc) return;
+      show("run");
+      if (loc.open) loc.open();
+      document.querySelectorAll("[data-cite]").forEach(function (m) { m.removeAttribute("data-cite"); m.classList.remove("xhl"); });
+      var el = loc.el();
+      if (!el) return;
+      el.setAttribute("data-cite", id);
+      el.classList.add("xhl");
+      el.scrollIntoView({ block: el.getBoundingClientRect().height > window.innerHeight ? "start" : "center" });
+    }
+  }
 })();
 </script>
 </body>
