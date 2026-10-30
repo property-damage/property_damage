@@ -12,7 +12,7 @@ defmodule PropertyDamage.FailureReport.CommandRunner do
   #     sees the end of the input after the last byte.
   #   * The command runs as `sh -c COMMAND`, started under `setsid -w`, so it
   #     leads its own process group. On a timeout the whole group gets SIGKILL
-  #     with `kill -KILL -- -PID`, which also reaches children and
+  #     with `kill -KILL -PID`, which also reaches children and
   #     grandchildren. `-w` makes `setsid` wait and pass the exit status on
   #     when it has to fork.
   #   * Where `setsid` does not exist (macOS), the command runs without its
@@ -222,8 +222,9 @@ defmodule PropertyDamage.FailureReport.CommandRunner do
         do: String.to_integer(child)
   end
 
-  # The shell's own `kill` accepts a negative pid for a group.
+  # The shell's own `kill` accepts a negative pid for a group. There is no `--`
+  # before the pid: the dash `kill` reads `--` as a pid, fails and sends nothing.
   defp signal(name, target) do
-    System.cmd("sh", ["-c", ~S[kill -"$1" -- "$2" 2>/dev/null], "sh", name, to_string(target)])
+    System.cmd("sh", ["-c", ~S[kill -"$1" "$2" 2>/dev/null], "sh", name, to_string(target)])
   end
 end
