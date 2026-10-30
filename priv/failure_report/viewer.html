@@ -219,7 +219,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 .xpane li { overflow-wrap: anywhere; }
 .xitem { margin: 0 0 12px; min-width: 0; }
 .xhyp { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; min-width: 0; }
-.xhyp h3 { font-size: 15px; margin: 0 0 4px; }
+.xhyp h3 { font-size: 15px; margin: 0 0 4px; overflow-wrap: anywhere; }
 .xhyp ul { margin: 2px 0 4px; padding-left: 20px; }
 .xlbl { font-size: 13px; font-weight: 600; margin-top: 8px; }
 .xcites { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; margin-top: 4px; min-width: 0; }
@@ -1194,7 +1194,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
       if (next && next.classList.contains("xcode")) { next.parentNode.removeChild(next); b.setAttribute("aria-expanded", "false"); return; }
       var s = sourceOf(id), h = "";
       if (!s) return;
-      for (var k = s.from; k <= s.to; k++) h += '<div class="xl"><span class="xn">' + k + '</span><span class="xt">' + esc(s.lines[k - 1]) + "</span></div>";
+      for (var k = s.from; k <= s.to; k++) h += '<div class="xl"><span class="xn">' + k + '</span><span class="xt">' + esc(s.lines[k - 1].replace(/\r$/, "")) + "</span></div>";
       var blk = document.createElement("div");
       blk.className = "xcode"; blk.setAttribute("data-src-of", id); blk.innerHTML = h;
       b.parentNode.insertBefore(blk, b.nextSibling);
@@ -1259,9 +1259,12 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
       function col() { return view.querySelector('.col[data-col="' + xti + '"][data-root="' + CSS.escape(root.label) + '"]'); }
       var ex = root.execs.indexOf(x);
       if (!entry) return { el: x === root ? col : function () { var c = col(); return c && ex >= 0 ? c.querySelectorAll(":scope > .ebox")[ex] || null : null; } };
-      // n counts the step's events from 1; log lines are not entries, and events never collate
+      // n counts the step's events from 1; log lines are not entries, and events never collate.
+      // Events tied to no command print after the target's last step, so the Run view lists them
+      // in that step's box; the bundle counts them apart, in the target's untied count.
+      var steps = list(L[ti].steps), untied = L[ti].untied, extra = st === steps[steps.length - 1] && untied && typeof untied.count === "number" ? untied.count : 0;
       var events = ex < 0 ? [] : x.entries.filter(function (e) { return e.kind === "event"; });
-      var e = events.length === list(st.entries).length ? events[entry.n - 1] : null;
+      var e = events.length === list(st.entries).length + extra ? events[entry.n - 1] : null;
       var item = e && x.items.filter(function (i) { return NODES[i].item.entries[0] === e; })[0];
       if (!item) return null;
       return {
