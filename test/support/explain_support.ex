@@ -96,9 +96,18 @@ defmodule PropertyDamage.Test.ExplainSupport do
       capture_io(:stderr, fn ->
         stdout =
           cond do
-            binary_input -> capture_io(:stdio, [input: binary_input, encoding: :latin1], run)
-            input -> capture_io(input, run)
-            true -> capture_io(run)
+            binary_input ->
+              capture_io(
+                :stdio,
+                [input: binary_input, encoding: :latin1, capture_prompt: false],
+                run
+              )
+
+            input ->
+              capture_io(:stdio, [input: input, capture_prompt: false], run)
+
+            true ->
+              capture_io(run)
           end
 
         send(parent, {ref, :stdout, stdout})

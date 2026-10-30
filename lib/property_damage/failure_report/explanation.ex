@@ -154,12 +154,19 @@ defmodule PropertyDamage.FailureReport.Explanation do
   """
   @spec validate(binary(), bundle()) :: {:ok, map()} | {:error, [String.t()]}
   def validate(text, bundle) do
+    text = strip_bom(text)
+
     case Jason.decode(text) do
-      {:ok, %{} = map} -> validate_object(map, bundle)
+      {:ok, %{} = map} -> validate_object(map, text, bundle)
       {:ok, other} -> {:error, [not_an_object("it is #{describe_value(other)}")]}
       {:error, error} -> {:error, [not_an_object(Exception.message(error))]}
     end
   end
+
+  # An editor may put a UTF-8 byte-order mark before the JSON; it carries no
+  # meaning, and the JSON parser does not accept it.
+  defp strip_bom(<<0xEF, 0xBB, 0xBF, rest::binary>>), do: rest
+  defp strip_bom(text), do: text
 
   @doc """
   Writes the explanation into the page and returns the new page.
@@ -202,8 +209,7 @@ defmodule PropertyDamage.FailureReport.Explanation do
       [] ->
         {:error,
          [
-           "#{page}: no bundle in this page " <>
-             "(it was written by a version that did not embed one)"
+           "#{page}: no bundle in this page (it holds no pd-bundle script)"
          ]}
 
       [_one] ->
@@ -229,20 +235,28 @@ defmodule PropertyDamage.FailureReport.Explanation do
   defp check_format(%{"format" => format}, _page) when format in @supported_formats, do: :ok
 
   defp check_format(data, page) do
-    shown =
-      case Map.get(data, "format") do
-        nil -> "missing"
-        format when is_integer(format) -> to_string(format)
-        format when is_binary(format) -> show(format)
-        other -> inspect(other)
-      end
+    supported = "this version reads formats: #{Enum.join(@supported_formats, ", ")}"
 
-    {:error,
-     [
-       "#{page}: bundle format #{shown} is not supported; " <>
-         "this version reads formats: #{Enum.join(@supported_formats, ", ")}"
-     ]}
+    case Map.fetch(data, "format") do
+      :error ->
+        {:error, ["#{page}: the bundle has no format field; #{supported}"]}
+
+      {:ok, format} ->
+        {:error, ["#{page}: bundle format #{show_json(format)} is not supported; #{supported}"]}
+    end
   end
+
+  # A JSON value as it reads in the input: its JSON text and, unless it is an
+  # integer or null, its type, so the string "1" cannot pass for the integer 1.
+  defp show_json(value) when is_integer(value), do: Jason.encode!(value)
+  defp show_json(nil), do: "null"
+  defp show_json(value), do: "#{Jason.encode!(value)} (#{json_type(value)})"
+
+  defp json_type(value) when is_binary(value), do: "a string"
+  defp json_type(value) when is_number(value), do: "a number"
+  defp json_type(value) when is_boolean(value), do: "a boolean"
+  defp json_type(value) when is_list(value), do: "a list"
+  defp json_type(value) when is_map(value), do: "an object"
 
   # A value from the input goes into an error line as is, unless it holds a
   # control character that could break the line or forge another one; then it
@@ -278,7 +292,7 @@ defmodule PropertyDamage.FailureReport.Explanation do
     rest = binary_part(html, body_start, byte_size(html) - body_start)
 
     case :binary.match(rest, @script_close) do
-      {close, _length} -> :binary.match(binary_part(rest, 0, close), "<script") != :nomatch
+      {close, _length} -> Regex.match?(~r/<script/i, binary_part(rest, 0, close))
       :nomatch -> true
     end
   end
@@ -305,7 +319,34 @@ defmodule PropertyDamage.FailureReport.Explanation do
   # The explanation
   # ===========================================================================
 
-  defp validate_object(map, bundle) do
+  defp validate_object(map, text, bundle) do
+    case duplicate_keys(text) do
+      [] -> validate_fields(map, bundle)
+      keys -> {:error, for(key <- keys, do: "schema: duplicate key #{show(key)}")}
+    end
+  end
+
+  # The decoder keeps the last copy of a repeated key without a word, so a
+  # reader could not tell which claim the explanation makes. This lists every
+  # key that repeats inside one object, at any depth, once each, in order.
+  defp duplicate_keys(text) do
+    text
+    |> Jason.decode!(objects: :ordered_objects)
+    |> repeated_keys()
+    |> Enum.uniq()
+  end
+
+  defp repeated_keys(%Jason.OrderedObject{values: pairs}) do
+    keys = Enum.map(pairs, &elem(&1, 0))
+
+    (keys -- Enum.uniq(keys)) ++
+      Enum.flat_map(pairs, fn {_key, value} -> repeated_keys(value) end)
+  end
+
+  defp repeated_keys(list) when is_list(list), do: Enum.flat_map(list, &repeated_keys/1)
+  defp repeated_keys(_scalar), do: []
+
+  defp validate_fields(map, bundle) do
     lines =
       schema_lines(map) ++ hash_lines(map, bundle.hash) ++ citation_lines(map, index(bundle.data))
 
@@ -509,14 +550,13 @@ defmodule PropertyDamage.FailureReport.Explanation do
 
   defp check_range(id, index) do
     with [_all, module, from, to] <-
-           Regex.run(~r/\Asource:(.+):([0-9]+)-([0-9]+)\z/s, id),
+           Regex.run(~r/\Asource:(.+):(0|[1-9][0-9]*)-(0|[1-9][0-9]*)\z/s, id),
          {:ok, lines} <- Map.fetch(index.lines, module) do
       {first, last} = {String.to_integer(from), String.to_integer(to)}
 
       if 1 <= first and first <= last and last <= lines,
         do: :ok,
-        else:
-          {:error, "source:#{show(module)}:#{from}-#{to}: lines #{from}-#{to} outside 1-#{lines}"}
+        else: {:error, "#{show(id)}: lines #{from}-#{to} outside 1-#{lines}"}
     else
       _not_a_known_range -> {:error, "#{show(id)}: not in this page"}
     end

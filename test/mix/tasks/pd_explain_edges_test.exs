@@ -236,13 +236,13 @@ defmodule Mix.Tasks.Pd.ExplainEdgesTest do
       nested = String.replace(text, ~s("rank":1), ~s("rank":1,"rank":2), global: false)
 
       out = E.apply_to(page, {:raw, top})
-      assert_refused(out, [~s(schema: duplicate key "summary")])
+      assert_refused(out, [~s(schema: duplicate key summary)])
 
       out = E.apply_to(page, {:raw, nested})
-      assert_refused(out, [~s(schema: duplicate key "rank")])
+      assert_refused(out, [~s(schema: duplicate key rank)])
 
       out = E.exec([page, "--apply", "-"], input: top)
-      assert_refused(out, [~s(schema: duplicate key "summary")])
+      assert_refused(out, [~s(schema: duplicate key summary)])
       assert File.read!(page) == bytes
     end
 

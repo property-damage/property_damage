@@ -25,7 +25,8 @@ defmodule Mix.Tasks.Pd.Explain do
   Without an option, the task writes the directory `PAGE.explain` (created if
   missing) with two files, `bundle.json` and `instructions.md`, and prints their
   absolute paths, the prompt version and the bundle hash, one per line. It
-  overwrites those two files and removes nothing else in the directory.
+  overwrites those two files and removes nothing else in the directory. It
+  refuses to write through either file when that file is a symbolic link.
   `bundle.json` holds the bundle bytes of the page, so `sha256sum bundle.json`
   prints the bundle hash. If the page already holds an explanation of this
   bundle for this prompt version, the task prints one line saying so and writes
@@ -44,6 +45,10 @@ defmodule Mix.Tasks.Pd.Explain do
   `pd-bundle` tag, replaces any earlier `pd-explanation` tag, and prints one line
   saying so. The page is replaced in one step, so a failure part way leaves the
   old page.
+  The task reads the explanation as bytes, from standard input as from a file,
+  and ignores a leading byte-order mark. It refuses a page that is a symbolic
+  link or is read-only, and says so on one line, so it never replaces a link
+  with a file or overwrites a page you protected.
 
   With `--with CMD`, the task runs the whole loop. It runs `CMD` with `sh -c`,
   sends the same text `--prompt` prints to its standard input and closes the
@@ -143,6 +148,7 @@ defmodule Mix.Tasks.Pd.Explain do
     with :ok <- check_options(invalid),
          {:ok, page} <- check_page_count(argv),
          :ok <- check_modes(opts),
+         :ok <- check_values(opts),
          {:ok, mode} <- resolve_mode(opts),
          :ok <- check_exists(page) do
       run_mode(page, mode)
@@ -165,6 +171,9 @@ defmodule Mix.Tasks.Pd.Explain do
   defp check_options([{"--attempts", value} | _]), do: {:usage, attempts_problem(value)}
   defp check_options([{"--timeout", value} | _]), do: {:usage, timeout_problem(value)}
 
+  defp check_options([{"--prompt", value} | _]),
+    do: {:usage, "mix pd.explain: --prompt takes no value, got #{value}"}
+
   defp check_options([{switch, _value} | _]),
     do: {:usage, "mix pd.explain: unknown option #{switch}"}
 
@@ -186,6 +195,12 @@ defmodule Mix.Tasks.Pd.Explain do
       true ->
         :ok
     end
+  end
+
+  defp check_values(opts) do
+    if opts[:apply] == "",
+      do: {:usage, "mix pd.explain: --apply needs a value"},
+      else: :ok
   end
 
   # Settles what the task does. A `--with` command wins over the config; the
@@ -292,6 +307,7 @@ defmodule Mix.Tasks.Pd.Explain do
       instructions_path = Path.join(dir, "instructions.md")
 
       with :ok <- mkdir(dir),
+           :ok <- refuse_links([bundle_path, instructions_path]),
            :ok <- write(bundle_path, bundle.bytes),
            :ok <- write(instructions_path, Explanation.instructions()) do
         succeed(
@@ -312,7 +328,8 @@ defmodule Mix.Tasks.Pd.Explain do
   end
 
   defp apply_explanation(page, html, bundle, file) do
-    with :ok <- Explanation.check_earlier(html, page) |> lines_error(),
+    with :ok <- check_replaceable(page),
+         :ok <- Explanation.check_earlier(html, page) |> lines_error(),
          {:ok, text} <- read_explanation(file),
          {:ok, explanation} <- Explanation.validate(text, bundle) |> lines_error(),
          :ok <- replace(page, Explanation.embed(html, bundle, explanation)) do
@@ -332,18 +349,17 @@ defmodule Mix.Tasks.Pd.Explain do
   # Runs the command up to `run.attempts` times. Every answer goes through
   # `Explanation.validate/2` and `Explanation.embed/3`, as `--apply` does.
   defp explain_with(page, html, bundle, run) do
-    case Explanation.check_earlier(html, page) do
-      :ok ->
-        prompt = Explanation.prompt(bundle)
+    with :ok <- check_replaceable(page),
+         :ok <- Explanation.check_earlier(html, page) |> lines_error() do
+      prompt = Explanation.prompt(bundle)
 
-        attempt(
-          1,
-          Map.merge(run, %{page: page, html: html, bundle: bundle, prompt: prompt}),
-          prompt
-        )
-
-      {:error, lines} ->
-        fail(lines)
+      attempt(
+        1,
+        Map.merge(run, %{page: page, html: html, bundle: bundle, prompt: prompt}),
+        prompt
+      )
+    else
+      {:fail, lines} -> fail(lines)
     end
   end
 
@@ -454,7 +470,7 @@ defmodule Mix.Tasks.Pd.Explain do
   end
 
   defp read_explanation("-") do
-    case IO.read(:stdio, :eof) do
+    case IO.binread(:stdio, :eof) do
       text when is_binary(text) ->
         {:ok, text}
 
@@ -514,7 +530,7 @@ defmodule Mix.Tasks.Pd.Explain do
         ".#{Path.basename(page)}.#{System.unique_integer([:positive])}.tmp"
       )
 
-    with :ok <- write(tmp, bytes),
+    with :ok <- write_temp(tmp, page, bytes),
          :ok <- copy_mode(page, tmp),
          :ok <- rename(tmp, page) do
       :ok
@@ -525,13 +541,51 @@ defmodule Mix.Tasks.Pd.Explain do
     end
   end
 
-  defp copy_mode(from, to) do
-    with {:ok, %File.Stat{mode: mode}} <- File.stat(from),
-         :ok <- File.chmod(to, mode) do
+  # Failures name the page, never the temp file, which the reader did not ask
+  # for and which no longer exists once the task reports the failure.
+  defp write_temp(tmp, page, bytes) do
+    case File.write(tmp, bytes) do
+      :ok -> :ok
+      {:error, reason} -> {:fail, [cannot_write(page, reason)]}
+    end
+  end
+
+  defp copy_mode(page, tmp) do
+    with {:ok, %File.Stat{mode: mode}} <- File.stat(page),
+         :ok <- File.chmod(tmp, mode) do
       :ok
     else
-      {:error, reason} ->
-        {:fail, ["mix pd.explain: cannot write #{to} (#{:file.format_error(reason)})"]}
+      {:error, reason} -> {:fail, [cannot_write(page, reason)]}
+    end
+  end
+
+  defp cannot_write(path, reason),
+    do: "mix pd.explain: cannot write #{path} (#{:file.format_error(reason)})"
+
+  # A symbolic link would be replaced by a regular file, and a read-only page
+  # is one its owner chose to protect, so the task changes neither.
+  defp check_replaceable(page) do
+    case File.lstat(page) do
+      {:ok, %File.Stat{type: :symlink}} ->
+        {:fail, ["mix pd.explain: #{page} is a symbolic link; refusing to replace it"]}
+
+      {:ok, %File.Stat{mode: mode}} when Bitwise.band(mode, 0o200) == 0 ->
+        {:fail, ["mix pd.explain: #{page} is read-only; refusing to replace it"]}
+
+      _readable_and_writable ->
+        :ok
+    end
+  end
+
+  # Writing to a symbolic link changes the file it points to, which may lie
+  # outside the directory of the page.
+  defp refuse_links(paths) do
+    case Enum.find(paths, &match?({:ok, %File.Stat{type: :symlink}}, File.lstat(&1))) do
+      nil ->
+        :ok
+
+      link ->
+        {:fail, ["mix pd.explain: #{link} is a symbolic link; refusing to write through it"]}
     end
   end
 
