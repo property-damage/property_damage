@@ -105,9 +105,9 @@ defmodule PropertyDamage.Failure.ExplainTest do
              "Unable to test the system: a command declared synchronous asked to be retried. Only asynchronous commands may ask for a retry, so the test's adapter has a defect."
   end
 
-  test "the meaning of poll_error is the agreed text" do
+  test "the meaning of poll_error says the check never reported" do
     assert Explain.meaning(:poll_error) ==
-             "Unable to test the system: the condition of an @eventually check raised an error while polling. This usually means the check itself has a defect."
+             "Unable to test the system: an @eventually check never reported. The run ended and PropertyDamage waited for the check's poller to answer, but it did not, so the condition was neither confirmed nor refuted. This usually means the check's condition blocked, such as a call with no timeout."
   end
 
   test "the meaning of stutter_execution_failed is the agreed text" do

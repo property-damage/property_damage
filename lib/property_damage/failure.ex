@@ -280,7 +280,7 @@ defmodule PropertyDamage.Failure do
   | `:nemesis_error` | the fault-injection error | `nil` |
   | `:stutter_execution_failed` | the retry failure details | `nil` |
   | `:resource_poller_error` | the poller error | `nil` |
-  | `:poll_error` | the raised poll-predicate error | `nil` |
+  | `:poll_error` | the error from waiting on a check's poller, such as `:await_timeout` | `nil` |
   | `:retry_from_sync_command` | a `:sync` command that returned `{:retry, _}` | `nil` |
   | `:malformed_adapter_return` | the unexpected adapter return value | `nil` |
 
