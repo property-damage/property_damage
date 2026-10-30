@@ -329,6 +329,38 @@ IO.inspect(comparison.ranking)  # most discriminating field first
 
 See [Visual Sequence Diagrams](#visual-sequence-diagrams) and [Run Comparison](#run-comparison) for detailed documentation.
 
+### Explaining a failure page
+
+Every HTML failure page carries a bundle: a machine-readable copy of the failure, with the docs and source of the modules behind it. The `pd-explain` skill gives the bundle to an agent. The agent writes an explanation of the failure, and the page then opens on an Explanation tab next to the Run view.
+
+To install the skill, link it into your project. The link keeps the skill in step with the PropertyDamage you installed. With a path dependency, run this from your project's `.claude/skills/` directory (the relative path runs from `.claude/skills/` to the PropertyDamage checkout, so adjust it to your layout):
+
+```bash
+ln -s ../../../property_damage/priv/claude/skills/pd-explain pd-explain
+```
+
+With a Hex dependency, from the same directory:
+
+```bash
+ln -s ../../deps/property_damage/priv/claude/skills/pd-explain pd-explain
+```
+
+The skill drives `mix pd.explain`, which reads one page and loads no project code:
+
+- `mix pd.explain PAGE` writes `PAGE.explain/bundle.json` and `PAGE.explain/instructions.md`, and prints their paths. It prints one line and writes nothing if the page already holds an explanation of this bundle.
+- `mix pd.explain PAGE --prompt` prints the instructions and the bundle to standard output, for a model of your choice.
+- `mix pd.explain PAGE --apply FILE` (or `--apply -` for standard input) checks an explanation written as JSON and, if it passes, embeds it in the page. If it fails, it prints every problem and leaves the page untouched.
+
+To skip the agent, name a command with `--with`. The task sends it the prompt on standard input and reads the explanation from its output:
+
+```bash
+mix pd.explain PAGE --with "my-agent --print"
+```
+
+Each attempt runs the command once, up to 3 attempts by default (`--attempts N` changes the count), and the command may cost money each time. A CI job that runs `--with` pays for the command on every failure.
+
+To have every CI failure leave a page, set `PD_REPORT_HTML` to a directory in the CI job, for example `PD_REPORT_HTML=failure_pages mix test`. The `report_html:` run option does the same for one run, and the environment variable replaces it when set and not blank. PropertyDamage writes no page by default. See the [debugging guide](guides/debugging_failures.md#explaining-the-report) for the Explanation view.
+
 ## Failure Persistence
 
 Save failures for later analysis or to build a regression suite:
@@ -1446,7 +1478,9 @@ failure report, see the [log lines guide](guides/log_lines.md).
 ## Agent Skills
 
 The repository carries [Claude Code skills](https://code.claude.com/docs/en/skills)
-in `.claude/skills/`, grouped by name prefix for two distinct audiences:
+in `.claude/skills/`, grouped by name prefix for two distinct audiences. One
+skill, `pd-explain`, also ships in the Hex package under `priv/`; you link it
+instead of copying it (see [Explaining a failure page](#explaining-a-failure-page)).
 
 - **`pd-*` (library users).** Judgment-heavy workflows for testing *your* system
   with PropertyDamage: authoring a correct model and invariants, diagnosing shrunk
@@ -1458,10 +1492,13 @@ in `.claude/skills/`, grouped by name prefix for two distinct audiences:
     an existing spec-backed model. The runnable examples in its reference docs
     are executed by the documentation-verification gate, so the skill's
     templates are held to the same standard as the guides.
+  - **`pd-explain`** — explains an HTML failure page: it runs `mix pd.explain`,
+    writes an explanation from the page's bundle and applies it. It ships in the
+    Hex package under `priv/claude/skills/pd-explain` and is linked, not copied.
 - **`openspec-*` (contributors).** The OpenSpec change workflow used to develop
   PropertyDamage itself. Only meaningful inside this repository.
 
-To use `pd-*` skills in your application, copy them from
+To use the other `pd-*` skills in your application, copy them from
 the git tag matching your installed version. Skills track the API of their release, so skills from a newer
 tag may reference APIs your version does not have:
 

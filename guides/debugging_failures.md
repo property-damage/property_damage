@@ -215,6 +215,21 @@ failing root in both. Projections compares the reference's state with the
 variant's at the failing boundary. For a real report, see the excerpt in the
 [path equivalence guide](path_equivalence_testing.md#4-plant-a-bug-and-watch-it-fail).
 
+## Explaining the report
+
+A failure page can carry an explanation of its failure: a summary, ranked hypotheses and talking points, each claim citing the page. Reading one takes four steps:
+
+1. Write the page. Set `report_html:` or `PD_REPORT_HTML` as the [README](../README.md#explaining-a-failure-page) shows, and let a run fail.
+2. Get an explanation written. Either ask an agent that has the `pd-explain` skill to explain the page, or run `mix pd.explain PAGE --with "my-agent --print"`, where the command reads the prompt on standard input and prints the explanation as JSON.
+3. Apply it. The skill runs `mix pd.explain PAGE --apply explanation.json`, and `--with` applies its own answer. The task checks the explanation against the page and refuses one that cites an id the page does not hold. A refused explanation leaves the page as it was.
+4. Reopen the page in a browser.
+
+A page with an explanation opens on an Explanation tab, next to the Run tab. The tab lists the summary, the hypotheses and the talking points. Each hypothesis prints with its rank and its likelihood, as `Hypothesis 1 (likely)`, then its claim, its evidence and its next steps.
+
+Every claim lists the evidence it cites. Click a citation to switch to the Run view, where the page unfolds the cited step, event or section, scrolls to it and highlights it. A `source:` citation names lines of a module's source file: click it to unfold those lines under the citation, and click again to fold them. If the page cannot find a cited id, the citation shows as `(not in this page)` and does nothing when clicked.
+
+The explanation is only as private as the page. The bundle in the page holds the source of the model, the projections, the commands, the events and the adapters. In a file that holds an adapter, the bundle masks secret-shaped string literals: on a line that names a secret, password, token or key, each double-quoted string becomes `"[REDACTED]"`. The page records the count and the rule. The rule reads one line at a time, so it does not mask other literals, such as an internal host name, a bare query string or text in a heredoc. Read the page before you share it.
+
 ## The Failure Report
 
 The report is a `%PropertyDamage.FailureReport{}`. A failing run returns it.
