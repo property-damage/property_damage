@@ -39,7 +39,9 @@ defmodule PropertyDamage.FailureReport.Explanation do
 
   An id resolves when the bundle lists it, or when it has the form
   `source:<Module>:<from>-<to>` and the bundle holds the source of `<Module>`
-  with at least `<to>` lines. A hypothesis may not cite the context item of a
+  with at least `<to>` lines. A range must satisfy `1 <= from <= to`, so it
+  cannot start at line 0 or run backward, and it may name a single line
+  (`from` equal to `to`). A hypothesis may not cite the context item of a
   missing description as evidence.
   """
 
