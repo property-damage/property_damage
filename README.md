@@ -1492,7 +1492,7 @@ instead of copying it (see [Explaining a failure page](#explaining-a-failure-pag
     an existing spec-backed model. The runnable examples in its reference docs
     are executed by the documentation-verification gate, so the skill's
     templates are held to the same standard as the guides.
-  - **`pd-explain`** — explains an HTML failure page: it runs `mix pd.explain`,
+  - **`pd-explain`**: explains an HTML failure page: it runs `mix pd.explain`,
     writes an explanation from the page's bundle and applies it. It ships in the
     Hex package under `priv/claude/skills/pd-explain` and is linked, not copied.
 - **`openspec-*` (contributors).** The OpenSpec change workflow used to develop
