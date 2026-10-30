@@ -77,15 +77,15 @@ Every record is **self-contained**: it carries enough context and rationale to s
 
 ## Which specs cite which DRs
 
-- `openspec/specs/model/spec.md`: DR-001, DR-002, DR-003, DR-007, DR-013, DR-026, DR-028, DR-042, DR-048, DR-049
-- `openspec/specs/command/spec.md`: DR-006, DR-008, DR-019, DR-028, DR-030, DR-034, DR-036, DR-046
-- `openspec/specs/projection/spec.md`: DR-004, DR-005, DR-009, DR-012, DR-014, DR-024, DR-025, DR-026, DR-042, DR-046, DR-049, DR-051, DR-052
+- `openspec/specs/model/spec.md`: DR-001, DR-002, DR-003, DR-007, DR-013, DR-026, DR-028, DR-042, DR-048, DR-049, DR-058
+- `openspec/specs/command/spec.md`: DR-006, DR-008, DR-019, DR-028, DR-030, DR-034, DR-036, DR-046, DR-058
+- `openspec/specs/projection/spec.md`: DR-004, DR-005, DR-009, DR-012, DR-014, DR-024, DR-025, DR-026, DR-042, DR-046, DR-049, DR-051, DR-052, DR-058
 - `openspec/specs/observability/spec.md`: DR-022, DR-024, DR-025, DR-026, DR-045, DR-049, DR-054
 - `openspec/specs/execution-engine/spec.md`: DR-010, DR-011, DR-014, DR-015, DR-016, DR-017, DR-018, DR-021, DR-023, DR-024, DR-025, DR-026, DR-027, DR-029, DR-030, DR-032, DR-033, DR-034, DR-035, DR-036, DR-037, DR-042, DR-043, DR-044, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050, DR-051, DR-054
 - `openspec/specs/shrinking/spec.md`: DR-017, DR-025, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050
 - `openspec/specs/eventual-consistency/spec.md`: DR-008, DR-018, DR-024, DR-026, DR-027, DR-028, DR-030, DR-044, DR-046, DR-052
-- `openspec/specs/failure-analysis/spec.md`: DR-026, DR-028, DR-033, DR-034, DR-035, DR-036, DR-040, DR-041, DR-049, DR-050, DR-054, DR-055, DR-056, DR-057
-- `openspec/specs/differential-testing/spec.md`: DR-021, DR-030, DR-033, DR-034, DR-035, DR-036, DR-040, DR-043, DR-044, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050, DR-051, DR-052, DR-055, DR-056
+- `openspec/specs/failure-analysis/spec.md`: DR-026, DR-028, DR-033, DR-034, DR-035, DR-036, DR-040, DR-041, DR-049, DR-050, DR-054, DR-055, DR-056, DR-057, DR-058
+- `openspec/specs/differential-testing/spec.md`: DR-021, DR-030, DR-033, DR-034, DR-035, DR-036, DR-040, DR-043, DR-044, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050, DR-051, DR-052, DR-055, DR-056, DR-058
 - `openspec/specs/export/spec.md`: DR-021, DR-028, DR-043
 - `openspec/specs/load-testing/spec.md`: DR-021, DR-022, DR-042
 - `openspec/specs/persistence/spec.md`: DR-020, DR-023, DR-033, DR-034, DR-036, DR-039, DR-040, DR-041, DR-042, DR-045, DR-046, DR-047, DR-048, DR-049, DR-050, DR-054, DR-055, DR-056

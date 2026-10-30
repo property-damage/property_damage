@@ -4,7 +4,7 @@
 
 Models orchestrate stateful property-based tests by defining which commands run, when they are valid, how they are parameterized, and the test lifecycle. A model ties together commands, projections, and optional simulators without knowing transport details or command internals.
 
-Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands)
+Reference Decision Records: DR-001 (Models as Behaviour Modules), DR-002 (Model and Command Agnosticism), DR-003 (Reuse Through Standard Elixir), DR-007 (Model-Level Command Wiring), DR-013 (Terminal States), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-048 (Setup and Teardown Commands), DR-049 (Expansions, Roots That Run as Several Commands), DR-058 (Failure Report Context and Explanations)
 
 ## Requirements
 
@@ -22,7 +22,7 @@ Models SHALL implement two required callbacks: `commands/0` returning a list of 
 - **THEN** it returns a single projection module
 - **AND** this projection's state drives command filtering, selection, and simulation
 
-### Requirement: Declaring a Model
+### Requirement: Declaring a Model (DR-058)
 
 A model SHALL be declared with `use PropertyDamage.Model`, which sets the `PropertyDamage.Model` behaviour. `use PropertyDamage.Model` SHALL reject any option at compile time. A module that declares `@behaviour PropertyDamage.Model` directly SHALL still be accepted as a model.
 
@@ -400,7 +400,7 @@ The framework SHALL resolve command specs by calling `command_spec/1` when avail
 - **THEN** the framework builds a spec from the framework defaults
 - **AND** merges Model-provided overrides on top of the default-derived spec
 
-### Requirement: Declared Docs Capture
+### Requirement: Declared Docs Capture (DR-058)
 
 A module that invokes `use PropertyDamage.Model` SHALL keep its own docs and the path of its source file, and `PropertyDamage.Docs.fetch/1` SHALL return them, also when the module was compiled from a script. The captured map SHALL include private functions and SHALL NOT include macros or names that start with `__`. The map SHALL hold docs, lines and the file path, never source text. `use PropertyDamage.Model` MUST come before every `def` and `defp` of the module whose name does not start with `__`, including those that another `use` defines; a function defined earlier SHALL be a `CompileError` at the line of the `use`, even when the module overrides that function later. The captured moduledoc SHALL be the one set by the end of the module body or by a `@before_compile` registered before `use`; a `@before_compile` registered after `use` that sets only `@moduledoc` is not seen, and a module that needs it captured MUST set `@moduledoc` in the module body or register that callback before `use`. When the beam no longer holds the captured map and has no docs chunk, `PropertyDamage.Docs.fetch/1` SHALL return `:unavailable` and SHALL NOT raise.
 

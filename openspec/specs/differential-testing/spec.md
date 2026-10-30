@@ -579,7 +579,7 @@ The `:random` pick at a root SHALL be a pure function of the run seed, the targe
 - **WHEN** a `:random` target is renamed
 - **THEN** its entries SHALL differ from the previous name's at some root of a long enough run
 
-### Requirement: Describing an Expansion Entry with `doc:`
+### Requirement: Describing an Expansion Entry with `doc:` (DR-058)
 
 An entry of an `expansions/0` function MAY be `{list, opts}`, where `opts` is a non-empty keyword list of `weight:`, a positive integer, and `doc:`, a string that describes the whole route the entry takes, each at most once. Any other option, a repeated option, an empty list, a non-positive or non-integer `weight:` and a `doc:` that is not a string SHALL be an `ArgumentError` that names the entry's key and root and names both `weight:` and `doc:`. A realized choice SHALL carry the key `doc`: the `doc:` of the entry the target ran at the root, read from that entry, so a choice never carries the doc of another entry when shrinking realizes it again or a recorded run is replayed. `doc` SHALL be nil when the entry has no `doc:` and when no listed entry ran at the root: a root that is not listed, a root forced to run as itself, and a root a target runs as itself with no entry. `doc:` on a leaf of an entry SHALL be ignored, with one warning per leaf that names the entry, the leaf and `doc:`. A report file saved before choices carried `doc` SHALL load with `doc` as nil on every choice.
 

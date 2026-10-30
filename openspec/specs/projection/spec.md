@@ -4,7 +4,7 @@
 
 Projections are the state management and invariant verification mechanism for stateful property-based tests. They serve a dual purpose: reducing commands and events into tracked state, and defining checks that verify invariants hold throughout test execution. A single behaviour supports both roles, from state-only projections that drive command generation to check-only projections that validate system correctness.
 
-Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-049 (Expansions, Roots That Run as Several Commands), DR-052 (A Check's Verdict Is Its Return Value)
+Reference Decision Records: DR-004 (Unified Projection Type), DR-005 (Projection Naming), DR-009 (Projections See Commands and Events), DR-012 (Trigger-Based Assertions), DR-014 (Assertion Modes), DR-024 (Lifecycle-Boundary Assertions), DR-025 (Continuous Async-Observation Checking), DR-026 (Invariant Catalog and Anti-Vacuity Coverage), DR-042 (One Engine for Property-Based, Differential and Path-Equivalence Runs), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-049 (Expansions, Roots That Run as Several Commands), DR-052 (A Check's Verdict Is Its Return Value), DR-058 (Failure Report Context and Explanations)
 
 ## Requirements
 
@@ -411,7 +411,7 @@ The `use PropertyDamage.Model.Projection` macro SHALL set up the check detection
 - **AND** check detection hooks are registered
 - **AND** the `__checks__/0` function is generated at compile time
 
-### Requirement: Declared Docs Capture
+### Requirement: Declared Docs Capture (DR-058)
 
 A module that invokes `use PropertyDamage.Model.Projection` SHALL keep its own docs and the path of its source file, and `PropertyDamage.Docs.fetch/1` SHALL return them, also when the module was compiled from a script. The captured map SHALL include private functions and SHALL NOT include macros or names that start with `__`. The map SHALL hold docs, lines and the file path, never source text. `use PropertyDamage.Model.Projection` MUST come before every `def` and `defp` of the module whose name does not start with `__`, including those that another `use` defines; a function defined earlier SHALL be a `CompileError` at the line of the `use`, even when the module overrides that function later. The captured moduledoc SHALL be the one set by the end of the module body or by a `@before_compile` registered before `use`; a `@before_compile` registered after `use` that sets only `@moduledoc` is not seen, and a module that needs it captured MUST set `@moduledoc` in the module body or register that callback before `use`. When the beam no longer holds the captured map and has no docs chunk, `PropertyDamage.Docs.fetch/1` SHALL return `:unavailable` and SHALL NOT raise.
 

@@ -4,7 +4,7 @@
 
 Commands are the semantic building blocks of stateful property-based tests. Each command defines a pure generator that produces field maps, a specification describing execution and shrinking behavior, and optional metadata callbacks. Commands are deliberately decoupled from state shape and execution transport, enabling reuse across different models and adapters.
 
-Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors)
+Reference Decision Records: DR-006 (Pure Command Generators), DR-008 (Command Semantics), DR-019 (Command Spec Pattern), DR-028 (Single command_spec Surface), DR-030 (Event Correlation via Awaits), DR-046 (Boundary Observations, the Convergence Loop and Adapter Errors), DR-058 (Failure Report Context and Explanations)
 
 ## Requirements
 
@@ -271,7 +271,7 @@ Each value appearing in a run's executed commands and events SHALL be classifiab
 - **WHEN** two runs assert the same plan identity but a `plan-generated` command field differs between them
 - **THEN** the framework SHALL treat the runs as not comparable
 
-### Requirement: Declared Docs Capture
+### Requirement: Declared Docs Capture (DR-058)
 
 A module that invokes `use PropertyDamage.Command` SHALL keep its own docs and the path of its source file, and `PropertyDamage.Docs.fetch/1` SHALL return them, also when the module was compiled from a script. The captured map SHALL include private functions and SHALL NOT include macros or names that start with `__`. The map SHALL hold docs, lines and the file path, never source text. `use PropertyDamage.Command` MUST come before every `def` and `defp` of the module whose name does not start with `__`, including those that another `use` defines; a function defined earlier SHALL be a `CompileError` at the line of the `use`, even when the module overrides that function later. The captured moduledoc SHALL be the one set by the end of the module body or by a `@before_compile` registered before `use`; a `@before_compile` registered after `use` that sets only `@moduledoc` is not seen, and a module that needs it captured MUST set `@moduledoc` in the module body or register that callback before `use`. When the beam no longer holds the captured map and has no docs chunk, `PropertyDamage.Docs.fetch/1` SHALL return `:unavailable` and SHALL NOT raise.
 
