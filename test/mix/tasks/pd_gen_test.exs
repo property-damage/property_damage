@@ -137,7 +137,8 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Adapter"
+      assert content =~ "use PropertyDamage.Adapter"
+      refute content =~ "@behaviour PropertyDamage.Adapter"
       assert content =~ "def setup"
       assert content =~ "def teardown"
       assert content =~ "def execute"
@@ -155,7 +156,8 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Adapter"
+      assert content =~ "use PropertyDamage.Adapter"
+      refute content =~ "@behaviour PropertyDamage.Adapter"
       assert content =~ "def setup"
       assert content =~ "def teardown"
       assert content =~ "def execute"
@@ -173,7 +175,8 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Adapter"
+      assert content =~ "use PropertyDamage.Adapter"
+      refute content =~ "@behaviour PropertyDamage.Adapter"
       assert content =~ "def setup"
       assert content =~ "def teardown"
       assert content =~ "def execute"
