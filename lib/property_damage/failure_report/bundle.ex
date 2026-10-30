@@ -78,7 +78,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
     * `source` is the full text of `file`, `{"missing": path}` when the file
       cannot be read (the path is also in `missing_sources`), and `null` for
       a module without a file; `lines` is the file's line count;
-    * a function is `{id, name, arity, doc, from, to}`.
+    * a function is `{id, name, arity, doc, from, to}` (`id` may be `null`, see "Ids").
 
   ### Function ranges
 
@@ -90,7 +90,8 @@ defmodule PropertyDamage.FailureReport.Bundle do
   module, private ones included, and the last definition runs to the line
   before the module's closing `end`. A function the file does not define at
   the top level of its module (one a macro injects, or one generated in a
-  loop) has `null` for both, as has every function of an unreadable file.
+  loop) has `null` for both, as has every function of an
+  unreadable file.
 
   ### Ids
 
@@ -99,7 +100,11 @@ defmodule PropertyDamage.FailureReport.Bundle do
   label that repeats gets an ordinal from the second occurrence (`:2`).
   `step:<target>:<label>`, `entry:<target>:<label>:<n>` and `section:<title>`
   use the text the page prints. `source:<Module>.<function>/<arity>` names a
-  function `PropertyDamage.Docs.fetch/1` lists, private ones included.
+  function `PropertyDamage.Docs.fetch/1` lists, private ones included. A
+  function of a readable file that no definition line of the file names (one
+  a macro injects, such as `timeout/1`) has `null` for its id and is not in
+  `ids`: an id the bundle declares must point at lines a reader can check. A
+  function of a module whose file could not be read keeps its id.
 
   ### Redaction
 
@@ -135,7 +140,12 @@ defmodule PropertyDamage.FailureReport.Bundle do
           Enum.map(context, & &1["id"]) ++
           listing_ids(listing) ++
           Enum.map(section_entries, & &1["id"]) ++
-          for(module <- modules, function <- module["functions"], do: function["id"])
+          for(
+            module <- modules,
+            %{"id" => id} <- module["functions"],
+            is_binary(id),
+            do: id
+          )
       )
 
     %{
@@ -427,7 +437,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
         "lines" => text && line_count(text),
         "source" => source,
         "resolution" => resolution(module, file),
-        "functions" => functions(module, docs.functions, ranges),
+        "functions" => functions(module, docs.functions, ranges, text),
         "redactions" => redactions
       })
 
@@ -468,14 +478,15 @@ defmodule PropertyDamage.FailureReport.Bundle do
     if String.ends_with?(text, "\n"), do: count - 1, else: count
   end
 
-  defp functions(module, docs, ranges) do
+  defp functions(module, docs, ranges, text) do
     docs
     |> Enum.sort_by(fn {{name, arity}, %{line: line}} -> {line, name, arity} end)
     |> Enum.map(fn {{name, arity}, %{doc: doc, line: line}} ->
-      {from, to} = range(Map.get(ranges, {name, arity}), line)
+      range = Map.get(ranges, {name, arity})
+      {from, to} = range(range, line)
 
       %{
-        "id" => "source:#{inspect(module)}.#{name}/#{arity}",
+        "id" => source_id(module, name, arity, range == nil and not named_in?(text, name)),
         "name" => to_string(name),
         "arity" => arity,
         "doc" => doc,
@@ -484,6 +495,21 @@ defmodule PropertyDamage.FailureReport.Bundle do
       }
     end)
   end
+
+  # A function of a readable file that no definition line of the file names
+  # (a macro injected it) has no lines to cite, so it gets no id. An
+  # unreadable file (`nil` text) leaves every function its id.
+  defp named_in?(nil, _name), do: true
+
+  defp named_in?(text, name) do
+    Regex.match?(
+      ~r/^\s*(def|defp|defmacro|defmacrop|defdelegate|defguard|defguardp)\s+#{Regex.escape(to_string(name))}(\(|\s|,|$)/m,
+      text
+    )
+  end
+
+  defp source_id(_module, _name, _arity, true), do: nil
+  defp source_id(module, name, arity, false), do: "source:#{inspect(module)}.#{name}/#{arity}"
 
   # `clauses` is `[{first_line, last_line}]` of the function's clauses. The
   # range starts at the first clause at or after the line the docs report.
