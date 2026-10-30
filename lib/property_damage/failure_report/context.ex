@@ -101,9 +101,10 @@ defmodule PropertyDamage.FailureReport.Context do
 
   defp hang(head, [first | rest]), do: [head <> first | Enum.map(rest, &indent/1)]
 
-  # A blank line stays empty rather than ending in spaces.
-  defp indent(""), do: ""
-  defp indent(line), do: String.duplicate(" ", @text_column) <> line
+  # A blank or whitespace-only line prints empty rather than as indent and spaces.
+  defp indent(line) do
+    if blank?(line), do: "", else: String.duplicate(" ", @text_column) <> line
+  end
 
   # ==========================================================================
   # Meaning and model
