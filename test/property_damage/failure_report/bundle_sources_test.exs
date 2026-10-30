@@ -320,6 +320,18 @@ defmodule PropertyDamage.FailureReport.BundleSourcesTest do
       assert execute["id"] == "source:#{inspect(system.adapter)}.execute/3"
     end
 
+    test "gives the timeout the use macro injects no range and no source id" do
+      system = B.define()
+      bundle = system |> B.run() |> B.build()
+      timeout = bundle |> B.module_entry(system.adapter) |> B.function_entry(:timeout, 1)
+
+      assert timeout["id"] == nil
+      assert timeout["from"] == nil
+      assert timeout["to"] == nil
+      refute "source:#{inspect(system.adapter)}.timeout/1" in bundle["ids"]
+      assert "source:#{inspect(system.adapter)}.execute/3" in bundle["ids"]
+    end
+
     test "lists its callbacks and the timeout the use macro injects, as it lists those of a model" do
       system = B.define()
 

@@ -319,7 +319,10 @@ defmodule PropertyDamage.Test.BundleSupport do
     sections = for %{"id" => id} <- bundle["sections"], do: id
 
     functions =
-      for module <- bundle["modules"], function <- module["functions"], do: function["id"]
+      for module <- bundle["modules"],
+          %{"id" => id} <- module["functions"],
+          is_binary(id),
+          do: id
 
     ids_in(bundle["failure"]) ++
       ids_in(bundle["context"]) ++ ids_in(bundle["listing"]) ++ sections ++ functions
@@ -353,14 +356,44 @@ defmodule PropertyDamage.Test.BundleSupport do
     end
   end
 
-  @doc "The `source:` ids `Docs.fetch/1` implies for `module`."
-  def source_ids(module) do
+  @doc """
+  The `source:` ids `Docs.fetch/1` implies for the module of a bundle entry.
+
+  A function that a macro injects has no line in the file to cite, so it
+  gets no id. This reads the definitions straight from the file with a
+  regex: a function whose name no `def`-like line of a readable file names
+  is left out. When the file cannot be read, every function keeps its id.
+  """
+  def source_ids(%{"module" => name} = entry) do
+    module = Module.concat([name])
+
     case Docs.fetch(module) do
       {:ok, %{functions: functions}} ->
-        for {{name, arity}, _doc} <- functions, do: "source:#{inspect(module)}.#{name}/#{arity}"
+        defined? = defined_in(entry["file"])
+
+        for {{function, arity}, _doc} <- functions,
+            defined?.(function),
+            do: "source:#{inspect(module)}.#{function}/#{arity}"
 
       :unavailable ->
         []
+    end
+  end
+
+  defp defined_in(file) do
+    case is_binary(file) && File.read(file) do
+      {:ok, text} ->
+        fn function ->
+          name = Regex.escape(to_string(function))
+
+          Regex.match?(
+            ~r/^\s*(def|defp|defmacro|defmacrop|defdelegate|defguard|defguardp)\s+#{name}(\(|\s|,|$)/m,
+            text
+          )
+        end
+
+      _unreadable ->
+        fn _function -> true end
     end
   end
 

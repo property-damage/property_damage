@@ -32,7 +32,7 @@ defmodule PropertyDamage.FailureReport.BundleIdsTest do
 
     sources =
       for module <- bundle["modules"],
-          id <- B.source_ids(Module.concat([module["module"]])),
+          id <- B.source_ids(module),
           do: id
 
     B.expected_ids(parsed) ++ sources
