@@ -12,6 +12,16 @@ defmodule PropertyDamage.FailureReport.Bundle.Redaction do
   `password:`, `:admin_password` and `api_key` match, while `keys`,
   `keyword` and `monkey` do not.
 
+  A double-quoted identifier used as a map key reads as a bare identifier:
+  `"api_key" =>` and `"password": ` match, `"keys" =>` does not. The key
+  itself stays as written and is not counted; every other literal on the
+  line is replaced. A bare `"token"` that is not a key names nothing.
+
+  When a line that names a secret ends in `,`, `(`, `[` or `{`, the call
+  continues on the next line, so the next line's double-quoted literals are
+  replaced too. That reach is one line: it chains only when the next line
+  names a secret itself.
+
   ## Limits
 
   The rule reads one line at a time, so it errs on both sides.
@@ -19,8 +29,10 @@ defmodule PropertyDamage.FailureReport.Bundle.Redaction do
     * It replaces a harmless literal on a line that names a secret, such as
       the `"amount"` of `key: "amount"`.
     * It misses a secret that sits in a heredoc, a sigil (`~s(...)`), a
-      charlist (`'...'`), a string that spans lines, or a line that names no
-      secret word.
+      charlist (`'...'`), a string that spans lines, a bare string such as
+      a query string (`"?token=abc"`), a comment, a `?"` character literal,
+      a camelCase name (`apiKey`), or a line that names no secret word and
+      does not follow one that wraps.
 
   Line numbers stay as they were: a replacement never adds or removes a
   newline.
@@ -29,8 +41,10 @@ defmodule PropertyDamage.FailureReport.Bundle.Redaction do
   @words ~w(secret password token key)
   @replacement ~S("[REDACTED]")
   @identifier ~r/\A[A-Za-z_][A-Za-z0-9_]*[?!]?/
+  @bare_identifier ~r/\A[A-Za-z_][A-Za-z0-9_]*[?!]?\z/
 
-  @rule "In a source file that holds an adapter, on every line that names a secret, password, token or key, " <>
+  @rule "In a source file that holds an adapter, on every line that names a secret, password, token or key " <>
+          "(a quoted map key included, kept as written) and on the next line when it ends in a comma or an opening bracket, " <>
           "each double-quoted string literal is replaced by \"[REDACTED]\"; " <>
           "heredocs, sigils and charlists are not scanned."
 
@@ -44,36 +58,70 @@ defmodule PropertyDamage.FailureReport.Bundle.Redaction do
   """
   @spec redact(String.t()) :: {String.t(), non_neg_integer()}
   def redact(text) when is_binary(text) do
-    {lines, {_closer, count}} =
-      text |> String.split("\n") |> Enum.map_reduce({nil, 0}, &redact_line/2)
+    {lines, {_closer, count, _wrapped}} =
+      text |> String.split("\n") |> Enum.map_reduce({nil, 0, false}, &redact_line/2)
 
     {Enum.join(lines, "\n"), count}
   end
 
   # Inside a heredoc the line passes unchanged until the closing delimiter.
-  defp redact_line(line, {nil, count}) do
+  defp redact_line(line, {nil, count, wrapped}) do
     {tokens, closer} = scan(line, [])
+    tokens = mark_keys(tokens)
+    names_secret? = Enum.any?(tokens, &secret_word?/1)
 
-    if Enum.any?(tokens, &secret_word?/1) do
+    if names_secret? or wrapped do
       {replaced, n} = replace_strings(tokens)
-      {replaced, {closer, count + n}}
+      {replaced, {closer, count + n, names_secret? and closer == nil and opens_call?(line)}}
     else
-      {Enum.map_join(tokens, &elem(&1, 1)), {closer, count}}
+      {Enum.map_join(tokens, &elem(&1, 1)), {closer, count, false}}
     end
   end
 
-  defp redact_line(line, {closer, count}) do
+  defp redact_line(line, {closer, count, _wrapped}) do
     if line |> String.trim_leading() |> String.starts_with?(closer),
-      do: {line, {nil, count}},
-      else: {line, {closer, count}}
+      do: {line, {nil, count, false}},
+      else: {line, {closer, count, false}}
   end
 
-  defp secret_word?({:word, word}) do
+  # A line that ends on a separator or an opening bracket continues on the
+  # next line, where a formatter wraps the argument of a call.
+  defp opens_call?(line),
+    do: line |> String.trim_trailing() |> String.ends_with?([",", "(", "[", "{"])
+
+  # A double-quoted identifier used as a map key (`"a" =>` or `"a": `) reads
+  # as the bare identifier. It stays as written and is not counted.
+  defp mark_keys(tokens), do: mark_keys(tokens, [])
+
+  defp mark_keys([], acc), do: Enum.reverse(acc)
+
+  defp mark_keys([{:string, literal} = token | rest], acc) do
+    if key?(literal, rest),
+      do: mark_keys(rest, [{:key, literal} | acc]),
+      else: mark_keys(rest, [token | acc])
+  end
+
+  defp mark_keys([token | rest], acc), do: mark_keys(rest, [token | acc])
+
+  defp key?(literal, rest) do
+    inner = binary_part(literal, 1, byte_size(literal) - 2)
+    after_key = Enum.map_join(rest, &elem(&1, 1))
+
+    Regex.match?(@bare_identifier, inner) and
+      (Regex.match?(~r/\A\s*=>/, after_key) or String.starts_with?(after_key, ": "))
+  end
+
+  defp secret_word?({:word, word}), do: secret_name?(word)
+
+  defp secret_word?({:key, literal}),
+    do: literal |> binary_part(1, byte_size(literal) - 2) |> secret_name?()
+
+  defp secret_word?(_token), do: false
+
+  defp secret_name?(word) do
     last = word |> String.trim_trailing("?") |> String.trim_trailing("!") |> last_part()
     last in @words
   end
-
-  defp secret_word?(_token), do: false
 
   defp last_part(word), do: word |> String.split("_") |> List.last()
 
