@@ -92,10 +92,10 @@ defmodule PropertyDamage.FailureReport.Bundle do
   before the module's closing `end`; a module written as `defmodule M, do: ...`
   has no `end`, so its last definition runs to the last line the module's
   expression reaches. A module whose syntax tree has an unexpected shape gives
-  no ranges, so its functions get a `null` id. A function the file does not define at
-  the top level of its module (one a macro injects, or one generated in a
-  loop) has `null` for both, as has every function of an
-  unreadable file.
+  no ranges, so its functions get a `null` id. A function the file does not
+  define at the top level of its module (one a macro injects, or one
+  generated in a loop) has `null` for both, as has every function of a module
+  whose file is missing, cannot be read or is `"nofile"`.
 
   ### Ids
 
@@ -105,10 +105,10 @@ defmodule PropertyDamage.FailureReport.Bundle do
   `step:<target>:<label>`, `entry:<target>:<label>:<n>` and `section:<title>`
   use the text the page prints. `source:<Module>.<function>/<arity>` names a
   function `PropertyDamage.Docs.fetch/1` lists, private ones included. A
-  function of a readable file that the file does not define at the top level
-  of its module (one a macro injects, such as `timeout/1`) has `null` for its
-  id and is not in `ids`: an id the bundle declares must point at lines a reader can check. A
-  function of a module whose file could not be read keeps its id.
+  function with no range (one a macro injects, such as `timeout/1`, or any
+  function of a module whose file is missing, unreadable or `"nofile"`) has
+  `null` for its id and is not in `ids`: an id the bundle declares must point
+  at lines a reader can check. Its name, arity and doc stay listed.
 
   ### Redaction
 
@@ -464,7 +464,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
         "lines" => text && line_count(text),
         "source" => source,
         "resolution" => resolution(module, file),
-        "functions" => functions(module, docs.functions, ranges, text),
+        "functions" => functions(module, docs.functions, ranges),
         "redactions" => redactions
       })
 
@@ -507,7 +507,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
     if String.ends_with?(text, "\n"), do: count - 1, else: count
   end
 
-  defp functions(module, docs, ranges, text) do
+  defp functions(module, docs, ranges) do
     docs
     |> Enum.sort_by(fn {{name, arity}, %{line: line}} -> {line, name, arity} end)
     |> Enum.map(fn {{name, arity}, %{doc: doc, line: line}} ->
@@ -515,7 +515,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
       {from, to} = range(range, line)
 
       %{
-        "id" => source_id(module, name, arity, text != nil and range == nil),
+        "id" => source_id(module, name, arity, range),
         "name" => to_string(name),
         "arity" => arity,
         "doc" => doc,
@@ -525,11 +525,10 @@ defmodule PropertyDamage.FailureReport.Bundle do
     end)
   end
 
-  # A function of a readable file that the file does not define at the top
-  # level of its module (a macro injected it) has no lines to cite, so it
-  # gets no id. An unreadable file leaves every function its id.
-  defp source_id(_module, _name, _arity, true), do: nil
-  defp source_id(module, name, arity, false), do: "source:#{inspect(module)}.#{name}/#{arity}"
+  # A function without lines to cite has no id: a macro injected it, or the
+  # file of its module is missing, unreadable or "nofile".
+  defp source_id(_module, _name, _arity, nil), do: nil
+  defp source_id(module, name, arity, _range), do: "source:#{inspect(module)}.#{name}/#{arity}"
 
   # `clauses` is `[{first_line, last_line}]` of the function's clauses. The
   # range starts at the first clause at or after the line the docs report.
