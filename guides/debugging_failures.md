@@ -87,8 +87,8 @@ PropertyDamage.run(model: MyApp.Model, targets: targets, only: [replay: "propert
 `IO.inspect(report, pretty: true)` prints the report like this, wrapped in
 `#FailureReport<` and `>`, without color. A failure in a
 `property_damage` ExUnit test prints the same layout through
-`PropertyDamage.ExUnit.format_failure/2`, with ANSI color. The two layouts
-carry the same text; only `format_failure/2` adds color. Plain `inspect(report)`, without
+`PropertyDamage.ExUnit.format_failure/2`, with ANSI color. Both print the
+same text; only `format_failure/2` adds color. Plain `inspect(report)`, without
 `pretty: true`, prints a one-line summary.
 
 ### Banner and seed
@@ -116,7 +116,7 @@ items depend on the failure kind, and each prints under its label:
 
 - The first item names the kind and says what it means. A failure
   kind that blames the test or the framework, not the system, opens with the
-  words "Unable to test the system". Three kinds do: `:adapter_error` (the
+  words "Unable to test the system". Examples are `:adapter_error` (the
   adapter raised or returned an error), `:setup_failed` (a target could not be
   prepared) and `:nemesis_error` (a fault injector failed).
   `PropertyDamage.Failure.Explain.meaning/1` returns the text for each kind.
