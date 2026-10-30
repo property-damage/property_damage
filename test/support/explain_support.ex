@@ -27,7 +27,10 @@ defmodule PropertyDamage.Test.ExplainSupport do
   @prefix "PropertyDamage.Test.Bundle2009281_3459"
 
   @doc "The usage line every usage error prints last."
-  def usage_line, do: "usage: mix pd.explain PAGE [--prompt | --apply FILE|-]"
+  def usage_line,
+    do:
+      "usage: mix pd.explain PAGE " <>
+        "[--prompt | --apply FILE|- | --with CMD [--attempts N] [--timeout T]]"
 
   @doc "The module name of `name` in the system the fixture page describes."
   def mod(name), do: @prefix <> "." <> name
@@ -38,6 +41,9 @@ defmodule PropertyDamage.Test.ExplainSupport do
   @doc "The explanation module; fails the test when it does not exist."
   def explanation,
     do: loaded!(Module.concat(["PropertyDamage", "FailureReport", "Explanation"]))
+
+  @doc "The command runner behind `--with`; fails the test when it does not exist."
+  def runner, do: loaded!(Module.concat(["PropertyDamage", "FailureReport", "CommandRunner"]))
 
   @doc "`Explanation.instructions/0`."
   def instructions do

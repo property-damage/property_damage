@@ -123,31 +123,6 @@ defmodule Mix.Tasks.Pd.ExplainUsageTest do
 
   describe "--with" do
     @tag :tmp_dir
-    test "is parsed and refused with one line and no usage line", %{tmp_dir: dir} do
-      page = E.copy(dir, "page.html")
-      bytes = File.read!(page)
-      before = E.tree(dir)
-      line = "mix pd.explain: --with is not available in this version\n"
-
-      for args <- [
-            [page, "--with", "cat"],
-            ["--with", "cat"],
-            [page, page, "--with", "cat"],
-            [Path.join(dir, "absent.html"), "--with", "cat", "--prompt"],
-            [page, "--with", "cat", "--apply", "-"]
-          ] do
-        out = E.exec(args, input: "")
-
-        assert out.result == :error
-        assert out.stdout == ""
-        assert out.stderr == line
-      end
-
-      assert File.read!(page) == bytes
-      assert E.tree(dir) == before
-    end
-
-    @tag :tmp_dir
     test "an unknown option is reported before it", %{tmp_dir: dir} do
       page = E.copy(dir, "page.html")
 
@@ -185,6 +160,7 @@ defmodule Mix.Tasks.Pd.ExplainUsageTest do
       assert {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} = Code.fetch_docs(mod)
       assert moduledoc =~ "--prompt"
       assert moduledoc =~ "--apply"
+      assert moduledoc =~ "--with"
       assert moduledoc =~ ".explain"
     end
 
