@@ -74,7 +74,8 @@ defmodule PropertyDamage.FailureReport.Bundle do
     * `resolution` is `captured` when `PropertyDamage.Docs.fetch/1` read the
       docs from `__pd_docs__/0`, `beam` when it read the beam's docs chunk,
       and `unavailable` when it found no docs or the module has no source
-      file;
+      file (a module compiled from a string reports the file `"nofile"`,
+      which counts as none);
     * `source` is the full text of `file`, `{"missing": path}` when the file
       cannot be read (the path is also in `missing_sources`), and `null` for
       a module without a file; `lines` is the file's line count;
@@ -101,9 +102,9 @@ defmodule PropertyDamage.FailureReport.Bundle do
   `step:<target>:<label>`, `entry:<target>:<label>:<n>` and `section:<title>`
   use the text the page prints. `source:<Module>.<function>/<arity>` names a
   function `PropertyDamage.Docs.fetch/1` lists, private ones included. A
-  function of a readable file that no definition line of the file names (one
-  a macro injects, such as `timeout/1`) has `null` for its id and is not in
-  `ids`: an id the bundle declares must point at lines a reader can check. A
+  function of a readable file that the file does not define at the top level
+  of its module (one a macro injects, such as `timeout/1`) has `null` for its
+  id and is not in `ids`: an id the bundle declares must point at lines a reader can check. A
   function of a module whose file could not be read keeps its id.
 
   ### Redaction
@@ -441,6 +442,10 @@ defmodule PropertyDamage.FailureReport.Bundle do
     %{entry: entry, missing: []}
   end
 
+  # A module compiled from a string reports the file "nofile": no file.
+  defp entry_from_docs(base, module, adapter_files, %{file: "nofile"} = docs),
+    do: entry_from_docs(base, module, adapter_files, %{docs | file: nil})
+
   defp entry_from_docs(base, module, adapter_files, %{file: file} = docs) do
     {text, missing} = read(file)
     {source, redactions} = source_of(text, file, adapter_files)
@@ -504,7 +509,7 @@ defmodule PropertyDamage.FailureReport.Bundle do
       {from, to} = range(range, line)
 
       %{
-        "id" => source_id(module, name, arity, range == nil and not named_in?(text, name)),
+        "id" => source_id(module, name, arity, text != nil and range == nil),
         "name" => to_string(name),
         "arity" => arity,
         "doc" => doc,
@@ -514,18 +519,9 @@ defmodule PropertyDamage.FailureReport.Bundle do
     end)
   end
 
-  # A function of a readable file that no definition line of the file names
-  # (a macro injected it) has no lines to cite, so it gets no id. An
-  # unreadable file (`nil` text) leaves every function its id.
-  defp named_in?(nil, _name), do: true
-
-  defp named_in?(text, name) do
-    Regex.match?(
-      ~r/^\s*(def|defp|defmacro|defmacrop|defdelegate|defguard|defguardp)\s+#{Regex.escape(to_string(name))}(\(|\s|,|$)/m,
-      text
-    )
-  end
-
+  # A function of a readable file that the file does not define at the top
+  # level of its module (a macro injected it) has no lines to cite, so it
+  # gets no id. An unreadable file leaves every function its id.
   defp source_id(_module, _name, _arity, true), do: nil
   defp source_id(module, name, arity, false), do: "source:#{inspect(module)}.#{name}/#{arity}"
 
