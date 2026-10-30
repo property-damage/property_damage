@@ -65,13 +65,14 @@ defmodule PropertyDamage.Log.SetupLogTest do
   end
 
   describe "the Setup section" do
-    test "sits right after Failure and before Minimal Reproduction, once, on every kind" do
+    test "sits after Failure and What this checks, before Minimal Reproduction, once, on every kind" do
       for report <- reports(setup_log: F.setup_lines()) do
         text = F.plain(report)
         failure = heading_index(text, "Failure")
         setup = heading_index(text, "Setup")
 
-        assert setup == failure + 1
+        assert heading_index(text, "What this checks") == failure + 1
+        assert setup == failure + 2
         assert heading_index(text, "Minimal Reproduction") == setup + 1
         assert Enum.count(headings(text), &String.starts_with?(&1, "Setup")) == 1
         assert length(String.split(text, "seeded 3 accounts")) == 2
@@ -117,7 +118,7 @@ defmodule PropertyDamage.Log.SetupLogTest do
         markdown = F.markdown(report)
 
         assert F.fenced_body(markdown, "Setup") == F.trimmed(F.section(plain, "Setup"))
-        assert heading_index(markdown, "Setup") == heading_index(markdown, "Failure") + 1
+        assert heading_index(markdown, "Setup") == heading_index(markdown, "Failure") + 2
       end
     end
 
@@ -174,7 +175,7 @@ defmodule PropertyDamage.Log.SetupLogTest do
                )
 
       text = F.plain(replayed)
-      assert heading_index(text, "Setup") == heading_index(text, "Failure") + 1
+      assert heading_index(text, "Setup") == heading_index(text, "Failure") + 2
       assert text =~ "seeded 3 accounts"
     end
   end

@@ -928,11 +928,14 @@ defmodule PropertyDamage.Scheduler do
   # A recorded check failure as a `%Failure{}`; an `@eventually` window that
   # ended early keeps its poll context (DR-052).
   defp recorded_failure(%{context: context} = recorded) when is_map(context) do
-    failure = Failure.check_failed(recorded.check_name, recorded.reason)
+    failure = recorded_check_failed(recorded)
     %{failure | type: %{failure.type | context: context}}
   end
 
-  defp recorded_failure(recorded), do: Failure.check_failed(recorded.check_name, recorded.reason)
+  defp recorded_failure(recorded), do: recorded_check_failed(recorded)
+
+  defp recorded_check_failed(recorded),
+    do: Failure.check_failed(recorded.check_name, recorded.reason, recorded[:projection])
 
   # Whether `finalize_failure/3` reports a check `check_mode: :record`
   # recorded.

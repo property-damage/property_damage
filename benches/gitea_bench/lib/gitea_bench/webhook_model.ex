@@ -14,7 +14,7 @@ defmodule GiteaBench.WebhookModel do
   dedicated gitea 1.24 instance (`:webhook_url`).
   """
 
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias GiteaBench.Commands.{
     AddLabelToIssue,

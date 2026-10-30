@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Docs and source path of a declared module (DR-058).** A model, projection or
+  command declared with `use` keeps its own docs and the path of its source
+  file, and `PropertyDamage.Docs.fetch/1` returns them. This also works for a
+  module compiled from a script, where `Code.fetch_docs/1` finds nothing.
+  Private functions are included; macros and `__`-prefixed names are not.
+  A `def` or `defp` written before `use PropertyDamage.Model`,
+  `use PropertyDamage.Model.Projection` or `use PropertyDamage.Command` is now
+  a compile error, because its docs could not be captured. So is one that
+  another `use` placed above defines, such as the defaults of `use GenServer`,
+  even when the module overrides that function later: move the
+  PropertyDamage `use` above it. A macro, or a function whose name
+  starts with `__`, may come first. The captured moduledoc is the one set by
+  the end of the module body or by a `@before_compile` registered before
+  `use`; a `@before_compile` registered after `use` that sets only
+  `@moduledoc` is not seen. To capture it, set `@moduledoc` in the module
+  body, or register that callback before `use`.
+- **The meaning of a failure kind (DR-058).**
+  `PropertyDamage.Failure.Explain.meaning/1` returns a plain-words text for
+  each kind of `PropertyDamage.Failure.kind()` and raises
+  `FunctionClauseError` for any other value.
+- **The projection of a failed check (DR-058).** A `:check_failed` or
+  `:poll_timeout` failure records the projection module that defines the
+  check, in the new `projection` field of `PropertyDamage.Failure.Check`. The
+  Failure section of the printed report shows it as a `Projection` field after
+  `Check`, and the JSON report's `failure` object carries it as `projection`.
+  `Failure.check_failed/3` takes it as an optional third argument. Report
+  files saved before the field existed load with `projection` as `nil`.
+- **"What this checks" in the failure report (DR-058).** The printed report
+  and the markdown gain a second section, right after Failure, that prints for
+  the failure at hand the meaning of its kind and the docs of the model, the
+  check or observation, its projection, the expansion path a target took and
+  the command. It names what is missing with the line that fixes it, such as
+  `(no description: add @doc to MyApp.Balances.never_negative/2)`. The HTML
+  page shows the section open, right after the failure summary. The JSON
+  report carries the items under `what_this_checks`. Each choice that
+  `PropertyDamage.Expansion` records gains a `function` field, the name of the
+  function `expansions/0` pairs with the root; report files saved before the
+  field existed load with it as `nil`.
+- **`use PropertyDamage.Model` (DR-058).** A model is now declared with
+  `use PropertyDamage.Model`, which sets the `PropertyDamage.Model`
+  behaviour. The macro takes no options and raises `ArgumentError` if given
+  one. `mix pd.gen.model` and `mix pd.scaffold` emit it. A module that
+  declares `@behaviour PropertyDamage.Model` directly still compiles and
+  runs.
 - **The failure report as an HTML page (DR-057).**
   `PropertyDamage.FailureReport.HTML` renders a report as one self-contained
   page that holds the terminal text, so the page and the terminal cannot
@@ -530,9 +574,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `expansion_command/1`. The printed report ends with the reproduction command,
   "Regenerate the failing variant:" and "Replay the shrunk failure:", whose
   `only: [replay: path]` call is the last line.
+- **`doc:` on an expansion entry (DR-058).** An entry of an `expansions/0`
+  function can be `{list, doc: "text"}` or `{list, weight: n, doc: "text"}`,
+  where the `doc:` describes the whole route. Every choice in
+  `PropertyDamage.Expansion.choice()` has the new key `doc`, the doc of the
+  entry the target ran (`nil` when the entry has none or no listed entry ran).
+  The doc stays with the entry through shrinking and replay. Any other option
+  is an `ArgumentError` that names `weight:` and `doc:`; `doc:` on a leaf is
+  warned about and ignored. Report files saved before the key load with `doc`
+  as `nil`.
 
 ### Changed
 
+- **Declare every model with `use PropertyDamage.Model` (DR-058).** Every
+  model in this repo is now declared with it. A model that declares
+  `@behaviour PropertyDamage.Model` directly still compiles and runs, and its
+  docs are read from the docs chunk when the module has one. A module compiled
+  from a script has no docs chunk, so the report prints a gap line for it until
+  you switch to `use`.
+- **The meaning of `poll_error` (DR-058).** `Failure.Explain.meaning/1` now says
+  that an `@eventually` check never reported: the executor's wait for the
+  check's poller timed out, so the condition was neither confirmed nor
+  refuted. A raising predicate reports as `check_failed` since DR-052, so the
+  earlier text, which described a raising predicate, no longer fit.
 - **`%PropertyDamage.Runtime{}` gains `log` (DR-054, amending DR-027).** It
   holds the function that writes a log line under the command, which
   `PropertyDamage.Runtime.log/3` calls; it defaults to `nil` on a hand-built

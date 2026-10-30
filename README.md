@@ -160,7 +160,7 @@ selection weights, `when:` preconditions, and `overrides:` generator overrides:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   @impl true
   def commands do
@@ -538,7 +538,7 @@ PropertyDamage.run(
 
 ```elixir
 defmodule MyModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   # Required
   def commands, do: [{CommandModule, weight: N}, ...]

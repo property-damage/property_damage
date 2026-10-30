@@ -625,8 +625,8 @@ defmodule PropertyDamage.Replay do
     end
   end
 
-  defp recorded_check(%{check_name: name, reason: reason}),
-    do: normalize_result(Failure.check_failed(name, reason))
+  defp recorded_check(%{check_name: name, reason: reason} = recorded),
+    do: normalize_result(Failure.check_failed(name, reason, recorded[:projection]))
 
   defp step_context(session) do
     %Stepping.Context{

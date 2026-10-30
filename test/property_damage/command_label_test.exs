@@ -71,8 +71,8 @@ defmodule PropertyDamage.CommandLabelTest do
 
   defmodule LabelModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Tick, Divide]

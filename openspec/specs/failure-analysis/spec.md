@@ -4,7 +4,7 @@
 
 Failure analysis provides intelligent post-mortem tooling for PropertyDamage test failures. It fingerprints failures for comparison, clusters similar failures to surface root causes, verifies fixes with seed variations, classifies error origins (SUT vs test code), suggests missing invariants, generates structured reports, compares passing/failing traces, and replays production event logs through model projections for incident analysis.
 
-Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-057 (HTML Failure Report)
+Reference DRs: DR-049 (Expansions, Roots That Run as Several Commands), DR-050 (Shrinking Along the Expansion Axis, and the Replay Artifact), DR-054 (Log Lines for the Failure Report), DR-055 (Failure Report Layout), DR-056 (One Report Layout, Two Renderers), DR-057 (HTML Failure Report), DR-058 (Failure Report Context and Explanations)
 
 ## Requirements
 
@@ -32,6 +32,53 @@ and `partial_events/1` accessors.
 
 - **WHEN** a `FailureReport` is built from a `%Failure{}` reason
 - **THEN** `FailureReport.failure_type/1` SHALL return the kind, `check_name/1` the name, `failure_message/1` a human-readable description, and `idempotency_violation/1` / `poll_timeout_info/1` the relevant payload; all derived from `report.failure_reason` rather than stored as denormalized fields
+
+### Requirement: A Failed Check Records Its Projection (DR-058)
+
+A failure of kind `:check_failed` or `:poll_timeout` SHALL record the projection
+module that defines the failed check, in the `projection` field of its
+`Failure.Check`. Every other kind, and a failure rebuilt from a signature, SHALL
+leave `projection` as `nil`. The printed Failure section SHALL show a
+`Projection` field directly after the `Check` field when `projection` is set.
+The JSON report's `failure` object SHALL carry a `projection` key beside
+`check_name`: the module name when set, `null` for a check failure without one,
+and no key when the failure is not a check failure. A failure report file saved
+before the field existed SHALL load with `projection` as `nil`.
+
+#### Scenario: Two projections share a check name
+
+- **GIVEN** projections `Alpha` and `Beta` that both define a check named `:balance_is_sane`
+- **WHEN** the check of `Beta` fails
+- **THEN** the failure's `projection` SHALL be `Beta`
+- **AND** the Failure section SHALL show `Projection` with the value `Beta` after `Check`
+- **AND** the JSON report's `failure.projection` SHALL be `"Beta"`
+
+#### Scenario: A check failure without a projection
+
+- **WHEN** a report holds a check failure whose `projection` is `nil`
+- **THEN** the Failure section SHALL show no `Projection` field
+- **AND** the JSON report's `failure.projection` SHALL be `null`
+
+#### Scenario: A report file saved before the field existed
+
+- **WHEN** a failure report file holds a `Failure.Check` without a `projection` key
+- **THEN** loading it SHALL succeed and the loaded failure's `projection` SHALL be `nil`
+
+### Requirement: Every Failure Kind Has a Meaning (DR-058)
+
+`PropertyDamage.Failure.Explain.meaning/1` SHALL return a text for every kind of
+the `PropertyDamage.Failure.kind()` type, in plain words, as a string. It SHALL
+raise `FunctionClauseError` for a value that is not a kind.
+
+#### Scenario: A kind has a meaning
+
+- **WHEN** `Failure.Explain.meaning/1` is called with any kind of the `Failure.kind()` type
+- **THEN** it SHALL return a non-empty string
+
+#### Scenario: A value that is not a kind
+
+- **WHEN** `Failure.Explain.meaning/1` is called with an atom that is not a kind
+- **THEN** it SHALL raise `FunctionClauseError`
 
 ### Requirement: Failure Fingerprinting
 
@@ -257,9 +304,9 @@ The system SHALL produce structured failure reports containing location (run num
 - **AND** `FailureReport.event_entries_at/2` SHALL delegate to `RunTrace.event_entries_at/2`, returning the log entries for a command addressed by either its flattened index or its `%Sequence.Position{}`
 - **AND** `steps/1` / `failure_step/1` SHALL be the ONLY structural accessors for the failing command and its entries: the report SHALL NOT carry materialized `command_at_failure` / `events_at_failure` fields (removed), and every renderer, exporter, and forensic analyzer SHALL obtain the failing command/events via the step interface (which resolves them branch-aware) rather than by re-walking `shrunk_sequence` / `event_log` / `failed_at_index`; in particular the event timeline's per-command provenance view (source badges + branch) SHALL be served from `steps/1` `entries` rather than a private `event_log` walk
 
-### Requirement: Printed Failure Report Layout (DR-055, DR-056)
+### Requirement: Printed Failure Report Layout (DR-055, DR-056, DR-058)
 
-The `:terminal` and `:markdown` formats SHALL print one layout, built once from the report as plain data and printed by one renderer per format. The terminal report SHALL print a banner (`BUG DETECTED!`, or `TEST CODE ERROR` for a failure in test code) whose lines all have one width with and without color, then `Seed: <seed>`, then the sections `Failure`, `Minimal Reproduction (N roots)`, `Projections at <label>` (only when a compared side has state) and `Reproduction`, in that order. It SHALL NOT print Run Number, Command Index, Timestamp, State Transition, Event Log, Boundary Comparisons, Shrinking Statistics or Original Sequence. The markdown report SHALL open with `# BUG DETECTED!` or `# TEST CODE ERROR`, then the seed, then the terminal's `## ` headings in the same order, each section's body in one fenced block whose text equals the terminal body without color (`diff` for Projections, `elixir` for Reproduction). `Formatter.format/3` SHALL read `:color` for the terminal format and no other layout option. The `:json` format SHALL keep every field it carried before this layout and SHALL gain `reference_trace` and `reference_projections` for a comparison failure (DR-055) and the `logs` key (DR-054); the `:compact` format SHALL NOT change.
+The `:terminal` and `:markdown` formats SHALL print one layout, built once from the report as plain data and printed by one renderer per format. The terminal report SHALL print a banner (`BUG DETECTED!`, or `TEST CODE ERROR` for a failure in test code) whose lines all have one width with and without color, then `Seed: <seed>`, then the sections `Failure`, `What this checks`, `Minimal Reproduction (N roots)`, `Projections at <label>` (only when a compared side has state) and `Reproduction`, in that order. It SHALL NOT print Run Number, Command Index, Timestamp, State Transition, Event Log, Boundary Comparisons, Shrinking Statistics or Original Sequence. The markdown report SHALL open with `# BUG DETECTED!` or `# TEST CODE ERROR`, then the seed, then the terminal's `## ` headings in the same order, each section's body in one fenced block whose text equals the terminal body without color (`diff` for Projections, `elixir` for Reproduction). `Formatter.format/3` SHALL read `:color` for the terminal format and no other layout option. The `:json` format SHALL keep every field it carried before this layout and SHALL gain `reference_trace` and `reference_projections` for a comparison failure (DR-055) and the `logs` key (DR-054); the `:compact` format SHALL NOT change.
 
 #### Scenario: One label per step in every section
 
@@ -299,6 +346,42 @@ The `:terminal` and `:markdown` formats SHALL print one layout, built once from 
 - **WHEN** the report's `targets` is not empty
 - **THEN** Reproduction SHALL print `targets = [...]` once and every call SHALL name `targets: targets`
 - **AND** when a target holds a pid, a reference, a port or a function, also inside a list or a tuple, a line under the binding SHALL name each place by its path (`config.server`, a list or tuple element by its index) and say to rebuild the list as the test does
+
+### Requirement: The "What this checks" Section of the Printed Report (DR-058)
+
+The printed failure report SHALL carry a section titled `What this checks` right after `Failure`, in the terminal text, the markdown and the HTML page. The section SHALL print, for the failure at hand, the meaning of its kind (`PropertyDamage.Failure.Explain.meaning/1`) and the docs of the model, of the check or observation that failed, of that check's projection, of the expansion path each listed target took and of the command, and SHALL name what is missing with the line that fixes it. The items SHALL print in this order: the meaning, `Model`, the subject of the kind with its supporting items, one `Path` item for each root a listed target ran as a listed expansion entry (the reference first), and `Command`.
+
+The subject is `Observation` for `:diverged` and `:did_not_converge` (then `Relation` when `using:` names a function of a module, one `Also differed` per further observation that disagreed, and `Projection`); `Check` for `:check_failed` and `:poll_timeout` (then `Projection`, and `Property` when the invariant has a description); `Projection` for `:projection_violation`; and `Command` for the execution kinds and for `:setup_failed` when a setup command failed. Every other kind has no subject. `Command` SHALL print last, from the marked step of the listing, for every kind that has no `Command` as its subject, and SHALL NOT print when no step is marked.
+
+A subject SHALL print its whole doc and any other item the text up to the first blank line, both as written and never parsed or re-wrapped. Docs SHALL come from `PropertyDamage.Docs.fetch/1`. An item whose doc is missing SHALL print a line that starts with `(no description: ` and names the fix: the `@doc` or `@moduledoc` to add, the `false` doc to replace, the `use` line that lets PropertyDamage read the module's docs, or the `doc:` to add to the numbered entry that the model's expansion function returns for the root.
+
+Each item SHALL print its label at column 2 and its name (a module, `Module.function/arity`, or for `Path` the target, the root and the step labels) on the label line at column 16, with its text on the lines below at column 16. A label of 14 characters or more SHALL stand alone on its line, and the text of an item without a name SHALL start on the label line. A blank line inside a doc SHALL print empty. Items SHALL be one empty line apart, and text written by PropertyDamage SHALL wrap at word boundaries within 80 columns. The three text renderings SHALL carry the same section body, byte for byte. The HTML page SHALL show the section open, as preformatted text, right after the failure summary. The `:json` format SHALL carry the items under `what_this_checks`. The section SHALL NOT raise for a projection without `__checks__/0` or `__compares__/0`, for a module that is not loaded, or for a failure that names no projection: the item is left out or prints its gap line.
+
+#### Scenario: A failed check prints its docs after the meaning
+
+- **GIVEN** a failed check whose model, projection, check function and command all carry docs
+- **WHEN** the report is printed
+- **THEN** the section SHALL be the second section and SHALL hold the items `Check failed`, `Model`, `Check`, `Projection`, `Property` (when the invariant has a description) and `Command`, in that order
+- **AND** `Check` SHALL print the check function's whole doc and `Model`, `Projection` and `Command` the text up to the first blank line of theirs
+
+#### Scenario: A missing doc names the fix
+
+- **GIVEN** a check function with no `@doc` and a command module with `@moduledoc false`
+- **WHEN** the report is printed
+- **THEN** `Check` SHALL print `(no description: add @doc to <Module.function/arity>)`
+- **AND** `Command` SHALL print `(no description: <Module> has @moduledoc false; replace it with a @moduledoc)`
+
+#### Scenario: A target that ran an expansion entry prints its path
+
+- **GIVEN** a comparison failure in which each target ran a root as a listed expansion entry
+- **WHEN** the report is printed
+- **THEN** a `Path` item for each target, the reference first, SHALL be named `"<target>" ran <Root> as steps [i.j],[i.k]` and SHALL print the entry's `doc:`, or when the entry has none, the line that names the entry's number, the model function that returned it and the root
+- **AND** a root that a target ran as itself in place of an entry SHALL have no `Path` item
+
+#### Scenario: A kind without a subject prints the meaning and the model
+
+- **WHEN** the report's kind is `:latency_exceeded`
+- **THEN** the section SHALL hold the meaning and `Model` and no `Command`
 
 ### Requirement: Failure Report Replay Fields and Footer (DR-050)
 

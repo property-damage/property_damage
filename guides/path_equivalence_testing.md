@@ -135,7 +135,7 @@ end
 
 defmodule Counter.Model do
   @moduledoc "`Add n` may run as itself or as `Add 1` then `Add (n - 1)`."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias Counter.Add
 
@@ -254,6 +254,33 @@ Reference    "left"  0
 Variant      "right"  1
 Compared     using ==, still differing after 101 ms (bound 100 ms)
 
+## What this checks
+
+  Diverged      Two targets ran the same plan separately and disagreed. They may
+                have taken different but equivalent paths, and an observation
+                settled to different values in the reference target and in the
+                variant target. Either the system treats equivalent histories
+                differently, or the test's claim that the paths are equivalent
+                is wrong.
+
+  Model         Counter.Model
+                `Add n` may run as itself or as `Add 1` then `Add (n - 1)`.
+
+  Observation   Counter.Projection.total/2
+                (no description: add @doc to Counter.Projection.total/2)
+
+  Projection    Counter.Projection
+                Folds the reported total and compares it across targets.
+
+  Path          "left" ran Add as steps [0]
+                (no description: add doc: "..." to the first entry that Counter.Model.add_paths/2 returns for Add)
+
+  Path          "right" ran Add as steps [0.0],[0.1]
+                (no description: add doc: "..." to the second entry that Counter.Model.add_paths/2 returns for Add)
+
+  Command       Counter.Add
+                Add `amount` to the counter.
+
 ## Minimal Reproduction (1 root)
 
 Reference: target "left"
@@ -293,6 +320,12 @@ Read it from the top. The Failure section says the observation
 read 0 and the variant `"right"` read 1. `Compared` names the relation (`==`)
 and the wait: the comparison waited 101 ms against a bound of 100 ms before it
 called the difference real.
+
+The "What this checks" section prints the docs of the model, the observation,
+its projection and the command. Its `Path` items say how each target ran the
+root (here `"left"` as step `[0]`, `"right"` as steps `[0.0],[0.1]`) and print
+the `doc:` of the entry that target ran. The `(no description: ...)` lines
+here say to add that `doc:` to the entry.
 
 Minimal Reproduction lists both sides of the comparison, each under its own
 header, and marks the diverging root `►` in both. The reference ran the root
@@ -366,8 +399,10 @@ def expansions, do: [{Add, &add_paths/2}]
 
 The function takes the root as generated and the target's simulated state at
 that root, and returns a list of **entries**. An entry is a sequence, or
-`{sequence, weight: n}` with a positive integer weight (default 1). Entries are
-named after their index in the returned list: `Add[0]`, `Add[1]`.
+`{sequence, weight: n, doc: "..."}`: `weight:` is a positive integer (default 1)
+and `doc:` is a string that describes the whole route. The failure report shows
+it in the Path item, and a `doc:` on a leaf is ignored with a warning. Entries
+are named after their index in the returned list: `Add[0]`, `Add[1]`.
 
 **The contract.** Every entry must mean the same as the root once the root is
 done, under every `@compare` observation of the model. The framework cannot

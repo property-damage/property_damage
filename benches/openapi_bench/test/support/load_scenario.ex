@@ -80,7 +80,7 @@ defmodule OpenapiBench.LoadModel do
   is `OpenapiBench.LoadConsistency` (read-your-own-write, robust to the shared,
   never-reset SUT a load test drives).
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias OpenapiBench.Generated.Commands.{GetValue, PutValue}
 

@@ -182,7 +182,7 @@ defmodule PropertyDamage.SuggestionsFixtures do
 
   defmodule FullModel do
     @moduledoc "Commands resolve to events; no existing check projections."
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.SuggestionsFixtures.{Commands, Projections}
 
@@ -205,7 +205,7 @@ defmodule PropertyDamage.SuggestionsFixtures do
 
   defmodule CheckedModel do
     @moduledoc "Same commands as FullModel, but with an existing balance check."
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.SuggestionsFixtures.{Commands, Projections}
 
@@ -228,7 +228,7 @@ defmodule PropertyDamage.SuggestionsFixtures do
 
   defmodule NoEventsModel do
     @moduledoc "A command that resolves to no events at all."
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.SuggestionsFixtures.{Commands, Projections}
 

@@ -194,7 +194,7 @@ defmodule CachexBench.ReplayTest do
     @moduledoc false
     # The bench model, but the rewrite of an `Incr` increments a key that
     # holds a function: a value no replay artifact can hold.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: CachexBench.Model.commands()

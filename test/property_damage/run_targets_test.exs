@@ -534,7 +534,7 @@ defmodule PropertyDamage.RunTargetsTest do
 
   defmodule SinkModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Step]

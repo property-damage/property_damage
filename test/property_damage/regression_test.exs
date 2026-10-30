@@ -29,7 +29,7 @@ defmodule PropertyDamage.RegressionTest do
   end
 
   defmodule TestModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do

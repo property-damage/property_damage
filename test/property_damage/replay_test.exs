@@ -55,7 +55,7 @@ defmodule PropertyDamage.ReplayTest do
 
   defmodule CounterModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Bump]
@@ -90,7 +90,7 @@ defmodule PropertyDamage.ReplayTest do
   # The counter with one setup command and one teardown command.
   defmodule LifecycleCounterModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.ReplayTest.{Bump, Counter, Prepare, Release}
 

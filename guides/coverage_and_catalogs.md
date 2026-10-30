@@ -87,8 +87,8 @@ defmodule Bank.Ledger do
 end
 
 defmodule Bank.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
   alias Bank.Commands.{Deposit, Withdraw}
   alias Bank.Events.{Deposited, Withdrawn, WithdrawRejected}
 
@@ -262,7 +262,7 @@ defmodule Bank.Observed do
 end
 
 defmodule Bank.SplitModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
   alias Bank.Commands.{Deposit, Withdraw}
 
   @impl true

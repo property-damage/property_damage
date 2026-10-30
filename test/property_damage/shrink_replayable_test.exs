@@ -36,7 +36,7 @@ defmodule PropertyDamage.ShrinkReplayableTest.Fixtures do
 
   defmodule Model do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ShrinkAxis, as: A
 
@@ -56,7 +56,7 @@ defmodule PropertyDamage.ShrinkReplayableTest.Fixtures do
     @moduledoc false
     # Without expansions: every Open mints an account and every Add credits
     # the last one opened.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.ShrinkAxis, as: A
 

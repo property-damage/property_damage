@@ -28,7 +28,7 @@ defmodule PropertyDamage.RunTraceStateTimelineTest do
 
   defmodule Model do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Cmd]
     @impl true

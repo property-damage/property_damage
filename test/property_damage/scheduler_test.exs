@@ -58,7 +58,7 @@ defmodule PropertyDamage.SchedulerTest do
 
   defmodule UnobservedModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Step]

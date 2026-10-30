@@ -157,8 +157,8 @@ defmodule Warehouse.State do
 end
 
 defmodule Warehouse.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Warehouse.Commands.{ShipWidget, AwaitWidget}
   alias Warehouse.Events.{WidgetShipped, WidgetArrived}
@@ -816,7 +816,7 @@ Declare which events can be injected in your model:
 
 ```elixir
 defmodule MyTest.Model do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   def injectable_events do
     [PaymentApproved, PaymentDeclined]

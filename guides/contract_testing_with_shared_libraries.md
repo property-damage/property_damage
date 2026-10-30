@@ -362,7 +362,7 @@ end
 
 # lib/order_model.ex
 defmodule OrderModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias OrderModel.Commands.CreateOrder
   alias OrderModel.Projections.{OrderState, OrderInvariants}

@@ -1320,7 +1320,7 @@ defmodule PropertyDamage.ShrinkerTest do
   end
 
   defmodule DivideModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Divide]
@@ -1432,7 +1432,7 @@ defmodule PropertyDamage.ShrinkerTest do
   end
 
   defmodule GateModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Gate, {Pass, when: &(&1.width > 0)}]

@@ -25,8 +25,8 @@ defmodule PropertyDamage.CaptureInjectorsTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Cmd]
     @impl true

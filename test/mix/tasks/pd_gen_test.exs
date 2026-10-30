@@ -193,7 +193,8 @@ defmodule Mix.Tasks.PdGenTest do
       assert File.exists?(path)
 
       content = File.read!(path)
-      assert content =~ "@behaviour PropertyDamage.Model"
+      assert content =~ "use PropertyDamage.Model"
+      refute content =~ "@behaviour #{inspect(PropertyDamage.Model)}"
       assert content =~ "def commands"
       assert content =~ "def command_sequence_projection"
       assert content =~ "def check_projections"

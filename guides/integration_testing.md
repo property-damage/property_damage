@@ -467,8 +467,8 @@ defmodule Shared.Notes do
 end
 
 defmodule Shared.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Shared.Commands.{CreateNote, Remove}
   alias Shared.Events.{NoteCreated, NotesRemoved}

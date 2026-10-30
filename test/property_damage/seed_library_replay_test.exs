@@ -47,7 +47,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     def commands, do: [Cmd]
     def command_sequence_projection, do: State
     def check_projections, do: [Switchable]
@@ -71,7 +71,7 @@ defmodule PropertyDamage.SeedLibraryReplayTest do
 
   # Cmd roots with one setup command and one teardown command.
   defmodule FixtureModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     alias PropertyDamage.Test.SetupCommands.{Cleanup, CreateUser}
     def commands, do: [Cmd]
     def command_sequence_projection, do: State

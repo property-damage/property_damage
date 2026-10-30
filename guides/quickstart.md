@@ -99,7 +99,7 @@ end
 
 # --- Model ---
 defmodule AccountModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   @impl true
   def commands, do: [CreateAccount]
@@ -131,6 +131,12 @@ defmodule AccountAdapter do
   end
 end
 ```
+
+`use PropertyDamage.Model` comes before any definition in the module: every
+`def` and `defp` comes after it. It also comes before any other `use` that
+defines functions, such as `use GenServer`; a module that breaks either rule
+does not compile. The same holds for `use PropertyDamage.Model.Projection` and
+`use PropertyDamage.Command`.
 
 Run it:
 

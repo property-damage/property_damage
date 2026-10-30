@@ -89,7 +89,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
 
   defmodule IdempotentModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [NonIdempotentViaSpec]
     @impl true
@@ -143,7 +143,7 @@ defmodule PropertyDamage.CommandSpecSurfaceTest do
 
   defmodule AcceptableModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [AcceptableRetryViaSpec]
     @impl true

@@ -183,8 +183,8 @@ defmodule Cache.State do
 end
 
 defmodule Cache.ChaosModel do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Cache.Commands.{SetKey, GetKey}
   alias Cache.Events.{KeySet, KeyRead}
@@ -318,7 +318,7 @@ Extend your model with nemesis commands:
 
 ```elixir
 defmodule MyApp.ChaosModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   # Regular commands
   alias MyApp.Commands.{CreateOrder, ProcessOrder, CancelOrder}
@@ -496,7 +496,7 @@ end
 
 ```elixir
 defmodule TravelBooking.ChaosModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   # Regular commands
   alias TravelBooking.Commands.{CreateBooking, AddFlight, AddHotel, ConfirmBooking}

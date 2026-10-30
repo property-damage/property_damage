@@ -44,12 +44,18 @@ defmodule MyApp.Commands.CreateOrder do
 end
 ```
 
+Rule: `use PropertyDamage.Model` comes before any definition in the module: every
+`def` and `defp` comes after it. It also comes before any other `use` that
+defines functions, such as `use GenServer`; a module that breaks either rule
+does not compile. The same holds for `use PropertyDamage.Model.Projection` and
+`use PropertyDamage.Command`.
+
 ## Model Template
 
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   @impl true
   def commands do
@@ -147,7 +153,7 @@ end
 | Rule | Behavior |
 |------|----------|
 | Contract | every expansion means the same as the root once it is done, under every `@compare` value of the model |
-| Entry | a sequence, or `{sequence, weight: n}`; default weight 1; list order is the shrink preference |
+| Entry | a sequence, or `{sequence, weight: n, doc: "..."}`; default weight 1; `doc:` describes the whole route and shows in the failure report's Path item (ignored with a warning on a leaf); list order is the shrink preference |
 | Identity | the received root struct alone: `[root]` or `{[root], weight: n}`; nothing is chosen that is not listed |
 | `overrides:` | a map, `fn state -> map end`, or (in a sequence only) `fn state, prior_leaves -> map end` |
 | `target expansion:` | `:random` (default), `:identity` or `:reference` (copy the first target, leaf for leaf; error on the first target) |

@@ -42,7 +42,7 @@ defmodule PropertyDamage.IExTest do
 
   defmodule EmptyModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: []

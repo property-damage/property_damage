@@ -25,7 +25,7 @@ defmodule PropertyDamage.ReplayArtifactKeyRefusalTest.Fixtures do
       ] do
     defmodule Module.concat(__MODULE__, name) do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       alias PropertyDamage.ReplayArtifactKeyRefusalTest.Fixtures
       alias PropertyDamage.Test.ReplayFixtures, as: R

@@ -242,7 +242,7 @@ sequence state, the check projections, and the simulator.
 
 ```elixir
 defmodule Demo.Model do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias Demo.Commands.{OpenAccount, Credit, Debit}
 
@@ -570,7 +570,7 @@ defmodule Demo.ChaosBank do
 end
 
 defmodule Demo.ChaosModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias Demo.Commands.{OpenAccount, Credit, Debit}
   alias PropertyDamage.Nemesis.NetworkLatency

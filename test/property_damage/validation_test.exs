@@ -41,7 +41,7 @@ defmodule PropertyDamage.ValidationTest do
 
     test "raises for missing model callback" do
       defmodule IncompleteModel do
-        @behaviour PropertyDamage.Model
+        use PropertyDamage.Model
         # Missing required callbacks
       end
 
@@ -78,7 +78,7 @@ defmodule PropertyDamage.ValidationTest do
     end
 
     defmodule NoGeneratorModel do
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [NoGeneratorCommand]
@@ -132,7 +132,7 @@ defmodule PropertyDamage.ValidationTest do
     end
 
     defmodule NemesisModel do
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands do
@@ -262,7 +262,7 @@ defmodule PropertyDamage.ValidationTest do
     end
 
     defmodule PollModel do
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [PollCommand]

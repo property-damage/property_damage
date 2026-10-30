@@ -199,7 +199,7 @@ defmodule OpenapiBench.Idempotency.Model do
   target's `config:`, so the same model exercises both the retry-safe and the
   double-creating SUT.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias OpenapiBench.Idempotency.Commands.CreateValue
 

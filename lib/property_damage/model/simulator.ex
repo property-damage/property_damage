@@ -33,7 +33,7 @@ defmodule PropertyDamage.Model.Simulator do
   Then reference it in your Model:
 
       defmodule MyModel do
-        @behaviour PropertyDamage.Model
+        use PropertyDamage.Model
 
         def simulator, do: MySimulator
         # ... other callbacks
@@ -44,8 +44,8 @@ defmodule PropertyDamage.Model.Simulator do
   For simpler cases, you can implement the Simulator directly in your Model:
 
       defmodule MyModel do
-        @behaviour PropertyDamage.Model
         @behaviour PropertyDamage.Model.Simulator
+        use PropertyDamage.Model
 
         def simulator, do: __MODULE__
 

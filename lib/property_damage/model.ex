@@ -2,6 +2,10 @@ defmodule PropertyDamage.Model do
   @moduledoc """
   Behaviour for models in stateful property-based testing.
 
+  Declare a model with `use PropertyDamage.Model`, which sets this behaviour.
+  A module that declares `@behaviour PropertyDamage.Model` directly is still a
+  model and still runs.
+
   A model ties together all the components needed for testing: which commands
   can be generated, which projections track state and checks, and the
   setup and teardown commands every run executes around its roots.
@@ -50,7 +54,7 @@ defmodule PropertyDamage.Model do
   ## Example
 
       defmodule MyTest.OrderModel do
-        @behaviour PropertyDamage.Model
+        use PropertyDamage.Model
 
         alias MyTest.Commands.{CreateOrder, ViewOrder, CancelOrder}
         alias MyTest.Projections.{ModelState, OrderBalances}
@@ -138,8 +142,8 @@ defmodule PropertyDamage.Model do
   For inline implementation, have the model implement both behaviours:
 
       defmodule MyModel do
-        @behaviour PropertyDamage.Model
         @behaviour PropertyDamage.Model.Simulator
+        use PropertyDamage.Model
 
         def simulator, do: __MODULE__
 
@@ -207,6 +211,26 @@ defmodule PropertyDamage.Model do
 
   If not implemented, the framework runs until `max_commands` is reached.
   """
+
+  @doc """
+  Declares the using module as a model by setting the `PropertyDamage.Model`
+  behaviour. The model keeps its docs and source path, readable with
+  `PropertyDamage.Docs.fetch/1`.
+
+  Takes no options; any option raises `ArgumentError` at compile time.
+  """
+  defmacro __using__(opts) do
+    if opts != [] do
+      raise ArgumentError,
+            "use PropertyDamage.Model takes no options, got: #{Macro.to_string(opts)}"
+    end
+
+    quote do
+      @behaviour PropertyDamage.Model
+      require PropertyDamage.Docs
+      PropertyDamage.Docs.hook(PropertyDamage.Model)
+    end
+  end
 
   @typedoc """
   Command specification options.
@@ -317,8 +341,8 @@ defmodule PropertyDamage.Model do
 
   @typedoc """
   A sequence of command entries, written as `commands/0` entries are
-  (`Module` or `{Module, opts}`). Every entry runs, in order; `when:` and
-  `weight:` are ignored.
+  (`Module` or `{Module, opts}`). Every entry runs, in order; `when:`,
+  `weight:` and `doc:` are ignored.
   """
   @type sequence :: [command_spec()]
 
@@ -327,6 +351,19 @@ defmodule PropertyDamage.Model do
   received, alone in a list.
   """
   @type identity :: [struct()]
+
+  @typedoc """
+  The expansions an expansion function returns to choose from: each one a
+  `t:sequence/0` or the `t:identity/0`, alone or as `{expansion, opts}`.
+  The options are `weight:`, a positive integer (default 1), and `doc:`, a
+  string that describes the whole route the expansion runs. Only an
+  expansion takes `doc:`; a `commands/0` entry does not.
+  """
+  @type expansion_choices :: [
+          sequence()
+          | identity()
+          | {sequence() | identity(), [weight: pos_integer(), doc: String.t()]}
+        ]
 
   @doc """
   The setup commands: run in every target after the adapter's `setup/1` and
@@ -370,12 +407,15 @@ defmodule PropertyDamage.Model do
   not be an `execution: :probe` command, and a module may be listed once.
 
   `fun` takes the root command as generated and the variant's simulated state
-  at that root, and returns the expansions to choose from: each one a
-  `t:sequence/0` of leaf commands, or `{sequence, weight: n}`. The identity is
-  the received root struct alone in its list (`[root]` or
-  `{[root], weight: n}`); the struct may appear nowhere else. Nothing is
-  chosen that is not listed. The list order is the shrink preference,
-  simplest first, and by convention the identity comes first.
+  at that root, and returns the expansions to choose from (see
+  `t:expansion_choices/0`): each one a `t:sequence/0` of leaf commands, or
+  `{sequence, opts}` with `weight: n`, `doc: text`, or both. A `doc:`
+  describes the whole route, not one leaf, and stays with its expansion
+  through shrinking and replay. The identity is the received root struct
+  alone in its list (`[root]` or `{[root], weight: n}`); the struct may
+  appear nowhere else. Nothing is chosen that is not listed. The list order
+  is the shrink preference, simplest first, and by convention the identity
+  comes first.
 
       def expansions, do: [{Pay, &pay_expansions/2}]
 
@@ -397,8 +437,9 @@ defmodule PropertyDamage.Model do
   before the next leaf. An `overrides:` function of arity 2 also receives the
   earlier leaves of the same sequence as `%{command: leaf, events: events}`
   maps with their simulated events, so a leaf can take a sibling's
-  `external()` value (resolved per target at execution). `when:` and `weight:`
-  on a leaf are ignored, and `mix pd.validate --seeds` warns about them.
+  `external()` value (resolved per target at execution). `when:`, `weight:`
+  and `doc:` on a leaf are ignored, and `mix pd.validate --seeds` warns about
+  them.
 
   A leaf whose module has a `commands/0` entry whose `when:` is false at the
   leaf's position withdraws its expansion, and the choice is made again among
@@ -420,7 +461,7 @@ defmodule PropertyDamage.Model do
 
   Optional - a model without it runs every root as itself.
   """
-  @callback expansions() :: [{module(), (struct(), map() -> choices(sequence() | identity()))}]
+  @callback expansions() :: [{module(), (struct(), map() -> expansion_choices())}]
 
   @doc """
   Decides whether to end the sequence being generated before `max_commands`.

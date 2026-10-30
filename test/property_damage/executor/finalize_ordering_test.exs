@@ -78,7 +78,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   end
 
   defmodule DrainHaltModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Trigger]
     @impl true
@@ -148,7 +148,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   end
 
   defmodule PollVsResourceModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Trigger]
     @impl true
@@ -218,7 +218,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   end
 
   defmodule SettleVsResourceModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Trigger]
     @impl true
@@ -301,7 +301,7 @@ defmodule PropertyDamage.Executor.FinalizeOrderingTest do
   end
 
   defmodule ResourceVsTeardownModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Trigger]
     @impl true

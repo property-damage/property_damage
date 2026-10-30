@@ -3,7 +3,7 @@ defmodule PropertyDamage.FailureReport.Formatter do
 
   alias PropertyDamage.{Failure, FailureReport, Sequence}
 
-  alias PropertyDamage.FailureReport.{Layout, Render}
+  alias PropertyDamage.FailureReport.{Context, Layout, Render}
 
   @type format :: :terminal | :markdown | :json | :compact
 
@@ -39,6 +39,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
   "file", "line", "offset_ms", "attempt"}`, its message as plain text; a gap is
   `{"kind": "gap", "attempts", "lines"}`. A hidden line is in none of these.
   The JSON output is not the persistence format.
+
+  ## The JSON `what_this_checks` key
+
+  `what_this_checks` lists the items of the "What this checks" section in
+  print order, each `{"label", "name", "text", "missing"}`: the text as
+  printed without its indent, `name` null for the meaning of the kind, and
+  `missing` true when the text is the line that names the doc to add.
   """
   @spec format(FailureReport.t(), format(), keyword()) :: String.t()
   def format(report, format \\ :terminal, opts \\ [])
@@ -66,6 +73,13 @@ defmodule PropertyDamage.FailureReport.Formatter do
     }
   end
 
+  # The projection that defines the failed check; the key is absent unless the
+  # failure is a check failure.
+  defp projection_entry(%FailureReport{failure_reason: %Failure{type: %Failure.Check{} = check}}),
+    do: %{"projection" => check.projection && inspect(check.projection)}
+
+  defp projection_entry(_report), do: %{}
+
   defp format_json(report, opts) do
     indent = Keyword.get(opts, :indent, 2)
 
@@ -78,14 +92,19 @@ defmodule PropertyDamage.FailureReport.Formatter do
         "failed_at_index" => report.failed_at_index,
         "seed" => report.seed
       },
-      "failure" => %{
-        "type" => to_string(FailureReport.failure_type(report)),
-        "check_name" =>
-          FailureReport.check_name(report) &&
-            FailureReport.format_name(FailureReport.check_name(report)),
-        "message" => FailureReport.failure_message(report),
-        "summary" => FailureReport.failure_type_summary(report)
-      },
+      "failure" =>
+        Map.merge(
+          %{
+            "type" => to_string(FailureReport.failure_type(report)),
+            "check_name" =>
+              FailureReport.check_name(report) &&
+                FailureReport.format_name(FailureReport.check_name(report)),
+            "message" => FailureReport.failure_message(report),
+            "summary" => FailureReport.failure_type_summary(report)
+          },
+          projection_entry(report)
+        ),
+      "what_this_checks" => report |> Layout.context_items(opts) |> Context.data(),
       "error_origin" => %{
         "origin" => report.error_origin && to_string(report.error_origin),
         "reason" => get_in(report.error_origin_details, [:reason]),

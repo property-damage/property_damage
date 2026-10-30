@@ -75,7 +75,7 @@ defmodule PropertyDamage.MockCallbackFailureTest do
 
   defmodule RejectingModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{F.Act, overrides: &%{n: &1.count}}]

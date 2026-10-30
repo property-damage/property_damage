@@ -237,16 +237,34 @@ defmodule PropertyDamage.Forensics do
       :ok ->
         {:cont, {:ok, new_state, [event | history], violations}}
 
-      {:error, check_name, reason} when stop_early ->
+      {:error, check_name, projection, reason} when stop_early ->
         failure =
-          build_failure(check_name, reason, index, event, state, new_projections, history)
+          build_failure(
+            check_name,
+            projection,
+            reason,
+            index,
+            event,
+            state,
+            new_projections,
+            history
+          )
 
         {:halt, {:error, failure}}
 
-      {:error, check_name, reason} ->
+      {:error, check_name, projection, reason} ->
         # Collect the violation and continue when stop_early is false.
         failure =
-          build_failure(check_name, reason, index, event, state, new_projections, history)
+          build_failure(
+            check_name,
+            projection,
+            reason,
+            index,
+            event,
+            state,
+            new_projections,
+            history
+          )
 
         {:cont, {:ok, new_state, [event | history], [failure | violations]}}
     end
@@ -254,9 +272,18 @@ defmodule PropertyDamage.Forensics do
 
   # A single violation record, shared by the stop-early failure and the
   # collected-violations path so both carry the same detail shape.
-  defp build_failure(check_name, reason, index, event, state, new_projections, history) do
+  defp build_failure(
+         check_name,
+         projection,
+         reason,
+         index,
+         event,
+         state,
+         new_projections,
+         history
+       ) do
     %{
-      failure_reason: PropertyDamage.Failure.check_failed(check_name, reason),
+      failure_reason: PropertyDamage.Failure.check_failed(check_name, reason, projection),
       failure_step: index,
       event_at_failure: event,
       state_before: state.projections,
@@ -312,7 +339,7 @@ defmodule PropertyDamage.Forensics do
 
       case run_projection_checks(projection, projection_state, checks, step_ctx) do
         :ok -> {:cont, :ok}
-        {:error, check_name, reason} -> {:halt, {:error, check_name, reason}}
+        {:error, check_name, reason} -> {:halt, {:error, check_name, projection, reason}}
       end
     end)
   end

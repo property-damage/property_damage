@@ -482,7 +482,7 @@ defmodule PropertyDamage.Test.Expansion do
   defmodule StaticModel do
     @moduledoc false
     # The payment example as an ordinary module, for runs in another OS process.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Expansion
     alias PropertyDamage.Test.Expansion.{Ledger, Pay, World}
@@ -520,7 +520,7 @@ defmodule PropertyDamage.Test.Expansion do
       quote do
         defmodule unquote(module) do
           @moduledoc false
-          @behaviour PropertyDamage.Model
+          use PropertyDamage.Model
 
           def commands, do: unquote(support).spec(unquote(module), :commands)
           def command_sequence_projection, do: unquote(World)

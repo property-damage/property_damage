@@ -130,7 +130,7 @@ defmodule PropertyDamage.ExportTest do
   end
 
   defmodule TestModelStub do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [CreateAccount]
     @impl true

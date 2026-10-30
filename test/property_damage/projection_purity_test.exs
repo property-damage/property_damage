@@ -70,7 +70,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
 
   defmodule PureModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Add, Ping]
     @impl true
@@ -81,7 +81,7 @@ defmodule PropertyDamage.ProjectionPurityTest do
 
   defmodule ImpureModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Add, Ping]
     @impl true
@@ -232,8 +232,8 @@ defmodule PropertyDamage.ProjectionPurityTest do
 
     defmodule GenPureModel do
       @moduledoc false
-      @behaviour PropertyDamage.Model
       @behaviour PropertyDamage.Model.Simulator
+      use PropertyDamage.Model
       @impl true
       def commands, do: [CreateItem]
       @impl true
@@ -249,8 +249,8 @@ defmodule PropertyDamage.ProjectionPurityTest do
 
     defmodule GenImpureModel do
       @moduledoc false
-      @behaviour PropertyDamage.Model
       @behaviour PropertyDamage.Model.Simulator
+      use PropertyDamage.Model
       @impl true
       def commands, do: [CreateItem]
       @impl true

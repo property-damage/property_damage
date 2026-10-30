@@ -105,7 +105,7 @@ more effective than increasing `max_runs` uniformly.
 
 ```elixir
 defmodule CancellationHeavyModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   def commands do
     [
@@ -126,7 +126,7 @@ end
 
 ```elixir
 defmodule HighConcurrencyModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   def commands do
     [

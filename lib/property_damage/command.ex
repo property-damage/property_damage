@@ -320,6 +320,9 @@ defmodule PropertyDamage.Command do
   @doc """
   Provides a default `command_spec/1` implementation when you `use PropertyDamage.Command`.
 
+  The command also keeps its docs and source path, readable with
+  `PropertyDamage.Docs.fetch/1`.
+
   ## Options
 
   All options are passed through to `command_spec/1` as defaults:
@@ -365,6 +368,8 @@ defmodule PropertyDamage.Command do
     quote bind_quoted: [opts: opts] do
       @behaviour PropertyDamage.Command
       @command_defaults opts
+      require PropertyDamage.Docs
+      PropertyDamage.Docs.hook(PropertyDamage.Command)
 
       @doc false
       def command_spec(overrides \\ []) do

@@ -34,8 +34,8 @@ defmodule PropertyDamage.Test.Audit.ImpureGeneratorModel do
   Model whose only command has an impure generator. `PropertyDamage.audit/2`
   returns `{:error, ...}` on it — the RED fixture for DR-037.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Audit.Commands.ImpureCreate
   alias PropertyDamage.Test.Audit.PassthroughProjection
@@ -73,8 +73,8 @@ defmodule PropertyDamage.Test.Audit.ImpureSelectionModel do
   generated command's arguments across two same-seed generations. Proves the
   audit catches impurity in an `overrides:` function, not only in a raw generator.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Audit.Commands.Stable
   alias PropertyDamage.Test.Audit.PassthroughProjection
@@ -123,8 +123,8 @@ defmodule PropertyDamage.Test.Audit.MintModel do
   the mint marker is position-stamped and deterministic, so the plan is stable
   across two same-seed generations. Guards the DR-034/DR-036 foundation.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Audit.Commands.MintSend
   alias PropertyDamage.Test.Audit.PassthroughProjection

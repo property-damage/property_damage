@@ -56,7 +56,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   end
 
   defmodule NoopModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Cmd]
     @impl true
@@ -64,7 +64,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   end
 
   defmodule RaisingProjectionModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Cmd]
     @impl true
@@ -72,7 +72,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   end
 
   defmodule ExitingProjectionModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Cmd]
     @impl true
@@ -80,7 +80,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   end
 
   defmodule ThrowingProjectionModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Cmd]
     @impl true
@@ -90,7 +90,7 @@ defmodule PropertyDamage.ExecutorAdversarialTest do
   # A model whose commands/0 lists a command with an invalid (zero) weight, so
   # normalize_commands raises. build_command_specs used to swallow that.
   defmodule BadCommandSpecModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [%{command: Cmd, weight: 0}]
     @impl true

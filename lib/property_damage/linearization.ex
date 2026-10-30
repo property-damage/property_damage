@@ -355,12 +355,15 @@ defmodule PropertyDamage.Linearization do
           |> apply(check.function_name, [state, ctx.command_or_event])
           |> Verdict.check(check.name)
           |> case do
-            :pass -> {:cont, :ok}
-            {:fail, e} -> {:halt, {:refuted, check.name, Failure.check_failed(check.name, e)}}
+            :pass ->
+              {:cont, :ok}
+
+            {:fail, e} ->
+              {:halt, {:refuted, check.name, Failure.check_failed(check.name, e, projection)}}
           end
         rescue
           e ->
-            reason = Failure.check_failed(check.name, {e, __STACKTRACE__})
+            reason = Failure.check_failed(check.name, {e, __STACKTRACE__}, projection)
             {:halt, {:refuted, check.name, reason}}
         end
       else

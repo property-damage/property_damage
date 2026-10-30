@@ -74,7 +74,7 @@ defmodule PropertyDamage.NemesisGenerationTest do
   end
 
   defmodule GenModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do
@@ -86,7 +86,7 @@ defmodule PropertyDamage.NemesisGenerationTest do
   end
 
   defmodule UnmetModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do
@@ -98,7 +98,7 @@ defmodule PropertyDamage.NemesisGenerationTest do
   end
 
   defmodule NoGenModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do

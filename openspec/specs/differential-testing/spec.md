@@ -579,6 +579,47 @@ The `:random` pick at a root SHALL be a pure function of the run seed, the targe
 - **WHEN** a `:random` target is renamed
 - **THEN** its entries SHALL differ from the previous name's at some root of a long enough run
 
+### Requirement: Describing an Expansion Entry with `doc:` (DR-058)
+
+An entry of an `expansions/0` function MAY be `{list, opts}`, where `opts` is a non-empty keyword list of `weight:`, a positive integer, and `doc:`, a string that describes the whole route the entry takes, each at most once. Any other option, a repeated option, an empty list, a non-positive or non-integer `weight:` and a `doc:` that is not a string SHALL be an `ArgumentError` that names the entry's key and root and names both `weight:` and `doc:`. A realized choice SHALL carry the key `doc`: the `doc:` of the entry the target ran at the root, read from that entry, so a choice never carries the doc of another entry when shrinking realizes it again or a recorded run is replayed. `doc` SHALL be nil when the entry has no `doc:` and when no listed entry ran at the root: a root that is not listed, a root forced to run as itself, and a root a target runs as itself with no entry. `doc:` on a leaf of an entry SHALL be ignored, with one warning per leaf that names the entry, the leaf and `doc:`. A report file saved before choices carried `doc` SHALL load with `doc` as nil on every choice.
+
+#### Scenario: A doc beside a weight
+- **GIVEN** an expansion function that returns `{[Authorize, Capture], weight: 3, doc: "authorize, then capture"}` for a root
+- **WHEN** a target realizes that entry at the root
+- **THEN** the target's choice at the root SHALL have `doc: "authorize, then capture"`
+- **AND** the entry SHALL count with weight 3 in the draw
+
+#### Scenario: An unknown option
+- **WHEN** an expansion function returns `{[Authorize], note: "x"}` for a root
+- **THEN** the framework SHALL raise an `ArgumentError` that names the entry key, the root, `weight:` and `doc:`
+
+#### Scenario: A doc that is not a string
+- **WHEN** an expansion function returns `{[Authorize], doc: :text}` for a root
+- **THEN** the framework SHALL raise an `ArgumentError` that names `weight:` and `doc:`
+
+#### Scenario: The doc follows the entry through shrinking
+- **GIVEN** a failing run in which a target ran entry 1 at a root, and shrinking drops an earlier root so the function's list at that root loses an entry ahead of it and index 1 now names another entry
+- **WHEN** the shrunk report is built and the target still runs index 1 at the root
+- **THEN** the target's choice at the root SHALL carry the `doc:` of the entry it realized there, not the doc of the entry it ran before shrinking
+
+#### Scenario: The doc on replay
+- **GIVEN** a failure report whose replay file records the commands each target ran
+- **WHEN** the replay runs
+- **THEN** each target's choice at every root SHALL carry the `doc:` of the entry the function lists at the recorded index
+
+#### Scenario: No entry ran
+- **WHEN** a target runs a root as itself because the model does not list the root, or because no listed entry could be realized
+- **THEN** its choice at the root SHALL have `doc: nil`
+
+#### Scenario: A doc on a leaf
+- **WHEN** an entry lists a leaf as `{Capture, doc: "x"}`
+- **THEN** the run SHALL ignore the option and warn once for that leaf
+
+#### Scenario: A report saved before the key existed
+- **GIVEN** a report file whose choices hold no `doc`
+- **WHEN** it is loaded
+- **THEN** every choice SHALL have `doc: nil`
+
 ### Requirement: Root Placeholder Aliasing (DR-049)
 
 In a target whose entry at a root is not the identity, every placeholder that the root's simulation minted SHALL be aliased, in that target's registry, to the placeholder of exactly one leaf whose simulated events hold the same event module at the same field path. Zero matches or several matches SHALL be a generation error that names the root, the entry key, the field and the candidate leaves (each as leaf index, module and event index), raised before any `Adapter.setup/1`. Several events of one leaf SHALL count as several matches. Resolution SHALL then happen at execution from the leaf's real events, as for any placeholder. A `:reference` target SHALL rebuild the reference's aliases in its own registry. In the target's simulated state after the root, each aliased leaf placeholder SHALL be replaced by its root placeholder, so a later root's `simulate/2`, an expansion function, and a leaf's `when:` and `overrides:` read the same ids as in a target that ran the root as itself; this SHALL hold when the target realizes the entry, when it replays recorded leaves and when it copies the reference's leaves.

@@ -70,6 +70,12 @@ defmodule MyTest.Events.OrderNotFound do
 end
 ```
 
+`use PropertyDamage.Model` comes before any definition in the module: every
+`def` and `defp` comes after it. It also comes before any other `use` that
+defines functions, such as `use GenServer`; a module that breaks either rule
+does not compile. The same holds for `use PropertyDamage.Model.Projection` and
+`use PropertyDamage.Command`.
+
 ### State-Dependent Command Example
 
 For commands that need state-dependent values (like selecting from existing refs):
@@ -101,8 +107,8 @@ The Model wires this command with state:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyTest.OrderModel do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias MyTest.Commands.{CreateOrder, ViewOrder}
   alias MyTest.Events.{OrderViewed, OrderNotFound}
@@ -229,8 +235,8 @@ and return themselves (or a delegate module) via `simulator/0`:
 
 ```elixir
 defmodule MyTest.OrderModel do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   def commands, do: [CreateOrder, CancelOrder]
   def command_sequence_projection, do: MyTest.OrderProjection
@@ -362,8 +368,8 @@ defmodule Notes.Session do
 end
 
 defmodule Notes.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Notes.Commands.{AddNote, CreateUser, Login}
   alias Notes.Events.{LoggedIn, NoteAdded, UserCreated}
@@ -647,8 +653,8 @@ defmodule Counter.Totals do
 end
 
 defmodule Counter.Model do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias Counter.Commands.Incr
   alias Counter.Events.Incremented
@@ -750,8 +756,11 @@ root that chose `Incr[1]`, because the rewrite sends such an amount.
 
 - **A list of entries.** `fun` receives the root as generated and the target's
   simulated state at that root, and returns a plain list. An entry is a
-  sequence, or `{sequence, weight: n}` with `n` a positive integer. The default
-  weight is 1.
+  sequence, or `{sequence, weight: n, doc: "..."}` with `n` a positive integer.
+  The default weight is 1. `doc:` is a string that describes the whole route;
+  the failure report shows it in its Path item. On a leaf it is ignored with a
+  warning, like `when:` and `weight:`. For example,
+  `{[Pay, PartialRefund, PartialRefund], weight: 2, doc: "refund in two halves"}`.
 - **The identity is listed.** Write the received struct alone, as `[incr]` or
   `{[incr], weight: 2}`. Nothing is chosen that the function did not list. The
   struct may appear nowhere else in a sequence.
@@ -882,8 +891,8 @@ Factor wiring functions into a helper module:
 
 ```elixir
 defmodule MyTest.OrderModel do
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias MyTest.CommandWiring
   alias MyTest.Simulation

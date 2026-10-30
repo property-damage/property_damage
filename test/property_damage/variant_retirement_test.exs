@@ -76,7 +76,7 @@ defmodule PropertyDamage.VariantRetirementTest do
     @moduledoc false
     # RoutingModel's commands (a Use consumes a Create's minted id), compared
     # through an observation that always agrees.
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: RoutingModel.commands()

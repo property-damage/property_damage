@@ -6,8 +6,8 @@ defmodule PropertyDamage.Test.FullModel do
   setup and teardown commands, terminate_early?/3, and the new Model-level
   wiring pattern.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, MinimalCommand, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
@@ -72,8 +72,8 @@ defmodule PropertyDamage.Test.TerminateImmediatelyModel do
   that a model-requested termination stops the whole sequence in branching mode
   (no branches, no suffix appended after the prefix) per DR-013.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.CreateItem
   alias PropertyDamage.Test.Events.ItemCreated
@@ -104,8 +104,8 @@ defmodule PropertyDamage.Test.MinimalModel do
   Demonstrates that optional callbacks can be omitted.
   Uses the new command spec format with Model-level wiring.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
@@ -147,8 +147,8 @@ defmodule PropertyDamage.Test.SimpleWeightModel do
   @moduledoc """
   Test model using simple (unweighted) command list.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
@@ -191,8 +191,8 @@ defmodule PropertyDamage.Test.WeightedModel do
   @moduledoc """
   Test model using explicit command weights.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Events.{ItemCreated, ItemViewed}
@@ -236,7 +236,7 @@ defmodule PropertyDamage.Test.SetupListModel do
   @moduledoc """
   Test model with one setup command and one teardown command.
   """
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Commands.{CreateItem, ViewItem}
   alias PropertyDamage.Test.Projections.ModelState

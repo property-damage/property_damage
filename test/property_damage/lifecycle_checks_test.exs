@@ -48,7 +48,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule MaxCountModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -124,7 +124,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule NeverModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -230,7 +230,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule LivenessSafetyModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Initiate]
     @impl true
@@ -310,7 +310,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule ConfirmableModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Initiate]
     @impl true
@@ -342,7 +342,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule FailingStartupModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -410,7 +410,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule PassingStartupModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -447,7 +447,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule SimulatedMaxCountModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -529,7 +529,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   # A projection listed as BOTH the command-sequence projection and a check
   # projection must have its teardown check evaluated only once.
   defmodule DoubleListedModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -587,7 +587,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule AccumulatorModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true
@@ -612,7 +612,7 @@ defmodule PropertyDamage.LifecycleChecksTest do
   end
 
   defmodule SnapshotModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true

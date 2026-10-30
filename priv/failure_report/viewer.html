@@ -352,6 +352,11 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
           if (m) R.failure.push({ k: m[1], v: m[2] });
           else if (R.failure.length) R.failure[R.failure.length - 1].v += "\n" + l.trim();
         });
+      } else if (s.title === "What this checks") {
+        var cl = s.lines.slice();
+        while (cl.length && cl[0] === "") cl.shift();
+        while (cl.length && cl[cl.length - 1] === "") cl.pop();
+        R.checks = cl.join("\n");
       } else if (s.title === "Setup") {
         var p = parseSteps(s.lines), st = p.targets[0] && p.targets[0].steps[0];
         R.setup = { caption: p.captions.join(" "), entries: st ? st.entries : [] };
@@ -877,7 +882,7 @@ details.sec > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
     h += '<div class="runhint">Click a line to unfold everything the report recorded for it; click again to fold it. Consecutive lines with the same summary collapse into one (×N); the detail of each stays one click away. ' +
       "<kbd>↑</kbd> <kbd>↓</kbd> walk a target through every step" + DOT + "<kbd>Enter</kbd> unfold" + (N > 1 ? DOT + "<kbd>←</kbd> <kbd>→</kbd> same line in the previous or next target" : "") + ".</div>";
     var cols = "repeat(" + N + ", minmax(0, 1fr))";
-    var g = '<div class="rgrid" style="grid-template-columns:' + cols + '">' + R.targets.map(function (t, ti) {
+    var g = (R.checks != null ? '<details class="sec" open data-section="what-this-checks"><summary>What this checks</summary><pre class="code" style="margin-top:8px">' + esc(R.checks) + "</pre></details>" : "") + '<div class="rgrid" style="grid-template-columns:' + cols + '">' + R.targets.map(function (t, ti) {
       return '<div class="hd c' + Math.min(ti, 1) + '"><span class="tname">' + esc(t.name) + '</span> <span class="sub">' + esc(t.role === "only" ? "" : t.role) + "</span></div>";
     }).join("");
     if (R.setup) {

@@ -45,7 +45,9 @@ mix deps.get
 
 ### 2. Write the system, the adapter and the model
 
-Create `lib/my_app.ex` with this content:
+Create `lib/my_app.ex` with this content. The adapter in it calls
+`require PropertyDamage` before its first log call, because
+`PropertyDamage.log/2` is a macro: it records the file and line of the call.
 
 <!-- pd-example: lib/my_app.ex -->
 <!-- pd-doc-verify: runnable -->
@@ -185,7 +187,7 @@ end
 
 defmodule MyApp.Model do
   @moduledoc "Deposits and withdrawals on two accounts."
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   @impl true
   def commands, do: [MyApp.Deposit, MyApp.Withdraw]
@@ -198,9 +200,7 @@ defmodule MyApp.Model do
 end
 ```
 
-The adapter logs five lines per command, each under two tags. `require
-PropertyDamage` comes first, because `PropertyDamage.log/2` is a macro: it
-records the file and line of the call.
+The adapter logs five lines per command, each under two tags.
 
 ### 3. Run it
 
@@ -240,10 +240,29 @@ Seed: 20
 
 ## Failure
 
-Failure  check failed
-Check    never_negative
-At       [1] %MyApp.Withdraw{account: "alice", amount: 5}
-Message  check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
+Failure     check failed
+Check       never_negative
+Projection  MyApp.Balances
+At          [1] %MyApp.Withdraw{account: "alice", amount: 5}
+Message     check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
+
+## What this checks
+
+  Check failed  A property did not hold. After the marked step, a check judged
+                the projection state (built from the events observed so far) and
+                found that it violates the property.
+
+  Model         MyApp.Model
+                Deposits and withdrawals on two accounts.
+
+  Check         MyApp.Balances.never_negative/2
+                (no description: add @doc to MyApp.Balances.never_negative/2)
+
+  Projection    MyApp.Balances
+                Folds the balances the bank reported and checks that none is negative.
+
+  Command       MyApp.Withdraw
+                Withdraw `amount` from `account`.
 
 ## Minimal Reproduction (2 roots)
 
@@ -284,15 +303,16 @@ PropertyDamage.run(model: MyApp.Model, targets: targets, only: [replay: "propert
 ```
 
 `IO.inspect/2` wraps the report in `#FailureReport<` and `>`. Read it from the
-top. The Failure section names the check and the step that
-broke it, `[1]`. Under each step of Minimal Reproduction, the step's log lines
-and events print in the order they happened. Each entry starts with its
-offset from the start of the target's run (`+0.00s`, since the bank answers
-at once), then `log` or `event`, then the line's tags in brackets and its
-message. The lines show what the adapter sent and what the bank answered: a
-withdrawal of 5 from a balance of 5 came back `200` with a balance of `-1`.
-The `authorization` header reads `[REDACTED]` because the adapter redacted it
-before the call.
+top. The Failure section names the check and the step that broke it, `[1]`. The
+"What this checks" section after it prints the docs of the model, check,
+projection and command, and a `(no description: ...)` line says where to add a
+missing doc. Under each step of Minimal Reproduction, the step's log lines and
+events print in the order they happened. Each entry starts with its offset from
+the start of the target's run (`+0.00s`, since the bank answers at once), then
+`log` or `event`, then the line's tags in brackets and its message. The lines
+show what the adapter sent and what the bank answered: a withdrawal of 5 from a
+balance of 5 came back `200` with a balance of `-1`. The `authorization` header
+reads `[REDACTED]` because the adapter redacted it before the call.
 
 ### 4. Read the report through a tag filter
 
@@ -317,9 +337,28 @@ Seed: 20
 
 Failure     check failed
 Check       never_negative
+Projection  MyApp.Balances
 At          [1] %MyApp.Withdraw{account: "alice", amount: 5}
 Message     check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
 Log filter  only: [:url, :status] (from PD_LOG)
+
+## What this checks
+
+  Check failed  A property did not hold. After the marked step, a check judged
+                the projection state (built from the events observed so far) and
+                found that it violates the property.
+
+  Model         MyApp.Model
+                Deposits and withdrawals on two accounts.
+
+  Check         MyApp.Balances.never_negative/2
+                (no description: add @doc to MyApp.Balances.never_negative/2)
+
+  Projection    MyApp.Balances
+                Folds the balances the bank reported and checks that none is negative.
+
+  Command       MyApp.Withdraw
+                Withdraw `amount` from `account`.
 
 ## Minimal Reproduction (2 roots)
 
@@ -589,9 +628,28 @@ Seed: 20
 
 Failure     check failed
 Check       never_negative
+Projection  MyApp.Balances
 At          [1] %MyApp.Withdraw{account: "alice", amount: 5}
 Message     check `never_negative` returned `false`; a check passes by returning a truthy value: a predicate, `condition or fail!(...)`, or a body that ends with `:ok`
 Log filter  only: [:url] (from the log: option)
+
+## What this checks
+
+  Check failed  A property did not hold. After the marked step, a check judged
+                the projection state (built from the events observed so far) and
+                found that it violates the property.
+
+  Model         MyApp.Model
+                Deposits and withdrawals on two accounts.
+
+  Check         MyApp.Balances.never_negative/2
+                (no description: add @doc to MyApp.Balances.never_negative/2)
+
+  Projection    MyApp.Balances
+                Folds the balances the bank reported and checks that none is negative.
+
+  Command       MyApp.Withdraw
+                Withdraw `amount` from `account`.
 
 ## Setup
 

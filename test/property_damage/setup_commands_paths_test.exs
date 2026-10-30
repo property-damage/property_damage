@@ -67,7 +67,7 @@ defmodule PropertyDamage.SetupCommandsPathsTest do
     # Act roots checked by the fixture projection, with no simulator: the
     # linearization check of a branching run is then indeterminate and runs
     # no check (it cannot evaluate the fixture's `at: :teardown` check).
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [PropertyDamage.Test.SetupCommands.Act]

@@ -243,7 +243,7 @@ defmodule PropertyDamage.Nemesis.ToxiproxyTest do
 
   defmodule Model do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [NoOp]
     @impl true

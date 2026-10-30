@@ -465,7 +465,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule StepModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Step]
@@ -479,7 +479,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule GuardedStepModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Step]
@@ -493,7 +493,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule StartupModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Step]
@@ -507,7 +507,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule PolledModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Step]
@@ -521,7 +521,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule ProbeModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [ProbeStep]
@@ -535,7 +535,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule DrainModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Deliver]
@@ -549,7 +549,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule OwnershipModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Begin, Nudge]
@@ -560,7 +560,7 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule IssueModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [CloseIssue]
@@ -571,8 +571,8 @@ defmodule PropertyDamage.Test.Lockstep do
 
   defmodule RoutingModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl true
     def commands do

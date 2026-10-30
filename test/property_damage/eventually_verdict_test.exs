@@ -67,7 +67,7 @@ defmodule PropertyDamage.EventuallyVerdictTest do
 
   for check <- [Never, Raising] do
     defmodule Module.concat(check, Model) do
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
       @impl true
       def commands, do: [PropertyDamage.EventuallyVerdictTest.InitiatePayment]
       @impl true

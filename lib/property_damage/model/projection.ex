@@ -9,6 +9,9 @@ defmodule PropertyDamage.Model.Projection do
   2. **Invariant checking**: Define checks via `@check` and `@eventually`
   3. **Comparing targets**: Define boundary observations via `@compare`
 
+  A module that declares `use PropertyDamage.Model.Projection` also keeps its
+  docs and source path, readable with `PropertyDamage.Docs.fetch/1`.
+
   ## Basic Usage
 
       defmodule MyProjection do
@@ -408,6 +411,10 @@ defmodule PropertyDamage.Model.Projection do
       @on_definition PropertyDamage.Model.Projection
 
       @before_compile PropertyDamage.Model.Projection
+
+      # Keeps the module's docs and source path for PropertyDamage.Docs.fetch/1.
+      require PropertyDamage.Docs
+      PropertyDamage.Docs.hook(PropertyDamage.Model.Projection)
     end
   end
 

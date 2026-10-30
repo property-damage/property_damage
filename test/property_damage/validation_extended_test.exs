@@ -31,8 +31,8 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule ValidModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     @impl PropertyDamage.Model
     def commands do
@@ -53,7 +53,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule EmptyModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: []
@@ -66,7 +66,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule InvalidWeightModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do
@@ -342,7 +342,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   # ============================================================================
 
   defmodule SingleCommandModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [PropertyDamage.ValidationExtendedTest.ValidCommand]
@@ -355,7 +355,7 @@ defmodule PropertyDamage.ValidationExtendedTest do
   end
 
   defmodule UnbalancedWeightModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands do

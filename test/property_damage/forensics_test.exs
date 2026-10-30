@@ -71,7 +71,7 @@ defmodule PropertyDamage.ForensicsTest do
 
   # Test model
   defmodule TestModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     def commands, do: []
     def command_sequence_projection, do: OrderState
@@ -99,7 +99,7 @@ defmodule PropertyDamage.ForensicsTest do
   end
 
   defmodule PerEventModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     def commands, do: []
     def command_sequence_projection, do: OrderState

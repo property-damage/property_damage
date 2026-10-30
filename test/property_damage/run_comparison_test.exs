@@ -247,8 +247,8 @@ defmodule PropertyDamage.RunComparisonTest do
   end
 
   defmodule RealModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
     @impl true
     def commands, do: [DoThing]
     @impl true

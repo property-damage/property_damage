@@ -70,7 +70,7 @@ defmodule PropertyDamage.ReportReproductionTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [{Noise, weight: 2}, Arm, Flip]

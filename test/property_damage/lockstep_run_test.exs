@@ -90,7 +90,7 @@ defmodule PropertyDamage.LockstepRunTest do
       ] do
     defmodule Module.concat(__MODULE__, name) do
       @moduledoc false
-      @behaviour PropertyDamage.Model
+      use PropertyDamage.Model
 
       @impl true
       def commands, do: [PropertyDamage.Test.Lockstep.Step]

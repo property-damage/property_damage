@@ -59,7 +59,7 @@ defmodule PropertyDamage.ExpansionDoubleMatchTest.Fixture do
       quote do
         defmodule unquote(module) do
           @moduledoc false
-          @behaviour PropertyDamage.Model
+          use PropertyDamage.Model
           def commands, do: [unquote(root)]
 
           def expansions,

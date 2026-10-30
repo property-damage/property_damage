@@ -97,11 +97,18 @@ defmodule MyApp.Commands.CreateUser do
 end
 ```
 
+`use PropertyDamage.Model` comes before any definition in the module: every
+`def` and `defp` comes after it. It also comes before any other `use` that
+defines functions, such as `use GenServer`; a module that breaks either rule
+does not compile. The same holds for `use PropertyDamage.Model.Projection` and
+`use PropertyDamage.Command`.
+
 Note: The `user_id` is **not** in the command - it's server-generated and marked
 with `external()` in the `UserCreated` event struct.
 
-> The `UpdateUser` and `DeleteUser` commands (referenced by the model and adapter
-> below) follow the same pattern and are left as an exercise.
+> The `UpdateUser` and `DeleteUser` commands (mentioned only in comments in the
+> model and adapter below) follow the same pattern and are left as an exercise.
+> The run in this guide does not need them.
 
 ### Key Command Surface
 
@@ -180,7 +187,7 @@ The model ties everything together:
 <!-- pd-doc-verify: runnable -->
 ```elixir
 defmodule MyApp.TestModel do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   alias MyApp.Commands.CreateUser
   alias MyApp.Projections.{ModelState, UserInvariants}
@@ -317,6 +324,10 @@ PropertyDamage.run(
   max_commands: 50
 )
 ```
+
+A passing run returns `{:ok, stats}` and prints nothing. [Reading the
+report](debugging_failures.md#reading-the-report) shows what a failing run
+prints.
 
 ### In ExUnit
 

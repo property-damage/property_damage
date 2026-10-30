@@ -106,7 +106,7 @@ defmodule PropertyDamage.FailureReport.LayoutPinsTest do
         assert text =~ "[#{root}.1]"
       end
 
-      assert length(Regex.scan(~r/\[0\.0\]/, text)) == 1
+      assert length(Regex.scan(~r/^[\x{25BA}\s]*\[0\.0\](\s|$)/mu, text)) == 1
     end
   end
 

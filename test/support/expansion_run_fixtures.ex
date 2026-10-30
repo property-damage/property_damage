@@ -539,7 +539,7 @@ defmodule PropertyDamage.Test.ExpansionRun do
       quote do
         defmodule unquote(module) do
           @moduledoc false
-          @behaviour PropertyDamage.Model
+          use PropertyDamage.Model
 
           def commands, do: unquote(support).spec(unquote(module), :commands)
 

@@ -420,7 +420,7 @@ defmodule PropertyDamage.Test.SetupCommands do
       quote do
         defmodule unquote(module) do
           @moduledoc false
-          @behaviour PropertyDamage.Model
+          use PropertyDamage.Model
 
           @impl true
           def commands, do: unquote(support).spec(unquote(module), :commands)

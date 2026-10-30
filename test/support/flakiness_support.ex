@@ -73,8 +73,8 @@ defmodule PropertyDamage.Test.Flake.Model do
   captured run exercises a single, seed-determined command against the
   banding adapter.
   """
-  @behaviour PropertyDamage.Model
   @behaviour PropertyDamage.Model.Simulator
+  use PropertyDamage.Model
 
   alias PropertyDamage.Test.Flake.Events.Ok
   alias PropertyDamage.Test.Flake.{Health, State}

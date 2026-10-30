@@ -92,8 +92,8 @@ defmodule PropertyDamage.MutationTest do
   end
 
   defmodule FixtureModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Commands.CreateItem
     alias PropertyDamage.Test.Events.ItemCreated
@@ -751,8 +751,8 @@ defmodule PropertyDamage.MutationTest do
   # harvesting this produced zero sample events (PropertyDamage.run's success
   # result carries no event log) and therefore zero mutations.
   defmodule PassingModel do
-    @behaviour PropertyDamage.Model
     @behaviour PropertyDamage.Model.Simulator
+    use PropertyDamage.Model
 
     alias PropertyDamage.Test.Commands.CreateItem
     alias PropertyDamage.Test.Events.ItemCreated

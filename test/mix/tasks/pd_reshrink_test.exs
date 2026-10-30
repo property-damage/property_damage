@@ -66,7 +66,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
 
   defmodule FailingModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [Bump]
@@ -94,7 +94,7 @@ defmodule Mix.Tasks.Pd.ReshrinkTest do
 
   defmodule ComparedModel do
     @moduledoc false
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Bump]
     @impl true

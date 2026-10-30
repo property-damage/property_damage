@@ -107,7 +107,7 @@ defmodule Bank.Projections.Ledger do
 end
 
 defmodule Bank.Model do
-  @behaviour PropertyDamage.Model
+  use PropertyDamage.Model
 
   @impl true
   def commands, do: [Bank.Commands.Deposit]

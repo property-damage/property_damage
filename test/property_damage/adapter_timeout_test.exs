@@ -27,7 +27,7 @@ defmodule PropertyDamage.AdapterTimeoutTest do
   end
 
   defmodule Model do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Cmd]
     @impl true

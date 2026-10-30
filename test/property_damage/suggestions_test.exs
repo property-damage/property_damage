@@ -63,7 +63,7 @@ defmodule PropertyDamage.SuggestionsTest do
 
   # Test model
   defmodule TestModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: []
@@ -77,7 +77,7 @@ defmodule PropertyDamage.SuggestionsTest do
 
   # Model with no projections
   defmodule MinimalModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: []

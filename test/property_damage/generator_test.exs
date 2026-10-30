@@ -7,7 +7,7 @@ defmodule PropertyDamage.GeneratorTest do
   # Fixtures for `overrides:` option no-op detection. CreateItem's fields are
   # [:name, :quantity]; an override targeting any other key is ineffective.
   defmodule UnknownKeyMapModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     alias PropertyDamage.Test.Commands.CreateItem
     alias PropertyDamage.Test.Projections.ModelState
 
@@ -19,7 +19,7 @@ defmodule PropertyDamage.GeneratorTest do
   end
 
   defmodule UnknownKeyFunModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     alias PropertyDamage.Test.Commands.CreateItem
     alias PropertyDamage.Test.Projections.ModelState
 
@@ -32,7 +32,7 @@ defmodule PropertyDamage.GeneratorTest do
   end
 
   defmodule ValidOverrideModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     alias PropertyDamage.Test.Commands.CreateItem
     alias PropertyDamage.Test.Projections.ModelState
 

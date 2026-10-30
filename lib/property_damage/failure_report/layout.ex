@@ -31,11 +31,14 @@ defmodule PropertyDamage.FailureReport.Layout do
   #   * `{:attribute, marker, key, value}` - a projection attribute, `marker`
   #     `:same`, `:minus` or `:plus`; `key` is nil for a state that is not a map
   #   * `{:comment, text}`, `{:code, text}`, `{:text, text}` - lines of the
-  #     Reproduction section
+  #     Reproduction section; `{:text, text}` also holds every line of the
+  #     "What this checks" section, already laid out by
+  #     `PropertyDamage.FailureReport.Context`
   #
   # `parts` is a list of strings and `{:value, term}`; the renderer inspects
   # each value, so it alone decides on syntax colors.
 
+  alias PropertyDamage.FailureReport.Context
   alias PropertyDamage.Log.{Filter, Gap, Line}
 
   alias PropertyDamage.{
@@ -88,6 +91,7 @@ defmodule PropertyDamage.FailureReport.Layout do
     sections =
       [
         failure_section(report, focus, filter, unknown),
+        context_section(report, focus),
         setup && setup.section,
         listing.section,
         projections_section(report, variant, focus),
@@ -110,6 +114,14 @@ defmodule PropertyDamage.FailureReport.Layout do
   @doc false
   @spec logs(FailureReport.t(), keyword()) :: map()
   def logs(%FailureReport{} = report, opts \\ []), do: report |> listing_data(opts) |> logs_of()
+
+  # The items of the "What this checks" section, for the `:json` format.
+  @doc false
+  @spec context_items(FailureReport.t(), keyword()) :: [Context.item()]
+  def context_items(%FailureReport{} = report, opts \\ []) do
+    %{focus: focus} = listing_data(report, opts)
+    Context.items(report, focus, context_targets(report))
+  end
 
   # The data of the listing and the log lines: the filter, the side of the
   # failing target, the failing step, the Setup lines and the Minimal
@@ -359,6 +371,27 @@ defmodule PropertyDamage.FailureReport.Layout do
     }
   end
 
+  # ==========================================================================
+  # What this checks
+  # ==========================================================================
+
+  defp context_section(report, focus) do
+    lines = report |> then(&Context.items(&1, focus, context_targets(&1))) |> Context.lines()
+    %Section{heading: "What this checks", lines: Enum.map(lines, &{:text, &1})}
+  end
+
+  # The targets the listing shows, the reference first, with the choices each
+  # made at its roots.
+  defp context_targets(%FailureReport{kind: kind} = report) do
+    listed =
+      if kind in [:diverged, :did_not_converge],
+        do: [{reference_name(report), report.reference_trace}],
+        else: []
+
+    for {name, trace} <- listed ++ [{variant_name(report), report.trace}],
+        do: {name, choices(trace, name)}
+  end
+
   defp kind_text(%Failure{} = failure),
     do: failure |> Failure.kind() |> to_string() |> String.replace("_", " ")
 
@@ -384,8 +417,21 @@ defmodule PropertyDamage.FailureReport.Layout do
           invariant_field(to_string(name), check) ++ property_field(report.invariant_description)
       end
 
-    if check, do: invariant ++ [{"Check", [check]}], else: invariant
+    if check,
+      do: invariant ++ [{"Check", [check]}] ++ projection_field(report),
+      else: invariant
   end
+
+  # The projection whose check failed, for a failed check or a timed-out poll.
+  defp projection_field(%FailureReport{
+         failure_reason: %Failure{
+           type: %Failure.Check{kind: kind, projection: projection}
+         }
+       })
+       when kind in [:check_failed, :poll_timeout] and not is_nil(projection),
+       do: [{"Projection", [inspect(projection)]}]
+
+  defp projection_field(_report), do: []
 
   defp check_text(nil), do: nil
   defp check_text(name), do: FailureReport.format_name(name)

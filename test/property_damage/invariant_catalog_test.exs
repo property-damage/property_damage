@@ -48,7 +48,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule GateModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -119,7 +119,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule InlineModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -168,7 +168,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   # ReuseProjectionA is listed BOTH as the command-sequence projection and as an
   # check projection (a doubly-listed projection); the catalog must dedup it.
   defmodule ReuseModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -203,7 +203,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule LifecycleModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -246,7 +246,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule FailingModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -287,7 +287,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule BranchModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -333,7 +333,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule WholeRunModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Tick]
     @impl true
@@ -390,7 +390,7 @@ defmodule PropertyDamage.InvariantCatalogTest do
   end
 
   defmodule PollModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [Start]
     @impl true

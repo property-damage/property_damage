@@ -62,7 +62,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
   end
 
   defmodule PaymentModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
 
     @impl true
     def commands, do: [InitiatePayment]
@@ -180,7 +180,7 @@ defmodule PropertyDamage.EventualConsistencyTest do
   end
 
   defmodule ProbeModel do
-    @behaviour PropertyDamage.Model
+    use PropertyDamage.Model
     @impl true
     def commands, do: [ProbeCheck]
     @impl true
